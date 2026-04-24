@@ -1,0 +1,235 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #0b0f19;
+  color: #f3f4f6;
+}
+
+.app-layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  width: 290px;
+  background: #070b13;
+  border-right: 1px solid #1f2937;
+  padding: 24px 18px;
+}
+
+.logo {
+  font-size: 34px;
+  font-weight: 700;
+  margin-bottom: 26px;
+}
+
+.menu {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.menu-item {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: #f3f4f6;
+  text-align: left;
+  padding: 14px 16px;
+  border-radius: 16px;
+  font-size: 17px;
+  cursor: pointer;
+}
+
+.menu-item:hover {
+  background: #161b26;
+}
+
+.menu-item.active {
+  background: #1a1f2b;
+}
+
+.main-content {
+  flex: 1;
+  padding: 32px;
+}
+
+.page-title {
+  font-size: 46px;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+.page-subtitle {
+  font-size: 20px;
+  color: #a1a1aa;
+  margin-bottom: 22px;
+}
+
+.card {
+  background: #151b26;
+  border: 1px solid #242c3a;
+  border-radius: 22px;
+  padding: 22px;
+  margin-bottom: 22px;
+}
+
+.kpi {
+  padding: 14px 16px;
+  border-radius: 14px;
+  margin-bottom: 12px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.kpi-ok {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+}
+
+.kpi-warn {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+}
+
+.kpi-alert {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+
+.kpi-info {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+}
+
+.action-btn {
+  border: none;
+  border-radius: 12px;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-weight: 700;
+  background: #243047;
+  color: #f3f4f6;
+}
+
+.action-btn:hover {
+  opacity: 0.92;
+}
+
+.mark-livree {
+  background: #14532d;
+  color: #bbf7d0;
+}
+
+.mark-absent {
+  background: #78350f;
+  color: #fde68a;
+}
+
+.stock-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.stock-card {
+  background: #111827;
+  border-radius: 18px;
+  padding: 18px;
+  border: 1px solid #243047;
+}
+
+.stock-card h3 {
+  margin-top: 0;
+  margin-bottom: 8px;
+  font-size: 20px;
+}
+
+.stock-meta {
+  color: #a1a1aa;
+  margin-bottom: 10px;
+}
+
+.stock-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.stock-btn {
+  border: none;
+  border-radius: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-weight: 700;
+  color: white;
+}
+
+.stock-plus {
+  background: #166534;
+}
+
+.stock-minus {
+  background: #991b1b;
+}
+
+.stock-neutral {
+  background: #1d4ed8;
+}
+
+#map {
+  min-height: 420px;
+}
+
+@media (max-width: 900px) {
+  .app-layout {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid #1f2937;
+  }
+
+  .menu {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .menu-item {
+    width: auto;
+    font-size: 15px;
+    padding: 10px 12px;
+  }
+
+  .main-content {
+    padding: 20px;
+  }
+
+  .page-title {
+    font-size: 32px;
+  }
+
+  .page-subtitle {
+    font-size: 16px;
+  }
+
+  .card {
+    padding: 16px;
+    border-radius: 18px;
+  }
+
+  .kpi {
+    font-size: 15px;
+  }
+
+  #map {
+    min-height: 320px;
+  }
+}
