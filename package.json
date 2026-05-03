@@ -1,13 +1,21 @@
 {
-  "name": "sereo-v7-clean",
+  "name": "sereo",
   "version": "1.0.0",
+  "description": "Application locale de gestion de stock, préparation et livraisons Séréo",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test",
+    "check": "node --check server.js && node --check public/js/app.js && node --check storage/sqliteStore.js && node --check scripts/migrate-json-to-sqlite.js",
+    "migrate:sqlite": "node scripts/migrate-json-to-sqlite.js"
   },
   "dependencies": {
-    "express": "^4.19.2",
-    "multer": "^1.4.5-lts.1",
-    "xlsx": "^0.18.5"
+    "express": "^4.22.1",
+    "leaflet": "^1.9.4",
+    "multer": "^2.1.1",
+    "read-excel-file": "^9.0.6"
+  },
+  "devDependencies": {
+    "fflate": "^0.8.2"
   }
 }

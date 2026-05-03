@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 818" preserveAspectRatio="xMidYMid meet">
+  <rect width="1160" height="818" fill="#ef8f77"/>
+  <g fill="#f7b19f" opacity=".46" font-family="Arial Black, Arial, sans-serif" font-weight="900">
+    <text x="105" y="595" font-size="650">e</text>
+    <text x="690" y="610" font-size="650">o</text>
+  </g>
+  <path d="M438 720c155 118 350 105 487-12" fill="none" stroke="#f7b19f" stroke-width="78" stroke-linecap="round" opacity=".58"/>
+  <ellipse cx="515" cy="-12" rx="115" ry="55" fill="#f7b19f" opacity=".34"/>
+</svg>
