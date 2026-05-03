@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title id="title">Séréo</title>
+  <rect width="128" height="128" rx="26" fill="#ef8f77"/>
+  <g fill="#f3b09f" opacity=".72">
+    <circle cx="46" cy="58" r="37"/>
+    <circle cx="106" cy="58" r="37"/>
+    <path d="M48 102c22 16 48 16 70-2" fill="none" stroke="#f3b09f" stroke-width="14" stroke-linecap="round"/>
+  </g>
+  <g fill="#356f70">
+    <text x="23" y="73" font-family="Segoe UI, Arial, sans-serif" font-size="46" font-weight="800">s</text>
+    <path d="M65 90c13 10 30 10 42-1" fill="none" stroke="#356f70" stroke-width="7" stroke-linecap="round"/>
+  </g>
+</svg>

@@ -1,0 +1,18 @@
+{
+  "name": "Séréo",
+  "short_name": "Séréo",
+  "description": "Gestion locale du stock, des préparations et des tournées de livraison.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#fafaf8",
+  "theme_color": "#cfe9e1",
+  "icons": [
+    {
+      "src": "/brand/sereo-mark.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

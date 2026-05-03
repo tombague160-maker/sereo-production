@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Séréo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#cfe9e1" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Séréo" />
+
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="stylesheet" href="/vendor/leaflet/leaflet.css" />
+  <link rel="stylesheet" href="/css/style.css?v=20260502f" />
+</head>
+
+<body>
+  <svg class="icon-sprite" aria-hidden="true" focusable="false">
+    <symbol id="icon-home" viewBox="0 0 24 24">
+      <path d="m3 11 9-8 9 8" />
+      <path d="M5 10v10h14V10" />
+      <path d="M9 20v-6h6v6" />
+    </symbol>
+    <symbol id="icon-box" viewBox="0 0 24 24">
+      <path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z" />
+      <path d="m4 7.5 8 4.5 8-4.5" />
+      <path d="M12 12v9" />
+    </symbol>
+    <symbol id="icon-clipboard-list" viewBox="0 0 24 24">
+      <path d="M9 4h6l1 2h3v15H5V6h3l1-2Z" />
+      <path d="M9 11h6" />
+      <path d="M9 15h6" />
+      <path d="M9 19h4" />
+    </symbol>
+    <symbol id="icon-truck" viewBox="0 0 24 24">
+      <path d="M3 6h11v10H3V6Z" />
+      <path d="M14 10h4l3 3v3h-7v-6Z" />
+      <path d="M6.5 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" />
+      <path d="M17.5 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" />
+    </symbol>
+    <symbol id="icon-star" viewBox="0 0 24 24">
+      <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.2l-5.6 3 1.1-6.2L3 9.6l6.2-.9L12 3Z" />
+    </symbol>
+    <symbol id="icon-rotate-ccw" viewBox="0 0 24 24">
+      <path d="M3 7v6h6" />
+      <path d="M21 12a8.5 8.5 0 0 1-15.8 4.4L3 13" />
+      <path d="M5.2 7.6A8.5 8.5 0 0 1 21 12" />
+    </symbol>
+    <symbol id="icon-bell" viewBox="0 0 24 24">
+      <path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9Z" />
+      <path d="M10 21h4" />
+    </symbol>
+    <symbol id="icon-unlink" viewBox="0 0 24 24">
+      <path d="m3 3 18 18" />
+      <path d="M10.5 13.5 9 15a4 4 0 0 1-5.7-5.7l2-2A4 4 0 0 1 11 7.2" />
+      <path d="M13.5 10.5 15 9a4 4 0 0 1 5.7 5.7l-2 2A4 4 0 0 1 13 16.8" />
+    </symbol>
+    <symbol id="icon-settings" viewBox="0 0 24 24">
+      <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
+      <path d="M19.4 15a8 8 0 0 0 .1-1l2-1.2-2-3.5-2.3.9a8 8 0 0 0-1.7-1L15.2 7h-4.4l-.3 2.2a8 8 0 0 0-1.7 1l-2.3-.9-2 3.5 2 1.2a8 8 0 0 0 .1 2l-2 1.2 2 3.5 2.3-.9a8 8 0 0 0 1.7 1l.3 2.2h4.4l.3-2.2a8 8 0 0 0 1.7-1l2.3.9 2-3.5-2.2-1.2Z" />
+    </symbol>
+  </svg>
+
+  <div class="app">
+    <aside class="sidebar" aria-label="Navigation principale">
+      <div class="brand">
+        <img class="brand-logo" src="/brand/sereo-logo.svg" alt="Séréo" />
+      </div>
+
+      <nav class="nav" role="tablist" aria-label="Sections">
+        <button id="tab-journee" class="tab active" type="button" role="tab" aria-selected="true" aria-controls="journee" data-tab="journee">
+          <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-home"></use></svg></span>
+          <span>Tableau de bord</span>
+        </button>
+        <button id="tab-stock" class="tab" type="button" role="tab" aria-selected="false" aria-controls="stock" data-tab="stock">
+          <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-box"></use></svg></span>
+          <span>Stock / Inventaire</span>
+        </button>
+        <button id="tab-preparation" class="tab" type="button" role="tab" aria-selected="false" aria-controls="preparation" data-tab="preparation">
+          <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-clipboard-list"></use></svg></span>
+          <span>Préparation</span>
+        </button>
+        <button id="tab-livreur" class="tab" type="button" role="tab" aria-selected="false" aria-controls="livreur" data-tab="livreur">
+          <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-truck"></use></svg></span>
+          <span>Livraison</span>
+        </button>
+        <button id="tab-recommande" class="tab" type="button" role="tab" aria-selected="false" aria-controls="recommande" data-tab="recommande">
+          <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-star"></use></svg></span>
+          <span>À recommander</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-visual" aria-hidden="true">
+        <img src="/brand/sereo-sidebar-bg.svg" alt="" />
+      </div>
+
+      <button class="sidebar-settings" type="button" data-action="go-tab" data-target-tab="parametres">
+        <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-settings"></use></svg></span>
+        <span>Paramètres</span>
+      </button>
+    </aside>
+
+    <main class="content">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Tableau de bord local</p>
+          <h2 id="pageTitle">Tableau de bord</h2>
+          <p id="pageSubtitle">Vue rapide du stock, des préparations et des livraisons.</p>
+        </div>
+
+        <div class="topbar-actions">
+          <span id="syncStatus" class="status-chip" aria-live="polite">Prêt</span>
+          <button id="refreshButton" class="button secondary" type="button" data-action="refresh">Actualiser</button>
+        </div>
+      </header>
+
+      <section id="journee" class="page active" role="tabpanel" aria-labelledby="tab-journee">
+        <div class="cards dashboard-cards">
+          <article class="card blue">
+            <span class="card-icon" aria-hidden="true"><svg class="icon"><use href="#icon-rotate-ccw"></use></svg></span>
+            <span class="card-label">Commandes importées</span>
+            <strong id="statTotal">0</strong>
+          </article>
+
+          <article class="card orange">
+            <span class="card-icon" aria-hidden="true"><svg class="icon"><use href="#icon-clipboard-list"></use></svg></span>
+            <span class="card-label">À préparer</span>
+            <strong id="statPreparable">0</strong>
+          </article>
+
+          <article class="card blue">
+            <span class="card-icon" aria-hidden="true"><svg class="icon"><use href="#icon-truck"></use></svg></span>
+            <span class="card-label">Livraisons aujourd'hui</span>
+            <strong id="statDeliveryToday">0</strong>
+          </article>
+
+          <article class="card orange">
+            <span class="card-icon" aria-hidden="true"><svg class="icon"><use href="#icon-bell"></use></svg></span>
+            <span class="card-label">Alertes</span>
+            <strong id="statAlerts">0</strong>
+          </article>
+        </div>
+
+        <div class="cards dashboard-cards secondary-cards">
+          <article class="card blue">
+            <span class="card-icon" aria-hidden="true"><svg class="icon"><use href="#icon-box"></use></svg></span>
+            <span class="card-label">Produits en stock</span>
+            <strong id="statStockTotal">0</strong>
+          </article>
+
+          <article class="card orange">
+            <span class="card-icon" aria-hidden="true"><svg class="icon"><use href="#icon-star"></use></svg></span>
+            <span class="card-label">À recommander</span>
+            <strong id="statRecommend">0</strong>
+          </article>
+
+          <article class="card orange">
+            <span class="card-icon" aria-hidden="true"><svg class="icon"><use href="#icon-unlink"></use></svg></span>
+            <span class="card-label">Ruptures</span>
+            <strong id="statStockOut">0</strong>
+          </article>
+
+          <article class="card blue">
+            <span class="card-icon" aria-hidden="true"><svg class="icon"><use href="#icon-truck"></use></svg></span>
+            <span class="card-label">En livraison</span>
+            <strong id="statInDelivery">0</strong>
+          </article>
+        </div>
+
+        <div class="panel">
+          <div class="panel-heading">
+            <h3>Résumé du jour</h3>
+            <span class="muted">Vue consolidée</span>
+          </div>
+          <div id="dailySummary" class="summary-grid"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-heading">
+          <h3>Accès rapide</h3>
+          <span class="muted">Actions métier du quotidien</span>
+        </div>
+        <div class="quick-actions">
+            <button class="button secondary" type="button" data-action="go-tab" data-target-tab="stock">Stock</button>
+            <button class="button secondary" type="button" data-action="go-tab" data-target-tab="preparation">Préparation</button>
+            <button class="button secondary" type="button" data-action="go-tab" data-target-tab="livreur">Livraison</button>
+            <button class="button secondary" type="button" data-action="go-tab" data-target-tab="recommande">À recommander</button>
+          </div>
+        </div>
+
+        <div class="panel visual-panel">
+          <div class="panel-heading">
+            <div>
+              <h3>Imports Excel</h3>
+              <p class="muted">Charge les dossiers et le stock depuis les exports du jour.</p>
+            </div>
+            <span class="status-chip">.xlsx</span>
+          </div>
+
+          <div class="upload-grid">
+            <form id="ventesForm" class="upload-card">
+              <label for="ventesFile">Dossiers / commandes</label>
+              <input type="file" id="ventesFile" name="file" accept=".xlsx" />
+              <button id="importVentesButton" class="button primary" type="submit">Importer les dossiers</button>
+            </form>
+
+            <form id="stockForm" class="upload-card">
+              <label for="stockFile">Tarifs / stock</label>
+              <input type="file" id="stockFile" name="file" accept=".xlsx" />
+              <button id="importStockButton" class="button primary" type="submit">Importer le stock</button>
+            </form>
+          </div>
+
+          <div id="importSummary" class="import-summary" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <section id="import" class="page" role="tabpanel" aria-label="Import du jour">
+        <div class="panel">
+          <div class="panel-heading">
+            <h3>Import du jour</h3>
+            <span class="muted">Format accepté : .xlsx</span>
+          </div>
+
+          <div class="empty-state">
+            <h4>Import déplacé</h4>
+            <p>L'import Excel se fait maintenant directement depuis le tableau de bord.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="stock" class="page" role="tabpanel" aria-labelledby="tab-stock">
+        <div class="panel">
+          <div class="panel-heading">
+            <h3>Stock</h3>
+            <div class="legend">
+              <span><i class="dot green-dot"></i> OK</span>
+              <span><i class="dot orange-dot"></i> Faible</span>
+              <span><i class="dot red-dot"></i> Rupture</span>
+              <span><i class="dot blue-dot"></i> À renseigner</span>
+            </div>
+          </div>
+
+          <div class="stock-toolbar">
+            <label>
+              Rechercher
+              <input id="stockSearch" placeholder="Produit, référence, catégorie" autocomplete="off" />
+            </label>
+            <label>
+              Statut
+              <select id="stockStatusFilter">
+                <option value="all">Tous les statuts</option>
+                <option value="disponible">Disponible</option>
+                <option value="reserve">Réservé</option>
+                <option value="stock_faible">Stock faible</option>
+                <option value="rupture">Rupture</option>
+                <option value="a_renseigner">À renseigner</option>
+              </select>
+            </label>
+            <label>
+              Catégorie
+              <select id="stockCategoryFilter">
+                <option value="all">Toutes</option>
+              </select>
+            </label>
+          </div>
+
+          <div id="stockList" class="list"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-heading">
+            <h3>Mouvements récents</h3>
+            <span class="muted">Ajustements manuels du stock</span>
+          </div>
+          <div id="stockMovementList" class="list compact-list"></div>
+        </div>
+      </section>
+
+      <section id="preparation" class="page" role="tabpanel" aria-labelledby="tab-preparation">
+        <div class="workflow-grid" id="preparationStats"></div>
+
+        <div class="panel">
+          <div class="panel-heading">
+            <div>
+              <h3>Préparation des commandes</h3>
+              <p class="muted">Les commandes terminées passent automatiquement en mode livraison.</p>
+            </div>
+            <div class="legend">
+              <span><i class="dot green-dot"></i> Préparable</span>
+              <span><i class="dot orange-dot"></i> À vérifier</span>
+              <span><i class="dot red-dot"></i> Bloqué</span>
+            </div>
+          </div>
+
+          <div id="preparationList" class="order-board"></div>
+        </div>
+      </section>
+
+      <section id="livreur" class="page" role="tabpanel" aria-labelledby="tab-livreur">
+        <div class="driver-page">
+          <div class="panel driver-hero">
+            <div class="panel-heading">
+              <div>
+                <h3>Mode livraison</h3>
+                <p class="muted">Choisis un secteur, sélectionne les clients et crée une tournée optimisée.</p>
+              </div>
+              <span id="routeProgress" class="status-chip">Aucune tournée</span>
+            </div>
+
+            <div class="delivery-filters">
+              <label>
+                Date
+                <input id="deliveryDate" type="date" />
+              </label>
+              <label>
+                Secteur
+                <select id="deliverySector"></select>
+              </label>
+              <label>
+                Ville
+                <input id="deliveryCity" placeholder="Ville exacte, optionnel" autocomplete="off" />
+              </label>
+              <button id="applyDeliveryFilterButton" class="button secondary" type="button" data-action="apply-delivery-filter">Filtrer</button>
+            </div>
+
+            <div class="delivery-actions">
+              <button class="button secondary" type="button" data-action="select-all-delivery">Tout sélectionner</button>
+              <button class="button secondary" type="button" data-action="clear-delivery-selection">Tout désélectionner</button>
+              <button class="button secondary" type="button" data-action="select-current-sector">Sélectionner ce secteur</button>
+              <button id="createRouteButton" class="button primary" type="button" data-action="create-route">Créer une tournée optimisée</button>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-heading">
+              <div>
+                <h3>Commandes prêtes à livrer</h3>
+                <p id="deliveryFilterSummary" class="muted">Aucun filtre appliqué.</p>
+              </div>
+              <span id="selectedDeliveryCount" class="status-chip">0 sélection</span>
+            </div>
+
+            <div id="deliveryCandidates" class="delivery-candidates"></div>
+          </div>
+
+          <div class="panel current-driver-card">
+            <div class="panel-heading">
+              <div>
+                <h3>Tournée active</h3>
+                <p class="muted">Ordre proposé, modifiable avant le départ.</p>
+              </div>
+              <button id="startRouteButton" class="button primary" type="button" data-action="start-route">Démarrer la tournée</button>
+            </div>
+
+            <div id="currentClient" class="current-client-box" aria-live="polite">
+              Aucune tournée créée.
+            </div>
+
+            <div class="big-actions">
+              <button id="callClientButton" class="button primary" type="button" data-action="call-current-client">Appeler</button>
+              <button id="mapsButton" class="button secondary" type="button" data-action="open-maps">Google Maps</button>
+              <button id="markDeliveredButton" class="button ok" type="button" data-action="mark-delivered">Valider</button>
+              <button id="markAbsentButton" class="button danger" type="button" data-action="mark-absent">Absent</button>
+              <button id="markProblemButton" class="button warning" type="button" data-action="mark-problem">Problème</button>
+              <button id="markRescheduleButton" class="button secondary" type="button" data-action="mark-reschedule">À reprogrammer</button>
+              <button id="nextClientButton" class="button secondary" type="button" data-action="next-client">Suivant</button>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-heading">
+              <h3>Ordre de tournée</h3>
+              <span id="routeMetrics" class="muted">Distance estimée indisponible.</span>
+            </div>
+            <div id="routeStopsList" class="route-stops"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-heading">
+              <h3>Carte tournée</h3>
+              <span class="muted">Points avec coordonnées</span>
+            </div>
+            <div class="map-shell">
+              <div id="map" aria-label="Carte de la tournée"></div>
+              <div id="mapEmpty" class="map-empty" hidden>Aucun client avec coordonnées.</div>
+            </div>
+          </div>
+
+          <div class="panel legacy-driver-panel">
+            <div class="panel-heading">
+              <h3>Clients tournée</h3>
+              <div class="legend vertical">
+                <span><i class="dot blue-dot"></i> Restant</span>
+                <span><i class="dot orange-dot"></i> En cours</span>
+                <span><i class="dot green-dot"></i> Livrée</span>
+                <span><i class="dot red-dot"></i> Problème / absent</span>
+              </div>
+            </div>
+
+            <div id="clientsList" class="driver-client-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="recommande" class="page" role="tabpanel" aria-labelledby="tab-recommande">
+        <div class="panel">
+          <div class="panel-heading">
+            <h3>À recommander</h3>
+            <span class="muted">Stock faible ou rupture</span>
+          </div>
+          <div class="recommend-toolbar">
+            <button class="button secondary compact active-filter" type="button" data-recommend-filter="urgent">Urgent</button>
+            <button class="button secondary compact" type="button" data-recommend-filter="low">Stock faible</button>
+            <button class="button secondary compact" type="button" data-recommend-filter="all">Tout afficher</button>
+          </div>
+          <div id="recommandeList" class="list"></div>
+        </div>
+      </section>
+
+      <section id="produits" class="page" role="tabpanel" aria-label="Produits">
+        <div class="panel">
+          <div class="panel-heading">
+            <h3>Produits</h3>
+            <span class="muted">Catalogue importé</span>
+          </div>
+          <div id="produitsList" class="list"></div>
+        </div>
+      </section>
+
+      <section id="ventes" class="page" role="tabpanel" aria-label="Ventes">
+        <div class="panel">
+          <div class="panel-heading">
+            <h3>Ventes</h3>
+            <span class="muted">Lignes importées</span>
+          </div>
+          <div id="ventesList" class="list"></div>
+        </div>
+      </section>
+
+      <section id="alertes" class="page" role="tabpanel" aria-label="Alertes internes">
+        <div class="panel">
+          <div class="panel-heading">
+            <h3>Alertes internes</h3>
+            <span class="muted">Stock, commandes bloquées et livraisons non terminées</span>
+          </div>
+
+          <div id="alertesList" class="list"></div>
+        </div>
+      </section>
+
+      <section id="historique" class="page" role="tabpanel" aria-label="Historique de l'application">
+        <div class="panel">
+          <div class="panel-heading">
+            <h3>Historique de l'application</h3>
+            <span class="muted">Dernières actions</span>
+          </div>
+          <div id="historiqueList" class="history-grid"></div>
+        </div>
+      </section>
+
+      <section id="parametres" class="page" role="tabpanel" aria-label="Paramètres">
+        <div class="settings-grid">
+          <div class="panel">
+            <div class="panel-heading">
+              <h3>Identité visuelle</h3>
+              <span class="muted">Thème local</span>
+            </div>
+            <div class="brand-preview">
+              <img id="brandPreviewImage" src="/brand/sereo-logo.svg" alt="Logo Séréo" data-brand-preview />
+
+              <div class="settings-block">
+                <div>
+                  <h4>Palette pastel</h4>
+                  <p class="muted">Choisis une ambiance douce pour toute l'application.</p>
+                </div>
+                <div id="themePaletteList" class="theme-palette-grid" aria-label="Palettes pastel"></div>
+                <button class="button secondary compact" type="button" data-action="reset-theme">Revenir aux couleurs séréo</button>
+              </div>
+
+              <div class="settings-block">
+                <div>
+                  <h4>Photo en haut à gauche</h4>
+                  <p class="muted">Importe un logo ou une photo. Elle reste enregistrée sur ce navigateur.</p>
+                </div>
+                <label class="file-control" for="brandImageInput">
+                  Importer une image
+                  <input id="brandImageInput" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" />
+                </label>
+                <p id="brandImageStatus" class="muted">Logo séréo par défaut.</p>
+                <button class="button secondary compact" type="button" data-action="reset-brand-image">Remettre le logo séréo</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-heading">
+              <h3>Secteurs livraison</h3>
+              <span class="muted">Déduction automatique</span>
+            </div>
+            <div id="settingsSectors" class="settings-list"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-heading">
+              <h3>Application mobile</h3>
+              <span class="muted">Base PWA</span>
+            </div>
+            <div class="settings-list">
+              <article class="item status-ok">
+                <h4>Manifest installé</h4>
+                <p>L'application peut être ajoutée à l'écran d'accueil sur les navigateurs compatibles.</p>
+              </article>
+              <article class="item status-neutral">
+                <h4>Mode livreur prioritaire</h4>
+                <p>Les boutons Appeler, Google Maps, Livré et Suivant restent accessibles sur mobile.</p>
+              </article>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+
+  <script src="/vendor/leaflet/leaflet.js"></script>
+  <script src="/js/app.js?v=20260502b"></script>
+</body>
+</html>
