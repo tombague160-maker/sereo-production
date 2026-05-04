@@ -3,15 +3,18 @@
 <head>
   <meta charset="UTF-8" />
   <title>Séréo</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#cfe9e1" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="Séréo" />
+  <meta name="format-detection" content="telephone=yes" />
 
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="stylesheet" href="/vendor/leaflet/leaflet.css" />
-  <link rel="stylesheet" href="/css/style.css?v=20260502f" />
+  <link rel="stylesheet" href="/css/style.css?v=20260503-desktop-visual" />
 </head>
 
 <body>
@@ -99,6 +102,29 @@
         <span>Paramètres</span>
       </button>
     </aside>
+
+    <nav class="mobile-tabbar" role="tablist" aria-label="Navigation mobile">
+      <button class="mobile-tab active" type="button" role="tab" aria-selected="true" aria-controls="journee" data-tab="journee">
+        <svg class="icon" aria-hidden="true"><use href="#icon-home"></use></svg>
+        <span>Accueil</span>
+      </button>
+      <button class="mobile-tab" type="button" role="tab" aria-selected="false" aria-controls="stock" data-tab="stock">
+        <svg class="icon" aria-hidden="true"><use href="#icon-box"></use></svg>
+        <span>Stock</span>
+      </button>
+      <button class="mobile-tab" type="button" role="tab" aria-selected="false" aria-controls="preparation" data-tab="preparation">
+        <svg class="icon" aria-hidden="true"><use href="#icon-clipboard-list"></use></svg>
+        <span>Prépa</span>
+      </button>
+      <button class="mobile-tab" type="button" role="tab" aria-selected="false" aria-controls="livreur" data-tab="livreur">
+        <svg class="icon" aria-hidden="true"><use href="#icon-truck"></use></svg>
+        <span>Livraison</span>
+      </button>
+      <button class="mobile-tab" type="button" role="tab" aria-selected="false" aria-controls="recommande" data-tab="recommande">
+        <svg class="icon" aria-hidden="true"><use href="#icon-star"></use></svg>
+        <span>Reco</span>
+      </button>
+    </nav>
 
     <main class="content">
       <header class="topbar">
@@ -481,7 +507,7 @@
               <div class="settings-block">
                 <div>
                   <h4>Photo en haut à gauche</h4>
-                  <p class="muted">Importe un logo ou une photo. Elle reste enregistrée sur ce navigateur.</p>
+                  <p class="muted">Importe un logo ou une photo. Elle est enregistrée pour l'application.</p>
                 </div>
                 <label class="file-control" for="brandImageInput">
                   Importer une image

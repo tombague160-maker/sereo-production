@@ -1,7 +1,5 @@
-const CACHE_NAME = "sereo-shell-20260502-icons";
+const CACHE_NAME = "sereo-shell-20260504-login";
 const APP_SHELL = [
-  "/",
-  "/index.html",
   "/css/style.css",
   "/js/app.js",
   "/favicon.svg",
@@ -31,12 +29,22 @@ self.addEventListener("fetch", event => {
   const { request } = event;
   const url = new URL(request.url);
 
-  if (request.method !== "GET" || url.origin !== self.location.origin || url.pathname.startsWith("/api/")) {
+  if (
+    request.method !== "GET"
+    || request.mode === "navigate"
+    || url.origin !== self.location.origin
+    || url.pathname.startsWith("/api/")
+    || url.pathname.startsWith("/login")
+  ) {
     return;
   }
 
   event.respondWith(
     fetch(request).then(response => {
+      if (!response.ok || response.type !== "basic") {
+        return response;
+      }
+
       const copy = response.clone();
       caches.open(CACHE_NAME).then(cache => cache.put(request, copy));
       return response;

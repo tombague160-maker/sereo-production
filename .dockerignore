@@ -1,0 +1,71 @@
+# ============================================================================
+# Tout ce qui ne doit PAS etre copie dans l'image Docker au build.
+# Reduit la taille du contexte envoye au daemon et evite d'embarquer secrets,
+# donnees runtime et fichiers de developpement dans l'image finale.
+# ============================================================================
+
+# Dependances - reinstallees proprement par "npm ci" dans le Dockerfile
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Fichiers Docker eux-memes (auto-reference inutile)
+Dockerfile*
+docker-compose*.yml
+docker-compose*.yaml
+.dockerignore
+
+# Configs reverse proxy (specifiques a un deploiement, pas au code)
+*.subdomain.conf
+*.subfolder.conf
+nginx-sereo.conf
+
+# Donnees runtime - JAMAIS dans l'image (montees en volume)
+data/db.json
+data/*.sqlite
+data/*.sqlite-shm
+data/*.sqlite-wal
+data/backups/
+uploads/
+imports/
+exports/
+
+# Variables d'env locales - secrets
+.env
+.env.*
+!.env.example
+
+# Doc et meta-instructions IA - inutiles en runtime
+audit/
+agents/
+ASSISTANT_BUGS.md
+IA_ASSISTANT.md
+AGENTS.md
+
+# Outils dev / IDE
+.vscode/
+.idea/
+.devcontainer/
+*.swp
+*.swo
+
+# Tests - Node.js prend les fichiers test/* via "node --test", pas besoin en prod
+test/
+
+# Git et CI
+.git/
+.gitignore
+.gitattributes
+.github/
+
+# Fichiers OS
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Logs et builds eventuels
+*.log
+coverage/
+dist/
+build/
+tmp/
