@@ -39,11 +39,36 @@ SEREO_DB_PATH=./data/db.json
 SEREO_UPLOAD_DIR=/tmp/sereo-uploads
 SEREO_BACKUP_DIR=/data/backups
 SEREO_ENABLE_DB_EXPORT=0
+SEREO_AUTH_USER=votre-identifiant
+SEREO_AUTH_PASSWORD=mot-de-passe-long-et-prive
+SEREO_AUTH_REALM=Sereo
 ```
 
 Important : `/data` doit etre un volume persistant sur l'hebergeur. Si l'hebergeur
 efface le disque au redemarrage, utiliser un volume persistant ou migrer vers une base
 geree type Postgres.
+
+## Protection d'acces
+
+L'application peut proteger toute l'interface et toutes les routes API avec un identifiant
+et un mot de passe HTTP Basic.
+
+Variables a configurer avant publication :
+
+```bash
+SEREO_AUTH_USER=votre-identifiant
+SEREO_AUTH_PASSWORD=mot-de-passe-long-et-prive
+SEREO_AUTH_REALM=Sereo
+```
+
+Important :
+
+- Configurer `SEREO_AUTH_USER` et `SEREO_AUTH_PASSWORD` ensemble. Si une seule valeur est
+  renseignee, l'application refuse les requetes avec une erreur de configuration.
+- Ne jamais commiter le fichier `.env`.
+- Utiliser un mot de passe long, unique et non partage ailleurs.
+- Sur Internet, utiliser HTTPS. HTTP Basic protege l'acces applicatif, mais le mot de passe
+  doit transiter dans un tunnel chiffre.
 
 ## Migration locale depuis JSON
 
@@ -86,8 +111,9 @@ Verifier la persistance :
 3. Monter un volume persistant, par exemple `/data`.
 4. Configurer `SEREO_SQLITE_PATH=/data/sereo.sqlite`.
 5. Configurer `SEREO_BACKUP_DIR=/data/backups`.
-6. Lancer `npm run migrate:sqlite` une seule fois si des donnees JSON existent.
-7. Lancer `npm start`.
+6. Configurer `SEREO_AUTH_USER` et `SEREO_AUTH_PASSWORD`.
+7. Lancer `npm run migrate:sqlite` une seule fois si des donnees JSON existent.
+8. Lancer `npm start`.
 
 ## Limites connues
 

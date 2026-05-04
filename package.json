@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Application locale de gestion de stock, préparation et livraisons Séréo",
   "main": "server.js",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "start": "node server.js",
     "test": "node --test",

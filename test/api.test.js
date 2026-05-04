@@ -17,6 +17,8 @@ process.env.SEREO_DB_PATH = dbPath;
 process.env.SEREO_SQLITE_PATH = sqlitePath;
 process.env.SEREO_UPLOAD_DIR = uploadDir;
 process.env.SEREO_BACKUP_DIR = backupDir;
+process.env.SEREO_AUTH_USER = "";
+process.env.SEREO_AUTH_PASSWORD = "";
 
 const { app, closeStorage, defaultDb, readDb, writeDb } = require("../server");
 
@@ -592,6 +594,91 @@ test("reprogrammed orders can be selected for a new delivery route", async () =>
   assert.equal(route.body.stops.length, 1);
   assert.equal(route.body.stops[0].orderId, "o1");
   assert.equal(route.body.stops[0].sector, "Dole");
+});
+
+test("sales import preserves active route orders missing from the new file", async () => {
+  seedDb({
+    ...defaultDb(),
+    clients: [
+      {
+        id: "c-old",
+        nom: "Client route",
+        rue: "1 rue active",
+        ville: "Besancon",
+        codePostal: "25000",
+        statut: "en_cours",
+        produits: [{ code: "A1", nom: "Produit A", quantite: 1 }]
+      }
+    ],
+    commandes: [
+      {
+        id: "o-old",
+        clientId: "c-old",
+        clientName: "Client route",
+        address: "1 rue active",
+        city: "Besancon",
+        postalCode: "25000",
+        sector: "Besancon",
+        products: [{ code: "A1", nom: "Produit A", quantite: 1 }],
+        status: "en_livraison",
+        deliveryStatus: "en_livraison",
+        routeId: "route-old"
+      }
+    ],
+    routes: [
+      {
+        id: "route-old",
+        sector: "Besancon",
+        status: "en_livraison",
+        selectedOrderIds: ["o-old"],
+        stops: [
+          {
+            id: "stop-old",
+            routeId: "route-old",
+            orderId: "o-old",
+            clientId: "c-old",
+            orderIndex: 1,
+            clientName: "Client route",
+            address: "1 rue active",
+            city: "Besancon",
+            postalCode: "25000",
+            sector: "Besancon",
+            status: "en_livraison",
+            products: [{ code: "A1", nom: "Produit A", quantite: 1 }]
+          }
+        ]
+      }
+    ],
+    stock: [{ id: "p1", code: "A1", nom: "Produit A", quantite: 5 }]
+  });
+
+  const form = new FormData();
+  form.append("file", workbookBlob([
+    ["Client", "Quantite", "Produit", "Rue", "Ville"],
+    ["Nouveau client", "1", "Produit B", "2 rue neuve", "Dole"]
+  ]), "ventes.xlsx");
+
+  const imported = await requestJson("/api/import/ventes", {
+    method: "POST",
+    body: form
+  });
+
+  assert.equal(imported.res.status, 200);
+
+  const db = readDb();
+  assert.equal(db.clients.some(client => client.id === "c-old"), true);
+  assert.equal(db.commandes.some(order => order.id === "o-old"), true);
+  assert.equal(db.clients.some(client => client.nom === "Nouveau client"), true);
+  assert.equal(db.routes[0].stops[0].orderId, "o-old");
+
+  const delivered = await requestJson("/api/routes/route-old/stops/stop-old", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status: "livre" })
+  });
+
+  assert.equal(delivered.res.status, 200);
+  assert.equal(delivered.body.order.status, "livre");
 });
 
 test("local Leaflet asset is served by Express", async () => {

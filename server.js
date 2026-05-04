@@ -1,9 +1,12 @@
 const express = require("express");
 const multer = require("multer");
 const readXlsxFile = require("read-excel-file/node");
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { createSqliteStore } = require("./storage/sqliteStore");
+
+loadEnvFile(path.join(__dirname, ".env"));
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -16,6 +19,12 @@ const UPLOAD_DIR = path.resolve(process.env.SEREO_UPLOAD_DIR || path.join(__dirn
 const BACKUP_DIR = path.resolve(process.env.SEREO_BACKUP_DIR || path.join(path.dirname(STORAGE_ENGINE === "json" ? DB_PATH : SQLITE_PATH), "backups"));
 const LEAFLET_DIST = path.join(__dirname, "node_modules", "leaflet", "dist");
 const ENABLE_DB_EXPORT = process.env.SEREO_ENABLE_DB_EXPORT === "1";
+const AUTH_USER = cleanEnv(process.env.SEREO_AUTH_USER);
+const AUTH_PASSWORD = cleanEnv(process.env.SEREO_AUTH_PASSWORD);
+const AUTH_REALM = cleanEnv(process.env.SEREO_AUTH_REALM) || "Sereo";
+const AUTH_SESSION_SECRET = cleanEnv(process.env.SEREO_AUTH_SESSION_SECRET) || AUTH_PASSWORD || AUTH_REALM;
+const AUTH_COOKIE_NAME = "sereo_access";
+const AUTH_COOKIE_MAX_AGE_SECONDS = 12 * 60 * 60;
 
 const MAX_UPLOAD_SIZE = 10 * 1024 * 1024;
 const MAX_BRAND_IMAGE_DATA_URL_SIZE = 3 * 1024 * 1024;
@@ -60,10 +69,51 @@ const upload = multer({
 
 app.disable("x-powered-by");
 app.use(securityHeaders);
+app.use("/brand", express.static(path.join(__dirname, "public", "brand"), { immutable: true, maxAge: "1d" }));
+app.get("/favicon.svg", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "favicon.svg"));
+});
+app.get("/healthz", (req, res) => {
+  res.json({ ok: true });
+});
+app.use(express.urlencoded({ extended: false, limit: "20kb" }));
+app.get("/login", renderLoginPage);
+app.post("/login", handleLogin);
+app.post("/logout", handleLogout);
+app.use(requireAccessAuth);
 app.use(express.json({ limit: "5mb" }));
 app.use("/vendor/leaflet", express.static(LEAFLET_DIST, { immutable: true, maxAge: "7d" }));
 app.use(express.static(path.join(__dirname, "public")));
 app.use("/api", requireTrustedApiRequest);
+
+function cleanEnv(value) {
+  return String(value ?? "").trim();
+}
+
+function loadEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) return;
+
+  const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
+
+  lines.forEach(line => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) return;
+
+    const separatorIndex = trimmed.indexOf("=");
+    if (separatorIndex === -1) return;
+
+    const key = trimmed.slice(0, separatorIndex).trim();
+    let value = trimmed.slice(separatorIndex + 1).trim();
+
+    if (!key || Object.prototype.hasOwnProperty.call(process.env, key)) return;
+
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+
+    process.env[key] = value;
+  });
+}
 
 function securityHeaders(req, res, next) {
   res.setHeader("X-Content-Type-Options", "nosniff");
@@ -85,6 +135,370 @@ function securityHeaders(req, res, next) {
     ].join("; ")
   );
   next();
+}
+
+function isAccessAuthEnabled() {
+  return Boolean(AUTH_USER && AUTH_PASSWORD);
+}
+
+function isAccessAuthMisconfigured() {
+  return Boolean(AUTH_USER || AUTH_PASSWORD) && !isAccessAuthEnabled();
+}
+
+function parseBasicAuthHeader(header) {
+  const [scheme, encoded] = String(header || "").split(" ");
+  if (!encoded || scheme.toLowerCase() !== "basic") return null;
+
+  try {
+    const decoded = Buffer.from(encoded, "base64").toString("utf8");
+    const separatorIndex = decoded.indexOf(":");
+    if (separatorIndex === -1) return null;
+
+    return {
+      username: decoded.slice(0, separatorIndex),
+      password: decoded.slice(separatorIndex + 1)
+    };
+  } catch {
+    return null;
+  }
+}
+
+function constantTimeEqual(left, right) {
+  const leftHash = crypto.createHash("sha256").update(String(left)).digest();
+  const rightHash = crypto.createHash("sha256").update(String(right)).digest();
+  return crypto.timingSafeEqual(leftHash, rightHash);
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function parseCookies(header) {
+  return String(header || "")
+    .split(";")
+    .map(part => part.trim())
+    .filter(Boolean)
+    .reduce((cookies, part) => {
+      const separatorIndex = part.indexOf("=");
+      if (separatorIndex === -1) return cookies;
+
+      const name = part.slice(0, separatorIndex).trim();
+      const value = part.slice(separatorIndex + 1).trim();
+      if (!name) return cookies;
+
+      cookies[name] = decodeURIComponent(value);
+      return cookies;
+    }, {});
+}
+
+function signAuthPayload(payload) {
+  return crypto
+    .createHmac("sha256", AUTH_SESSION_SECRET)
+    .update(payload)
+    .digest("base64url");
+}
+
+function createAccessSessionValue(now = Date.now()) {
+  const payload = Buffer.from(JSON.stringify({
+    user: AUTH_USER,
+    issuedAt: now
+  })).toString("base64url");
+
+  return `${payload}.${signAuthPayload(payload)}`;
+}
+
+function isValidAccessSessionValue(value, now = Date.now()) {
+  const [payload, signature] = String(value || "").split(".");
+  if (!payload || !signature) return false;
+
+  const expectedSignature = signAuthPayload(payload);
+  if (!constantTimeEqual(signature, expectedSignature)) return false;
+
+  try {
+    const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    const issuedAt = Number(session.issuedAt);
+
+    if (session.user !== AUTH_USER || !Number.isFinite(issuedAt)) return false;
+    return now - issuedAt <= AUTH_COOKIE_MAX_AGE_SECONDS * 1000;
+  } catch {
+    return false;
+  }
+}
+
+function getAccessSessionCookie(req) {
+  return parseCookies(req.get("cookie"))[AUTH_COOKIE_NAME];
+}
+
+function buildAuthCookie(value, maxAgeSeconds, req) {
+  const cookieParts = [
+    `${AUTH_COOKIE_NAME}=${encodeURIComponent(value)}`,
+    "HttpOnly",
+    "SameSite=Lax",
+    "Path=/",
+    `Max-Age=${maxAgeSeconds}`
+  ];
+
+  if (req.secure || req.get("x-forwarded-proto") === "https") {
+    cookieParts.push("Secure");
+  }
+
+  return cookieParts.join("; ");
+}
+
+function isSessionAuthorizedRequest(req) {
+  if (!isAccessAuthEnabled()) return true;
+  return isValidAccessSessionValue(getAccessSessionCookie(req));
+}
+
+function isAuthorizedRequest(req) {
+  if (!isAccessAuthEnabled()) return true;
+
+  if (isSessionAuthorizedRequest(req)) return true;
+
+  const credentials = parseBasicAuthHeader(req.get("authorization"));
+  if (!credentials) return false;
+
+  return constantTimeEqual(credentials.username, AUTH_USER)
+    && constantTimeEqual(credentials.password, AUTH_PASSWORD);
+}
+
+function isApiRequest(req) {
+  return String(req.path || "").startsWith("/api/");
+}
+
+function isHtmlNavigationRequest(req) {
+  return req.method === "GET"
+    && (req.path === "/" || req.path === "/index.html" || String(req.get("accept") || "").includes("text/html"));
+}
+
+function requireAccessAuth(req, res, next) {
+  if (isAccessAuthMisconfigured()) {
+    res.status(500).json({
+      error: "Protection d'acces mal configuree. Renseigner SEREO_AUTH_USER et SEREO_AUTH_PASSWORD."
+    });
+    return;
+  }
+
+  if (isAuthorizedRequest(req)) {
+    next();
+    return;
+  }
+
+  if (isApiRequest(req)) {
+    res.setHeader("WWW-Authenticate", `Basic realm="${AUTH_REALM}", charset="UTF-8"`);
+    res.status(401).json({ error: "Connexion requise" });
+    return;
+  }
+
+  if (req.method === "GET") {
+    renderLoginPage(req, res);
+    return;
+  }
+
+  res.setHeader("WWW-Authenticate", `Basic realm="${AUTH_REALM}", charset="UTF-8"`);
+  res.status(401).send("Acces protege");
+}
+
+function getSafeRedirectTarget(value) {
+  const target = String(value || "/");
+
+  if (!target.startsWith("/") || target.startsWith("//") || target.startsWith("/login")) {
+    return "/";
+  }
+
+  return target;
+}
+
+function renderLoginPage(req, res) {
+  if (!isAccessAuthEnabled()) {
+    res.redirect(getSafeRedirectTarget(req.query.next));
+    return;
+  }
+
+  const hasError = req.query.error === "1";
+  const next = getSafeRedirectTarget(req.query.next);
+  const errorMarkup = hasError
+    ? '<p class="login-error" role="alert">Identifiant ou mot de passe incorrect.</p>'
+    : "";
+
+  res.status(hasError ? 401 : 200).send(`<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Connexion - s&eacute;r&eacute;o</title>
+  <style>
+    :root {
+      --brand-teal: #0e6b63;
+      --pastel-green: #cfe9e1;
+      --pastel-green-light: #e8f4ef;
+      --pastel-orange: #ffc4a3;
+      --pastel-orange-strong: #f47a5a;
+      --surface: #fffefa;
+      --text: #0f2937;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      font-family: Arial, Helvetica, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(207, 233, 225, 0.95), transparent 34%),
+        radial-gradient(circle at bottom right, rgba(255, 196, 163, 0.55), transparent 36%),
+        #fafaf8;
+    }
+
+    .login-card {
+      width: min(100%, 420px);
+      padding: 34px;
+      border: 1px solid rgba(14, 107, 99, 0.16);
+      border-radius: 28px;
+      background: rgba(255, 254, 250, 0.92);
+      box-shadow: 0 24px 60px rgba(15, 41, 55, 0.12);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 76px;
+      margin-bottom: 24px;
+      border-radius: 18px;
+      background: white;
+    }
+
+    .brand img {
+      max-width: 170px;
+      max-height: 58px;
+      object-fit: contain;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      color: var(--brand-teal);
+      font-size: 28px;
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    .intro {
+      margin: 0 0 24px;
+      color: rgba(15, 41, 55, 0.72);
+      line-height: 1.45;
+    }
+
+    label {
+      display: block;
+      margin: 0 0 8px;
+      color: var(--brand-teal);
+      font-weight: 700;
+      font-size: 14px;
+    }
+
+    input {
+      width: 100%;
+      min-height: 48px;
+      margin-bottom: 16px;
+      padding: 12px 14px;
+      border: 1px solid rgba(14, 107, 99, 0.24);
+      border-radius: 14px;
+      background: white;
+      color: var(--text);
+      font: inherit;
+      outline: none;
+    }
+
+    input:focus {
+      border-color: var(--pastel-orange-strong);
+      box-shadow: 0 0 0 4px rgba(255, 196, 163, 0.36);
+    }
+
+    button {
+      width: 100%;
+      min-height: 50px;
+      border: 0;
+      border-radius: 16px;
+      background: var(--pastel-orange-strong);
+      color: white;
+      font: inherit;
+      font-weight: 800;
+      cursor: pointer;
+      box-shadow: 0 12px 24px rgba(244, 122, 90, 0.22);
+    }
+
+    .login-error {
+      margin: 0 0 18px;
+      padding: 12px 14px;
+      border: 1px solid rgba(244, 122, 90, 0.26);
+      border-radius: 14px;
+      background: rgba(255, 196, 163, 0.28);
+      color: #9c341f;
+      font-weight: 700;
+    }
+
+    @media (max-width: 480px) {
+      body { padding: 16px; }
+      .login-card { padding: 24px; border-radius: 22px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="login-card" aria-labelledby="login-title">
+    <div class="brand"><img src="/brand/sereo-logo.svg" alt="s&eacute;r&eacute;o"></div>
+    <h1 id="login-title">Acc&egrave;s prot&eacute;g&eacute;</h1>
+    <p class="intro">Connecte-toi pour ouvrir l'application.</p>
+    ${errorMarkup}
+    <form method="post" action="/login">
+      <input type="hidden" name="next" value="${escapeHtml(next)}">
+      <label for="username">Identifiant</label>
+      <input id="username" name="username" autocomplete="username" autofocus required>
+      <label for="password">Mot de passe</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <button type="submit">Se connecter</button>
+    </form>
+  </main>
+</body>
+</html>`);
+}
+
+function handleLogin(req, res) {
+  if (isAccessAuthMisconfigured()) {
+    res.status(500).send("Protection d'acces mal configuree.");
+    return;
+  }
+
+  const next = getSafeRedirectTarget(req.body.next);
+  const username = cleanEnv(req.body.username);
+  const password = cleanEnv(req.body.password);
+
+  if (!isAccessAuthEnabled()) {
+    res.redirect(next);
+    return;
+  }
+
+  if (!constantTimeEqual(username, AUTH_USER) || !constantTimeEqual(password, AUTH_PASSWORD)) {
+    res.redirect(303, `/login?error=1&next=${encodeURIComponent(next)}`);
+    return;
+  }
+
+  res.setHeader("Set-Cookie", buildAuthCookie(createAccessSessionValue(), AUTH_COOKIE_MAX_AGE_SECONDS, req));
+  res.redirect(303, next);
+}
+
+function handleLogout(req, res) {
+  res.setHeader("Set-Cookie", buildAuthCookie("", 0, req));
+  res.redirect(303, "/login");
 }
 
 function requireTrustedApiRequest(req, res, next) {
@@ -500,6 +914,54 @@ function clientKey(value) {
   ].join("|").toLowerCase();
 }
 
+function getRouteClientIds(db) {
+  const ids = new Set();
+
+  db.routes.forEach(route => {
+    (route.stops || []).forEach(stop => {
+      if (stop.clientId !== undefined && stop.clientId !== null) {
+        ids.add(String(stop.clientId));
+      }
+    });
+  });
+
+  return ids;
+}
+
+function shouldPreserveClientAfterImport(client, order, routeClientIds) {
+  const clientId = String(client?.id ?? "");
+  if (!clientId) return false;
+  if (routeClientIds.has(clientId)) return true;
+  if (!order) return false;
+  if (order.routeId) return true;
+
+  return [
+    "en_preparation",
+    "preparation_terminee",
+    "pret_livraison",
+    "en_livraison",
+    "livre",
+    "probleme_livraison",
+    "a_reprogrammer"
+  ].includes(order.status);
+}
+
+function mergeImportedClients(db, importedClients) {
+  const importedKeys = new Set(importedClients.map(client => clientKey(client)));
+  const routeClientIds = getRouteClientIds(db);
+  const existingOrders = new Map(db.commandes.map(order => [String(order.clientId), order]));
+  const preservedClients = db.clients.filter(client => {
+    const key = clientKey(client);
+    if (importedKeys.has(key)) return false;
+    return shouldPreserveClientAfterImport(client, existingOrders.get(String(client.id)), routeClientIds);
+  });
+
+  return {
+    clients: [...importedClients, ...preservedClients],
+    preservedCount: preservedClients.length
+  };
+}
+
 function badRequest(message) {
   const error = new Error(message);
   error.statusCode = 400;
@@ -852,9 +1314,10 @@ function syncWorkflow(db) {
     });
   });
 
+  const generatedClientIds = new Set(generatedOrders.map(order => String(order.clientId)));
   const generatedIds = new Set(generatedOrders.map(order => String(order.id)));
   const detachedOrders = db.commandes
-    .filter(order => !existingOrders.has(String(order.clientId)) && !generatedIds.has(String(order.id)))
+    .filter(order => !generatedClientIds.has(String(order.clientId)) && !generatedIds.has(String(order.id)))
     .map(normalizeOrder);
 
   db.commandes = [...generatedOrders, ...detachedOrders].map(order => enrichOrder(order, db.stock));
@@ -1396,6 +1859,7 @@ app.get("/api/storage/status", (req, res) => {
     engine: useSqliteStorage() ? "sqlite" : "json",
     persistent: true,
     sharedAfterRefresh: true,
+    accessProtected: isAccessAuthEnabled(),
     path: useSqliteStorage() ? SQLITE_PATH : DB_PATH
   });
 });
@@ -1630,7 +2094,9 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       });
     });
 
-    db.clients = Object.values(clientsMap);
+    const importedClients = Object.values(clientsMap);
+    const mergedImport = mergeImportedClients(db, importedClients);
+    db.clients = mergedImport.clients;
     db.commandes = db.clients.map(client => {
       const existingOrder = existingOrders.get(String(client.id)) || {};
       return normalizeOrder({
@@ -1653,9 +2119,17 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     });
 
     syncWorkflow(db);
-    addHistory(db, "Import ventes", `${db.ventes.length} vente(s) importee(s) et ${db.clients.length} client(s) cree(s)`, {
-      fichier: req.file.originalname
-    });
+    const preservedMessage = mergedImport.preservedCount > 0
+      ? `, ${mergedImport.preservedCount} client(s) deja en workflow conserve(s)`
+      : "";
+    addHistory(
+      db,
+      "Import ventes",
+      `${db.ventes.length} vente(s) importee(s), ${importedClients.length} client(s) detecte(s)${preservedMessage}`,
+      {
+        fichier: req.file.originalname
+      }
+    );
 
     writeDb(db);
 
@@ -2042,6 +2516,9 @@ module.exports = {
   optimizeOrders,
   parseCoordinate,
   getCoordinates,
+  parseBasicAuthHeader,
+  isAuthorizedRequest,
+  isAccessAuthEnabled,
   DB_PATH,
   SQLITE_PATH,
   STORAGE_ENGINE,

@@ -48,9 +48,9 @@ USER node
 
 EXPOSE 3000
 
-# Healthcheck applicatif. /api/storage/status est un endpoint leger expose par server.js.
+# Healthcheck applicatif public. /healthz ne revele aucune donnee metier.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD wget --quiet --tries=1 --spider http://127.0.0.1:3000/api/storage/status || exit 1
+    CMD wget --quiet --tries=1 --spider http://127.0.0.1:3000/healthz || exit 1
 
 # Tini en PID 1 pour le bon traitement des signaux
 ENTRYPOINT ["/sbin/tini", "--"]

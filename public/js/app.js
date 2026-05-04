@@ -33,6 +33,11 @@ let activeBrandImage = "/brand/sereo-logo.svg";
 const mainTabs = new Set(["journee", "stock", "preparation", "livreur", "recommande", "parametres"]);
 const DEFAULT_BRAND_IMAGE = "/brand/sereo-logo.svg";
 const MAX_BRAND_IMAGE_SIZE = 2 * 1024 * 1024;
+
+if ("scrollRestoration" in history) {
+  history.scrollRestoration = "manual";
+}
+
 const pastelThemes = {
   sereo: {
     id: "sereo",
@@ -214,6 +219,8 @@ document.addEventListener("DOMContentLoaded", () => {
   loadData();
 });
 
+window.addEventListener("load", () => resetViewportScroll(false), { once: true });
+
 function bindUi() {
   document.querySelectorAll("[data-tab]").forEach(button => {
     button.addEventListener("click", () => showTab(button.dataset.tab));
@@ -328,18 +335,13 @@ function showTab(tabName, options = {}) {
   const nextTab = titles[tabName] && mainTabs.has(tabName) ? tabName : "journee";
 
   document.querySelectorAll(".page").forEach(page => page.classList.remove("active"));
-  document.querySelectorAll(".tab").forEach(tab => {
-    tab.classList.remove("active");
-    tab.setAttribute("aria-selected", "false");
+  document.querySelectorAll("[data-tab]").forEach(tab => {
+    const isActive = tab.dataset.tab === nextTab;
+    tab.classList.toggle("active", isActive);
+    tab.setAttribute("aria-selected", isActive ? "true" : "false");
   });
 
   document.getElementById(nextTab)?.classList.add("active");
-
-  const activeButton = document.querySelector(`[data-tab="${nextTab}"]`);
-  if (activeButton) {
-    activeButton.classList.add("active");
-    activeButton.setAttribute("aria-selected", "true");
-  }
 
   setText("pageTitle", titles[nextTab].title);
   setText("pageSubtitle", titles[nextTab].subtitle);
@@ -348,9 +350,18 @@ function showTab(tabName, options = {}) {
     history.replaceState(null, "", `#${nextTab}`);
   }
 
+  resetViewportScroll(updateHash);
+
   if (nextTab === "livreur" && map) {
     setTimeout(() => map.invalidateSize(), 150);
   }
+}
+
+function resetViewportScroll(animated = true) {
+  const behavior = animated ? "smooth" : "auto";
+  window.scrollTo({ top: 0, left: 0, behavior });
+  requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: "auto" }));
+  setTimeout(() => window.scrollTo({ top: 0, left: 0, behavior: "auto" }), 120);
 }
 
 function initMap() {
@@ -1184,8 +1195,9 @@ async function loadAppearance() {
     const appearance = await apiFetch("/api/settings/appearance");
     applyTheme(appearance.themeId || "sereo", { persist: false });
     applyBrandImage(appearance.brandImage || DEFAULT_BRAND_IMAGE);
-  } catch {
+  } catch (error) {
     updateBrandImageStatus(false);
+    notify(error.message || "Paramètres visuels indisponibles.", "warning");
   }
 }
 
