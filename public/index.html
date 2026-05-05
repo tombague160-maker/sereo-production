@@ -91,6 +91,10 @@
           <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-star"></use></svg></span>
           <span>À recommander</span>
         </button>
+        <button id="tab-commandes-livrees" class="tab" type="button" role="tab" aria-selected="false" aria-controls="commandes-livrees" data-tab="commandes-livrees">
+          <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-clipboard-list"></use></svg></span>
+          <span>Commandes livrées</span>
+        </button>
       </nav>
 
       <div class="sidebar-visual" aria-hidden="true">
@@ -123,6 +127,10 @@
       <button class="mobile-tab" type="button" role="tab" aria-selected="false" aria-controls="recommande" data-tab="recommande">
         <svg class="icon" aria-hidden="true"><use href="#icon-star"></use></svg>
         <span>Reco</span>
+      </button>
+      <button class="mobile-tab" type="button" role="tab" aria-selected="false" aria-controls="commandes-livrees" data-tab="commandes-livrees">
+        <svg class="icon" aria-hidden="true"><use href="#icon-clipboard-list"></use></svg>
+        <span>Livrées</span>
       </button>
     </nav>
 
@@ -441,6 +449,17 @@
             <button class="button secondary compact" type="button" data-recommend-filter="all">Tout afficher</button>
           </div>
           <div id="recommandeList" class="list"></div>
+        </div>
+      </section>
+
+      <section id="commandes-livrees" class="page" role="tabpanel" aria-labelledby="tab-commandes-livrees">
+        <div class="panel">
+          <div class="panel-heading">
+            <h3>Commandes livrées</h3>
+            <span class="muted">Historique des livraisons effectuées et des ventes importées comme déjà livrées</span>
+          </div>
+          <div id="commandesLivreesSummary" class="muted" aria-live="polite"></div>
+          <div id="commandesLivreesList" class="list"></div>
         </div>
       </section>
 

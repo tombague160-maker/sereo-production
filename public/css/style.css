@@ -2018,3 +2018,37 @@ label {
     grid-column: auto;
   }
 }
+
+/* Vue Commandes livrees */
+.commandes-livrees-card {
+  display: grid;
+  gap: 12px;
+}
+
+.commandes-livrees-card .item-header {
+  align-items: flex-start;
+}
+
+.commandes-livrees-card .item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 0.9em;
+}
+
+.commandes-livrees-products {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.commandes-livrees-product {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 6px 10px;
+  background: var(--color-surface-tint, rgba(0, 0, 0, 0.03));
+  border-radius: var(--radius, 8px);
+}

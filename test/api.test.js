@@ -790,3 +790,242 @@ test("recommendations contain no duplicates after polluted stock import", async 
   const dupItems = body.filter(item => (item.code || "").toUpperCase() === "DUP1");
   assert.equal(dupItems.length, 1, "les recommandations ne doivent pas contenir de doublons");
 });
+
+// ============================================================================
+// V7 - workflow import ventes + anti-doublon + qty 0 + commandes livrees
+// ============================================================================
+
+test("normalizeProducts garde quantite 0 (ne la force plus a 1)", async () => {
+  seedDb({
+    ...defaultDb(),
+    stock: [{ id: "p1", code: "A1", nom: "Produit A", quantite: 5 }],
+    clients: [{ id: "c1", nom: "Client zero", produits: [{ code: "A1", nom: "Produit A", quantite: 0 }] }],
+    commandes: [{
+      id: "o1",
+      clientId: "c1",
+      clientName: "Client zero",
+      products: [{ code: "A1", nom: "Produit A", quantite: 0 }],
+      status: "stock_a_verifier"
+    }]
+  });
+
+  const { res, body } = await requestJson("/api/orders");
+  assert.equal(res.status, 200);
+  const order = body.find(o => o.id === "o1");
+  assert.ok(order, "la commande doit exister");
+  assert.equal(order.products[0].quantite, 0, "la quantite 0 ne doit plus etre forcee a 1");
+});
+
+test("import ventes : statut facture 'Envoyee' cree une commande livre direct", async () => {
+  seedDb(defaultDb());
+
+  const form = new FormData();
+  form.append("file", workbookBlob([
+    ["Statut", "Code", "Client", "Quantite", "Produit", "Rue", "Code Postal", "Ville"],
+    ["Envoyée", "P1", "Client livre direct", "3", "Produit X", "1 rue test", "25000", "Besancon"]
+  ]), "ventes.xlsx");
+
+  const { res, body } = await requestJson("/api/import/ventes", {
+    method: "POST",
+    body: form
+  });
+
+  assert.equal(res.status, 200);
+  assert.equal(body.success, true);
+  assert.equal(body.importedAsLivre, 1, "1 commande importee comme deja livree");
+
+  const order = body.commandes.find(o => o.clientName === "Client livre direct");
+  assert.ok(order, "la commande doit etre creee");
+  assert.equal(order.status, "livre", "status doit etre livre");
+  assert.equal(order.preparationStatus, "terminee", "preparation doit etre terminee");
+  assert.equal(order.deliveryStatus, "livre", "deliveryStatus doit etre livre");
+  assert.equal(order.importedAsLivre, true, "le flag importedAsLivre doit etre true");
+});
+
+test("import ventes : variantes 'envoyee', 'ENVOYE', 'expediee' toutes traitees comme livre", async () => {
+  for (const statut of ["envoyee", "ENVOYE", "expédiée", "Sent"]) {
+    seedDb(defaultDb());
+
+    const form = new FormData();
+    form.append("file", workbookBlob([
+      ["Statut", "Code", "Client", "Quantite", "Produit", "Rue", "Code Postal", "Ville"],
+      [statut, "P1", `Client ${statut}`, "1", "Produit X", "1 rue test", "25000", "Besancon"]
+    ]), "ventes.xlsx");
+
+    const { res, body } = await requestJson("/api/import/ventes", {
+      method: "POST",
+      body: form
+    });
+
+    assert.equal(res.status, 200, `import doit reussir pour statut "${statut}"`);
+    const order = body.commandes.find(o => o.clientName === `Client ${statut}`);
+    assert.ok(order, `commande creee pour "${statut}"`);
+    assert.equal(order.status, "livre", `status livre attendu pour "${statut}"`);
+  }
+});
+
+test("import ventes : statut 'Brouillon' ou vide reste en stock_a_verifier", async () => {
+  for (const statut of ["Brouillon", ""]) {
+    seedDb(defaultDb());
+
+    const form = new FormData();
+    form.append("file", workbookBlob([
+      ["Statut", "Code", "Client", "Quantite", "Produit", "Rue", "Code Postal", "Ville"],
+      [statut, "P1", "Client non livre", "1", "Produit X", "1 rue", "25000", "Besancon"]
+    ]), "ventes.xlsx");
+
+    const { res, body } = await requestJson("/api/import/ventes", {
+      method: "POST",
+      body: form
+    });
+
+    assert.equal(res.status, 200);
+    const order = body.commandes.find(o => o.clientName === "Client non livre");
+    assert.ok(order);
+    assert.notEqual(order.status, "livre", `statut "${statut}" ne doit pas declencher livre`);
+  }
+});
+
+test("import ventes : ligne 'Envoyee' + ligne non livree pour meme client => non livre", async () => {
+  seedDb(defaultDb());
+
+  const form = new FormData();
+  form.append("file", workbookBlob([
+    ["Statut", "Code", "Client", "Quantite", "Produit", "Rue", "Code Postal", "Ville"],
+    ["Envoyée", "P1", "Client mixte", "1", "Produit X", "1 rue", "25000", "Besancon"],
+    ["Brouillon", "P2", "Client mixte", "1", "Produit Y", "1 rue", "25000", "Besancon"]
+  ]), "ventes.xlsx");
+
+  const { res, body } = await requestJson("/api/import/ventes", {
+    method: "POST",
+    body: form
+  });
+
+  assert.equal(res.status, 200);
+  const order = body.commandes.find(o => o.clientName === "Client mixte");
+  assert.ok(order);
+  assert.notEqual(order.status, "livre", "une seule ligne non-livree suffit a desactiver le marquage");
+});
+
+test("anti-doublon client : virgule en trop dans rue => fusion par cle secondaire (nom + CP)", async () => {
+  seedDb({
+    ...defaultDb(),
+    clients: [{
+      id: "c-existing",
+      nom: "Dupont",
+      rue: "3 rue,",  // virgule en trop
+      ville: "Besancon",
+      codePostal: "25000",
+      statut: "en_cours",
+      produits: [{ code: "A1", nom: "Produit A", quantite: 5 }]
+    }],
+    commandes: [{
+      id: "o-existing",
+      clientId: "c-existing",
+      clientName: "Dupont",
+      address: "3 rue,",
+      city: "Besancon",
+      postalCode: "25000",
+      products: [{ code: "A1", nom: "Produit A", quantite: 5 }],
+      status: "en_preparation",
+      preparationStatus: "en_cours"
+    }]
+  });
+
+  const form = new FormData();
+  form.append("file", workbookBlob([
+    ["Code", "Client", "Quantite", "Produit", "Rue", "Code Postal", "Ville"],
+    ["A1", "Dupont", "8", "Produit A", "3 rue", "25000", "Besancon"]  // sans virgule
+  ]), "ventes.xlsx");
+
+  const { res, body } = await requestJson("/api/import/ventes", {
+    method: "POST",
+    body: form
+  });
+
+  assert.equal(res.status, 200);
+  const dupontClients = body.clients.filter(c => c.nom === "Dupont");
+  assert.equal(dupontClients.length, 1, "un seul client Dupont apres fusion par cle secondaire");
+  assert.equal(dupontClients[0].id, "c-existing", "l'id de la BDD est preserve");
+
+  const order = body.commandes.find(c => c.clientName === "Dupont");
+  assert.equal(order.products.length, 1);
+  assert.equal(order.products[0].quantite, 8, "quantite finale = celle de l'Excel (8), pas 5+8=13");
+  assert.equal(body.mergedBySecondary, 1, "1 fusion par cle secondaire signalee");
+});
+
+test("anti-doublon : sans CP, pas de match secondaire (retombe sur strict)", async () => {
+  seedDb({
+    ...defaultDb(),
+    clients: [{
+      id: "c-existing",
+      nom: "Sans CP",
+      rue: "rue X",
+      ville: "Besancon",
+      codePostal: "",
+      statut: "en_cours",
+      produits: [{ code: "A1", nom: "Produit A", quantite: 1 }]
+    }],
+    commandes: [{
+      id: "o-existing",
+      clientId: "c-existing",
+      clientName: "Sans CP",
+      address: "rue X",
+      city: "Besancon",
+      postalCode: "",
+      products: [{ code: "A1", nom: "Produit A", quantite: 1 }],
+      status: "en_preparation"
+    }]
+  });
+
+  const form = new FormData();
+  form.append("file", workbookBlob([
+    ["Code", "Client", "Quantite", "Produit", "Rue", "Code Postal", "Ville"],
+    ["A1", "Sans CP", "1", "Produit A", "rue Y", "", "Besancon"]
+  ]), "ventes.xlsx");
+
+  const { res, body } = await requestJson("/api/import/ventes", {
+    method: "POST",
+    body: form
+  });
+
+  assert.equal(res.status, 200);
+  assert.equal(body.mergedBySecondary, 0, "aucune fusion secondaire car CP absent");
+});
+
+test("GET /api/orders sans param renvoie toutes les commandes", async () => {
+  seedDb({
+    ...defaultDb(),
+    commandes: [
+      { id: "o1", clientName: "A", status: "stock_a_verifier", products: [] },
+      { id: "o2", clientName: "B", status: "livre", products: [] },
+      { id: "o3", clientName: "C", status: "en_preparation", products: [] }
+    ]
+  });
+
+  const { res, body } = await requestJson("/api/orders");
+  assert.equal(res.status, 200);
+  assert.equal(body.length, 3);
+});
+
+test("GET /api/orders?status=livre renvoie seulement les livrees", async () => {
+  seedDb({
+    ...defaultDb(),
+    commandes: [
+      { id: "o1", clientName: "A", status: "stock_a_verifier", products: [] },
+      { id: "o2", clientName: "B", status: "livre", products: [] },
+      { id: "o3", clientName: "C", status: "livre", products: [] }
+    ]
+  });
+
+  const { res, body } = await requestJson("/api/orders?status=livre");
+  assert.equal(res.status, 200);
+  assert.equal(body.length, 2);
+  assert.ok(body.every(o => o.status === "livre"));
+});
+
+test("GET /api/orders?status=invalide renvoie 400", async () => {
+  seedDb(defaultDb());
+  const { res } = await requestJson("/api/orders?status=foobar");
+  assert.equal(res.status, 400);
+});
