@@ -1032,6 +1032,17 @@ function getProductCode(product) {
   return clean(product.code || product.sku || product.reference);
 }
 
+function productKey(product) {
+  if (!product || typeof product !== "object") return "";
+  const code = normalizeTextKey(
+    product.code || product.codeProduit || product.sku || product.reference || ""
+  );
+  const nom = normalizeTextKey(
+    product.nom || product.Nom || product.produit || product.Produit || product.name || product.productName || ""
+  );
+  return code || nom;
+}
+
 function getStockAlertThreshold(product) {
   const raw = product.alertThreshold ?? product.seuilAlerte ?? product.seuil ?? product.minimum;
   const threshold = number(raw, 5);
@@ -1932,7 +1943,7 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
     const dataRows = rows.slice(headerIndex + 1);
     const db = readDb();
 
-    db.stock = dataRows
+    const parsedProducts = dataRows
       .map((row, index) => {
         const code = clean(getCellByNames(row, headers, ["Code", "Reference", "Référence", "SKU"]));
         const nom = clean(getCellByNames(row, headers, ["Nom", "Produit", "Article"]));
@@ -1958,8 +1969,27 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
       })
       .filter(product => product.code || product.nom);
 
+    // Deduplication : garde la PREMIERE occurrence par productKey (code || nom).
+    // Un export stock propre ne contient pas de doublons - les lignes suivantes
+    // sont ignorees pour eviter des entrees fantomes dans les recommandations.
+    const seenProductKeys = new Map();
+    let duplicatesSkipped = 0;
+    parsedProducts.forEach(product => {
+      const key = productKey(product);
+      if (!key) return;
+      if (seenProductKeys.has(key)) {
+        duplicatesSkipped += 1;
+        return;
+      }
+      seenProductKeys.set(key, product);
+    });
+    db.stock = Array.from(seenProductKeys.values());
+
     syncWorkflow(db);
-    addHistory(db, "Import stock", `${db.stock.length} produit(s) importe(s) depuis le fichier tarifs`, {
+    const dedupNote = duplicatesSkipped > 0
+      ? `, ${duplicatesSkipped} doublon(s) ignore(s)`
+      : "";
+    addHistory(db, "Import stock", `${db.stock.length} produit(s) importe(s) depuis le fichier tarifs${dedupNote}`, {
       fichier: req.file.originalname
     });
 
@@ -1968,7 +1998,8 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
     res.json({
       success: true,
       stock: db.stock,
-      commandes: db.commandes
+      commandes: db.commandes,
+      duplicatesSkipped
     });
   } catch (error) {
     handleRouteError(error, res, "Erreur import stock");
@@ -2087,11 +2118,24 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
         };
       }
 
-      clientsMap[key].produits.push({
+      // Deduplication : si le meme produit (code || nom) apparait plusieurs fois
+      // pour le meme client, on additionne les quantites au lieu de creer des
+      // lignes en double. C'est le comportement attendu pour un export de ventes
+      // ou chaque ligne represente une vente individuelle du meme article.
+      const newLine = {
         code: vente.codeProduit,
         nom: vente.produit,
         quantite: vente.quantite
-      });
+      };
+      const newLineKey = productKey(newLine);
+      const existingLine = newLineKey
+        ? clientsMap[key].produits.find(line => productKey(line) === newLineKey)
+        : null;
+      if (existingLine) {
+        existingLine.quantite = number(existingLine.quantite, 0) + number(newLine.quantite, 0);
+      } else {
+        clientsMap[key].produits.push(newLine);
+      }
     });
 
     const importedClients = Object.values(clientsMap);
@@ -2503,6 +2547,7 @@ module.exports = {
   readDb,
   writeDb,
   getRecommendations,
+  productKey,
   normalizeCity,
   deriveSector,
   analyzeOrderStock,
