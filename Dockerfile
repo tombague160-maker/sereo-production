@@ -1,8 +1,11 @@
-# syntax=docker/dockerfile:1.7
 # ============================================================================
 # Sereo - image de production
 # Base : Node 24 sur Alpine. Node 24+ requis pour le module natif `node:sqlite`
 # (DatabaseSync) utilise par storage/sqliteStore.js.
+#
+# Compatible avec le builder legacy ET BuildKit. Pas de directive `# syntax=`
+# ni de `--mount=type=cache` car le service sereo-updater (alpine + docker-cli)
+# utilise le builder legacy qui ne supporte pas ces fonctionnalites.
 # ============================================================================
 FROM node:24-alpine
 
@@ -32,8 +35,7 @@ ENV NODE_ENV=production \
 
 # Etape 1 : install des dependances (couche cachee tant que package*.json ne change pas)
 COPY package.json package-lock.json ./
-RUN --mount=type=cache,target=/root/.npm \
-    npm ci --omit=dev --no-audit --no-fund
+RUN npm ci --omit=dev --no-audit --no-fund
 
 # Etape 2 : copie du code applicatif (couche relancee a chaque modif source)
 COPY . .
