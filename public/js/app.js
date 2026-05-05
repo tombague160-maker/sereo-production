@@ -991,8 +991,27 @@ function updateRecommendFilterButtons() {
   });
 }
 
+function productKey(product) {
+  if (!product || typeof product !== "object") return "";
+  const code = normalizeTextKey(product.code || product.codeProduit || product.sku || product.reference || "");
+  const nom = normalizeTextKey(product.nom || product.Nom || product.produit || product.Produit || product.name || "");
+  return code || nom;
+}
+
 function getRecommendationItems() {
-  return stock
+  // Filet de securite : si la base contient des doublons (ex: imports anterieurs
+  // a la dedup), on filtre cote frontend pour eviter d'afficher 2x le meme produit.
+  // Garde la premiere occurrence par productKey, les produits sans cle sont conserves.
+  const seenKeys = new Set();
+  const uniqueStock = stock.filter(product => {
+    const key = productKey(product);
+    if (!key) return true;
+    if (seenKeys.has(key)) return false;
+    seenKeys.add(key);
+    return true;
+  });
+
+  return uniqueStock
     .map(product => {
       const available = product.quantityAvailable ?? getProductQuantity(product) ?? 0;
       const needed = product.quantityNeeded ?? getNeededQuantityForProduct(product);

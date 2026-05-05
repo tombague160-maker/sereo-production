@@ -701,3 +701,92 @@ test("PWA and brand assets are served locally", async () => {
   assert.match(await serviceWorker.text(), /CACHE_NAME/);
   assert.match(await logo.text(), /séréo/);
 });
+
+test("stock import deduplicates rows with same code (keeps first occurrence)", async () => {
+  seedDb(defaultDb());
+
+  const form = new FormData();
+  form.append(
+    "file",
+    workbookBlob([
+      ["Code", "Nom", "Coût", "Tarif", "Quantité"],
+      ["ABC", "Produit X", "1,00", "2,00", "10"],
+      ["ABC", "Produit X bis", "5,00", "9,00", "99"],
+      ["ABC", "Produit X ter", "3,00", "7,00", "33"],
+      ["DEF", "Autre produit", "0,50", "1,50", "5"]
+    ]),
+    "stock.xlsx"
+  );
+
+  const { res, body } = await requestJson("/api/import/stock", {
+    method: "POST",
+    body: form
+  });
+
+  assert.equal(res.status, 200);
+  assert.equal(body.success, true);
+  assert.equal(body.stock.length, 2, "deux produits uniques attendus apres dedup");
+  assert.equal(body.duplicatesSkipped, 2, "deux doublons doivent etre signales");
+
+  const abc = body.stock.find(p => p.code === "ABC");
+  assert.equal(abc.nom, "Produit X", "la premiere occurrence doit etre conservee");
+  assert.equal(abc.cout, 1, "le cout doit etre celui de la premiere ligne");
+  assert.equal(abc.quantite, 10);
+});
+
+test("sales import sums quantities when same product appears twice for one client", async () => {
+  seedDb(defaultDb());
+
+  const form = new FormData();
+  form.append(
+    "file",
+    workbookBlob([
+      ["Code", "Client", "Quantite", "Produit", "Rue", "Ville"],
+      ["P1", "Client A", "5", "Vis M8", "1 rue test", "Besancon"],
+      ["P1", "Client A", "3", "Vis M8", "1 rue test", "Besancon"],
+      ["P2", "Client A", "2", "Ecrou M8", "1 rue test", "Besancon"]
+    ]),
+    "ventes.xlsx"
+  );
+
+  const { res, body } = await requestJson("/api/import/ventes", {
+    method: "POST",
+    body: form
+  });
+
+  assert.equal(res.status, 200);
+  assert.equal(body.success, true);
+
+  const clientA = body.clients.find(c => c.nom === "Client A");
+  assert.ok(clientA, "le client doit etre cree");
+  assert.equal(clientA.produits.length, 2, "les 2 lignes Vis M8 doivent etre fusionnees");
+
+  const visM8 = clientA.produits.find(p => p.code === "P1");
+  assert.equal(visM8.quantite, 8, "la quantite doit etre la somme 5+3");
+
+  const ecrouM8 = clientA.produits.find(p => p.code === "P2");
+  assert.equal(ecrouM8.quantite, 2, "le produit unique reste inchange");
+});
+
+test("recommendations contain no duplicates after polluted stock import", async () => {
+  seedDb(defaultDb());
+
+  const stockForm = new FormData();
+  stockForm.append(
+    "file",
+    workbookBlob([
+      ["Code", "Nom", "Coût", "Tarif", "Quantité", "Seuil"],
+      ["DUP1", "Produit faible", "1", "2", "0", "5"],
+      ["DUP1", "Produit faible (dup)", "1", "2", "0", "5"],
+      ["DUP1", "Produit faible (dup 2)", "1", "2", "0", "5"]
+    ]),
+    "stock.xlsx"
+  );
+  await requestJson("/api/import/stock", { method: "POST", body: stockForm });
+
+  const { res, body } = await requestJson("/api/recommendations");
+  assert.equal(res.status, 200);
+
+  const dupItems = body.filter(item => (item.code || "").toUpperCase() === "DUP1");
+  assert.equal(dupItems.length, 1, "les recommandations ne doivent pas contenir de doublons");
+});
