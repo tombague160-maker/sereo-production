@@ -30,7 +30,7 @@ let recommendFilter = "urgent";
 let activeThemeId = "sereo";
 let activeBrandImage = "/brand/sereo-logo.svg";
 
-const mainTabs = new Set(["journee", "stock", "preparation", "livreur", "recommande", "parametres"]);
+const mainTabs = new Set(["journee", "stock", "preparation", "livreur", "recommande", "commandes-livrees", "parametres"]);
 const DEFAULT_BRAND_IMAGE = "/brand/sereo-logo.svg";
 const MAX_BRAND_IMAGE_SIZE = 2 * 1024 * 1024;
 
@@ -185,6 +185,10 @@ const titles = {
   recommande: {
     title: "À recommander",
     subtitle: "Produits en rupture ou proches de la rupture."
+  },
+  "commandes-livrees": {
+    title: "Commandes livrées",
+    subtitle: "Historique des livraisons effectuées et des ventes importées comme déjà livrées."
   },
   produits: {
     title: "Produits",
@@ -466,6 +470,7 @@ function renderAll() {
   renderStockMovements();
   renderPreparation();
   renderRecommande();
+  renderCommandesLivrees();
   renderProduits();
   renderVentes();
   renderAlertes();
@@ -1207,6 +1212,71 @@ function renderHistorique() {
       <div class="history-cell">${escapeHtml(item.message || item.texte || "-")}</div>
     `;
   });
+}
+
+function renderCommandesLivrees() {
+  const container = document.getElementById("commandesLivreesList");
+  const summary = document.getElementById("commandesLivreesSummary");
+  if (!container) return;
+
+  const livrees = (orders || []).filter(order => order.status === "livre");
+
+  if (summary) {
+    summary.textContent = livrees.length
+      ? `${livrees.length} commande${livrees.length > 1 ? "s" : ""} livrée${livrees.length > 1 ? "s" : ""}.`
+      : "";
+  }
+
+  if (!livrees.length) {
+    container.innerHTML = emptyState(
+      "Aucune commande livrée",
+      "Les commandes terminées via une tournée ou importées comme déjà livrées apparaîtront ici."
+    );
+    return;
+  }
+
+  const sorted = livrees.slice().sort((a, b) => {
+    const dateA = a.deliveryDate || a.updatedAt || "";
+    const dateB = b.deliveryDate || b.updatedAt || "";
+    return String(dateB).localeCompare(String(dateA));
+  });
+
+  container.innerHTML = sorted.map(order => {
+    const products = Array.isArray(order.products) ? order.products : [];
+    const productsHtml = products.length
+      ? products.map(p => `
+          <li class="commandes-livrees-product">
+            <span>${escapeHtml(p.nom || p.code || "Produit")}</span>
+            <span class="muted">x ${escapeHtml(p.quantite ?? 0)}</span>
+          </li>
+        `).join("")
+      : `<li class="muted">Aucun produit identifié.</li>`;
+
+    const origin = order.importedAsLivre
+      ? `<span class="pill pill-warning">Importée déjà livrée</span>`
+      : `<span class="pill pill-ok">Livrée via tournée</span>`;
+
+    const deliveryDate = order.deliveryDate || order.updatedAt;
+
+    return `
+      <article class="item commandes-livrees-card">
+        <header class="item-header">
+          <div>
+            <h4>${escapeHtml(order.clientName || "Client")}</h4>
+            <p class="muted">${escapeHtml([order.address, order.postalCode, order.city].filter(Boolean).join(" · "))}</p>
+          </div>
+          ${origin}
+        </header>
+        <div class="item-meta">
+          <span class="muted">Secteur : ${escapeHtml(order.sector || "-")}</span>
+          <span class="muted">Date : ${escapeHtml(formatDate(deliveryDate))}</span>
+        </div>
+        <ul class="commandes-livrees-products">
+          ${productsHtml}
+        </ul>
+      </article>
+    `;
+  }).join("");
 }
 
 async function loadAppearance() {

@@ -914,6 +914,16 @@ function clientKey(value) {
   ].join("|").toLowerCase();
 }
 
+// Cle secondaire (nom + code postal, normalises) pour rattraper les doublons
+// causes par des variations mineures de saisie (espaces, virgules, accents)
+// que clientKey() laisse passer. Vide si nom OU CP manque.
+function clientSecondaryKey(value) {
+  const nom = normalizeTextKey(value.nom || value.client || value.clientName || "");
+  const cp = normalizeTextKey(value.codePostal || value.postalCode || "");
+  if (!nom || !cp) return "";
+  return `${nom}|${cp}`;
+}
+
 function getRouteClientIds(db) {
   const ids = new Set();
 
@@ -948,17 +958,48 @@ function shouldPreserveClientAfterImport(client, order, routeClientIds) {
 
 function mergeImportedClients(db, importedClients) {
   const importedKeys = new Set(importedClients.map(client => clientKey(client)));
+  // Map secondaire : cle nom+CP normalises -> client importe correspondant.
+  // Permet de rattraper les doublons quand l'adresse rue diverge legerement
+  // (virgule, espace, casse) entre la BDD et le fichier Excel.
+  const importedSecondaryKeys = new Map();
+  importedClients.forEach(client => {
+    const secondary = clientSecondaryKey(client);
+    if (secondary && !importedSecondaryKeys.has(secondary)) {
+      importedSecondaryKeys.set(secondary, client);
+    }
+  });
+
   const routeClientIds = getRouteClientIds(db);
   const existingOrders = new Map(db.commandes.map(order => [String(order.clientId), order]));
+
+  // Phase 1 : pour chaque client existant en DB qui ne match PAS en strict
+  // mais match en secondaire, propager son id vers le client importe pour
+  // preserver les references dans commandes/routes/stops.
+  let mergedBySecondary = 0;
+  db.clients.forEach(existing => {
+    if (importedKeys.has(clientKey(existing))) return;
+    const secondary = clientSecondaryKey(existing);
+    if (!secondary) return;
+    const importedTwin = importedSecondaryKeys.get(secondary);
+    if (!importedTwin) return;
+    importedTwin.id = existing.id;
+    importedKeys.add(clientKey(importedTwin));
+    mergedBySecondary += 1;
+  });
+
+  // Phase 2 : preservation des clients en workflow actif qui ne sont
+  // dans AUCUN des deux match (strict ou secondaire).
   const preservedClients = db.clients.filter(client => {
-    const key = clientKey(client);
-    if (importedKeys.has(key)) return false;
+    if (importedKeys.has(clientKey(client))) return false;
+    const secondary = clientSecondaryKey(client);
+    if (secondary && importedSecondaryKeys.has(secondary)) return false;
     return shouldPreserveClientAfterImport(client, existingOrders.get(String(client.id)), routeClientIds);
   });
 
   return {
     clients: [...importedClients, ...preservedClients],
-    preservedCount: preservedClients.length
+    preservedCount: preservedClients.length,
+    mergedBySecondary
   };
 }
 
@@ -1043,6 +1084,15 @@ function productKey(product) {
   return code || nom;
 }
 
+// Set des statuts facture (apres normalizeTextKey) qui signalent une vente
+// deja livree dans le systeme source. Permet d'importer la commande
+// directement comme "livre" sans la faire passer par la file de preparation.
+const FACTURE_STATUS_LIVRE = new Set(["envoyee", "envoye", "expediee", "expedie", "sent"]);
+
+function isFactureStatusLivre(rawStatut) {
+  return FACTURE_STATUS_LIVRE.has(normalizeTextKey(rawStatut || ""));
+}
+
 function getStockAlertThreshold(product) {
   const raw = product.alertThreshold ?? product.seuilAlerte ?? product.seuil ?? product.minimum;
   const threshold = number(raw, 5);
@@ -1064,7 +1114,7 @@ function stockItemMatchesLine(product, line) {
 function getQuantityForProductInOrder(product, order) {
   return normalizeProducts(order.products).reduce((total, line) => {
     if (!stockItemMatchesLine(product, line)) return total;
-    return total + Math.max(1, number(line.quantite, 1));
+    return total + Math.max(0, number(line.quantite, 0));
   }, 0);
 }
 
@@ -1254,7 +1304,11 @@ function normalizeProducts(products) {
       const isObject = product && typeof product === "object";
       const code = clean(isObject ? product.code || product.sku || product.reference : "");
       const name = clean(isObject ? product.nom || product.produit || product.productName || product.name : product);
-      const quantity = Math.max(1, number(isObject ? product.quantite || product.quantity || product.qte : 1, 1));
+      // Math.max(0, ...) au lieu de Math.max(1, ...) : une quantite 0 est conservee telle quelle
+      // pour ne pas masquer les saisies invalides ou volontairement nulles. On utilise `??`
+      // au lieu de `||` pour ne pas confondre 0 (valide) avec null/undefined (fallback).
+      const rawQty = isObject ? (product.quantite ?? product.quantity ?? product.qte) : 1;
+      const quantity = Math.max(0, number(rawQty, 1));
 
       return {
         id: isObject ? product.id || `${code || name || "produit"}-${index}` : `${name || "produit"}-${index}`,
@@ -1271,7 +1325,7 @@ function analyzeOrderStock(order, stock) {
   const lines = normalizeProducts(order.products).map(product => {
     const stockItem = lookup.get(productKeyFromLine(product)) || lookup.get(`name:${normalizeTextKey(product.nom)}`);
     const available = stockItem ? getStockQuantity(stockItem) : null;
-    const required = Math.max(1, number(product.quantite, 1));
+    const required = Math.max(0, number(product.quantite, 0));
     const missing = available === null ? required : Math.max(0, required - available);
     let status = "ok";
 
@@ -1402,7 +1456,8 @@ function normalizeOrder(order) {
     lng: order.lng ?? order.longitude ?? "",
     deliveryDate: normalizeDateInput(order.deliveryDate || order.dateLivraison || order.livraisonDate),
     stockReservedAt: order.stockReservedAt || null,
-    routeId: order.routeId || null
+    routeId: order.routeId || null,
+    importedAsLivre: order.importedAsLivre || false
   };
 }
 
@@ -1906,7 +1961,12 @@ app.patch("/api/settings/appearance", (req, res) => {
 
 app.get("/api/orders", (req, res) => {
   const db = readDb();
-  res.json(db.commandes);
+  const statusFilter = clean(req.query.status || "").toLowerCase();
+  if (!statusFilter) return res.json(db.commandes);
+  if (!ORDER_STATUSES.has(statusFilter)) {
+    return res.status(400).json({ error: "Statut inconnu" });
+  }
+  res.json(db.commandes.filter(order => order.status === statusFilter));
 });
 
 app.get("/api/recommendations", (req, res) => {
@@ -2096,6 +2156,8 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       });
       const existingClient = existingClients.get(key) || {};
 
+      const venteFactureLivree = isFactureStatusLivre(vente.statutFacture);
+
       if (!clientsMap[key]) {
         const id = existingClient.id || Date.now() + Object.keys(clientsMap).length;
         const existingOrder = existingOrders.get(String(id)) || {};
@@ -2114,8 +2176,13 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
           secteur: vente.secteur,
           deliveryDate: vente.deliveryDate,
           notes: vente.notes || existingClient.notes || existingOrder.notes || "",
-          priority: vente.priority || existingClient.priority || existingOrder.priority || ""
+          priority: vente.priority || existingClient.priority || existingOrder.priority || "",
+          // factureLivree : "TOUTES les ventes de ce client ont un statut Envoyee/expediee".
+          // Une seule ligne non-livree suffit a desactiver le marquage "deja livre".
+          factureLivree: venteFactureLivree
         };
+      } else {
+        clientsMap[key].factureLivree = clientsMap[key].factureLivree && venteFactureLivree;
       }
 
       // Deduplication : si le meme produit (code || nom) apparait plusieurs fois
@@ -2141,8 +2208,13 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     const importedClients = Object.values(clientsMap);
     const mergedImport = mergeImportedClients(db, importedClients);
     db.clients = mergedImport.clients;
+    let importedAsLivreCount = 0;
     db.commandes = db.clients.map(client => {
       const existingOrder = existingOrders.get(String(client.id)) || {};
+      const livreParImport = !!client.factureLivree;
+      if (livreParImport && existingOrder.status !== "livre") {
+        importedAsLivreCount += 1;
+      }
       return normalizeOrder({
         ...existingOrder,
         clientId: client.id,
@@ -2158,7 +2230,10 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
         notes: client.notes,
         priority: client.priority,
         deliveryDate: existingOrder.deliveryDate || client.deliveryDate,
-        status: existingOrder.status || "stock_a_verifier"
+        status: livreParImport ? "livre" : (existingOrder.status || "stock_a_verifier"),
+        deliveryStatus: livreParImport ? "livre" : existingOrder.deliveryStatus,
+        preparationStatus: livreParImport ? "terminee" : existingOrder.preparationStatus,
+        importedAsLivre: livreParImport ? true : existingOrder.importedAsLivre
       });
     });
 
@@ -2166,10 +2241,16 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     const preservedMessage = mergedImport.preservedCount > 0
       ? `, ${mergedImport.preservedCount} client(s) deja en workflow conserve(s)`
       : "";
+    const mergedMessage = mergedImport.mergedBySecondary > 0
+      ? `, ${mergedImport.mergedBySecondary} doublon(s) client(s) fusionne(s) par cle secondaire`
+      : "";
+    const livreMessage = importedAsLivreCount > 0
+      ? `, ${importedAsLivreCount} commande(s) importee(s) comme deja livree(s) (statut facture Envoyee)`
+      : "";
     addHistory(
       db,
       "Import ventes",
-      `${db.ventes.length} vente(s) importee(s), ${importedClients.length} client(s) detecte(s)${preservedMessage}`,
+      `${db.ventes.length} vente(s) importee(s), ${importedClients.length} client(s) detecte(s)${preservedMessage}${mergedMessage}${livreMessage}`,
       {
         fichier: req.file.originalname
       }
@@ -2182,7 +2263,9 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       ventes: db.ventes,
       clients: db.clients,
       commandes: db.commandes,
-      secteurs: getSectors(db)
+      secteurs: getSectors(db),
+      mergedBySecondary: mergedImport.mergedBySecondary,
+      importedAsLivre: importedAsLivreCount
     });
   } catch (error) {
     handleRouteError(error, res, "Erreur import ventes");
@@ -2548,6 +2631,8 @@ module.exports = {
   writeDb,
   getRecommendations,
   productKey,
+  clientSecondaryKey,
+  isFactureStatusLivre,
   normalizeCity,
   deriveSector,
   analyzeOrderStock,
