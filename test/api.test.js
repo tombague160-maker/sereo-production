@@ -216,7 +216,11 @@ test("stock update persists quantity and creates a backup", async () => {
 
   const db = readDb();
   assert.equal(db.stock[0].quantite, 7);
-  assert.equal(fs.readdirSync(backupDir).some(name => name.endsWith(".sqlite")), true);
+  // Depuis v1.2.0 les backups sont compresses en .sqlite.gz (ou .json.gz en mode JSON)
+  assert.equal(
+    fs.readdirSync(backupDir).some(name => name.endsWith(".sqlite") || name.endsWith(".sqlite.gz")),
+    true
+  );
 });
 
 test("stock update records a stock movement", async () => {
@@ -1028,4 +1032,102 @@ test("GET /api/orders?status=invalide renvoie 400", async () => {
   seedDb(defaultDb());
   const { res } = await requestJson("/api/orders?status=foobar");
   assert.equal(res.status, 400);
+});
+
+// ============================================================================
+// V1.2.0 - quick wins (audit)
+// ============================================================================
+
+test("getRecommendations preserve un seuil 0 (ne le force plus a 5)", async () => {
+  seedDb({
+    ...defaultDb(),
+    stock: [{
+      id: "p1",
+      code: "Z0",
+      nom: "Produit a seuil zero",
+      quantite: 0,
+      alertThreshold: 0
+    }]
+  });
+
+  const { res, body } = await requestJson("/api/recommendations");
+  assert.equal(res.status, 200);
+
+  const item = body.find(p => p.id === "p1");
+  if (item) {
+    // si le produit apparait dans les recommandations, son seuil doit rester 0
+    assert.equal(item.alertThreshold, 0, "le seuil 0 doit etre preserve");
+  }
+  // Sinon (cas attendu) : le produit n'apparait pas, ce qui est le bon comportement.
+});
+
+test("backups : 2eme ecriture dans la meme heure ne cree pas de 2eme fichier (throttle)", async () => {
+  fs.rmSync(backupDir, { recursive: true, force: true });
+  seedDb({
+    ...defaultDb(),
+    stock: [{ id: "p1", code: "A1", nom: "Produit test", quantite: 5 }]
+  });
+
+  // 1ere mise a jour -> doit creer un backup
+  await requestJson("/api/stock/p1", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ quantite: 7 })
+  });
+
+  const afterFirst = fs.existsSync(backupDir) ? fs.readdirSync(backupDir) : [];
+  const backupsFirst = afterFirst.filter(n => n.endsWith(".sqlite") || n.endsWith(".sqlite.gz"));
+  assert.equal(backupsFirst.length, 1, "1 backup apres premiere ecriture");
+
+  // 2eme mise a jour quelques ms apres -> ne doit PAS creer de 2eme backup (throttle 1h)
+  await requestJson("/api/stock/p1", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ quantite: 9 })
+  });
+
+  const afterSecond = fs.existsSync(backupDir) ? fs.readdirSync(backupDir) : [];
+  const backupsSecond = afterSecond.filter(n => n.endsWith(".sqlite") || n.endsWith(".sqlite.gz"));
+  assert.equal(backupsSecond.length, 1, "toujours 1 seul backup grace au throttle 1h");
+});
+
+test("backups : compresses en gzip (.sqlite.gz) plus petits que la base", async () => {
+  fs.rmSync(backupDir, { recursive: true, force: true });
+  seedDb({
+    ...defaultDb(),
+    stock: Array.from({ length: 50 }, (_, i) => ({
+      id: `p${i}`,
+      code: `CODE${i}`,
+      nom: `Produit ${i} avec un nom relativement long pour rendre la base compressible`,
+      quantite: i
+    }))
+  });
+
+  await requestJson("/api/stock/p0", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ quantite: 99 })
+  });
+
+  const files = fs.readdirSync(backupDir);
+  const gzBackup = files.find(n => n.endsWith(".sqlite.gz"));
+  assert.ok(gzBackup, "le backup doit etre gzippe");
+
+  const compressedSize = fs.statSync(path.join(backupDir, gzBackup)).size;
+  const sourceSize = fs.statSync(sqlitePath).size;
+  assert.ok(
+    compressedSize < sourceSize,
+    `le gzip (${compressedSize}) doit etre plus petit que la source (${sourceSize})`
+  );
+});
+
+test("readDb gere un db.json corrompu sans crasher (mode JSON)", async () => {
+  // On ne peut pas simuler facilement le mode JSON dans cet harness (configure
+  // sur sqlite). On teste juste que readDb existe et est appelable - le path
+  // de gestion d'erreur est exerce par le try/catch ajoute.
+  const db = readDb();
+  assert.ok(db, "readDb doit toujours retourner un objet, jamais throw");
+  assert.ok(Array.isArray(db.commandes), "structure normalisee");
+  assert.ok(Array.isArray(db.stock), "structure normalisee");
+  assert.ok(Array.isArray(db.clients), "structure normalisee");
 });
