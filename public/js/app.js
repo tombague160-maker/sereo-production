@@ -240,9 +240,15 @@ function bindUi() {
     runAction(event.submitter, "Import...", () => importFile("stock", "stockFile"));
   });
 
+  // Debounce 200ms : evite un re-render complet a chaque touche (fluidite sur 2000+ produits)
+  let stockSearchTimer = null;
   document.getElementById("stockSearch")?.addEventListener("input", event => {
-    stockFilter.query = event.target.value;
-    renderStock();
+    const value = event.target.value;
+    clearTimeout(stockSearchTimer);
+    stockSearchTimer = setTimeout(() => {
+      stockFilter.query = value;
+      renderStock();
+    }, 200);
   });
 
   document.getElementById("stockStatusFilter")?.addEventListener("change", event => {
@@ -719,12 +725,12 @@ function createStockCard(product) {
     </div>
 
     <div class="stock-controls">
-      <button class="button danger compact" type="button" data-product-id="${productId}" data-stock-delta="-5">-5</button>
-      <button class="button danger compact" type="button" data-product-id="${productId}" data-stock-delta="-1">-1</button>
+      <button class="button danger compact" type="button" data-product-id="${productId}" data-stock-delta="-5" aria-label="Retirer 5 unités de ${escapeAttribute(getProductName(product))}">-5</button>
+      <button class="button danger compact" type="button" data-product-id="${productId}" data-stock-delta="-1" aria-label="Retirer 1 unité de ${escapeAttribute(getProductName(product))}">-1</button>
       <label class="sr-only" for="stock-${productId}">Quantité ${escapeHtml(getProductName(product))}</label>
       <input id="stock-${productId}" data-stock-input data-product-id="${productId}" type="number" min="0" step="1" value="${escapeAttribute(quantityValue)}">
-      <button class="button ok compact" type="button" data-product-id="${productId}" data-stock-delta="1">+1</button>
-      <button class="button ok compact" type="button" data-product-id="${productId}" data-stock-delta="5">+5</button>
+      <button class="button ok compact" type="button" data-product-id="${productId}" data-stock-delta="1" aria-label="Ajouter 1 unité à ${escapeAttribute(getProductName(product))}">+1</button>
+      <button class="button ok compact" type="button" data-product-id="${productId}" data-stock-delta="5" aria-label="Ajouter 5 unités à ${escapeAttribute(getProductName(product))}">+5</button>
     </div>
   `;
 
@@ -2120,6 +2126,17 @@ function focusEntity(entity) {
 
 async function apiFetch(url, options = {}) {
   const res = await fetch(url, options);
+
+  // Session expiree (cookie 12h) -> redirige vers /login en preservant l'URL courante.
+  // Garde-fou : si on est deja sur /login, on ne re-redirige pas (boucle infinie possible
+  // sur certains navigateurs).
+  if (res.status === 401 && !window.location.pathname.startsWith("/login")) {
+    const next = window.location.pathname + window.location.search + window.location.hash;
+    window.location.href = `/login?next=${encodeURIComponent(next)}`;
+    // On throw quand meme pour interrompre proprement le code appelant.
+    throw new Error("Session expiree, redirection vers /login");
+  }
+
   const text = await res.text();
   let body = null;
 
@@ -2174,13 +2191,35 @@ function notify(message, type = "info") {
 
   const toast = document.createElement("div");
   toast.className = `toast toast-${type}`;
-  toast.textContent = message;
-  region.appendChild(toast);
+  toast.setAttribute("role", type === "error" ? "alert" : "status");
 
-  setTimeout(() => {
+  const text = document.createElement("span");
+  text.className = "toast-message";
+  text.textContent = message;
+  toast.appendChild(text);
+
+  // Bouton de fermeture (utile surtout pour les erreurs persistantes)
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "toast-close";
+  closeBtn.setAttribute("aria-label", "Fermer la notification");
+  closeBtn.textContent = "×";
+  closeBtn.addEventListener("click", () => {
     toast.classList.add("toast-out");
     setTimeout(() => toast.remove(), 250);
-  }, 3500);
+  });
+  toast.appendChild(closeBtn);
+
+  region.appendChild(toast);
+
+  // Les erreurs restent affichees jusqu'au clic utilisateur (lecture sans pression).
+  // Les autres types (info / success / warning) disparaissent apres 3.5s.
+  if (type !== "error") {
+    setTimeout(() => {
+      toast.classList.add("toast-out");
+      setTimeout(() => toast.remove(), 250);
+    }, 3500);
+  }
 }
 
 function updateRouteProgress() {

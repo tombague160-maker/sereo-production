@@ -4,6 +4,7 @@ const readXlsxFile = require("read-excel-file/node");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
+const zlib = require("zlib");
 const { createSqliteStore } = require("./storage/sqliteStore");
 
 loadEnvFile(path.join(__dirname, ".env"));
@@ -592,7 +593,22 @@ function readDb() {
   }
 
   const raw = fs.readFileSync(DB_PATH, "utf8");
-  const db = raw ? JSON.parse(raw) : defaultDb();
+  let db;
+  if (!raw) {
+    db = defaultDb();
+  } else {
+    try {
+      db = JSON.parse(raw);
+    } catch (error) {
+      // db.json corrompu (coupure courant pendant ecriture, etc.) :
+      // on sauvegarde le fichier corrompu et on redemarre avec une base vierge
+      // plutot que de crasher tout le serveur (qui rendrait /login inaccessible).
+      const brokenPath = `${DB_PATH}.broken-${safeTimestamp()}`;
+      try { fs.copyFileSync(DB_PATH, brokenPath); } catch { /* best-effort */ }
+      console.error(`[readDb] db.json corrompu, sauvegarde dans ${brokenPath} - redemarrage en mode vierge :`, error.message);
+      db = defaultDb();
+    }
+  }
 
   return normalizeDb(db);
 }
@@ -669,19 +685,66 @@ function writeDb(db, options = {}) {
   fs.renameSync(tempPath, DB_PATH);
 }
 
+// Limite la frequence des backups pour ne pas saturer le disque.
+// Un backup au plus toutes les BACKUP_THROTTLE_MS, et on conserve uniquement
+// les BACKUP_RETENTION plus recents (les plus anciens sont supprimes).
+// Les backups sont compresses en gzip pour reduire l'occupation disque
+// (typiquement -65% sur une base SQLite).
+const BACKUP_THROTTLE_MS = 60 * 60 * 1000; // 1h
+const BACKUP_RETENTION = 30;
+const BACKUP_FILENAME_PATTERN = /^db-.*\.(sqlite|json)(\.gz)?$/;
+
+function listBackupEntries() {
+  if (!fs.existsSync(BACKUP_DIR)) return [];
+  return fs.readdirSync(BACKUP_DIR)
+    .filter(name => BACKUP_FILENAME_PATTERN.test(name))
+    .map(name => {
+      const fullPath = path.join(BACKUP_DIR, name);
+      try {
+        return { name, fullPath, mtimeMs: fs.statSync(fullPath).mtimeMs };
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+}
+
+function pruneOldBackups() {
+  const entries = listBackupEntries();
+  entries.slice(BACKUP_RETENTION).forEach(entry => {
+    try { fs.unlinkSync(entry.fullPath); } catch { /* best-effort */ }
+  });
+}
+
 function backupDbIfNeeded() {
   const sourcePath = useSqliteStorage() ? SQLITE_PATH : DB_PATH;
   if (!fs.existsSync(sourcePath)) return null;
 
   ensureDir(BACKUP_DIR);
 
+  // Throttle : on skip si un backup recent existe deja (< 1h).
+  const entries = listBackupEntries();
+  const mostRecent = entries[0];
+  if (mostRecent && Date.now() - mostRecent.mtimeMs < BACKUP_THROTTLE_MS) {
+    return null; // skipped, deja recent
+  }
+
   if (useSqliteStorage()) {
     getSqliteStore().checkpoint();
   }
 
-  const extension = useSqliteStorage() ? ".sqlite" : ".json";
-  const backupPath = path.join(BACKUP_DIR, `db-${safeTimestamp()}${extension}`);
-  fs.copyFileSync(sourcePath, backupPath);
+  const baseExtension = useSqliteStorage() ? ".sqlite" : ".json";
+  const backupPath = path.join(BACKUP_DIR, `db-${safeTimestamp()}${baseExtension}.gz`);
+
+  // Compression gzip : reduit la taille de 60-70% sur SQLite, 80%+ sur JSON.
+  const sourceData = fs.readFileSync(sourcePath);
+  const compressed = zlib.gzipSync(sourceData);
+  fs.writeFileSync(backupPath, compressed);
+
+  // Retention : supprime les plus anciens au-dela de BACKUP_RETENTION.
+  pruneOldBackups();
+
   return backupPath;
 }
 
@@ -691,7 +754,7 @@ function safeTimestamp(date = new Date()) {
 
 function addHistory(db, type, message, details = {}) {
   db.historique.unshift({
-    id: Date.now(),
+    id: crypto.randomUUID(),
     date: new Date().toISOString(),
     type,
     message,
@@ -1177,7 +1240,10 @@ function getRecommendations(db) {
     .map(product => {
       const available = Number(product.quantityAvailable) || 0;
       const needed = Number(product.quantityNeeded) || 0;
-      const minimum = Number(product.alertThreshold) || 5;
+      // Seuil 0 legitime preserve : on ne le remplace par 5 que si la valeur est invalide
+      // (null, undefined, NaN, "" -> non finite). Cf. fix v1.1.0 sur normalizeProducts.
+      const thresholdRaw = Number(product.alertThreshold);
+      const minimum = Number.isFinite(thresholdRaw) ? thresholdRaw : 5;
       const recommended = Math.max(0, Math.ceil(Math.max(minimum - available, needed - available)));
 
       return {
@@ -1192,7 +1258,7 @@ function recordStockMovement(db, product, oldQuantity, newQuantity, reason = "Aj
   if (oldQuantity === newQuantity) return;
 
   db.stockMovements.unshift({
-    id: `stock-${Date.now()}-${db.stockMovements.length + 1}`,
+    id: `stock-${crypto.randomUUID()}`,
     productId: product.id,
     productName: getProductName(product),
     sku: getProductCode(product),
@@ -1411,7 +1477,7 @@ function normalizeClient(client) {
 
   return {
     ...client,
-    id: client.id ?? Date.now(),
+    id: client.id ?? crypto.randomUUID(),
     nom: clean(client.nom || client.name || client.client || "Client sans nom"),
     rue: clean(client.rue || client.address || client.adresse),
     ville: city,
@@ -1436,7 +1502,7 @@ function normalizeOrder(order) {
   const now = new Date().toISOString();
 
   return {
-    id: order.id || `cmd-${order.clientId || Date.now()}`,
+    id: order.id || `cmd-${order.clientId || crypto.randomUUID()}`,
     clientId: order.clientId,
     clientName: clean(order.clientName || order.nom || order.client || "Client sans nom"),
     address: clean(order.address || order.rue || order.adresse),
@@ -1628,7 +1694,7 @@ function createRoute(db, options = {}) {
   }
 
   const optimizedOrders = optimizeOrders(orders);
-  const routeId = `route-${Date.now()}`;
+  const routeId = `route-${crypto.randomUUID()}`;
   const now = new Date().toISOString();
   const metrics = estimateRouteMetrics(optimizedOrders);
 
@@ -2014,7 +2080,7 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
         const alertThreshold = optionalQuantity(getCellByNames(row, headers, ["Seuil", "Seuil alerte", "Minimum", "Alerte"]));
 
         return {
-          id: Date.now() + index,
+          id: crypto.randomUUID(),
           code,
           sku: code,
           nom,
@@ -2116,7 +2182,7 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
         const lng = getCoordinateValue(getCellByNames(row, headers, ["Longitude", "Lng"]), -180, 180);
 
         return {
-          id: Date.now() + index,
+          id: crypto.randomUUID(),
           codeProduit,
           produit: nomProduit || produitComplet,
           produitComplet,
@@ -2159,7 +2225,7 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       const venteFactureLivree = isFactureStatusLivre(vente.statutFacture);
 
       if (!clientsMap[key]) {
-        const id = existingClient.id || Date.now() + Object.keys(clientsMap).length;
+        const id = existingClient.id || crypto.randomUUID();
         const existingOrder = existingOrders.get(String(id)) || {};
 
         clientsMap[key] = {

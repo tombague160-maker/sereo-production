@@ -1505,6 +1505,32 @@ label {
   color: var(--white);
   box-shadow: var(--shadow);
   font-weight: 800;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.toast-message {
+  flex: 1;
+  word-break: break-word;
+}
+
+.toast-close {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font-size: 1.4em;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+  opacity: 0.85;
+  transition: opacity 120ms ease;
+  flex-shrink: 0;
+}
+
+.toast-close:hover,
+.toast-close:focus-visible {
+  opacity: 1;
 }
 
 .toast-success {
