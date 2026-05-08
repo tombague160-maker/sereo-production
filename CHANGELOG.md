@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.2.0](https://github.com/tombague160-maker/sereo-production/compare/v1.1.0...v1.2.0) (2026-05-08)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* cache offline + UX (api SWR, redirect 401, fermeture toasts) ([e4427b8](https://github.com/tombague160-maker/sereo-production/commit/e4427b85ce7d7088bc8a385cca3e4424d9b1572d))
+
+
+### 🐛 Corrections de bugs
+
+* corrections issues de l'audit v1.1.0 ([4b9ee71](https://github.com/tombague160-maker/sereo-production/commit/4b9ee717e4f7095d961ac05b13e6f41dc501dac7))
+* **docker:** retire --mount=type=cache pour compat builder legacy (sereo-updater) ([c76bd68](https://github.com/tombague160-maker/sereo-production/commit/c76bd6861ea7e54d1612f58c1f928c6f2d68f614))
+* **docker:** retire --mount=type=cache pour compat builder legacy (sereo-updater) ([08e2d0e](https://github.com/tombague160-maker/sereo-production/commit/08e2d0edf64168cb34b3afaad6c3352b292a7aaa))
+
+
+### 💄 Style / UI
+
+* **a11y:** ajoute h1 cache pour la navigation lecteurs d'ecran ([4c4c871](https://github.com/tombague160-maker/sereo-production/commit/4c4c871f6b0d1b47c043ede78168b70dde6b993e))
+
 ## [1.1.0](https://github.com/tombague160-maker/sereo-production/compare/v1.0.0...v1.1.0) (2026-05-05)
 
 
