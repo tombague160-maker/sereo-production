@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 160" role="img" aria-labelledby="titleDark">
+  <title id="titleDark">Séréo</title>
+  <rect width="460" height="160" rx="18" fill="#15212a"/>
+  <g fill="#9adcd1">
+    <text x="52" y="98" font-family="Segoe UI, Arial, sans-serif" font-size="74" font-weight="800" letter-spacing="-1">séréo</text>
+    <path d="M280 112c22 18 54 18 75-1" fill="none" stroke="#9adcd1" stroke-width="10" stroke-linecap="round"/>
+  </g>
+  <g fill="#5cabaa">
+    <ellipse cx="146" cy="45" rx="22" ry="9" transform="rotate(-17 146 45)"/>
+    <ellipse cx="236" cy="45" rx="22" ry="9" transform="rotate(-17 236 45)"/>
+  </g>
+</svg>

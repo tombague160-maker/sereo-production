@@ -546,11 +546,17 @@ function defaultDb() {
     settings: {
       appearance: {
         themeId: "sereo",
-        brandImage: ""
+        brandImage: "",
+        // colorScheme : "auto" suit l'OS (prefers-color-scheme), "light"/"dark" force.
+        // Persiste cote serveur pour synchro multi-device optionnelle. La preference
+        // par-device est stockee en localStorage cote frontend (gagne en cas de conflit).
+        colorScheme: "auto"
       }
     }
   };
 }
+
+const VALID_COLOR_SCHEMES = new Set(["auto", "light", "dark"]);
 
 function ensureDir(directoryPath) {
   fs.mkdirSync(directoryPath, { recursive: true });
@@ -632,11 +638,15 @@ function normalizeSettings(settings = {}) {
     ? settings.appearance
     : {};
 
+  const rawColorScheme = clean(appearance.colorScheme).toLowerCase();
+  const colorScheme = VALID_COLOR_SCHEMES.has(rawColorScheme) ? rawColorScheme : "auto";
+
   return {
     ...settings,
     appearance: {
       themeId: clean(appearance.themeId) || "sereo",
-      brandImage: clean(appearance.brandImage)
+      brandImage: clean(appearance.brandImage),
+      colorScheme
     }
   };
 }
@@ -2015,6 +2025,14 @@ app.patch("/api/settings/appearance", (req, res) => {
 
     if (Object.prototype.hasOwnProperty.call(req.body || {}, "brandImage")) {
       appearance.brandImage = validateBrandImage(req.body.brandImage);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "colorScheme")) {
+      const raw = clean(req.body.colorScheme).toLowerCase();
+      if (!VALID_COLOR_SCHEMES.has(raw)) {
+        throw badRequest("Mode d'affichage invalide");
+      }
+      appearance.colorScheme = raw;
     }
 
     db.settings.appearance = appearance;
