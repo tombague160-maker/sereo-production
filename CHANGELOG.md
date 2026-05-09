@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.7](https://github.com/tombague160-maker/sereo-production/compare/v1.3.6...v1.3.7) (2026-05-09)
+
+
+### 🐛 Corrections de bugs
+
+* **theme:** externalise le script anti-FART (CSP bloquait inline) ([b1641a4](https://github.com/tombague160-maker/sereo-production/commit/b1641a4bb5f17c0ab8dfa98392357876c835ccab))
+* **theme:** externalise le script anti-FART pour contourner la CSP ([3fb84b5](https://github.com/tombague160-maker/sereo-production/commit/3fb84b5cc6da026c0708456437823a1c70fcea54))
+
 ## [1.3.6](https://github.com/tombague160-maker/sereo-production/compare/v1.3.5...v1.3.6) (2026-05-09)
 
 
