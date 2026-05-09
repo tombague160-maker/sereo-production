@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.4](https://github.com/tombague160-maker/sereo-production/compare/v1.3.3...v1.3.4) (2026-05-09)
+
+
+### 🐛 Corrections de bugs
+
+* **theme:** mode d'affichage strictement par device ([37adac0](https://github.com/tombague160-maker/sereo-production/commit/37adac02511a3dd455d2a23c09e8ad37955e614f))
+* **theme:** mode d'affichage strictement par device (plus de sync entre appareils) ([2575a7a](https://github.com/tombague160-maker/sereo-production/commit/2575a7ad524ebacb23d69aa937d55593bfa26b48))
+
 ## [1.3.3](https://github.com/tombague160-maker/sereo-production/compare/v1.3.2...v1.3.3) (2026-05-09)
 
 
