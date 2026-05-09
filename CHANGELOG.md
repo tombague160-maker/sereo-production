@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.5](https://github.com/tombague160-maker/sereo-production/compare/v1.3.4...v1.3.5) (2026-05-09)
+
+
+### 🐛 Corrections de bugs
+
+* **theme:** supprime le flash de mode sombre au reload ([33f4af3](https://github.com/tombague160-maker/sereo-production/commit/33f4af35a18c013e06815ff48f8e80addacab305))
+* **theme:** supprime le flash de mode sombre au reload (FART) ([9a8d262](https://github.com/tombague160-maker/sereo-production/commit/9a8d26228216a70aff7e148922332b21218a02fb))
+
 ## [1.3.4](https://github.com/tombague160-maker/sereo-production/compare/v1.3.3...v1.3.4) (2026-05-09)
 
 
