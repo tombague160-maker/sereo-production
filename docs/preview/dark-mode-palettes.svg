@@ -1,0 +1,128 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" role="img" aria-labelledby="palettesTitle">
+  <title id="palettesTitle">Sereo v1.3.0 - Palettes des 6 themes pastel en mode clair et sombre</title>
+
+  <!-- Background page -->
+  <rect width="1200" height="720" fill="#fafaf8"/>
+
+  <!-- Header -->
+  <text x="600" y="48" font-family="Segoe UI, Arial, sans-serif" font-size="28" font-weight="800" fill="#0f3d3d" text-anchor="middle">
+    Séréo v1.3.0 — Mode sombre complet
+  </text>
+  <text x="600" y="78" font-family="Segoe UI, Arial, sans-serif" font-size="15" fill="#4f686b" text-anchor="middle">
+    6 thèmes pastel × 2 modes = 12 variantes (toutes WCAG AA)
+  </text>
+
+  <!-- Column headers -->
+  <text x="320" y="125" font-family="Segoe UI, Arial, sans-serif" font-size="18" font-weight="700" fill="#102a2f" text-anchor="middle">☀ MODE CLAIR</text>
+  <text x="900" y="125" font-family="Segoe UI, Arial, sans-serif" font-size="18" font-weight="700" fill="#102a2f" text-anchor="middle">🌙 MODE SOMBRE</text>
+
+  <!-- ============ Theme 1: SEREO (vert/orange) ============ -->
+  <!-- Light -->
+  <g transform="translate(60, 150)">
+    <rect width="520" height="80" rx="10" fill="#fafaf8" stroke="#d8ebe5"/>
+    <rect x="14" y="14" width="52" height="52" rx="8" fill="#cfe9e1"/>
+    <rect x="74" y="14" width="52" height="52" rx="8" fill="#ffc4a3"/>
+    <rect x="134" y="14" width="52" height="52" rx="8" fill="#0e6b63"/>
+    <text x="200" y="36" font-family="Segoe UI, Arial, sans-serif" font-size="15" font-weight="800" fill="#0f3d3d">Séréo (vert &amp; orange)</text>
+    <text x="200" y="58" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#4f686b">Vert d'eau, orange pastel et teal séréo.</text>
+  </g>
+  <!-- Dark -->
+  <g transform="translate(640, 150)">
+    <rect width="520" height="80" rx="10" fill="#0d1518" stroke="#2a3d3f"/>
+    <rect x="14" y="14" width="52" height="52" rx="8" fill="#1f3833"/>
+    <rect x="74" y="14" width="52" height="52" rx="8" fill="#5d3a2a"/>
+    <rect x="134" y="14" width="52" height="52" rx="8" fill="#7fc9be"/>
+    <text x="200" y="36" font-family="Segoe UI, Arial, sans-serif" font-size="15" font-weight="800" fill="#9adcd1">Séréo (vert &amp; orange)</text>
+    <text x="200" y="58" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#a8b8bc">Vert d'eau, orange pastel et teal séréo.</text>
+  </g>
+
+  <!-- ============ Theme 2: MENTHE (menthe/peche) ============ -->
+  <g transform="translate(60, 240)">
+    <rect width="520" height="80" rx="10" fill="#fbfdfa" stroke="#d5ede5"/>
+    <rect x="14" y="14" width="52" height="52" rx="8" fill="#d8f3e8"/>
+    <rect x="74" y="14" width="52" height="52" rx="8" fill="#ffd6bd"/>
+    <rect x="134" y="14" width="52" height="52" rx="8" fill="#0f6a5f"/>
+    <text x="200" y="36" font-family="Segoe UI, Arial, sans-serif" font-size="15" font-weight="800" fill="#0d3f3b">Menthe &amp; pêche</text>
+    <text x="200" y="58" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#4f686b">Plus clair, très doux sur tablette et mobile.</text>
+  </g>
+  <g transform="translate(640, 240)">
+    <rect width="520" height="80" rx="10" fill="#0d1518" stroke="#2a3d3f"/>
+    <rect x="14" y="14" width="52" height="52" rx="8" fill="#1d3a32"/>
+    <rect x="74" y="14" width="52" height="52" rx="8" fill="#5b3b2a"/>
+    <rect x="134" y="14" width="52" height="52" rx="8" fill="#84d2c4"/>
+    <text x="200" y="36" font-family="Segoe UI, Arial, sans-serif" font-size="15" font-weight="800" fill="#a3e2d6">Menthe &amp; pêche</text>
+    <text x="200" y="58" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#a8b8bc">Plus clair, très doux sur tablette et mobile.</text>
+  </g>
+
+  <!-- ============ Theme 3: LAVANDE ============ -->
+  <g transform="translate(60, 330)">
+    <rect width="520" height="80" rx="10" fill="#fbf9ff" stroke="#dfd8f3"/>
+    <rect x="14" y="14" width="52" height="52" rx="8" fill="#ded8f7"/>
+    <rect x="74" y="14" width="52" height="52" rx="8" fill="#ffd1b8"/>
+    <rect x="134" y="14" width="52" height="52" rx="8" fill="#5d5486"/>
+    <text x="200" y="36" font-family="Segoe UI, Arial, sans-serif" font-size="15" font-weight="800" fill="#332d52">Lavande &amp; pêche</text>
+    <text x="200" y="58" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#4f686b">Pastel plus chaleureux, sans perdre le contraste.</text>
+  </g>
+  <g transform="translate(640, 330)">
+    <rect width="520" height="80" rx="10" fill="#0d1518" stroke="#2a3d3f"/>
+    <rect x="14" y="14" width="52" height="52" rx="8" fill="#2c2748"/>
+    <rect x="74" y="14" width="52" height="52" rx="8" fill="#5a3b29"/>
+    <rect x="134" y="14" width="52" height="52" rx="8" fill="#b3a8d9"/>
+    <text x="200" y="36" font-family="Segoe UI, Arial, sans-serif" font-size="15" font-weight="800" fill="#c8c0e5">Lavande &amp; pêche</text>
+    <text x="200" y="58" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#a8b8bc">Pastel plus chaleureux, sans perdre le contraste.</text>
+  </g>
+
+  <!-- ============ Theme 4: CIEL ============ -->
+  <g transform="translate(60, 420)">
+    <rect width="520" height="80" rx="10" fill="#fbfdff" stroke="#d2e9f1"/>
+    <rect x="14" y="14" width="52" height="52" rx="8" fill="#d8eef8"/>
+    <rect x="74" y="14" width="52" height="52" rx="8" fill="#ffd8a8"/>
+    <rect x="134" y="14" width="52" height="52" rx="8" fill="#246b7a"/>
+    <text x="200" y="36" font-family="Segoe UI, Arial, sans-serif" font-size="15" font-weight="800" fill="#173f48">Bleu ciel &amp; abricot</text>
+    <text x="200" y="58" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#4f686b">Ambiance fraîche, lisible et très lumineuse.</text>
+  </g>
+  <g transform="translate(640, 420)">
+    <rect width="520" height="80" rx="10" fill="#0d1518" stroke="#2a3d3f"/>
+    <rect x="14" y="14" width="52" height="52" rx="8" fill="#1c3640"/>
+    <rect x="74" y="14" width="52" height="52" rx="8" fill="#5b3f23"/>
+    <rect x="134" y="14" width="52" height="52" rx="8" fill="#7fb8c8"/>
+    <text x="200" y="36" font-family="Segoe UI, Arial, sans-serif" font-size="15" font-weight="800" fill="#a0cfdc">Bleu ciel &amp; abricot</text>
+    <text x="200" y="58" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#a8b8bc">Ambiance fraîche, lisible et très lumineuse.</text>
+  </g>
+
+  <!-- ============ Theme 5: SAUGE ============ -->
+  <g transform="translate(60, 510)">
+    <rect width="520" height="80" rx="10" fill="#fbfdf9" stroke="#d9e9d5"/>
+    <rect x="14" y="14" width="52" height="52" rx="8" fill="#dcebd7"/>
+    <rect x="74" y="14" width="52" height="52" rx="8" fill="#ffd3d8"/>
+    <rect x="134" y="14" width="52" height="52" rx="8" fill="#476a57"/>
+    <text x="200" y="36" font-family="Segoe UI, Arial, sans-serif" font-size="15" font-weight="800" fill="#284034">Sauge &amp; rose poudré</text>
+    <text x="200" y="58" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#4f686b">Très calme, doux et premium.</text>
+  </g>
+  <g transform="translate(640, 510)">
+    <rect width="520" height="80" rx="10" fill="#0d1518" stroke="#2a3d3f"/>
+    <rect x="14" y="14" width="52" height="52" rx="8" fill="#1f3a26"/>
+    <rect x="74" y="14" width="52" height="52" rx="8" fill="#5b2f33"/>
+    <rect x="134" y="14" width="52" height="52" rx="8" fill="#a3c4a8"/>
+    <text x="200" y="36" font-family="Segoe UI, Arial, sans-serif" font-size="15" font-weight="800" fill="#bdd5be">Sauge &amp; rose poudré</text>
+    <text x="200" y="58" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#a8b8bc">Très calme, doux et premium.</text>
+  </g>
+
+  <!-- ============ Theme 6: VANILLE ============ -->
+  <g transform="translate(60, 600)">
+    <rect width="520" height="80" rx="10" fill="#fffdf5" stroke="#efe5bd"/>
+    <rect x="14" y="14" width="52" height="52" rx="8" fill="#f6edc8"/>
+    <rect x="74" y="14" width="52" height="52" rx="8" fill="#ffc7b5"/>
+    <rect x="134" y="14" width="52" height="52" rx="8" fill="#6c5d24"/>
+    <text x="200" y="36" font-family="Segoe UI, Arial, sans-serif" font-size="15" font-weight="800" fill="#433817">Vanille &amp; corail doux</text>
+    <text x="200" y="58" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#4f686b">Plus solaire, mais toujours pastel.</text>
+  </g>
+  <g transform="translate(640, 600)">
+    <rect width="520" height="80" rx="10" fill="#0d1518" stroke="#2a3d3f"/>
+    <rect x="14" y="14" width="52" height="52" rx="8" fill="#3a3217"/>
+    <rect x="74" y="14" width="52" height="52" rx="8" fill="#5a3a2a"/>
+    <rect x="134" y="14" width="52" height="52" rx="8" fill="#d4c47e"/>
+    <text x="200" y="36" font-family="Segoe UI, Arial, sans-serif" font-size="15" font-weight="800" fill="#e6d99a">Vanille &amp; corail doux</text>
+    <text x="200" y="58" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#a8b8bc">Plus solaire, mais toujours pastel.</text>
+  </g>
+</svg>
