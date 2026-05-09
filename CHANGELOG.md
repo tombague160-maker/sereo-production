@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.1](https://github.com/tombague160-maker/sereo-production/compare/v1.3.0...v1.3.1) (2026-05-09)
+
+
+### 🐛 Corrections de bugs
+
+* **theme:** defaut "light" au lieu de "auto" pendant la phase de test ([0d3de7d](https://github.com/tombague160-maker/sereo-production/commit/0d3de7d138994b1f3aba1f8242bb4ffea966ef47))
+* **theme:** defaut light au lieu de auto pendant la phase de test ([fc8f69c](https://github.com/tombague160-maker/sereo-production/commit/fc8f69ca8d3c71080a8258ea4d64fc6de1f6ba46))
+
 ## [1.3.0](https://github.com/tombague160-maker/sereo-production/compare/v1.2.0...v1.3.0) (2026-05-09)
 
 
