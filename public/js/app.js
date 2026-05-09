@@ -1334,19 +1334,14 @@ async function loadAppearance() {
   try {
     const appearance = await apiFetch("/api/settings/appearance");
 
-    // Resolution du mode de couleur :
-    // 1. Priorite absolue : localStorage (par device, deja applique au boot via anti-FART)
-    // 2. Sinon : valeur DB serveur (synchro multi-device)
-    // 3. Sinon : "light" (defaut prudent pendant phase de test du dark mode)
+    // Mode de couleur : strictement par-device via localStorage.
+    // On NE lit PAS la valeur DB pour eviter qu'un device adopte le choix
+    // d'un autre device. Si localStorage est vide, on retombe sur "light".
     let scheme = "light";
     try {
       const stored = localStorage.getItem(COLOR_SCHEME_STORAGE_KEY);
       if (VALID_COLOR_SCHEMES.includes(stored)) scheme = stored;
-      else if (VALID_COLOR_SCHEMES.includes(appearance.colorScheme)) scheme = appearance.colorScheme;
-    } catch {
-      if (VALID_COLOR_SCHEMES.includes(appearance.colorScheme)) scheme = appearance.colorScheme;
-    }
-    // applyColorScheme avec persist:false pour ne pas re-ecrire la valeur qu'on vient de lire
+    } catch { /* localStorage indispo : on garde le defaut "light" */ }
     applyColorScheme(scheme, { persist: false });
 
     applyTheme(appearance.themeId || "sereo", { persist: false });
@@ -1420,12 +1415,11 @@ function applyColorScheme(scheme, options = {}) {
 
   if (persist) {
     try {
-      // On stocke TOUS les modes (y compris "auto") pour preserver le choix utilisateur.
-      // Le defaut "light" ne s'applique que si rien n'a ete stocke.
+      // Persistance par-device uniquement. On NE sync PAS vers la DB pour
+      // que chaque device garde son propre mode (pas de propagation entre
+      // appareils connectes au meme compte).
       localStorage.setItem(COLOR_SCHEME_STORAGE_KEY, next);
     } catch { /* localStorage indispo : ignore, on a deja applique le mode */ }
-    // Sync DB (best-effort, ne bloque pas l'UI si echec)
-    saveAppearance({ colorScheme: next }).catch(() => { /* silencieux */ });
   }
 
   if (notifyUser) {
