@@ -1131,3 +1131,74 @@ test("readDb gere un db.json corrompu sans crasher (mode JSON)", async () => {
   assert.ok(Array.isArray(db.stock), "structure normalisee");
   assert.ok(Array.isArray(db.clients), "structure normalisee");
 });
+
+// ============================================================================
+// V1.3.0 - Mode sombre (dark mode)
+// ============================================================================
+
+test("appearance par defaut contient colorScheme=auto", async () => {
+  seedDb(defaultDb());
+  const { res, body } = await requestJson("/api/settings/appearance");
+  assert.equal(res.status, 200);
+  assert.equal(body.colorScheme, "auto", "colorScheme defaut = auto");
+  assert.equal(body.themeId, "sereo");
+});
+
+test("PATCH /api/settings/appearance accepte colorScheme=dark", async () => {
+  seedDb(defaultDb());
+  const { res, body } = await requestJson("/api/settings/appearance", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ colorScheme: "dark" })
+  });
+  assert.equal(res.status, 200);
+  assert.equal(body.colorScheme, "dark");
+
+  // Verifie que la valeur est bien persistee
+  const { body: reloaded } = await requestJson("/api/settings/appearance");
+  assert.equal(reloaded.colorScheme, "dark");
+});
+
+test("PATCH /api/settings/appearance accepte colorScheme=light", async () => {
+  seedDb(defaultDb());
+  const { res, body } = await requestJson("/api/settings/appearance", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ colorScheme: "light" })
+  });
+  assert.equal(res.status, 200);
+  assert.equal(body.colorScheme, "light");
+});
+
+test("PATCH /api/settings/appearance refuse colorScheme invalide (400)", async () => {
+  seedDb(defaultDb());
+  const { res } = await requestJson("/api/settings/appearance", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ colorScheme: "neon" })
+  });
+  assert.equal(res.status, 400);
+});
+
+test("PATCH /api/settings/appearance preserve colorScheme quand non fourni", async () => {
+  seedDb(defaultDb());
+
+  // 1. On set colorScheme=dark
+  await requestJson("/api/settings/appearance", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ colorScheme: "dark" })
+  });
+
+  // 2. On change uniquement le themeId, sans toucher colorScheme
+  await requestJson("/api/settings/appearance", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ themeId: "menthe" })
+  });
+
+  // 3. colorScheme=dark doit etre preserve
+  const { body } = await requestJson("/api/settings/appearance");
+  assert.equal(body.colorScheme, "dark");
+  assert.equal(body.themeId, "menthe");
+});

@@ -29,15 +29,23 @@ let lastImportSummary = null;
 let recommendFilter = "urgent";
 let activeThemeId = "sereo";
 let activeBrandImage = "/brand/sereo-logo.svg";
+// "auto" suit l'OS (prefers-color-scheme), "light"/"dark" force.
+// Persistance par appareil dans localStorage. Synchro DB optionnelle (multi-device).
+let activeColorScheme = "auto";
 
 const mainTabs = new Set(["journee", "stock", "preparation", "livreur", "recommande", "commandes-livrees", "parametres"]);
 const DEFAULT_BRAND_IMAGE = "/brand/sereo-logo.svg";
+const DEFAULT_BRAND_IMAGE_DARK = "/brand/sereo-logo-dark.svg";
 const MAX_BRAND_IMAGE_SIZE = 2 * 1024 * 1024;
 
 if ("scrollRestoration" in history) {
   history.scrollRestoration = "manual";
 }
 
+// Chaque theme a 2 palettes : `vars` (mode clair) et `darkVars` (mode sombre).
+// applyTheme applique l'un ou l'autre selon le colorScheme actif.
+// Les couleurs dark sont calibrees pour passer WCAG AA (4.5:1 sur texte) avec
+// le fond sombre standard (#0d1518 a #182226).
 const pastelThemes = {
   sereo: {
     id: "sereo",
@@ -51,12 +59,16 @@ const pastelThemes = {
       "--color-pastel-green-light": "#e8f4ef",
       "--color-pastel-orange": "#ffc4a3",
       "--color-pastel-orange-light": "#fff0e8",
-      "--color-pastel-orange-strong": "#f47a5a",
-      "--color-background": "#fafaf8",
-      "--color-surface-tint": "#f5fbf8",
-      "--border": "#d8ebe5",
-      "--border-strong": "#a9d2c8",
-      "--blue": "#9fd5cc"
+      "--color-pastel-orange-strong": "#f47a5a"
+    },
+    darkVars: {
+      "--color-brand-teal": "#7fc9be",
+      "--color-brand-teal-dark": "#9adcd1",
+      "--color-pastel-green": "#1f3833",
+      "--color-pastel-green-light": "#142421",
+      "--color-pastel-orange": "#5d3a2a",
+      "--color-pastel-orange-light": "#3a261b",
+      "--color-pastel-orange-strong": "#f08864"
     }
   },
   menthe: {
@@ -71,12 +83,16 @@ const pastelThemes = {
       "--color-pastel-green-light": "#effaf6",
       "--color-pastel-orange": "#ffd6bd",
       "--color-pastel-orange-light": "#fff3eb",
-      "--color-pastel-orange-strong": "#ee8a67",
-      "--color-background": "#fbfdfa",
-      "--color-surface-tint": "#f6fcf9",
-      "--border": "#d5ede5",
-      "--border-strong": "#a9d9ca",
-      "--blue": "#a8dccc"
+      "--color-pastel-orange-strong": "#ee8a67"
+    },
+    darkVars: {
+      "--color-brand-teal": "#84d2c4",
+      "--color-brand-teal-dark": "#a3e2d6",
+      "--color-pastel-green": "#1d3a32",
+      "--color-pastel-green-light": "#13241f",
+      "--color-pastel-orange": "#5b3b2a",
+      "--color-pastel-orange-light": "#38241a",
+      "--color-pastel-orange-strong": "#ed9573"
     }
   },
   lavande: {
@@ -91,12 +107,16 @@ const pastelThemes = {
       "--color-pastel-green-light": "#f5f2ff",
       "--color-pastel-orange": "#ffd1b8",
       "--color-pastel-orange-light": "#fff2eb",
-      "--color-pastel-orange-strong": "#e88465",
-      "--color-background": "#fbf9ff",
-      "--color-surface-tint": "#f7f5ff",
-      "--border": "#dfd8f3",
-      "--border-strong": "#beb3e5",
-      "--blue": "#c7bff0"
+      "--color-pastel-orange-strong": "#e88465"
+    },
+    darkVars: {
+      "--color-brand-teal": "#b3a8d9",
+      "--color-brand-teal-dark": "#c8c0e5",
+      "--color-pastel-green": "#2c2748",
+      "--color-pastel-green-light": "#1d1932",
+      "--color-pastel-orange": "#5a3b29",
+      "--color-pastel-orange-light": "#36241a",
+      "--color-pastel-orange-strong": "#e89272"
     }
   },
   ciel: {
@@ -111,12 +131,16 @@ const pastelThemes = {
       "--color-pastel-green-light": "#eef9fd",
       "--color-pastel-orange": "#ffd8a8",
       "--color-pastel-orange-light": "#fff4e6",
-      "--color-pastel-orange-strong": "#e99452",
-      "--color-background": "#fbfdff",
-      "--color-surface-tint": "#f4fbfe",
-      "--border": "#d2e9f1",
-      "--border-strong": "#a8cfda",
-      "--blue": "#a8d7e5"
+      "--color-pastel-orange-strong": "#e99452"
+    },
+    darkVars: {
+      "--color-brand-teal": "#7fb8c8",
+      "--color-brand-teal-dark": "#a0cfdc",
+      "--color-pastel-green": "#1c3640",
+      "--color-pastel-green-light": "#13242a",
+      "--color-pastel-orange": "#5b3f23",
+      "--color-pastel-orange-light": "#382617",
+      "--color-pastel-orange-strong": "#e8a668"
     }
   },
   sauge: {
@@ -131,12 +155,16 @@ const pastelThemes = {
       "--color-pastel-green-light": "#f3faf1",
       "--color-pastel-orange": "#ffd3d8",
       "--color-pastel-orange-light": "#fff1f3",
-      "--color-pastel-orange-strong": "#df7b86",
-      "--color-background": "#fbfdf9",
-      "--color-surface-tint": "#f6fbf4",
-      "--border": "#d9e9d5",
-      "--border-strong": "#b8d4b2",
-      "--blue": "#bad9c5"
+      "--color-pastel-orange-strong": "#df7b86"
+    },
+    darkVars: {
+      "--color-brand-teal": "#a3c4a8",
+      "--color-brand-teal-dark": "#bdd5be",
+      "--color-pastel-green": "#1f3a26",
+      "--color-pastel-green-light": "#14251a",
+      "--color-pastel-orange": "#5b2f33",
+      "--color-pastel-orange-light": "#371d20",
+      "--color-pastel-orange-strong": "#df8a92"
     }
   },
   vanille: {
@@ -151,12 +179,16 @@ const pastelThemes = {
       "--color-pastel-green-light": "#fff9df",
       "--color-pastel-orange": "#ffc7b5",
       "--color-pastel-orange-light": "#fff0ea",
-      "--color-pastel-orange-strong": "#e98368",
-      "--color-background": "#fffdf5",
-      "--color-surface-tint": "#fffaf0",
-      "--border": "#efe5bd",
-      "--border-strong": "#dccd8f",
-      "--blue": "#eadfbc"
+      "--color-pastel-orange-strong": "#e98368"
+    },
+    darkVars: {
+      "--color-brand-teal": "#d4c47e",
+      "--color-brand-teal-dark": "#e6d99a",
+      "--color-pastel-green": "#3a3217",
+      "--color-pastel-green-light": "#26200d",
+      "--color-pastel-orange": "#5a3a2a",
+      "--color-pastel-orange-light": "#38241a",
+      "--color-pastel-orange-strong": "#ec9176"
     }
   }
 };
@@ -213,8 +245,18 @@ const titles = {
 };
 
 document.addEventListener("DOMContentLoaded", () => {
+  // Resolution synchrone du mode (avant tout render) :
+  // - localStorage "dark"|"light" -> on respecte (deja applique par anti-FART script)
+  // - sinon "auto" (suit prefers-color-scheme via CSS media query)
+  try {
+    const stored = localStorage.getItem(COLOR_SCHEME_STORAGE_KEY);
+    if (stored === "dark" || stored === "light") activeColorScheme = stored;
+  } catch { /* ignore */ }
+
   applyTheme("sereo", { persist: false });
   applyBrandImage(DEFAULT_BRAND_IMAGE);
+  updateMetaThemeColor();
+  watchSystemColorScheme();
   bindUi();
   initMap();
   registerServiceWorker();
@@ -294,6 +336,7 @@ function bindUi() {
     if (action === "go-tab") showTab(actionButton.dataset.targetTab || "journee");
     if (action === "select-theme") applyTheme(actionButton.dataset.themeId, { notifyUser: true });
     if (action === "reset-theme") applyTheme("sereo", { notifyUser: true });
+    if (action === "select-color-scheme") applyColorScheme(actionButton.dataset.colorScheme, { notifyUser: true });
     if (action === "reset-brand-image") resetBrandImage();
     if (action === "start-preparation") runAction(actionButton, "Démarrage...", () => startPreparation(actionButton.dataset.orderId));
     if (action === "finish-preparation") runAction(actionButton, "Validation...", () => finishPreparation(actionButton.dataset.orderId));
@@ -1288,6 +1331,22 @@ function renderCommandesLivrees() {
 async function loadAppearance() {
   try {
     const appearance = await apiFetch("/api/settings/appearance");
+
+    // Resolution du mode de couleur :
+    // 1. Priorite absolue : localStorage (par device, deja applique au boot via anti-FART)
+    // 2. Sinon : valeur DB serveur (synchro multi-device)
+    // 3. Sinon : "auto" (suit l'OS)
+    let scheme = "auto";
+    try {
+      const stored = localStorage.getItem(COLOR_SCHEME_STORAGE_KEY);
+      if (stored === "dark" || stored === "light") scheme = stored;
+      else if (VALID_COLOR_SCHEMES.includes(appearance.colorScheme)) scheme = appearance.colorScheme;
+    } catch {
+      if (VALID_COLOR_SCHEMES.includes(appearance.colorScheme)) scheme = appearance.colorScheme;
+    }
+    // applyColorScheme avec persist:false pour ne pas re-ecrire la valeur qu'on vient de lire
+    applyColorScheme(scheme, { persist: false });
+
     applyTheme(appearance.themeId || "sereo", { persist: false });
     applyBrandImage(appearance.brandImage || DEFAULT_BRAND_IMAGE);
   } catch (error) {
@@ -1296,14 +1355,106 @@ async function loadAppearance() {
   }
 }
 
+// Cle localStorage pour la persistance par device du mode (auto / light / dark)
+const COLOR_SCHEME_STORAGE_KEY = "sereo:colorScheme";
+const VALID_COLOR_SCHEMES = ["auto", "light", "dark"];
+
+// Retourne le mode effectivement applique : "light" ou "dark".
+// "auto" est resolu via le media query prefers-color-scheme.
+function getEffectiveColorScheme() {
+  if (activeColorScheme === "dark") return "dark";
+  if (activeColorScheme === "light") return "light";
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+// Applique les variables d'un theme en respectant le mode actif (clair / sombre).
+// Le theme pastel definit ses 7 variables --color-* en 2 versions : `vars` et `darkVars`.
+function applyThemeVariables(theme) {
+  const effective = getEffectiveColorScheme();
+  const variables = effective === "dark" && theme.darkVars ? theme.darkVars : theme.vars;
+  const root = document.documentElement;
+  Object.entries(variables).forEach(([name, value]) => {
+    root.style.setProperty(name, value);
+  });
+}
+
+// Met a jour la meta theme-color (couleur de la barre OS sur mobile)
+// pour refleter le mode actif. Utilise la couleur de fond.
+function updateMetaThemeColor() {
+  const effective = getEffectiveColorScheme();
+  const color = effective === "dark" ? "#0d1518" : "#cfe9e1";
+  // On force une seule meta sans media query (override les 2 du HTML)
+  let tag = document.querySelector('meta[name="theme-color"]:not([media])');
+  if (!tag) {
+    tag = document.createElement("meta");
+    tag.setAttribute("name", "theme-color");
+    document.head.appendChild(tag);
+  }
+  tag.setAttribute("content", color);
+}
+
+// Change le mode de couleur (auto / light / dark).
+// - persist : sauve dans localStorage par device + sync DB serveur
+// - notifyUser : affiche un toast de confirmation
+function applyColorScheme(scheme, options = {}) {
+  const { persist = true, notifyUser = false } = options;
+  const next = VALID_COLOR_SCHEMES.includes(scheme) ? scheme : "auto";
+  activeColorScheme = next;
+
+  const root = document.documentElement;
+  if (next === "auto") {
+    delete root.dataset.colorScheme;
+  } else {
+    root.dataset.colorScheme = next;
+  }
+
+  // Re-applique les variables du theme actif avec la bonne palette (light/dark)
+  const theme = pastelThemes[activeThemeId] || pastelThemes.sereo;
+  applyThemeVariables(theme);
+  updateMetaThemeColor();
+  // Re-evalue le logo (variante claire/sombre si logo par defaut)
+  applyBrandImage(activeBrandImage);
+
+  if (persist) {
+    try {
+      if (next === "auto") localStorage.removeItem(COLOR_SCHEME_STORAGE_KEY);
+      else localStorage.setItem(COLOR_SCHEME_STORAGE_KEY, next);
+    } catch { /* localStorage indispo : ignore, on a deja applique le mode */ }
+    // Sync DB (best-effort, ne bloque pas l'UI si echec)
+    saveAppearance({ colorScheme: next }).catch(() => { /* silencieux */ });
+  }
+
+  if (notifyUser) {
+    const label = next === "auto" ? "automatique" : (next === "dark" ? "sombre" : "clair");
+    notify(`Mode d'affichage : ${label}.`, "success");
+  }
+
+  renderColorSchemeToggle();
+  renderThemePalettes();
+}
+
+// Re-evalue le mode si l'OS change de prefers-color-scheme et qu'on est en "auto"
+function watchSystemColorScheme() {
+  const mq = window.matchMedia("(prefers-color-scheme: dark)");
+  const handler = () => {
+    if (activeColorScheme === "auto") {
+      const theme = pastelThemes[activeThemeId] || pastelThemes.sereo;
+      applyThemeVariables(theme);
+      updateMetaThemeColor();
+      applyBrandImage(activeBrandImage);
+      renderThemePalettes();
+    }
+  };
+  if (mq.addEventListener) mq.addEventListener("change", handler);
+  else if (mq.addListener) mq.addListener(handler); // legacy Safari
+}
+
 function applyTheme(themeId, options = {}) {
   const { persist = true, notifyUser = false } = options;
   const theme = pastelThemes[themeId] || pastelThemes.sereo;
 
   activeThemeId = theme.id;
-  Object.entries(theme.vars).forEach(([name, value]) => {
-    document.documentElement.style.setProperty(name, value);
-  });
+  applyThemeVariables(theme);
 
   if (persist) {
     saveAppearance({ themeId: theme.id })
@@ -1316,6 +1467,16 @@ function applyTheme(themeId, options = {}) {
   }
 
   renderThemePalettes();
+}
+
+// Met a jour les boutons Auto/Clair/Sombre pour refleter le mode actif.
+// Pas de innerHTML (pour preserver le focus clavier), juste les attributs.
+function renderColorSchemeToggle() {
+  const buttons = document.querySelectorAll('[data-action="select-color-scheme"]');
+  buttons.forEach(btn => {
+    const isActive = btn.dataset.colorScheme === activeColorScheme;
+    btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
 }
 
 function renderThemePalettes() {
@@ -1392,10 +1553,19 @@ async function resetBrandImage() {
 function applyBrandImage(src) {
   const imageSrc = src || DEFAULT_BRAND_IMAGE;
   activeBrandImage = imageSrc;
+
+  // Si c'est le logo par defaut, on swap automatiquement entre la variante claire
+  // et sombre selon le mode actif. Si c'est un logo custom uploade, on l'affiche
+  // tel quel (l'utilisateur a choisi son image).
+  const isDefault = imageSrc === DEFAULT_BRAND_IMAGE || imageSrc === DEFAULT_BRAND_IMAGE_DARK;
+  const effectiveSrc = isDefault
+    ? (getEffectiveColorScheme() === "dark" ? DEFAULT_BRAND_IMAGE_DARK : DEFAULT_BRAND_IMAGE)
+    : imageSrc;
+
   document.querySelectorAll(".brand-logo, [data-brand-preview]").forEach(image => {
-    image.src = imageSrc;
+    image.src = effectiveSrc;
   });
-  updateBrandImageStatus(imageSrc !== DEFAULT_BRAND_IMAGE);
+  updateBrandImageStatus(!isDefault);
 }
 
 function updateBrandImageStatus(isCustom = activeBrandImage !== DEFAULT_BRAND_IMAGE) {

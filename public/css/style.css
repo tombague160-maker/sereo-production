@@ -1,4 +1,20 @@
+/* ============================================================================
+ * Mode CLAIR (par defaut)
+ *
+ * Variables decoupees en 2 niveaux :
+ *  - Couleurs primitives (--color-*) : palette du theme actif (modifiees par
+ *    pastelThemes en JS)
+ *  - Couleurs semantiques (--bg, --surface, --text, --border, etc.) : utilisees
+ *    par tout le CSS, derivees des primitives
+ *
+ * Le mode SOMBRE (plus bas) override uniquement les couleurs SEMANTIQUES,
+ * permettant a chaque theme pastel de garder son identite tout en passant en
+ * dark.
+ * ========================================================================== */
 :root {
+  color-scheme: light;
+
+  /* Primitives du theme pastel (sereo par defaut, modifie par applyTheme) */
   --color-brand-teal: #0e6b63;
   --color-brand-teal-dark: #0f3d3d;
   --color-pastel-green: #cfe9e1;
@@ -6,18 +22,23 @@
   --color-pastel-orange: #ffc4a3;
   --color-pastel-orange-light: #fff0e8;
   --color-pastel-orange-strong: #f47a5a;
+
+  /* Couleurs semantiques en mode clair */
   --color-background: #fafaf8;
   --color-surface: #ffffff;
   --color-surface-tint: #f5fbf8;
   --color-text: #102a2f;
   --color-text-soft: #4f686b;
   --color-muted: #7a8d8e;
+
+  /* Tokens generiques */
   --radius-card: 8px;
   --shadow-soft: 0 16px 36px rgba(15, 61, 61, 0.08);
   --shadow-tiny: 0 8px 18px rgba(15, 61, 61, 0.06);
 
+  /* Alias semantiques utilises partout dans le CSS */
   --bg: var(--color-background);
-  --surface: #ffffff;
+  --surface: var(--color-surface);
   --surface-alt: var(--color-pastel-green-light);
   --sidebar: var(--color-pastel-green);
   --sidebar-soft: #dff0ea;
@@ -28,6 +49,7 @@
   --muted: var(--color-muted);
   --white: #ffffff;
 
+  /* Brand */
   --brand-primary: var(--color-pastel-green);
   --brand-primary-dark: var(--color-brand-teal);
   --brand-secondary: var(--color-pastel-orange);
@@ -35,6 +57,7 @@
   --brand-accent: #ffffff;
   --brand-accent-dark: #f8fbfa;
 
+  /* Couleurs de statut (badges, pills, etc.) */
   --blue: #9fd5cc;
   --blue-dark: var(--color-brand-teal);
   --green: #67b99a;
@@ -44,8 +67,135 @@
   --red: #e58b7c;
   --red-dark: #b94d3d;
 
+  /* Toasts (couleurs de fond + texte associes, accessibles WCAG AA) */
+  --toast-bg: var(--color-brand-teal-dark);
+  --toast-text: var(--white);
+  --toast-success-bg: var(--color-brand-teal);
+  --toast-warning-bg: var(--color-pastel-orange-strong);
+  --toast-error-bg: #a64234;
+
+  /* Gradients body (recreates en dark plus bas) */
+  --body-gradient-1: rgba(207, 233, 225, 0.48);
+  --body-gradient-2: rgba(255, 196, 163, 0.22);
+  --body-gradient-stop-mid: var(--bg);
+  --body-gradient-stop-end: #f5fbf8;
+  --body-gradient-stop-start: #ffffff;
+
+  /* Tile provider Leaflet (clair par defaut, sombre via applyDarkMap) */
+  --leaflet-tile-filter: none;
+
   --shadow: var(--shadow-soft);
   --radius: var(--radius-card);
+
+  /* Transitions douces sur les changements de mode (respecte reduce-motion) */
+  --color-transition: background-color 200ms ease, color 200ms ease, border-color 200ms ease;
+}
+
+/* ============================================================================
+ * Mode SOMBRE
+ *
+ * S'active dans 2 cas :
+ *  1) prefers-color-scheme: dark ET pas d'override utilisateur (data-color-scheme!="light")
+ *  2) override utilisateur explicite (data-color-scheme="dark")
+ *
+ * On surcharge UNIQUEMENT les variables semantiques pour preserver l'identite
+ * du theme pastel actif (les --color-pastel-* viennent de pastelThemes).
+ * ========================================================================== */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) {
+    color-scheme: dark;
+
+    --color-background: #0d1518;
+    --color-surface: #182226;
+    --color-surface-tint: #15202b;
+    --color-text: #e8eef0;
+    --color-text-soft: #a8b8bc;
+    --color-muted: #7d8c90;
+
+    --shadow-soft: 0 16px 36px rgba(0, 0, 0, 0.5);
+    --shadow-tiny: 0 8px 18px rgba(0, 0, 0, 0.4);
+
+    --surface-alt: #1f2c30;
+    --sidebar: #15212a;
+    --sidebar-soft: #1c2a32;
+    --border: #2a3d3f;
+    --border-strong: #4a6266;
+
+    --brand-accent: #182226;
+    --brand-accent-dark: #1d2a30;
+
+    --blue: #5cabaa;
+    --green: #5da589;
+    --orange: #d99772;
+    --red: #c97264;
+
+    --toast-bg: #1a2628;
+    --toast-success-bg: #1c5048;
+    --toast-warning-bg: #aa5e3f;
+    --toast-error-bg: #8a3025;
+
+    --body-gradient-1: rgba(15, 50, 45, 0.65);
+    --body-gradient-2: rgba(80, 35, 25, 0.45);
+    --body-gradient-stop-mid: var(--bg);
+    --body-gradient-stop-end: #0a1316;
+    --body-gradient-stop-start: #14202a;
+
+    /* Tiles OSM en dark mode : invert + hue-rotate pour rendu sombre lisible.
+       Solution sans dependance, fonctionne avec n'importe quel tile provider. */
+    --leaflet-tile-filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.92);
+  }
+}
+
+/* Override manuel utilisateur - DARK (priorite absolue, ignore le prefers-color-scheme) */
+:root[data-color-scheme="dark"] {
+  color-scheme: dark;
+
+  --color-background: #0d1518;
+  --color-surface: #182226;
+  --color-surface-tint: #15202b;
+  --color-text: #e8eef0;
+  --color-text-soft: #a8b8bc;
+  --color-muted: #7d8c90;
+
+  --shadow-soft: 0 16px 36px rgba(0, 0, 0, 0.5);
+  --shadow-tiny: 0 8px 18px rgba(0, 0, 0, 0.4);
+
+  --surface-alt: #1f2c30;
+  --sidebar: #15212a;
+  --sidebar-soft: #1c2a32;
+  --border: #2a3d3f;
+  --border-strong: #4a6266;
+
+  --brand-accent: #182226;
+  --brand-accent-dark: #1d2a30;
+
+  --blue: #5cabaa;
+  --green: #5da589;
+  --orange: #d99772;
+  --red: #c97264;
+
+  --toast-bg: #1a2628;
+  --toast-success-bg: #1c5048;
+  --toast-warning-bg: #aa5e3f;
+  --toast-error-bg: #8a3025;
+
+  --body-gradient-1: rgba(15, 50, 45, 0.65);
+  --body-gradient-2: rgba(80, 35, 25, 0.45);
+  --body-gradient-stop-end: #0a1316;
+  --body-gradient-stop-start: #14202a;
+
+  --leaflet-tile-filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.92);
+}
+
+/* Override manuel - LIGHT : pas besoin de redefinir, on annule juste les eventuelles
+   surcharges du @media et on revient aux valeurs de :root par defaut. */
+:root[data-color-scheme="light"] {
+  color-scheme: light;
+}
+
+/* Respect du prefers-reduced-motion : pas de transition sur changement de mode */
+@media (prefers-reduced-motion: reduce) {
+  :root { --color-transition: none; }
 }
 
 * {
@@ -61,10 +211,11 @@ html {
 
 body {
   margin: 0;
+  /* Gradients radiaux derives des variables : passent automatiquement en dark mode. */
   background:
-    radial-gradient(circle at 8% 4%, rgba(207, 233, 225, 0.48), transparent 28%),
-    radial-gradient(circle at 98% 0%, rgba(255, 196, 163, 0.22), transparent 30%),
-    linear-gradient(180deg, #ffffff 0%, var(--bg) 42%, #f5fbf8 100%);
+    radial-gradient(circle at 8% 4%, var(--body-gradient-1), transparent 28%),
+    radial-gradient(circle at 98% 0%, var(--body-gradient-2), transparent 30%),
+    linear-gradient(180deg, var(--body-gradient-stop-start) 0%, var(--body-gradient-stop-mid) 42%, var(--body-gradient-stop-end) 100%);
   color: var(--text);
   font-family: Inter, "Segoe UI", Arial, sans-serif;
   font-size: 16px;
@@ -72,6 +223,7 @@ body {
   letter-spacing: 0;
   overflow-x: hidden;
   touch-action: manipulation;
+  transition: var(--color-transition);
 }
 
 button,
@@ -1232,6 +1384,13 @@ label {
   overflow: hidden;
 }
 
+/* En mode sombre, on inverse les couleurs des tuiles OSM pour un rendu lisible
+   la nuit / interieur faible lumiere. Filtre applique seulement aux tuiles, pas
+   aux markers (preserves) ni controles (preserves via :not). */
+.leaflet-tile-pane {
+  filter: var(--leaflet-tile-filter, none);
+}
+
 .map-empty {
   position: absolute;
   inset: auto 16px 16px 16px;
@@ -1358,7 +1517,8 @@ label {
   padding: 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: linear-gradient(135deg, #ffffff, var(--color-surface-tint));
+  background: linear-gradient(135deg, var(--surface), var(--color-surface-tint));
+  transition: var(--color-transition);
 }
 
 .settings-block h4 {
@@ -1407,10 +1567,11 @@ label {
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: #ffffff;
+  background: var(--surface);
   color: var(--text);
   text-align: left;
-  box-shadow: 0 8px 18px rgba(15, 61, 61, 0.04);
+  box-shadow: var(--shadow-tiny);
+  transition: var(--color-transition), box-shadow 200ms ease;
 }
 
 .theme-card:hover {
@@ -1420,8 +1581,67 @@ label {
 
 .theme-card.active {
   border-color: var(--color-pastel-orange-strong);
-  background: linear-gradient(135deg, var(--color-pastel-orange-light), #ffffff);
-  box-shadow: 0 0 0 3px rgba(244, 122, 90, 0.14);
+  background: linear-gradient(135deg, var(--color-pastel-orange-light), var(--surface));
+  box-shadow: 0 0 0 3px var(--color-pastel-orange-light);
+}
+
+/* Toggle Mode d'affichage : 3 boutons (Auto / Clair / Sombre) */
+.color-scheme-toggle {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.color-scheme-option {
+  display: grid;
+  gap: 4px;
+  padding: 14px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  text-align: center;
+  cursor: pointer;
+  transition: var(--color-transition), transform 120ms ease, box-shadow 200ms ease;
+  min-height: 88px;
+}
+
+.color-scheme-option:hover {
+  border-color: var(--border-strong);
+  background: var(--color-surface-tint);
+}
+
+.color-scheme-option:focus-visible {
+  outline: 2px solid var(--color-pastel-orange-strong);
+  outline-offset: 2px;
+}
+
+.color-scheme-option[aria-pressed="true"] {
+  border-color: var(--color-pastel-orange-strong);
+  background: linear-gradient(135deg, var(--color-pastel-orange-light), var(--surface));
+  box-shadow: 0 0 0 3px var(--color-pastel-orange-light);
+}
+
+.color-scheme-icon {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.color-scheme-label {
+  font-weight: 900;
+  font-size: 14px;
+  color: var(--color-brand-teal-dark);
+}
+
+.color-scheme-hint {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.3;
+}
+
+@media (max-width: 520px) {
+  .color-scheme-toggle { grid-template-columns: 1fr; }
+  .color-scheme-option { min-height: 72px; flex-direction: row; text-align: left; }
 }
 
 .theme-card-title,
@@ -1501,13 +1721,14 @@ label {
 .toast {
   padding: 12px 14px;
   border-radius: var(--radius);
-  background: var(--color-brand-teal-dark);
-  color: var(--white);
+  background: var(--toast-bg);
+  color: var(--toast-text);
   box-shadow: var(--shadow);
   font-weight: 800;
   display: flex;
   align-items: flex-start;
   gap: 10px;
+  transition: var(--color-transition);
 }
 
 .toast-message {
@@ -1534,15 +1755,15 @@ label {
 }
 
 .toast-success {
-  background: var(--color-brand-teal);
+  background: var(--toast-success-bg);
 }
 
 .toast-warning {
-  background: var(--color-pastel-orange-strong);
+  background: var(--toast-warning-bg);
 }
 
 .toast-error {
-  background: #a64234;
+  background: var(--toast-error-bg);
 }
 
 .toast-out {

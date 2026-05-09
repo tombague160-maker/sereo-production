@@ -4,17 +4,34 @@
   <meta charset="UTF-8" />
   <title>Séréo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="theme-color" content="#cfe9e1" />
+  <!-- theme-color dynamique (clair par defaut, sombre via prefers-color-scheme).
+       Le JS de toggle override la valeur quand l'utilisateur force light/dark. -->
+  <meta name="theme-color" content="#cfe9e1" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0d1518" media="(prefers-color-scheme: dark)" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="Séréo" />
   <meta name="format-detection" content="telephone=yes" />
 
+  <!-- Anti-FART (Flash of inAccurate Resolved Theme) : applique le mode utilisateur
+       AVANT le rendu pour eviter un flash clair en demarrant dans le sombre.
+       Stocke par device dans localStorage. -->
+  <script>
+    (function() {
+      try {
+        var pref = localStorage.getItem('sereo:colorScheme');
+        if (pref === 'dark' || pref === 'light') {
+          document.documentElement.dataset.colorScheme = pref;
+        }
+      } catch (e) { /* localStorage indispo : on laisse prefers-color-scheme decider */ }
+    })();
+  </script>
+
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="stylesheet" href="/vendor/leaflet/leaflet.css" />
-  <link rel="stylesheet" href="/css/style.css?v=20260503-desktop-visual" />
+  <link rel="stylesheet" href="/css/style.css?v=20260509-dark-mode" />
 </head>
 
 <body>
@@ -514,6 +531,30 @@
             </div>
             <div class="brand-preview">
               <img id="brandPreviewImage" src="/brand/sereo-logo.svg" alt="Logo Séréo" data-brand-preview />
+
+              <div class="settings-block">
+                <div>
+                  <h4>Mode d'affichage</h4>
+                  <p class="muted">Choisis entre le mode clair, sombre, ou suivre l'appareil. Réglage par appareil.</p>
+                </div>
+                <div id="colorSchemeToggle" class="color-scheme-toggle" role="group" aria-label="Mode d'affichage">
+                  <button type="button" class="color-scheme-option" data-action="select-color-scheme" data-color-scheme="auto" aria-pressed="true">
+                    <span class="color-scheme-icon" aria-hidden="true">◐</span>
+                    <span class="color-scheme-label">Auto</span>
+                    <span class="color-scheme-hint">Suit votre appareil</span>
+                  </button>
+                  <button type="button" class="color-scheme-option" data-action="select-color-scheme" data-color-scheme="light" aria-pressed="false">
+                    <span class="color-scheme-icon" aria-hidden="true">☀</span>
+                    <span class="color-scheme-label">Clair</span>
+                    <span class="color-scheme-hint">Lumineux, journée</span>
+                  </button>
+                  <button type="button" class="color-scheme-option" data-action="select-color-scheme" data-color-scheme="dark" aria-pressed="false">
+                    <span class="color-scheme-icon" aria-hidden="true">🌙</span>
+                    <span class="color-scheme-label">Sombre</span>
+                    <span class="color-scheme-hint">Repos visuel, soir</span>
+                  </button>
+                </div>
+              </div>
 
               <div class="settings-block">
                 <div>
