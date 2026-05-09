@@ -1,6 +1,6 @@
 {
   "name": "sereo",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "description": "Application locale de gestion de stock, préparation et livraisons Séréo",
   "main": "server.js",
   "engines": {
