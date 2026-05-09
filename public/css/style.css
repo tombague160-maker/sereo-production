@@ -36,29 +36,38 @@
   --shadow-soft: 0 16px 36px rgba(15, 61, 61, 0.08);
   --shadow-tiny: 0 8px 18px rgba(15, 61, 61, 0.06);
 
-  /* Alias semantiques utilises partout dans le CSS */
+  /* Alias semantiques utilises partout dans le CSS.
+   *
+   * Variables semantiques de theme : consolidees pour passer de 17 declarations
+   * specifiques par composant a 9 categories partagees. Chaque variable a 3
+   * definitions identiques :
+   *   - ici dans :root (mode clair par defaut)
+   *   - dans @media (prefers-color-scheme: dark) pour l'auto-mode
+   *   - dans :root[data-color-scheme="dark"] pour l'override utilisateur
+   * Garder ces 3 blocs synchronises lors de toute modification.
+   *
+   * --gradient-overlay-cool : 1er stop des gradients (tint vert/teal pastel)
+   * --gradient-overlay-warm : 2eme stop des gradients (tint orange/peche pastel)
+   * --gradient-overlay-light : variante claire (utilisee uniquement par .current-driver-card)
+   * --sidebar-overlay-1/2 : overlays decoratifs du fond sidebar
+   * --sidebar-button-overlay : fond des boutons sidebar (hover desktop + mobile)
+   * --surface-soft : fond quasi-blanc des cellules / hover / boutons secondaires
+   * --tab-bg, --tab-bg-hover : fonds des boutons de navigation
+   */
   --bg: var(--color-background);
   --surface: var(--color-surface);
   --surface-alt: var(--color-pastel-green-light);
   --surface-soft: #fbfefd;
-  --surface-soft-alt: #f7fbf9;
   --sidebar: var(--color-pastel-green);
   --sidebar-soft: #dff0ea;
-  --sidebar-tint-1: rgba(255, 255, 255, 0.56);
-  --sidebar-tint-2: rgba(207, 233, 225, 0.3);
-  --sidebar-settings-hover-bg: rgba(255, 255, 255, 0.34);
-  --sidebar-settings-mobile-bg: rgba(255, 255, 255, 0.58);
-  --topbar-tint-1: rgba(232, 244, 239, 0.95);
-  --topbar-tint-2: rgba(255, 240, 232, 0.8);
-  --driver-hero-tint-1: rgba(232, 244, 239, 0.88);
-  --driver-hero-tint-2: rgba(255, 240, 232, 0.68);
-  --current-driver-tint-1: rgba(255, 240, 232, 0.68);
-  --current-driver-tint-2: rgba(255, 255, 255, 0.94);
-  --current-client-box-tint-1: rgba(232, 244, 239, 0.92);
-  --current-client-box-tint-2: rgba(255, 240, 232, 0.58);
+  --sidebar-overlay-1: rgba(255, 255, 255, 0.56);
+  --sidebar-overlay-2: rgba(207, 233, 225, 0.3);
+  --sidebar-button-overlay: rgba(255, 255, 255, 0.5);
+  --gradient-overlay-cool: rgba(232, 244, 239, 0.92);
+  --gradient-overlay-warm: rgba(255, 240, 232, 0.7);
+  --gradient-overlay-light: rgba(255, 255, 255, 0.94);
   --tab-bg: rgba(255, 248, 244, 0.72);
   --tab-bg-hover: rgba(255, 240, 232, 0.92);
-  --secondary-bg: #f6fbf9;
   --border: #d8ebe5;
   --border-strong: #a9d2c8;
   --text: var(--color-text);
@@ -134,24 +143,16 @@
 
     --surface-alt: #1f2c30;
     --surface-soft: #1d2a30;
-    --surface-soft-alt: #1a2528;
     --sidebar: #15212a;
     --sidebar-soft: #1c2a32;
-    --sidebar-tint-1: rgba(255, 255, 255, 0.02);
-    --sidebar-tint-2: rgba(46, 80, 76, 0.12);
-    --sidebar-settings-hover-bg: rgba(255, 255, 255, 0.06);
-    --sidebar-settings-mobile-bg: rgba(255, 255, 255, 0.06);
-    --topbar-tint-1: rgba(15, 60, 55, 0.45);
-    --topbar-tint-2: rgba(80, 35, 25, 0.25);
-    --driver-hero-tint-1: rgba(15, 60, 55, 0.45);
-    --driver-hero-tint-2: rgba(80, 35, 25, 0.25);
-    --current-driver-tint-1: rgba(80, 35, 25, 0.28);
-    --current-driver-tint-2: rgba(15, 60, 55, 0.22);
-    --current-client-box-tint-1: rgba(15, 60, 55, 0.4);
-    --current-client-box-tint-2: rgba(80, 35, 25, 0.25);
+    --sidebar-overlay-1: rgba(255, 255, 255, 0.02);
+    --sidebar-overlay-2: rgba(46, 80, 76, 0.12);
+    --sidebar-button-overlay: rgba(255, 255, 255, 0.06);
+    --gradient-overlay-cool: rgba(15, 60, 55, 0.43);
+    --gradient-overlay-warm: rgba(80, 35, 25, 0.26);
+    --gradient-overlay-light: rgba(15, 60, 55, 0.22);
     --tab-bg: rgba(255, 255, 255, 0.04);
     --tab-bg-hover: rgba(255, 255, 255, 0.08);
-    --secondary-bg: #1f2c30;
     --border: #2a3d3f;
     --border-strong: #4a6266;
 
@@ -196,24 +197,16 @@
 
   --surface-alt: #1f2c30;
   --surface-soft: #1d2a30;
-  --surface-soft-alt: #1a2528;
   --sidebar: #15212a;
   --sidebar-soft: #1c2a32;
-  --sidebar-tint-1: rgba(255, 255, 255, 0.02);
-  --sidebar-tint-2: rgba(46, 80, 76, 0.12);
-  --sidebar-settings-hover-bg: rgba(255, 255, 255, 0.06);
-  --sidebar-settings-mobile-bg: rgba(255, 255, 255, 0.06);
-  --topbar-tint-1: rgba(15, 60, 55, 0.45);
-  --topbar-tint-2: rgba(80, 35, 25, 0.25);
-  --driver-hero-tint-1: rgba(15, 60, 55, 0.45);
-  --driver-hero-tint-2: rgba(80, 35, 25, 0.25);
-  --current-driver-tint-1: rgba(80, 35, 25, 0.28);
-  --current-driver-tint-2: rgba(15, 60, 55, 0.22);
-  --current-client-box-tint-1: rgba(15, 60, 55, 0.4);
-  --current-client-box-tint-2: rgba(80, 35, 25, 0.25);
+  --sidebar-overlay-1: rgba(255, 255, 255, 0.02);
+  --sidebar-overlay-2: rgba(46, 80, 76, 0.12);
+  --sidebar-button-overlay: rgba(255, 255, 255, 0.06);
+  --gradient-overlay-cool: rgba(15, 60, 55, 0.43);
+  --gradient-overlay-warm: rgba(80, 35, 25, 0.26);
+  --gradient-overlay-light: rgba(15, 60, 55, 0.22);
   --tab-bg: rgba(255, 255, 255, 0.04);
   --tab-bg-hover: rgba(255, 255, 255, 0.08);
-  --secondary-bg: #1f2c30;
   --border: #2a3d3f;
   --border-strong: #4a6266;
 
@@ -336,7 +329,7 @@ select:disabled {
   margin: 12px 0 12px 12px;
   padding: 22px 18px;
   background:
-    linear-gradient(180deg, var(--sidebar-tint-1), var(--sidebar-tint-2)),
+    linear-gradient(180deg, var(--sidebar-overlay-1), var(--sidebar-overlay-2)),
     var(--sidebar);
   color: var(--text);
   border: 1px solid var(--border);
@@ -494,7 +487,7 @@ select:disabled {
 }
 
 .sidebar-settings:hover {
-  background: var(--sidebar-settings-hover-bg);
+  background: var(--sidebar-button-overlay);
 }
 
 .nav-badge {
@@ -526,7 +519,7 @@ select:disabled {
   margin-bottom: 20px;
   padding: 22px;
   background:
-    linear-gradient(135deg, var(--topbar-tint-1), var(--topbar-tint-2)),
+    linear-gradient(135deg, var(--gradient-overlay-cool), var(--gradient-overlay-warm)),
     var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -761,7 +754,7 @@ button {
 }
 
 .secondary {
-  background: var(--secondary-bg);
+  background: var(--surface-soft);
   color: var(--color-brand-teal);
   border-color: var(--border-strong);
 }
@@ -1081,7 +1074,7 @@ label {
   gap: 10px;
   padding: 7px 9px;
   border-radius: 7px;
-  background: var(--surface-soft-alt);
+  background: var(--surface-soft);
   font-size: 14px;
   overflow-wrap: anywhere;
 }
@@ -1254,7 +1247,7 @@ label {
 .driver-hero {
   border-left: 5px solid var(--border-strong);
   background:
-    linear-gradient(135deg, var(--driver-hero-tint-1), var(--driver-hero-tint-2)),
+    linear-gradient(135deg, var(--gradient-overlay-cool), var(--gradient-overlay-warm)),
     var(--surface);
 }
 
@@ -1328,7 +1321,7 @@ label {
 .current-driver-card {
   border-left: 5px solid var(--color-pastel-orange);
   background:
-    linear-gradient(135deg, var(--current-driver-tint-1), var(--current-driver-tint-2)),
+    linear-gradient(135deg, var(--gradient-overlay-warm), var(--gradient-overlay-light)),
     var(--surface);
 }
 
@@ -1502,7 +1495,7 @@ label {
   margin-top: 10px;
   padding: 10px;
   border-radius: var(--radius);
-  background: var(--surface-soft-alt);
+  background: var(--surface-soft);
 }
 
 .history-grid {
@@ -1938,7 +1931,7 @@ label {
     min-height: 44px;
     padding: 9px 11px;
     border-radius: 999px;
-    background: var(--sidebar-settings-mobile-bg);
+    background: var(--sidebar-button-overlay);
     box-shadow: none;
   }
 
@@ -2134,7 +2127,7 @@ label {
     min-height: 160px;
     padding: 18px;
     background:
-      linear-gradient(135deg, var(--current-client-box-tint-1), var(--current-client-box-tint-2)),
+      linear-gradient(135deg, var(--gradient-overlay-cool), var(--gradient-overlay-warm)),
       var(--surface);
   }
 
