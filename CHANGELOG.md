@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.0](https://github.com/tombague160-maker/sereo-production/compare/v1.2.0...v1.3.0) (2026-05-09)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **theme:** mode sombre complet avec toggle Auto/Clair/Sombre par device ([ebbeaed](https://github.com/tombague160-maker/sereo-production/commit/ebbeaed993291140846377928d370d70797ea5b9))
+* **theme:** mode sombre complet avec toggle Auto/Clair/Sombre par device ([9ac7f12](https://github.com/tombague160-maker/sereo-production/commit/9ac7f12f41cbbe3ed8252a0ad0382c0a8f60135b))
+
 ## [1.2.0](https://github.com/tombague160-maker/sereo-production/compare/v1.1.0...v1.2.0) (2026-05-08)
 
 
