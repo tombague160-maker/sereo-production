@@ -31,7 +31,9 @@ let activeThemeId = "sereo";
 let activeBrandImage = "/brand/sereo-logo.svg";
 // "auto" suit l'OS (prefers-color-scheme), "light"/"dark" force.
 // Persistance par appareil dans localStorage. Synchro DB optionnelle (multi-device).
-let activeColorScheme = "auto";
+// Defaut "light" : pendant la phase de test, on n'active pas le mode sombre auto.
+// L'utilisateur peut basculer via Parametres > Mode d'affichage.
+let activeColorScheme = "light";
 
 const mainTabs = new Set(["journee", "stock", "preparation", "livreur", "recommande", "commandes-livrees", "parametres"]);
 const DEFAULT_BRAND_IMAGE = "/brand/sereo-logo.svg";
@@ -246,11 +248,11 @@ const titles = {
 
 document.addEventListener("DOMContentLoaded", () => {
   // Resolution synchrone du mode (avant tout render) :
-  // - localStorage "dark"|"light" -> on respecte (deja applique par anti-FART script)
-  // - sinon "auto" (suit prefers-color-scheme via CSS media query)
+  // - localStorage "dark"|"light"|"auto" -> on respecte le choix utilisateur
+  // - sinon defaut "light" (set en haut du fichier)
   try {
     const stored = localStorage.getItem(COLOR_SCHEME_STORAGE_KEY);
-    if (stored === "dark" || stored === "light") activeColorScheme = stored;
+    if (VALID_COLOR_SCHEMES.includes(stored)) activeColorScheme = stored;
   } catch { /* ignore */ }
 
   applyTheme("sereo", { persist: false });
@@ -1335,11 +1337,11 @@ async function loadAppearance() {
     // Resolution du mode de couleur :
     // 1. Priorite absolue : localStorage (par device, deja applique au boot via anti-FART)
     // 2. Sinon : valeur DB serveur (synchro multi-device)
-    // 3. Sinon : "auto" (suit l'OS)
-    let scheme = "auto";
+    // 3. Sinon : "light" (defaut prudent pendant phase de test du dark mode)
+    let scheme = "light";
     try {
       const stored = localStorage.getItem(COLOR_SCHEME_STORAGE_KEY);
-      if (stored === "dark" || stored === "light") scheme = stored;
+      if (VALID_COLOR_SCHEMES.includes(stored)) scheme = stored;
       else if (VALID_COLOR_SCHEMES.includes(appearance.colorScheme)) scheme = appearance.colorScheme;
     } catch {
       if (VALID_COLOR_SCHEMES.includes(appearance.colorScheme)) scheme = appearance.colorScheme;
@@ -1398,7 +1400,8 @@ function updateMetaThemeColor() {
 // - notifyUser : affiche un toast de confirmation
 function applyColorScheme(scheme, options = {}) {
   const { persist = true, notifyUser = false } = options;
-  const next = VALID_COLOR_SCHEMES.includes(scheme) ? scheme : "auto";
+  // Defaut "light" si valeur invalide (le mode auto reste choisissable explicitement).
+  const next = VALID_COLOR_SCHEMES.includes(scheme) ? scheme : "light";
   activeColorScheme = next;
 
   const root = document.documentElement;
@@ -1417,8 +1420,9 @@ function applyColorScheme(scheme, options = {}) {
 
   if (persist) {
     try {
-      if (next === "auto") localStorage.removeItem(COLOR_SCHEME_STORAGE_KEY);
-      else localStorage.setItem(COLOR_SCHEME_STORAGE_KEY, next);
+      // On stocke TOUS les modes (y compris "auto") pour preserver le choix utilisateur.
+      // Le defaut "light" ne s'applique que si rien n'a ete stocke.
+      localStorage.setItem(COLOR_SCHEME_STORAGE_KEY, next);
     } catch { /* localStorage indispo : ignore, on a deja applique le mode */ }
     // Sync DB (best-effort, ne bloque pas l'UI si echec)
     saveAppearance({ colorScheme: next }).catch(() => { /* silencieux */ });
