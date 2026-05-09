@@ -40,6 +40,22 @@
     })();
   </script>
 
+  <!-- Critical CSS anti-FART : applique le fond + color-scheme AVANT le chargement
+       de style.css pour eviter un flash de couleur au reload (ex: OS en sombre,
+       navigateur peint le fond OS-default avant que la CSS principale ne charge).
+       Doit rester synchrone, court et se lit avec le data-color-scheme pose
+       par le script ci-dessus. Les couleurs miroir celles de style.css. -->
+  <style>
+    html { background-color: #fafaf8; color-scheme: light; }
+    html[data-color-scheme="dark"] { background-color: #0d1518; color-scheme: dark; }
+    @media (prefers-color-scheme: dark) {
+      html:not([data-color-scheme="light"]) {
+        background-color: #0d1518;
+        color-scheme: dark;
+      }
+    }
+  </style>
+
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="stylesheet" href="/vendor/leaflet/leaflet.css" />
