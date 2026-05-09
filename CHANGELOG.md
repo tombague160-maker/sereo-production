@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.2](https://github.com/tombague160-maker/sereo-production/compare/v1.3.1...v1.3.2) (2026-05-09)
+
+
+### 🐛 Corrections de bugs
+
+* **theme:** corrige fonds blancs hardcodes invisibles en mode sombre ([3c10fce](https://github.com/tombague160-maker/sereo-production/commit/3c10fceb7bf37f1fd6268739667757f30449f69c))
+* **theme:** corrige fonds blancs hardcodes invisibles en mode sombre ([86911f9](https://github.com/tombague160-maker/sereo-production/commit/86911f963ff3f0e331621ccfe08af3e2d4d4d9ec))
+
 ## [1.3.1](https://github.com/tombague160-maker/sereo-production/compare/v1.3.0...v1.3.1) (2026-05-09)
 
 
