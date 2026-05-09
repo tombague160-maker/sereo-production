@@ -4,10 +4,12 @@
   <meta charset="UTF-8" />
   <title>Séréo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <!-- theme-color dynamique (clair par defaut, sombre via prefers-color-scheme).
-       Le JS de toggle override la valeur quand l'utilisateur force light/dark. -->
-  <meta name="theme-color" content="#cfe9e1" media="(prefers-color-scheme: light)" />
-  <meta name="theme-color" content="#0d1518" media="(prefers-color-scheme: dark)" />
+  <!-- theme-color : valeur initiale neutre (claire). Le script anti-FART
+       ci-dessous la corrige immediatement si l'utilisateur a stocke un mode
+       sombre dans localStorage. Pas de version conditionnelle prefers-color-scheme
+       car elle causait un flash de couleur OS bar quand l'OS est en sombre
+       mais que l'app force le mode clair. -->
+  <meta name="theme-color" content="#cfe9e1" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -22,36 +24,53 @@
        automatiquement. Les utilisateurs peuvent passer en auto/dark via Parametres. -->
   <script>
     (function() {
+      var resolved = 'light';
       try {
         var pref = localStorage.getItem('sereo:colorScheme');
         if (pref === 'dark' || pref === 'light') {
           document.documentElement.dataset.colorScheme = pref;
+          resolved = pref;
         } else if (pref === 'auto') {
           // L'utilisateur a explicitement choisi "auto" : on retire l'attribut pour
           // que le @media prefers-color-scheme: dark prenne la main.
           delete document.documentElement.dataset.colorScheme;
+          resolved = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
         } else {
           // Pas de preference stockee : on force "light" par defaut.
           document.documentElement.dataset.colorScheme = 'light';
+          resolved = 'light';
         }
       } catch (e) { /* localStorage indispo : on force light statique */
         document.documentElement.dataset.colorScheme = 'light';
+        resolved = 'light';
       }
+      // Met a jour le meta theme-color (OS bar / address bar) immediatement
+      // pour eviter un flash sur mobile / PWA quand l'OS est en sombre mais
+      // l'app en clair (ou inversement).
+      try {
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute('content', resolved === 'dark' ? '#0d1518' : '#cfe9e1');
+      } catch (e) { /* DOM pas pret : ignore */ }
     })();
   </script>
 
   <!-- Critical CSS anti-FART : applique le fond + color-scheme AVANT le chargement
-       de style.css pour eviter un flash de couleur au reload (ex: OS en sombre,
-       navigateur peint le fond OS-default avant que la CSS principale ne charge).
-       Doit rester synchrone, court et se lit avec le data-color-scheme pose
-       par le script ci-dessus. Les couleurs miroir celles de style.css. -->
+       de style.css pour eviter un flash de couleur au reload. On force aussi
+       le background-color sur body avec !important pour qu'il reste cohérent
+       même si style.css applique son gradient (qui a des transparences).
+       Les couleurs miroir celles de style.css :root et :root[data-color-scheme="dark"]. -->
   <style>
     html { background-color: #fafaf8; color-scheme: light; }
+    body { background-color: #fafaf8 !important; }
     html[data-color-scheme="dark"] { background-color: #0d1518; color-scheme: dark; }
+    html[data-color-scheme="dark"] body { background-color: #0d1518 !important; }
     @media (prefers-color-scheme: dark) {
       html:not([data-color-scheme="light"]) {
         background-color: #0d1518;
         color-scheme: dark;
+      }
+      html:not([data-color-scheme="light"]) body {
+        background-color: #0d1518 !important;
       }
     }
   </style>
