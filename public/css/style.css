@@ -468,19 +468,12 @@ select:disabled {
   color: var(--color-pastel-orange-strong);
 }
 
+/* Sidebar-visual : decoration de fond masquee. Le SVG sereo-sidebar-bg.svg
+   rendait un blob orange en multiply qui apparaissait grisatre sur le pastel
+   vert. Plus propre de le masquer. La balise <div class="sidebar-visual"> reste
+   dans index.html pour ne pas casser d'eventuels layouts mobiles ou hooks. */
 .sidebar-visual {
-  margin-top: auto;
-  padding: 12px 10px 4px;
-  opacity: 0.18;
-  mix-blend-mode: multiply;
-}
-
-.sidebar-visual img {
-  display: block;
-  width: min(100%, 210px);
-  height: auto;
-  margin-inline: auto;
-  border-radius: var(--radius);
+  display: none;
 }
 
 .sidebar-settings {
@@ -490,6 +483,7 @@ select:disabled {
   gap: 10px;
   width: 100%;
   min-height: 48px;
+  margin-top: auto;
   padding: 9px 10px;
   border: 1px solid transparent;
   border-radius: var(--radius);
