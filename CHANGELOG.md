@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.3](https://github.com/tombague160-maker/sereo-production/compare/v1.3.2...v1.3.3) (2026-05-09)
+
+
+### 🐛 Corrections de bugs
+
+* **theme:** chrome dark mode (sidebar, topbar, tab, inputs) ([56c59fd](https://github.com/tombague160-maker/sereo-production/commit/56c59fdfae3ff503fd982d349587f2218dc12838))
+* **theme:** chrome de l'app (sidebar, topbar, tab) adaptes au mode sombre ([a3cb247](https://github.com/tombague160-maker/sereo-production/commit/a3cb24741d79cac10c78da7f64b6dff9e93ac2db))
+
 ## [1.3.2](https://github.com/tombague160-maker/sereo-production/compare/v1.3.1...v1.3.2) (2026-05-09)
 
 
