@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.8](https://github.com/tombague160-maker/sereo-production/compare/v1.3.7...v1.3.8) (2026-05-09)
+
+
+### 🐛 Corrections de bugs
+
+* **ui:** masque la decoration sidebar grise + remplace l'icone parametres ([e9aa943](https://github.com/tombague160-maker/sereo-production/commit/e9aa94399d4aae3827dbc39b8f5f7eb3500f0087))
+* **ui:** masque la sidebar-visual grise + nouvelle icone parametres ([b15f336](https://github.com/tombague160-maker/sereo-production/commit/b15f336e5cacaa8cff2666fe4d2e35d62663fe0e))
+
 ## [1.3.7](https://github.com/tombague160-maker/sereo-production/compare/v1.3.6...v1.3.7) (2026-05-09)
 
 
