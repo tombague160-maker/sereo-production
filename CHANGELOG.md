@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.6](https://github.com/tombague160-maker/sereo-production/compare/v1.3.5...v1.3.6) (2026-05-09)
+
+
+### 🐛 Corrections de bugs
+
+* **theme:** renforce l'anti-FART (body bg + meta theme-color initial) ([7f82579](https://github.com/tombague160-maker/sereo-production/commit/7f8257914998325930d2760aeb08999c40a512fc))
+* **theme:** renforce l'anti-FART (body bg + meta theme-color initial) ([864ff0f](https://github.com/tombague160-maker/sereo-production/commit/864ff0f64efed7c994713705243ff43dca40bcae))
+
 ## [1.3.5](https://github.com/tombague160-maker/sereo-production/compare/v1.3.4...v1.3.5) (2026-05-09)
 
 
