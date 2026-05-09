@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.3.9](https://github.com/tombague160-maker/sereo-production/compare/v1.3.8...v1.3.9) (2026-05-09)
+
+
+### ♻️ Refactorisation
+
+* **theme:** consolide 17 variables -&gt; 9 + ajoute CLAUDE.md ([ec1d68f](https://github.com/tombague160-maker/sereo-production/commit/ec1d68f38c9b79301d756419743c0f9cf3914353))
+* **theme:** consolide les variables de gradient/overlay (17 -&gt; 9) ([2a362ea](https://github.com/tombague160-maker/sereo-production/commit/2a362ea634a356fbafaa70db655a302749cff092))
+
+
+### 📚 Documentation
+
+* ajoute CLAUDE.md pour orienter les futurs agents IA ([aeb36f5](https://github.com/tombague160-maker/sereo-production/commit/aeb36f556718743c215c976cede095e9da55d2e0))
+
 ## [1.3.8](https://github.com/tombague160-maker/sereo-production/compare/v1.3.7...v1.3.8) (2026-05-09)
 
 
