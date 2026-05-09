@@ -1,8 +1,9 @@
-const CACHE_NAME = "sereo-shell-20260506-offline-api";
+const CACHE_NAME = "sereo-shell-20260509-anti-fart";
 const API_CACHE_NAME = "sereo-api-20260506";
 const APP_SHELL = [
   "/css/style.css",
   "/js/app.js",
+  "/js/anti-fart.js",
   "/favicon.svg",
   "/manifest.webmanifest",
   "/brand/sereo-logo.svg",

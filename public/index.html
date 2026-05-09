@@ -16,43 +16,12 @@
   <meta name="apple-mobile-web-app-title" content="Séréo" />
   <meta name="format-detection" content="telephone=yes" />
 
-  <!-- Anti-FART (Flash of inAccurate Resolved Theme) : applique le mode utilisateur
-       AVANT le rendu pour eviter un flash. Stocke par device dans localStorage.
-
-       Defaut "light" pendant la phase de test du dark mode : si rien n'est stocke,
-       on force data-color-scheme="light" pour ne PAS suivre prefers-color-scheme
-       automatiquement. Les utilisateurs peuvent passer en auto/dark via Parametres. -->
-  <script>
-    (function() {
-      var resolved = 'light';
-      try {
-        var pref = localStorage.getItem('sereo:colorScheme');
-        if (pref === 'dark' || pref === 'light') {
-          document.documentElement.dataset.colorScheme = pref;
-          resolved = pref;
-        } else if (pref === 'auto') {
-          // L'utilisateur a explicitement choisi "auto" : on retire l'attribut pour
-          // que le @media prefers-color-scheme: dark prenne la main.
-          delete document.documentElement.dataset.colorScheme;
-          resolved = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-        } else {
-          // Pas de preference stockee : on force "light" par defaut.
-          document.documentElement.dataset.colorScheme = 'light';
-          resolved = 'light';
-        }
-      } catch (e) { /* localStorage indispo : on force light statique */
-        document.documentElement.dataset.colorScheme = 'light';
-        resolved = 'light';
-      }
-      // Met a jour le meta theme-color (OS bar / address bar) immediatement
-      // pour eviter un flash sur mobile / PWA quand l'OS est en sombre mais
-      // l'app en clair (ou inversement).
-      try {
-        var meta = document.querySelector('meta[name="theme-color"]');
-        if (meta) meta.setAttribute('content', resolved === 'dark' ? '#0d1518' : '#cfe9e1');
-      } catch (e) { /* DOM pas pret : ignore */ }
-    })();
-  </script>
+  <!-- Anti-FART (Flash of inAccurate Resolved Theme) : externalise dans un fichier
+       separe car la CSP `script-src 'self'` bloque les scripts inline. Charge en
+       synchrone (sans defer/async) dans <head> avant le <link> CSS bloquant pour
+       qu'il s'execute avant le premier rendu et pose data-color-scheme="..." sur
+       <html>. Cf public/js/anti-fart.js pour la logique. -->
+  <script src="/js/anti-fart.js"></script>
 
   <!-- Critical CSS anti-FART : applique le fond + color-scheme AVANT le chargement
        de style.css pour eviter un flash de couleur au reload. On force aussi
