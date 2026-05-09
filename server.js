@@ -548,9 +548,9 @@ function defaultDb() {
         themeId: "sereo",
         brandImage: "",
         // colorScheme : "auto" suit l'OS (prefers-color-scheme), "light"/"dark" force.
-        // Persiste cote serveur pour synchro multi-device optionnelle. La preference
-        // par-device est stockee en localStorage cote frontend (gagne en cas de conflit).
-        colorScheme: "auto"
+        // Defaut "light" en attendant que le mode sombre soit valide en production.
+        // Les utilisateurs peuvent passer en "auto" ou "dark" via le toggle Parametres.
+        colorScheme: "light"
       }
     }
   };
@@ -639,7 +639,9 @@ function normalizeSettings(settings = {}) {
     : {};
 
   const rawColorScheme = clean(appearance.colorScheme).toLowerCase();
-  const colorScheme = VALID_COLOR_SCHEMES.has(rawColorScheme) ? rawColorScheme : "auto";
+  // Defaut "light" : les utilisateurs sans preference explicite voient le mode clair,
+  // ce qui evite un changement visuel surprenant pendant la phase de test du dark mode.
+  const colorScheme = VALID_COLOR_SCHEMES.has(rawColorScheme) ? rawColorScheme : "light";
 
   return {
     ...settings,

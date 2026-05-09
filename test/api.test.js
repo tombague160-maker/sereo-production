@@ -1136,11 +1136,13 @@ test("readDb gere un db.json corrompu sans crasher (mode JSON)", async () => {
 // V1.3.0 - Mode sombre (dark mode)
 // ============================================================================
 
-test("appearance par defaut contient colorScheme=auto", async () => {
+test("appearance par defaut contient colorScheme=light (pas auto)", async () => {
   seedDb(defaultDb());
   const { res, body } = await requestJson("/api/settings/appearance");
   assert.equal(res.status, 200);
-  assert.equal(body.colorScheme, "auto", "colorScheme defaut = auto");
+  // Defaut "light" pendant la phase de test du dark mode.
+  // Les utilisateurs peuvent passer en "auto" ou "dark" via le toggle Parametres.
+  assert.equal(body.colorScheme, "light", "colorScheme defaut = light");
   assert.equal(body.themeId, "sereo");
 });
 
