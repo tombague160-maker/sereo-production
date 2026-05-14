@@ -1,0 +1,36 @@
+# CI Sereo : valide les PRs (npm run check + npm test) avant qu'elles soient mergeables.
+#
+# Sans ce workflow, un commit cassé pouvait passer en main, etre tagge par
+# release-please et auto-deploye par sereo-updater 15 min plus tard.
+# Maintenant, GitHub bloque le merge si l'un des jobs echoue.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    name: Tests + syntax check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Syntax check (node --check)
+        run: npm run check
+
+      - name: Run tests (node --test)
+        run: npm test
