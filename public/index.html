@@ -139,6 +139,11 @@
         <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-settings"></use></svg></span>
         <span>Paramètres</span>
       </button>
+
+      <button class="sidebar-version" type="button" data-action="open-version-modal" aria-label="Voir la version et les nouveautes" title="Cliquer pour voir les nouveautés">
+        <span class="sidebar-version-label">Version</span>
+        <span class="sidebar-version-value" id="sidebar-version-value">…</span>
+      </button>
     </aside>
 
     <nav class="mobile-tabbar" role="tablist" aria-label="Navigation mobile">
@@ -626,6 +631,35 @@
   </div>
 
   <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+
+  <!-- Modal version : affiche les nouveautes de la release courante en clair.
+       Pilote par app.js (data-action="open-version-modal"). Aria-hidden tant
+       que ferme, focus management gere en JS. -->
+  <div id="versionModal" class="version-modal" role="dialog" aria-modal="true" aria-labelledby="versionModalTitle" aria-hidden="true">
+    <div class="version-modal-backdrop" data-action="close-version-modal"></div>
+    <div class="version-modal-card" role="document">
+      <header class="version-modal-header">
+        <div>
+          <h2 id="versionModalTitle">Nouveautés de l'app</h2>
+          <p class="version-modal-subtitle">
+            Version <span id="versionModalVersion">…</span>
+            <span class="version-modal-date" id="versionModalDate"></span>
+          </p>
+        </div>
+        <button class="version-modal-close" type="button" data-action="close-version-modal" aria-label="Fermer">
+          <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M6 6 18 18 M18 6 6 18"/></svg>
+        </button>
+      </header>
+      <div class="version-modal-body" id="versionModalBody">
+        <p>Chargement des nouveautés…</p>
+      </div>
+      <footer class="version-modal-footer">
+        <a id="versionModalLink" class="version-modal-github-link" target="_blank" rel="noopener noreferrer">
+          Voir tous les détails techniques sur GitHub →
+        </a>
+      </footer>
+    </div>
+  </div>
 
   <script src="/vendor/leaflet/leaflet.js"></script>
   <script src="/js/app.js?v=20260502b"></script>

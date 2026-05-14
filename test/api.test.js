@@ -1401,6 +1401,18 @@ test("CSP guard : le header Content-Security-Policy est strict (script-src 'self
   assert.doesNotMatch(csp, /script-src[^;]*'unsafe-eval'/, "script-src ne doit PAS contenir 'unsafe-eval'");
 });
 
+test("GET /api/version retourne la version courante", async () => {
+  const { res, body } = await requestJson("/api/version");
+  assert.equal(res.status, 200);
+  // La version doit matcher le package.json
+  const pkg = require(path.join(__dirname, "..", "package.json"));
+  assert.equal(body.version, pkg.version);
+  assert.ok(body.releaseUrl, "releaseUrl doit etre fourni");
+  assert.match(body.releaseUrl, /github\.com.*releases\/tag\/v/, "URL release github attendue");
+  // En tests, available peut etre false si GitHub injoignable ou rate-limited
+  assert.equal(typeof body.available, "boolean");
+});
+
 // =============================================================================
 // Tests d'import sequential : 2 imports consecutifs, dedup, sync stock
 // =============================================================================

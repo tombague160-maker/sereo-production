@@ -13,6 +13,91 @@ const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.SEREO_HOST || process.env.HOST || "127.0.0.1";
 
+// Lit la version courante depuis package.json (mis a jour automatiquement par
+// release-please a chaque release). Cache en memoire processus : se rafraichit
+// au prochain redemarrage du container (= prochain auto-deploy via sereo-updater).
+const APP_VERSION = (() => {
+  try {
+    return require("./package.json").version || "0.0.0";
+  } catch (e) {
+    return "0.0.0";
+  }
+})();
+const GITHUB_REPO = "tombague160-maker/sereo-production";
+
+// Cache memoire des release notes recuperees depuis l'API GitHub.
+// Pour eviter de rappeler GitHub a chaque /api/version (rate limit 60/h
+// pour requetes anonymes), on cache 1h apres le 1er fetch reussi.
+let releaseNotesCache = null;
+let releaseNotesCacheAt = 0;
+const RELEASE_NOTES_CACHE_TTL_MS = 60 * 60 * 1000;
+
+async function fetchReleaseNotes(version) {
+  const now = Date.now();
+  if (releaseNotesCache && releaseNotesCache.version === version
+      && now - releaseNotesCacheAt < RELEASE_NOTES_CACHE_TTL_MS) {
+    return releaseNotesCache;
+  }
+  const fallbackUrl = `https://github.com/${GITHUB_REPO}/releases/tag/v${version}`;
+  try {
+    const url = `https://api.github.com/repos/${GITHUB_REPO}/releases/tags/v${version}`;
+    const response = await fetch(url, {
+      headers: {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "sereo-app"
+      }
+    });
+    if (!response.ok) {
+      const cache = {
+        version,
+        releaseUrl: fallbackUrl,
+        releaseName: `v${version}`,
+        publishedAt: "",
+        pourToi: "",
+        fullNotes: "",
+        fetchedAt: new Date().toISOString(),
+        fetchError: `HTTP ${response.status}`
+      };
+      releaseNotesCache = cache;
+      releaseNotesCacheAt = now;
+      return cache;
+    }
+    const data = await response.json();
+    const body = String(data.body || "");
+    // Extrait la section "## 🎁 Pour toi" jusqu'au prochain ## (ou EOF).
+    // Si la section n'existe pas, on tombe en fallback sur les notes completes.
+    const match = body.match(/^##\s*🎁\s*Pour toi\s*\n([\s\S]*?)(?=^##\s|$(?![\s\S]))/m);
+    const pourToi = match ? match[1].trim() : "";
+    const cache = {
+      version,
+      releaseUrl: data.html_url || fallbackUrl,
+      releaseName: data.name || `v${version}`,
+      publishedAt: data.published_at || "",
+      pourToi,
+      fullNotes: body,
+      fetchedAt: new Date().toISOString(),
+      fetchError: null
+    };
+    releaseNotesCache = cache;
+    releaseNotesCacheAt = now;
+    return cache;
+  } catch (e) {
+    const cache = {
+      version,
+      releaseUrl: fallbackUrl,
+      releaseName: `v${version}`,
+      publishedAt: "",
+      pourToi: "",
+      fullNotes: "",
+      fetchedAt: new Date().toISOString(),
+      fetchError: e.message || "fetch error"
+    };
+    releaseNotesCache = cache;
+    releaseNotesCacheAt = now;
+    return cache;
+  }
+}
+
 const DB_PATH = path.resolve(process.env.SEREO_DB_PATH || path.join(__dirname, "data", "db.json"));
 const STORAGE_ENGINE = (process.env.SEREO_STORAGE || "sqlite").toLowerCase();
 const SQLITE_PATH = path.resolve(process.env.SEREO_SQLITE_PATH || process.env.SQLITE_PATH || path.join(__dirname, "data", "sereo.sqlite"));
@@ -132,6 +217,33 @@ app.get("/favicon.svg", (req, res) => {
 });
 app.get("/healthz", (req, res) => {
   res.json({ ok: true });
+});
+
+// Endpoint /api/version expose la version courante + les release notes
+// simplifiees pour le footer + modal version cote frontend.
+// Place AVANT requireAccessAuth pour rester accessible sur /login aussi
+// (la version n'est pas une info sensible et permet d'afficher le chip
+// "v1.5.0" meme avant connexion).
+app.get("/api/version", async (req, res) => {
+  try {
+    const cache = await fetchReleaseNotes(APP_VERSION);
+    res.set("Cache-Control", "public, max-age=300");
+    res.json({
+      version: cache.version,
+      releaseUrl: cache.releaseUrl,
+      releaseName: cache.releaseName,
+      publishedAt: cache.publishedAt,
+      pourToi: cache.pourToi,
+      fullNotes: cache.fullNotes,
+      fetchedAt: cache.fetchedAt,
+      fetchError: cache.fetchError,
+      // available : derive de fetchError pour compat tests. true si on a
+      // reussi a fetch les release notes depuis GitHub, false sinon.
+      available: !cache.fetchError
+    });
+  } catch (e) {
+    res.status(500).json({ error: "Version indisponible" });
+  }
 });
 app.use(express.urlencoded({ extended: false, limit: "20kb" }));
 app.get("/login", renderLoginPage);
@@ -477,7 +589,9 @@ function renderLoginPage(req, res) {
   let errorMarkup = "";
   if (isLocked) {
     const plural = lockedSeconds > 1 ? "s" : "";
-    errorMarkup = `<p class="login-error" role="alert" aria-live="polite">Trop de tentatives. R&eacute;essaie dans <span id="lockout-countdown">${lockedSeconds}</span> seconde${plural}.</p>`;
+    // Le mot "seconde(s)" est dans un span separe pour que login.js puisse
+    // basculer entre singulier et pluriel quand le compteur descend a 1.
+    errorMarkup = `<p class="login-error" role="alert" aria-live="polite">Trop de tentatives. R&eacute;essaie dans <span id="lockout-countdown">${lockedSeconds}</span> <span id="lockout-unit">seconde${plural}</span>.</p>`;
   } else if (hasError) {
     const attemptsRemaining = status.remaining;
     const attemptsLine = attemptsRemaining > 0 && attemptsRemaining < AUTH_RATE_LIMIT_MAX_ATTEMPTS
@@ -498,119 +612,229 @@ function renderLoginPage(req, res) {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Connexion - s&eacute;r&eacute;o</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <style>
     :root {
       --brand-teal: #0e6b63;
+      --brand-teal-dark: #0f3d3d;
       --pastel-green: #cfe9e1;
       --pastel-green-light: #e8f4ef;
       --pastel-orange: #ffc4a3;
+      --pastel-orange-light: #fff0e8;
       --pastel-orange-strong: #f47a5a;
-      --surface: #fffefa;
-      --text: #0f2937;
+      --surface: #ffffff;
+      --surface-soft: #fbfefd;
+      --text: #102a2f;
+      --text-soft: #4f686b;
+      --border-soft: rgba(14, 107, 99, 0.14);
+      --shadow-card: 0 32px 80px rgba(15, 41, 55, 0.12), 0 8px 24px rgba(15, 41, 55, 0.04);
     }
 
     * { box-sizing: border-box; }
 
-    body {
-      min-height: 100vh;
+    html, body {
       margin: 0;
+      min-height: 100vh;
+    }
+
+    body {
+      position: relative;
       display: grid;
       place-items: center;
       padding: 24px;
-      font-family: Arial, Helvetica, sans-serif;
+      font-family: Inter, "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
       color: var(--text);
       background:
-        radial-gradient(circle at top left, rgba(207, 233, 225, 0.95), transparent 34%),
-        radial-gradient(circle at bottom right, rgba(255, 196, 163, 0.55), transparent 36%),
+        radial-gradient(900px circle at 8% 6%, rgba(207, 233, 225, 0.7), transparent 60%),
+        radial-gradient(700px circle at 96% 94%, rgba(255, 196, 163, 0.55), transparent 60%),
+        radial-gradient(500px circle at 92% 12%, rgba(255, 240, 232, 0.55), transparent 60%),
         #fafaf8;
+      overflow-x: hidden;
+    }
+
+    /* Blobs decoratifs flottants pour donner un peu de profondeur */
+    body::before, body::after {
+      content: "";
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(48px);
+      pointer-events: none;
+      z-index: 0;
+    }
+    body::before {
+      width: 280px;
+      height: 280px;
+      background: rgba(207, 233, 225, 0.55);
+      top: -60px;
+      left: -80px;
+    }
+    body::after {
+      width: 320px;
+      height: 320px;
+      background: rgba(255, 196, 163, 0.42);
+      bottom: -100px;
+      right: -100px;
     }
 
     .login-card {
-      width: min(100%, 420px);
-      padding: 34px;
-      border: 1px solid rgba(14, 107, 99, 0.16);
+      position: relative;
+      z-index: 1;
+      width: min(100%, 440px);
+      padding: 40px 36px 32px;
+      border: 1px solid var(--border-soft);
       border-radius: 28px;
-      background: rgba(255, 254, 250, 0.92);
-      box-shadow: 0 24px 60px rgba(15, 41, 55, 0.12);
+      background: rgba(255, 255, 255, 0.96);
+      backdrop-filter: blur(18px);
+      box-shadow: var(--shadow-card);
+      animation: card-in 380ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes card-in {
+      from { opacity: 0; transform: translateY(14px) scale(0.985); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
     }
 
     .brand {
       display: flex;
       align-items: center;
       justify-content: center;
-      min-height: 76px;
+      min-height: 92px;
       margin-bottom: 24px;
-      border-radius: 18px;
-      background: white;
+      padding: 14px 22px;
+      border-radius: 20px;
+      background: linear-gradient(135deg, var(--pastel-green-light), #ffffff);
+      box-shadow: 0 14px 28px rgba(53, 111, 112, 0.08);
     }
 
     .brand img {
-      max-width: 170px;
-      max-height: 58px;
+      max-width: 180px;
+      max-height: 64px;
       object-fit: contain;
     }
 
-    h1 {
-      margin: 0 0 8px;
+    .title-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+
+    .title-row svg {
+      flex-shrink: 0;
+      width: 28px;
+      height: 28px;
+      padding: 6px;
+      border-radius: 10px;
+      background: var(--pastel-green-light);
       color: var(--brand-teal);
-      font-size: 28px;
-      line-height: 1.15;
-      letter-spacing: 0;
+    }
+
+    h1 {
+      margin: 0;
+      color: var(--brand-teal);
+      font-size: 26px;
+      font-weight: 800;
+      line-height: 1.2;
+      letter-spacing: -0.01em;
     }
 
     .intro {
-      margin: 0 0 24px;
-      color: rgba(15, 41, 55, 0.72);
-      line-height: 1.45;
+      margin: 0 0 28px;
+      color: var(--text-soft);
+      line-height: 1.5;
+      font-size: 15px;
+    }
+
+    .field {
+      margin-bottom: 16px;
     }
 
     label {
       display: block;
-      margin: 0 0 8px;
-      color: var(--brand-teal);
+      margin: 0 0 6px;
+      color: var(--brand-teal-dark);
       font-weight: 700;
-      font-size: 14px;
+      font-size: 13px;
+      letter-spacing: 0.02em;
     }
 
     input {
       width: 100%;
-      min-height: 48px;
-      margin-bottom: 16px;
-      padding: 12px 14px;
-      border: 1px solid rgba(14, 107, 99, 0.24);
+      min-height: 50px;
+      padding: 12px 16px;
+      border: 1.5px solid var(--border-soft);
       border-radius: 14px;
-      background: white;
+      background: var(--surface-soft);
       color: var(--text);
       font: inherit;
+      font-size: 15px;
       outline: none;
+      transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+    }
+
+    input:hover:not(:disabled) {
+      background: var(--surface);
     }
 
     input:focus {
       border-color: var(--pastel-orange-strong);
-      box-shadow: 0 0 0 4px rgba(255, 196, 163, 0.36);
+      background: var(--surface);
+      box-shadow: 0 0 0 4px rgba(255, 196, 163, 0.32);
     }
 
-    button {
+    input:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    button[type="submit"] {
       width: 100%;
-      min-height: 50px;
+      min-height: 52px;
+      margin-top: 8px;
       border: 0;
-      border-radius: 16px;
-      background: var(--pastel-orange-strong);
+      border-radius: 14px;
+      background: linear-gradient(135deg, var(--pastel-orange-strong), #e96d50);
       color: white;
       font: inherit;
+      font-size: 15px;
       font-weight: 800;
+      letter-spacing: 0.02em;
       cursor: pointer;
-      box-shadow: 0 12px 24px rgba(244, 122, 90, 0.22);
+      box-shadow: 0 14px 28px rgba(244, 122, 90, 0.26);
+      transition: transform 120ms ease, box-shadow 160ms ease, opacity 120ms ease;
+    }
+
+    button[type="submit"]:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 18px 32px rgba(244, 122, 90, 0.34);
+    }
+
+    button[type="submit"]:active:not(:disabled) {
+      transform: translateY(0);
+    }
+
+    button[type="submit"]:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+      box-shadow: none;
     }
 
     .login-error {
-      margin: 0 0 18px;
-      padding: 12px 14px;
-      border: 1px solid rgba(244, 122, 90, 0.26);
+      margin: 0 0 20px;
+      padding: 14px 16px;
+      border: 1px solid rgba(244, 122, 90, 0.28);
       border-radius: 14px;
-      background: rgba(255, 196, 163, 0.28);
+      background: rgba(255, 196, 163, 0.22);
       color: #9c341f;
-      font-weight: 700;
+      font-weight: 600;
+      font-size: 14px;
+      line-height: 1.4;
+      animation: error-in 320ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes error-in {
+      from { opacity: 0; transform: translateY(-4px); }
+      to   { opacity: 1; transform: translateY(0); }
     }
 
     .login-error-attempts {
@@ -621,31 +845,71 @@ function renderLoginPage(req, res) {
       color: rgba(156, 52, 31, 0.86);
     }
 
-    button:disabled {
-      opacity: 0.55;
-      cursor: not-allowed;
+    #lockout-countdown {
+      display: inline-block;
+      min-width: 1.2em;
+      padding: 1px 6px;
+      margin: 0 2px;
+      border-radius: 8px;
+      background: rgba(156, 52, 31, 0.12);
+      font-variant-numeric: tabular-nums;
+      font-weight: 800;
+    }
+
+    .footer-hint {
+      margin: 22px 0 0;
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-soft);
+    }
+
+    .footer-hint a {
+      color: var(--brand-teal);
+      text-decoration: none;
+    }
+
+    .footer-hint a:hover {
+      text-decoration: underline;
     }
 
     @media (max-width: 480px) {
       body { padding: 16px; }
-      .login-card { padding: 24px; border-radius: 22px; }
+      .login-card { padding: 28px 22px 24px; border-radius: 24px; }
+      h1 { font-size: 22px; }
+      .intro { font-size: 14px; margin-bottom: 22px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .login-card, .login-error { animation: none; }
+      button[type="submit"]:hover:not(:disabled) { transform: none; }
     }
   </style>
 </head>
 <body${bodyLockedAttr}>
   <main class="login-card" aria-labelledby="login-title">
     <div class="brand"><img src="/brand/sereo-logo.svg" alt="s&eacute;r&eacute;o"></div>
-    <h1 id="login-title">Acc&egrave;s prot&eacute;g&eacute;</h1>
+    <div class="title-row">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="4" y="11" width="16" height="10" rx="2" />
+        <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+      </svg>
+      <h1 id="login-title">Acc&egrave;s prot&eacute;g&eacute;</h1>
+    </div>
     <p class="intro">Connecte-toi pour ouvrir l'application.</p>
     ${errorMarkup}
     <form method="post" action="/login">
       <input type="hidden" name="next" value="${escapeHtml(next)}">
-      <label for="username">Identifiant</label>
-      <input id="username" name="username" autocomplete="username" autofocus ${isLocked ? "disabled" : "required"}>
-      <label for="password">Mot de passe</label>
-      <input id="password" name="password" type="password" autocomplete="current-password" ${isLocked ? "disabled" : "required"}>
+      <div class="field">
+        <label for="username">Identifiant</label>
+        <input id="username" name="username" autocomplete="username" autofocus ${isLocked ? "disabled" : "required"}>
+      </div>
+      <div class="field">
+        <label for="password">Mot de passe</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" ${isLocked ? "disabled" : "required"}>
+      </div>
       <button type="submit"${isLocked ? " disabled" : ""}>Se connecter</button>
     </form>
+    <p class="footer-hint">Application priv&eacute;e &middot; <a href="https://github.com/${GITHUB_REPO}/releases" target="_blank" rel="noopener noreferrer">v${APP_VERSION}</a></p>
   </main>
   <script src="/login.js"></script>
 </body>
@@ -2206,6 +2470,9 @@ app.get("/api/storage/status", (req, res) => {
     path: useSqliteStorage() ? SQLITE_PATH : DB_PATH
   });
 });
+
+// L'endpoint /api/version est declare plus haut (avant requireAccessAuth)
+// pour rester accessible sans authentification, notamment sur la page /login.
 
 app.get("/api/settings/appearance", (req, res) => {
   res.json(getAppearanceSettings(readDb()));
