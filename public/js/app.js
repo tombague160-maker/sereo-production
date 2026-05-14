@@ -338,6 +338,12 @@ function bindUi() {
 
     if (action === "refresh") runAction(actionButton, "Actualisation...", loadData);
     if (action === "go-tab") showTab(actionButton.dataset.targetTab || "journee");
+    if (action === "open-more-menu") openMoreMenu();
+    if (action === "close-more-menu") closeMoreMenu();
+    if (action === "more-menu-pick") {
+      showTab(actionButton.dataset.tab);
+      closeMoreMenu();
+    }
     if (action === "select-theme") applyTheme(actionButton.dataset.themeId, { notifyUser: true });
     if (action === "reset-theme") applyTheme("sereo", { notifyUser: true });
     if (action === "select-color-scheme") applyColorScheme(actionButton.dataset.colorScheme, { notifyUser: true });
@@ -387,6 +393,12 @@ function getInitialTab() {
   return mainTabs.has(hash) ? hash : "journee";
 }
 
+// Tabs accessibles uniquement via le menu "Plus" de la mobile-tabbar (overflow
+// car > 5 destinations). Quand l'utilisateur navigue vers l'une d'elles, le
+// bouton "Plus" recoit la classe `.active` pour montrer visuellement qu'on est
+// dans ce groupe.
+const MOBILE_OVERFLOW_TABS = new Set(["recommande", "commandes-livrees", "parametres"]);
+
 function showTab(tabName, options = {}) {
   const { updateHash = true } = options;
   const nextTab = titles[tabName] && mainTabs.has(tabName) ? tabName : "journee";
@@ -397,6 +409,12 @@ function showTab(tabName, options = {}) {
     tab.classList.toggle("active", isActive);
     tab.setAttribute("aria-selected", isActive ? "true" : "false");
   });
+
+  // Bouton "Plus" : actif si l'utilisateur est sur une destination "overflow"
+  const moreBtn = document.getElementById("mobile-tab-more");
+  if (moreBtn) {
+    moreBtn.classList.toggle("active", MOBILE_OVERFLOW_TABS.has(nextTab));
+  }
 
   document.getElementById(nextTab)?.classList.add("active");
 
@@ -413,6 +431,37 @@ function showTab(tabName, options = {}) {
     setTimeout(() => map.invalidateSize(), 150);
   }
 }
+
+// Bottom sheet "Plus" de la mobile-tabbar : pattern iOS/Android pour les
+// destinations overflow (> 5 dans une tabbar fixed).
+function openMoreMenu() {
+  const sheet = document.getElementById("mobile-more-sheet");
+  const trigger = document.getElementById("mobile-tab-more");
+  if (!sheet) return;
+  sheet.hidden = false;
+  trigger?.setAttribute("aria-expanded", "true");
+  // Focus le 1er item pour la nav clavier
+  const firstItem = sheet.querySelector(".more-sheet-item");
+  if (firstItem) firstItem.focus({ preventScroll: true });
+}
+
+function closeMoreMenu() {
+  const sheet = document.getElementById("mobile-more-sheet");
+  const trigger = document.getElementById("mobile-tab-more");
+  if (!sheet) return;
+  sheet.hidden = true;
+  trigger?.setAttribute("aria-expanded", "false");
+  trigger?.focus({ preventScroll: true });
+}
+
+// Escape ferme le sheet, clic en dehors aussi (gere via .more-sheet-backdrop
+// avec data-action="close-more-menu" dans bindUi).
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape") {
+    const sheet = document.getElementById("mobile-more-sheet");
+    if (sheet && !sheet.hidden) closeMoreMenu();
+  }
+});
 
 function resetViewportScroll(animated = true) {
   const behavior = animated ? "smooth" : "auto";

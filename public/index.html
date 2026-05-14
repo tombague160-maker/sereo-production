@@ -95,6 +95,11 @@
       <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
       <circle cx="12" cy="12" r="3" />
     </symbol>
+    <symbol id="icon-more" viewBox="0 0 24 24">
+      <circle cx="5" cy="12" r="1.6" />
+      <circle cx="12" cy="12" r="1.6" />
+      <circle cx="19" cy="12" r="1.6" />
+    </symbol>
   </svg>
 
   <div class="app">
@@ -163,15 +168,32 @@
         <svg class="icon" aria-hidden="true"><use href="#icon-truck"></use></svg>
         <span>Livraison</span>
       </button>
-      <button class="mobile-tab" type="button" role="tab" aria-selected="false" aria-controls="recommande" data-tab="recommande">
-        <svg class="icon" aria-hidden="true"><use href="#icon-star"></use></svg>
-        <span>Reco</span>
-      </button>
-      <button class="mobile-tab" type="button" role="tab" aria-selected="false" aria-controls="commandes-livrees" data-tab="commandes-livrees">
-        <svg class="icon" aria-hidden="true"><use href="#icon-clipboard-list"></use></svg>
-        <span>Livrées</span>
+      <button class="mobile-tab" type="button" id="mobile-tab-more" aria-haspopup="menu" aria-expanded="false" aria-controls="mobile-more-sheet" data-action="open-more-menu" aria-label="Plus d'options">
+        <svg class="icon" aria-hidden="true"><use href="#icon-more"></use></svg>
+        <span>Plus</span>
       </button>
     </nav>
+
+    <!-- Bottom sheet "Plus" : ouvert depuis la mobile-tabbar quand 5+ destinations -->
+    <div id="mobile-more-sheet" class="more-sheet" role="dialog" aria-modal="true" aria-labelledby="more-sheet-title" hidden>
+      <div class="more-sheet-backdrop" data-action="close-more-menu"></div>
+      <div class="more-sheet-panel" role="menu">
+        <div class="more-sheet-handle" aria-hidden="true"></div>
+        <h3 id="more-sheet-title" class="more-sheet-title">Plus d'options</h3>
+        <button class="more-sheet-item" type="button" role="menuitem" data-tab="recommande" data-action="more-menu-pick">
+          <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-star"></use></svg></span>
+          <span class="more-sheet-label">À recommander</span>
+        </button>
+        <button class="more-sheet-item" type="button" role="menuitem" data-tab="commandes-livrees" data-action="more-menu-pick">
+          <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-clipboard-list"></use></svg></span>
+          <span class="more-sheet-label">Commandes livrées</span>
+        </button>
+        <button class="more-sheet-item" type="button" role="menuitem" data-tab="parametres" data-action="more-menu-pick">
+          <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-settings"></use></svg></span>
+          <span class="more-sheet-label">Paramètres</span>
+        </button>
+      </div>
+    </div>
 
     <main class="content">
       <header class="topbar">
