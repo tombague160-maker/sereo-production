@@ -58,6 +58,41 @@ const ORDER_STATUSES = new Set([
   "probleme_livraison",
   "a_reprogrammer"
 ]);
+
+// Machine d'etat des transitions de status pour les commandes.
+// Cette table represente les transitions VALIDES via setOrderStatus().
+// Toute tentative de transition non listee est rejetee avec 400.
+//
+// normalizeOrder() (creation et import) BYPASSE cette validation pour
+// permettre l'initialisation d'un objet a n'importe quel etat (utile
+// pour `importedAsLivre` : import "Envoyee" -> directement livre).
+//
+// Le flux principal "happy path" :
+//   importe -> stock_a_verifier -> en_preparation -> preparation_terminee
+//   -> pret_livraison -> en_livraison -> livre
+// + branches problemes :
+//   en_livraison -> probleme_livraison -> a_reprogrammer
+//   a_reprogrammer -> pret_livraison / en_preparation / en_livraison (retry)
+// + raccourcis pratiques pour les cas reels :
+//   en_preparation -> pret_livraison (saute preparation_terminee, deja gere ligne 2621)
+//   en_livraison -> a_reprogrammer (direct depuis tournee, code existant 2034)
+const ORDER_STATUS_TRANSITIONS = {
+  importe: ["stock_a_verifier", "en_preparation"],
+  stock_a_verifier: ["en_preparation", "pret_livraison"],
+  en_preparation: ["preparation_terminee", "pret_livraison"],
+  preparation_terminee: ["pret_livraison"],
+  pret_livraison: ["en_livraison", "en_preparation"],
+  en_livraison: ["livre", "probleme_livraison", "a_reprogrammer", "pret_livraison"],
+  livre: [],
+  probleme_livraison: ["a_reprogrammer", "en_livraison"],
+  a_reprogrammer: ["pret_livraison", "en_preparation", "en_livraison"]
+};
+
+function isValidOrderStatusTransition(fromStatus, toStatus) {
+  if (fromStatus === toStatus) return true;
+  const allowed = ORDER_STATUS_TRANSITIONS[fromStatus];
+  return Array.isArray(allowed) && allowed.includes(toStatus);
+}
 const ROUTE_STATUSES = new Set(["brouillon", "prete", "en_livraison", "terminee"]);
 const STOP_STATUSES = new Set(["pret_livraison", "en_livraison", "livre", "absent", "probleme", "a_reprogrammer"]);
 const CORE_SECTORS = ["Besancon", "Champagnole", "Dole"];
@@ -1750,6 +1785,9 @@ function mapOrderStatusToClientStatus(order) {
 function setOrderStatus(order, status) {
   if (!ORDER_STATUSES.has(status)) {
     throw badRequest("Statut commande invalide");
+  }
+  if (!isValidOrderStatusTransition(order.status, status)) {
+    throw badRequest(`Transition non autorisee : ${order.status} -> ${status}`);
   }
 
   order.status = status;
