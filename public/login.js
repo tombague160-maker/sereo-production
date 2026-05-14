@@ -24,6 +24,7 @@
   }
 
   var countdownEl = document.getElementById("lockout-countdown");
+  var unitEl = document.getElementById("lockout-unit");
   var form = document.querySelector("form");
   var inputs = form ? form.querySelectorAll("input, button") : [];
 
@@ -40,6 +41,8 @@
     }
     var seconds = Math.ceil(remainingMs / 1000);
     if (countdownEl) countdownEl.textContent = String(seconds);
+    // Synchronise le pluriel : "1 seconde" / "N secondes"
+    if (unitEl) unitEl.textContent = seconds > 1 ? "secondes" : "seconde";
   }
 
   tick();

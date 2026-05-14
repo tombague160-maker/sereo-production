@@ -260,10 +260,12 @@ document.addEventListener("DOMContentLoaded", () => {
   updateMetaThemeColor();
   watchSystemColorScheme();
   bindUi();
+  bindVersionModal();
   initMap();
   registerServiceWorker();
   showTab(getInitialTab(), { updateHash: false });
   loadAppearance();
+  loadVersionInfo();
   loadData();
 });
 
@@ -2813,6 +2815,177 @@ function formatDeliveryDate(value) {
   } catch {
     return value;
   }
+}
+
+// ============================================================================
+// Modal "Quoi de neuf ?" : affiche la version courante + section "Pour toi"
+// extraite des release notes GitHub.
+//
+// Source de donnees : GET /api/version (server.js lit package.json au boot
+// et fetch GitHub Releases en cache memoire).
+// ============================================================================
+let versionInfoCache = null;
+
+async function loadVersionInfo() {
+  try {
+    versionInfoCache = await apiFetch("/api/version");
+  } catch {
+    // Si l'endpoint est down, on garde versionInfoCache=null, le bouton
+    // affiche "—" et le modal montrera "Notes indisponibles".
+    versionInfoCache = null;
+  }
+  // Met a jour le chip dans la sidebar avec la version
+  const versionLabel = document.getElementById("sidebar-version-value");
+  if (versionLabel) {
+    versionLabel.textContent = versionInfoCache?.version
+      ? `v${versionInfoCache.version}`
+      : "—";
+  }
+}
+
+function bindVersionModal() {
+  document.addEventListener("click", event => {
+    const opener = event.target.closest('[data-action="open-version-modal"]');
+    if (opener) {
+      event.preventDefault();
+      openVersionModal();
+      return;
+    }
+    const closer = event.target.closest('[data-action="close-version-modal"]');
+    if (closer) {
+      event.preventDefault();
+      closeVersionModal();
+    }
+  });
+  // Escape pour fermer
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape") {
+      const modal = document.getElementById("versionModal");
+      if (modal && modal.getAttribute("aria-hidden") === "false") {
+        closeVersionModal();
+      }
+    }
+  });
+}
+
+function openVersionModal() {
+  const modal = document.getElementById("versionModal");
+  if (!modal) return;
+  populateVersionModal();
+  modal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("version-modal-open");
+}
+
+function closeVersionModal() {
+  const modal = document.getElementById("versionModal");
+  if (!modal) return;
+  modal.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("version-modal-open");
+}
+
+function populateVersionModal() {
+  const info = versionInfoCache;
+  const versionEl = document.getElementById("versionModalVersion");
+  const dateEl = document.getElementById("versionModalDate");
+  const bodyEl = document.getElementById("versionModalBody");
+  const linkEl = document.getElementById("versionModalLink");
+  if (!info) {
+    if (versionEl) versionEl.textContent = "—";
+    if (bodyEl) bodyEl.innerHTML = '<p class="version-modal-empty">Notes indisponibles pour le moment.</p>';
+    if (linkEl) linkEl.removeAttribute("href");
+    return;
+  }
+  if (versionEl) versionEl.textContent = `v${info.version}`;
+  if (dateEl) {
+    dateEl.textContent = info.publishedAt
+      ? ` • publiée le ${formatDateFR(info.publishedAt)}`
+      : "";
+  }
+  if (linkEl) {
+    linkEl.href = info.releaseUrl;
+  }
+  if (bodyEl) {
+    if (info.pourToi) {
+      bodyEl.innerHTML = renderSimpleMarkdown(info.pourToi);
+    } else if (info.fullNotes) {
+      // Fallback : pas de section "Pour toi", on affiche un avertissement
+      // et la version brute (utile en attendant que la prochaine release
+      // inclue la section dediee).
+      bodyEl.innerHTML = `
+        <p class="version-modal-empty">Pas encore de résumé en clair pour cette version. Voici les notes complètes :</p>
+        ${renderSimpleMarkdown(info.fullNotes)}
+      `;
+    } else {
+      bodyEl.innerHTML = '<p class="version-modal-empty">Notes indisponibles pour le moment.</p>';
+    }
+  }
+}
+
+function formatDateFR(isoString) {
+  try {
+    const d = new Date(isoString);
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+  } catch {
+    return "";
+  }
+}
+
+// Petit renderer markdown sans dependance : gere les titres ##, listes -, bold **,
+// italic *, code inline `, links [text](url), paragraphes. Echappe le HTML pour
+// eviter toute injection si les release notes contenaient du HTML brut.
+function renderSimpleMarkdown(md) {
+  if (!md) return "";
+  const escaped = md
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  const lines = escaped.split(/\r?\n/);
+  const out = [];
+  let inList = false;
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+    if (!line.trim()) {
+      if (inList) { out.push("</ul>"); inList = false; }
+      continue;
+    }
+    // Titres h2/h3
+    let m = line.match(/^###\s+(.*)$/);
+    if (m) {
+      if (inList) { out.push("</ul>"); inList = false; }
+      out.push(`<h3>${inlineMarkdown(m[1])}</h3>`);
+      continue;
+    }
+    m = line.match(/^##\s+(.*)$/);
+    if (m) {
+      if (inList) { out.push("</ul>"); inList = false; }
+      out.push(`<h2>${inlineMarkdown(m[1])}</h2>`);
+      continue;
+    }
+    // Liste -
+    m = line.match(/^[\s]*[-*]\s+(.*)$/);
+    if (m) {
+      if (!inList) { out.push("<ul>"); inList = true; }
+      out.push(`<li>${inlineMarkdown(m[1])}</li>`);
+      continue;
+    }
+    // Paragraphe
+    if (inList) { out.push("</ul>"); inList = false; }
+    out.push(`<p>${inlineMarkdown(line)}</p>`);
+  }
+  if (inList) out.push("</ul>");
+  return out.join("\n");
+}
+
+function inlineMarkdown(text) {
+  return text
+    // Bold + italic
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|\W)\*([^*\s][^*]*[^*\s])\*(?=\W|$)/g, "$1<em>$2</em>")
+    // Code inline
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    // Links [text](url) - url restreinte a http(s) ou anchor pour bloquer javascript:
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+|#[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
 }
 
 function registerServiceWorker() {
