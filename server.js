@@ -23,9 +23,25 @@ const ENABLE_DB_EXPORT = process.env.SEREO_ENABLE_DB_EXPORT === "1";
 const AUTH_USER = cleanEnv(process.env.SEREO_AUTH_USER);
 const AUTH_PASSWORD = cleanEnv(process.env.SEREO_AUTH_PASSWORD);
 const AUTH_REALM = cleanEnv(process.env.SEREO_AUTH_REALM) || "Sereo";
-const AUTH_SESSION_SECRET = cleanEnv(process.env.SEREO_AUTH_SESSION_SECRET) || AUTH_PASSWORD || AUTH_REALM;
+// Le secret de signature integre TOUJOURS le password courant pour qu'un
+// changement de mot de passe invalide automatiquement toutes les sessions
+// existantes, meme si SEREO_AUTH_SESSION_SECRET est explicitement defini.
+const AUTH_SESSION_SECRET_BASE = cleanEnv(process.env.SEREO_AUTH_SESSION_SECRET) || AUTH_REALM;
+const AUTH_SESSION_SECRET = `${AUTH_SESSION_SECRET_BASE}|${AUTH_PASSWORD}`;
 const AUTH_COOKIE_NAME = "sereo_access";
 const AUTH_COOKIE_MAX_AGE_SECONDS = 12 * 60 * 60;
+
+// Rate limit sur /login pour eviter le brute-force.
+// App privee pro derriere SWAG : on prend des valeurs douces pour ne pas
+// genaner un utilisateur qui se trompe quelques fois, tout en bloquant un
+// attaquant qui tenterait 1000+ tentatives/sec.
+//   - MAX_ATTEMPTS : nb de tentatives ratees autorisees avant lockout
+//   - WINDOW_MS    : fenetre glissante pour compter les echecs
+//   - LOCKOUT_MS   : duree du lockout une fois MAX_ATTEMPTS atteint
+// Configurable via env pour ajuster en prod si necessaire.
+const AUTH_RATE_LIMIT_MAX_ATTEMPTS = Math.max(1, Number(process.env.SEREO_AUTH_MAX_ATTEMPTS) || 5);
+const AUTH_RATE_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.SEREO_AUTH_RATE_WINDOW_MS) || 15 * 60 * 1000);
+const AUTH_RATE_LIMIT_LOCKOUT_MS = Math.max(1000, Number(process.env.SEREO_AUTH_LOCKOUT_MS) || 15 * 1000);
 
 const MAX_UPLOAD_SIZE = 10 * 1024 * 1024;
 const MAX_BRAND_IMAGE_DATA_URL_SIZE = 3 * 1024 * 1024;
@@ -69,6 +85,11 @@ const upload = multer({
 });
 
 app.disable("x-powered-by");
+// Trust le 1er proxy (SWAG en prod, harmless en dev local).
+// Permet a req.ip de retourner la vraie IP client via X-Forwarded-For, ce qui
+// est indispensable pour que le rate limit s'applique par utilisateur et pas
+// sur l'IP unique du reverse proxy.
+app.set("trust proxy", 1);
 app.use(securityHeaders);
 app.use("/brand", express.static(path.join(__dirname, "public", "brand"), { immutable: true, maxAge: "1d" }));
 app.get("/favicon.svg", (req, res) => {
@@ -79,6 +100,11 @@ app.get("/healthz", (req, res) => {
 });
 app.use(express.urlencoded({ extended: false, limit: "20kb" }));
 app.get("/login", renderLoginPage);
+app.get("/login.js", (req, res) => {
+  // Asset JS de la page login (countdown lockout). Servi avant requireAccessAuth
+  // pour etre accessible sans authentification.
+  res.sendFile(path.join(__dirname, "public", "login.js"));
+});
 app.post("/login", handleLogin);
 app.post("/logout", handleLogout);
 app.use(requireAccessAuth);
@@ -90,6 +116,87 @@ app.use("/api", requireTrustedApiRequest);
 function cleanEnv(value) {
   return String(value ?? "").trim();
 }
+
+// ============================================================================
+// Rate limit auth (en memoire, par IP)
+// ============================================================================
+// State : Map<ip, { failedTimestamps: number[], lockedUntil: number | null }>
+// Volontairement en memoire process : l'app est mono-instance (sereo container
+// unique). Les tentatives ratees sont oubliees au redemarrage, ce qui est
+// acceptable car (a) un attaquant qui force redemarrage n'est pas notre
+// modele de menace, (b) un utilisateur legitime n'attend que 15 min pour
+// reset naturel via la fenetre glissante.
+const authRateLimitState = new Map();
+
+function getAuthRateLimitStatus(ip, now) {
+  const time = now || Date.now();
+  const entry = authRateLimitState.get(ip);
+  if (!entry) {
+    return { attempts: 0, remaining: AUTH_RATE_LIMIT_MAX_ATTEMPTS, locked: false, remainingMs: 0 };
+  }
+  const cutoff = time - AUTH_RATE_LIMIT_WINDOW_MS;
+  entry.failedTimestamps = entry.failedTimestamps.filter(t => t > cutoff);
+  if (entry.lockedUntil && entry.lockedUntil > time) {
+    return {
+      attempts: entry.failedTimestamps.length,
+      remaining: 0,
+      locked: true,
+      remainingMs: entry.lockedUntil - time,
+      lockedUntil: entry.lockedUntil
+    };
+  }
+  if (entry.lockedUntil && entry.lockedUntil <= time) {
+    // Le lockout vient de finir : on reset le compteur pour que l'utilisateur
+    // reparte sur 5 tentatives fraiches.
+    entry.failedTimestamps = [];
+    entry.lockedUntil = null;
+  }
+  return {
+    attempts: entry.failedTimestamps.length,
+    remaining: Math.max(0, AUTH_RATE_LIMIT_MAX_ATTEMPTS - entry.failedTimestamps.length),
+    locked: false,
+    remainingMs: 0
+  };
+}
+
+function recordAuthFailure(ip, now) {
+  const time = now || Date.now();
+  let entry = authRateLimitState.get(ip);
+  if (!entry) {
+    entry = { failedTimestamps: [], lockedUntil: null };
+    authRateLimitState.set(ip, entry);
+  }
+  const cutoff = time - AUTH_RATE_LIMIT_WINDOW_MS;
+  entry.failedTimestamps = entry.failedTimestamps.filter(t => t > cutoff);
+  entry.failedTimestamps.push(time);
+  if (entry.failedTimestamps.length >= AUTH_RATE_LIMIT_MAX_ATTEMPTS) {
+    entry.lockedUntil = time + AUTH_RATE_LIMIT_LOCKOUT_MS;
+  }
+  return getAuthRateLimitStatus(ip, time);
+}
+
+function clearAuthFailures(ip) {
+  authRateLimitState.delete(ip);
+}
+
+function getClientIp(req) {
+  return req.ip || req.socket?.remoteAddress || "unknown";
+}
+
+// Nettoyage periodique pour eviter une croissance non bornee de la Map.
+// Tourne toutes les 5 min, supprime les IPs sans tentative recente ni lockout actif.
+const authRateLimitCleanupInterval = setInterval(() => {
+  const now = Date.now();
+  const cutoff = now - AUTH_RATE_LIMIT_WINDOW_MS;
+  for (const [ip, entry] of authRateLimitState.entries()) {
+    const recentFailures = entry.failedTimestamps.some(t => t > cutoff);
+    const stillLocked = entry.lockedUntil && entry.lockedUntil > now;
+    if (!recentFailures && !stillLocked) {
+      authRateLimitState.delete(ip);
+    }
+  }
+}, 5 * 60 * 1000);
+authRateLimitCleanupInterval.unref();
 
 function loadEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return;
@@ -323,11 +430,34 @@ function renderLoginPage(req, res) {
 
   const hasError = req.query.error === "1";
   const next = getSafeRedirectTarget(req.query.next);
-  const errorMarkup = hasError
-    ? '<p class="login-error" role="alert">Identifiant ou mot de passe incorrect.</p>'
-    : "";
 
-  res.status(hasError ? 401 : 200).send(`<!doctype html>
+  // Etat du rate limit pour cette IP, calcule a chaque GET /login.
+  // Source de verite serveur (la query ?locked=1 peut etre obsolete si le
+  // lockout a expire entre le POST et le GET).
+  const status = getAuthRateLimitStatus(getClientIp(req));
+  const isLocked = status.locked;
+  const lockedSeconds = isLocked ? Math.ceil(status.remainingMs / 1000) : 0;
+  const lockedUntilMs = isLocked ? status.lockedUntil : 0;
+
+  let errorMarkup = "";
+  if (isLocked) {
+    const plural = lockedSeconds > 1 ? "s" : "";
+    errorMarkup = `<p class="login-error" role="alert" aria-live="polite">Trop de tentatives. R&eacute;essaie dans <span id="lockout-countdown">${lockedSeconds}</span> seconde${plural}.</p>`;
+  } else if (hasError) {
+    const attemptsRemaining = status.remaining;
+    const attemptsLine = attemptsRemaining > 0 && attemptsRemaining < AUTH_RATE_LIMIT_MAX_ATTEMPTS
+      ? `<span class="login-error-attempts">Il te reste ${attemptsRemaining} tentative${attemptsRemaining > 1 ? "s" : ""} avant blocage.</span>`
+      : "";
+    errorMarkup = `<p class="login-error" role="alert">Identifiant ou mot de passe incorrect.${attemptsLine ? " " + attemptsLine : ""}</p>`;
+  }
+
+  const responseStatus = isLocked ? 429 : (hasError ? 401 : 200);
+  if (isLocked) {
+    res.setHeader("Retry-After", String(lockedSeconds));
+  }
+  const bodyLockedAttr = isLocked ? ` data-locked-until="${lockedUntilMs}"` : "";
+
+  res.status(responseStatus).send(`<!doctype html>
 <html lang="fr">
 <head>
   <meta charset="utf-8">
@@ -448,13 +578,26 @@ function renderLoginPage(req, res) {
       font-weight: 700;
     }
 
+    .login-error-attempts {
+      display: block;
+      margin-top: 6px;
+      font-weight: 500;
+      font-size: 13px;
+      color: rgba(156, 52, 31, 0.86);
+    }
+
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
     @media (max-width: 480px) {
       body { padding: 16px; }
       .login-card { padding: 24px; border-radius: 22px; }
     }
   </style>
 </head>
-<body>
+<body${bodyLockedAttr}>
   <main class="login-card" aria-labelledby="login-title">
     <div class="brand"><img src="/brand/sereo-logo.svg" alt="s&eacute;r&eacute;o"></div>
     <h1 id="login-title">Acc&egrave;s prot&eacute;g&eacute;</h1>
@@ -463,12 +606,13 @@ function renderLoginPage(req, res) {
     <form method="post" action="/login">
       <input type="hidden" name="next" value="${escapeHtml(next)}">
       <label for="username">Identifiant</label>
-      <input id="username" name="username" autocomplete="username" autofocus required>
+      <input id="username" name="username" autocomplete="username" autofocus ${isLocked ? "disabled" : "required"}>
       <label for="password">Mot de passe</label>
-      <input id="password" name="password" type="password" autocomplete="current-password" required>
-      <button type="submit">Se connecter</button>
+      <input id="password" name="password" type="password" autocomplete="current-password" ${isLocked ? "disabled" : "required"}>
+      <button type="submit"${isLocked ? " disabled" : ""}>Se connecter</button>
     </form>
   </main>
+  <script src="/login.js"></script>
 </body>
 </html>`);
 }
@@ -482,17 +626,34 @@ function handleLogin(req, res) {
   const next = getSafeRedirectTarget(req.body.next);
   const username = cleanEnv(req.body.username);
   const password = cleanEnv(req.body.password);
+  const ip = getClientIp(req);
 
   if (!isAccessAuthEnabled()) {
     res.redirect(next);
     return;
   }
 
-  if (!constantTimeEqual(username, AUTH_USER) || !constantTimeEqual(password, AUTH_PASSWORD)) {
-    res.redirect(303, `/login?error=1&next=${encodeURIComponent(next)}`);
+  // Si l'IP est verrouillee, on rejette AVANT meme de comparer les credentials.
+  // Cela protege aussi contre la timing-analysis sur des comptes connus.
+  const status = getAuthRateLimitStatus(ip);
+  if (status.locked) {
+    res.setHeader("Retry-After", String(Math.ceil(status.remainingMs / 1000)));
+    res.redirect(303, `/login?locked=1&until=${status.lockedUntil}&next=${encodeURIComponent(next)}`);
     return;
   }
 
+  if (!constantTimeEqual(username, AUTH_USER) || !constantTimeEqual(password, AUTH_PASSWORD)) {
+    const updated = recordAuthFailure(ip);
+    if (updated.locked) {
+      res.setHeader("Retry-After", String(Math.ceil(updated.remainingMs / 1000)));
+      res.redirect(303, `/login?locked=1&until=${updated.lockedUntil}&next=${encodeURIComponent(next)}`);
+      return;
+    }
+    res.redirect(303, `/login?error=1&remaining=${updated.remaining}&next=${encodeURIComponent(next)}`);
+    return;
+  }
+
+  clearAuthFailures(ip);
   res.setHeader("Set-Cookie", buildAuthCookie(createAccessSessionValue(), AUTH_COOKIE_MAX_AGE_SECONDS, req));
   res.redirect(303, next);
 }
@@ -2735,6 +2896,9 @@ module.exports = {
   parseBasicAuthHeader,
   isAuthorizedRequest,
   isAccessAuthEnabled,
+  // Helpers de test : ne pas appeler depuis du code applicatif
+  _resetAuthRateLimitForTest: () => authRateLimitState.clear(),
+  _getAuthRateLimitMaxAttempts: () => AUTH_RATE_LIMIT_MAX_ATTEMPTS,
   DB_PATH,
   SQLITE_PATH,
   STORAGE_ENGINE,
