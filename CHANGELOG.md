@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.8.0](https://github.com/tombague160-maker/sereo-production/compare/v1.7.0...v1.8.0) (2026-05-14)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **login:** refonte split-screen desktop (pattern B2B SaaS 2026) ([562c2c0](https://github.com/tombague160-maker/sereo-production/commit/562c2c0b18ee79dba676dbd2b4ce401a94e4eaca))
+* **login:** refonte split-screen desktop (pattern B2B SaaS 2026) ([868c1e3](https://github.com/tombague160-maker/sereo-production/commit/868c1e33a9be25972447efb03c4669656680e2f2))
+
+
+### 🐛 Corrections de bugs
+
+* **version:** /api/version pas mis en cache (HTTP + Service Worker) ([98deaad](https://github.com/tombague160-maker/sereo-production/commit/98deaad885517d606b62647f82c33d4fabd30046))
+* **version:** /api/version pas mis en cache (HTTP + Service Worker) ([0bfc0c5](https://github.com/tombague160-maker/sereo-production/commit/0bfc0c5bf1299673c143956fe92ecbc6219cb763))
+
 ## [1.7.0](https://github.com/tombague160-maker/sereo-production/compare/v1.6.0...v1.7.0) (2026-05-14)
 
 
