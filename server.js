@@ -614,29 +614,31 @@ function renderLoginPage(req, res) {
   <title>Connexion - s&eacute;r&eacute;o</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <style>
+    /* Palette strictement brand sereo : teal, vert pastel, orange pastel.
+       Aucune couleur "neutre froide" pour garder le ton chaleureux + pro. */
     :root {
       --brand-teal: #0e6b63;
       --brand-teal-dark: #0f3d3d;
+      --brand-teal-glow: rgba(14, 107, 99, 0.18);
       --pastel-green: #cfe9e1;
       --pastel-green-light: #e8f4ef;
       --pastel-orange: #ffc4a3;
       --pastel-orange-light: #fff0e8;
       --pastel-orange-strong: #f47a5a;
+      --pastel-orange-glow: rgba(244, 122, 90, 0.22);
       --surface: #ffffff;
       --surface-soft: #fbfefd;
       --text: #102a2f;
       --text-soft: #4f686b;
-      --border-soft: rgba(14, 107, 99, 0.14);
-      --shadow-card: 0 32px 80px rgba(15, 41, 55, 0.12), 0 8px 24px rgba(15, 41, 55, 0.04);
     }
 
     * { box-sizing: border-box; }
 
-    html, body {
-      margin: 0;
-      min-height: 100vh;
-    }
+    html, body { margin: 0; min-height: 100vh; }
 
+    /* Fond : 3 radial-gradients qui dressent une "scene" pastel. L'animation
+       lente sur les positions (40s) cree un effet de derive subtile, comme
+       une lumiere ambiante qui change d'humeur. */
     body {
       position: relative;
       display: grid;
@@ -645,174 +647,251 @@ function renderLoginPage(req, res) {
       font-family: Inter, "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
       color: var(--text);
       background:
-        radial-gradient(900px circle at 8% 6%, rgba(207, 233, 225, 0.7), transparent 60%),
-        radial-gradient(700px circle at 96% 94%, rgba(255, 196, 163, 0.55), transparent 60%),
-        radial-gradient(500px circle at 92% 12%, rgba(255, 240, 232, 0.55), transparent 60%),
+        radial-gradient(620px circle at var(--bg-x1, 12%) var(--bg-y1, 18%), rgba(207, 233, 225, 0.78), transparent 60%),
+        radial-gradient(720px circle at var(--bg-x2, 88%) var(--bg-y2, 78%), rgba(255, 196, 163, 0.52), transparent 62%),
+        radial-gradient(420px circle at 50% 50%, rgba(232, 244, 239, 0.5), transparent 70%),
         #fafaf8;
+      animation: bg-drift 42s ease-in-out infinite alternate;
       overflow-x: hidden;
     }
 
-    /* Blobs decoratifs flottants pour donner un peu de profondeur */
+    /* Definit les variables de position que l'animation va interpoler. */
+    @property --bg-x1 { syntax: "<percentage>"; inherits: true; initial-value: 12%; }
+    @property --bg-y1 { syntax: "<percentage>"; inherits: true; initial-value: 18%; }
+    @property --bg-x2 { syntax: "<percentage>"; inherits: true; initial-value: 88%; }
+    @property --bg-y2 { syntax: "<percentage>"; inherits: true; initial-value: 78%; }
+
+    @keyframes bg-drift {
+      0%   { --bg-x1: 12%; --bg-y1: 18%; --bg-x2: 88%; --bg-y2: 78%; }
+      50%  { --bg-x1: 28%; --bg-y1: 8%;  --bg-x2: 72%; --bg-y2: 92%; }
+      100% { --bg-x1: 18%; --bg-y1: 32%; --bg-x2: 82%; --bg-y2: 68%; }
+    }
+
+    /* 2 blobs decoratifs qui respirent (scale + drift lent) - effet luxe. */
     body::before, body::after {
       content: "";
       position: absolute;
       border-radius: 50%;
-      filter: blur(48px);
+      filter: blur(64px);
       pointer-events: none;
       z-index: 0;
+      mix-blend-mode: multiply;
     }
     body::before {
-      width: 280px;
-      height: 280px;
-      background: rgba(207, 233, 225, 0.55);
-      top: -60px;
-      left: -80px;
+      width: 360px;
+      height: 360px;
+      background: var(--pastel-green);
+      top: -90px;
+      left: -100px;
+      animation: blob-breathe-1 14s ease-in-out infinite;
     }
     body::after {
-      width: 320px;
-      height: 320px;
-      background: rgba(255, 196, 163, 0.42);
-      bottom: -100px;
-      right: -100px;
+      width: 400px;
+      height: 400px;
+      background: var(--pastel-orange);
+      bottom: -120px;
+      right: -120px;
+      animation: blob-breathe-2 16s ease-in-out infinite;
+    }
+    @keyframes blob-breathe-1 {
+      0%, 100% { transform: scale(1) translate(0, 0);     opacity: 0.55; }
+      50%      { transform: scale(1.12) translate(20px, 30px); opacity: 0.75; }
+    }
+    @keyframes blob-breathe-2 {
+      0%, 100% { transform: scale(1) translate(0, 0);      opacity: 0.45; }
+      50%      { transform: scale(1.08) translate(-30px, -20px); opacity: 0.62; }
     }
 
-    .login-card {
+    /* Carte : double border-radius pour un effet "encadre dans un cadre".
+       Le cadre exterieur est une fine "halo" gradient brand qui pulse tres
+       legerement. La carte interieure reste minimaliste blanche. */
+    .login-frame {
       position: relative;
       z-index: 1;
-      width: min(100%, 440px);
-      padding: 40px 36px 32px;
-      border: 1px solid var(--border-soft);
-      border-radius: 28px;
-      background: rgba(255, 255, 255, 0.96);
-      backdrop-filter: blur(18px);
-      box-shadow: var(--shadow-card);
-      animation: card-in 380ms cubic-bezier(0.16, 1, 0.3, 1);
+      padding: 3px;
+      border-radius: 32px;
+      background: linear-gradient(135deg, var(--pastel-green) 0%, rgba(255, 255, 255, 0.5) 38%, var(--pastel-orange) 100%);
+      background-size: 200% 200%;
+      box-shadow:
+        0 32px 80px rgba(14, 107, 99, 0.14),
+        0 8px 24px rgba(15, 41, 55, 0.06),
+        0 0 60px -20px var(--brand-teal-glow),
+        0 0 80px -30px var(--pastel-orange-glow);
+      animation: frame-glow 8s ease-in-out infinite alternate, card-in 480ms cubic-bezier(0.16, 1, 0.3, 1);
     }
-
+    @keyframes frame-glow {
+      0%   { background-position: 0% 50%; box-shadow:
+        0 32px 80px rgba(14, 107, 99, 0.14),
+        0 8px 24px rgba(15, 41, 55, 0.06),
+        0 0 60px -20px var(--brand-teal-glow),
+        0 0 80px -30px var(--pastel-orange-glow);
+      }
+      100% { background-position: 100% 50%; box-shadow:
+        0 36px 88px rgba(14, 107, 99, 0.18),
+        0 10px 28px rgba(15, 41, 55, 0.08),
+        0 0 80px -16px var(--brand-teal-glow),
+        0 0 100px -22px var(--pastel-orange-glow);
+      }
+    }
     @keyframes card-in {
-      from { opacity: 0; transform: translateY(14px) scale(0.985); }
+      from { opacity: 0; transform: translateY(18px) scale(0.97); }
       to   { opacity: 1; transform: translateY(0) scale(1); }
     }
 
+    .login-card {
+      width: min(100%, 440px);
+      padding: 40px 38px 30px;
+      border-radius: 29px;
+      background: rgba(255, 255, 255, 0.94);
+      backdrop-filter: blur(20px) saturate(115%);
+      -webkit-backdrop-filter: blur(20px) saturate(115%);
+    }
+
+    /* Logo : carre blanc raffine avec une fine touche de teal en bordure */
     .brand {
       display: flex;
       align-items: center;
       justify-content: center;
-      min-height: 92px;
-      margin-bottom: 24px;
+      min-height: 96px;
+      margin-bottom: 28px;
       padding: 14px 22px;
       border-radius: 20px;
-      background: linear-gradient(135deg, var(--pastel-green-light), #ffffff);
-      box-shadow: 0 14px 28px rgba(53, 111, 112, 0.08);
+      background: linear-gradient(135deg, var(--pastel-green-light) 0%, #ffffff 60%);
+      box-shadow:
+        0 16px 32px rgba(14, 107, 99, 0.08),
+        inset 0 0 0 1px rgba(14, 107, 99, 0.08);
     }
-
     .brand img {
-      max-width: 180px;
+      max-width: 188px;
       max-height: 64px;
       object-fit: contain;
     }
 
+    /* Titre + icone cadenas : icone dans un disque pastel pour faire focal point */
     .title-row {
       display: flex;
       align-items: center;
-      gap: 12px;
-      margin-bottom: 8px;
+      gap: 14px;
+      margin-bottom: 10px;
     }
-
     .title-row svg {
       flex-shrink: 0;
-      width: 28px;
-      height: 28px;
-      padding: 6px;
-      border-radius: 10px;
-      background: var(--pastel-green-light);
+      width: 32px;
+      height: 32px;
+      padding: 7px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--pastel-green-light), #ffffff);
       color: var(--brand-teal);
+      box-shadow: inset 0 0 0 1px rgba(14, 107, 99, 0.1);
     }
-
     h1 {
       margin: 0;
       color: var(--brand-teal);
-      font-size: 26px;
+      font-size: 27px;
       font-weight: 800;
-      line-height: 1.2;
-      letter-spacing: -0.01em;
+      line-height: 1.18;
+      letter-spacing: -0.015em;
     }
 
     .intro {
-      margin: 0 0 28px;
+      margin: 0 0 30px;
       color: var(--text-soft);
       line-height: 1.5;
       font-size: 15px;
     }
 
-    .field {
-      margin-bottom: 16px;
-    }
+    .field { margin-bottom: 16px; }
 
     label {
       display: block;
-      margin: 0 0 6px;
+      margin: 0 0 7px;
       color: var(--brand-teal-dark);
       font-weight: 700;
-      font-size: 13px;
-      letter-spacing: 0.02em;
+      font-size: 12.5px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
     }
 
     input {
       width: 100%;
-      min-height: 50px;
-      padding: 12px 16px;
-      border: 1.5px solid var(--border-soft);
+      min-height: 52px;
+      padding: 14px 16px;
+      border: 1.5px solid rgba(14, 107, 99, 0.12);
       border-radius: 14px;
       background: var(--surface-soft);
       color: var(--text);
       font: inherit;
-      font-size: 15px;
+      font-size: 15.5px;
       outline: none;
-      transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+      transition: border-color 180ms ease, box-shadow 220ms ease, background-color 180ms ease;
     }
-
     input:hover:not(:disabled) {
+      border-color: rgba(14, 107, 99, 0.22);
       background: var(--surface);
     }
-
     input:focus {
       border-color: var(--pastel-orange-strong);
       background: var(--surface);
-      box-shadow: 0 0 0 4px rgba(255, 196, 163, 0.32);
+      box-shadow:
+        0 0 0 4px rgba(255, 196, 163, 0.34),
+        0 0 24px -4px rgba(244, 122, 90, 0.22);
     }
+    input:disabled { opacity: 0.6; cursor: not-allowed; }
 
-    input:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-    }
-
+    /* Bouton : gradient teal->orange (signature brand sereo), shine sweep
+       sur hover pour un effet "haut de gamme" subtil */
     button[type="submit"] {
+      position: relative;
       width: 100%;
-      min-height: 52px;
-      margin-top: 8px;
+      min-height: 54px;
+      margin-top: 10px;
       border: 0;
       border-radius: 14px;
-      background: linear-gradient(135deg, var(--pastel-orange-strong), #e96d50);
+      background: linear-gradient(135deg, var(--brand-teal) 0%, var(--pastel-orange-strong) 100%);
+      background-size: 180% 180%;
+      background-position: 0% 50%;
       color: white;
       font: inherit;
-      font-size: 15px;
+      font-size: 15.5px;
       font-weight: 800;
-      letter-spacing: 0.02em;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
       cursor: pointer;
-      box-shadow: 0 14px 28px rgba(244, 122, 90, 0.26);
-      transition: transform 120ms ease, box-shadow 160ms ease, opacity 120ms ease;
+      overflow: hidden;
+      isolation: isolate;
+      box-shadow:
+        0 16px 32px rgba(244, 122, 90, 0.26),
+        0 4px 12px rgba(14, 107, 99, 0.14);
+      transition: transform 160ms ease, box-shadow 240ms ease, background-position 600ms ease;
     }
-
+    /* Shine sweep effet luxe au hover */
+    button[type="submit"]::after {
+      content: "";
+      position: absolute;
+      top: 0; left: -100%;
+      width: 60%;
+      height: 100%;
+      background: linear-gradient(120deg,
+        transparent 0%,
+        rgba(255, 255, 255, 0.32) 50%,
+        transparent 100%);
+      transform: skewX(-22deg);
+      transition: left 700ms ease;
+      pointer-events: none;
+      z-index: 1;
+    }
     button[type="submit"]:hover:not(:disabled) {
-      transform: translateY(-1px);
-      box-shadow: 0 18px 32px rgba(244, 122, 90, 0.34);
+      transform: translateY(-2px);
+      background-position: 100% 50%;
+      box-shadow:
+        0 22px 40px rgba(244, 122, 90, 0.34),
+        0 6px 16px rgba(14, 107, 99, 0.18),
+        0 0 0 1px rgba(255, 255, 255, 0.4) inset;
     }
-
-    button[type="submit"]:active:not(:disabled) {
-      transform: translateY(0);
+    button[type="submit"]:hover:not(:disabled)::after {
+      left: 140%;
     }
-
+    button[type="submit"]:active:not(:disabled) { transform: translateY(-1px); }
     button[type="submit"]:disabled {
       opacity: 0.55;
       cursor: not-allowed;
@@ -824,19 +903,17 @@ function renderLoginPage(req, res) {
       padding: 14px 16px;
       border: 1px solid rgba(244, 122, 90, 0.28);
       border-radius: 14px;
-      background: rgba(255, 196, 163, 0.22);
+      background: linear-gradient(135deg, rgba(255, 196, 163, 0.28), rgba(255, 240, 232, 0.18));
       color: #9c341f;
       font-weight: 600;
       font-size: 14px;
-      line-height: 1.4;
-      animation: error-in 320ms cubic-bezier(0.16, 1, 0.3, 1);
+      line-height: 1.45;
+      animation: error-in 360ms cubic-bezier(0.16, 1, 0.3, 1);
     }
-
     @keyframes error-in {
-      from { opacity: 0; transform: translateY(-4px); }
+      from { opacity: 0; transform: translateY(-6px); }
       to   { opacity: 1; transform: translateY(0); }
     }
-
     .login-error-attempts {
       display: block;
       margin-top: 6px;
@@ -847,70 +924,75 @@ function renderLoginPage(req, res) {
 
     #lockout-countdown {
       display: inline-block;
-      min-width: 1.2em;
-      padding: 1px 6px;
-      margin: 0 2px;
-      border-radius: 8px;
-      background: rgba(156, 52, 31, 0.12);
+      min-width: 1.4em;
+      padding: 2px 8px;
+      margin: 0 3px;
+      border-radius: 10px;
+      background: rgba(156, 52, 31, 0.14);
       font-variant-numeric: tabular-nums;
       font-weight: 800;
     }
 
     .footer-hint {
-      margin: 22px 0 0;
+      margin: 26px 0 0;
       text-align: center;
       font-size: 12px;
       color: var(--text-soft);
+      letter-spacing: 0.02em;
     }
-
     .footer-hint a {
       color: var(--brand-teal);
       text-decoration: none;
+      font-weight: 600;
+      transition: color 160ms ease;
     }
-
-    .footer-hint a:hover {
-      text-decoration: underline;
-    }
+    .footer-hint a:hover { color: var(--pastel-orange-strong); }
 
     @media (max-width: 480px) {
       body { padding: 16px; }
-      .login-card { padding: 28px 22px 24px; border-radius: 24px; }
-      h1 { font-size: 22px; }
-      .intro { font-size: 14px; margin-bottom: 22px; }
+      .login-frame { border-radius: 26px; }
+      .login-card { padding: 28px 22px 22px; border-radius: 23px; }
+      h1 { font-size: 23px; }
+      .title-row svg { width: 28px; height: 28px; padding: 6px; }
+      .intro { font-size: 14.5px; margin-bottom: 24px; }
     }
 
+    /* Accessibilite : on coupe TOUTES les animations decoratives si demande */
     @media (prefers-reduced-motion: reduce) {
-      .login-card, .login-error { animation: none; }
+      body, body::before, body::after, .login-frame { animation: none; }
       button[type="submit"]:hover:not(:disabled) { transform: none; }
+      button[type="submit"]::after { display: none; }
     }
   </style>
 </head>
 <body${bodyLockedAttr}>
-  <main class="login-card" aria-labelledby="login-title">
-    <div class="brand"><img src="/brand/sereo-logo.svg" alt="s&eacute;r&eacute;o"></div>
-    <div class="title-row">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <rect x="4" y="11" width="16" height="10" rx="2" />
-        <path d="M8 11V7a4 4 0 0 1 8 0v4" />
-      </svg>
-      <h1 id="login-title">Acc&egrave;s prot&eacute;g&eacute;</h1>
-    </div>
-    <p class="intro">Connecte-toi pour ouvrir l'application.</p>
-    ${errorMarkup}
-    <form method="post" action="/login">
-      <input type="hidden" name="next" value="${escapeHtml(next)}">
-      <div class="field">
-        <label for="username">Identifiant</label>
-        <input id="username" name="username" autocomplete="username" autofocus ${isLocked ? "disabled" : "required"}>
+  <div class="login-frame">
+    <main class="login-card" aria-labelledby="login-title">
+      <div class="brand"><img src="/brand/sereo-logo.svg" alt="s&eacute;r&eacute;o"></div>
+      <div class="title-row">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="4" y="11" width="16" height="10" rx="2" />
+          <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+        </svg>
+        <h1 id="login-title">Acc&egrave;s prot&eacute;g&eacute;</h1>
       </div>
-      <div class="field">
-        <label for="password">Mot de passe</label>
-        <input id="password" name="password" type="password" autocomplete="current-password" ${isLocked ? "disabled" : "required"}>
-      </div>
-      <button type="submit"${isLocked ? " disabled" : ""}>Se connecter</button>
-    </form>
-    <p class="footer-hint">Application priv&eacute;e &middot; <a href="https://github.com/${GITHUB_REPO}/releases" target="_blank" rel="noopener noreferrer">v${APP_VERSION}</a></p>
-  </main>
+      <p class="intro">Connecte-toi pour ouvrir l'application.</p>
+      ${errorMarkup}
+      <form method="post" action="/login">
+        <input type="hidden" name="next" value="${escapeHtml(next)}">
+        <div class="field">
+          <label for="username">Identifiant</label>
+          <input id="username" name="username" autocomplete="username" autofocus ${isLocked ? "disabled" : "required"}>
+        </div>
+        <div class="field">
+          <label for="password">Mot de passe</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" ${isLocked ? "disabled" : "required"}>
+        </div>
+        <button type="submit"${isLocked ? " disabled" : ""}>Se connecter</button>
+      </form>
+      <p class="footer-hint">Application priv&eacute;e &middot; <a href="https://github.com/${GITHUB_REPO}/releases" target="_blank" rel="noopener noreferrer">v${APP_VERSION}</a></p>
+    </main>
+  </div>
   <script src="/login.js"></script>
 </body>
 </html>`);
