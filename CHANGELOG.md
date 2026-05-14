@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.5.0](https://github.com/tombague160-maker/sereo-production/compare/v1.4.0...v1.5.0) (2026-05-14)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **workflow:** state machine pour les transitions de status de commande ([5880b84](https://github.com/tombague160-maker/sereo-production/commit/5880b84cee5768c54c6f9888a61ea1846224c1b1))
+* **workflow:** state machine pour les transitions de status de commande ([919b3d2](https://github.com/tombague160-maker/sereo-production/commit/919b3d2bff8ee1fad1963afd81faa0ea5ff9c77c))
+
+
+### 🧪 Tests
+
+* ajoute 14 tests (CSP guard + import sequentiel + multi-stops routes) ([d73fc59](https://github.com/tombague160-maker/sereo-production/commit/d73fc59bb8afddf2829b87136eecd44e97bc4b64))
+* ajoute 14 tests (CSP guard + import sequentiel + multi-stops routes) ([12b5fca](https://github.com/tombague160-maker/sereo-production/commit/12b5fca98cee61fb69dc530a8de2d9089caec605))
+
 ## [1.4.0](https://github.com/tombague160-maker/sereo-production/compare/v1.3.9...v1.4.0) (2026-05-14)
 
 
