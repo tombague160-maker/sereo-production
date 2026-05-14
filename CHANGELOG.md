@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.2](https://github.com/tombague160-maker/sereo-production/compare/v1.8.1...v1.8.2) (2026-05-14)
+
+
+### 🐛 Corrections de bugs
+
+* **mobile:** tabbar 6 tabs cassait sur telephone, refonte 5 max + menu Plus ([#44](https://github.com/tombague160-maker/sereo-production/issues/44)) ([9891066](https://github.com/tombague160-maker/sereo-production/commit/989106632ab31a366f66c550518105e3687a8db4))
+
 ## [1.8.1](https://github.com/tombague160-maker/sereo-production/compare/v1.8.0...v1.8.1) (2026-05-14)
 
 
