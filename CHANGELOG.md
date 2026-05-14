@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.0](https://github.com/tombague160-maker/sereo-production/compare/v1.5.0...v1.6.0) (2026-05-14)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **ui:** version chip + modal "Quoi de neuf ?" + refonte login ([afe2a2b](https://github.com/tombague160-maker/sereo-production/commit/afe2a2b55715b2ded32856625d7be5a9d6be2c5b))
+* **ui:** version chip + modal release notes + refonte login + fix singulier ([5286675](https://github.com/tombague160-maker/sereo-production/commit/5286675bc85474b03995c00afe154aea1cf7045d))
+
 ## [1.5.0](https://github.com/tombague160-maker/sereo-production/compare/v1.4.0...v1.5.0) (2026-05-14)
 
 
