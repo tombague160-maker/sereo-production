@@ -68,6 +68,13 @@
   --gradient-overlay-light: rgba(255, 255, 255, 0.94);
   --tab-bg: rgba(255, 248, 244, 0.72);
   --tab-bg-hover: rgba(255, 240, 232, 0.92);
+  /* Boutons et badges d'etat danger (.danger / .ghost / .pill-danger).
+   * Centralises ici pour permettre l'override en dark mode (le rose pastel
+   * d'origine etait illisible sur fond sombre). */
+  --btn-danger-bg: #f8d8d0;
+  --btn-danger-bg-hover: #efb0a3;
+  --btn-danger-border: #efb0a3;
+  --btn-danger-soft-bg: #fff1ed;
   --border: #d8ebe5;
   --border-strong: #a9d2c8;
   --text: var(--color-text);
@@ -153,6 +160,10 @@
     --gradient-overlay-light: rgba(15, 60, 55, 0.22);
     --tab-bg: rgba(255, 255, 255, 0.04);
     --tab-bg-hover: rgba(255, 255, 255, 0.08);
+    --btn-danger-bg: rgba(201, 100, 88, 0.18);
+    --btn-danger-bg-hover: rgba(201, 100, 88, 0.32);
+    --btn-danger-border: rgba(201, 100, 88, 0.4);
+    --btn-danger-soft-bg: rgba(229, 139, 124, 0.1);
     --border: #2a3d3f;
     --border-strong: #4a6266;
 
@@ -163,6 +174,7 @@
     --green: #5da589;
     --orange: #d99772;
     --red: #c97264;
+    --red-dark: #ec9482;
 
     --toast-bg: #1a2628;
     --toast-success-bg: #1c5048;
@@ -207,6 +219,10 @@
   --gradient-overlay-light: rgba(15, 60, 55, 0.22);
   --tab-bg: rgba(255, 255, 255, 0.04);
   --tab-bg-hover: rgba(255, 255, 255, 0.08);
+  --btn-danger-bg: rgba(201, 100, 88, 0.18);
+  --btn-danger-bg-hover: rgba(201, 100, 88, 0.32);
+  --btn-danger-border: rgba(201, 100, 88, 0.4);
+  --btn-danger-soft-bg: rgba(229, 139, 124, 0.1);
   --border: #2a3d3f;
   --border-strong: #4a6266;
 
@@ -217,6 +233,7 @@
   --green: #5da589;
   --orange: #d99772;
   --red: #c97264;
+  --red-dark: #ec9482;
 
   --toast-bg: #1a2628;
   --toast-success-bg: #1c5048;
@@ -774,14 +791,14 @@ button {
 }
 
 .danger {
-  background: #f8d8d0;
-  color: #92372c;
-  border-color: #efb0a3;
+  background: var(--btn-danger-bg);
+  color: var(--red-dark);
+  border-color: var(--btn-danger-border);
 }
 
 .danger:hover {
-  background: #efb0a3;
-  color: #6f2019;
+  background: var(--btn-danger-bg-hover);
+  color: var(--red-dark);
 }
 
 .warning {
@@ -796,9 +813,9 @@ button {
 }
 
 .ghost {
-  background: #fff1ed;
+  background: var(--btn-danger-soft-bg);
   color: var(--red-dark);
-  border-color: #ffd3c6;
+  border-color: var(--btn-danger-border);
 }
 
 .compact {
@@ -1188,8 +1205,8 @@ label {
 }
 
 .pill-danger {
-  background: #ffe1d7;
-  color: #9e3f31;
+  background: var(--btn-danger-soft-bg);
+  color: var(--red-dark);
 }
 
 .pill-blue {
