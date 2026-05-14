@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.0](https://github.com/tombague160-maker/sereo-production/compare/v1.6.0...v1.7.0) (2026-05-14)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **login:** refonte plus luxe/pro - couleurs brand sereo animees subtilement ([7aac506](https://github.com/tombague160-maker/sereo-production/commit/7aac50622a10bd12f50a1daf20145f68c931bef7))
+* **login:** refonte plus luxe/pro - couleurs brand sereo animees subtilement ([d3a11af](https://github.com/tombague160-maker/sereo-production/commit/d3a11af149535a87bb383bd54dede71fda35e94f))
+
 ## [1.6.0](https://github.com/tombague160-maker/sereo-production/compare/v1.5.0...v1.6.0) (2026-05-14)
 
 
