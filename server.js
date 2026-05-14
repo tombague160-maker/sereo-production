@@ -227,7 +227,11 @@ app.get("/healthz", (req, res) => {
 app.get("/api/version", async (req, res) => {
   try {
     const cache = await fetchReleaseNotes(APP_VERSION);
-    res.set("Cache-Control", "public, max-age=300");
+    // no-store : le client ne doit JAMAIS cacher la version. Sinon apres un
+    // auto-deploy le frontend affiche encore l'ancien numero pendant la
+    // duree du cache. Le serveur lui-meme cache deja les release notes
+    // GitHub 1h en RAM via releaseNotesCache, donc la perf reste OK.
+    res.set("Cache-Control", "no-store, max-age=0");
     res.json({
       version: cache.version,
       releaseUrl: cache.releaseUrl,

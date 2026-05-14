@@ -1,5 +1,5 @@
-const CACHE_NAME = "sereo-shell-20260509-anti-fart";
-const API_CACHE_NAME = "sereo-api-20260506";
+const CACHE_NAME = "sereo-shell-20260514-version-nocache";
+const API_CACHE_NAME = "sereo-api-20260514";
 const APP_SHELL = [
   "/css/style.css",
   "/js/app.js",
@@ -14,7 +14,10 @@ const APP_SHELL = [
 ];
 
 // Endpoints /api/ a NE PAS cacher (auth-sensible, etat session, sante).
-const API_CACHE_EXCLUDED = ["/api/storage/status"];
+// /api/version : ne PAS cacher cote SW, sinon apres un auto-deploy le chip
+// version reste sur l'ancienne valeur tant que le SW sert le cache.
+// Le serveur envoie deja Cache-Control: no-store pour la couche HTTP.
+const API_CACHE_EXCLUDED = ["/api/storage/status", "/api/version"];
 
 // Network-first avec timeout puis fallback cache pour les GET /api/*.
 // Cible : reseau ok -> donnees fraiches, reseau lent/coupe -> derniere version connue.
@@ -92,8 +95,15 @@ self.addEventListener("fetch", event => {
     return;
   }
 
-  // Endpoints /api/* : strategie network-first avec timeout + fallback cache.
-  // Permet une consultation offline des dernieres donnees connues.
+  // Endpoints /api/* exclus du cache : on laisse passer au navigateur sans
+  // toucher au SW (le serveur gere via Cache-Control: no-store).
+  // Sinon ils seraient caches par le handler "ressources statiques" en bas.
+  if (url.pathname.startsWith("/api/") && !isApiCacheable(url)) {
+    return;
+  }
+
+  // Endpoints /api/* cacheables : strategie network-first avec timeout +
+  // fallback cache. Permet une consultation offline des dernieres donnees.
   if (isApiCacheable(url)) {
     event.respondWith(networkFirstApi(request));
     return;
