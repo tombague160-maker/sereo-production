@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.8.1](https://github.com/tombague160-maker/sereo-production/compare/v1.8.0...v1.8.1) (2026-05-14)
+
+
+### 🐛 Corrections de bugs
+
+* **login:** proportions mobile + autofill jaune navigateur ([09eaab7](https://github.com/tombague160-maker/sereo-production/commit/09eaab7ca873adde59a551365a1eeba8a15b4078))
+* **login:** proportions mobile + autofill jaune navigateur ([700c3da](https://github.com/tombague160-maker/sereo-production/commit/700c3dadcdee78d4649fd72b9ef0cbc31db49937))
+
 ## [1.8.0](https://github.com/tombague160-maker/sereo-production/compare/v1.7.0...v1.8.0) (2026-05-14)
 
 
