@@ -614,8 +614,7 @@ function renderLoginPage(req, res) {
   <title>Connexion - s&eacute;r&eacute;o</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <style>
-    /* Palette strictement brand sereo : teal, vert pastel, orange pastel.
-       Aucune couleur "neutre froide" pour garder le ton chaleureux + pro. */
+    /* Palette strictement brand sereo : teal, vert pastel, orange pastel. */
     :root {
       --brand-teal: #0e6b63;
       --brand-teal-dark: #0f3d3d;
@@ -636,138 +635,213 @@ function renderLoginPage(req, res) {
 
     html, body { margin: 0; min-height: 100vh; }
 
-    /* Fond : 3 radial-gradients qui dressent une "scene" pastel. L'animation
-       lente sur les positions (40s) cree un effet de derive subtile, comme
-       une lumiere ambiante qui change d'humeur. */
-    body {
-      position: relative;
+    /* =========================================================================
+       Layout split-screen (pattern B2B SaaS 2026)
+       - Desktop >= 1024px : 1.15fr (brand) / 1fr (form), full viewport
+       - Tablet 768-1023px : single column, hero band en haut compact
+       - Mobile  < 768px   : single column, pas de hero
+       ========================================================================= */
+    .login-page {
       display: grid;
-      place-items: center;
-      padding: 24px;
+      grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+      min-height: 100vh;
+    }
+    @media (max-width: 1023px) {
+      .login-page { grid-template-columns: 1fr; }
+    }
+
+    body {
       font-family: Inter, "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
       color: var(--text);
-      background:
-        radial-gradient(620px circle at var(--bg-x1, 12%) var(--bg-y1, 18%), rgba(207, 233, 225, 0.78), transparent 60%),
-        radial-gradient(720px circle at var(--bg-x2, 88%) var(--bg-y2, 78%), rgba(255, 196, 163, 0.52), transparent 62%),
-        radial-gradient(420px circle at 50% 50%, rgba(232, 244, 239, 0.5), transparent 70%),
-        #fafaf8;
-      animation: bg-drift 42s ease-in-out infinite alternate;
+      background: #fafaf8;
       overflow-x: hidden;
     }
 
-    /* Definit les variables de position que l'animation va interpoler. */
-    @property --bg-x1 { syntax: "<percentage>"; inherits: true; initial-value: 12%; }
-    @property --bg-y1 { syntax: "<percentage>"; inherits: true; initial-value: 18%; }
-    @property --bg-x2 { syntax: "<percentage>"; inherits: true; initial-value: 88%; }
+    /* =========================================================================
+       Panel BRAND (gauche desktop / haut tablet)
+       ========================================================================= */
+    .brand-panel {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 64px 56px;
+      overflow: hidden;
+      background:
+        radial-gradient(620px circle at var(--bg-x1, 18%) var(--bg-y1, 22%), rgba(255, 196, 163, 0.55), transparent 62%),
+        radial-gradient(720px circle at var(--bg-x2, 82%) var(--bg-y2, 78%), rgba(207, 233, 225, 0.85), transparent 60%),
+        linear-gradient(135deg, var(--pastel-green-light) 0%, #ffffff 50%, var(--pastel-orange-light) 100%);
+      animation: bg-drift 42s ease-in-out infinite alternate;
+    }
+    @media (max-width: 1023px) {
+      .brand-panel { padding: 40px 28px 32px; min-height: 280px; }
+    }
+    @media (max-width: 640px) {
+      .brand-panel { padding: 32px 22px 20px; min-height: 200px; }
+    }
+
+    @property --bg-x1 { syntax: "<percentage>"; inherits: true; initial-value: 18%; }
+    @property --bg-y1 { syntax: "<percentage>"; inherits: true; initial-value: 22%; }
+    @property --bg-x2 { syntax: "<percentage>"; inherits: true; initial-value: 82%; }
     @property --bg-y2 { syntax: "<percentage>"; inherits: true; initial-value: 78%; }
 
     @keyframes bg-drift {
-      0%   { --bg-x1: 12%; --bg-y1: 18%; --bg-x2: 88%; --bg-y2: 78%; }
-      50%  { --bg-x1: 28%; --bg-y1: 8%;  --bg-x2: 72%; --bg-y2: 92%; }
-      100% { --bg-x1: 18%; --bg-y1: 32%; --bg-x2: 82%; --bg-y2: 68%; }
+      0%   { --bg-x1: 18%; --bg-y1: 22%; --bg-x2: 82%; --bg-y2: 78%; }
+      50%  { --bg-x1: 32%; --bg-y1: 12%; --bg-x2: 68%; --bg-y2: 88%; }
+      100% { --bg-x1: 22%; --bg-y1: 35%; --bg-x2: 78%; --bg-y2: 65%; }
     }
 
-    /* 2 blobs decoratifs qui respirent (scale + drift lent) - effet luxe. */
-    body::before, body::after {
+    /* 2 blobs decoratifs qui respirent dans le panel brand */
+    .brand-panel::before, .brand-panel::after {
       content: "";
       position: absolute;
       border-radius: 50%;
-      filter: blur(64px);
+      filter: blur(72px);
       pointer-events: none;
       z-index: 0;
       mix-blend-mode: multiply;
     }
-    body::before {
-      width: 360px;
-      height: 360px;
+    .brand-panel::before {
+      width: 420px;
+      height: 420px;
       background: var(--pastel-green);
-      top: -90px;
-      left: -100px;
+      top: -110px;
+      left: -120px;
       animation: blob-breathe-1 14s ease-in-out infinite;
     }
-    body::after {
-      width: 400px;
-      height: 400px;
+    .brand-panel::after {
+      width: 460px;
+      height: 460px;
       background: var(--pastel-orange);
-      bottom: -120px;
-      right: -120px;
+      bottom: -140px;
+      right: -130px;
       animation: blob-breathe-2 16s ease-in-out infinite;
     }
     @keyframes blob-breathe-1 {
-      0%, 100% { transform: scale(1) translate(0, 0);     opacity: 0.55; }
-      50%      { transform: scale(1.12) translate(20px, 30px); opacity: 0.75; }
+      0%, 100% { transform: scale(1) translate(0, 0);          opacity: 0.5; }
+      50%      { transform: scale(1.12) translate(30px, 40px); opacity: 0.7; }
     }
     @keyframes blob-breathe-2 {
-      0%, 100% { transform: scale(1) translate(0, 0);      opacity: 0.45; }
-      50%      { transform: scale(1.08) translate(-30px, -20px); opacity: 0.62; }
+      0%, 100% { transform: scale(1) translate(0, 0);            opacity: 0.42; }
+      50%      { transform: scale(1.08) translate(-40px, -30px); opacity: 0.58; }
     }
 
-    /* Carte : double border-radius pour un effet "encadre dans un cadre".
-       Le cadre exterieur est une fine "halo" gradient brand qui pulse tres
-       legerement. La carte interieure reste minimaliste blanche. */
-    .login-frame {
+    .brand-content {
       position: relative;
       z-index: 1;
-      padding: 3px;
-      border-radius: 32px;
-      background: linear-gradient(135deg, var(--pastel-green) 0%, rgba(255, 255, 255, 0.5) 38%, var(--pastel-orange) 100%);
-      background-size: 200% 200%;
-      box-shadow:
-        0 32px 80px rgba(14, 107, 99, 0.14),
-        0 8px 24px rgba(15, 41, 55, 0.06),
-        0 0 60px -20px var(--brand-teal-glow),
-        0 0 80px -30px var(--pastel-orange-glow);
-      animation: frame-glow 8s ease-in-out infinite alternate, card-in 480ms cubic-bezier(0.16, 1, 0.3, 1);
-    }
-    @keyframes frame-glow {
-      0%   { background-position: 0% 50%; box-shadow:
-        0 32px 80px rgba(14, 107, 99, 0.14),
-        0 8px 24px rgba(15, 41, 55, 0.06),
-        0 0 60px -20px var(--brand-teal-glow),
-        0 0 80px -30px var(--pastel-orange-glow);
-      }
-      100% { background-position: 100% 50%; box-shadow:
-        0 36px 88px rgba(14, 107, 99, 0.18),
-        0 10px 28px rgba(15, 41, 55, 0.08),
-        0 0 80px -16px var(--brand-teal-glow),
-        0 0 100px -22px var(--pastel-orange-glow);
-      }
-    }
-    @keyframes card-in {
-      from { opacity: 0; transform: translateY(18px) scale(0.97); }
-      to   { opacity: 1; transform: translateY(0) scale(1); }
+      max-width: 480px;
+      margin: 0 auto;
+      text-align: center;
+      animation: card-in 600ms cubic-bezier(0.16, 1, 0.3, 1);
     }
 
-    .login-card {
-      width: min(100%, 440px);
-      padding: 40px 38px 30px;
-      border-radius: 29px;
-      background: rgba(255, 255, 255, 0.94);
-      backdrop-filter: blur(20px) saturate(115%);
-      -webkit-backdrop-filter: blur(20px) saturate(115%);
-    }
-
-    /* Logo : carre blanc raffine avec une fine touche de teal en bordure */
-    .brand {
-      display: flex;
+    .brand-logo-frame {
+      display: inline-flex;
       align-items: center;
       justify-content: center;
-      min-height: 96px;
-      margin-bottom: 28px;
-      padding: 14px 22px;
-      border-radius: 20px;
-      background: linear-gradient(135deg, var(--pastel-green-light) 0%, #ffffff 60%);
+      padding: 18px 30px;
+      margin-bottom: 32px;
+      border-radius: 24px;
+      background: rgba(255, 255, 255, 0.85);
+      backdrop-filter: blur(12px) saturate(120%);
       box-shadow:
-        0 16px 32px rgba(14, 107, 99, 0.08),
+        0 24px 48px rgba(14, 107, 99, 0.1),
         inset 0 0 0 1px rgba(14, 107, 99, 0.08);
+      animation: logo-pulse 6s ease-in-out infinite alternate;
     }
-    .brand img {
-      max-width: 188px;
-      max-height: 64px;
+    @keyframes logo-pulse {
+      0%   { box-shadow: 0 24px 48px rgba(14, 107, 99, 0.1), inset 0 0 0 1px rgba(14, 107, 99, 0.08); transform: scale(1); }
+      100% { box-shadow: 0 28px 56px rgba(14, 107, 99, 0.14), 0 0 60px -10px var(--brand-teal-glow), inset 0 0 0 1px rgba(14, 107, 99, 0.12); transform: scale(1.015); }
+    }
+    .brand-logo-frame img {
+      width: clamp(160px, 22vw, 240px);
+      height: auto;
       object-fit: contain;
     }
 
-    /* Titre + icone cadenas : icone dans un disque pastel pour faire focal point */
+    .brand-tagline {
+      margin: 0 0 36px;
+      color: var(--brand-teal-dark);
+      font-size: clamp(17px, 1.4vw, 21px);
+      line-height: 1.45;
+      font-weight: 600;
+      letter-spacing: -0.005em;
+    }
+
+    .brand-features {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: grid;
+      gap: 14px;
+      text-align: left;
+    }
+    .brand-features li {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 14px 18px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.72);
+      backdrop-filter: blur(8px);
+      color: var(--brand-teal-dark);
+      font-size: 14.5px;
+      font-weight: 500;
+      box-shadow: inset 0 0 0 1px rgba(14, 107, 99, 0.06);
+    }
+    .brand-features svg {
+      flex-shrink: 0;
+      width: 22px;
+      height: 22px;
+      color: var(--pastel-orange-strong);
+    }
+
+    @media (max-width: 1023px) {
+      .brand-tagline { font-size: 16px; margin-bottom: 0; }
+      .brand-features { display: none; }
+      .brand-logo-frame { padding: 14px 22px; margin-bottom: 20px; }
+    }
+
+    /* =========================================================================
+       Panel FORM (droite desktop / bas tablet)
+       ========================================================================= */
+    .form-panel {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 56px 32px;
+      background: var(--surface);
+      position: relative;
+    }
+    /* Sur desktop, un trait de gradient brand sur le bord gauche separe les 2 panels */
+    @media (min-width: 1024px) {
+      .form-panel::before {
+        content: "";
+        position: absolute;
+        top: 12%;
+        bottom: 12%;
+        left: 0;
+        width: 1px;
+        background: linear-gradient(180deg, transparent, rgba(14, 107, 99, 0.18), rgba(244, 122, 90, 0.18), transparent);
+        pointer-events: none;
+      }
+    }
+    @media (max-width: 1023px) {
+      .form-panel { padding: 36px 24px; }
+    }
+
+    .login-card {
+      width: 100%;
+      max-width: 420px;
+      padding: 12px 4px;
+      animation: card-in 480ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    @keyframes card-in {
+      from { opacity: 0; transform: translateY(14px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Titre + icone cadenas : icone dans un disque pastel */
     .title-row {
       display: flex;
       align-items: center;
@@ -776,28 +850,28 @@ function renderLoginPage(req, res) {
     }
     .title-row svg {
       flex-shrink: 0;
-      width: 32px;
-      height: 32px;
-      padding: 7px;
+      width: 34px;
+      height: 34px;
+      padding: 8px;
       border-radius: 12px;
-      background: linear-gradient(135deg, var(--pastel-green-light), #ffffff);
+      background: linear-gradient(135deg, var(--pastel-green-light), var(--pastel-orange-light));
       color: var(--brand-teal);
-      box-shadow: inset 0 0 0 1px rgba(14, 107, 99, 0.1);
+      box-shadow: inset 0 0 0 1px rgba(14, 107, 99, 0.12);
     }
     h1 {
       margin: 0;
       color: var(--brand-teal);
-      font-size: 27px;
+      font-size: clamp(26px, 2.2vw, 32px);
       font-weight: 800;
-      line-height: 1.18;
+      line-height: 1.15;
       letter-spacing: -0.015em;
     }
 
     .intro {
-      margin: 0 0 30px;
+      margin: 0 0 32px;
       color: var(--text-soft);
-      line-height: 1.5;
-      font-size: 15px;
+      line-height: 1.55;
+      font-size: 15.5px;
     }
 
     .field { margin-bottom: 16px; }
@@ -948,49 +1022,84 @@ function renderLoginPage(req, res) {
     }
     .footer-hint a:hover { color: var(--pastel-orange-strong); }
 
-    @media (max-width: 480px) {
-      body { padding: 16px; }
-      .login-frame { border-radius: 26px; }
-      .login-card { padding: 28px 22px 22px; border-radius: 23px; }
-      h1 { font-size: 23px; }
-      .title-row svg { width: 28px; height: 28px; padding: 6px; }
+    @media (max-width: 640px) {
+      h1 { font-size: 24px; }
+      .title-row svg { width: 30px; height: 30px; padding: 7px; }
       .intro { font-size: 14.5px; margin-bottom: 24px; }
     }
 
     /* Accessibilite : on coupe TOUTES les animations decoratives si demande */
     @media (prefers-reduced-motion: reduce) {
-      body, body::before, body::after, .login-frame { animation: none; }
+      .brand-panel, .brand-panel::before, .brand-panel::after,
+      .brand-logo-frame, .brand-content, .login-card { animation: none; }
       button[type="submit"]:hover:not(:disabled) { transform: none; }
       button[type="submit"]::after { display: none; }
     }
   </style>
 </head>
 <body${bodyLockedAttr}>
-  <div class="login-frame">
-    <main class="login-card" aria-labelledby="login-title">
-      <div class="brand"><img src="/brand/sereo-logo.svg" alt="s&eacute;r&eacute;o"></div>
-      <div class="title-row">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="4" y="11" width="16" height="10" rx="2" />
-          <path d="M8 11V7a4 4 0 0 1 8 0v4" />
-        </svg>
-        <h1 id="login-title">Acc&egrave;s prot&eacute;g&eacute;</h1>
+  <div class="login-page">
+    <aside class="brand-panel" aria-hidden="true">
+      <div class="brand-content">
+        <div class="brand-logo-frame">
+          <img src="/brand/sereo-logo.svg" alt="s&eacute;r&eacute;o" />
+        </div>
+        <p class="brand-tagline">Gestion locale du stock, des pr&eacute;parations et des livraisons.</p>
+        <ul class="brand-features">
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z" />
+              <path d="m4 7.5 8 4.5 8-4.5" />
+              <path d="M12 12v9" />
+            </svg>
+            <span>Stock et inventaire en temps r&eacute;el</span>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M9 4h6l1 2h3v15H5V6h3l1-2Z" />
+              <path d="M9 11h6" />
+              <path d="M9 15h6" />
+              <path d="M9 19h4" />
+            </svg>
+            <span>Pr&eacute;paration de commandes simplifi&eacute;e</span>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 6h11v10H3V6Z" />
+              <path d="M14 10h4l3 3v3h-7v-6Z" />
+              <path d="M6.5 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" />
+              <path d="M17.5 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" />
+            </svg>
+            <span>Tourn&eacute;es de livraison optimis&eacute;es</span>
+          </li>
+        </ul>
       </div>
-      <p class="intro">Connecte-toi pour ouvrir l'application.</p>
-      ${errorMarkup}
-      <form method="post" action="/login">
-        <input type="hidden" name="next" value="${escapeHtml(next)}">
-        <div class="field">
-          <label for="username">Identifiant</label>
-          <input id="username" name="username" autocomplete="username" autofocus ${isLocked ? "disabled" : "required"}>
+    </aside>
+    <main class="form-panel">
+      <div class="login-card" aria-labelledby="login-title">
+        <div class="title-row">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="4" y="11" width="16" height="10" rx="2" />
+            <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+          </svg>
+          <h1 id="login-title">Bonjour</h1>
         </div>
-        <div class="field">
-          <label for="password">Mot de passe</label>
-          <input id="password" name="password" type="password" autocomplete="current-password" ${isLocked ? "disabled" : "required"}>
-        </div>
-        <button type="submit"${isLocked ? " disabled" : ""}>Se connecter</button>
-      </form>
-      <p class="footer-hint">Application priv&eacute;e &middot; <a href="https://github.com/${GITHUB_REPO}/releases" target="_blank" rel="noopener noreferrer">v${APP_VERSION}</a></p>
+        <p class="intro">Connecte-toi pour ouvrir l'application.</p>
+        ${errorMarkup}
+        <form method="post" action="/login">
+          <input type="hidden" name="next" value="${escapeHtml(next)}">
+          <div class="field">
+            <label for="username">Identifiant</label>
+            <input id="username" name="username" autocomplete="username" autofocus ${isLocked ? "disabled" : "required"}>
+          </div>
+          <div class="field">
+            <label for="password">Mot de passe</label>
+            <input id="password" name="password" type="password" autocomplete="current-password" ${isLocked ? "disabled" : "required"}>
+          </div>
+          <button type="submit"${isLocked ? " disabled" : ""}>Se connecter</button>
+        </form>
+        <p class="footer-hint">Application priv&eacute;e &middot; <a href="https://github.com/${GITHUB_REPO}/releases" target="_blank" rel="noopener noreferrer">v${APP_VERSION}</a></p>
+      </div>
     </main>
   </div>
   <script src="/login.js"></script>
