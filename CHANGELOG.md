@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.4.0](https://github.com/tombague160-maker/sereo-production/compare/v1.3.9...v1.4.0) (2026-05-14)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **security:** rate limit /login + CI test workflow + session HMAC robuste ([9f14e41](https://github.com/tombague160-maker/sereo-production/commit/9f14e41e321f91057bc7e95c4576d02d45befd3d))
+* **security:** rate limit /login + CI test workflow + session HMAC robuste ([fbe9d56](https://github.com/tombague160-maker/sereo-production/commit/fbe9d5670aac5e4273103858b9231d65f6c81559))
+
+
+### 🐛 Corrections de bugs
+
+* **theme:** boutons et badges danger lisibles en dark mode ([e4aa473](https://github.com/tombague160-maker/sereo-production/commit/e4aa473f7385e80edbe238399cf0ace57315f167))
+* **theme:** boutons et badges danger lisibles en dark mode ([29969c6](https://github.com/tombague160-maker/sereo-production/commit/29969c68139d7a5add5320efaee88d685135d56f))
+
+
+### 📚 Documentation
+
+* **env:** documente les nouvelles variables auth (session secret + rate limit) ([fff1b4a](https://github.com/tombague160-maker/sereo-production/commit/fff1b4a508c5a05e70aedd51937f7976f5169c27))
+
 ## [1.3.9](https://github.com/tombague160-maker/sereo-production/compare/v1.3.8...v1.3.9) (2026-05-09)
 
 
