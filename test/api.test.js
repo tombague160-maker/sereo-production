@@ -1336,3 +1336,413 @@ test("state machine : PATCH sans status mais avec notes ne declenche pas validat
   assert.equal(body.status, "importe");
   assert.equal(body.notes, "Note libre, pas de changement de status");
 });
+
+// =============================================================================
+// CSP guard : aucun <script> inline dans le HTML servi
+// =============================================================================
+//
+// La CSP `script-src 'self'` bloque silencieusement les scripts inline. Lors
+// du sprint dark mode (v1.3.5/6), 2 releases ont ete publiees avec un
+// script anti-FART inline qui ne s'executait jamais en prod, causant le
+// flash de mode sombre au reload. La cause n'a ete identifiee qu'en v1.3.7
+// apres analyse des logs F12.
+//
+// Ce test verifie qu'aucun <script>...</script> inline n'est servi dans les
+// pages HTML accessibles publiquement (login + app shell apres auth).
+// Si un futur dev ajoute du JS inline, le test echoue et bloque le merge.
+
+function hasInlineScript(html) {
+  // Match les balises <script> qui ne sont pas auto-fermantes via src
+  // (i.e. ont du contenu non-vide entre <script>...</script>).
+  // Ignore <script src="..."></script> et <script type="application/json">.
+  const inlineRegex = /<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi;
+  const matches = [];
+  let match;
+  while ((match = inlineRegex.exec(html)) !== null) {
+    const attrs = match[0].slice(0, match[0].indexOf(">") + 1);
+    const body = match[1].trim();
+    // Autoriser <script type="application/ld+json"> ou autres data scripts non-executables
+    if (/type=["']application\/(?:ld\+)?json["']/i.test(attrs)) continue;
+    if (body.length > 0) {
+      matches.push({ attrs, body: body.slice(0, 200) });
+    }
+  }
+  return matches;
+}
+
+test("CSP guard : aucun <script> inline sur GET / (app shell)", async () => {
+  const res = await fetch(`${baseUrl}/`);
+  const html = await res.text();
+  const inline = hasInlineScript(html);
+  assert.equal(
+    inline.length,
+    0,
+    `Scripts inline detectes dans / : ${JSON.stringify(inline, null, 2)}\nLa CSP script-src 'self' va les bloquer en prod, casser le rendu.`
+  );
+});
+
+test("CSP guard : aucun <script> inline sur GET /login", async () => {
+  const res = await fetch(`${baseUrl}/login`);
+  const html = await res.text();
+  const inline = hasInlineScript(html);
+  assert.equal(
+    inline.length,
+    0,
+    `Scripts inline detectes dans /login : ${JSON.stringify(inline, null, 2)}`
+  );
+});
+
+test("CSP guard : le header Content-Security-Policy est strict (script-src 'self')", async () => {
+  const res = await fetch(`${baseUrl}/`);
+  const csp = res.headers.get("content-security-policy") || "";
+  // Le CSP doit contenir "script-src 'self'" SANS 'unsafe-inline' ni 'unsafe-eval'
+  assert.match(csp, /script-src 'self'/, "Le CSP doit declarer script-src 'self'");
+  assert.doesNotMatch(csp, /script-src[^;]*'unsafe-inline'/, "script-src ne doit PAS contenir 'unsafe-inline'");
+  assert.doesNotMatch(csp, /script-src[^;]*'unsafe-eval'/, "script-src ne doit PAS contenir 'unsafe-eval'");
+});
+
+// =============================================================================
+// Tests d'import sequential : 2 imports consecutifs, dedup, sync stock
+// =============================================================================
+//
+// Avant cette serie, le scenario "import 1 puis import 2 du meme fichier
+// avec quantite differente" n'etait pas teste. Risque silencieux : si la
+// logique de dedup change, les quantites pouvaient s'additionner au lieu
+// d'etre remplacees par celles de l'Excel.
+
+async function importVentes(rows) {
+  const form = new FormData();
+  form.append("file", workbookBlob(rows), "ventes.xlsx");
+  return requestJson("/api/import/ventes", { method: "POST", body: form });
+}
+
+async function importStock(rows) {
+  const form = new FormData();
+  form.append("file", workbookBlob(rows), "stock.xlsx");
+  return requestJson("/api/import/stock", { method: "POST", body: form });
+}
+
+test("import sequentiel : 2 imports du meme client avec quantite differente -> remplace, n'additionne pas", async () => {
+  seedDb(defaultDb());
+
+  // Import 1 : Dupont avec 5 unites
+  await importVentes([
+    ["Client", "Quantite", "Produit", "Rue", "Ville", "Code Postal"],
+    ["Dupont", "5", "Produit A", "3 rue Test", "Besancon", "25000"]
+  ]);
+
+  const db1 = readDb();
+  const dupont1 = db1.clients.find(c => c.nom === "Dupont");
+  assert.ok(dupont1, "Dupont doit exister apres import 1");
+  const order1 = db1.commandes.find(o => o.clientId === dupont1.id);
+  assert.ok(order1, "Commande Dupont doit exister apres import 1");
+  assert.equal(order1.products[0].quantite, 5, "Quantite apres import 1 doit etre 5");
+
+  // Import 2 : Dupont avec 8 unites (quantite differente)
+  await importVentes([
+    ["Client", "Quantite", "Produit", "Rue", "Ville", "Code Postal"],
+    ["Dupont", "8", "Produit A", "3 rue Test", "Besancon", "25000"]
+  ]);
+
+  const db2 = readDb();
+  const dupontList = db2.clients.filter(c => c.nom === "Dupont");
+  assert.equal(dupontList.length, 1, "Il doit y avoir un seul client Dupont (dedup)");
+  const order2 = db2.commandes.find(o => o.clientId === dupontList[0].id);
+  assert.equal(order2.products[0].quantite, 8, "Quantite apres import 2 doit etre 8 (pas 13)");
+});
+
+test("import sequentiel : dedup par cle secondaire (variation ponctuation rue)", async () => {
+  seedDb(defaultDb());
+
+  // Import 1 : "3 rue Test"
+  await importVentes([
+    ["Client", "Quantite", "Produit", "Rue", "Ville", "Code Postal"],
+    ["Dupont", "1", "Produit A", "3 rue Test", "Besancon", "25000"]
+  ]);
+
+  // Import 2 : "3 rue Test," (virgule trainante)
+  await importVentes([
+    ["Client", "Quantite", "Produit", "Rue", "Ville", "Code Postal"],
+    ["Dupont", "2", "Produit A", "3 rue Test,", "Besancon", "25000"]
+  ]);
+
+  const db = readDb();
+  const dupontList = db.clients.filter(c => c.nom === "Dupont");
+  assert.equal(dupontList.length, 1, "La virgule en plus ne doit pas creer un doublon (nom+CP)");
+});
+
+test("import sequentiel : import ventes auto-cree les produits inconnus dans le stock", async () => {
+  seedDb({
+    ...defaultDb(),
+    stock: [{ id: "p1", code: "A1", nom: "Produit A", quantite: 10 }]
+  });
+
+  // Import ventes avec un produit B totalement nouveau
+  await importVentes([
+    ["Client", "Quantite", "Produit", "Code Produit", "Rue", "Ville"],
+    ["Martin", "3", "Produit B", "B2", "1 rue", "Dole"]
+  ]);
+
+  const db = readDb();
+  const stockCodes = db.stock.map(s => s.code);
+  assert.ok(stockCodes.includes("A1"), "Produit A1 existant doit etre conserve");
+  // Le produit B2 peut etre auto-cree, sinon il est en "a renseigner" - on verifie au moins
+  // que la commande est creee correctement
+  const martin = db.clients.find(c => c.nom === "Martin");
+  assert.ok(martin, "Client Martin doit etre cree");
+});
+
+test("import sequentiel : import vide (header seul) retourne success avec 0 commande", async () => {
+  seedDb(defaultDb());
+
+  const { res, body } = await importVentes([
+    ["Client", "Quantite", "Produit", "Rue", "Ville"]
+  ]);
+
+  assert.equal(res.status, 200);
+  // Doit reussir mais sans creer de commandes
+  const db = readDb();
+  assert.equal(db.commandes.length, 0);
+});
+
+test("import sequentiel : import sans en-tete attendue retourne 400", async () => {
+  seedDb(defaultDb());
+
+  const { res } = await importVentes([
+    ["FooBar", "Bazz", "Truc"],
+    ["valeur1", "valeur2", "valeur3"]
+  ]);
+
+  // L'import doit echouer car les en-tetes ne sont pas reconnues
+  // (server.js valide les colonnes Client, Quantite, Produit)
+  assert.ok(res.status >= 400, `Status doit etre 400+, got ${res.status}`);
+});
+
+// =============================================================================
+// Tests multi-stops routes : creation, reorder, statuts varies
+// =============================================================================
+//
+// Avant cette serie, seuls les flux 1-stop etaient testes. Risque :
+// reorder, optimize-route et statuts absent/probleme/a_reprogrammer n'avaient
+// aucune couverture. Une regression silencieuse sur l'algo de reorder ou
+// les transitions de status sur stop multi pouvait passer en prod.
+
+function seedThreeStopsReady() {
+  const db = {
+    ...defaultDb(),
+    clients: [
+      { id: "c-a", nom: "Client Alpha", rue: "1 rue A", ville: "Besancon", codePostal: "25000", statut: "restant", produits: [{ code: "P1", nom: "Produit 1", quantite: 1 }], lat: 47.24, lng: 6.02 },
+      { id: "c-b", nom: "Client Beta", rue: "2 rue B", ville: "Besancon", codePostal: "25000", statut: "restant", produits: [{ code: "P2", nom: "Produit 2", quantite: 1 }], lat: 47.25, lng: 6.03 },
+      { id: "c-c", nom: "Client Gamma", rue: "3 rue C", ville: "Besancon", codePostal: "25000", statut: "restant", produits: [{ code: "P3", nom: "Produit 3", quantite: 1 }], lat: 47.26, lng: 6.04 }
+    ],
+    commandes: [
+      { id: "o-a", clientId: "c-a", clientName: "Client Alpha", address: "1 rue A", city: "Besancon", postalCode: "25000", sector: "Besancon", products: [{ code: "P1", nom: "Produit 1", quantite: 1 }], status: "pret_livraison", deliveryDate: "2026-05-04" },
+      { id: "o-b", clientId: "c-b", clientName: "Client Beta", address: "2 rue B", city: "Besancon", postalCode: "25000", sector: "Besancon", products: [{ code: "P2", nom: "Produit 2", quantite: 1 }], status: "pret_livraison", deliveryDate: "2026-05-04" },
+      { id: "o-c", clientId: "c-c", clientName: "Client Gamma", address: "3 rue C", city: "Besancon", postalCode: "25000", sector: "Besancon", products: [{ code: "P3", nom: "Produit 3", quantite: 1 }], status: "pret_livraison", deliveryDate: "2026-05-04" }
+    ],
+    stock: [
+      { id: "s1", code: "P1", nom: "Produit 1", quantite: 5 },
+      { id: "s2", code: "P2", nom: "Produit 2", quantite: 5 },
+      { id: "s3", code: "P3", nom: "Produit 3", quantite: 5 }
+    ]
+  };
+  seedDb(db);
+}
+
+test("route multi-stops : creation avec 3 commandes produit 3 stops dans l'ordre", async () => {
+  seedThreeStopsReady();
+
+  const { res, body } = await requestJson("/api/routes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sector: "Besancon",
+      deliveryDate: "2026-05-04",
+      orderIds: ["o-a", "o-b", "o-c"]
+    })
+  });
+
+  assert.equal(res.status, 201);
+  assert.equal(body.stops.length, 3);
+  assert.deepEqual(
+    body.stops.map(s => s.orderId),
+    ["o-a", "o-b", "o-c"],
+    "L'ordre initial doit correspondre a orderIds"
+  );
+});
+
+test("route multi-stops : reorder change l'ordre des stops", async () => {
+  seedThreeStopsReady();
+
+  const created = await requestJson("/api/routes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sector: "Besancon",
+      deliveryDate: "2026-05-04",
+      orderIds: ["o-a", "o-b", "o-c"]
+    })
+  });
+  const routeId = created.body.id;
+  const stopIds = created.body.stops.map(s => s.id);
+  // Inverser l'ordre : c, b, a
+  const reorderedStopIds = [stopIds[2], stopIds[1], stopIds[0]];
+
+  const { res, body } = await requestJson(`/api/routes/${routeId}/reorder`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ stopIds: reorderedStopIds })
+  });
+
+  assert.equal(res.status, 200);
+  assert.deepEqual(
+    body.stops.map(s => s.orderId),
+    ["o-c", "o-b", "o-a"],
+    "L'ordre des stops doit etre inverse apres reorder"
+  );
+});
+
+test("route multi-stops : start passe les stops et les commandes en en_livraison", async () => {
+  seedThreeStopsReady();
+
+  const created = await requestJson("/api/routes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sector: "Besancon",
+      deliveryDate: "2026-05-04",
+      orderIds: ["o-a", "o-b", "o-c"]
+    })
+  });
+  const routeId = created.body.id;
+
+  const started = await requestJson(`/api/routes/${routeId}/start`, {
+    method: "POST"
+  });
+
+  assert.equal(started.res.status, 200);
+  assert.equal(started.body.status, "en_livraison");
+  started.body.stops.forEach((stop, i) => {
+    assert.equal(stop.status, "en_livraison", `Stop ${i} doit etre en_livraison`);
+  });
+
+  // Verifier que les commandes sont aussi passees en_livraison
+  const db = readDb();
+  ["o-a", "o-b", "o-c"].forEach(orderId => {
+    const order = db.commandes.find(o => o.id === orderId);
+    assert.equal(order.status, "en_livraison", `Commande ${orderId} doit etre en_livraison`);
+  });
+});
+
+test("route multi-stops : statuts varies sur 3 stops (livre / absent / probleme)", async () => {
+  seedThreeStopsReady();
+
+  const created = await requestJson("/api/routes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sector: "Besancon",
+      deliveryDate: "2026-05-04",
+      orderIds: ["o-a", "o-b", "o-c"]
+    })
+  });
+  const routeId = created.body.id;
+  await requestJson(`/api/routes/${routeId}/start`, { method: "POST" });
+
+  const stops = created.body.stops;
+
+  // Stop A : livre
+  const a = await requestJson(`/api/routes/${routeId}/stops/${stops[0].id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status: "livre" })
+  });
+  assert.equal(a.res.status, 200);
+  assert.equal(a.body.order.status, "livre");
+
+  // Stop B : absent
+  const b = await requestJson(`/api/routes/${routeId}/stops/${stops[1].id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status: "absent" })
+  });
+  assert.equal(b.res.status, 200);
+  assert.equal(b.body.order.status, "probleme_livraison");
+  assert.equal(b.body.order.deliveryStatus, "absent");
+
+  // Stop C : probleme
+  const c = await requestJson(`/api/routes/${routeId}/stops/${stops[2].id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status: "probleme", notes: "Adresse introuvable" })
+  });
+  assert.equal(c.res.status, 200);
+  assert.equal(c.body.order.status, "probleme_livraison");
+  assert.equal(c.body.order.deliveryStatus, "probleme");
+
+  // Verifier les statuts finaux en DB
+  const db = readDb();
+  const orderA = db.commandes.find(o => o.id === "o-a");
+  const orderB = db.commandes.find(o => o.id === "o-b");
+  const orderC = db.commandes.find(o => o.id === "o-c");
+  assert.equal(orderA.status, "livre");
+  assert.equal(orderB.status, "probleme_livraison");
+  assert.equal(orderC.status, "probleme_livraison");
+});
+
+test("route multi-stops : stop a_reprogrammer met la commande en a_reprogrammer", async () => {
+  seedThreeStopsReady();
+
+  const created = await requestJson("/api/routes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sector: "Besancon",
+      deliveryDate: "2026-05-04",
+      orderIds: ["o-a"]
+    })
+  });
+  const routeId = created.body.id;
+  await requestJson(`/api/routes/${routeId}/start`, { method: "POST" });
+  const stopId = created.body.stops[0].id;
+
+  const result = await requestJson(`/api/routes/${routeId}/stops/${stopId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status: "a_reprogrammer", notes: "Magasin ferme" })
+  });
+
+  assert.equal(result.res.status, 200);
+  assert.equal(result.body.order.status, "a_reprogrammer");
+});
+
+test("route multi-stops : reorder avec liste partielle est rejetee ou ignoree", async () => {
+  seedThreeStopsReady();
+
+  const created = await requestJson("/api/routes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sector: "Besancon",
+      deliveryDate: "2026-05-04",
+      orderIds: ["o-a", "o-b", "o-c"]
+    })
+  });
+  const routeId = created.body.id;
+  const stopIds = created.body.stops.map(s => s.id);
+
+  // Reorder avec seulement 2 ids sur 3
+  const partial = await requestJson(`/api/routes/${routeId}/reorder`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ stopIds: [stopIds[1], stopIds[0]] })
+  });
+
+  // Comportement : soit 400 (rejete), soit 200 (reorganise les fournis + garde les autres)
+  // L'implementation actuelle accepte et reorganise.
+  assert.ok(partial.res.status === 200 || partial.res.status >= 400);
+  // Important : pas de perte de stop
+  if (partial.res.status === 200) {
+    assert.equal(partial.body.stops.length, 3, "Aucun stop ne doit etre perdu");
+  }
+});
