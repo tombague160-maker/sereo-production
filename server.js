@@ -678,10 +678,10 @@ function renderLoginPage(req, res) {
       animation: bg-drift 42s ease-in-out infinite alternate;
     }
     @media (max-width: 1023px) {
-      .brand-panel { padding: 40px 28px 32px; min-height: 280px; }
+      .brand-panel { padding: 32px 28px 20px; min-height: 0; }
     }
     @media (max-width: 640px) {
-      .brand-panel { padding: 32px 22px 20px; min-height: 200px; }
+      .brand-panel { padding: 24px 22px 16px; min-height: 0; }
     }
 
     @property --bg-x1 { syntax: "<percentage>"; inherits: true; initial-value: 18%; }
@@ -831,7 +831,16 @@ function renderLoginPage(req, res) {
       }
     }
     @media (max-width: 1023px) {
-      .form-panel { padding: 36px 24px; }
+      /* Sur tablet/mobile, le form-panel se contente de remplir l'espace
+         restant sous le brand-panel. align-items:start evite le gros gap
+         vertical quand le viewport est tres haut (mobile portrait). */
+      .form-panel {
+        align-items: flex-start;
+        padding: 24px 24px 32px;
+      }
+    }
+    @media (max-width: 640px) {
+      .form-panel { padding: 20px 20px 28px; }
     }
 
     .login-card {
@@ -915,6 +924,25 @@ function renderLoginPage(req, res) {
         0 0 24px -4px rgba(244, 122, 90, 0.22);
     }
     input:disabled { opacity: 0.6; cursor: not-allowed; }
+    /* Autofill : le navigateur applique un fond jaune horrible. On override
+       avec un inset box-shadow qui simule notre fond pastel cohérent
+       (technique standard car background ne peut pas etre override en
+       autofill). Couleur cible : surface blanc + une touche pastel green. */
+    input:-webkit-autofill,
+    input:-webkit-autofill:hover,
+    input:-webkit-autofill:focus {
+      -webkit-box-shadow: 0 0 0 100px var(--surface) inset, 0 0 0 4px rgba(255, 196, 163, 0.18);
+      -webkit-text-fill-color: var(--text);
+      caret-color: var(--text);
+      transition: background-color 5000s ease-in-out 0s;
+    }
+    /* Variante focus pour conserver le ring orange brand */
+    input:-webkit-autofill:focus {
+      -webkit-box-shadow:
+        0 0 0 100px var(--surface) inset,
+        0 0 0 4px rgba(255, 196, 163, 0.34),
+        0 0 24px -4px rgba(244, 122, 90, 0.22);
+    }
 
     /* Bouton : gradient teal->orange (signature brand sereo), shine sweep
        sur hover pour un effet "haut de gamme" subtil */
