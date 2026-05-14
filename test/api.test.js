@@ -1204,3 +1204,135 @@ test("PATCH /api/settings/appearance preserve colorScheme quand non fourni", asy
   assert.equal(body.colorScheme, "dark");
   assert.equal(body.themeId, "menthe");
 });
+
+// =============================================================================
+// State machine pour PATCH /api/orders/:id status transitions
+// =============================================================================
+//
+// Avant l'introduction de la state machine, PATCH /api/orders/:id { status: X }
+// acceptait n'importe quel status valide, meme un saut absurde
+// (importe -> livre sans preparation). Ces tests verifient que les
+// transitions sont desormais validees.
+
+function seedOrderAtStatus(status) {
+  // Cree un client + 1 ordre directement au status voulu via normalizeOrder
+  // (qui bypasse la state machine - initialisation, pas transition).
+  const db = defaultDb();
+  db.clients = [{
+    id: "c-state",
+    nom: "Client State",
+    rue: "1 rue test",
+    ville: "Besançon",
+    codePostal: "25000",
+    statut: "restant",
+    produits: [{ code: "A1", nom: "Produit A", quantite: 1 }]
+  }];
+  db.commandes = [{
+    id: "o-state",
+    clientId: "c-state",
+    clientName: "Client State",
+    address: "1 rue test",
+    city: "Besançon",
+    postalCode: "25000",
+    products: [{ code: "A1", nom: "Produit A", quantite: 1 }],
+    status,
+    deliveryDate: "2026-05-04"
+  }];
+  db.stock = [{ id: "p1", code: "A1", nom: "Produit A", quantite: 5 }];
+  seedDb(db);
+}
+
+async function patchOrderStatus(id, status) {
+  return requestJson(`/api/orders/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status })
+  });
+}
+
+test("state machine : transition valide importe -> stock_a_verifier OK", async () => {
+  seedOrderAtStatus("importe");
+  const { res, body } = await patchOrderStatus("o-state", "stock_a_verifier");
+  assert.equal(res.status, 200);
+  assert.equal(body.status, "stock_a_verifier");
+});
+
+test("state machine : transition valide en_livraison -> livre OK", async () => {
+  seedOrderAtStatus("en_livraison");
+  const { res, body } = await patchOrderStatus("o-state", "livre");
+  assert.equal(res.status, 200);
+  assert.equal(body.status, "livre");
+});
+
+test("state machine : importe -> livre direct rejete (skip workflow)", async () => {
+  seedOrderAtStatus("importe");
+  const { res, body } = await patchOrderStatus("o-state", "livre");
+  assert.equal(res.status, 400);
+  assert.match(body.error, /Transition non autorisee/);
+  assert.match(body.error, /importe.*livre/);
+});
+
+test("state machine : en_preparation -> livre rejete (skip livraison)", async () => {
+  seedOrderAtStatus("en_preparation");
+  const { res } = await patchOrderStatus("o-state", "livre");
+  assert.equal(res.status, 400);
+});
+
+test("state machine : pret_livraison -> livre rejete (skip en_livraison)", async () => {
+  seedOrderAtStatus("pret_livraison");
+  const { res } = await patchOrderStatus("o-state", "livre");
+  assert.equal(res.status, 400);
+});
+
+test("state machine : livre est terminal, toute transition rejetee", async () => {
+  seedOrderAtStatus("livre");
+  for (const target of ["importe", "en_preparation", "en_livraison", "probleme_livraison"]) {
+    const { res } = await patchOrderStatus("o-state", target);
+    assert.equal(res.status, 400, `livre -> ${target} doit etre rejete`);
+  }
+});
+
+test("state machine : status identique idempotent (en_preparation -> en_preparation)", async () => {
+  seedOrderAtStatus("en_preparation");
+  const { res, body } = await patchOrderStatus("o-state", "en_preparation");
+  assert.equal(res.status, 200);
+  assert.equal(body.status, "en_preparation");
+});
+
+test("state machine : transition vers status inconnu rejetee", async () => {
+  seedOrderAtStatus("importe");
+  const { res, body } = await patchOrderStatus("o-state", "xyz_inexistant");
+  assert.equal(res.status, 400);
+  assert.match(body.error, /Statut commande invalide/);
+});
+
+test("state machine : a_reprogrammer peut retourner en pret_livraison ou en_preparation", async () => {
+  seedOrderAtStatus("a_reprogrammer");
+  const back = await patchOrderStatus("o-state", "pret_livraison");
+  assert.equal(back.res.status, 200);
+  assert.equal(back.body.status, "pret_livraison");
+
+  seedOrderAtStatus("a_reprogrammer");
+  const restart = await patchOrderStatus("o-state", "en_preparation");
+  assert.equal(restart.res.status, 200);
+  assert.equal(restart.body.status, "en_preparation");
+});
+
+test("state machine : probleme_livraison peut retourner en_livraison (retry)", async () => {
+  seedOrderAtStatus("probleme_livraison");
+  const { res, body } = await patchOrderStatus("o-state", "en_livraison");
+  assert.equal(res.status, 200);
+  assert.equal(body.status, "en_livraison");
+});
+
+test("state machine : PATCH sans status mais avec notes ne declenche pas validation", async () => {
+  seedOrderAtStatus("importe");
+  const { res, body } = await requestJson("/api/orders/o-state", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ notes: "Note libre, pas de changement de status" })
+  });
+  assert.equal(res.status, 200);
+  assert.equal(body.status, "importe");
+  assert.equal(body.notes, "Note libre, pas de changement de status");
+});
