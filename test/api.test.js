@@ -1201,6 +1201,31 @@ test("GET /api/orders?status=livre renvoie seulement les livrees", async () => {
   assert.ok(body.every(o => o.status === "livre"));
 });
 
+test("GET /api/orders expose numero + dateCommande + excelRowHash (UI Bons de commande Phase 3)", async () => {
+  seedDb({
+    ...defaultDb(),
+    commandes: [
+      {
+        id: "o1",
+        clientId: "c1",
+        clientName: "Dupont",
+        numero: "CMD-2026-001",
+        dateCommande: "2026-05-18",
+        excelRowHash: "abc123",
+        status: "stock_a_verifier",
+        products: []
+      }
+    ]
+  });
+
+  const { res, body } = await requestJson("/api/orders");
+  assert.equal(res.status, 200);
+  assert.equal(body.length, 1);
+  assert.equal(body[0].numero, "CMD-2026-001", "numero expose pour la page UI Bons de commande");
+  assert.equal(body[0].dateCommande, "2026-05-18", "dateCommande expose en ISO");
+  assert.equal(body[0].excelRowHash, "abc123", "excelRowHash expose pour le detail technique");
+});
+
 test("GET /api/orders?status=invalide renvoie 400", async () => {
   seedDb(defaultDb());
   const { res } = await requestJson("/api/orders?status=foobar");

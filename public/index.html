@@ -100,6 +100,12 @@
       <circle cx="12" cy="12" r="1.6" />
       <circle cx="19" cy="12" r="1.6" />
     </symbol>
+    <symbol id="icon-receipt" viewBox="0 0 24 24">
+      <path d="M4 3.5h16v17l-2.5-1.5-2.5 1.5-2.5-1.5-2.5 1.5-2.5-1.5L4 20.5z" />
+      <line x1="8" y1="8" x2="16" y2="8" />
+      <line x1="8" y1="12" x2="16" y2="12" />
+      <line x1="8" y1="16" x2="13" y2="16" />
+    </symbol>
   </svg>
 
   <div class="app">
@@ -121,6 +127,10 @@
         <button id="tab-preparation" class="tab" type="button" role="tab" aria-selected="false" aria-controls="preparation" data-tab="preparation">
           <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-clipboard-list"></use></svg></span>
           <span>Préparation</span>
+        </button>
+        <button id="tab-bons-commande" class="tab" type="button" role="tab" aria-selected="false" aria-controls="bons-commande" data-tab="bons-commande">
+          <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-receipt"></use></svg></span>
+          <span>Bons de commande</span>
         </button>
         <button id="tab-livreur" class="tab" type="button" role="tab" aria-selected="false" aria-controls="livreur" data-tab="livreur">
           <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-truck"></use></svg></span>
@@ -180,6 +190,10 @@
       <div class="more-sheet-panel" role="menu">
         <div class="more-sheet-handle" aria-hidden="true"></div>
         <h3 id="more-sheet-title" class="more-sheet-title">Plus d'options</h3>
+        <button class="more-sheet-item" type="button" role="menuitem" data-tab="bons-commande" data-action="more-menu-pick">
+          <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-receipt"></use></svg></span>
+          <span class="more-sheet-label">Bons de commande</span>
+        </button>
         <button class="more-sheet-item" type="button" role="menuitem" data-tab="recommande" data-action="more-menu-pick">
           <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-star"></use></svg></span>
           <span class="more-sheet-label">À recommander</span>
@@ -497,6 +511,65 @@
           </div>
         </div>
       </section>
+
+      <section id="bons-commande" class="page" role="tabpanel" aria-labelledby="tab-bons-commande">
+        <div class="panel">
+          <div class="panel-heading">
+            <h3>Bons de commande</h3>
+            <span class="muted">Tous les bons importés, triables et filtrables.</span>
+          </div>
+
+          <div class="bdc-toolbar" role="region" aria-label="Filtres bons de commande">
+            <label class="bdc-search">
+              <span class="sr-only">Rechercher par numéro ou client</span>
+              <input type="search" id="bdc-search" placeholder="Numéro CMD-... ou nom client" autocomplete="off" />
+            </label>
+
+            <div class="bdc-filter-group" role="group" aria-label="Filtrer par statut">
+              <button class="button secondary compact bdc-status-filter active-filter" type="button" data-bdc-status="all">Tous</button>
+              <button class="button secondary compact bdc-status-filter" type="button" data-bdc-status="stock_a_verifier">À vérifier</button>
+              <button class="button secondary compact bdc-status-filter" type="button" data-bdc-status="en_preparation">En préparation</button>
+              <button class="button secondary compact bdc-status-filter" type="button" data-bdc-status="pret_livraison">Prêt livraison</button>
+              <button class="button secondary compact bdc-status-filter" type="button" data-bdc-status="en_livraison">En livraison</button>
+              <button class="button secondary compact bdc-status-filter" type="button" data-bdc-status="livre">Livrées</button>
+            </div>
+
+            <div class="bdc-filter-row">
+              <label class="bdc-field">
+                <span>Secteur</span>
+                <select id="bdc-sector"><option value="">Tous secteurs</option></select>
+              </label>
+              <label class="bdc-field">
+                <span>Du</span>
+                <input type="date" id="bdc-date-from" />
+              </label>
+              <label class="bdc-field">
+                <span>Au</span>
+                <input type="date" id="bdc-date-to" />
+              </label>
+              <button class="button secondary compact" type="button" data-action="bdc-reset-filters">Réinitialiser</button>
+            </div>
+          </div>
+
+          <div id="bdc-summary" class="muted" aria-live="polite"></div>
+          <div id="bdc-list" class="list bdc-list"></div>
+        </div>
+      </section>
+
+      <!-- Modal détail bon de commande : meme pattern que versionModal -->
+      <div id="bdc-detail-modal" class="version-modal" role="dialog" aria-modal="true" aria-labelledby="bdc-detail-title" aria-hidden="true">
+        <div class="version-modal-backdrop" data-action="close-bdc-detail"></div>
+        <div class="version-modal-panel bdc-detail-panel" role="document">
+          <header class="version-modal-header">
+            <div>
+              <h2 id="bdc-detail-title" class="version-modal-title">Bon de commande</h2>
+              <p class="version-modal-meta" id="bdc-detail-subtitle"></p>
+            </div>
+            <button class="version-modal-close" type="button" data-action="close-bdc-detail" aria-label="Fermer">×</button>
+          </header>
+          <div class="version-modal-body" id="bdc-detail-body"></div>
+        </div>
+      </div>
 
       <section id="recommande" class="page" role="tabpanel" aria-labelledby="tab-recommande">
         <div class="panel">
