@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.1](https://github.com/tombague160-maker/sereo-production/compare/v1.9.0...v1.9.1) (2026-05-18)
+
+
+### 🐛 Corrections de bugs
+
+* **sqlite:** migration v1.9.0 cassee en prod - CREATE INDEX avant ALTER TABLE ([#51](https://github.com/tombague160-maker/sereo-production/issues/51)) ([3327435](https://github.com/tombague160-maker/sereo-production/commit/3327435a8f45b5fcd6d89d5678adbc362dfb6149))
+
 ## [1.9.0](https://github.com/tombague160-maker/sereo-production/compare/v1.8.3...v1.9.0) (2026-05-18)
 
 
