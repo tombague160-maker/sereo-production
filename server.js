@@ -1578,6 +1578,26 @@ function excelDate(value) {
   return clean(value);
 }
 
+// Variante ISO (YYYY-MM-DD) de excelDate. Utilisee pour dateCommande qui doit
+// etre stockee en format normalise pour permettre le tri, le filtrage et
+// l'identification d'une commande par (clientId, dateCommande). L'affichage
+// dans l'UI se fera selon les settings locale du user (Phase 5).
+function excelDateToIso(value) {
+  if (!value) return "";
+
+  if (value instanceof Date) {
+    return value.toISOString().slice(0, 10);
+  }
+
+  if (typeof value === "number") {
+    const date = new Date(Date.UTC(1899, 11, 30) + value * 24 * 60 * 60 * 1000);
+    return date.toISOString().slice(0, 10);
+  }
+
+  // Reutilise normalizeDateInput qui gere deja FR (DD/MM/YYYY) et ISO.
+  return normalizeDateInput(clean(value));
+}
+
 function normalizeDateInput(value) {
   if (!value) return "";
 
@@ -2236,42 +2256,76 @@ function analyzeOrderStock(order, stock) {
   };
 }
 
+// ERP v1.9.0 : syncWorkflow ne regenere PLUS 1 commande par client. Il
+// enrichit les commandes existantes (analyse stock) et synchronise les statuts
+// des clients en se basant sur leur commande LA PLUS RECENTE. Cela permet le
+// modele N commandes par client (1 par dateCommande).
+//
+// Compatibilite legacy : si un client existe SANS aucune commande (seed test,
+// import historique), on en cree une "fallback" pour preserver le comportement
+// des anciennes UIs qui supposent qu'un client a toujours une commande.
 function syncWorkflow(db) {
-  const existingOrders = new Map(db.commandes.map(order => [String(order.clientId), order]));
-
   db.clients = db.clients.map(client => normalizeClient(client));
 
-  const generatedOrders = db.clients.map(client => {
-    const existing = existingOrders.get(String(client.id)) || {};
-    return normalizeOrder({
-      ...existing,
+  // Bucket des commandes par clientId (1->N relation)
+  const ordersByClientId = new Map();
+  db.commandes.forEach(order => {
+    const cid = String(order.clientId);
+    if (!ordersByClientId.has(cid)) ordersByClientId.set(cid, []);
+    ordersByClientId.get(cid).push(order);
+  });
+
+  // Legacy compat : un client sans aucune commande recoit une commande
+  // fallback (deduite de ses produits) pour ne pas casser les anciennes UIs
+  // qui supposent 1 client = 1 commande.
+  db.clients.forEach(client => {
+    const orders = ordersByClientId.get(String(client.id)) || [];
+    if (orders.length > 0) return;
+    if (!Array.isArray(client.produits) || client.produits.length === 0) return;
+
+    const today = new Date().toISOString().slice(0, 10);
+    const fallback = normalizeOrder({
       clientId: client.id,
       clientName: client.nom,
       address: client.rue,
       city: client.ville,
       postalCode: client.codePostal,
-      sector: existing.sector || client.secteur || client.sector,
+      sector: client.secteur,
       phone: client.telephone,
       products: client.produits,
-      latitude: client.lat,
-      longitude: client.lng,
-    notes: existing.notes || client.notes || "",
-      priority: existing.priority || client.priority || "",
-      deliveryDate: existing.deliveryDate || client.deliveryDate || ""
+      lat: client.lat,
+      lng: client.lng,
+      notes: client.notes,
+      priority: client.priority,
+      dateCommande: today,
+      dateImport: new Date().toISOString(),
+      numero: generateOrderNumber(db, today),
+      status: client.statut === "livree" ? "livre" : "stock_a_verifier"
     });
+    fallback.id = `cmd-${fallback.numero.toLowerCase()}`;
+    db.commandes.push(fallback);
+    ordersByClientId.set(String(client.id), [fallback]);
   });
 
-  const generatedClientIds = new Set(generatedOrders.map(order => String(order.clientId)));
-  const generatedIds = new Set(generatedOrders.map(order => String(order.id)));
-  const detachedOrders = db.commandes
-    .filter(order => !generatedClientIds.has(String(order.clientId)) && !generatedIds.has(String(order.id)))
-    .map(normalizeOrder);
+  // Re-normalisation + enrichissement (analyse stock) de TOUTES les commandes
+  db.commandes = db.commandes
+    .map(order => normalizeOrder(order))
+    .map(order => enrichOrder(order, db.stock));
 
-  db.commandes = [...generatedOrders, ...detachedOrders].map(order => enrichOrder(order, db.stock));
+  // Statut du client = statut de sa commande la plus recente (par dateCommande)
+  const latestOrderByClient = new Map();
+  db.commandes.forEach(order => {
+    const cid = String(order.clientId);
+    const current = latestOrderByClient.get(cid);
+    const orderDate = String(order.dateCommande || "");
+    const currentDate = current ? String(current.dateCommande || "") : "";
+    if (!current || orderDate.localeCompare(currentDate) > 0) {
+      latestOrderByClient.set(cid, order);
+    }
+  });
 
-  const orderByClientId = new Map(db.commandes.map(order => [String(order.clientId), order]));
   db.clients = db.clients.map(client => {
-    const order = orderByClientId.get(String(client.id));
+    const order = latestOrderByClient.get(String(client.id));
     if (!order) return client;
 
     return {
@@ -2324,7 +2378,10 @@ function normalizeOrder(order) {
     // Sont attribues par generateOrderNumber() et computeOrderHash() au moment
     // de la creation (import ou creation manuelle), preserves a chaque re-import.
     numero: order.numero || "",
-    dateCommande: order.dateCommande || order.dateImport || order.createdAt || now,
+    // dateCommande TOUJOURS au format ISO YYYY-MM-DD pour permettre le match
+    // exact (clientId, dateCommande) lors d'un re-import. normalizeDateInput
+    // accepte FR (DD/MM/YYYY), ISO et Date object. Fallback : la date du jour.
+    dateCommande: normalizeDateInput(order.dateCommande || order.dateImport || order.createdAt) || now.slice(0, 10),
     excelRowHash: order.excelRowHash || "",
     clientId: order.clientId,
     clientName: clean(order.clientName || order.nom || order.client || "Client sans nom"),
@@ -3100,7 +3157,12 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
         const nomProduit = clean(getCellByNames(row, headers, ["Nom", "Produit", "Article"]));
         const client = clean(getCellByNames(row, headers, ["Client", "Nom client", "Client final"]));
         const statutFacture = clean(getCell(row, headers, "Statut", 1));
-        const date = excelDate(getCell(row, headers, "Date", 1));
+        // ERP v1.9.0 : la date Excel devient le discriminant entre 2 bons de
+        // commande du meme client. Format ISO pour permettre le tri et le
+        // matching deterministe. excelDate (FR) reste pour le legacy affichage.
+        const dateCell = getCell(row, headers, "Date", 1);
+        const date = excelDate(dateCell);
+        const dateCommandeIso = excelDateToIso(dateCell);
         const deliveryDate = normalizeDateInput(getCellByNames(row, headers, ["Date livraison", "Livraison", "Date de livraison"]));
         const quantite = number(getCellByNames(row, headers, ["Quantite", "Quantité", "Qte", "Qté"]), 1);
         const prixUnitaire = number(getCell(row, headers, "Prix unitaire", 1), 0);
@@ -3126,6 +3188,7 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
           client,
           statutFacture,
           date,
+          dateCommandeIso,
           quantite,
           prixUnitaire,
           ht,
@@ -3147,8 +3210,12 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
 
     db.ventes = ventes;
 
+    // ERP v1.9.0 : bucket par (client, dateCommande) au lieu de juste par client.
+    // Chaque (client, date) = 1 bon de commande distinct. Multiples imports
+    // d'un meme bon (meme client + meme date) = update du contenu, pas creation
+    // de doublon (anti-doublon via excelRowHash).
+    const todayIso = new Date().toISOString().slice(0, 10);
     const clientsMap = {};
-    const existingOrders = new Map(db.commandes.map(order => [String(order.clientId), order]));
 
     ventes.forEach(vente => {
       const key = clientKey({
@@ -3158,85 +3225,160 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
         ville: vente.ville
       });
       const existingClient = existingClients.get(key) || {};
-
+      // Fallback : si la ligne Excel n'a pas de Date, on bucket avec la date du
+      // jour (l'utilisateur peut quand meme avoir importe quelque chose hors
+      // contexte de bon de commande date). C'est rare en pratique.
+      const dateCommande = vente.dateCommandeIso || todayIso;
       const venteFactureLivree = isFactureStatusLivre(vente.statutFacture);
 
       if (!clientsMap[key]) {
-        const id = existingClient.id || crypto.randomUUID();
-        const existingOrder = existingOrders.get(String(id)) || {};
-
         clientsMap[key] = {
-          id,
+          id: existingClient.id || crypto.randomUUID(),
           nom: vente.client || "Client sans nom",
           rue: vente.rue,
           ville: vente.ville,
           codePostal: vente.codePostal,
           telephone: vente.telephone,
           statut: existingClient.statut || "restant",
+          // Liste flat (legacy compat pour syncWorkflow et anciennes UIs)
           produits: [],
           lat: vente.lat !== "" ? vente.lat : (existingClient.lat || ""),
           lng: vente.lng !== "" ? vente.lng : (existingClient.lng || ""),
           secteur: vente.secteur,
           deliveryDate: vente.deliveryDate,
-          notes: vente.notes || existingClient.notes || existingOrder.notes || "",
-          priority: vente.priority || existingClient.priority || existingOrder.priority || "",
-          // factureLivree : "TOUTES les ventes de ce client ont un statut Envoyee/expediee".
-          // Une seule ligne non-livree suffit a desactiver le marquage "deja livre".
+          notes: vente.notes || existingClient.notes || "",
+          priority: vente.priority || existingClient.priority || "",
+          // Multi-commandes : 1 entree par dateCommande pour ce client
+          ordersByDate: {}
+        };
+      }
+
+      // Bucket commande dans le client
+      if (!clientsMap[key].ordersByDate[dateCommande]) {
+        clientsMap[key].ordersByDate[dateCommande] = {
+          dateCommande,
+          deliveryDate: vente.deliveryDate,
+          produits: [],
           factureLivree: venteFactureLivree
         };
       } else {
-        clientsMap[key].factureLivree = clientsMap[key].factureLivree && venteFactureLivree;
+        // factureLivree d'une commande = AND de toutes ses lignes
+        const order = clientsMap[key].ordersByDate[dateCommande];
+        order.factureLivree = order.factureLivree && venteFactureLivree;
+        if (!order.deliveryDate && vente.deliveryDate) order.deliveryDate = vente.deliveryDate;
       }
 
-      // Deduplication : si le meme produit (code || nom) apparait plusieurs fois
-      // pour le meme client, on additionne les quantites au lieu de creer des
-      // lignes en double. C'est le comportement attendu pour un export de ventes
-      // ou chaque ligne represente une vente individuelle du meme article.
+      // Agregation/dedup produit dans la commande (meme produit 2 lignes Excel = somme)
       const newLine = {
         code: vente.codeProduit,
         nom: vente.produit,
         quantite: vente.quantite
       };
       const newLineKey = productKey(newLine);
-      const existingLine = newLineKey
+      const orderBucket = clientsMap[key].ordersByDate[dateCommande];
+      const existingOrderLine = newLineKey
+        ? orderBucket.produits.find(line => productKey(line) === newLineKey)
+        : null;
+      if (existingOrderLine) {
+        existingOrderLine.quantite = number(existingOrderLine.quantite, 0) + number(newLine.quantite, 0);
+      } else {
+        orderBucket.produits.push({ ...newLine });
+      }
+
+      // Maintenance de la liste flat (sum sur toutes commandes confondues du client)
+      const flatExistingLine = newLineKey
         ? clientsMap[key].produits.find(line => productKey(line) === newLineKey)
         : null;
-      if (existingLine) {
-        existingLine.quantite = number(existingLine.quantite, 0) + number(newLine.quantite, 0);
+      if (flatExistingLine) {
+        flatExistingLine.quantite = number(flatExistingLine.quantite, 0) + number(newLine.quantite, 0);
       } else {
-        clientsMap[key].produits.push(newLine);
+        clientsMap[key].produits.push({ ...newLine });
       }
     });
 
     const importedClients = Object.values(clientsMap);
     const mergedImport = mergeImportedClients(db, importedClients);
     db.clients = mergedImport.clients;
+
+    // ERP v1.9.0 : creation/mise a jour des commandes par (client, dateCommande).
+    // 3 chemins :
+    //   1. Hash strict match -> noop (re-import identique = idempotent)
+    //   2. Match (clientId, dateCommande) -> update produits, preserve status/workflow
+    //   3. Nouveau (client, date) -> nouvelle commande avec numero genere
+    let createdCount = 0;
+    let updatedCount = 0;
+    let skippedIdenticalCount = 0;
     let importedAsLivreCount = 0;
-    db.commandes = db.clients.map(client => {
-      const existingOrder = existingOrders.get(String(client.id)) || {};
-      const livreParImport = !!client.factureLivree;
-      if (livreParImport && existingOrder.status !== "livre") {
-        importedAsLivreCount += 1;
-      }
-      return normalizeOrder({
-        ...existingOrder,
-        clientId: client.id,
-        clientName: client.nom,
-        address: client.rue,
-        city: client.ville,
-        postalCode: client.codePostal,
-        sector: client.secteur,
-        phone: client.telephone,
-        products: client.produits,
-        lat: client.lat,
-        lng: client.lng,
-        notes: client.notes,
-        priority: client.priority,
-        deliveryDate: existingOrder.deliveryDate || client.deliveryDate,
-        status: livreParImport ? "livre" : (existingOrder.status || "stock_a_verifier"),
-        deliveryStatus: livreParImport ? "livre" : existingOrder.deliveryStatus,
-        preparationStatus: livreParImport ? "terminee" : existingOrder.preparationStatus,
-        importedAsLivre: livreParImport ? true : existingOrder.importedAsLivre
+
+    importedClients.forEach(client => {
+      Object.values(client.ordersByDate || {}).forEach(orderData => {
+        const hash = computeOrderHash({
+          clientId: client.id,
+          dateCommande: orderData.dateCommande,
+          products: orderData.produits
+        });
+
+        // Chemin 1 : hash strict = meme contenu, re-import identique idempotent
+        const sameHashOrder = db.commandes.find(o => o.excelRowHash && o.excelRowHash === hash);
+        if (sameHashOrder) {
+          sameHashOrder.updatedAt = new Date().toISOString();
+          skippedIdenticalCount += 1;
+          return;
+        }
+
+        // Chemin 2 : (clientId, dateCommande) = meme bon mais contenu modifie
+        const sameKeyOrder = db.commandes.find(o =>
+          String(o.clientId) === String(client.id) &&
+          o.dateCommande === orderData.dateCommande
+        );
+        if (sameKeyOrder) {
+          sameKeyOrder.products = normalizeProducts(orderData.produits);
+          sameKeyOrder.excelRowHash = hash;
+          sameKeyOrder.updatedAt = new Date().toISOString();
+          // Sync coordonnees client (peuvent avoir change). lat/lng client manuel
+          // (PATCH /api/clients/:id/coordinates) deja merge dans client.lat/lng.
+          sameKeyOrder.address = client.rue || sameKeyOrder.address;
+          sameKeyOrder.city = client.ville || sameKeyOrder.city;
+          sameKeyOrder.postalCode = client.codePostal || sameKeyOrder.postalCode;
+          sameKeyOrder.sector = client.secteur || sameKeyOrder.sector;
+          sameKeyOrder.phone = client.telephone || sameKeyOrder.phone;
+          if (client.lat !== "") sameKeyOrder.lat = client.lat;
+          if (client.lng !== "") sameKeyOrder.lng = client.lng;
+          updatedCount += 1;
+          return;
+        }
+
+        // Chemin 3 : nouvelle commande. generateOrderNumber doit voir les
+        // commandes deja pushees pour ne pas re-utiliser un numero.
+        const newOrder = normalizeOrder({
+          clientId: client.id,
+          clientName: client.nom,
+          address: client.rue,
+          city: client.ville,
+          postalCode: client.codePostal,
+          sector: client.secteur,
+          phone: client.telephone,
+          products: orderData.produits,
+          lat: client.lat,
+          lng: client.lng,
+          notes: client.notes,
+          priority: client.priority,
+          dateCommande: orderData.dateCommande,
+          deliveryDate: orderData.deliveryDate || "",
+          dateImport: new Date().toISOString(),
+          excelRowHash: hash,
+          numero: generateOrderNumber(db, orderData.dateCommande),
+          status: orderData.factureLivree ? "livre" : "stock_a_verifier",
+          deliveryStatus: orderData.factureLivree ? "livre" : "restant",
+          preparationStatus: orderData.factureLivree ? "terminee" : "a_preparer",
+          importedAsLivre: orderData.factureLivree
+        });
+        // Id deterministe via numero : evite la collision cmd-${clientId} qui
+        // ecrasait l'ancienne commande quand un meme client commandait 2x.
+        newOrder.id = `cmd-${newOrder.numero.toLowerCase()}`;
+        db.commandes.push(newOrder);
+        createdCount += 1;
+        if (orderData.factureLivree) importedAsLivreCount += 1;
       });
     });
 
@@ -3250,10 +3392,11 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     const livreMessage = importedAsLivreCount > 0
       ? `, ${importedAsLivreCount} commande(s) importee(s) comme deja livree(s) (statut facture Envoyee)`
       : "";
+    const commandeStats = `${createdCount} commande(s) creee(s), ${updatedCount} mise(s) a jour, ${skippedIdenticalCount} identique(s) ignoree(s)`;
     addHistory(
       db,
       "Import ventes",
-      `${db.ventes.length} vente(s) importee(s), ${importedClients.length} client(s) detecte(s)${preservedMessage}${mergedMessage}${livreMessage}`,
+      `${db.ventes.length} vente(s) importee(s), ${importedClients.length} client(s) detecte(s), ${commandeStats}${preservedMessage}${mergedMessage}${livreMessage}`,
       {
         fichier: req.file.originalname
       }
@@ -3268,7 +3411,10 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       commandes: db.commandes,
       secteurs: getSectors(db),
       mergedBySecondary: mergedImport.mergedBySecondary,
-      importedAsLivre: importedAsLivreCount
+      importedAsLivre: importedAsLivreCount,
+      created: createdCount,
+      updated: updatedCount,
+      skippedIdentical: skippedIdenticalCount
     });
   } catch (error) {
     handleRouteError(error, res, "Erreur import ventes");

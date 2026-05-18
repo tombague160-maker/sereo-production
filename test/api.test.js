@@ -2342,3 +2342,232 @@ test("route multi-stops : reorder avec liste partielle est rejetee ou ignoree", 
     assert.equal(partial.body.stops.length, 3, "Aucun stop ne doit etre perdu");
   }
 });
+
+// ============================================================================
+// V1.9.0 - ERP Phase 2 : refonte import ventes en bons de commande.
+// Bucket par (client, dateCommande) : meme client + meme date Excel = meme
+// bon (update). Meme client + date differente = nouveau bon (numero neuf).
+// Re-import identique = idempotent (hash strict). Refactor de syncWorkflow
+// pour gerer N commandes par client.
+// ============================================================================
+
+test("ERP Phase 2 : re-import identique = idempotent (hash strict, aucun doublon)", async () => {
+  seedDb(defaultDb());
+
+  const sheet = [
+    ["Code", "Client", "Quantite", "Produit", "Rue", "Code Postal", "Ville", "Date"],
+    ["A1", "Dupont", "5", "Produit A", "1 rue test", "25000", "Besancon", "01/05/2026"]
+  ];
+
+  // 1er import : cree la commande
+  const form1 = new FormData();
+  form1.append("file", workbookBlob(sheet), "ventes.xlsx");
+  const r1 = await requestJson("/api/import/ventes", { method: "POST", body: form1 });
+  assert.equal(r1.res.status, 200);
+  assert.equal(r1.body.created, 1, "1 commande creee au premier import");
+  assert.equal(r1.body.skippedIdentical, 0);
+
+  const numero1 = r1.body.commandes[0].numero;
+  assert.match(numero1, /^CMD-\d{4}-\d{3}$/, "Numero genere au format CMD-YYYY-NNN");
+  const id1 = r1.body.commandes[0].id;
+
+  // 2e import IDENTIQUE : aucun changement attendu (hash strict)
+  const form2 = new FormData();
+  form2.append("file", workbookBlob(sheet), "ventes.xlsx");
+  const r2 = await requestJson("/api/import/ventes", { method: "POST", body: form2 });
+  assert.equal(r2.body.created, 0, "Aucune commande creee");
+  assert.equal(r2.body.updated, 0, "Aucune mise a jour");
+  assert.equal(r2.body.skippedIdentical, 1, "1 ligne identique ignoree");
+
+  // La commande existe toujours, meme numero, meme id
+  const cmd = r2.body.commandes.find(c => c.id === id1);
+  assert.ok(cmd, "Commande preservee");
+  assert.equal(cmd.numero, numero1, "Numero inchange");
+});
+
+test("ERP Phase 2 : meme client + nouvelle date Excel = nouvelle commande avec numero suivant", async () => {
+  seedDb(defaultDb());
+
+  // J1 : commande du 1er mai pour Dupont
+  const form1 = new FormData();
+  form1.append("file", workbookBlob([
+    ["Code", "Client", "Quantite", "Produit", "Rue", "Code Postal", "Ville", "Date"],
+    ["A1", "Dupont", "5", "Produit A", "1 rue test", "25000", "Besancon", "01/05/2026"]
+  ]), "ventes.xlsx");
+  const r1 = await requestJson("/api/import/ventes", { method: "POST", body: form1 });
+  assert.equal(r1.body.created, 1);
+  const numero1 = r1.body.commandes[0].numero;
+
+  // J8 : nouvelle commande du 8 mai pour le MEME Dupont
+  const form2 = new FormData();
+  form2.append("file", workbookBlob([
+    ["Code", "Client", "Quantite", "Produit", "Rue", "Code Postal", "Ville", "Date"],
+    ["B1", "Dupont", "3", "Produit B", "1 rue test", "25000", "Besancon", "08/05/2026"]
+  ]), "ventes.xlsx");
+  const r2 = await requestJson("/api/import/ventes", { method: "POST", body: form2 });
+  assert.equal(r2.body.created, 1, "Nouvelle commande creee pour la nouvelle date");
+
+  // Les 2 commandes coexistent
+  const dupontCommandes = r2.body.commandes.filter(c => c.clientName === "Dupont");
+  assert.equal(dupontCommandes.length, 2, "Dupont a 2 commandes distinctes");
+
+  const dates = dupontCommandes.map(c => c.dateCommande).sort();
+  assert.deepEqual(dates, ["2026-05-01", "2026-05-08"]);
+
+  // Numero du 8 mai est le suivant
+  const cmd8 = dupontCommandes.find(c => c.dateCommande === "2026-05-08");
+  assert.match(cmd8.numero, /^CMD-\d{4}-\d{3}$/);
+  assert.notEqual(cmd8.numero, numero1, "Numero distinct du premier");
+});
+
+test("ERP Phase 2 : meme client + meme date + contenu modifie = update de la commande existante", async () => {
+  seedDb(defaultDb());
+
+  // J1 : commande avec 5 unites de A1
+  const form1 = new FormData();
+  form1.append("file", workbookBlob([
+    ["Code", "Client", "Quantite", "Produit", "Rue", "Code Postal", "Ville", "Date"],
+    ["A1", "Dupont", "5", "Produit A", "1 rue test", "25000", "Besancon", "01/05/2026"]
+  ]), "ventes.xlsx");
+  const r1 = await requestJson("/api/import/ventes", { method: "POST", body: form1 });
+  const numero1 = r1.body.commandes[0].numero;
+  const id1 = r1.body.commandes[0].id;
+
+  // J1 corrige : 8 unites de A1 (correction Excel)
+  const form2 = new FormData();
+  form2.append("file", workbookBlob([
+    ["Code", "Client", "Quantite", "Produit", "Rue", "Code Postal", "Ville", "Date"],
+    ["A1", "Dupont", "8", "Produit A", "1 rue test", "25000", "Besancon", "01/05/2026"]
+  ]), "ventes.xlsx");
+  const r2 = await requestJson("/api/import/ventes", { method: "POST", body: form2 });
+  assert.equal(r2.body.created, 0, "Pas de nouvelle commande");
+  assert.equal(r2.body.updated, 1, "Commande existante mise a jour");
+
+  // Memes id et numero, contenu mis a jour
+  const dupontCommandes = r2.body.commandes.filter(c => c.clientName === "Dupont");
+  assert.equal(dupontCommandes.length, 1, "Toujours 1 seule commande");
+  assert.equal(dupontCommandes[0].id, id1, "Id preserve");
+  assert.equal(dupontCommandes[0].numero, numero1, "Numero preserve");
+  assert.equal(dupontCommandes[0].products[0].quantite, 8, "Quantite mise a jour");
+});
+
+test("ERP Phase 2 : numeros sequentiels CMD-YYYY-001, 002, 003 sur 3 clients differents", async () => {
+  seedDb(defaultDb());
+
+  const form = new FormData();
+  form.append("file", workbookBlob([
+    ["Code", "Client", "Quantite", "Produit", "Rue", "Code Postal", "Ville", "Date"],
+    ["A1", "Client A", "1", "X", "1 rue A", "25000", "Besancon", "01/05/2026"],
+    ["B1", "Client B", "2", "Y", "2 rue B", "39100", "Dole", "01/05/2026"],
+    ["C1", "Client C", "3", "Z", "3 rue C", "39300", "Champagnole", "01/05/2026"]
+  ]), "ventes.xlsx");
+  const r = await requestJson("/api/import/ventes", { method: "POST", body: form });
+
+  assert.equal(r.body.created, 3, "3 commandes creees");
+  const numeros = r.body.commandes
+    .filter(c => c.numero)
+    .map(c => c.numero)
+    .sort();
+
+  // 3 numeros distincts, suite CMD-2026-001..003
+  assert.equal(numeros.length, 3);
+  assert.match(numeros[0], /^CMD-2026-\d{3}$/);
+  assert.match(numeros[2], /^CMD-2026-\d{3}$/);
+  const seqs = numeros.map(n => Number(n.split("-")[2])).sort((a, b) => a - b);
+  assert.deepEqual(seqs, [1, 2, 3], "Sequence 1,2,3 sans trou");
+});
+
+test("ERP Phase 2 : multi-produits pour meme bon = 1 commande avec N lignes", async () => {
+  seedDb(defaultDb());
+
+  const form = new FormData();
+  form.append("file", workbookBlob([
+    ["Code", "Client", "Quantite", "Produit", "Rue", "Code Postal", "Ville", "Date"],
+    ["A1", "Dupont", "5", "Produit A", "1 rue test", "25000", "Besancon", "01/05/2026"],
+    ["B1", "Dupont", "3", "Produit B", "1 rue test", "25000", "Besancon", "01/05/2026"],
+    ["C1", "Dupont", "2", "Produit C", "1 rue test", "25000", "Besancon", "01/05/2026"]
+  ]), "ventes.xlsx");
+  const r = await requestJson("/api/import/ventes", { method: "POST", body: form });
+
+  assert.equal(r.body.created, 1, "1 seule commande pour les 3 lignes (meme date, meme client)");
+  const cmd = r.body.commandes.find(c => c.clientName === "Dupont");
+  assert.equal(cmd.products.length, 3, "3 lignes produits dans la commande");
+  const totalQty = cmd.products.reduce((sum, p) => sum + Number(p.quantite || 0), 0);
+  assert.equal(totalQty, 10, "5+3+2 = 10");
+});
+
+test("ERP Phase 2 : meme produit 2 fois pour meme bon = lignes agregees (somme)", async () => {
+  seedDb(defaultDb());
+
+  const form = new FormData();
+  form.append("file", workbookBlob([
+    ["Code", "Client", "Quantite", "Produit", "Rue", "Code Postal", "Ville", "Date"],
+    ["A1", "Dupont", "5", "Produit A", "1 rue test", "25000", "Besancon", "01/05/2026"],
+    ["A1", "Dupont", "3", "Produit A", "1 rue test", "25000", "Besancon", "01/05/2026"]
+  ]), "ventes.xlsx");
+  const r = await requestJson("/api/import/ventes", { method: "POST", body: form });
+
+  const cmd = r.body.commandes.find(c => c.clientName === "Dupont");
+  assert.equal(cmd.products.length, 1, "1 seule ligne (deduplication par productKey)");
+  assert.equal(cmd.products[0].quantite, 8, "5+3 = 8");
+});
+
+test("ERP Phase 2 : statut Envoyee dans Excel = commande creee directement en livre", async () => {
+  seedDb(defaultDb());
+
+  const form = new FormData();
+  form.append("file", workbookBlob([
+    ["Code", "Client", "Quantite", "Produit", "Rue", "Code Postal", "Ville", "Date", "Statut"],
+    ["A1", "Dupont", "5", "Produit A", "1 rue test", "25000", "Besancon", "01/05/2026", "Envoyée"]
+  ]), "ventes.xlsx");
+  const r = await requestJson("/api/import/ventes", { method: "POST", body: form });
+
+  assert.equal(r.body.created, 1);
+  assert.equal(r.body.importedAsLivre, 1, "Commande importee comme livree");
+
+  const cmd = r.body.commandes.find(c => c.clientName === "Dupont");
+  assert.equal(cmd.status, "livre");
+  assert.equal(cmd.preparationStatus, "terminee");
+  assert.equal(cmd.deliveryStatus, "livre");
+  assert.equal(cmd.importedAsLivre, true);
+});
+
+test("ERP Phase 2 : re-import qui modifie commande deja livree preserve le statut livre", async () => {
+  seedDb(defaultDb());
+
+  // Import initial : commande livree
+  const form1 = new FormData();
+  form1.append("file", workbookBlob([
+    ["Code", "Client", "Quantite", "Produit", "Rue", "Code Postal", "Ville", "Date", "Statut"],
+    ["A1", "Dupont", "5", "Produit A", "1 rue test", "25000", "Besancon", "01/05/2026", "Envoyée"]
+  ]), "ventes.xlsx");
+  await requestJson("/api/import/ventes", { method: "POST", body: form1 });
+
+  // Re-import avec contenu modifie (8 au lieu de 5) MAIS sans le statut Envoyee
+  const form2 = new FormData();
+  form2.append("file", workbookBlob([
+    ["Code", "Client", "Quantite", "Produit", "Rue", "Code Postal", "Ville", "Date"],
+    ["A1", "Dupont", "8", "Produit A", "1 rue test", "25000", "Besancon", "01/05/2026"]
+  ]), "ventes.xlsx");
+  const r2 = await requestJson("/api/import/ventes", { method: "POST", body: form2 });
+
+  assert.equal(r2.body.updated, 1);
+  const cmd = r2.body.commandes.find(c => c.clientName === "Dupont");
+  assert.equal(cmd.status, "livre", "Statut livre preserve");
+  assert.equal(cmd.products[0].quantite, 8, "Contenu mis a jour");
+});
+
+test("ERP Phase 2 : excelRowHash present sur chaque commande importee", async () => {
+  seedDb(defaultDb());
+
+  const form = new FormData();
+  form.append("file", workbookBlob([
+    ["Code", "Client", "Quantite", "Produit", "Rue", "Code Postal", "Ville", "Date"],
+    ["A1", "Dupont", "5", "Produit A", "1 rue test", "25000", "Besancon", "01/05/2026"]
+  ]), "ventes.xlsx");
+  const r = await requestJson("/api/import/ventes", { method: "POST", body: form });
+
+  const cmd = r.body.commandes.find(c => c.clientName === "Dupont");
+  assert.ok(cmd.excelRowHash, "Hash present sur commande importee");
+  assert.match(cmd.excelRowHash, /^[a-f0-9]{16}$/, "Hash format SHA-256 (16 hex chars)");
+});
