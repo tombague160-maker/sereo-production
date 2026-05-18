@@ -2571,3 +2571,115 @@ test("ERP Phase 2 : excelRowHash present sur chaque commande importee", async ()
   assert.ok(cmd.excelRowHash, "Hash present sur commande importee");
   assert.match(cmd.excelRowHash, /^[a-f0-9]{16}$/, "Hash format SHA-256 (16 hex chars)");
 });
+
+// ============================================================================
+// V1.9.1 - Hotfix migration SQLite : les bases creees avant Phase 1 (sans
+// colonnes numero/date_commande/excel_row_hash) doivent se mettre a niveau
+// automatiquement au prochain startup, SANS crash "no such column".
+// Bug rapporte en prod : tous les endpoints renvoyaient 500 apres deploiement.
+// ============================================================================
+
+test("v1.9.1 migration : base SQLite pre-Phase1 (sans colonnes ERP) se met a niveau au startup", () => {
+  const { DatabaseSync } = require("node:sqlite");
+  const { createSqliteStore } = require("../storage/sqliteStore");
+
+  const legacyPath = path.join(tmpRoot, "data", `legacy-${Date.now()}.sqlite`);
+
+  // 1. Construire une base avec l'ancien schema (sans numero/date_commande/excel_row_hash)
+  // C'est exactement ce qui existe en prod chez l'utilisateur (sereo.sqlite avec
+  // donnees pre-v1.9.0).
+  const legacy = new DatabaseSync(legacyPath);
+  legacy.exec(`
+    CREATE TABLE app_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE commandes (
+      id TEXT PRIMARY KEY,
+      client_id TEXT,
+      date_import TEXT,
+      date_preparation TEXT,
+      date_livraison TEXT,
+      statut TEXT,
+      source_excel TEXT,
+      updated_at TEXT,
+      payload TEXT NOT NULL,
+      sort_order INTEGER NOT NULL
+    );
+    CREATE TABLE produits (id TEXT PRIMARY KEY, payload TEXT NOT NULL, sort_order INTEGER NOT NULL);
+    CREATE TABLE clients (id TEXT PRIMARY KEY, payload TEXT NOT NULL, sort_order INTEGER NOT NULL);
+    CREATE TABLE lignes_commande (id TEXT PRIMARY KEY, commande_id TEXT NOT NULL, payload TEXT NOT NULL, sort_order INTEGER NOT NULL);
+    CREATE TABLE livraisons (id TEXT PRIMARY KEY, payload TEXT NOT NULL, sort_order INTEGER NOT NULL);
+    CREATE TABLE mouvements_stock (id TEXT PRIMARY KEY, payload TEXT NOT NULL, sort_order INTEGER NOT NULL);
+    CREATE TABLE ventes (id TEXT PRIMARY KEY, payload TEXT NOT NULL, sort_order INTEGER NOT NULL);
+    CREATE TABLE historique (id TEXT PRIMARY KEY, payload TEXT NOT NULL, sort_order INTEGER NOT NULL);
+    CREATE TABLE routes (id TEXT PRIMARY KEY, payload TEXT NOT NULL, sort_order INTEGER NOT NULL);
+  `);
+  // Donnee critique : une commande pre-Phase1, sans numero/date_commande/hash
+  legacy.prepare(`
+    INSERT INTO commandes (id, client_id, statut, payload, sort_order)
+    VALUES ('cmd-legacy-1', 'c-legacy', 'en_preparation',
+            '{"id":"cmd-legacy-1","clientId":"c-legacy","clientName":"Client Legacy","products":[{"code":"A1","quantite":5}],"status":"en_preparation"}',
+            0)
+  `).run();
+  legacy.prepare(`INSERT INTO app_meta (key, value) VALUES ('initialized', '1')`).run();
+  legacy.close();
+
+  // 2. Ouvrir avec le nouveau createSqliteStore : migration auto, pas de crash
+  const store = createSqliteStore({
+    sqlitePath: legacyPath,
+    seedJsonPath: "",
+    defaultDb: () => ({ clients: [], commandes: [], stock: [], ventes: [], historique: [], routes: [], stockMovements: [], settings: {} }),
+    normalizeDb: db => db,
+    ensureDir: () => {}
+  });
+
+  // 3. Verifications cles
+  const db = store.readDb();
+  assert.equal(db.commandes.length, 1, "Donnee legacy preservee (clientId c-legacy)");
+  assert.equal(db.commandes[0].clientId, "c-legacy");
+  assert.equal(db.commandes[0].status, "en_preparation", "Status workflow preserve");
+
+  // Verif schema : la table a maintenant les nouvelles colonnes
+  const legacy2 = new DatabaseSync(legacyPath);
+  const columns = legacy2.prepare("PRAGMA table_info(commandes)").all().map(r => r.name);
+  assert.ok(columns.includes("numero"), "Colonne numero ajoutee");
+  assert.ok(columns.includes("date_commande"), "Colonne date_commande ajoutee");
+  assert.ok(columns.includes("excel_row_hash"), "Colonne excel_row_hash ajoutee");
+
+  // Verif index : les CREATE INDEX se sont executes apres ALTER TABLE
+  const indexes = legacy2.prepare("PRAGMA index_list(commandes)").all().map(r => r.name);
+  assert.ok(indexes.includes("idx_commandes_numero"), "Index sur numero cree");
+  assert.ok(indexes.includes("idx_commandes_client_date"), "Index sur (client_id, date_commande) cree");
+  legacy2.close();
+
+  store.close();
+  fs.unlinkSync(legacyPath);
+});
+
+test("v1.9.1 migration : idempotent (2e startup sur base deja a jour ne crash pas)", () => {
+  const { createSqliteStore } = require("../storage/sqliteStore");
+
+  const freshPath = path.join(tmpRoot, "data", `fresh-${Date.now()}.sqlite`);
+  const opts = {
+    sqlitePath: freshPath,
+    seedJsonPath: "",
+    defaultDb: () => ({ clients: [], commandes: [], stock: [], ventes: [], historique: [], routes: [], stockMovements: [], settings: {} }),
+    normalizeDb: db => db,
+    ensureDir: () => {}
+  };
+
+  // 1er startup : creation fraiche, schema avec colonnes ERP
+  const store1 = createSqliteStore(opts);
+  store1.close();
+
+  // 2e startup : migration idempotente (addColumnIfMissing ne re-ajoute pas
+  // une colonne deja presente)
+  const store2 = createSqliteStore(opts);
+  const db = store2.readDb();
+  assert.ok(db, "2e startup OK, pas de crash");
+  store2.close();
+
+  fs.unlinkSync(freshPath);
+});

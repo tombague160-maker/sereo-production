@@ -60,6 +60,11 @@ function createSqliteStore(options) {
 }
 
 function migrateSchema(database) {
+  // Etape 1 : creation des tables. CREATE TABLE IF NOT EXISTS est idempotent
+  // mais ne met PAS a jour le schema d'une table existante avec de nouvelles
+  // colonnes. La definition ici est utilisee uniquement pour les bases neuves.
+  // Les bases existantes (prod avant Phase 1 v1.9.0) sont mises a niveau via
+  // addColumnIfMissing ci-dessous a l'etape 2.
   database.exec(`
     CREATE TABLE IF NOT EXISTS app_meta (
       key TEXT PRIMARY KEY,
@@ -108,10 +113,6 @@ function migrateSchema(database) {
       payload TEXT NOT NULL,
       sort_order INTEGER NOT NULL
     );
-
-    CREATE INDEX IF NOT EXISTS idx_commandes_numero ON commandes(numero);
-    CREATE INDEX IF NOT EXISTS idx_commandes_client_date ON commandes(client_id, date_commande);
-    CREATE INDEX IF NOT EXISTS idx_commandes_hash ON commandes(excel_row_hash);
 
     CREATE TABLE IF NOT EXISTS lignes_commande (
       id TEXT PRIMARY KEY,
@@ -177,13 +178,24 @@ function migrateSchema(database) {
     );
   `);
 
-  // Migration v1.9.0 : ajout colonnes ERP sur commandes existantes.
-  // node:sqlite ne supporte pas IF NOT EXISTS sur ADD COLUMN, donc on
-  // inspecte le schema avant pour eviter une erreur sur les bases deja
-  // migrees.
+  // Etape 2 : ALTER TABLE pour les bases creees AVANT v1.9.0 qui n'ont pas
+  // encore les colonnes ERP. node:sqlite ne supporte pas IF NOT EXISTS sur
+  // ADD COLUMN, donc on inspecte le schema avant. addColumnIfMissing est
+  // idempotent et safe pour les bases deja a jour.
+  //
+  // CRITIQUE : doit etre execute AVANT les CREATE INDEX qui referencent ces
+  // colonnes, sinon les bases pre-Phase-1 crashent avec "no such column".
+  // Bug v1.9.0 fixe par v1.9.1.
   addColumnIfMissing(database, "commandes", "numero", "TEXT");
   addColumnIfMissing(database, "commandes", "date_commande", "TEXT");
   addColumnIfMissing(database, "commandes", "excel_row_hash", "TEXT");
+
+  // Etape 3 : CREATE INDEX, maintenant que les colonnes existent garantissimement.
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_commandes_numero ON commandes(numero);
+    CREATE INDEX IF NOT EXISTS idx_commandes_client_date ON commandes(client_id, date_commande);
+    CREATE INDEX IF NOT EXISTS idx_commandes_hash ON commandes(excel_row_hash);
+  `);
 }
 
 function addColumnIfMissing(database, table, column, type) {
