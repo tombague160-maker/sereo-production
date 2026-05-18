@@ -1208,6 +1208,189 @@ test("GET /api/orders?status=invalide renvoie 400", async () => {
 });
 
 // ============================================================================
+// Non-regression : aucun import ne doit ecraser les modifications manuelles
+// faites par l'utilisateur (notes order, coordonnees lat/lng client, statut
+// workflow). Suite a l'audit "cherche a fond si y a pas d'autre bug de ce
+// genre" du 14 mai 2026.
+// ============================================================================
+
+test("non-regression: re-import ventes preserve les notes manuelles d'une commande", async () => {
+  seedDb({
+    ...defaultDb(),
+    clients: [{
+      id: "c-notes", nom: "Client Notes", rue: "1 rue test",
+      ville: "Besancon", codePostal: "25000", statut: "restant", produits: []
+    }],
+    commandes: [{
+      id: "o-notes", clientId: "c-notes", clientName: "Client Notes",
+      address: "1 rue test", city: "Besancon", postalCode: "25000",
+      sector: "Besancon", products: [], status: "stock_a_verifier"
+    }]
+  });
+
+  // L'utilisateur tape une note manuelle sur la commande
+  await requestJson("/api/orders/o-notes", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ notes: "Sonner 2 fois, code 1234" })
+  });
+
+  // Re-import de l'Excel ventes pour le meme client (sans colonne Notes)
+  const form = new FormData();
+  form.append("file", workbookBlob([
+    ["Client", "Quantite", "Produit", "Rue", "Ville", "Code Postal"],
+    ["Client Notes", "1", "Produit Z", "1 rue test", "Besancon", "25000"]
+  ]), "ventes.xlsx");
+  const r = await requestJson("/api/import/ventes", { method: "POST", body: form });
+
+  assert.equal(r.res.status, 200);
+  const order = r.body.commandes.find(o => o.clientName === "Client Notes");
+  assert.ok(order, "commande retrouvee");
+  assert.equal(order.notes, "Sonner 2 fois, code 1234",
+    "Notes manuelles preservees apres re-import sans colonne Notes Excel");
+});
+
+test("non-regression: re-import ventes preserve les coordonnees lat/lng manuelles", async () => {
+  seedDb({
+    ...defaultDb(),
+    clients: [{
+      id: "c-geo", nom: "Client GPS", rue: "5 avenue test",
+      ville: "Dole", codePostal: "39100", statut: "restant", produits: [],
+      lat: "", lng: ""
+    }],
+    commandes: [{
+      id: "o-geo", clientId: "c-geo", clientName: "Client GPS",
+      address: "5 avenue test", city: "Dole", postalCode: "39100",
+      sector: "Dole", products: [], status: "stock_a_verifier"
+    }]
+  });
+
+  // L'utilisateur saisit ses coordonnees GPS manuellement
+  await requestJson("/api/clients/c-geo/coordinates", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ lat: "47.0936", lng: "5.4912" })
+  });
+
+  // Re-import sans Latitude/Longitude
+  const form = new FormData();
+  form.append("file", workbookBlob([
+    ["Client", "Quantite", "Produit", "Rue", "Ville", "Code Postal"],
+    ["Client GPS", "1", "Produit X", "5 avenue test", "Dole", "39100"]
+  ]), "ventes.xlsx");
+  const r = await requestJson("/api/import/ventes", { method: "POST", body: form });
+
+  assert.equal(r.res.status, 200);
+  const client = r.body.clients.find(c => c.nom === "Client GPS");
+  assert.ok(client, "client retrouve");
+  assert.equal(Number(client.lat), 47.0936,
+    "Latitude manuelle preservee apres re-import sans Lat Excel");
+  assert.equal(Number(client.lng), 5.4912,
+    "Longitude manuelle preservee");
+});
+
+test("non-regression: re-import ventes preserve le statut workflow en_preparation", async () => {
+  seedDb({
+    ...defaultDb(),
+    clients: [{
+      id: "c-prep", nom: "Client Prep", rue: "3 rue prep",
+      ville: "Champagnole", codePostal: "39300", statut: "restant", produits: []
+    }],
+    commandes: [{
+      id: "o-prep", clientId: "c-prep", clientName: "Client Prep",
+      address: "3 rue prep", city: "Champagnole", postalCode: "39300",
+      sector: "Champagnole", products: [{ code: "X1", nom: "X", quantite: 1 }],
+      status: "en_preparation", preparationStatus: "en_cours",
+      stockReservedAt: new Date().toISOString()
+    }],
+    stock: [{ id: "p-x", code: "X1", nom: "X", quantite: 10 }]
+  });
+
+  // Re-import ventes (sans colonne statut, donc pas "Envoyee")
+  const form = new FormData();
+  form.append("file", workbookBlob([
+    ["Client", "Quantite", "Produit", "Rue", "Ville", "Code Postal"],
+    ["Client Prep", "1", "X", "3 rue prep", "Champagnole", "39300"]
+  ]), "ventes.xlsx");
+  const r = await requestJson("/api/import/ventes", { method: "POST", body: form });
+
+  assert.equal(r.res.status, 200);
+  const order = r.body.commandes.find(o => o.clientName === "Client Prep");
+  assert.equal(order.status, "en_preparation",
+    "Statut en_preparation preserve apres re-import");
+  assert.equal(order.preparationStatus, "en_cours",
+    "preparationStatus preserve");
+});
+
+test("non-regression: re-import ventes preserve la priority manuelle de la commande", async () => {
+  seedDb({
+    ...defaultDb(),
+    clients: [{
+      id: "c-prio", nom: "Client Prio", rue: "8 rue prio",
+      ville: "Besancon", codePostal: "25000", statut: "restant", produits: []
+    }],
+    commandes: [{
+      id: "o-prio", clientId: "c-prio", clientName: "Client Prio",
+      address: "8 rue prio", city: "Besancon", postalCode: "25000",
+      sector: "Besancon", products: [], status: "stock_a_verifier"
+    }]
+  });
+
+  await requestJson("/api/orders/o-prio", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ priority: "urgent" })
+  });
+
+  const form = new FormData();
+  form.append("file", workbookBlob([
+    ["Client", "Quantite", "Produit", "Rue", "Ville", "Code Postal"],
+    ["Client Prio", "1", "Z", "8 rue prio", "Besancon", "25000"]
+  ]), "ventes.xlsx");
+  const r = await requestJson("/api/import/ventes", { method: "POST", body: form });
+
+  const order = r.body.commandes.find(o => o.clientName === "Client Prio");
+  assert.equal(order.priority, "urgent",
+    "Priority manuelle preservee apres re-import sans colonne Priorite");
+});
+
+test("non-regression: re-import stock preserve les mouvements de stock (historique)", async () => {
+  seedDb(defaultDb());
+
+  // Import initial + ajustement -> genere un stockMovement
+  const form1 = new FormData();
+  form1.append("file", workbookBlob([
+    ["Code", "Nom"],
+    ["M1", "Produit M"]
+  ]), "stock.xlsx");
+  const r1 = await requestJson("/api/import/stock", { method: "POST", body: form1 });
+  const productId = r1.body.stock[0].id;
+
+  await requestJson(`/api/stock/${encodeURIComponent(productId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ quantite: 30 })
+  });
+
+  // Verifier qu'on a bien un mouvement
+  const before = await requestJson("/api/stock-movements");
+  const movementsBefore = before.body.length;
+  assert.ok(movementsBefore > 0, "Au moins un mouvement enregistre");
+
+  // Re-import du meme Excel
+  const form2 = new FormData();
+  form2.append("file", workbookBlob([
+    ["Code", "Nom"],
+    ["M1", "Produit M"]
+  ]), "stock.xlsx");
+  await requestJson("/api/import/stock", { method: "POST", body: form2 });
+
+  const after = await requestJson("/api/stock-movements");
+  assert.equal(after.body.length, movementsBefore,
+    "Historique des mouvements preserve apres re-import");
+});
+
+// ============================================================================
 // V1.2.0 - quick wins (audit)
 // ============================================================================
 
