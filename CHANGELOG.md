@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.0](https://github.com/tombague160-maker/sereo-production/compare/v1.9.1...v1.10.0) (2026-05-18)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **ui:** nouvelle page "Bons de commande" avec filtres + modal detail (Phase 3 ERP) ([#53](https://github.com/tombague160-maker/sereo-production/issues/53)) ([9435a33](https://github.com/tombague160-maker/sereo-production/commit/9435a33d00cae801ea472eaf9faf5f2897df476d))
+
 ## [1.9.1](https://github.com/tombague160-maker/sereo-production/compare/v1.9.0...v1.9.1) (2026-05-18)
 
 
