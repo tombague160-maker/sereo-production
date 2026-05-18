@@ -35,7 +35,7 @@ let activeBrandImage = "/brand/sereo-logo.svg";
 // L'utilisateur peut basculer via Parametres > Mode d'affichage.
 let activeColorScheme = "light";
 
-const mainTabs = new Set(["journee", "stock", "preparation", "livreur", "recommande", "commandes-livrees", "parametres"]);
+const mainTabs = new Set(["journee", "stock", "preparation", "bons-commande", "livreur", "recommande", "commandes-livrees", "parametres"]);
 const DEFAULT_BRAND_IMAGE = "/brand/sereo-logo.svg";
 const DEFAULT_BRAND_IMAGE_DARK = "/brand/sereo-logo-dark.svg";
 const MAX_BRAND_IMAGE_SIZE = 2 * 1024 * 1024;
@@ -216,6 +216,10 @@ const titles = {
     title: "Livraison",
     subtitle: "Filtre par date et secteur, crée la tournée et suit les clients."
   },
+  "bons-commande": {
+    title: "Bons de commande",
+    subtitle: "Tous les bons importés, triables et filtrables par statut, secteur ou date."
+  },
   recommande: {
     title: "À recommander",
     subtitle: "Produits en rupture ou proches de la rupture."
@@ -261,6 +265,7 @@ document.addEventListener("DOMContentLoaded", () => {
   watchSystemColorScheme();
   bindUi();
   bindVersionModal();
+  bindBonsCommandeUi();
   initMap();
   registerServiceWorker();
   showTab(getInitialTab(), { updateHash: false });
@@ -397,7 +402,7 @@ function getInitialTab() {
 // car > 5 destinations). Quand l'utilisateur navigue vers l'une d'elles, le
 // bouton "Plus" recoit la classe `.active` pour montrer visuellement qu'on est
 // dans ce groupe.
-const MOBILE_OVERFLOW_TABS = new Set(["recommande", "commandes-livrees", "parametres"]);
+const MOBILE_OVERFLOW_TABS = new Set(["bons-commande", "recommande", "commandes-livrees", "parametres"]);
 
 function showTab(tabName, options = {}) {
   const { updateHash = true } = options;
@@ -573,6 +578,7 @@ function renderAll() {
   renderPreparation();
   renderRecommande();
   renderCommandesLivrees();
+  renderBonsCommande();
   renderProduits();
   renderVentes();
   renderAlertes();
@@ -1379,6 +1385,345 @@ function renderCommandesLivrees() {
       </article>
     `;
   }).join("");
+}
+
+// ============================================================================
+// PAGE "BONS DE COMMANDE" (Phase 3 ERP v1.10.0)
+//
+// Liste triable + filtrable de TOUS les bons de commande (toutes statuts).
+// Filtres : recherche texte (numero CMD-... ou client), statut, secteur, date.
+// Vue detail : modal avec lignes produits, statut workflow, hash, dates.
+// Tri par defaut : dateCommande desc, puis numero desc (plus recent en haut).
+// ============================================================================
+
+const bdcState = {
+  status: "all",
+  search: "",
+  sector: "",
+  dateFrom: "",
+  dateTo: ""
+};
+
+const BDC_STATUS_LABELS = {
+  importe: "Importée",
+  stock_a_verifier: "À vérifier",
+  en_preparation: "En préparation",
+  preparation_terminee: "Préparation terminée",
+  pret_livraison: "Prêt livraison",
+  en_livraison: "En livraison",
+  livre: "Livrée",
+  probleme_livraison: "Problème livraison",
+  a_reprogrammer: "À reprogrammer"
+};
+
+const BDC_STATUS_TONE = {
+  importe: "neutral",
+  stock_a_verifier: "warning",
+  en_preparation: "info",
+  preparation_terminee: "info",
+  pret_livraison: "ok",
+  en_livraison: "info",
+  livre: "ok",
+  probleme_livraison: "danger",
+  a_reprogrammer: "warning"
+};
+
+function bdcStatusBadge(status) {
+  const label = BDC_STATUS_LABELS[status] || status || "Inconnu";
+  const tone = BDC_STATUS_TONE[status] || "neutral";
+  return `<span class="bdc-pill bdc-pill-${tone}">${escapeHtml(label)}</span>`;
+}
+
+// Format date ISO YYYY-MM-DD en FR DD/MM/YYYY (defaut, future option dans settings)
+function bdcFormatDate(iso) {
+  if (!iso) return "—";
+  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return iso;
+  return `${m[3]}/${m[2]}/${m[1]}`;
+}
+
+function bdcMatchSearch(order, search) {
+  if (!search) return true;
+  const q = search.toLowerCase();
+  return (
+    (order.numero || "").toLowerCase().includes(q) ||
+    (order.clientName || "").toLowerCase().includes(q) ||
+    (order.id || "").toLowerCase().includes(q)
+  );
+}
+
+function bdcFilterOrders() {
+  return (orders || [])
+    .filter(o => o && o.clientId)
+    .filter(o => bdcState.status === "all" || o.status === bdcState.status)
+    .filter(o => !bdcState.sector || o.sector === bdcState.sector)
+    .filter(o => bdcMatchSearch(o, bdcState.search))
+    .filter(o => {
+      const d = String(o.dateCommande || "").slice(0, 10);
+      if (bdcState.dateFrom && d < bdcState.dateFrom) return false;
+      if (bdcState.dateTo && d > bdcState.dateTo) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      const dateA = String(a.dateCommande || "").slice(0, 10);
+      const dateB = String(b.dateCommande || "").slice(0, 10);
+      if (dateA !== dateB) return dateB.localeCompare(dateA);
+      return String(b.numero || "").localeCompare(String(a.numero || ""));
+    });
+}
+
+function renderBdcSectorOptions() {
+  const select = document.getElementById("bdc-sector");
+  if (!select) return;
+  const currentValue = select.value;
+  const sectors = Array.from(new Set((orders || [])
+    .map(o => o.sector)
+    .filter(Boolean))).sort();
+  select.innerHTML = `<option value="">Tous secteurs</option>` +
+    sectors.map(s => `<option value="${escapeAttribute(s)}">${escapeHtml(s)}</option>`).join("");
+  // Re-set valeur si elle est toujours dispo
+  if (currentValue && sectors.includes(currentValue)) select.value = currentValue;
+}
+
+function renderBonsCommande() {
+  const container = document.getElementById("bdc-list");
+  const summary = document.getElementById("bdc-summary");
+  if (!container) return;
+
+  renderBdcSectorOptions();
+
+  const filtered = bdcFilterOrders();
+  const total = (orders || []).filter(o => o && o.clientId).length;
+
+  if (summary) {
+    summary.textContent = total === 0
+      ? "Aucune commande pour l'instant. Importe ton fichier ventes pour commencer."
+      : `${filtered.length} bon${filtered.length > 1 ? "s" : ""} affiché${filtered.length > 1 ? "s" : ""} sur ${total} au total.`;
+  }
+
+  if (!filtered.length) {
+    container.innerHTML = emptyState(
+      "Aucun bon ne correspond aux filtres",
+      total === 0
+        ? "Importe ton fichier de ventes pour voir les bons de commande ici."
+        : "Essaie de réinitialiser les filtres ou d'élargir la plage de dates."
+    );
+    return;
+  }
+
+  container.innerHTML = filtered.map(order => {
+    const productsCount = Array.isArray(order.products) ? order.products.length : 0;
+    const totalQty = (order.products || []).reduce((sum, p) => sum + Number(p.quantite || 0), 0);
+    const numero = order.numero || `(non numéroté)`;
+    const address = [order.address, order.postalCode, order.city].filter(Boolean).join(" · ");
+    const livreFromImport = order.importedAsLivre
+      ? `<span class="bdc-pill bdc-pill-neutral" title="Importée comme déjà livrée">📥 import livré</span>`
+      : "";
+
+    return `
+      <article class="bdc-card" data-action="open-bdc-detail" data-order-id="${escapeAttribute(order.id)}" role="button" tabindex="0" aria-label="Ouvrir le détail du bon ${escapeAttribute(numero)}">
+        <header class="bdc-card-head">
+          <div class="bdc-card-numero">
+            <strong>${escapeHtml(numero)}</strong>
+            <span class="bdc-card-date">${escapeHtml(bdcFormatDate(order.dateCommande))}</span>
+          </div>
+          ${bdcStatusBadge(order.status)}
+        </header>
+        <div class="bdc-card-client">
+          <h4>${escapeHtml(order.clientName || "Client sans nom")}</h4>
+          <p class="muted">${escapeHtml(address || "Adresse non renseignée")}</p>
+        </div>
+        <footer class="bdc-card-foot">
+          <span class="muted">Secteur : <strong>${escapeHtml(order.sector || "—")}</strong></span>
+          <span class="muted">${productsCount} ligne${productsCount > 1 ? "s" : ""} · ${totalQty} unité${totalQty > 1 ? "s" : ""}</span>
+          ${livreFromImport}
+        </footer>
+      </article>
+    `;
+  }).join("");
+}
+
+function openBdcDetail(orderId) {
+  const order = (orders || []).find(o => String(o.id) === String(orderId));
+  if (!order) return;
+
+  const modal = document.getElementById("bdc-detail-modal");
+  const titleEl = document.getElementById("bdc-detail-title");
+  const subtitleEl = document.getElementById("bdc-detail-subtitle");
+  const bodyEl = document.getElementById("bdc-detail-body");
+  if (!modal || !bodyEl) return;
+
+  const numero = order.numero || "(non numéroté)";
+  if (titleEl) titleEl.textContent = `Bon ${numero}`;
+  if (subtitleEl) {
+    subtitleEl.textContent = `${order.clientName || "Client"} · ${bdcFormatDate(order.dateCommande)}`;
+  }
+
+  const products = Array.isArray(order.products) ? order.products : [];
+  const productsHtml = products.length
+    ? `<table class="bdc-detail-table">
+        <thead><tr><th>Code</th><th>Produit</th><th class="bdc-qty">Qté</th></tr></thead>
+        <tbody>
+          ${products.map(p => `
+            <tr>
+              <td class="muted">${escapeHtml(p.code || "—")}</td>
+              <td>${escapeHtml(p.nom || p.produit || "Produit sans nom")}</td>
+              <td class="bdc-qty"><strong>${escapeHtml(p.quantite ?? 0)}</strong></td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>`
+    : `<p class="muted">Aucune ligne produit.</p>`;
+
+  const address = [order.address, order.postalCode, order.city].filter(Boolean).join(" · ");
+  const hash = order.excelRowHash
+    ? `<code class="bdc-detail-hash" title="Empreinte SHA-256 pour anti-doublon a l'import">${escapeHtml(order.excelRowHash)}</code>`
+    : `<span class="muted">—</span>`;
+
+  bodyEl.innerHTML = `
+    <div class="bdc-detail-grid">
+      <div class="bdc-detail-field">
+        <span class="bdc-detail-label">Statut</span>
+        ${bdcStatusBadge(order.status)}
+      </div>
+      <div class="bdc-detail-field">
+        <span class="bdc-detail-label">Secteur</span>
+        <strong>${escapeHtml(order.sector || "—")}</strong>
+      </div>
+      <div class="bdc-detail-field">
+        <span class="bdc-detail-label">Date commande</span>
+        <strong>${escapeHtml(bdcFormatDate(order.dateCommande))}</strong>
+      </div>
+      <div class="bdc-detail-field">
+        <span class="bdc-detail-label">Date livraison souhaitée</span>
+        <strong>${escapeHtml(bdcFormatDate(order.deliveryDate) || "—")}</strong>
+      </div>
+    </div>
+
+    <div class="bdc-detail-section">
+      <h3>Client</h3>
+      <p><strong>${escapeHtml(order.clientName || "—")}</strong></p>
+      <p class="muted">${escapeHtml(address || "Adresse non renseignée")}</p>
+      ${order.phone ? `<p class="muted">📞 ${escapeHtml(order.phone)}</p>` : ""}
+      ${order.notes ? `<p class="bdc-detail-notes">📝 ${escapeHtml(order.notes)}</p>` : ""}
+    </div>
+
+    <div class="bdc-detail-section">
+      <h3>Lignes produits</h3>
+      ${productsHtml}
+    </div>
+
+    <div class="bdc-detail-section bdc-detail-tech">
+      <h3>Technique</h3>
+      <dl class="bdc-detail-dl">
+        <dt>ID</dt><dd><code>${escapeHtml(order.id)}</code></dd>
+        <dt>Empreinte (anti-doublon)</dt><dd>${hash}</dd>
+        <dt>Importée déjà livrée</dt><dd>${order.importedAsLivre ? "Oui" : "Non"}</dd>
+        <dt>Créée le</dt><dd>${escapeHtml(formatDate(order.createdAt) || "—")}</dd>
+        <dt>Mise à jour</dt><dd>${escapeHtml(formatDate(order.updatedAt) || "—")}</dd>
+      </dl>
+    </div>
+  `;
+
+  modal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("version-modal-open");
+}
+
+function closeBdcDetail() {
+  const modal = document.getElementById("bdc-detail-modal");
+  if (!modal) return;
+  modal.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("version-modal-open");
+}
+
+function bindBonsCommandeUi() {
+  // Recherche texte (event input pour reactivite immediate)
+  document.addEventListener("input", event => {
+    const search = event.target.closest("#bdc-search");
+    if (search) {
+      bdcState.search = search.value || "";
+      renderBonsCommande();
+    }
+  });
+
+  // Filtres + clic carte + close modal (delegation au document)
+  document.addEventListener("click", event => {
+    const statusBtn = event.target.closest("[data-bdc-status]");
+    if (statusBtn) {
+      bdcState.status = statusBtn.dataset.bdcStatus;
+      document.querySelectorAll(".bdc-status-filter").forEach(btn => {
+        btn.classList.toggle("active-filter", btn.dataset.bdcStatus === bdcState.status);
+      });
+      renderBonsCommande();
+      return;
+    }
+
+    const reset = event.target.closest('[data-action="bdc-reset-filters"]');
+    if (reset) {
+      bdcState.status = "all";
+      bdcState.search = "";
+      bdcState.sector = "";
+      bdcState.dateFrom = "";
+      bdcState.dateTo = "";
+      const search = document.getElementById("bdc-search");
+      if (search) search.value = "";
+      const sector = document.getElementById("bdc-sector");
+      if (sector) sector.value = "";
+      const dateFrom = document.getElementById("bdc-date-from");
+      if (dateFrom) dateFrom.value = "";
+      const dateTo = document.getElementById("bdc-date-to");
+      if (dateTo) dateTo.value = "";
+      document.querySelectorAll(".bdc-status-filter").forEach(btn => {
+        btn.classList.toggle("active-filter", btn.dataset.bdcStatus === "all");
+      });
+      renderBonsCommande();
+      return;
+    }
+
+    const opener = event.target.closest('[data-action="open-bdc-detail"]');
+    if (opener) {
+      openBdcDetail(opener.dataset.orderId);
+      return;
+    }
+
+    const closer = event.target.closest('[data-action="close-bdc-detail"]');
+    if (closer) {
+      closeBdcDetail();
+    }
+  });
+
+  // Selects et date inputs (event change)
+  document.addEventListener("change", event => {
+    if (event.target.id === "bdc-sector") {
+      bdcState.sector = event.target.value || "";
+      renderBonsCommande();
+    }
+    if (event.target.id === "bdc-date-from") {
+      bdcState.dateFrom = event.target.value || "";
+      renderBonsCommande();
+    }
+    if (event.target.id === "bdc-date-to") {
+      bdcState.dateTo = event.target.value || "";
+      renderBonsCommande();
+    }
+  });
+
+  // Carte au clavier (Enter/Espace) pour a11y
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape") {
+      const modal = document.getElementById("bdc-detail-modal");
+      if (modal && modal.getAttribute("aria-hidden") === "false") {
+        closeBdcDetail();
+      }
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      const card = event.target.closest && event.target.closest('[data-action="open-bdc-detail"]');
+      if (card && document.activeElement === card) {
+        event.preventDefault();
+        openBdcDetail(card.dataset.orderId);
+      }
+    }
+  });
 }
 
 async function loadAppearance() {
