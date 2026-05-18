@@ -1201,6 +1201,73 @@ test("GET /api/orders?status=livre renvoie seulement les livrees", async () => {
   assert.ok(body.every(o => o.status === "livre"));
 });
 
+test("v1.11.0 PATCH /api/clients/:id : mise a jour partielle propage vers les commandes du client", async () => {
+  seedDb({
+    ...defaultDb(),
+    clients: [{
+      id: "c-edit", nom: "Dupont", rue: "ancien", codePostal: "25000",
+      ville: "Besancon", telephone: "", secteur: "Besancon", statut: "restant", produits: []
+    }],
+    commandes: [
+      { id: "o-edit-1", clientId: "c-edit", clientName: "Dupont", address: "ancien", postalCode: "25000", city: "Besancon", sector: "Besancon", status: "stock_a_verifier", products: [] },
+      { id: "o-edit-2", clientId: "c-edit", clientName: "Dupont", address: "ancien", postalCode: "25000", city: "Besancon", sector: "Besancon", status: "livre", products: [] }
+    ]
+  });
+
+  const r = await requestJson("/api/clients/c-edit", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rue: "5 nouveau chemin", telephone: "06 11 22 33 44", notes: "Sonner 2 fois" })
+  });
+
+  assert.equal(r.res.status, 200);
+  assert.equal(r.body.client.rue, "5 nouveau chemin");
+  assert.equal(r.body.client.telephone, "06 11 22 33 44");
+  assert.equal(r.body.client.notes, "Sonner 2 fois");
+  assert.equal(r.body.ordersUpdated, 2, "Les 2 commandes du client sont mises a jour");
+
+  // Verifier que les commandes ont bien ete propagees
+  const ordersAfter = await requestJson("/api/orders");
+  const cmds = ordersAfter.body.filter(o => o.clientId === "c-edit");
+  assert.equal(cmds.length, 2);
+  assert.ok(cmds.every(o => o.address === "5 nouveau chemin"), "address propagee");
+  assert.ok(cmds.every(o => o.phone === "06 11 22 33 44"), "phone propage");
+  assert.ok(cmds.every(o => o.notes === "Sonner 2 fois"), "notes propagees");
+});
+
+test("v1.11.0 PATCH /api/clients/:id : changement de ville recalcule le secteur", async () => {
+  seedDb({
+    ...defaultDb(),
+    clients: [{ id: "c-move", nom: "Bouge", rue: "", codePostal: "25000", ville: "Besancon", secteur: "Besancon", statut: "restant", produits: [] }],
+    commandes: [{ id: "o-move", clientId: "c-move", clientName: "Bouge", city: "Besancon", sector: "Besancon", status: "stock_a_verifier", products: [] }]
+  });
+
+  const r = await requestJson("/api/clients/c-move", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ville: "Dole", codePostal: "39100" })
+  });
+
+  assert.equal(r.res.status, 200);
+  assert.equal(r.body.client.ville, "Dole");
+  assert.equal(r.body.client.secteur, "Dole", "Secteur derive automatiquement depuis la nouvelle ville");
+
+  const orders = await requestJson("/api/orders");
+  const cmd = orders.body.find(o => o.id === "o-move");
+  assert.equal(cmd.city, "Dole");
+  assert.equal(cmd.sector, "Dole", "Secteur propage sur la commande");
+});
+
+test("v1.11.0 PATCH /api/clients/:id : client inexistant renvoie 404", async () => {
+  seedDb(defaultDb());
+  const r = await requestJson("/api/clients/ghost-id", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rue: "test" })
+  });
+  assert.equal(r.res.status, 404);
+});
+
 test("GET /api/orders expose numero + dateCommande + excelRowHash (UI Bons de commande Phase 3)", async () => {
   seedDb({
     ...defaultDb(),

@@ -532,6 +532,7 @@
               <button class="button secondary compact bdc-status-filter" type="button" data-bdc-status="pret_livraison">Prêt livraison</button>
               <button class="button secondary compact bdc-status-filter" type="button" data-bdc-status="en_livraison">En livraison</button>
               <button class="button secondary compact bdc-status-filter" type="button" data-bdc-status="livre">Livrées</button>
+              <button class="button secondary compact bdc-status-filter bdc-status-warning" type="button" data-bdc-status="to_complete" title="Bons dont l'adresse ou le téléphone manque">⚠ À compléter</button>
             </div>
 
             <div class="bdc-filter-row">
@@ -548,6 +549,14 @@
                 <input type="date" id="bdc-date-to" />
               </label>
               <button class="button secondary compact" type="button" data-action="bdc-reset-filters">Réinitialiser</button>
+            </div>
+
+            <div class="bdc-view-actions">
+              <div class="bdc-view-toggle" role="group" aria-label="Mode d'affichage">
+                <button class="button secondary compact bdc-view-btn active-filter" type="button" data-bdc-view="cards" title="Vue cartes">⊞ Cartes</button>
+                <button class="button secondary compact bdc-view-btn" type="button" data-bdc-view="table" title="Vue tableau dense">≡ Tableau</button>
+              </div>
+              <button class="button secondary compact bdc-export-btn" type="button" data-action="bdc-export-csv" title="Télécharger un CSV des bons actuellement filtrés">📥 Exporter CSV</button>
             </div>
           </div>
 

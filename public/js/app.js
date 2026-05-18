@@ -1322,6 +1322,32 @@ function renderHistorique() {
   });
 }
 
+// Helpers ERP v1.11.0 partages entre renderCommandesLivrees et renderBonsCommande
+
+// Format date "seulement jour" : YYYY-MM-DD ou ISO complet -> DD/MM/YYYY (sans heure).
+// Avant on utilisait formatDate qui inclut l'heure 02:00:00 (artefact timezone Excel).
+function formatDateDayOnly(value) {
+  if (!value) return "—";
+  const s = String(value).slice(0, 10); // garde juste YYYY-MM-DD
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) {
+    // valeur deja au format FR ou autre : on coupe juste l'heure si presente
+    return String(value).split(/[\sT]/)[0];
+  }
+  return `${m[3]}/${m[2]}/${m[1]}`;
+}
+
+// Separe un code-barre numerique (8-14 chiffres) du nom produit.
+// Ex: "4052199301679 HARTMANN Change complet" -> {code: "4052199301679", name: "HARTMANN Change complet"}
+// Si pas de code-barre detecte au debut, retourne {code: null, name: original}.
+function splitProductCode(text) {
+  if (!text) return { code: null, name: "" };
+  const t = String(text).trim();
+  const m = t.match(/^(\d{8,14})\s+(.+)$/);
+  if (m) return { code: m[1], name: m[2].trim() };
+  return { code: null, name: t };
+}
+
 function renderCommandesLivrees() {
   const container = document.getElementById("commandesLivreesList");
   const summary = document.getElementById("commandesLivreesSummary");
@@ -1352,24 +1378,43 @@ function renderCommandesLivrees() {
   container.innerHTML = sorted.map(order => {
     const products = Array.isArray(order.products) ? order.products : [];
     const productsHtml = products.length
-      ? products.map(p => `
-          <li class="commandes-livrees-product">
-            <span>${escapeHtml(p.nom || p.code || "Produit")}</span>
-            <span class="muted">x ${escapeHtml(p.quantite ?? 0)}</span>
-          </li>
-        `).join("")
+      ? products.map(p => {
+          // Cas 1 : code-barre dans le champ `code` -> on garde tel quel
+          // Cas 2 : code-barre fusionne dans le `nom` -> on le separe
+          const rawName = p.nom || p.code || "Produit";
+          const split = splitProductCode(rawName);
+          const codeDisplay = p.code && p.code !== rawName
+            ? p.code
+            : split.code || "";
+          return `
+            <li class="commandes-livrees-product">
+              <div class="cl-product-main">
+                ${codeDisplay ? `<code class="cl-product-code">${escapeHtml(codeDisplay)}</code>` : ""}
+                <span>${escapeHtml(split.name)}</span>
+              </div>
+              <span class="muted">x ${escapeHtml(p.quantite ?? 0)}</span>
+            </li>
+          `;
+        }).join("")
       : `<li class="muted">Aucun produit identifié.</li>`;
 
     const origin = order.importedAsLivre
       ? `<span class="pill pill-warning">Importée déjà livrée</span>`
       : `<span class="pill pill-ok">Livrée via tournée</span>`;
 
-    const deliveryDate = order.deliveryDate || order.updatedAt;
+    // ERP v1.11.0 : numero CMD-... affiche pour coherence avec page Bons de commande,
+    // et toute la carte est cliquable pour ouvrir le meme modal detail.
+    const numero = order.numero || "(non numéroté)";
+    const dateDisplay = order.dateCommande || order.deliveryDate || order.updatedAt;
 
     return `
-      <article class="item commandes-livrees-card">
+      <article class="item commandes-livrees-card" data-action="open-bdc-detail" data-order-id="${escapeAttribute(order.id)}" role="button" tabindex="0" aria-label="Ouvrir le détail du bon ${escapeAttribute(numero)}">
         <header class="item-header">
           <div>
+            <div class="cl-numero-line">
+              <strong class="cl-numero">${escapeHtml(numero)}</strong>
+              <span class="muted">· ${escapeHtml(formatDateDayOnly(dateDisplay))}</span>
+            </div>
             <h4>${escapeHtml(order.clientName || "Client")}</h4>
             <p class="muted">${escapeHtml([order.address, order.postalCode, order.city].filter(Boolean).join(" · "))}</p>
           </div>
@@ -1377,7 +1422,6 @@ function renderCommandesLivrees() {
         </header>
         <div class="item-meta">
           <span class="muted">Secteur : ${escapeHtml(order.sector || "-")}</span>
-          <span class="muted">Date : ${escapeHtml(formatDate(deliveryDate))}</span>
         </div>
         <ul class="commandes-livrees-products">
           ${productsHtml}
@@ -1401,8 +1445,20 @@ const bdcState = {
   search: "",
   sector: "",
   dateFrom: "",
-  dateTo: ""
+  dateTo: "",
+  view: "cards",       // "cards" | "table"
+  editingClientId: null // id du client en cours d'edition dans le modal detail
 };
+
+// Un bon est "a completer" si l'adresse ou le telephone manque, ou si le
+// secteur n'a pas pu etre derive (-> "Sans Secteur").
+function bdcNeedsCompletion(order) {
+  if (!order) return false;
+  const hasAddress = order.address && order.postalCode && order.city;
+  const hasPhone = order.phone && order.phone.trim().length >= 6;
+  const hasSector = order.sector && order.sector !== "Sans Secteur";
+  return !hasAddress || !hasPhone || !hasSector;
+}
 
 const BDC_STATUS_LABELS = {
   importe: "Importée",
@@ -1455,7 +1511,12 @@ function bdcMatchSearch(order, search) {
 function bdcFilterOrders() {
   return (orders || [])
     .filter(o => o && o.clientId)
-    .filter(o => bdcState.status === "all" || o.status === bdcState.status)
+    .filter(o => {
+      // Filtre statut, avec cas special "to_complete" (filtre meta sur completude profil)
+      if (bdcState.status === "all") return true;
+      if (bdcState.status === "to_complete") return bdcNeedsCompletion(o);
+      return o.status === bdcState.status;
+    })
     .filter(o => !bdcState.sector || o.sector === bdcState.sector)
     .filter(o => bdcMatchSearch(o, bdcState.search))
     .filter(o => {
@@ -1493,13 +1554,28 @@ function renderBonsCommande() {
   renderBdcSectorOptions();
 
   const filtered = bdcFilterOrders();
-  const total = (orders || []).filter(o => o && o.clientId).length;
+  const allOrders = (orders || []).filter(o => o && o.clientId);
+  const total = allOrders.length;
+  const toCompleteCount = allOrders.filter(bdcNeedsCompletion).length;
+
+  // Mettre a jour le compteur du bouton "A completer"
+  const toCompleteBtn = document.querySelector('[data-bdc-status="to_complete"]');
+  if (toCompleteBtn) {
+    const baseLabel = "⚠ À compléter";
+    toCompleteBtn.textContent = toCompleteCount > 0
+      ? `${baseLabel} (${toCompleteCount})`
+      : baseLabel;
+    toCompleteBtn.disabled = toCompleteCount === 0;
+  }
 
   if (summary) {
     summary.textContent = total === 0
       ? "Aucune commande pour l'instant. Importe ton fichier ventes pour commencer."
       : `${filtered.length} bon${filtered.length > 1 ? "s" : ""} affiché${filtered.length > 1 ? "s" : ""} sur ${total} au total.`;
   }
+
+  // Toggle classes selon la vue active
+  container.classList.toggle("bdc-list-table-mode", bdcState.view === "table");
 
   if (!filtered.length) {
     container.innerHTML = emptyState(
@@ -1508,6 +1584,11 @@ function renderBonsCommande() {
         ? "Importe ton fichier de ventes pour voir les bons de commande ici."
         : "Essaie de réinitialiser les filtres ou d'élargir la plage de dates."
     );
+    return;
+  }
+
+  if (bdcState.view === "table") {
+    container.innerHTML = renderBdcTable(filtered);
     return;
   }
 
@@ -1546,6 +1627,105 @@ function renderBonsCommande() {
   }).join("");
 }
 
+// Vue tableau dense : utile pour scanner 100+ bons d'un coup. Sticky header,
+// clic sur ligne ouvre le modal detail.
+function renderBdcTable(orders) {
+  const rows = orders.map(order => {
+    const numero = order.numero || "(non numéroté)";
+    const totalQty = (order.products || []).reduce((sum, p) => sum + Number(p.quantite || 0), 0);
+    const productsCount = Array.isArray(order.products) ? order.products.length : 0;
+    const needs = bdcNeedsCompletion(order);
+    return `
+      <tr data-action="open-bdc-detail" data-order-id="${escapeAttribute(order.id)}" tabindex="0" class="${needs ? "bdc-row-warning" : ""}">
+        <td class="bdc-td-numero"><strong>${escapeHtml(numero)}</strong></td>
+        <td class="muted">${escapeHtml(bdcFormatDate(order.dateCommande))}</td>
+        <td>${escapeHtml(order.clientName || "—")}</td>
+        <td class="muted">${escapeHtml(order.sector || "—")}</td>
+        <td>${bdcStatusBadge(order.status)}</td>
+        <td class="bdc-td-num">${productsCount}</td>
+        <td class="bdc-td-num">${totalQty}</td>
+        <td>${needs ? `<span class="bdc-row-warning-flag" title="Profil client à compléter">⚠</span>` : ""}</td>
+      </tr>
+    `;
+  }).join("");
+
+  return `
+    <div class="bdc-table-wrap" role="region" aria-label="Tableau des bons de commande">
+      <table class="bdc-table">
+        <thead>
+          <tr>
+            <th>Numéro</th>
+            <th>Date</th>
+            <th>Client</th>
+            <th>Secteur</th>
+            <th>Statut</th>
+            <th class="bdc-td-num">Lignes</th>
+            <th class="bdc-td-num">Qté</th>
+            <th aria-label="Alertes"></th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+// Export CSV des bons filtres. Pas d'endpoint backend : Blob + download client-side.
+// Format : Numero;Date;Client;Adresse;CP;Ville;Secteur;Statut;Telephone;Lignes;Qté
+// Separateur ; (compatibilite Excel FR), encodage UTF-8 BOM pour les accents.
+function exportBdcCsv() {
+  const filtered = bdcFilterOrders();
+  if (!filtered.length) {
+    notify("Aucun bon à exporter (filtres vides).", "warning");
+    return;
+  }
+
+  const headers = [
+    "Numero", "Date commande", "Client", "Adresse", "Code postal", "Ville",
+    "Secteur", "Statut", "Telephone", "Nb lignes", "Total quantite", "Importee livree"
+  ];
+
+  const escapeCsv = v => {
+    const s = v === null || v === undefined ? "" : String(v);
+    if (/[";\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+
+  const lines = filtered.map(o => {
+    const productsCount = Array.isArray(o.products) ? o.products.length : 0;
+    const totalQty = (o.products || []).reduce((s, p) => s + Number(p.quantite || 0), 0);
+    return [
+      o.numero || "",
+      bdcFormatDate(o.dateCommande),
+      o.clientName || "",
+      o.address || "",
+      o.postalCode || "",
+      o.city || "",
+      o.sector || "",
+      BDC_STATUS_LABELS[o.status] || o.status || "",
+      o.phone || "",
+      productsCount,
+      totalQty,
+      o.importedAsLivre ? "Oui" : "Non"
+    ].map(escapeCsv).join(";");
+  });
+
+  // UTF-8 BOM ﻿ pour qu'Excel detecte l'encodage et n'abime pas les accents
+  const csv = "﻿" + headers.join(";") + "\r\n" + lines.join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const date = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `sereo-bons-commande-${date}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+  notify(`${filtered.length} bon${filtered.length > 1 ? "s" : ""} exporté${filtered.length > 1 ? "s" : ""} en CSV.`, "success");
+}
+
 function openBdcDetail(orderId) {
   const order = (orders || []).find(o => String(o.id) === String(orderId));
   if (!order) return;
@@ -1567,21 +1747,40 @@ function openBdcDetail(orderId) {
     ? `<table class="bdc-detail-table">
         <thead><tr><th>Code</th><th>Produit</th><th class="bdc-qty">Qté</th></tr></thead>
         <tbody>
-          ${products.map(p => `
-            <tr>
-              <td class="muted">${escapeHtml(p.code || "—")}</td>
-              <td>${escapeHtml(p.nom || p.produit || "Produit sans nom")}</td>
-              <td class="bdc-qty"><strong>${escapeHtml(p.quantite ?? 0)}</strong></td>
-            </tr>
-          `).join("")}
+          ${products.map(p => {
+            // ERP v1.11.0 : separer le code-barre EAN du nom produit si fusionne
+            const rawName = p.nom || p.produit || "Produit sans nom";
+            const split = splitProductCode(rawName);
+            const code = p.code && p.code !== rawName ? p.code : (split.code || "");
+            return `
+              <tr>
+                <td class="muted"><code>${escapeHtml(code || "—")}</code></td>
+                <td>${escapeHtml(split.name)}</td>
+                <td class="bdc-qty"><strong>${escapeHtml(p.quantite ?? 0)}</strong></td>
+              </tr>
+            `;
+          }).join("")}
         </tbody>
       </table>`
     : `<p class="muted">Aucune ligne produit.</p>`;
 
-  const address = [order.address, order.postalCode, order.city].filter(Boolean).join(" · ");
+  // ERP v1.11.0 : empreinte vide -> texte clair "Creation manuelle" au lieu de —
   const hash = order.excelRowHash
     ? `<code class="bdc-detail-hash" title="Empreinte SHA-256 pour anti-doublon a l'import">${escapeHtml(order.excelRowHash)}</code>`
-    : `<span class="muted">—</span>`;
+    : `<span class="muted" title="Ce bon a ete cree manuellement, pas via un import Excel">Création manuelle</span>`;
+
+  // Date livraison : si identique a la date commande, afficher discretement
+  const sameDates = order.deliveryDate && order.dateCommande &&
+    String(order.deliveryDate).slice(0, 10) === String(order.dateCommande).slice(0, 10);
+  const dateLivraisonHtml = order.deliveryDate
+    ? `<strong>${escapeHtml(bdcFormatDate(order.deliveryDate))}</strong>${sameDates ? ` <span class="muted">(idem date commande)</span>` : ""}`
+    : `<span class="muted">Non spécifiée</span>`;
+
+  // Section CLIENT : mode lecture OU edition selon bdcState.editingClientId
+  const isEditing = bdcState.editingClientId && String(bdcState.editingClientId) === String(order.clientId);
+  const clientSection = isEditing
+    ? renderBdcClientEditForm(order)
+    : renderBdcClientReadView(order);
 
   bodyEl.innerHTML = `
     <div class="bdc-detail-grid">
@@ -1599,17 +1798,11 @@ function openBdcDetail(orderId) {
       </div>
       <div class="bdc-detail-field">
         <span class="bdc-detail-label">Date livraison souhaitée</span>
-        <strong>${escapeHtml(bdcFormatDate(order.deliveryDate) || "—")}</strong>
+        ${dateLivraisonHtml}
       </div>
     </div>
 
-    <div class="bdc-detail-section">
-      <h3>Client</h3>
-      <p><strong>${escapeHtml(order.clientName || "—")}</strong></p>
-      <p class="muted">${escapeHtml(address || "Adresse non renseignée")}</p>
-      ${order.phone ? `<p class="muted">📞 ${escapeHtml(order.phone)}</p>` : ""}
-      ${order.notes ? `<p class="bdc-detail-notes">📝 ${escapeHtml(order.notes)}</p>` : ""}
-    </div>
+    ${clientSection}
 
     <div class="bdc-detail-section">
       <h3>Lignes produits</h3>
@@ -1622,14 +1815,129 @@ function openBdcDetail(orderId) {
         <dt>ID</dt><dd><code>${escapeHtml(order.id)}</code></dd>
         <dt>Empreinte (anti-doublon)</dt><dd>${hash}</dd>
         <dt>Importée déjà livrée</dt><dd>${order.importedAsLivre ? "Oui" : "Non"}</dd>
-        <dt>Créée le</dt><dd>${escapeHtml(formatDate(order.createdAt) || "—")}</dd>
-        <dt>Mise à jour</dt><dd>${escapeHtml(formatDate(order.updatedAt) || "—")}</dd>
+        <dt>Créée le</dt><dd>${escapeHtml(formatDateDayOnly(order.createdAt))}</dd>
+        <dt>Mise à jour</dt><dd>${escapeHtml(formatDateDayOnly(order.updatedAt))}</dd>
       </dl>
     </div>
   `;
 
   modal.setAttribute("aria-hidden", "false");
   document.body.classList.add("version-modal-open");
+}
+
+// Section CLIENT en mode LECTURE (defaut). Affiche un bouton "Modifier le profil"
+// + un warning visuel si le profil est incomplet (adresse/telephone manquant).
+function renderBdcClientReadView(order) {
+  const address = [order.address, order.postalCode, order.city].filter(Boolean).join(" · ");
+  const needs = bdcNeedsCompletion(order);
+  const phoneHtml = order.phone
+    ? `<p class="bdc-detail-phone"><a href="tel:${escapeAttribute(String(order.phone).replace(/\s+/g, ""))}">📞 ${escapeHtml(order.phone)}</a></p>`
+    : `<p class="bdc-detail-missing">⚠ Téléphone non renseigné</p>`;
+  const addressHtml = address
+    ? `<p class="muted">${escapeHtml(address)}</p>`
+    : `<p class="bdc-detail-missing">⚠ Adresse non renseignée</p>`;
+  const warnBadge = needs
+    ? `<span class="bdc-detail-warn-badge" title="Ce client a un profil incomplet">À compléter</span>`
+    : "";
+
+  return `
+    <div class="bdc-detail-section bdc-detail-client">
+      <div class="bdc-detail-client-head">
+        <h3>Client ${warnBadge}</h3>
+        <button class="button secondary compact" type="button"
+                data-action="bdc-edit-client" data-client-id="${escapeAttribute(order.clientId)}">
+          ✏️ Modifier le profil
+        </button>
+      </div>
+      <p><strong>${escapeHtml(order.clientName || "—")}</strong></p>
+      ${addressHtml}
+      ${phoneHtml}
+      ${order.notes ? `<p class="bdc-detail-notes">📝 ${escapeHtml(order.notes)}</p>` : ""}
+    </div>
+  `;
+}
+
+// Section CLIENT en mode EDITION. Inputs editables + Save/Cancel.
+function renderBdcClientEditForm(order) {
+  return `
+    <form class="bdc-detail-section bdc-detail-client-form" data-action="bdc-save-client"
+          data-client-id="${escapeAttribute(order.clientId)}" onsubmit="return false">
+      <div class="bdc-detail-client-head">
+        <h3>Modifier le profil client</h3>
+      </div>
+      <div class="bdc-form-grid">
+        <label class="bdc-form-field bdc-form-field-wide">
+          <span>Nom</span>
+          <input type="text" name="nom" value="${escapeAttribute(order.clientName || "")}" required />
+        </label>
+        <label class="bdc-form-field bdc-form-field-wide">
+          <span>Rue</span>
+          <input type="text" name="rue" value="${escapeAttribute(order.address || "")}" placeholder="Ex : 5 Rue des Accacias" />
+        </label>
+        <label class="bdc-form-field">
+          <span>Code postal</span>
+          <input type="text" name="codePostal" value="${escapeAttribute(order.postalCode || "")}" placeholder="25000" inputmode="numeric" pattern="[0-9]{4,5}" />
+        </label>
+        <label class="bdc-form-field">
+          <span>Ville</span>
+          <input type="text" name="ville" value="${escapeAttribute(order.city || "")}" placeholder="Besancon" />
+        </label>
+        <label class="bdc-form-field bdc-form-field-wide">
+          <span>Téléphone</span>
+          <input type="tel" name="telephone" value="${escapeAttribute(order.phone || "")}" placeholder="06 81 23 71 71" />
+        </label>
+        <label class="bdc-form-field bdc-form-field-wide">
+          <span>Notes</span>
+          <textarea name="notes" rows="2" placeholder="Sonner 2 fois, code 1234, etc.">${escapeHtml(order.notes || "")}</textarea>
+        </label>
+      </div>
+      <div class="bdc-form-actions">
+        <button class="button secondary compact" type="button" data-action="bdc-cancel-edit">Annuler</button>
+        <button class="button compact" type="submit" data-action="bdc-save-client" data-client-id="${escapeAttribute(order.clientId)}">💾 Enregistrer</button>
+      </div>
+    </form>
+  `;
+}
+
+// Helper utilise par le handler edit : retrouve l'orderId courant a partir d'un clientId
+// (utile car le modal est ouvert pour 1 commande mais l'edition vise le client).
+function findOrderIdForClient(clientId) {
+  const order = (orders || []).find(o => String(o.clientId) === String(clientId));
+  return order ? order.id : null;
+}
+
+// Sauve l'edition du profil client via PATCH /api/clients/:id puis reload.
+async function saveBdcClientEdit(triggerBtn) {
+  const form = triggerBtn.closest("form");
+  if (!form) return;
+  const clientId = triggerBtn.dataset.clientId || form.dataset.clientId;
+  if (!clientId) return;
+
+  const formData = new FormData(form);
+  const body = {
+    nom: formData.get("nom") || "",
+    rue: formData.get("rue") || "",
+    codePostal: formData.get("codePostal") || "",
+    ville: formData.get("ville") || "",
+    telephone: formData.get("telephone") || "",
+    notes: formData.get("notes") || ""
+  };
+
+  await runAction(triggerBtn, "Enregistrement...", async () => {
+    const result = await apiFetch(`/api/clients/${encodeURIComponent(clientId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+
+    bdcState.editingClientId = null;
+    notify(`Profil client mis à jour${result.ordersUpdated > 1 ? ` (${result.ordersUpdated} commandes synchronisées)` : ""}.`, "success");
+
+    // Reload data pour avoir l'ordre a jour, puis re-render modal en mode lecture
+    await loadData();
+    const order = (orders || []).find(o => String(o.clientId) === String(clientId));
+    if (order) openBdcDetail(order.id);
+  });
 }
 
 function closeBdcDetail() {
@@ -1685,13 +1993,61 @@ function bindBonsCommandeUi() {
 
     const opener = event.target.closest('[data-action="open-bdc-detail"]');
     if (opener) {
+      bdcState.editingClientId = null; // reset edit mode a l'ouverture
       openBdcDetail(opener.dataset.orderId);
       return;
     }
 
     const closer = event.target.closest('[data-action="close-bdc-detail"]');
     if (closer) {
+      bdcState.editingClientId = null;
       closeBdcDetail();
+      return;
+    }
+
+    // Toggle vue cartes / tableau
+    const viewBtn = event.target.closest("[data-bdc-view]");
+    if (viewBtn) {
+      bdcState.view = viewBtn.dataset.bdcView;
+      document.querySelectorAll(".bdc-view-btn").forEach(btn => {
+        btn.classList.toggle("active-filter", btn.dataset.bdcView === bdcState.view);
+      });
+      renderBonsCommande();
+      return;
+    }
+
+    // Export CSV
+    if (event.target.closest('[data-action="bdc-export-csv"]')) {
+      exportBdcCsv();
+      return;
+    }
+
+    // Edition client : passe en mode formulaire
+    const editBtn = event.target.closest('[data-action="bdc-edit-client"]');
+    if (editBtn) {
+      bdcState.editingClientId = editBtn.dataset.clientId;
+      const currentOrderId = document.querySelector('#bdc-detail-modal[aria-hidden="false"]')
+        ? findOrderIdForClient(bdcState.editingClientId) : null;
+      // Re-render le modal avec mode edition
+      const order = (orders || []).find(o => String(o.clientId) === String(bdcState.editingClientId));
+      if (order) openBdcDetail(order.id);
+      return;
+    }
+
+    // Cancel edition
+    if (event.target.closest('[data-action="bdc-cancel-edit"]')) {
+      const order = (orders || []).find(o => String(o.clientId) === String(bdcState.editingClientId));
+      bdcState.editingClientId = null;
+      if (order) openBdcDetail(order.id);
+      return;
+    }
+
+    // Save edition (delegation : on cherche le form ascendant pour recuperer les valeurs)
+    const saveBtn = event.target.closest('button[data-action="bdc-save-client"]');
+    if (saveBtn) {
+      event.preventDefault();
+      saveBdcClientEdit(saveBtn);
+      return;
     }
   });
 

@@ -3034,3 +3034,320 @@ label {
   .bdc-card { transition: none; }
   .bdc-card:hover, .bdc-card:focus-visible { transform: none; }
 }
+
+/* ============================================================================
+   v1.11.0 : extras (filtre A completer, vue tableau, export CSV, edition client)
+   ============================================================================ */
+
+/* Filtre "A completer" : style warning pour le distinguer des statuts workflow */
+.bdc-status-filter.bdc-status-warning {
+  border-color: rgba(244, 122, 90, 0.45);
+  color: var(--color-pastel-orange-strong);
+  font-weight: 600;
+}
+.bdc-status-filter.bdc-status-warning.active-filter {
+  background: var(--color-pastel-orange-light);
+  border-color: var(--color-pastel-orange-strong);
+}
+.bdc-status-filter:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Toolbar : separation toggle vue + export */
+.bdc-view-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 8px;
+  margin-top: 4px;
+  border-top: 1px dashed var(--border);
+}
+
+.bdc-view-toggle {
+  display: inline-flex;
+  gap: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+}
+
+.bdc-view-toggle .bdc-view-btn {
+  border: none;
+  border-radius: 0;
+  font-size: 0.85rem;
+  padding: 6px 12px;
+}
+
+.bdc-view-toggle .bdc-view-btn + .bdc-view-btn {
+  border-left: 1px solid var(--border-strong);
+}
+
+.bdc-view-toggle .bdc-view-btn.active-filter {
+  background: var(--color-pastel-orange);
+  color: var(--text-strong, #fff);
+}
+
+.bdc-export-btn {
+  font-size: 0.85rem;
+}
+
+/* Vue tableau dense */
+.bdc-list.bdc-list-table-mode {
+  display: block;
+  grid-template-columns: none;
+}
+
+.bdc-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.bdc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.bdc-table thead {
+  background: var(--surface-soft);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.bdc-table th {
+  padding: 10px 12px;
+  text-align: left;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--color-brand-teal);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.bdc-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.bdc-table tbody tr {
+  cursor: pointer;
+  transition: background-color 0.1s;
+}
+
+.bdc-table tbody tr:hover,
+.bdc-table tbody tr:focus-visible {
+  background: var(--color-pastel-orange-light);
+  outline: none;
+}
+
+.bdc-table tbody tr.bdc-row-warning td:first-child {
+  border-left: 3px solid var(--color-pastel-orange-strong);
+}
+
+.bdc-td-numero {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-weight: 700;
+  color: var(--color-brand-teal-dark);
+}
+
+.bdc-td-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  width: 70px;
+}
+
+.bdc-row-warning-flag {
+  color: var(--color-pastel-orange-strong);
+  font-weight: 700;
+  font-size: 1.1em;
+}
+
+/* Mode edition profil client dans le modal detail */
+.bdc-detail-client-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.bdc-detail-client-head h3 {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bdc-detail-warn-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  background: var(--color-pastel-orange-light);
+  color: var(--color-pastel-orange-strong);
+  border: 1px solid rgba(244, 122, 90, 0.4);
+  border-radius: 999px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.bdc-detail-missing {
+  margin: 6px 0;
+  color: var(--color-pastel-orange-strong);
+  font-style: italic;
+  font-weight: 500;
+}
+
+.bdc-detail-phone a {
+  display: inline-block;
+  margin: 4px 0;
+  padding: 4px 12px;
+  background: var(--color-pastel-green-light, rgba(46, 139, 137, 0.1));
+  color: var(--color-brand-teal-dark);
+  border-radius: 8px;
+  text-decoration: none;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid rgba(46, 139, 137, 0.2);
+}
+.bdc-detail-phone a:hover { background: rgba(46, 139, 137, 0.18); }
+
+/* Formulaire edition */
+.bdc-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+  margin: 12px 0;
+}
+
+.bdc-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bdc-form-field-wide {
+  grid-column: 1 / -1;
+}
+
+.bdc-form-field span {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-brand-teal);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.bdc-form-field input,
+.bdc-form-field textarea {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 0.95rem;
+  font-family: inherit;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.bdc-form-field input:focus,
+.bdc-form-field textarea:focus {
+  outline: none;
+  border-color: var(--color-pastel-orange-strong);
+  box-shadow: 0 0 0 3px rgba(244, 122, 90, 0.18);
+}
+
+.bdc-form-field textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+
+.bdc-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+/* Page Commandes livrees : numero CMD + card cliquable */
+.cl-numero-line {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.cl-numero {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color: var(--color-brand-teal-dark);
+  font-size: 0.95rem;
+}
+
+.commandes-livrees-card[data-action="open-bdc-detail"] {
+  cursor: pointer;
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+.commandes-livrees-card[data-action="open-bdc-detail"]:hover,
+.commandes-livrees-card[data-action="open-bdc-detail"]:focus-visible {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(15, 61, 61, 0.08);
+  outline: none;
+}
+.commandes-livrees-card[data-action="open-bdc-detail"]:focus-visible {
+  box-shadow: 0 0 0 3px rgba(244, 122, 90, 0.25);
+}
+
+/* Separation code-barre / nom dans lignes produits */
+.cl-product-main {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.cl-product-code {
+  padding: 1px 6px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.78em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Mobile : adapter tableau + form */
+@media (max-width: 720px) {
+  .bdc-view-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .bdc-view-toggle, .bdc-export-btn {
+    width: 100%;
+  }
+  .bdc-table th, .bdc-table td {
+    padding: 8px 8px;
+    font-size: 0.85rem;
+  }
+  .bdc-form-grid {
+    grid-template-columns: 1fr;
+  }
+  .bdc-form-actions {
+    flex-direction: column-reverse;
+  }
+  .bdc-form-actions .button {
+    width: 100%;
+  }
+}
