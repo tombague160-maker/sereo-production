@@ -559,13 +559,15 @@
       <!-- Modal détail bon de commande : meme pattern que versionModal -->
       <div id="bdc-detail-modal" class="version-modal" role="dialog" aria-modal="true" aria-labelledby="bdc-detail-title" aria-hidden="true">
         <div class="version-modal-backdrop" data-action="close-bdc-detail"></div>
-        <div class="version-modal-panel bdc-detail-panel" role="document">
+        <div class="version-modal-card bdc-detail-card" role="document">
           <header class="version-modal-header">
             <div>
-              <h2 id="bdc-detail-title" class="version-modal-title">Bon de commande</h2>
-              <p class="version-modal-meta" id="bdc-detail-subtitle"></p>
+              <h2 id="bdc-detail-title">Bon de commande</h2>
+              <p class="version-modal-subtitle" id="bdc-detail-subtitle"></p>
             </div>
-            <button class="version-modal-close" type="button" data-action="close-bdc-detail" aria-label="Fermer">×</button>
+            <button class="version-modal-close" type="button" data-action="close-bdc-detail" aria-label="Fermer">
+              <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M6 6 18 18 M18 6 6 18"/></svg>
+            </button>
           </header>
           <div class="version-modal-body" id="bdc-detail-body"></div>
         </div>

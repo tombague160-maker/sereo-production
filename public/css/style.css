@@ -2758,8 +2758,8 @@ label {
 .bdc-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 16px 18px;
+  gap: 8px;
+  padding: 13px 15px 14px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-left: 4px solid var(--color-brand-teal);
@@ -2821,8 +2821,17 @@ label {
   flex-wrap: wrap;
   gap: 10px;
   font-size: 0.84rem;
-  padding-top: 8px;
+  padding-top: 6px;
+  margin-top: auto;
   border-top: 1px solid var(--border);
+}
+
+/* "Adresse non renseignee" : signaler subtilement la donnee manquante */
+.bdc-card-client p.bdc-card-no-address {
+  color: var(--color-pastel-orange-strong);
+  font-style: italic;
+  font-size: 0.85rem;
+  opacity: 0.85;
 }
 
 /* Pills statut workflow */
@@ -2844,9 +2853,10 @@ label {
   border-color: rgba(46, 139, 87, 0.25);
 }
 .bdc-pill-info {
-  background: rgba(59, 130, 246, 0.12);
-  color: #1d4ed8;
-  border-color: rgba(59, 130, 246, 0.28);
+  /* teal pastel sereo plutot que bleu Tailwind, pour rester dans la palette */
+  background: rgba(46, 139, 137, 0.14);
+  color: var(--color-brand-teal-dark);
+  border-color: rgba(46, 139, 137, 0.32);
 }
 .bdc-pill-warning {
   background: var(--color-pastel-orange-light);
@@ -2864,9 +2874,14 @@ label {
   border-color: var(--border);
 }
 
-/* Modal detail bon de commande : reutilise .version-modal mais panel plus large */
-.bdc-detail-panel {
-  max-width: 720px;
+/* Modal detail bon de commande : reutilise .version-modal-card mais plus large */
+.bdc-detail-card {
+  width: min(100%, 720px) !important;
+  max-height: min(90vh, 820px) !important;
+}
+
+.bdc-detail-card .version-modal-body {
+  padding: 18px 24px 22px;
 }
 
 .bdc-detail-grid {

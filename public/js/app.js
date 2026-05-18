@@ -1519,6 +1519,9 @@ function renderBonsCommande() {
     const livreFromImport = order.importedAsLivre
       ? `<span class="bdc-pill bdc-pill-neutral" title="Importée comme déjà livrée">📥 import livré</span>`
       : "";
+    const addressHtml = address
+      ? `<p class="muted">${escapeHtml(address)}</p>`
+      : `<p class="bdc-card-no-address">⚠ Adresse non renseignée</p>`;
 
     return `
       <article class="bdc-card" data-action="open-bdc-detail" data-order-id="${escapeAttribute(order.id)}" role="button" tabindex="0" aria-label="Ouvrir le détail du bon ${escapeAttribute(numero)}">
@@ -1531,7 +1534,7 @@ function renderBonsCommande() {
         </header>
         <div class="bdc-card-client">
           <h4>${escapeHtml(order.clientName || "Client sans nom")}</h4>
-          <p class="muted">${escapeHtml(address || "Adresse non renseignée")}</p>
+          ${addressHtml}
         </div>
         <footer class="bdc-card-foot">
           <span class="muted">Secteur : <strong>${escapeHtml(order.sector || "—")}</strong></span>
