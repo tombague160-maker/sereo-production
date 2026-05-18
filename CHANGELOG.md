@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.1](https://github.com/tombague160-maker/sereo-production/compare/v1.10.0...v1.10.1) (2026-05-18)
+
+
+### 🐛 Corrections de bugs
+
+* **ui:** modal detail bon de commande sans fond + lisibilite cartes ([#55](https://github.com/tombague160-maker/sereo-production/issues/55)) ([a25afba](https://github.com/tombague160-maker/sereo-production/commit/a25afba11239d3f219d6b13bd8204dd043147c19))
+
 ## [1.10.0](https://github.com/tombague160-maker/sereo-production/compare/v1.9.1...v1.10.0) (2026-05-18)
 
 
