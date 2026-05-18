@@ -3456,6 +3456,64 @@ app.patch("/api/stock/:id", (req, res) => {
   }
 });
 
+// PATCH /api/clients/:id : mise a jour partielle des champs metier d'un client
+// (rue, codePostal, ville, telephone, notes). Utilise par la nouvelle UI
+// "Compléter le profil client" depuis la modal detail bon de commande v1.11.0.
+// Propage les changements vers la/les commande(s) active(s) du client pour que
+// les ecrans Livraison/Preparation reflechent l'adresse a jour.
+app.patch("/api/clients/:id", (req, res) => {
+  try {
+    const db = readDb();
+    const client = db.clients.find(c => String(c.id) === String(req.params.id));
+
+    if (!client) {
+      throw notFound("Client introuvable");
+    }
+
+    const updates = {};
+    if (req.body.nom !== undefined) updates.nom = clean(req.body.nom);
+    if (req.body.rue !== undefined) updates.rue = clean(req.body.rue);
+    if (req.body.codePostal !== undefined) updates.codePostal = clean(req.body.codePostal);
+    if (req.body.ville !== undefined) {
+      const newVille = normalizeCity(clean(req.body.ville));
+      updates.ville = newVille;
+      // Le secteur DOIT etre recalcule depuis la nouvelle ville (sans tenir
+      // compte de l'ancien). Si le user fournit explicitement un secteur, on
+      // le respecte, sinon on le derive de la nouvelle ville seulement.
+      const explicitSector = req.body.secteur !== undefined ? clean(req.body.secteur) : "";
+      updates.secteur = deriveSector(newVille, explicitSector);
+    }
+    if (req.body.telephone !== undefined) updates.telephone = clean(req.body.telephone);
+    if (req.body.notes !== undefined) updates.notes = clean(req.body.notes);
+
+    Object.assign(client, updates);
+    client.updatedAt = new Date().toISOString();
+
+    // Propager vers la ou les commandes du client (peut etre plusieurs depuis Phase 2 ERP)
+    const matchingOrders = db.commandes.filter(o => String(o.clientId) === String(client.id));
+    matchingOrders.forEach(order => {
+      if (updates.nom !== undefined) order.clientName = updates.nom;
+      if (updates.rue !== undefined) order.address = updates.rue;
+      if (updates.codePostal !== undefined) order.postalCode = updates.codePostal;
+      if (updates.ville !== undefined) order.city = updates.ville;
+      if (updates.ville !== undefined) order.sector = updates.secteur;
+      if (updates.telephone !== undefined) order.phone = updates.telephone;
+      if (updates.notes !== undefined) order.notes = updates.notes;
+      order.updatedAt = new Date().toISOString();
+    });
+
+    addHistory(db, "Client", `${client.nom} : profil mis a jour`, {
+      clientId: client.id,
+      champsModifies: Object.keys(updates)
+    });
+
+    writeDb(db);
+    res.json({ client, ordersUpdated: matchingOrders.length });
+  } catch (error) {
+    handleRouteError(error, res, "Erreur mise a jour client");
+  }
+});
+
 app.patch("/api/clients/:id/coordinates", (req, res) => {
   try {
     const db = readDb();
