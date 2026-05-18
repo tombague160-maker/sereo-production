@@ -2778,28 +2778,63 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
     const dataRows = rows.slice(headerIndex + 1);
     const db = readDb();
 
+    // Index des produits existants par productKey (code/nom normalises)
+    // pour preserver l'ID + la quantite manuelle quand on reimporte le meme Excel.
+    // Bug fix : avant, chaque import recreait tous les produits avec un UUID
+    // random et ecrasait db.stock, ce qui detruisait les ajustements +1/-1 que
+    // l'utilisateur avait fait manuellement entre 2 imports.
+    const existingByKey = new Map();
+    db.stock.forEach(product => {
+      const key = productKey(product);
+      if (key) existingByKey.set(key, product);
+    });
+
     const parsedProducts = dataRows
-      .map((row, index) => {
+      .map(row => {
         const code = clean(getCellByNames(row, headers, ["Code", "Reference", "Référence", "SKU"]));
         const nom = clean(getCellByNames(row, headers, ["Nom", "Produit", "Article"]));
         const cout = number(getCellByNames(row, headers, ["Cout", "Coût", "Prix achat"]), 0);
         const tarif = number(getCellByNames(row, headers, ["Tarif", "Prix", "Prix vente"]), 0);
-        const quantite = optionalQuantity(getCellByNames(row, headers, ["Quantite", "Stock", "Qte"]));
+        const excelQuantite = optionalQuantity(getCellByNames(row, headers, ["Quantite", "Stock", "Qte"]));
         const category = clean(getCellByNames(row, headers, ["Categorie", "Category", "Type"]));
         const alertThreshold = optionalQuantity(getCellByNames(row, headers, ["Seuil", "Seuil alerte", "Minimum", "Alerte"]));
 
-        return {
-          id: crypto.randomUUID(),
+        const fieldsFromExcel = {
           code,
           sku: code,
           nom,
-          quantite,
           tarif,
           cout,
           statut: clean(getCell(row, headers, "Statut", 1)),
           type: category,
           category,
           alertThreshold
+        };
+
+        const key = productKey(fieldsFromExcel);
+        const existing = key ? existingByKey.get(key) : null;
+
+        if (existing) {
+          // MERGE : preserve l'id et la quantite manuelle (la regle metier dit
+          // que c'est l'utilisateur qui gere son stock cote app, l'Excel ne sert
+          // qu'a importer le catalogue produits). Une valeur explicite dans la
+          // colonne Quantite de l'Excel ecrase quand meme le stock manuel pour
+          // permettre une remise a zero ponctuelle si vraiment souhaitee.
+          return {
+            ...existing,
+            ...fieldsFromExcel,
+            id: existing.id,
+            quantite: excelQuantite !== null && excelQuantite !== undefined
+              ? excelQuantite
+              : existing.quantite
+          };
+        }
+
+        // Nouveau produit (pas trouve dans la DB) : UUID + valeur Excel (ou null)
+        return {
+          ...fieldsFromExcel,
+          id: crypto.randomUUID(),
+          quantite: excelQuantite
         };
       })
       .filter(product => product.code || product.nom);
@@ -2818,15 +2853,36 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
       }
       seenProductKeys.set(key, product);
     });
-    db.stock = Array.from(seenProductKeys.values());
+
+    // Preservation des produits qui sont dans la DB mais ABSENTS du nouvel Excel.
+    // Strategie safe : on ne supprime pas (l'utilisateur peut avoir ajoute des
+    // produits hors Excel, ou re-importer un Excel partiel). Une purge explicite
+    // pourra etre exposee plus tard via un endpoint dedie si besoin.
+    const importedKeys = new Set(seenProductKeys.keys());
+    const preservedProducts = db.stock.filter(product => {
+      const key = productKey(product);
+      return key && !importedKeys.has(key);
+    });
+
+    const importedProducts = Array.from(seenProductKeys.values());
+    const updatedCount = importedProducts.filter(p => existingByKey.has(productKey(p))).length;
+    const createdCount = importedProducts.length - updatedCount;
+
+    db.stock = [...importedProducts, ...preservedProducts];
 
     syncWorkflow(db);
     const dedupNote = duplicatesSkipped > 0
       ? `, ${duplicatesSkipped} doublon(s) ignore(s)`
       : "";
-    addHistory(db, "Import stock", `${db.stock.length} produit(s) importe(s) depuis le fichier tarifs${dedupNote}`, {
-      fichier: req.file.originalname
-    });
+    const preservedNote = preservedProducts.length > 0
+      ? `, ${preservedProducts.length} produit(s) hors Excel preserve(s)`
+      : "";
+    addHistory(
+      db,
+      "Import stock",
+      `${createdCount} produit(s) cree(s), ${updatedCount} produit(s) mis a jour${dedupNote}${preservedNote}`,
+      { fichier: req.file.originalname }
+    );
 
     writeDb(db);
 
@@ -2834,7 +2890,10 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
       success: true,
       stock: db.stock,
       commandes: db.commandes,
-      duplicatesSkipped
+      duplicatesSkipped,
+      created: createdCount,
+      updated: updatedCount,
+      preserved: preservedProducts.length
     });
   } catch (error) {
     handleRouteError(error, res, "Erreur import stock");

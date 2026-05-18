@@ -390,6 +390,179 @@ test("stock import keeps missing quantities as not initialized", async () => {
   assert.equal(body.stock[0].quantite, null);
 });
 
+// Bug fix v1.8.3 : avant, chaque import recreait tous les produits avec un UUID
+// random et ecrasait db.stock, ce qui detruisait les ajustements +1/-1 que
+// l'utilisateur faisait manuellement entre 2 imports. Voir POST /api/import/stock.
+
+test("re-import stock preserves manually adjusted quantities when Excel column is empty", async () => {
+  seedDb(defaultDb());
+
+  // 1. Import initial avec quantite vide
+  const form1 = new FormData();
+  form1.append(
+    "file",
+    workbookBlob([
+      ["Code", "Nom", "Coût", "Tarif"],
+      ["A1", "Produit A", "1,00", "2,00"]
+    ]),
+    "stock.xlsx"
+  );
+  const r1 = await requestJson("/api/import/stock", { method: "POST", body: form1 });
+  assert.equal(r1.body.stock[0].quantite, null);
+  const productId = r1.body.stock[0].id;
+
+  // 2. Utilisateur ajuste manuellement le stock a 42
+  const patch = await requestJson(`/api/stock/${encodeURIComponent(productId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ quantite: 42 })
+  });
+  assert.equal(patch.res.status, 200);
+  assert.equal(patch.body.quantite, 42);
+
+  // 3. Re-import du MEME Excel (sans colonne Quantite remplie)
+  const form2 = new FormData();
+  form2.append(
+    "file",
+    workbookBlob([
+      ["Code", "Nom", "Coût", "Tarif"],
+      ["A1", "Produit A", "1,00", "2,00"]
+    ]),
+    "stock.xlsx"
+  );
+  const r2 = await requestJson("/api/import/stock", { method: "POST", body: form2 });
+  assert.equal(r2.res.status, 200);
+
+  // 4. Le stock manuel doit etre preserve, l'id aussi (match par code)
+  assert.equal(r2.body.stock.length, 1);
+  assert.equal(r2.body.stock[0].quantite, 42, "Stock manuel doit etre preserve");
+  assert.equal(r2.body.stock[0].id, productId, "ID doit etre preserve (match par code)");
+  assert.equal(r2.body.updated, 1);
+  assert.equal(r2.body.created, 0);
+});
+
+test("re-import stock with explicit Quantite column overwrites manual quantity", async () => {
+  seedDb(defaultDb());
+
+  // 1. Import initial + ajustement manuel
+  const form1 = new FormData();
+  form1.append(
+    "file",
+    workbookBlob([
+      ["Code", "Nom"],
+      ["B1", "Produit B"]
+    ]),
+    "stock.xlsx"
+  );
+  const r1 = await requestJson("/api/import/stock", { method: "POST", body: form1 });
+  const productId = r1.body.stock[0].id;
+
+  await requestJson(`/api/stock/${encodeURIComponent(productId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ quantite: 100 })
+  });
+
+  // 2. Re-import avec une valeur EXPLICITE dans Quantite
+  const form2 = new FormData();
+  form2.append(
+    "file",
+    workbookBlob([
+      ["Code", "Nom", "Quantite"],
+      ["B1", "Produit B", "5"]
+    ]),
+    "stock.xlsx"
+  );
+  const r2 = await requestJson("/api/import/stock", { method: "POST", body: form2 });
+
+  // 3. La valeur Excel ecrase le stock manuel (regle metier explicite)
+  assert.equal(r2.body.stock[0].quantite, 5, "Excel explicite ecrase le manuel");
+  assert.equal(r2.body.stock[0].id, productId, "ID toujours preserve");
+});
+
+test("re-import stock preserves products absent from new Excel (no destructive wipe)", async () => {
+  seedDb(defaultDb());
+
+  // 1. Import initial avec 2 produits + ajustement manuel sur les 2
+  const form1 = new FormData();
+  form1.append(
+    "file",
+    workbookBlob([
+      ["Code", "Nom"],
+      ["C1", "Produit C1"],
+      ["C2", "Produit C2"]
+    ]),
+    "stock.xlsx"
+  );
+  const r1 = await requestJson("/api/import/stock", { method: "POST", body: form1 });
+  assert.equal(r1.body.stock.length, 2);
+
+  const idC1 = r1.body.stock.find(p => p.code === "C1").id;
+  const idC2 = r1.body.stock.find(p => p.code === "C2").id;
+
+  await requestJson(`/api/stock/${encodeURIComponent(idC1)}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ quantite: 11 })
+  });
+  await requestJson(`/api/stock/${encodeURIComponent(idC2)}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ quantite: 22 })
+  });
+
+  // 2. Re-import avec UNIQUEMENT C1 (Excel partiel)
+  const form2 = new FormData();
+  form2.append(
+    "file",
+    workbookBlob([
+      ["Code", "Nom"],
+      ["C1", "Produit C1"]
+    ]),
+    "stock.xlsx"
+  );
+  const r2 = await requestJson("/api/import/stock", { method: "POST", body: form2 });
+
+  // 3. Les 2 produits doivent rester, C2 preserve avec sa quantite manuelle
+  assert.equal(r2.body.stock.length, 2, "C2 doit etre preserve");
+  const c1After = r2.body.stock.find(p => p.code === "C1");
+  const c2After = r2.body.stock.find(p => p.code === "C2");
+  assert.equal(c1After.quantite, 11, "C1 quantite manuelle preservee");
+  assert.equal(c2After.quantite, 22, "C2 quantite manuelle preservee meme s'il n'est plus dans l'Excel");
+  assert.equal(c2After.id, idC2, "C2 id preserve");
+  assert.equal(r2.body.preserved, 1, "compteur preserved = 1");
+});
+
+test("re-import stock returns created/updated counters for audit log", async () => {
+  seedDb(defaultDb());
+
+  // 1. Import avec 1 produit
+  const form1 = new FormData();
+  form1.append(
+    "file",
+    workbookBlob([
+      ["Code", "Nom"],
+      ["D1", "Produit D1"]
+    ]),
+    "stock.xlsx"
+  );
+  await requestJson("/api/import/stock", { method: "POST", body: form1 });
+
+  // 2. Re-import avec D1 (mise a jour) + D2 (nouveau)
+  const form2 = new FormData();
+  form2.append(
+    "file",
+    workbookBlob([
+      ["Code", "Nom"],
+      ["D1", "Produit D1 mis a jour"],
+      ["D2", "Produit D2 nouveau"]
+    ]),
+    "stock.xlsx"
+  );
+  const r2 = await requestJson("/api/import/stock", { method: "POST", body: form2 });
+
+  assert.equal(r2.body.created, 1, "D2 cree");
+  assert.equal(r2.body.updated, 1, "D1 mis a jour");
+});
+
 test("client coordinates can be saved, rejected, and cleared", async () => {
   seedDb({
     ...defaultDb(),
