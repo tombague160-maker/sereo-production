@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.0](https://github.com/tombague160-maker/sereo-production/compare/v1.10.1...v1.11.0) (2026-05-18)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **ui:** coherence Commandes livrees + filtre A completer + edition profil + vue tableau + export CSV ([#57](https://github.com/tombague160-maker/sereo-production/issues/57)) ([d7c4bc4](https://github.com/tombague160-maker/sereo-production/commit/d7c4bc4595f18cbc149b1aefa73061b672b7bdde))
+
 ## [1.10.1](https://github.com/tombague160-maker/sereo-production/compare/v1.10.0...v1.10.1) (2026-05-18)
 
 
