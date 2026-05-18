@@ -11,7 +11,7 @@ Sereo V7 est une application locale Node.js/Express + SPA vanilla JS pour gérer
 ```bash
 npm install                  # Installation des dépendances
 npm start                    # Lance le serveur sur PORT (défaut 3000)
-npm test                     # 48 tests via node --test (api.test.js + auth.test.js)
+npm test                     # 114 tests via node --test (api.test.js + auth.test.js)
 npm run check                # node --check sur server.js, app.js, sqliteStore.js, scripts
 npm run migrate:sqlite       # Migration data/db.json -> data/sereo.sqlite (one-shot)
 ```
@@ -31,10 +31,32 @@ Avant tout commit qui touche `server.js` ou `public/js/app.js` : **toujours `npm
 - **Upload** : `multer` plafonné à 10 MB, fichiers .xlsx exclusivement.
 
 ### Flux de données
-1. **Import Ximi** → ventes (table `ventes`) + clients (table `clients`) + commandes (table `commandes`) générées par `mergeImportedClients` + `syncWorkflow`.
+1. **Import Ximi** → ventes (table `ventes`) + clients (table `clients`) + commandes (table `commandes`) avec **numéro humain** (`CMD-2026-001`) et **bucketing par (client, dateCommande)** depuis v1.9.0. Multi-commandes par client supportées.
 2. **Préparation** → workflow par statuts d'`ORDER_STATUSES` (`importe` → `stock_a_verifier` → `en_preparation` → `pret_livraison` → `livre`).
 3. **Stock** → réservation/déduction calculée à la volée depuis les commandes actives.
 4. **Tournée** → `routes` + `stops` (un client par stop), statut `STOP_STATUSES`.
+
+### Modèle ERP des commandes (v1.9.0+)
+
+Une commande = un **bon de commande** identifié par :
+- `numero` : format humain `CMD-2026-001` (préfixe configurable dans `settings.orderNumbering.prefix`, reset annuel par défaut)
+- `dateCommande` : date métier ISO `YYYY-MM-DD` (extraite de la colonne Date de l'Excel, fallback today)
+- `excelRowHash` : SHA-256 16 hex de `(clientId, dateCommande, products)` pour détection idempotence
+
+**Logique d'import** (`POST /api/import/ventes`) :
+- Group ventes Excel par `(clientKey, dateCommandeIso)`
+- 3 chemins de match :
+  1. Hash strict (`excelRowHash`) → noop (re-import identique idempotent)
+  2. `(clientId, dateCommande)` → update produits + sync adresses, **préserve status workflow**
+  3. Aucun match → nouvelle commande avec `numero` neuf via `generateOrderNumber`
+- **Le statut workflow d'une commande existante n'est jamais reculé** par un re-import.
+
+**Settings de numérotation** (`appearance.orderNumbering` dans `app_meta.settings`) :
+- `prefix` : préfixe du numéro (défaut `CMD`)
+- `dateFormat` : `dmy` | `mdy` | `ymd` | `iso` (affichage UI)
+- `resetAnnually` : `true` (défaut, `CMD-2026-001`) ou `false` (continu `CMD-00001`)
+
+**Réservation de stock** : la réservation se base sur la somme des produits de toutes les commandes actives d'un produit (status ∈ `importe`, `stock_a_verifier`, `en_preparation`, `preparation_terminee`, `pret_livraison`).
 
 ### Tables SQLite
 `produits`, `clients`, `commandes`, `lignes_commande`, `livraisons`, `mouvements_stock`, `ventes`, `historique`, `routes`, `app_meta`. Schéma dans `storage/sqliteStore.js`.
