@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.3](https://github.com/tombague160-maker/sereo-production/compare/v1.8.2...v1.8.3) (2026-05-18)
+
+
+### 🐛 Corrections de bugs
+
+* **import:** preserver les ajustements manuels du stock lors d'un re-import Excel ([#46](https://github.com/tombague160-maker/sereo-production/issues/46)) ([e0ebe36](https://github.com/tombague160-maker/sereo-production/commit/e0ebe36b2f9fde723fa238e98287a1f90378d548))
+
 ## [1.8.2](https://github.com/tombague160-maker/sereo-production/compare/v1.8.1...v1.8.2) (2026-05-14)
 
 
