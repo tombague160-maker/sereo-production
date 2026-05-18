@@ -1354,6 +1354,234 @@ test("non-regression: re-import ventes preserve la priority manuelle de la comma
     "Priority manuelle preservee apres re-import sans colonne Priorite");
 });
 
+// ============================================================================
+// V1.9.0 - ERP Phase 1 : numerotation bons de commande + hash anti-doublon.
+// Le user veut un vrai systeme de gestion de commandes (numero CMD-2026-001
+// visible, historique conserve, anti-doublon par hash). Cette phase introduit
+// le modele de donnees et les helpers, sans changer encore la logique d'import
+// ni l'UI (Phase 2-5 a suivre).
+// ============================================================================
+
+const { generateOrderNumber, computeOrderHash, extractYear, ensureOrderNumbers, normalizeSettings } = require("../server");
+
+test("generateOrderNumber: format reset annuel par defaut CMD-YYYY-NNN", async () => {
+  const db = { commandes: [], settings: {} };
+  const n1 = generateOrderNumber(db, "2026-05-18");
+  assert.equal(n1, "CMD-2026-001");
+
+  db.commandes.push({ numero: n1 });
+  const n2 = generateOrderNumber(db, "2026-05-19");
+  assert.equal(n2, "CMD-2026-002");
+});
+
+test("generateOrderNumber: reset annuel cree CMD-2027-001 en janvier", async () => {
+  const db = {
+    commandes: [
+      { numero: "CMD-2026-001" },
+      { numero: "CMD-2026-042" }
+    ],
+    settings: {}
+  };
+  const next = generateOrderNumber(db, "2027-01-15");
+  assert.equal(next, "CMD-2027-001", "compteur reset au passage 2026 -> 2027");
+});
+
+test("generateOrderNumber: prefixe personnalise via settings", async () => {
+  const db = {
+    commandes: [],
+    settings: { orderNumbering: { prefix: "BC", resetAnnually: true } }
+  };
+  const next = generateOrderNumber(db, "2026-05-18");
+  assert.equal(next, "BC-2026-001");
+});
+
+test("generateOrderNumber: mode continu (jamais reset)", async () => {
+  const db = {
+    commandes: [
+      { numero: "CMD-00001" },
+      { numero: "CMD-00042" }
+    ],
+    settings: { orderNumbering: { prefix: "CMD", resetAnnually: false } }
+  };
+  const next = generateOrderNumber(db, "2026-05-18");
+  assert.equal(next, "CMD-00043", "continu : suite stricte sans annee");
+});
+
+test("generateOrderNumber: ignore les numeros malformes existants", async () => {
+  const db = {
+    commandes: [
+      { numero: "CMD-2026-001" },
+      { numero: "old-id-42" },        // legacy
+      { numero: "" },                 // vide
+      { numero: "CMD-2026-005" }
+    ],
+    settings: {}
+  };
+  const next = generateOrderNumber(db, "2026-05-18");
+  assert.equal(next, "CMD-2026-006", "prend en compte uniquement les numeros au bon format");
+});
+
+test("computeOrderHash: meme contenu = meme hash", async () => {
+  const a = computeOrderHash({
+    clientId: "c1",
+    dateCommande: "2026-05-18",
+    products: [
+      { code: "A1", nom: "Produit A", quantite: 2 },
+      { code: "B2", nom: "Produit B", quantite: 5 }
+    ]
+  });
+  const b = computeOrderHash({
+    clientId: "c1",
+    dateCommande: "2026-05-18",
+    // ordre different mais memes lignes
+    products: [
+      { code: "B2", nom: "Produit B", quantite: 5 },
+      { code: "A1", nom: "Produit A", quantite: 2 }
+    ]
+  });
+  assert.equal(a, b, "ordre des produits ne doit pas affecter le hash");
+});
+
+test("computeOrderHash: contenu different = hash different", async () => {
+  const a = computeOrderHash({
+    clientId: "c1", dateCommande: "2026-05-18",
+    products: [{ code: "A1", quantite: 2 }]
+  });
+  const b = computeOrderHash({
+    clientId: "c1", dateCommande: "2026-05-18",
+    products: [{ code: "A1", quantite: 3 }] // quantite differente
+  });
+  assert.notEqual(a, b);
+
+  const c = computeOrderHash({
+    clientId: "c1", dateCommande: "2026-05-19", // date differente
+    products: [{ code: "A1", quantite: 2 }]
+  });
+  assert.notEqual(a, c);
+
+  const d = computeOrderHash({
+    clientId: "c2", dateCommande: "2026-05-18", // client different
+    products: [{ code: "A1", quantite: 2 }]
+  });
+  assert.notEqual(a, d);
+});
+
+test("extractYear: gere les formats ISO et FR", async () => {
+  assert.equal(extractYear("2026-05-18"), 2026);
+  assert.equal(extractYear("2026-05-18T10:30:00Z"), 2026);
+  assert.equal(extractYear("18/05/2026"), 2026);
+  assert.equal(extractYear("18-05-2026"), 2026);
+  assert.equal(extractYear(""), new Date().getFullYear());
+  assert.equal(extractYear(null), new Date().getFullYear());
+});
+
+test("ensureOrderNumbers: migration retroactive par date_import chronologique", async () => {
+  const db = {
+    commandes: [
+      { id: "o3", dateImport: "2026-04-15T10:00:00Z" },
+      { id: "o1", dateImport: "2026-03-01T09:00:00Z" },
+      { id: "o2", dateImport: "2026-04-01T14:00:00Z" }
+    ],
+    settings: {}
+  };
+  ensureOrderNumbers(db);
+
+  const o1 = db.commandes.find(c => c.id === "o1");
+  const o2 = db.commandes.find(c => c.id === "o2");
+  const o3 = db.commandes.find(c => c.id === "o3");
+
+  assert.equal(o1.numero, "CMD-2026-001", "o1 mars -> 001 (le plus ancien)");
+  assert.equal(o2.numero, "CMD-2026-002", "o2 avril -> 002");
+  assert.equal(o3.numero, "CMD-2026-003", "o3 avril plus tard -> 003");
+
+  // Les date_commande sont remplies par fallback sur dateImport
+  assert.equal(o1.dateCommande, "2026-03-01T09:00:00Z");
+});
+
+test("ensureOrderNumbers: ne touche pas les commandes qui ont deja un numero", async () => {
+  const db = {
+    commandes: [
+      { id: "o1", numero: "CMD-2025-099", dateImport: "2025-12-31" },
+      { id: "o2", dateImport: "2026-01-15" }
+    ],
+    settings: {}
+  };
+  ensureOrderNumbers(db);
+
+  const o1 = db.commandes.find(c => c.id === "o1");
+  const o2 = db.commandes.find(c => c.id === "o2");
+  assert.equal(o1.numero, "CMD-2025-099", "non modifie");
+  assert.equal(o2.numero, "CMD-2026-001", "nouveau numero, annee 2026 reset annuel");
+});
+
+test("normalizeSettings: orderNumbering valide prefix + resetAnnually", async () => {
+  const s1 = normalizeSettings({});
+  assert.equal(s1.orderNumbering.prefix, "CMD");
+  assert.equal(s1.orderNumbering.resetAnnually, true);
+
+  const s2 = normalizeSettings({ orderNumbering: { prefix: "ord", resetAnnually: false } });
+  assert.equal(s2.orderNumbering.prefix, "ORD", "uppercase");
+  assert.equal(s2.orderNumbering.resetAnnually, false);
+
+  const s3 = normalizeSettings({ orderNumbering: { prefix: "x" } });
+  assert.equal(s3.orderNumbering.prefix, "CMD", "prefix trop court -> default");
+});
+
+test("GET /api/settings/order-numbering retourne config par defaut", async () => {
+  seedDb(defaultDb());
+  const { res, body } = await requestJson("/api/settings/order-numbering");
+  assert.equal(res.status, 200);
+  assert.equal(body.prefix, "CMD");
+  assert.equal(body.resetAnnually, true);
+});
+
+test("PATCH /api/settings/order-numbering met a jour prefix et resetAnnually", async () => {
+  seedDb(defaultDb());
+  const { res, body } = await requestJson("/api/settings/order-numbering", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prefix: "BC", resetAnnually: false })
+  });
+  assert.equal(res.status, 200);
+  assert.equal(body.prefix, "BC");
+  assert.equal(body.resetAnnually, false);
+
+  // Persistant
+  const check = await requestJson("/api/settings/order-numbering");
+  assert.equal(check.body.prefix, "BC");
+  assert.equal(check.body.resetAnnually, false);
+});
+
+test("PATCH /api/settings/order-numbering rejette un prefix invalide", async () => {
+  seedDb(defaultDb());
+  const { res, body } = await requestJson("/api/settings/order-numbering", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prefix: "X" })
+  });
+  assert.equal(res.status, 400);
+  assert.match(body.error, /Prefixe/);
+});
+
+test("GET /api/orders/by-number/CMD-2026-001 retourne la commande", async () => {
+  seedDb({
+    ...defaultDb(),
+    commandes: [
+      { id: "o1", clientId: "c1", clientName: "X", numero: "CMD-2026-001", products: [] }
+    ]
+  });
+  const { res, body } = await requestJson("/api/orders/by-number/CMD-2026-001");
+  assert.equal(res.status, 200);
+  assert.equal(body.id, "o1");
+  assert.equal(body.numero, "CMD-2026-001");
+});
+
+test("GET /api/orders/by-number/INEXISTANT renvoie 404", async () => {
+  seedDb(defaultDb());
+  const { res } = await requestJson("/api/orders/by-number/CMD-2099-999");
+  assert.equal(res.status, 404);
+});
+
 test("non-regression: re-import stock preserve les mouvements de stock (historique)", async () => {
   seedDb(defaultDb());
 

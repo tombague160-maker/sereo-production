@@ -1312,8 +1312,37 @@ function normalizeDb(db) {
   db.stockMovements = Array.isArray(db.stockMovements) ? db.stockMovements : [];
   db.settings = normalizeSettings(db.settings);
 
+  // Migration retroactive v1.9.0 : attribuer un numero aux commandes qui n'en
+  // ont pas (legacy avant cette release). Numerotation chronologique par
+  // dateImport pour preserver l'ordre historique reel.
+  ensureOrderNumbers(db);
+
   syncWorkflow(db);
   return db;
+}
+
+function ensureOrderNumbers(db) {
+  const missingNumero = db.commandes.filter(order => !order.numero);
+  if (missingNumero.length === 0) return;
+
+  // Tri chronologique stable : dateImport asc, fallback createdAt, fallback id
+  // pour garantir l'ordre meme sur des dates manquantes.
+  missingNumero.sort((a, b) => {
+    const dateA = String(a.dateImport || a.createdAt || "");
+    const dateB = String(b.dateImport || b.createdAt || "");
+    if (dateA !== dateB) return dateA.localeCompare(dateB);
+    return String(a.id || "").localeCompare(String(b.id || ""));
+  });
+
+  // generateOrderNumber lit db.commandes pour trouver le max numero existant,
+  // donc on doit attribuer un a un (pas en batch) pour que les numeros se
+  // suivent correctement quand resetAnnually est actif.
+  missingNumero.forEach(order => {
+    if (!order.dateCommande) {
+      order.dateCommande = order.dateImport || order.createdAt || new Date().toISOString();
+    }
+    order.numero = generateOrderNumber(db, order.dateCommande);
+  });
 }
 
 function normalizeSettings(settings = {}) {
@@ -1326,12 +1355,26 @@ function normalizeSettings(settings = {}) {
   // ce qui evite un changement visuel surprenant pendant la phase de test du dark mode.
   const colorScheme = VALID_COLOR_SCHEMES.has(rawColorScheme) ? rawColorScheme : "light";
 
+  const orderNumberingRaw = settings && typeof settings === "object" && settings.orderNumbering && typeof settings.orderNumbering === "object"
+    ? settings.orderNumbering
+    : {};
+  // Prefixe alphanumerique 2-8 chars (CMD, ORD, BC, etc.). Defaut CMD.
+  const rawPrefix = clean(orderNumberingRaw.prefix).toUpperCase();
+  const prefix = /^[A-Z0-9]{2,8}$/.test(rawPrefix) ? rawPrefix : "CMD";
+  // resetAnnually par defaut true (standard ERP francais : compteur reset
+  // chaque 1er janvier). False = compteur continu (jamais reset).
+  const resetAnnually = orderNumberingRaw.resetAnnually !== false;
+
   return {
     ...settings,
     appearance: {
       themeId: clean(appearance.themeId) || "sereo",
       brandImage: clean(appearance.brandImage),
       colorScheme
+    },
+    orderNumbering: {
+      prefix,
+      resetAnnually
     }
   };
 }
@@ -2043,6 +2086,84 @@ function productKeyFromLine(line) {
   return `name:${normalizeTextKey(line.nom || line.produit || line.productName)}`;
 }
 
+// ============================================================================
+// ERP v1.9.0 : numerotation bons de commande + detection doublons re-import
+// ============================================================================
+
+// Extrait l'annee d'une date ISO ou FR. Retourne new Date().getFullYear() en
+// fallback pour ne jamais bloquer sur un format inconnu.
+function extractYear(dateString) {
+  if (!dateString) return new Date().getFullYear();
+  const str = String(dateString);
+  // Format ISO ou ISO-like : "2026-05-18" / "2026-05-18T..." / "2026/05/18"
+  const isoMatch = str.match(/^(\d{4})[-/]/);
+  if (isoMatch) return Number(isoMatch[1]);
+  // Format francais : "18/05/2026" ou "18-05-2026"
+  const frMatch = str.match(/^\d{1,2}[/-]\d{1,2}[/-](\d{4})/);
+  if (frMatch) return Number(frMatch[1]);
+  return new Date().getFullYear();
+}
+
+// Genere le prochain numero de commande au format PREFIX-YYYY-NNN (reset
+// annuel) ou PREFIX-NNNNN (continu). Le compteur est calcule a la volee
+// depuis MAX(numero) en DB, ce qui evite un compteur en cache qui pourrait
+// driver. Convient bien pour Sereo (volume B2B faible, < 10000 commandes/an).
+//
+// Format reset annuel    : CMD-2026-001, CMD-2026-002, ..., CMD-2027-001
+// Format continu (jamais) : CMD-00001, CMD-00002, ..., CMD-12847
+function generateOrderNumber(db, dateCommande) {
+  const settings = normalizeSettings(db.settings || {});
+  const { prefix, resetAnnually } = settings.orderNumbering;
+  const existingNumeros = (db.commandes || [])
+    .map(order => order.numero)
+    .filter(Boolean);
+
+  if (!resetAnnually) {
+    // Compteur continu : extraire le plus grand suffixe numerique tout prefixe confondu
+    const pattern = new RegExp(`^${prefix}-(\\d+)$`);
+    const maxSeq = existingNumeros.reduce((max, numero) => {
+      const match = numero.match(pattern);
+      if (!match) return max;
+      const seq = Number(match[1]);
+      return Number.isFinite(seq) && seq > max ? seq : max;
+    }, 0);
+    return `${prefix}-${String(maxSeq + 1).padStart(5, "0")}`;
+  }
+
+  // Reset annuel : compteur par annee
+  const year = extractYear(dateCommande);
+  const pattern = new RegExp(`^${prefix}-${year}-(\\d+)$`);
+  const maxSeq = existingNumeros.reduce((max, numero) => {
+    const match = numero.match(pattern);
+    if (!match) return max;
+    const seq = Number(match[1]);
+    return Number.isFinite(seq) && seq > max ? seq : max;
+  }, 0);
+  return `${prefix}-${year}-${String(maxSeq + 1).padStart(3, "0")}`;
+}
+
+// Hash deterministe d'une commande pour detecter les doublons au re-import.
+// Combine clientId + dateCommande + lignes produits (code/nom + quantite).
+// Deux imports identiques produisent le meme hash -> on peut skip silencieusement.
+// Utilise SHA-256 de la chaine canonique pour minimiser les collisions.
+function computeOrderHash({ clientId, dateCommande, products }) {
+  const safeClientId = String(clientId || "");
+  const safeDate = String(dateCommande || "").slice(0, 10); // YYYY-MM-DD ou DD/MM/YYYY
+  const safeProducts = (Array.isArray(products) ? products : [])
+    .map(p => {
+      const code = normalizeTextKey(p.code || p.sku || p.reference);
+      const nom = normalizeTextKey(p.nom || p.produit || p.productName);
+      const key = code || nom;
+      const qty = Number(p.quantite ?? p.quantity ?? 0);
+      return `${key}:${qty}`;
+    })
+    .filter(Boolean)
+    .sort()
+    .join("|");
+  const canonical = `${safeClientId}#${safeDate}#${safeProducts}`;
+  return crypto.createHash("sha256").update(canonical).digest("hex").slice(0, 16);
+}
+
 function stockLookup(stock) {
   const map = new Map();
 
@@ -2198,6 +2319,13 @@ function normalizeOrder(order) {
 
   return {
     id: order.id || `cmd-${order.clientId || crypto.randomUUID()}`,
+    // Champs ERP v1.9.0 : numero humain (CMD-2026-001) + date metier de la
+    // commande (date Excel ou date import) + hash deterministe pour anti-doublon.
+    // Sont attribues par generateOrderNumber() et computeOrderHash() au moment
+    // de la creation (import ou creation manuelle), preserves a chaque re-import.
+    numero: order.numero || "",
+    dateCommande: order.dateCommande || order.dateImport || order.createdAt || now,
+    excelRowHash: order.excelRowHash || "",
     clientId: order.clientId,
     clientName: clean(order.clientName || order.nom || order.client || "Client sans nom"),
     address: clean(order.address || order.rue || order.adresse),
@@ -2734,6 +2862,35 @@ app.patch("/api/settings/appearance", (req, res) => {
   }
 });
 
+app.get("/api/settings/order-numbering", (req, res) => {
+  const db = readDb();
+  res.json(normalizeSettings(db.settings || {}).orderNumbering);
+});
+
+app.patch("/api/settings/order-numbering", (req, res) => {
+  try {
+    const db = readDb();
+    db.settings = normalizeSettings(db.settings || {});
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "prefix")) {
+      const raw = clean(req.body.prefix).toUpperCase();
+      if (!/^[A-Z0-9]{2,8}$/.test(raw)) {
+        throw badRequest("Prefixe invalide : 2 a 8 caracteres alphanumeriques (ex: CMD, ORD, BC)");
+      }
+      db.settings.orderNumbering.prefix = raw;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "resetAnnually")) {
+      db.settings.orderNumbering.resetAnnually = !!req.body.resetAnnually;
+    }
+
+    writeDb(db);
+    res.json(db.settings.orderNumbering);
+  } catch (error) {
+    handleRouteError(error, res, "Erreur parametres numerotation");
+  }
+});
+
 app.get("/api/orders", (req, res) => {
   const db = readDb();
   const statusFilter = clean(req.query.status || "").toLowerCase();
@@ -2742,6 +2899,18 @@ app.get("/api/orders", (req, res) => {
     return res.status(400).json({ error: "Statut inconnu" });
   }
   res.json(db.commandes.filter(order => order.status === statusFilter));
+});
+
+// Recherche d'une commande par son numero humain (CMD-2026-001).
+// Utilisee par la barre de recherche dans la nouvelle page Commandes (Phase 3).
+app.get("/api/orders/by-number/:numero", (req, res) => {
+  const db = readDb();
+  const numero = clean(req.params.numero).toUpperCase();
+  const order = db.commandes.find(o => String(o.numero).toUpperCase() === numero);
+  if (!order) {
+    return res.status(404).json({ error: "Commande introuvable" });
+  }
+  res.json(order);
 });
 
 app.get("/api/recommendations", (req, res) => {
@@ -3467,6 +3636,11 @@ module.exports = {
   productKey,
   clientSecondaryKey,
   isFactureStatusLivre,
+  generateOrderNumber,
+  computeOrderHash,
+  extractYear,
+  ensureOrderNumbers,
+  normalizeSettings,
   normalizeCity,
   deriveSector,
   analyzeOrderStock,

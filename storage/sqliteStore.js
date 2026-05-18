@@ -95,6 +95,9 @@ function migrateSchema(database) {
 
     CREATE TABLE IF NOT EXISTS commandes (
       id TEXT PRIMARY KEY,
+      numero TEXT,
+      date_commande TEXT,
+      excel_row_hash TEXT,
       client_id TEXT,
       date_import TEXT,
       date_preparation TEXT,
@@ -105,6 +108,10 @@ function migrateSchema(database) {
       payload TEXT NOT NULL,
       sort_order INTEGER NOT NULL
     );
+
+    CREATE INDEX IF NOT EXISTS idx_commandes_numero ON commandes(numero);
+    CREATE INDEX IF NOT EXISTS idx_commandes_client_date ON commandes(client_id, date_commande);
+    CREATE INDEX IF NOT EXISTS idx_commandes_hash ON commandes(excel_row_hash);
 
     CREATE TABLE IF NOT EXISTS lignes_commande (
       id TEXT PRIMARY KEY,
@@ -169,6 +176,23 @@ function migrateSchema(database) {
       sort_order INTEGER NOT NULL
     );
   `);
+
+  // Migration v1.9.0 : ajout colonnes ERP sur commandes existantes.
+  // node:sqlite ne supporte pas IF NOT EXISTS sur ADD COLUMN, donc on
+  // inspecte le schema avant pour eviter une erreur sur les bases deja
+  // migrees.
+  addColumnIfMissing(database, "commandes", "numero", "TEXT");
+  addColumnIfMissing(database, "commandes", "date_commande", "TEXT");
+  addColumnIfMissing(database, "commandes", "excel_row_hash", "TEXT");
+}
+
+function addColumnIfMissing(database, table, column, type) {
+  const existing = database
+    .prepare(`PRAGMA table_info(${table})`)
+    .all()
+    .some(row => row.name === column);
+  if (existing) return;
+  database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
 }
 
 function initializeFromJsonIfNeeded(database, options) {
@@ -293,13 +317,18 @@ function insertClients(database, clients) {
 function insertOrders(database, orders) {
   const statement = database.prepare(`
     INSERT INTO commandes (
-      id, client_id, date_import, date_preparation, date_livraison, statut, source_excel, updated_at, payload, sort_order
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      id, numero, date_commande, excel_row_hash, client_id, date_import,
+      date_preparation, date_livraison, statut, source_excel, updated_at,
+      payload, sort_order
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   orders.forEach((order, index) => {
     statement.run(
       stableId(order, "commande", index),
+      text(order.numero),
+      text(order.dateCommande),
+      text(order.excelRowHash),
       text(order.clientId),
       text(order.dateImport || order.createdAt),
       text(order.datePreparation || order.preparationDate),
