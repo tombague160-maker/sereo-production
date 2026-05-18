@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/tombague160-maker/sereo-production/compare/v1.8.3...v1.9.0) (2026-05-18)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **orders:** refonte ERP des bons de commande (Phase 1+2 - modele + import) ([#49](https://github.com/tombague160-maker/sereo-production/issues/49)) ([19e9aeb](https://github.com/tombague160-maker/sereo-production/commit/19e9aeb92d5e97ded8c6920d0984a23c9333f99d))
+
 ## [1.8.3](https://github.com/tombague160-maker/sereo-production/compare/v1.8.2...v1.8.3) (2026-05-18)
 
 
