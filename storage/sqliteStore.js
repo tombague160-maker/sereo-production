@@ -37,6 +37,9 @@ function createSqliteStore(options) {
         commandes: readPayloads(database, "commandes"),
         routes: readPayloads(database, "routes"),
         stockMovements: readPayloads(database, "mouvements_stock"),
+        // v1.12.0 : historique des imports Excel archives (metadata + chemin
+        // vers le fichier xlsx brut conserve dans /app/data/imports-archives/)
+        importsArchives: readPayloads(database, "imports_archives"),
         settings: readSettings(database)
       };
 
@@ -176,6 +179,24 @@ function migrateSchema(database) {
       payload TEXT NOT NULL,
       sort_order INTEGER NOT NULL
     );
+
+    -- v1.12.0 : archivage automatique des fichiers Excel importes pour pouvoir
+    -- les retelecharger plus tard et tracer l'historique (audit, debug, repro).
+    -- Le fichier brut .xlsx est copie dans /app/data/imports-archives/, et un
+    -- enregistrement metadata est stocke ici (chemin + sha256 + stats).
+    CREATE TABLE IF NOT EXISTS imports_archives (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL,
+      filename TEXT,
+      archived_path TEXT,
+      imported_at TEXT,
+      rows_count INTEGER,
+      file_size INTEGER,
+      sha256 TEXT,
+      stats_json TEXT,
+      payload TEXT NOT NULL,
+      sort_order INTEGER NOT NULL
+    );
   `);
 
   // Etape 2 : ALTER TABLE pour les bases creees AVANT v1.9.0 qui n'ont pas
@@ -195,6 +216,8 @@ function migrateSchema(database) {
     CREATE INDEX IF NOT EXISTS idx_commandes_numero ON commandes(numero);
     CREATE INDEX IF NOT EXISTS idx_commandes_client_date ON commandes(client_id, date_commande);
     CREATE INDEX IF NOT EXISTS idx_commandes_hash ON commandes(excel_row_hash);
+    CREATE INDEX IF NOT EXISTS idx_imports_archives_at ON imports_archives(imported_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_imports_archives_type ON imports_archives(type, imported_at DESC);
   `);
 }
 
@@ -242,7 +265,8 @@ function persistDatabase(database, db) {
       "produits",
       "mouvements_stock",
       "ventes",
-      "historique"
+      "historique",
+      "imports_archives"
     ].forEach(table => database.prepare(`DELETE FROM ${table}`).run());
 
     insertProducts(database, db.stock || []);
@@ -254,6 +278,7 @@ function persistDatabase(database, db) {
     insertMovements(database, db.stockMovements || []);
     insertSimplePayloads(database, "ventes", db.ventes || []);
     insertHistory(database, db.historique || []);
+    insertImportsArchives(database, db.importsArchives || []);
 
     database.prepare(`
       INSERT INTO app_meta (key, value, updated_at)
@@ -496,6 +521,35 @@ function insertHistory(database, items) {
       text(item.message || item.texte),
       text(item.date),
       stringify(item),
+      index
+    );
+  });
+}
+
+// v1.12.0 : insertion des archives d'imports Excel. Le payload contient les
+// metadata completes (type, filename, archived_path, sha256, file_size,
+// rows_count, stats, imported_at). On expose aussi quelques colonnes
+// indexables pour le tri et filtrage cote SQL.
+function insertImportsArchives(database, archives) {
+  const statement = database.prepare(`
+    INSERT INTO imports_archives (
+      id, type, filename, archived_path, imported_at,
+      rows_count, file_size, sha256, stats_json, payload, sort_order
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  archives.forEach((archive, index) => {
+    statement.run(
+      stableId(archive, "import", index),
+      text(archive.type),
+      text(archive.filename),
+      text(archive.archivedPath),
+      text(archive.importedAt),
+      numberOrNull(archive.rowsCount),
+      numberOrNull(archive.fileSize),
+      text(archive.sha256),
+      stringify(archive.stats || {}),
+      stringify(archive),
       index
     );
   });

@@ -103,6 +103,10 @@ const STORAGE_ENGINE = (process.env.SEREO_STORAGE || "sqlite").toLowerCase();
 const SQLITE_PATH = path.resolve(process.env.SEREO_SQLITE_PATH || process.env.SQLITE_PATH || path.join(__dirname, "data", "sereo.sqlite"));
 const UPLOAD_DIR = path.resolve(process.env.SEREO_UPLOAD_DIR || path.join(__dirname, "imports"));
 const BACKUP_DIR = path.resolve(process.env.SEREO_BACKUP_DIR || path.join(path.dirname(STORAGE_ENGINE === "json" ? DB_PATH : SQLITE_PATH), "backups"));
+// v1.12.0 : dossier ou les Excel importes sont archives au format brut pour
+// retelechargement et audit. Sous-dossier du data dir, donc persistant sur
+// le volume Docker comme la SQLite.
+const IMPORTS_ARCHIVES_DIR = path.resolve(process.env.SEREO_IMPORTS_ARCHIVES_DIR || path.join(path.dirname(SQLITE_PATH), "imports-archives"));
 const LEAFLET_DIST = path.join(__dirname, "node_modules", "leaflet", "dist");
 const ENABLE_DB_EXPORT = process.env.SEREO_ENABLE_DB_EXPORT === "1";
 const AUTH_USER = cleanEnv(process.env.SEREO_AUTH_USER);
@@ -1226,6 +1230,7 @@ function defaultDb() {
     commandes: [],
     routes: [],
     stockMovements: [],
+    importsArchives: [],
     settings: {
       appearance: {
         themeId: "sereo",
@@ -1310,6 +1315,7 @@ function normalizeDb(db) {
   db.commandes = Array.isArray(db.commandes) ? db.commandes : [];
   db.routes = Array.isArray(db.routes) ? db.routes : [];
   db.stockMovements = Array.isArray(db.stockMovements) ? db.stockMovements : [];
+  db.importsArchives = Array.isArray(db.importsArchives) ? db.importsArchives : [];
   db.settings = normalizeSettings(db.settings);
 
   // Migration retroactive v1.9.0 : attribuer un numero aux commandes qui n'en
@@ -1851,6 +1857,60 @@ function cleanupUploadedFile(filePath) {
     }
   } catch (error) {
     console.error(error);
+  }
+}
+
+// v1.12.0 : copie le fichier Excel uploade dans /app/data/imports-archives/
+// (persistant) avec un nom horodate et ajoute une entree de metadata dans
+// db.importsArchives pour retelechargement futur. Doit etre appelee AVANT
+// cleanupUploadedFile sinon le fichier est deja supprime.
+function archiveImportFile(req, db, type, stats = {}) {
+  if (!req?.file?.path) return null;
+
+  try {
+    if (!fs.existsSync(IMPORTS_ARCHIVES_DIR)) {
+      fs.mkdirSync(IMPORTS_ARCHIVES_DIR, { recursive: true });
+    }
+
+    const sourcePath = req.file.path;
+    const originalName = req.file.originalname || "import.xlsx";
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    // Nom safe : alphanumerique + tirets seulement, ascii only
+    const safeName = String(originalName)
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/[^a-zA-Z0-9._-]/g, "_")
+      .slice(0, 80);
+    const archivedFilename = `${timestamp}_${type}_${safeName}`;
+    const archivedPath = path.join(IMPORTS_ARCHIVES_DIR, archivedFilename);
+
+    fs.copyFileSync(sourcePath, archivedPath);
+
+    const stat = fs.statSync(archivedPath);
+    const fileBuffer = fs.readFileSync(archivedPath);
+    const sha256 = crypto.createHash("sha256").update(fileBuffer).digest("hex");
+
+    const archiveEntry = {
+      id: `import-${timestamp}-${crypto.randomUUID().slice(0, 8)}`,
+      type,
+      filename: originalName,
+      archivedFilename,
+      archivedPath,
+      importedAt: new Date().toISOString(),
+      rowsCount: Number(stats.rowsCount || 0),
+      fileSize: stat.size,
+      sha256,
+      stats: stats || {}
+    };
+
+    db.importsArchives = db.importsArchives || [];
+    db.importsArchives.push(archiveEntry);
+
+    return archiveEntry;
+  } catch (error) {
+    // L'archivage est best-effort : si ca echoue, on ne casse pas l'import.
+    console.error("Erreur archivage import :", error);
+    return null;
   }
 }
 
@@ -3110,6 +3170,15 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
       { fichier: req.file.originalname }
     );
 
+    // v1.12.0 : archivage du fichier Excel brut pour retelechargement futur
+    const archive = archiveImportFile(req, db, "stock", {
+      rowsCount: dataRows.length,
+      created: createdCount,
+      updated: updatedCount,
+      preserved: preservedProducts.length,
+      duplicatesSkipped
+    });
+
     writeDb(db);
 
     res.json({
@@ -3119,7 +3188,8 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
       duplicatesSkipped,
       created: createdCount,
       updated: updatedCount,
-      preserved: preservedProducts.length
+      preserved: preservedProducts.length,
+      archive
     });
   } catch (error) {
     handleRouteError(error, res, "Erreur import stock");
@@ -3402,6 +3472,17 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       }
     );
 
+    // v1.12.0 : archivage du fichier Excel brut pour retelechargement futur
+    const archive = archiveImportFile(req, db, "ventes", {
+      rowsCount: db.ventes.length,
+      clientsCount: importedClients.length,
+      created: createdCount,
+      updated: updatedCount,
+      skippedIdentical: skippedIdenticalCount,
+      importedAsLivre: importedAsLivreCount,
+      mergedBySecondary: mergedImport.mergedBySecondary
+    });
+
     writeDb(db);
 
     res.json({
@@ -3414,12 +3495,94 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       importedAsLivre: importedAsLivreCount,
       created: createdCount,
       updated: updatedCount,
-      skippedIdentical: skippedIdenticalCount
+      skippedIdentical: skippedIdenticalCount,
+      archive
     });
   } catch (error) {
     handleRouteError(error, res, "Erreur import ventes");
   } finally {
     cleanupUploadedFile(uploadedPath);
+  }
+});
+
+// v1.12.0 : liste des fichiers Excel archives lors des imports passes.
+// Tries du plus recent au plus ancien. Inclut metadata (taille, sha256, stats)
+// mais pas le contenu binaire du fichier (recupere via GET /:id/download).
+app.get("/api/imports/archives", (req, res) => {
+  const db = readDb();
+  const archives = (db.importsArchives || []).slice();
+  const typeFilter = clean(req.query.type || "").toLowerCase();
+  const filtered = typeFilter
+    ? archives.filter(a => String(a.type).toLowerCase() === typeFilter)
+    : archives;
+  filtered.sort((a, b) => String(b.importedAt || "").localeCompare(String(a.importedAt || "")));
+  res.json(filtered);
+});
+
+// v1.12.0 : telechargement d'un fichier Excel archive. Verifie que l'id est
+// connu en DB et que le fichier existe encore sur disque (peut etre purge
+// manuellement par le sysadmin).
+app.get("/api/imports/archives/:id/download", (req, res) => {
+  try {
+    const db = readDb();
+    const archive = (db.importsArchives || []).find(a => String(a.id) === String(req.params.id));
+
+    if (!archive) {
+      throw notFound("Archive introuvable");
+    }
+
+    if (!archive.archivedPath || !fs.existsSync(archive.archivedPath)) {
+      throw notFound("Fichier archive supprime du disque");
+    }
+
+    res.download(archive.archivedPath, archive.filename || "import.xlsx");
+  } catch (error) {
+    handleRouteError(error, res, "Erreur telechargement archive");
+  }
+});
+
+// v1.12.0 : purge des bons de commande pour repartir propre (utile apres
+// une migration ou pour effacer des imports cassés). Supprime commandes,
+// clients, ventes et routes (cascades logiques), mais PRESERVE :
+// - stock (catalogue produits + quantites manuelles)
+// - stockMovements (historique des ajustements stock)
+// - historique evenements (audit)
+// - importsArchives (l'historique des fichiers reste accessible)
+// - settings (themes, palette, etc.)
+//
+// La purge laisse l'utilisateur pouvoir reimporter ses Excel originaux
+// depuis Parametres -> Historique imports -> Telecharger.
+app.post("/api/orders/purge", (req, res) => {
+  try {
+    const db = readDb();
+    const purgedCounts = {
+      commandes: db.commandes.length,
+      clients: db.clients.length,
+      ventes: db.ventes.length,
+      routes: db.routes.length
+    };
+
+    db.commandes = [];
+    db.clients = [];
+    db.ventes = [];
+    db.routes = [];
+
+    addHistory(
+      db,
+      "Purge",
+      `Reset bons de commande : ${purgedCounts.commandes} commande(s), ${purgedCounts.clients} client(s), ${purgedCounts.ventes} vente(s), ${purgedCounts.routes} tournee(s) supprimees. Stock et historique preserves.`,
+      purgedCounts
+    );
+
+    writeDb(db);
+
+    res.json({
+      success: true,
+      purged: purgedCounts,
+      message: "Bons de commande purges. Re-importez vos Excel depuis Parametres > Historique imports."
+    });
+  } catch (error) {
+    handleRouteError(error, res, "Erreur purge bons");
   }
 });
 

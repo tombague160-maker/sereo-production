@@ -367,6 +367,7 @@ function bindUi() {
     if (action === "move-stop-down") runAction(actionButton, "...", () => moveStop(actionButton.dataset.stopId, 1));
     if (action === "start-tour") startTour();
     if (action === "reset-tour") runAction(actionButton, "Reset...", resetTour);
+    if (action === "purge-orders") purgeOrdersHandler(actionButton);
     if (action === "mark-delivered") runAction(actionButton, "Envoi...", () => updateCurrentDeliveryStatus("livre"));
     if (action === "mark-absent") runAction(actionButton, "Envoi...", () => updateCurrentDeliveryStatus("absent"));
     if (action === "mark-problem") runAction(actionButton, "Envoi...", () => updateCurrentDeliveryStatus("probleme"));
@@ -588,6 +589,7 @@ function renderAll() {
   renderRoute();
   renderClients();
   renderSettings();
+  renderImportsArchives();
   renderMap();
   updateRouteProgress();
 }
@@ -2364,6 +2366,134 @@ function renderSettings() {
       </div>
     </article>
   `).join("");
+}
+
+// v1.12.0 : historique des fichiers Excel importes (archives auto).
+// Charge dynamiquement via /api/imports/archives a chaque render pour rester
+// a jour apres un nouvel import. Affiche un tableau avec date, type, nom,
+// stats et bouton de telechargement.
+async function renderImportsArchives() {
+  const container = document.getElementById("importsArchivesList");
+  if (!container) return;
+
+  try {
+    const archives = await apiFetch("/api/imports/archives");
+
+    if (!archives.length) {
+      container.innerHTML = `<p class="muted">Aucun import archivé pour l'instant. Tes prochains imports apparaitront ici.</p>`;
+      return;
+    }
+
+    container.innerHTML = `
+      <div class="imports-archives-table-wrap">
+        <table class="imports-archives-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Type</th>
+              <th>Fichier</th>
+              <th class="imports-num">Lignes</th>
+              <th class="imports-num">Taille</th>
+              <th>Stats</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${archives.map(a => `
+              <tr>
+                <td class="muted">${escapeHtml(formatDateTimeShort(a.importedAt))}</td>
+                <td>${a.type === "ventes" ? "📋 Ventes" : "📦 Stock"}</td>
+                <td class="imports-filename">${escapeHtml(a.filename || "—")}</td>
+                <td class="imports-num">${escapeHtml(a.rowsCount ?? "—")}</td>
+                <td class="imports-num muted">${formatFileSize(a.fileSize)}</td>
+                <td class="muted imports-stats">${formatImportStats(a.stats, a.type)}</td>
+                <td>
+                  <a class="button secondary compact" href="/api/imports/archives/${encodeURIComponent(a.id)}/download" download="${escapeAttribute(a.filename || "import.xlsx")}">
+                    ⬇ Télécharger
+                  </a>
+                </td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    `;
+  } catch (error) {
+    container.innerHTML = `<p class="muted">Impossible de charger l'historique : ${escapeHtml(error.message || "erreur réseau")}</p>`;
+  }
+}
+
+function formatDateTimeShort(iso) {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString("fr-FR", {
+      day: "2-digit", month: "2-digit", year: "numeric",
+      hour: "2-digit", minute: "2-digit"
+    });
+  } catch {
+    return String(iso).slice(0, 16).replace("T", " ");
+  }
+}
+
+function formatFileSize(bytes) {
+  if (!bytes || bytes < 0) return "—";
+  const KB = 1024;
+  if (bytes < KB) return `${bytes} o`;
+  if (bytes < KB * KB) return `${(bytes / KB).toFixed(1)} ko`;
+  return `${(bytes / KB / KB).toFixed(2)} Mo`;
+}
+
+function formatImportStats(stats, type) {
+  if (!stats || typeof stats !== "object") return "—";
+  if (type === "ventes") {
+    const parts = [];
+    if (stats.created) parts.push(`${stats.created} créées`);
+    if (stats.updated) parts.push(`${stats.updated} maj`);
+    if (stats.skippedIdentical) parts.push(`${stats.skippedIdentical} idem`);
+    if (stats.importedAsLivre) parts.push(`${stats.importedAsLivre} déjà livrées`);
+    return parts.join(", ") || "—";
+  }
+  if (type === "stock") {
+    const parts = [];
+    if (stats.created) parts.push(`${stats.created} créés`);
+    if (stats.updated) parts.push(`${stats.updated} maj`);
+    if (stats.preserved) parts.push(`${stats.preserved} préservés`);
+    if (stats.duplicatesSkipped) parts.push(`${stats.duplicatesSkipped} doublons`);
+    return parts.join(", ") || "—";
+  }
+  return "—";
+}
+
+// v1.12.0 : handler du bouton "Purger les bons de commande" en Parametres.
+// Double confirmation (window.confirm) avant l'appel API destructif.
+async function purgeOrdersHandler(btn) {
+  const msg = [
+    "⚠️ ATTENTION — action irréversible",
+    "",
+    "Tu vas supprimer définitivement :",
+    "  • toutes les commandes / bons de commande",
+    "  • tous les clients",
+    "  • toutes les ventes importées",
+    "  • toutes les tournées",
+    "",
+    "Le stock et l'historique sont préservés.",
+    "Les archives Excel restent téléchargeables.",
+    "",
+    "Continuer ?"
+  ].join("\n");
+
+  if (!window.confirm(msg)) return;
+  if (!window.confirm("Es-tu vraiment sûr ? Tape OK pour confirmer.")) return;
+
+  await runAction(btn, "Purge en cours...", async () => {
+    const result = await apiFetch("/api/orders/purge", { method: "POST" });
+    notify(
+      `Purge OK : ${result.purged.commandes} bon(s), ${result.purged.clients} client(s), ${result.purged.ventes} vente(s), ${result.purged.routes} tournée(s) supprimés. Va dans Historique des imports ci-dessus pour ré-importer tes Excel.`,
+      "success"
+    );
+    await loadData();
+  });
 }
 
 function renderDeliveryFilters() {

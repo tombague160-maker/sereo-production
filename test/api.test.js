@@ -1268,6 +1268,191 @@ test("v1.11.0 PATCH /api/clients/:id : client inexistant renvoie 404", async () 
   assert.equal(r.res.status, 404);
 });
 
+// ============================================================================
+// v1.12.0 : archivage des Excel + purge bons
+// ============================================================================
+
+test("v1.12.0 archivage : import ventes copie le fichier xlsx et cree une entree imports_archives", async () => {
+  seedDb(defaultDb());
+
+  const form = new FormData();
+  form.append("file", workbookBlob([
+    ["Client", "Quantite", "Produit", "Rue", "Ville", "Code Postal"],
+    ["Archive Client", "1", "Produit A", "1 rue test", "Besancon", "25000"]
+  ]), "ventes-mai-2026.xlsx");
+
+  const r = await requestJson("/api/import/ventes", { method: "POST", body: form });
+  assert.equal(r.res.status, 200);
+  assert.ok(r.body.archive, "Reponse contient un objet archive");
+  assert.equal(r.body.archive.type, "ventes");
+  assert.equal(r.body.archive.filename, "ventes-mai-2026.xlsx");
+  assert.ok(r.body.archive.sha256 && r.body.archive.sha256.length === 64, "SHA256 calcule (64 hex)");
+  assert.ok(r.body.archive.fileSize > 0, "fileSize renseigne");
+  assert.ok(r.body.archive.archivedPath, "archivedPath renseigne");
+  assert.ok(fs.existsSync(r.body.archive.archivedPath), "Fichier archive existe sur disque");
+
+  // Listing via GET /api/imports/archives
+  const list = await requestJson("/api/imports/archives");
+  assert.equal(list.res.status, 200);
+  assert.equal(list.body.length, 1);
+  assert.equal(list.body[0].filename, "ventes-mai-2026.xlsx");
+  assert.equal(list.body[0].type, "ventes");
+});
+
+test("v1.12.0 archivage : filtre par type ?type=stock", async () => {
+  seedDb(defaultDb());
+
+  const formV = new FormData();
+  formV.append("file", workbookBlob([
+    ["Client", "Quantite", "Produit", "Rue", "Ville"],
+    ["X", "1", "Y", "1 r", "Besancon"]
+  ]), "v.xlsx");
+  await requestJson("/api/import/ventes", { method: "POST", body: formV });
+
+  const formS = new FormData();
+  formS.append("file", workbookBlob([
+    ["Code", "Nom"],
+    ["S1", "Produit S"]
+  ]), "s.xlsx");
+  await requestJson("/api/import/stock", { method: "POST", body: formS });
+
+  const listAll = await requestJson("/api/imports/archives");
+  assert.equal(listAll.body.length, 2);
+
+  const listStock = await requestJson("/api/imports/archives?type=stock");
+  assert.equal(listStock.body.length, 1);
+  assert.equal(listStock.body[0].type, "stock");
+});
+
+test("v1.12.0 download : GET /api/imports/archives/:id/download renvoie le fichier", async () => {
+  seedDb(defaultDb());
+
+  const form = new FormData();
+  form.append("file", workbookBlob([
+    ["Client", "Quantite", "Produit", "Rue", "Ville"],
+    ["D", "1", "P", "1", "Besancon"]
+  ]), "test-download.xlsx");
+  const r = await requestJson("/api/import/ventes", { method: "POST", body: form });
+  const archiveId = r.body.archive.id;
+
+  // Telechargement raw (pas requestJson car retourne du binaire xlsx)
+  const downloadRes = await fetch(`${baseUrl}/api/imports/archives/${encodeURIComponent(archiveId)}/download`);
+  assert.equal(downloadRes.status, 200);
+  const contentDisp = downloadRes.headers.get("content-disposition") || "";
+  assert.match(contentDisp, /test-download\.xlsx/);
+  const buf = Buffer.from(await downloadRes.arrayBuffer());
+  assert.ok(buf.length > 0, "Binaire xlsx non vide");
+});
+
+test("v1.12.0 download : 404 si id inconnu", async () => {
+  seedDb(defaultDb());
+  const res = await fetch(`${baseUrl}/api/imports/archives/ghost-id/download`);
+  assert.equal(res.status, 404);
+});
+
+test("v1.12.0 purge : POST /api/orders/purge wipe commandes/clients/ventes/routes, preserve stock", async () => {
+  seedDb({
+    ...defaultDb(),
+    clients: [{ id: "c1", nom: "ToWipe", statut: "restant", produits: [] }],
+    commandes: [{ id: "o1", clientId: "c1", clientName: "ToWipe", status: "stock_a_verifier", products: [] }],
+    ventes: [{ id: "v1", client: "ToWipe" }],
+    routes: [{ id: "r1", stops: [{ id: "s1", orderId: "o1", clientId: "c1" }] }],
+    stock: [{ id: "p1", code: "A1", nom: "Produit A", quantite: 42 }],
+    stockMovements: [{ id: "m1", produitId: "p1", type: "ajustement", quantite: 5 }]
+  });
+
+  const purge = await requestJson("/api/orders/purge", { method: "POST" });
+  assert.equal(purge.res.status, 200);
+  assert.equal(purge.body.success, true);
+  assert.deepEqual(purge.body.purged, { commandes: 1, clients: 1, ventes: 1, routes: 1 });
+
+  // Verifier l'etat post-purge
+  const ordersAfter = await requestJson("/api/orders");
+  assert.equal(ordersAfter.body.length, 0, "Commandes vides");
+
+  const clientsAfter = await requestJson("/api/clients");
+  assert.equal(clientsAfter.body.length, 0, "Clients vides");
+
+  // Stock PRESERVE
+  const stockAfter = await requestJson("/api/stock");
+  assert.equal(stockAfter.body.length, 1, "Stock preserve");
+  assert.equal(stockAfter.body[0].quantite, 42, "Quantite manuelle preservee");
+
+  // Historique mouvements stock PRESERVE
+  const movs = await requestJson("/api/stock-movements");
+  assert.equal(movs.body.length, 1, "Mouvements stock preserves");
+});
+
+// ============================================================================
+// Repro bug user : Excel Ximi reel avec colonnes en double (Code, Statut) +
+// Date "05/05/2026" identique sur toutes les lignes (date d'export rapport).
+// Format en-tete exact du fichier "BillItem (Articles de facture (T Ventes
+// SEREO par produits))" partage par le user.
+// ============================================================================
+
+test("import ventes : format Ximi reel avec en-tete dupliques (Code, Statut) lit bien la colonne Date", async () => {
+  seedDb(defaultDb());
+
+  const form = new FormData();
+  form.append("file", workbookBlob([
+    // En-tete exact du fichier Ximi BillItem (note les colonnes dupliquees)
+    [
+      "Code", "Nom", "Client", "Statut", "Date", "Début de période",
+      "Code", "Heures", "Quantite", "Prix unitaire", "HT", "TTC",
+      "Produit", "Soumis à royalties", "Type", "Type de TVA", "Statut",
+      "Téléphone favori", "Référence", "Code Postal", "Rue", "Ville"
+    ],
+    // Ligne 1 : ZANETTI Ginette, Date 05/05/2026
+    [
+      "MAT_SDB1", "4065995003890 Planche de bain Benny 73cm", "ZANETTI, Ginette",
+      "Validée", "05/05/2026", "01/05/2026",
+      "PR2", "0", "1", "35,90", "29,82", "35,90",
+      "MAT_SDB1 - 4065995003890 Planche", "VRAI", "Fourniture", "Pro Métropole (20%)", "Actif",
+      "03 84 33 03 39", "PR2FA26050001", "39400", "171 rue de la république", "Hauts de Bienne"
+    ],
+    // Ligne 2 : meme client, meme date -> doit etre fusionnee dans le meme bon
+    [
+      "MAT_SDB7", "5021196843122 AIDAPT Barre d'appui", "ZANETTI, Ginette",
+      "Validée", "05/05/2026", "01/05/2026",
+      "PR2", "0", "1", "31,00", "25,83", "31,00",
+      "MAT_SDB7 - AIDAPT", "VRAI", "Fourniture", "Pro Métropole (20%)", "Actif",
+      "03 84 33 03 39", "PR2FA26050001", "39400", "171 rue de la république", "Hauts de Bienne"
+    ],
+    // Ligne 3 : meme client mais date differente -> doit creer un 2e bon distinct
+    [
+      "MAT_SDB1", "4065995003890 Planche de bain Benny 73cm", "ZANETTI, Ginette",
+      "Validée", "12/04/2026", "01/04/2026",
+      "PR2", "0", "1", "35,90", "29,82", "35,90",
+      "MAT_SDB1 - autre date", "VRAI", "Fourniture", "Pro Métropole (20%)", "Actif",
+      "03 84 33 03 39", "PR2FA26040001", "39400", "171 rue de la république", "Hauts de Bienne"
+    ]
+  ]), "ventes.xlsx");
+
+  const r = await requestJson("/api/import/ventes", { method: "POST", body: form });
+  assert.equal(r.res.status, 200, "Import doit reussir");
+
+  const cmdsZanetti = r.body.commandes.filter(o => o.clientName && o.clientName.includes("ZANETTI"));
+  assert.equal(cmdsZanetti.length, 2, "ZANETTI doit avoir 2 bons (2 dates differentes)");
+
+  // Verifier que les dateCommande sont bien celles du Excel, PAS today
+  const today = new Date().toISOString().slice(0, 10);
+  const dates = cmdsZanetti.map(o => o.dateCommande).sort();
+  assert.deepEqual(dates, ["2026-04-12", "2026-05-05"],
+    `dateCommande doit etre extraite du Excel (05/05/2026 et 12/04/2026), pas today (${today}). Recu: ${JSON.stringify(dates)}`);
+
+  // Le bon du 05/05 doit contenir 2 produits (les 2 lignes fusionnees)
+  const cmdMai = cmdsZanetti.find(o => o.dateCommande === "2026-05-05");
+  assert.equal(cmdMai.products.length, 2, "Bon du 05/05 doit fusionner les 2 lignes produits");
+
+  // Le bon du 12/04 doit etre distinct avec 1 ligne
+  const cmdAvril = cmdsZanetti.find(o => o.dateCommande === "2026-04-12");
+  assert.equal(cmdAvril.products.length, 1, "Bon du 12/04 doit etre distinct avec 1 ligne");
+
+  // Numero doit etre base sur l'annee 2026
+  assert.ok(cmdMai.numero && cmdMai.numero.includes("2026"), `Numero doit contenir 2026, recu: ${cmdMai.numero}`);
+  assert.ok(cmdAvril.numero && cmdAvril.numero.includes("2026"), `Numero doit contenir 2026, recu: ${cmdAvril.numero}`);
+});
+
 test("GET /api/orders expose numero + dateCommande + excelRowHash (UI Bons de commande Phase 3)", async () => {
   seedDb({
     ...defaultDb(),

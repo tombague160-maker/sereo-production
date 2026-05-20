@@ -3351,3 +3351,131 @@ label {
     width: 100%;
   }
 }
+
+/* ============================================================================
+   v1.12.0 : historique des imports Excel + zone dangereuse purge
+   ============================================================================ */
+
+.imports-archives-list {
+  margin-top: 8px;
+}
+
+.imports-archives-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.imports-archives-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.imports-archives-table thead {
+  background: var(--surface-soft);
+}
+
+.imports-archives-table th {
+  padding: 10px 12px;
+  text-align: left;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--color-brand-teal);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.imports-archives-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.imports-archives-table tbody tr:hover {
+  background: var(--surface-soft);
+}
+
+.imports-filename {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.imports-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.imports-stats {
+  font-size: 0.82rem;
+}
+
+/* Zone dangereuse - reset bons */
+.settings-block-danger {
+  border-left: 4px solid #e8634e;
+  background: rgba(232, 99, 78, 0.04);
+}
+
+.danger-zone {
+  padding: 16px 18px;
+}
+
+.danger-zone p {
+  margin: 8px 0;
+}
+
+.danger-list,
+.preserve-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 8px 0 16px;
+}
+
+.danger-list li,
+.preserve-list li {
+  padding: 4px 0;
+  font-size: 0.95rem;
+}
+
+.danger-list li {
+  color: #c54a36;
+}
+
+.preserve-list li {
+  color: var(--color-brand-teal-dark);
+}
+
+.button.danger {
+  background: #e8634e;
+  color: #fff;
+  border-color: #c54a36;
+  font-weight: 600;
+}
+.button.danger:hover {
+  background: #c54a36;
+}
+
+.danger-note {
+  margin-top: 12px;
+  font-size: 0.88rem;
+  font-style: italic;
+}
+
+@media (max-width: 720px) {
+  .imports-archives-table th,
+  .imports-archives-table td {
+    padding: 8px 8px;
+    font-size: 0.82rem;
+  }
+  .imports-filename {
+    max-width: 180px;
+  }
+}

@@ -731,6 +731,46 @@
               </article>
             </div>
           </div>
+
+          <!-- v1.12.0 : historique des fichiers Excel importes (archives auto). -->
+          <div class="settings-block">
+            <header class="block-header">
+              <h3>📥 Historique des imports Excel</h3>
+              <span class="muted">Tous les fichiers .xlsx importés sont archivés automatiquement et téléchargeables</span>
+            </header>
+            <div id="importsArchivesList" class="imports-archives-list" aria-live="polite">
+              <p class="muted">Chargement de l'historique…</p>
+            </div>
+          </div>
+
+          <!-- v1.12.0 : zone dangereuse - reset des bons de commande. -->
+          <div class="settings-block settings-block-danger">
+            <header class="block-header">
+              <h3>⚠️ Zone dangereuse — Réinitialiser les bons de commande</h3>
+              <span class="muted">À utiliser après une migration ou pour repartir propre avec un re-import</span>
+            </header>
+            <div class="danger-zone">
+              <p>Cette action <strong>supprime définitivement</strong> :</p>
+              <ul class="danger-list">
+                <li>✗ Toutes les <strong>commandes</strong> (bons de commande)</li>
+                <li>✗ Tous les <strong>clients</strong></li>
+                <li>✗ Toutes les <strong>ventes</strong> importées</li>
+                <li>✗ Toutes les <strong>tournées</strong> de livraison</li>
+              </ul>
+              <p>Et <strong>préserve</strong> :</p>
+              <ul class="preserve-list">
+                <li>✓ Le <strong>stock</strong> (catalogue produits + quantités)</li>
+                <li>✓ L'<strong>historique des mouvements de stock</strong></li>
+                <li>✓ L'<strong>historique des évènements</strong></li>
+                <li>✓ Les <strong>archives Excel</strong> (tu peux re-télécharger tes fichiers)</li>
+                <li>✓ Tes <strong>paramètres visuels</strong> (thèmes, logo)</li>
+              </ul>
+              <button class="button danger" type="button" data-action="purge-orders">
+                🗑️ Purger les bons de commande
+              </button>
+              <p class="muted danger-note">Après purge, va dans <strong>Historique des imports</strong> ci-dessus pour re-télécharger tes Excel et les ré-importer depuis le Tableau de bord.</p>
+            </div>
+          </div>
         </div>
       </section>
     </main>
