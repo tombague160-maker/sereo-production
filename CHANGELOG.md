@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.0](https://github.com/tombague160-maker/sereo-production/compare/v1.11.0...v1.12.0) (2026-05-20)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **imports:** archivage auto des Excel + bouton purge bons de commande ([#59](https://github.com/tombague160-maker/sereo-production/issues/59)) ([e6b20da](https://github.com/tombague160-maker/sereo-production/commit/e6b20da4574625b8a5b6d7250d6fba894e7c65b6))
+
 ## [1.11.0](https://github.com/tombague160-maker/sereo-production/compare/v1.10.1...v1.11.0) (2026-05-18)
 
 
