@@ -62,13 +62,24 @@ Voir [`.env.example`](.env.example) et [`DEPLOYMENT.md`](DEPLOYMENT.md) pour la 
 
 ```bash
 npm run check    # syntax check (node --check) — obligatoire avant tout commit
-npm test         # 130+ tests via node --test natif
+npm test         # 127+ tests backend via node --test natif
 ```
 
 Lancer un seul test :
 ```bash
 node --test test/api.test.js --test-name-pattern="re-import stock"
 ```
+
+### Tests E2E (Playwright, v1.13.2+)
+
+```bash
+npm install                          # installe @playwright/test
+npx playwright install chromium      # installe le navigateur (~150 MB, 1 fois)
+npm run test:e2e                     # mode headless
+npm run test:e2e:ui                  # mode interactif debug
+```
+
+Les tests E2E couvrent les **golden paths** (login → dashboard → import → modal détail). Voir [`test/e2e/smoke.spec.js`](test/e2e/smoke.spec.js) et [`playwright.config.js`](playwright.config.js).
 
 ## Architecture
 
@@ -79,7 +90,11 @@ node --test test/api.test.js --test-name-pattern="re-import stock"
 - **Import Excel** : `read-excel-file` (.xlsx uniquement, max 10 MB)
 - **PWA** : Service Worker pour offline-light + auto-update
 
-Détails dans [`CLAUDE.md`](CLAUDE.md) (instructions pour les agents IA) et [`docs/internal/AUDIT_2026_05_20.md`](docs/internal/AUDIT_2026_05_20.md) (audit complet).
+Détails dans :
+- [`CLAUDE.md`](CLAUDE.md) — instructions pour les agents IA + conventions
+- [`docs/internal/AUDIT_2026_05_20.md`](docs/internal/AUDIT_2026_05_20.md) — audit complet 5 axes + plan en 3 sprints
+- [`docs/SCHEMA.md`](docs/SCHEMA.md) — schéma SQLite avec diagramme ER
+- [`docs/adr/`](docs/adr/) — Architecture Decision Records (rationale des choix structurants)
 
 ## Workflow Git
 

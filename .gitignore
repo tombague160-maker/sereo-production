@@ -20,3 +20,8 @@ uploads/*
 
 exports/*
 !exports/.gitkeep
+
+# Playwright (Sprint 3 audit v1.13.2)
+playwright-report/
+test-results/
+playwright/.cache/
