@@ -51,6 +51,17 @@
 </head>
 
 <body>
+  <!-- v1.13.0 : overlay loader pour les actions longues (imports principalement).
+       Reste cache par defaut, montre via showLoader()/hideLoader() dans app.js.
+       aria-live polite pour annoncer le statut aux lecteurs d'ecran. -->
+  <div id="appLoader" class="app-loader" aria-live="polite" aria-busy="false" hidden>
+    <div class="app-loader-backdrop"></div>
+    <div class="app-loader-panel" role="status">
+      <div class="app-loader-spinner" aria-hidden="true"></div>
+      <p class="app-loader-message" id="appLoaderMessage">Chargement…</p>
+    </div>
+  </div>
+
   <svg class="icon-sprite" aria-hidden="true" focusable="false">
     <symbol id="icon-home" viewBox="0 0 24 24">
       <path d="m3 11 9-8 9 8" />

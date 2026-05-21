@@ -11,7 +11,7 @@ Sereo V7 est une application locale Node.js/Express + SPA vanilla JS pour gérer
 ```bash
 npm install                  # Installation des dépendances
 npm start                    # Lance le serveur sur PORT (défaut 3000)
-npm test                     # 114 tests via node --test (api.test.js + auth.test.js)
+npm test                     # 130+ tests via node --test (api.test.js + auth.test.js)
 npm run check                # node --check sur server.js, app.js, sqliteStore.js, scripts
 npm run migrate:sqlite       # Migration data/db.json -> data/sereo.sqlite (one-shot)
 ```
@@ -59,7 +59,23 @@ Une commande = un **bon de commande** identifié par :
 **Réservation de stock** : la réservation se base sur la somme des produits de toutes les commandes actives d'un produit (status ∈ `importe`, `stock_a_verifier`, `en_preparation`, `preparation_terminee`, `pret_livraison`).
 
 ### Tables SQLite
-`produits`, `clients`, `commandes`, `lignes_commande`, `livraisons`, `mouvements_stock`, `ventes`, `historique`, `routes`, `app_meta`. Schéma dans `storage/sqliteStore.js`.
+`produits`, `clients`, `commandes`, `lignes_commande`, `livraisons`, `mouvements_stock`, `ventes`, `historique`, `routes`, `app_meta`, `imports_archives` (v1.12.0+). Schéma dans `storage/sqliteStore.js`.
+
+### Archivage des imports Excel (v1.12.0+)
+
+Chaque import (.xlsx ventes ou stock) est **archivé automatiquement** :
+- Fichier brut copié dans `/app/data/imports-archives/` avec nom horodaté
+  (`YYYY-MM-DDTHH-MM-SS-mmmZ_<type>_<original>.xlsx`)
+- Entrée dans la table `imports_archives` avec SHA256, taille, nb lignes, stats
+- Best-effort : si l'écriture disque échoue, l'import continue (pas de rollback)
+
+Endpoints :
+- `GET /api/imports/archives[?type=ventes|stock]` : liste triée DESC par date
+- `GET /api/imports/archives/:id/download` : streame le .xlsx (Content-Disposition attachment)
+- `POST /api/orders/purge` : wipe commandes + clients + ventes + routes.
+  **Préserve** stock + stockMovements + historique + importsArchives + settings.
+  Utilisé pour repartir propre après numérotation incohérente (ex: anciens bons
+  pré-v1.9.0 avec `dateCommande = today`).
 
 ### Système de thème (dark/light)
 - Mode stocké **strictement en localStorage par device** (pas sync serveur, par choix UX).

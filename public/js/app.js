@@ -449,6 +449,9 @@ function openMoreMenu() {
   // Focus le 1er item pour la nav clavier
   const firstItem = sheet.querySelector(".more-sheet-item");
   if (firstItem) firstItem.focus({ preventScroll: true });
+  // U3 v1.13.0 : focus trap pour empecher Tab de sortir du modal
+  if (sheet._releaseTrap) sheet._releaseTrap();
+  sheet._releaseTrap = trapFocusWithin(sheet);
 }
 
 function closeMoreMenu() {
@@ -457,6 +460,7 @@ function closeMoreMenu() {
   if (!sheet) return;
   sheet.hidden = true;
   trigger?.setAttribute("aria-expanded", "false");
+  if (sheet._releaseTrap) { sheet._releaseTrap(); sheet._releaseTrap = null; }
   trigger?.focus({ preventScroll: true });
 }
 
@@ -606,19 +610,77 @@ async function importFile(type, inputId) {
   const formData = new FormData();
   formData.append("file", file);
 
-  const result = await apiFetch(`/api/import/${type}`, {
-    method: "POST",
-    body: formData
-  });
+  // U1 v1.13.0 : overlay loader explicite pendant l'import (peut prendre 5-30s
+  // pour un gros fichier). Sans ca l'UI gele silencieusement et le user
+  // re-clique = double import. showLoader bloque visuellement.
+  const sizeKb = Math.round(file.size / 1024);
+  showLoader(`Import ${type === "ventes" ? "des dossiers" : "du stock"} en cours… (${sizeKb} Ko)`);
 
-  lastImportSummary = {
-    type,
-    result,
-    importedAt: new Date().toISOString()
+  try {
+    const result = await apiFetch(`/api/import/${type}`, {
+      method: "POST",
+      body: formData
+    });
+
+    lastImportSummary = {
+      type,
+      result,
+      importedAt: new Date().toISOString()
+    };
+    if (fileInput) fileInput.value = "";
+    await loadData();
+    notify(type === "ventes" ? "Dossiers importés." : "Stock importé.", "success");
+  } finally {
+    hideLoader();
+  }
+}
+
+// U1 v1.13.0 : overlay global pour les actions longues (>500ms perceptible).
+// L'overlay capture les clics (pas de double-soumission possible), affiche
+// un spinner CSS et un message contextuel. aria-busy=true sur le body pour
+// les lecteurs d'ecran.
+function showLoader(message) {
+  const overlay = document.getElementById("appLoader");
+  const msg = document.getElementById("appLoaderMessage");
+  if (!overlay) return;
+  if (msg && message) msg.textContent = message;
+  overlay.hidden = false;
+  overlay.setAttribute("aria-busy", "true");
+  document.body.setAttribute("aria-busy", "true");
+}
+
+function hideLoader() {
+  const overlay = document.getElementById("appLoader");
+  if (!overlay) return;
+  overlay.hidden = true;
+  overlay.setAttribute("aria-busy", "false");
+  document.body.removeAttribute("aria-busy");
+}
+
+// U3 v1.13.0 : focus-trap minimal pour les modals. Maintient le focus a
+// l'interieur du modal pendant qu'il est ouvert. Branche sur keydown(Tab).
+// Le modal a un attribut aria-modal="true" deja, ce qui aide les lecteurs
+// d'ecran mais pas la nav clavier sans ce trap.
+function trapFocusWithin(container) {
+  if (!container) return null;
+  const focusableSelector = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+  const handler = event => {
+    if (event.key !== "Tab") return;
+    const focusables = Array.from(container.querySelectorAll(focusableSelector))
+      .filter(el => !el.disabled && !el.hidden && el.offsetParent !== null);
+    if (focusables.length === 0) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   };
-  if (fileInput) fileInput.value = "";
-  await loadData();
-  notify(type === "ventes" ? "Dossiers importés." : "Stock importé.", "success");
+  container.addEventListener("keydown", handler);
+  return () => container.removeEventListener("keydown", handler);
 }
 
 function renderStats() {
@@ -1825,6 +1887,9 @@ function openBdcDetail(orderId) {
 
   modal.setAttribute("aria-hidden", "false");
   document.body.classList.add("version-modal-open");
+  // U3 v1.13.0 : focus trap pour empecher Tab de sortir du modal
+  if (modal._releaseTrap) modal._releaseTrap();
+  modal._releaseTrap = trapFocusWithin(modal);
 }
 
 // Section CLIENT en mode LECTURE (defaut). Affiche un bouton "Modifier le profil"
@@ -1947,6 +2012,7 @@ function closeBdcDetail() {
   if (!modal) return;
   modal.setAttribute("aria-hidden", "true");
   document.body.classList.remove("version-modal-open");
+  if (modal._releaseTrap) { modal._releaseTrap(); modal._releaseTrap = null; }
 }
 
 function bindBonsCommandeUi() {
@@ -3757,6 +3823,9 @@ function openVersionModal() {
   populateVersionModal();
   modal.setAttribute("aria-hidden", "false");
   document.body.classList.add("version-modal-open");
+  // U3 v1.13.0 : focus trap
+  if (modal._releaseTrap) modal._releaseTrap();
+  modal._releaseTrap = trapFocusWithin(modal);
 }
 
 function closeVersionModal() {
@@ -3764,6 +3833,7 @@ function closeVersionModal() {
   if (!modal) return;
   modal.setAttribute("aria-hidden", "true");
   document.body.classList.remove("version-modal-open");
+  if (modal._releaseTrap) { modal._releaseTrap(); modal._releaseTrap = null; }
 }
 
 function populateVersionModal() {
@@ -3861,14 +3931,23 @@ function renderSimpleMarkdown(md) {
 }
 
 function inlineMarkdown(text) {
-  return text
+  // S1 v1.13.0 : escape HTML AVANT de transformer le markdown, sinon le texte
+  // brut peut injecter du HTML/JS dans la modal "Quoi de neuf" (les notes
+  // viennent de GitHub release notes - source externe). escapeHtml ne touche
+  // pas aux caracteres markdown ([ ] ( ) * `), donc les regex en dessous
+  // fonctionnent toujours sur le contenu deja safe.
+  const safe = escapeHtml(text);
+  return safe
     // Bold + italic
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|\W)\*([^*\s][^*]*[^*\s])\*(?=\W|$)/g, "$1<em>$2</em>")
     // Code inline
     .replace(/`([^`]+)`/g, "<code>$1</code>")
-    // Links [text](url) - url restreinte a http(s) ou anchor pour bloquer javascript:
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+|#[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    // Links [text](url) - url restreinte a http(s) ou anchor (filtre javascript:)
+    // Le texte ($1) est deja escape par escapeHtml ci-dessus, donc safe.
+    // L'URL ($2) est passee dans href : on l'echappe en attribut pour blinder.
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+|#[^)\s]+)\)/g,
+      (m, linkText, url) => `<a href="${escapeAttribute(url)}" target="_blank" rel="noopener noreferrer">${linkText}</a>`);
 }
 
 function registerServiceWorker() {

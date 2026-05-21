@@ -216,6 +216,10 @@ function migrateSchema(database) {
     CREATE INDEX IF NOT EXISTS idx_commandes_numero ON commandes(numero);
     CREATE INDEX IF NOT EXISTS idx_commandes_client_date ON commandes(client_id, date_commande);
     CREATE INDEX IF NOT EXISTS idx_commandes_hash ON commandes(excel_row_hash);
+    -- v1.13.0 : indexes ajoutes pour accelerer les filtres frequents
+    -- (Bons de commande filtre par statut, Livraison filtre par date_livraison)
+    CREATE INDEX IF NOT EXISTS idx_commandes_statut ON commandes(statut);
+    CREATE INDEX IF NOT EXISTS idx_commandes_date_livraison ON commandes(date_livraison);
     CREATE INDEX IF NOT EXISTS idx_imports_archives_at ON imports_archives(imported_at DESC);
     CREATE INDEX IF NOT EXISTS idx_imports_archives_type ON imports_archives(type, imported_at DESC);
   `);
