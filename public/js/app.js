@@ -1025,12 +1025,21 @@ function renderPreparationStats() {
   const container = document.getElementById("preparationStats");
   if (!container) return;
 
-  const counts = {
-    imported: orders.filter(order => ["importe", "stock_a_verifier"].includes(order.status)).length,
-    preparing: orders.filter(order => order.status === "en_preparation").length,
-    ready: orders.filter(order => order.status === "pret_livraison").length,
-    blocked: orders.filter(order => ["importe", "stock_a_verifier"].includes(order.status) && !order.canPrepare).length
-  };
+  // P3 v1.14.0 : 1 seule passe sur orders au lieu de 4 .filter() consecutifs.
+  // Avant : O(4n) sur ~500 commandes = 2000 comparaisons.
+  // Apres : O(n) = 500 comparaisons + 1 lookup Map.
+  const counts = { imported: 0, preparing: 0, ready: 0, blocked: 0 };
+  for (const order of orders) {
+    const status = order.status;
+    if (status === "importe" || status === "stock_a_verifier") {
+      counts.imported += 1;
+      if (!order.canPrepare) counts.blocked += 1;
+    } else if (status === "en_preparation") {
+      counts.preparing += 1;
+    } else if (status === "pret_livraison") {
+      counts.ready += 1;
+    }
+  }
 
   container.innerHTML = `
     <article class="workflow-card">

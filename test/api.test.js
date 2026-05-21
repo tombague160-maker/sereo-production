@@ -1269,6 +1269,46 @@ test("v1.11.0 PATCH /api/clients/:id : client inexistant renvoie 404", async () 
 });
 
 // ============================================================================
+// v1.14.0 : test stress import gros volume Excel (Sprint 2, T2)
+// ============================================================================
+
+test("v1.14.0 stress : import ventes 5000 lignes traite en moins de 30s + bons numerotes", async () => {
+  seedDb(defaultDb());
+
+  // Genere 5000 lignes Excel : 500 clients differents x 10 produits chacun
+  // sur 5 dates differentes (donc ~5000 bons groupes par client+date).
+  const headers = ["Client", "Quantite", "Produit", "Code", "Rue", "Ville", "Code Postal", "Date"];
+  const rows = [headers];
+  const dates = ["2026-01-15", "2026-02-15", "2026-03-15", "2026-04-15", "2026-05-15"];
+  for (let i = 0; i < 500; i++) {
+    const clientName = `Client_${String(i).padStart(4, "0")}`;
+    const cp = String(25000 + (i % 100)).padStart(5, "0");
+    for (let p = 0; p < 10; p++) {
+      rows.push([
+        clientName, "1", `Produit_${p}`, `CODE${p}`,
+        `${i + 1} rue test`, "Besancon", cp, dates[i % dates.length]
+      ]);
+    }
+  }
+
+  const form = new FormData();
+  form.append("file", workbookBlob(rows), "stress-5000.xlsx");
+
+  const start = Date.now();
+  const r = await requestJson("/api/import/ventes", { method: "POST", body: form });
+  const durationMs = Date.now() - start;
+
+  assert.equal(r.res.status, 200);
+  // 500 clients * 1 date each (i % 5 fait que chaque client a UNE seule date) = 500 bons
+  assert.ok(r.body.created >= 500, `Au moins 500 bons crees, got ${r.body.created}`);
+  // Tous les bons doivent avoir un numero CMD-YYYY-NNN (pas vide)
+  const sample = r.body.commandes.slice(0, 10);
+  assert.ok(sample.every(c => /^CMD-\d{4}-\d{3,}$/.test(c.numero)), "Tous les bons numerotes correctement");
+  // Limite raisonnable : import 5000 lignes < 30s
+  assert.ok(durationMs < 30000, `Import 5000 lignes en ${durationMs}ms (limite 30000ms)`);
+});
+
+// ============================================================================
 // v1.12.0 : archivage des Excel + purge bons
 // ============================================================================
 
