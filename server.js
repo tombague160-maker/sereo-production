@@ -115,8 +115,24 @@ const AUTH_REALM = cleanEnv(process.env.SEREO_AUTH_REALM) || "Sereo";
 // Le secret de signature integre TOUJOURS le password courant pour qu'un
 // changement de mot de passe invalide automatiquement toutes les sessions
 // existantes, meme si SEREO_AUTH_SESSION_SECRET est explicitement defini.
-const AUTH_SESSION_SECRET_BASE = cleanEnv(process.env.SEREO_AUTH_SESSION_SECRET) || AUTH_REALM;
+//
+// S2 v1.13.0 : si SEREO_AUTH_SESSION_SECRET n'est pas defini, on genere un
+// secret aleatoire fort (32 bytes base64) au lieu de tomber sur AUTH_REALM
+// qui vaut "Sereo" par defaut (brute-forcable). Side-effect : toutes les
+// sessions sont invalidees a chaque redemarrage du container (acceptable -
+// le user devra se reconnecter une fois apres deploy d'une nouvelle version).
+// Pour la persistance des sessions a travers les restarts, definir
+// SEREO_AUTH_SESSION_SECRET dans les variables d'environnement (Tom.yml).
+const AUTH_SESSION_SECRET_BASE = cleanEnv(process.env.SEREO_AUTH_SESSION_SECRET)
+  || crypto.randomBytes(32).toString("base64");
 const AUTH_SESSION_SECRET = `${AUTH_SESSION_SECRET_BASE}|${AUTH_PASSWORD}`;
+if (!cleanEnv(process.env.SEREO_AUTH_SESSION_SECRET)) {
+  console.warn(
+    "[auth] SEREO_AUTH_SESSION_SECRET non defini : secret HMAC aleatoire genere. "
+    + "Les sessions seront invalidees au prochain redemarrage. "
+    + "Pour persister les sessions, definir cette variable dans l'environnement."
+  );
+}
 const AUTH_COOKIE_NAME = "sereo_access";
 const AUTH_COOKIE_MAX_AGE_SECONDS = 12 * 60 * 60;
 
