@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.1](https://github.com/tombague160-maker/sereo-production/compare/v1.13.0...v1.13.1) (2026-05-21)
+
+
+### ⚡ Optimisations
+
+* **core:** sprint 2 - syncWorkflow hors readDb + N+1 stats + test stress 5000 lignes + ADR 0001 ([#64](https://github.com/tombague160-maker/sereo-production/issues/64)) ([a903b65](https://github.com/tombague160-maker/sereo-production/commit/a903b65c0e10988d3614578441be8bc5172f4c04))
+
 ## [1.13.0](https://github.com/tombague160-maker/sereo-production/compare/v1.12.0...v1.13.0) (2026-05-21)
 
 
