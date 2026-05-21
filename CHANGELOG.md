@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.0](https://github.com/tombague160-maker/sereo-production/compare/v1.13.1...v1.14.0) (2026-05-21)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **qa:** sprint 3 - Playwright E2E + a11y polish + schema doc ([#66](https://github.com/tombague160-maker/sereo-production/issues/66)) ([77c17e9](https://github.com/tombague160-maker/sereo-production/commit/77c17e90a87d48c236799a8cb42a619013762632))
+
 ## [1.13.1](https://github.com/tombague160-maker/sereo-production/compare/v1.13.0...v1.13.1) (2026-05-21)
 
 
