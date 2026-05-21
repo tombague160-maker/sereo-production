@@ -2522,8 +2522,21 @@ label {
 .version-modal-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(10, 20, 24, 0.42);
+  background: rgba(10, 20, 24, 0.55);
   backdrop-filter: blur(3px);
+}
+
+/* v1.13.2 a11y : backdrop plus opaque en dark mode (0.42 etait insuffisant
+   sur fond deja tres fonce, sensation de modal "qui flotte" mal isolee). */
+:root[data-color-scheme="dark"] .version-modal-backdrop,
+:root[data-color-scheme="dark"] .more-sheet-backdrop {
+  background: rgba(0, 0, 0, 0.62);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) .version-modal-backdrop,
+  :root:not([data-color-scheme="light"]) .more-sheet-backdrop {
+    background: rgba(0, 0, 0, 0.62);
+  }
 }
 
 .version-modal-card {
@@ -3545,5 +3558,25 @@ label {
     animation: none;
     border-top-color: var(--color-pastel-orange-strong);
     border-right-color: var(--color-pastel-orange);
+  }
+}
+
+/* ============================================================================
+   v1.13.2 a11y polish : focus visible sur cards + touch targets mobile
+   ============================================================================ */
+
+/* Focus visible explicite sur les cards cliquables (a11y W3 2.4.7) */
+.bdc-card[data-action="open-bdc-detail"]:focus-visible,
+.commandes-livrees-card[data-action="open-bdc-detail"]:focus-visible {
+  outline: 3px solid var(--color-pastel-orange-strong);
+  outline-offset: 2px;
+}
+
+/* Mobile : touch targets WCAG min 44x44 px sur filtres compact */
+@media (max-width: 720px) {
+  .bdc-status-filter,
+  .button.secondary.compact {
+    min-height: 44px;
+    padding: 10px 14px;
   }
 }
