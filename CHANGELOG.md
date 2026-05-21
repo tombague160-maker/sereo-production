@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.13.0](https://github.com/tombague160-maker/sereo-production/compare/v1.12.0...v1.13.0) (2026-05-21)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **hardening:** sprint 1 audit (XSS fix, auth secret, spinner, dark contrast, focus trap, indexes, README, CLAUDE.md) ([#63](https://github.com/tombague160-maker/sereo-production/issues/63)) ([e2a938c](https://github.com/tombague160-maker/sereo-production/commit/e2a938c824f9eef05b6ed6af330fc687077dbf30))
+
+
+### 📚 Documentation
+
+* **audit:** rapport complet 20 mai 2026 (5 axes, plan en 3 sprints) ([#61](https://github.com/tombague160-maker/sereo-production/issues/61)) ([b55c9ff](https://github.com/tombague160-maker/sereo-production/commit/b55c9ff9077eb38fa05bb63204a016ba3e5c0798))
+
 ## [1.12.0](https://github.com/tombague160-maker/sereo-production/compare/v1.11.0...v1.12.0) (2026-05-20)
 
 
