@@ -1339,8 +1339,27 @@ function normalizeDb(db) {
   // dateImport pour preserver l'ordre historique reel.
   ensureOrderNumbers(db);
 
-  syncWorkflow(db);
+  // P1 v1.14.0 : syncWorkflow N'EST PLUS appele ici (avant : a chaque readDb,
+  // ce qui ajoutait 50-100ms a chaque requete GET). Il est maintenant appele
+  // UNIQUEMENT dans writeDb() avant persistance + au boot du serveur via
+  // healDatabaseAtBoot(). Apres tout writeDb la base SQLite est sync, donc
+  // les readDb suivants lisent du sync sans recalculer.
   return db;
+}
+
+// P1 v1.14.0 : data healing au boot. Si la base SQLite a ete creee par une
+// ancienne version sans syncWorkflow OU si elle a ete restauree depuis un
+// backup, on s'assure que l'etat est coherent avant d'accepter des requetes.
+// Appel unique au demarrage : pas de cout sur les requetes suivantes.
+function healDatabaseAtBoot() {
+  try {
+    const db = readDb();
+    syncWorkflow(db);
+    writeDb(db, { backup: false });
+    console.log("[boot] base coherente apres syncWorkflow initial");
+  } catch (error) {
+    console.error("[boot] healDatabaseAtBoot a echoue :", error.message);
+  }
 }
 
 function ensureOrderNumbers(db) {
@@ -3996,6 +4015,9 @@ app.post("/api/optimize-route", (req, res) => {
 });
 
 function startServer(port = PORT, host = HOST) {
+  // P1 v1.14.0 : healing initial pour garantir la coherence apres restart
+  // (notamment apres restauration d'un backup ou montee de version)
+  healDatabaseAtBoot();
   return app.listen(port, host, () => {
     console.log(`Sereo lance sur http://${host}:${port}`);
     if (host === "0.0.0.0" || host === "::") {
