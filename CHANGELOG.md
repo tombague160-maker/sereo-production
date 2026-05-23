@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.1](https://github.com/tombague160-maker/sereo-production/compare/v1.14.0...v1.14.1) (2026-05-23)
+
+
+### 🐛 Corrections de bugs
+
+* **build:** retirer @playwright/test des devDependencies (build Docker echouait) ([#68](https://github.com/tombague160-maker/sereo-production/issues/68)) ([b921197](https://github.com/tombague160-maker/sereo-production/commit/b921197590e3c9a15cc70fbbdb0a8bc4c365be1e))
+
 ## [1.14.0](https://github.com/tombague160-maker/sereo-production/compare/v1.13.1...v1.14.0) (2026-05-21)
 
 
