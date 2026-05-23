@@ -1555,6 +1555,45 @@ label {
   grid-row: span 2;
 }
 
+/* v1.15.0 : sur grand ecran (>=1400px), passage en 3 colonnes pour combler
+   le vide blanc entre Identite visuelle et Application mobile. La 3e colonne
+   regroupe les sections "compactes" (mobile + historique + zone dangereuse). */
+@media (min-width: 1400px) {
+  .settings-grid {
+    grid-template-columns: minmax(320px, 1fr) minmax(280px, 1.1fr) minmax(320px, 1fr);
+  }
+  .settings-grid .panel:first-child {
+    grid-row: span 3; /* Identite visuelle = colonne 1, plein hauteur */
+  }
+  .settings-grid > .panel:nth-of-type(2) {
+    grid-column: 2;
+    grid-row: span 3; /* Secteurs livraison = colonne 2, plein hauteur */
+  }
+  .settings-grid > .panel:nth-of-type(3) {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  /* Les 2 settings-block enfants directs (Historique + Danger) viennent
+     dans la colonne 3, sous Application mobile */
+  .settings-grid > .settings-block {
+    grid-column: 3;
+  }
+  /* Liste secteurs en 2 sous-colonnes : 17 secteurs sur 9 lignes au lieu de 17 */
+  #settingsSectors {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 12px;
+  }
+}
+
+/* v1.15.0 : meme sur ecran "normal" (1024-1399px), passer la liste secteurs
+   en 2 colonnes si la place est suffisante. Limite la hauteur du panel. */
+@media (min-width: 1100px) and (max-width: 1399px) {
+  #settingsSectors {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 12px;
+  }
+}
+
 .brand-preview {
   display: grid;
   gap: 14px;
