@@ -70,16 +70,20 @@ Lancer un seul test :
 node --test test/api.test.js --test-name-pattern="re-import stock"
 ```
 
-### Tests E2E (Playwright, v1.13.2+)
+### Tests E2E (Playwright, v1.14.0+)
+
+Playwright n'est **pas dans `devDependencies`** pour ne pas alourdir l'image Docker de prod. Pour l'utiliser en dev :
 
 ```bash
-npm install                          # installe @playwright/test
-npx playwright install chromium      # installe le navigateur (~150 MB, 1 fois)
-npm run test:e2e                     # mode headless
-npm run test:e2e:ui                  # mode interactif debug
+npm install --save-dev @playwright/test    # installe Playwright local (NE PAS commit package.json)
+npx playwright install chromium            # installe le navigateur (~150 MB, 1 fois)
+npm run test:e2e                           # mode headless
+npm run test:e2e:ui                        # mode interactif debug
 ```
 
-Les tests E2E couvrent les **golden paths** (login → dashboard → import → modal détail). Voir [`test/e2e/smoke.spec.js`](test/e2e/smoke.spec.js) et [`playwright.config.js`](playwright.config.js).
+⚠️ Après `npm install --save-dev`, ne **PAS** commit le package.json modifié (sinon le build Docker prod va re-tenter de l'installer dans le container et alourdir l'image de 200 MB).
+
+Les tests E2E couvrent les **golden paths** (dashboard, Bons de commande, Paramètres, modal version, erreur import). Voir [`test/e2e/smoke.spec.js`](test/e2e/smoke.spec.js) et [`playwright.config.js`](playwright.config.js).
 
 ## Architecture
 
