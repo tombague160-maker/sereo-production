@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.0](https://github.com/tombague160-maker/sereo-production/compare/v1.14.1...v1.15.0) (2026-05-23)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **ui:** page Parametres en grille 3 colonnes sur grand ecran + secteurs en 2 sous-colonnes ([#70](https://github.com/tombague160-maker/sereo-production/issues/70)) ([29e3af6](https://github.com/tombague160-maker/sereo-production/commit/29e3af6eaa9bb80a2c93bae2662c03b04a83dbbd))
+
 ## [1.14.1](https://github.com/tombague160-maker/sereo-production/compare/v1.14.0...v1.14.1) (2026-05-23)
 
 
