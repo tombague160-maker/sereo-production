@@ -236,6 +236,13 @@ app.get("/favicon.svg", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "favicon.svg"));
 });
 app.get("/healthz", (req, res) => {
+  // Revue #4 : si la recovery storage a totalement echoue (disque plein, FS
+  // read-only), le serveur ecoute mais sert 500 sur toutes les routes data.
+  // On reflete cet etat zombie via un 503 pour que Docker/SWAG/sereo-updater
+  // detectent le container comme non-sain (sinon il reste declare "healthy").
+  if (storageRecoveryFatal) {
+    return res.status(503).json({ ok: false, error: "storage indisponible (recovery echouee)" });
+  }
   res.json({ ok: true });
 });
 
@@ -1271,24 +1278,255 @@ function useSqliteStorage() {
 }
 
 let sqliteStore;
+// B3 (v1.16.0) : trace de la derniere recovery de corruption SQLite, exposee
+// via /api/storage/status et journalisee dans l'historique au boot. Permet a
+// l'operateur de SAVOIR qu'un sinistre a eu lieu (sinon une base vierge ressemble
+// a une install neuve et il re-saisit par-dessus sans le savoir).
+let lastStorageRecovery = null;
+// Memorise un echec TOTAL de recovery (disque plein...) pour ne pas la rejouer
+// a chaque requete (revue #2).
+let storageRecoveryFatal = null;
+// Nombre max de fichiers .corrupt-<ts> conserves (forensic) avant purge
+const QUARANTINE_RETENTION = 5;
+
+function openSqliteStore(options = {}) {
+  return createSqliteStore({
+    sqlitePath: SQLITE_PATH,
+    // Revue #2 : sur le chemin recovery-vierge, on passe seedJsonPath=null pour
+    // que la base soit VRAIMENT vide et ne ressuscite PAS un db.json legacy
+    // perime (sinon le message "base vierge" est mensonger et l'operateur voit
+    // reapparaitre du stock/clients fantomes).
+    seedJsonPath: options.skipJsonSeed ? null : DB_PATH,
+    defaultDb,
+    normalizeDb,
+    ensureDir
+  });
+}
 
 function getSqliteStore() {
   if (!sqliteStore) {
-    sqliteStore = createSqliteStore({
-      sqlitePath: SQLITE_PATH,
-      seedJsonPath: DB_PATH,
-      defaultDb,
-      normalizeDb,
-      ensureDir
-    });
+    // Revue #2 : si une recovery a deja totalement echoue (disque plein...),
+    // on ne la rejoue PAS a chaque requete (sinon spam de quarantaines + boucle
+    // CPU/IO + logs). On re-throw l'erreur memorisee directement.
+    if (storageRecoveryFatal) {
+      throw storageRecoveryFatal;
+    }
+    try {
+      sqliteStore = openSqliteStore();
+    } catch (error) {
+      // Revue #3 (HIGH) : la recovery est DESTRUCTIVE (quarantaine + wipe). On
+      // ne la declenche QUE sur une corruption AVEREE. Une erreur transitoire
+      // (verrou "database is locked", I/O, permission) sur une base SAINE ne
+      // doit PAS detruire les donnees : on re-throw, le serveur echoue proprement
+      // et reessaiera au prochain boot (ex: l'autre container relache le verrou).
+      if (!isCorruptionError(error)) {
+        console.error(`[storage] Ouverture SQLite echouee mais NON-corruption (${error.code || error.message}). Pas de recovery destructive - re-throw.`);
+        throw error;
+      }
+      // B3 (v1.16.0) : corruption avEREE (coupure courant, disque defaillant).
+      // Recovery : quarantaine -> restore backup -> sinon base vierge.
+      console.error(`[storage] Corruption SQLite averee (${error.code || error.message}). Tentative de recovery...`);
+      try {
+        sqliteStore = recoverCorruptSqliteStore(error);
+      } catch (fatalError) {
+        // Recovery elle-meme impossible (disque plein/permissions) : on memorise
+        // pour ne pas rejouer, et on propage.
+        storageRecoveryFatal = fatalError;
+        throw fatalError;
+      }
+    }
   }
 
   return sqliteStore;
 }
 
+// Revue #3 : distingue une corruption AVEREE (recovery destructive justifiee)
+// d'une erreur transitoire (verrou, I/O, permission - NE PAS detruire la base).
+// Liste blanche stricte : on ne recovery QUE sur les signatures de corruption
+// connues ; tout le reste est traite comme transitoire (fail-safe = preserver).
+function isCorruptionError(error) {
+  if (!error) return false;
+  // Combine message ET errstr : node:sqlite peut porter la signature dans l'un
+  // ou l'autre selon la version/le contexte.
+  const msg = [error.message, error.errstr].filter(Boolean).join(" ").toLowerCase();
+  return (
+    msg.includes("file is not a database")
+    || msg.includes("not a database")
+    || msg.includes("malformed")          // "database disk image is malformed"
+    || msg.includes("file is encrypted")  // header illisible
+    || msg.includes("quick_check a echoue")
+  );
+}
+
+// Nettoie les fichiers sidecar WAL/SHM (peuvent etre corrompus eux aussi)
+function removeSqliteSidecars() {
+  for (const ext of ["-wal", "-shm"]) {
+    try { fs.unlinkSync(SQLITE_PATH + ext); } catch { /* absent : ok */ }
+  }
+}
+
+// Quarantaine du fichier corrompu pour un eventuel sauvetage externe
+// (sqlite3 .recover) AVANT que la recovery ne l'ecrase.
+// Revue #2 : (1) on quarantaine AUSSI les sidecars -wal/-shm car des donnees
+// committees peuvent y vivre (WAL non checkpointe apres coupure). (2) tag unique
+// avec compteur pour eviter la collision si 2 recoveries dans la meme ms.
+// (3) fallback rename si copy echoue (disque plein) : rename ne consomme pas
+// d'espace et preserve quand meme l'original.
+let quarantineCounter = 0;
+function quarantineCorruptFile() {
+  if (!fs.existsSync(SQLITE_PATH)) return null;
+  const tag = `${safeTimestamp()}-${++quarantineCounter}`;
+  const quarantinePath = `${SQLITE_PATH}.corrupt-${tag}`;
+  // Sidecars d'abord (best-effort, copie pour preserver le WAL committe)
+  for (const ext of ["-wal", "-shm"]) {
+    if (fs.existsSync(SQLITE_PATH + ext)) {
+      try { fs.copyFileSync(SQLITE_PATH + ext, quarantinePath + ext); } catch { /* best-effort */ }
+    }
+  }
+  try {
+    fs.copyFileSync(SQLITE_PATH, quarantinePath);
+    console.error(`[storage] Fichier corrompu copie en quarantaine : ${quarantinePath}`);
+    return quarantinePath;
+  } catch (copyErr) {
+    // Disque plein probable : on tente un rename (move) qui ne consomme pas
+    // d'espace, pour preserver quand meme l'original avant le wipe.
+    try {
+      fs.renameSync(SQLITE_PATH, quarantinePath);
+      console.error(`[storage] Copie impossible (${copyErr.code || copyErr.message}), fichier deplace en quarantaine : ${quarantinePath}`);
+      return quarantinePath;
+    } catch (renameErr) {
+      console.error(`[storage] Quarantaine impossible (copy: ${copyErr.code || copyErr.message}, rename: ${renameErr.code || renameErr.message}) - le fichier corrompu sera ecrase.`);
+      return null;
+    }
+  }
+}
+
+// Purge les vieux fichiers .corrupt-* pour eviter de saturer le disque (chacun
+// peut peser autant que la base). On garde les QUARANTINE_RETENTION plus recents.
+function pruneOldQuarantineFiles() {
+  try {
+    const dir = path.dirname(SQLITE_PATH);
+    const prefix = `${path.basename(SQLITE_PATH)}.corrupt-`;
+    fs.readdirSync(dir)
+      .filter(name => name.startsWith(prefix))
+      .map(name => {
+        const full = path.join(dir, name);
+        let mtimeMs = 0;
+        try { mtimeMs = fs.statSync(full).mtimeMs; } catch { /* ignore */ }
+        return { full, mtimeMs };
+      })
+      .sort((a, b) => b.mtimeMs - a.mtimeMs)
+      .slice(QUARANTINE_RETENTION)
+      .forEach(e => { try { fs.unlinkSync(e.full); } catch { /* best-effort */ } });
+  } catch { /* best-effort */ }
+}
+
+// Plafond de decompression d'un backup pour eviter un OOM sur un .gz forge/gonfle
+const MAX_BACKUP_DECOMPRESSED_BYTES = 1024 * 1024 * 1024; // 1 Go
+
+function recoverCorruptSqliteStore(originalError) {
+  // 1. Quarantaine par COPIE (preserve l'original recuperable). On capture le
+  //    succes pour le chemin fresh_empty (revue #3 : ne pas wiper sans sauvegarde).
+  const quarantinePath = quarantineCorruptFile();
+  removeSqliteSidecars();
+
+  // 2. Restaurer le backup gzip le plus recent (du plus recent au plus ancien).
+  const backups = listBackupEntries().filter(entry => entry.name.endsWith(".sqlite.gz"));
+  for (const entry of backups) {
+    let raw;
+    try {
+      const compressed = fs.readFileSync(entry.fullPath);
+      raw = zlib.gunzipSync(compressed, { maxOutputLength: MAX_BACKUP_DECOMPRESSED_BYTES });
+    } catch (gzErr) {
+      // Backup .gz illisible/corrompu/trop gros : essayer le suivant (non destructif)
+      console.error(`[storage] Backup ${entry.name} illisible (${gzErr.code || gzErr.message}), suivant...`);
+      continue;
+    }
+    try {
+      fs.writeFileSync(SQLITE_PATH, raw);
+    } catch (writeErr) {
+      // Revue #3 : erreur d'ecriture NON liee au backup (disque plein, FS en
+      // lecture seule). On ABANDONNE (re-throw) au lieu de wiper en fresh_empty :
+      // un bon backup existe peut-etre, et l'environnement est defaillant.
+      console.error(`[storage] Ecriture du restore impossible (${writeErr.code || writeErr.message}) - abandon recovery, base NON wipee.`);
+      throw writeErr;
+    }
+    removeSqliteSidecars();
+    try {
+      // Revue #4 : skipJsonSeed pendant la recovery -> ne JAMAIS ressusciter un
+      // db.json legacy par-dessus le backup restaure (sinon faux "restore reussi"
+      // affichant du stock/clients fantomes). Un backup Sereo legitime contient
+      // deja app_meta.initialized, donc ce flag ne change rien pour les vrais
+      // backups ; il blinde juste contre les backups vides/etrangers.
+      const store = openSqliteStore({ skipJsonSeed: true }); // valide que le backup s'ouvre vraiment
+      const backupAgeMin = Math.round((Date.now() - entry.mtimeMs) / 60000);
+      lastStorageRecovery = {
+        at: new Date().toISOString(),
+        mode: "restored_backup",
+        source: entry.name,
+        message: `Base restauree depuis le backup ${entry.name} (~${backupAgeMin} min de donnees potentiellement perdues)`
+      };
+      console.error(`[storage] RECOVERY: ${lastStorageRecovery.message}`);
+      pruneOldQuarantineFiles();
+      return store;
+    } catch (openErr) {
+      if (!isCorruptionError(openErr)) {
+        // Erreur transitoire a l'ouverture du backup restaure (verrou, I/O) :
+        // abandonner plutot que de continuer vers fresh_empty destructif.
+        console.error(`[storage] Ouverture du backup restaure echouee (NON-corruption: ${openErr.code || openErr.message}) - abandon recovery.`);
+        throw openErr;
+      }
+      // Backup structurellement corrompu : nettoyer et essayer le suivant
+      try { fs.unlinkSync(SQLITE_PATH); } catch { /* best-effort */ }
+      removeSqliteSidecars();
+      console.error(`[storage] Backup ${entry.name} corrompu (${openErr.code || openErr.message}), suivant...`);
+    }
+  }
+
+  // 3. Aucun backup exploitable : base vierge. Revue #3 : si la quarantaine a
+  //    TOTALEMENT echoue (quarantinePath null) ET qu'un fichier corrompu existe
+  //    encore, on REFUSE de le wiper (re-throw) pour preserver l'original
+  //    recuperable par un outil externe. Mieux vaut un serveur qui refuse de
+  //    demarrer qu'une perte de donnees definitive non sauvegardee.
+  if (!quarantinePath && fs.existsSync(SQLITE_PATH)) {
+    console.error(
+      `[storage] RECOVERY ABANDONNEE : aucun backup ET quarantaine impossible. `
+      + `Le fichier corrompu est PRESERVE (pas de wipe) pour recuperation manuelle. `
+      + `Erreur initiale: ${originalError.message}`
+    );
+    throw originalError;
+  }
+
+  try {
+    try { fs.unlinkSync(SQLITE_PATH); } catch { /* best-effort */ }
+    removeSqliteSidecars();
+    const freshStore = openSqliteStore({ skipJsonSeed: true }); // vraiment vide
+    lastStorageRecovery = {
+      at: new Date().toISOString(),
+      mode: "fresh_empty",
+      source: null,
+      message: `Aucun backup exploitable : base reinitialisee VIERGE (donnees perdues). Erreur initiale: ${originalError.message}`
+    };
+    console.error(`[storage] RECOVERY: ${lastStorageRecovery.message}`);
+    pruneOldQuarantineFiles();
+    return freshStore;
+  } catch (freshError) {
+    console.error(
+      `[storage] RECOVERY ECHEC TOTAL : impossible de creer une base vierge `
+      + `(${freshError.code || freshError.message}). Storage indisponible - `
+      + `verifier l'espace disque et les permissions du volume.`
+    );
+    throw freshError;
+  }
+}
+
 function closeStorage() {
   if (sqliteStore) {
-    sqliteStore.close();
+    // Revue #2 : close() protege. Si close throw (double close, handle invalide
+    // apres recovery, EBUSY Windows), on remet quand meme sqliteStore a null
+    // pour qu'un getSqliteStore() ulterieur retente une ouverture propre plutot
+    // que de garder un store pointant un handle mort.
+    try { sqliteStore.close(); } catch { /* handle deja invalide */ }
     sqliteStore = null;
   }
 }
@@ -1355,8 +1593,22 @@ function healDatabaseAtBoot() {
   try {
     const db = readDb();
     syncWorkflow(db);
+    // B3 v1.16.0 : si une recovery de corruption a eu lieu pendant le readDb
+    // ci-dessus, on la journalise dans l'historique pour que l'operateur la voie
+    // (sinon une base vierge ressemble a une install neuve).
+    if (lastStorageRecovery) {
+      addHistory(db, "Recovery storage", lastStorageRecovery.message, {
+        mode: lastStorageRecovery.mode,
+        source: lastStorageRecovery.source,
+        at: lastStorageRecovery.at
+      });
+    }
     writeDb(db, { backup: false });
-    console.log("[boot] base coherente apres syncWorkflow initial");
+    if (lastStorageRecovery) {
+      console.error(`[boot] ATTENTION : recovery storage detectee au demarrage (${lastStorageRecovery.mode}).`);
+    } else {
+      console.log("[boot] base coherente apres syncWorkflow initial");
+    }
   } catch (error) {
     console.error("[boot] healDatabaseAtBoot a echoue :", error.message);
   }
@@ -1486,7 +1738,11 @@ function listBackupEntries() {
       }
     })
     .filter(Boolean)
-    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+    // Tri par mtime DESC, tie-break sur le nom (qui contient safeTimestamp,
+    // donc trie chronologiquement de facon fiable). Sans ce tie-break, 2 backups
+    // ecrits dans la meme milliseconde ont le meme mtimeMs -> ordre indetermine
+    // -> recovery pourrait restaurer un backup plus ancien (audit B3).
+    .sort((a, b) => (b.mtimeMs - a.mtimeMs) || b.name.localeCompare(a.name));
 }
 
 function pruneOldBackups() {
@@ -1499,6 +1755,17 @@ function pruneOldBackups() {
 function backupDbIfNeeded() {
   const sourcePath = useSqliteStorage() ? SQLITE_PATH : DB_PATH;
   if (!fs.existsSync(sourcePath)) return null;
+
+  // B3 v1.16.0 : apres TOUTE recovery (revue #4 : etendu de fresh_empty a
+  // restored_backup), on SUSPEND les backups automatiques pour la session.
+  // Raisons : (1) fresh_empty -> ne pas gzipper la base VIDE (empoisonnement) ;
+  // (2) restored_backup -> on a peut-etre restaure un backup ANCIEN (les recents
+  // etaient corrompus) ; le re-backuper en ferait le plus recent et evincerait
+  // les vrais backups intermediaires. On preserve donc la chaine existante
+  // jusqu'au prochain redemarrage propre (lastStorageRecovery repart a null).
+  if (lastStorageRecovery) {
+    return null;
+  }
 
   ensureDir(BACKUP_DIR);
 
@@ -2970,7 +3237,10 @@ app.get("/api/storage/status", (req, res) => {
     persistent: true,
     sharedAfterRefresh: true,
     accessProtected: isAccessAuthEnabled(),
-    path: useSqliteStorage() ? SQLITE_PATH : DB_PATH
+    path: useSqliteStorage() ? SQLITE_PATH : DB_PATH,
+    // B3 v1.16.0 : expose la derniere recovery de corruption (null si aucune)
+    // pour qu'un client/admin puisse afficher une alerte de perte de donnees.
+    lastRecovery: lastStorageRecovery
   });
 });
 
@@ -4064,6 +4334,9 @@ module.exports = {
   isAccessAuthEnabled,
   // Helpers de test : ne pas appeler depuis du code applicatif
   _resetAuthRateLimitForTest: () => authRateLimitState.clear(),
+  _getLastStorageRecovery: () => lastStorageRecovery,
+  _resetStorageRecoveryForTest: () => { lastStorageRecovery = null; storageRecoveryFatal = null; },
+  _isCorruptionError: isCorruptionError,
   _getAuthRateLimitMaxAttempts: () => AUTH_RATE_LIMIT_MAX_ATTEMPTS,
   DB_PATH,
   SQLITE_PATH,

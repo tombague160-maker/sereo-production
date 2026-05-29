@@ -3626,3 +3626,36 @@ label {
     padding: 10px 14px;
   }
 }
+
+/* ============================================================================
+   v1.16.0 : banniere d'alerte recovery storage (B3) - perte de donnees signalee
+   ============================================================================ */
+.storage-recovery-banner {
+  position: sticky;
+  top: 0;
+  z-index: 1500;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 18px;
+  background: #c54a36;
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+.storage-recovery-content { flex: 1; min-width: 0; }
+.storage-recovery-content strong { display: block; font-size: 1rem; margin-bottom: 4px; }
+.storage-recovery-content p { margin: 2px 0; font-size: 0.9rem; }
+.storage-recovery-content .muted { color: rgba(255, 255, 255, 0.85); }
+.storage-recovery-dismiss {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.storage-recovery-dismiss:hover { background: rgba(255, 255, 255, 0.3); }
