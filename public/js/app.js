@@ -272,7 +272,45 @@ document.addEventListener("DOMContentLoaded", () => {
   loadAppearance();
   loadVersionInfo();
   loadData();
+  checkStorageRecovery();
 });
+
+// B3 v1.16.0 : si le serveur a subi une recovery de corruption SQLite (restore
+// d'un backup ou base vierge), on affiche une banniere d'alerte PERSISTANTE pour
+// que l'operateur SACHE qu'il y a eu un sinistre (sinon une base vierge ressemble
+// a une install neuve et il re-saisit par-dessus sans le savoir).
+async function checkStorageRecovery() {
+  try {
+    const status = await apiFetch("/api/storage/status");
+    if (status && status.lastRecovery) {
+      showStorageRecoveryBanner(status.lastRecovery);
+    }
+  } catch { /* endpoint indisponible : pas de banniere, non bloquant */ }
+}
+
+function showStorageRecoveryBanner(recovery) {
+  if (document.getElementById("storageRecoveryBanner")) return; // deja affichee
+  const banner = document.createElement("div");
+  banner.id = "storageRecoveryBanner";
+  banner.className = "storage-recovery-banner";
+  banner.setAttribute("role", "alert");
+  const isFresh = recovery.mode === "fresh_empty";
+  const titre = isFresh
+    ? "⚠️ Base de données réinitialisée à vide"
+    : "⚠️ Données restaurées depuis une sauvegarde";
+  banner.innerHTML = `
+    <div class="storage-recovery-content">
+      <strong>${escapeHtml(titre)}</strong>
+      <p>${escapeHtml(recovery.message || "Une récupération de la base de données a eu lieu.")}</p>
+      <p class="muted">Vérifie tes données avant de continuer. ${isFresh
+        ? "Tu peux ré-importer tes fichiers Excel depuis Paramètres → Historique des imports."
+        : "Les saisies les plus récentes (avant la dernière sauvegarde) peuvent manquer."}</p>
+    </div>
+    <button class="storage-recovery-dismiss" type="button" aria-label="Fermer">×</button>
+  `;
+  banner.querySelector(".storage-recovery-dismiss").addEventListener("click", () => banner.remove());
+  document.body.prepend(banner);
+}
 
 window.addEventListener("load", () => resetViewportScroll(false), { once: true });
 

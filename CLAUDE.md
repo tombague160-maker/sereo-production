@@ -58,6 +58,14 @@ Une commande = un **bon de commande** identifié par :
 
 **Réservation de stock** : la réservation se base sur la somme des produits de toutes les commandes actives d'un produit (status ∈ `importe`, `stock_a_verifier`, `en_preparation`, `preparation_terminee`, `pret_livraison`).
 
+### Recovery corruption SQLite (v1.16.0+)
+
+`getSqliteStore()` protège contre une base SQLite corrompue (coupure courant, disque défaillant) :
+- **Détection** : exception à l'ouverture OU `PRAGMA quick_check` ≠ ok. La recovery ne se déclenche QUE sur corruption **avérée** (`isCorruptionError`) — une erreur transitoire (`database is locked`, I/O, permission) est re-throw SANS destruction (évite de wiper une base saine pendant un `--force-recreate` à 2 containers).
+- **Recovery** : quarantaine du fichier corrompu (copie `.corrupt-<ts>`, préserve forensic) → restore du backup gzip le plus récent (valide chacun) → sinon base vierge (`skipJsonSeed`, pas de re-seed db.json legacy).
+- **Notification** : `lastStorageRecovery` exposé via `/api/storage/status` + bannière frontend + entrée historique. Backups auto **suspendus** après toute recovery (ne pas figer un état dégradé). `/healthz` renvoie 503 si recovery fatale (disque plein).
+- **Limites connues** : `quick_check` ne détecte pas la corruption pure de contenu de cellule ni un WAL supprimé (limite SQLite ; `integrity_check` trop coûteux au boot). Test : `test/corruption.test.js` (8 cas, B3.f prouvé non-vacuous par mutation).
+
 ### Tables SQLite
 `produits`, `clients`, `commandes`, `lignes_commande`, `livraisons`, `mouvements_stock`, `ventes`, `historique`, `routes`, `app_meta`, `imports_archives` (v1.12.0+). Schéma dans `storage/sqliteStore.js`.
 

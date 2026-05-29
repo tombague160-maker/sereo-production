@@ -51,7 +51,11 @@ USER node
 EXPOSE 3000
 
 # Healthcheck applicatif public. /healthz ne revele aucune donnee metier.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+# start-period a 45s (v1.16.0) : laisse le temps au boot incluant PRAGMA
+# quick_check (scan integrite, cout lineaire avec la taille de base en cache
+# froid) + syncWorkflow initial, sans declencher un restart premature qui
+# relancerait un scan froid en boucle sur une grosse base.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
     CMD wget --quiet --tries=1 --spider http://127.0.0.1:3000/healthz || exit 1
 
 # Tini en PID 1 pour le bon traitement des signaux

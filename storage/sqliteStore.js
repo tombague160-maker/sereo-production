@@ -13,18 +13,54 @@ function createSqliteStore(options) {
 
   ensureDir(path.dirname(sqlitePath));
 
-  const database = new DatabaseSync(sqlitePath);
-  database.exec("PRAGMA journal_mode = WAL");
-  database.exec("PRAGMA synchronous = NORMAL");
-  database.exec("PRAGMA busy_timeout = 5000");
-  database.exec("PRAGMA foreign_keys = ON");
+  // B3 (v1.16.0) : try/catch englobant TOUTE l'init. Sur un fichier corrompu,
+  // `new DatabaseSync` n' echoue pas (ouverture paresseuse) mais le 1er
+  // `database.exec(PRAGMA...)` throw "file is not a database". Sans ce catch,
+  // le handle reste OUVERT (jamais close) -> sur Windows il verrouille le
+  // fichier (EBUSY) et empeche toute quarantaine/suppression dans la recovery,
+  // qui re-crashe. On ferme donc systematiquement le handle avant de re-throw.
+  let database;
+  try {
+    database = new DatabaseSync(sqlitePath);
+    // Revue #3 (HIGH) : busy_timeout AVANT journal_mode. Le passage en WAL
+    // necessite un write lock ; si un autre process tient le verrou (ex: 2
+    // containers brievement co-existants pendant `docker compose --force-recreate`),
+    // journal_mode throw "database is locked". En positionnant busy_timeout
+    // d'abord, cette etape attend jusqu'a 5s au lieu d'echouer immediatement
+    // (ce qui, avant, etait interprete a tort comme une corruption -> wipe).
+    database.exec("PRAGMA busy_timeout = 5000");
+    database.exec("PRAGMA journal_mode = WAL");
+    database.exec("PRAGMA synchronous = NORMAL");
+    database.exec("PRAGMA foreign_keys = ON");
 
-  migrateSchema(database);
-  initializeFromJsonIfNeeded(database, {
-    seedJsonPath,
-    defaultDb,
-    normalizeDb
-  });
+    // quick_check : detecte la corruption STRUCTURELLE du b-tree (chainage de
+    // pages casse) sur un fichier qui s'ouvre quand meme. Limites connues
+    // (cf. audit) : ne detecte PAS la corruption pure de contenu de cellule,
+    // ni l'incoherence d'index, ni un WAL manquant. Couvre les cas frequents
+    // (header casse, troncature) ; les autres remontent via les exceptions.
+    // Cout : ~lineaire avec la taille de base (au boot uniquement).
+    // .all() (pas .get()) : quick_check peut retourner PLUSIEURS lignes d'erreur.
+    // Sain = exactement une ligne "ok". Sinon on agrege pour un log de diagnostic
+    // complet (revue #4).
+    const integrityRows = database.prepare("PRAGMA quick_check").all();
+    const integrityValues = integrityRows.map(row => Object.values(row)[0]);
+    const isOk = integrityValues.length === 1 && integrityValues[0] === "ok";
+    if (!isOk) {
+      throw new Error(`SQLite quick_check a echoue: ${integrityValues.join(" | ").slice(0, 300)}`);
+    }
+
+    migrateSchema(database);
+    initializeFromJsonIfNeeded(database, {
+      seedJsonPath,
+      defaultDb,
+      normalizeDb
+    });
+  } catch (error) {
+    if (database) {
+      try { database.close(); } catch { /* handle deja invalide : ok */ }
+    }
+    throw error;
+  }
 
   return {
     readDb() {
