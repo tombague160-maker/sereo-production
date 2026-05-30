@@ -3290,8 +3290,45 @@ function focusEntity(entity) {
   }
 }
 
+// T4 (v1.16.1) : timeout par defaut sur fetch pour eviter une attente infinie
+// si le reseau est dégrade (livreur en zone blanche, OMV qui ne repond plus).
+// Plus long pour les imports (peuvent legitimement durer > 30s sur 5000 lignes).
+const APIFETCH_DEFAULT_TIMEOUT_MS = 30_000;
+const APIFETCH_UPLOAD_TIMEOUT_MS = 120_000;
+
 async function apiFetch(url, options = {}) {
-  const res = await fetch(url, options);
+  const isUpload = options.body instanceof FormData;
+  const timeoutMs = options.timeoutMs || (isUpload ? APIFETCH_UPLOAD_TIMEOUT_MS : APIFETCH_DEFAULT_TIMEOUT_MS);
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+
+  // T4 (revue) : si l'appelant fournit son propre signal, il faut COMBINER
+  // avec le timeout interne (sinon le timeout est noop). AbortSignal.any() est
+  // dispo dans Node 20+ / Chrome 116+ ; fallback : on chaine manuellement.
+  let signal = ac.signal;
+  if (options.signal) {
+    if (typeof AbortSignal !== "undefined" && AbortSignal.any) {
+      signal = AbortSignal.any([options.signal, ac.signal]);
+    } else {
+      // Fallback : si le signal externe abort, on abort aussi le notre
+      options.signal.addEventListener("abort", () => ac.abort(), { once: true });
+    }
+  }
+
+  let res;
+  try {
+    res = await fetch(url, { ...options, signal });
+  } catch (err) {
+    clearTimeout(timer);
+    if (err && (err.name === "AbortError" || err.code === "ABORT_ERR")) {
+      // Si c'est l'appelant qui a abort (pas le timeout), on re-throw l'erreur
+      // originale pour preserver la semantique. Sinon notre message "timeout".
+      if (options.signal && options.signal.aborted) throw err;
+      throw new Error(`Reseau trop lent (timeout ${Math.round(timeoutMs / 1000)}s). Verifie ta connexion.`);
+    }
+    throw err;
+  }
+  clearTimeout(timer);
 
   // Session expiree (cookie 12h) -> redirige vers /login en preservant l'URL courante.
   // Garde-fou : si on est deja sur /login, on ne re-redirige pas (boucle infinie possible
@@ -3999,9 +4036,68 @@ function inlineMarkdown(text) {
 
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
+  // T1 (v1.16.1, revue) : on capture l'EXISTENCE d'un controller AVANT
+  // register. Si null -> 1ere install (pas un update) -> on ignore le 1er
+  // controllerchange qui suit (sinon faux positif "Nouvelle version" au
+  // premier chargement). Si non-null -> c'est un vrai update.
+  const hadControllerBefore = !!navigator.serviceWorker.controller;
+  let reloadingFromSwUpdate = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (reloadingFromSwUpdate) return;
+    if (!hadControllerBefore) {
+      // 1ere install (pas un update) : on ignore ce 1er controllerchange.
+      // Les updates ulterieurs (avec hadControllerBefore toujours false dans
+      // cette session) sont rares ; en pratique l'utilisateur a refresh
+      // entre temps et hadControllerBefore sera true a la prochaine load.
+      return;
+    }
+    reloadingFromSwUpdate = true;
+    showSwUpdateNotification();
+  });
   navigator.serviceWorker.register("/service-worker.js")
-    .then(registration => registration.update())
+    .then(registration => {
+      registration.update();
+      registration.addEventListener("updatefound", () => {
+        const installing = registration.installing;
+        if (!installing) return;
+        installing.addEventListener("statechange", () => {
+          if (installing.state === "installed" && navigator.serviceWorker.controller) {
+            // SW installe pret a prendre le controle ET il y avait deja un
+            // controller (vrai update, pas 1ere install).
+            showSwUpdateNotification();
+          }
+        });
+      });
+    })
     .catch(() => {});
+}
+
+// T1 (v1.16.1, revue) : toast PERSISTANT custom (DOM dedie) avec bouton
+// "Recharger". L'ancien `notify('info')` disparaissait apres 3.5s et n'avait
+// pas de bouton -> l'utilisateur ne voyait rien d'actionnable.
+let swUpdateNotificationShown = false;
+function showSwUpdateNotification() {
+  if (swUpdateNotificationShown) return;
+  swUpdateNotificationShown = true;
+  try {
+    if (document.getElementById("sw-update-toast")) return;
+    const toast = document.createElement("div");
+    toast.id = "sw-update-toast";
+    toast.setAttribute("role", "status");
+    toast.setAttribute("aria-live", "polite");
+    toast.innerHTML = `
+      <span class="sw-update-toast-msg">Nouvelle version de l'app disponible.</span>
+      <button type="button" class="sw-update-toast-btn" id="sw-update-reload">Recharger</button>
+      <button type="button" class="sw-update-toast-close" id="sw-update-dismiss" aria-label="Fermer">×</button>
+    `;
+    document.body.appendChild(toast);
+    document.getElementById("sw-update-reload").addEventListener("click", () => {
+      window.location.reload();
+    });
+    document.getElementById("sw-update-dismiss").addEventListener("click", () => {
+      toast.remove();
+    });
+  } catch { /* DOM indisponible tres tot : on retentera plus tard */ }
 }
 
 function setText(id, value) {

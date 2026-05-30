@@ -1871,6 +1871,15 @@ function optionalQuantity(value) {
   return Math.max(0, number(value, 0));
 }
 
+// M2 (v1.16.1) : quantite a l'import = number() clampe a >= 0. Une qty Excel
+// negative ou "abc" ne doit pas se propager en commande (sinon fausse les
+// calculs de stock disponible / reserve). Le PATCH /api/stock filtre deja les
+// negatifs en rejet 400 ; les imports en masse clampent silencieusement a 0
+// (compromis : pas d'erreur globale qui bloquerait 5000 lignes pour 1 -5).
+function importQuantity(value, fallback = 0) {
+  return Math.max(0, number(value, fallback));
+}
+
 function excelDate(value) {
   if (!value) return "";
 
@@ -1891,47 +1900,68 @@ function excelDate(value) {
 // l'identification d'une commande par (clientId, dateCommande). L'affichage
 // dans l'UI se fera selon les settings locale du user (Phase 5).
 function excelDateToIso(value) {
-  if (!value) return "";
-
-  if (value instanceof Date) {
-    return value.toISOString().slice(0, 10);
-  }
-
-  if (typeof value === "number") {
-    const date = new Date(Date.UTC(1899, 11, 30) + value * 24 * 60 * 60 * 1000);
-    return date.toISOString().slice(0, 10);
-  }
-
-  // Reutilise normalizeDateInput qui gere deja FR (DD/MM/YYYY) et ISO.
-  return normalizeDateInput(clean(value));
+  // M1 v1.16.1 (revue) : delegue ENTIEREMENT a normalizeDateInput sur tous les
+  // paths (texte, Date object, number Excel epoch) pour beneficier de la
+  // validation round-trip + bornes [1900,2199]. Avant : Date/number sortaient
+  // sans validation -> dateCommandeIso pouvait valoir "3000-01-01" et creer
+  // un bucket ERP fantome.
+  return normalizeDateInput(value);
 }
 
 function normalizeDateInput(value) {
   if (!value) return "";
 
   if (value instanceof Date) {
-    return value.toISOString().slice(0, 10);
+    return validateAndFormatYMD(value.getUTCFullYear(), value.getUTCMonth() + 1, value.getUTCDate());
   }
 
   if (typeof value === "number") {
+    // Excel epoch (1899-12-30). Borne le serial number a une plage realiste pour
+    // eviter qu'une valeur aberrante (ex: 99999 = an 2173) ne se faufile.
+    if (!Number.isFinite(value) || value < 0 || value > 80000) return "";
     const date = new Date(Date.UTC(1899, 11, 30) + value * 24 * 60 * 60 * 1000);
-    return date.toISOString().slice(0, 10);
+    return validateAndFormatYMD(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate());
   }
 
   const text = clean(value);
   if (!text) return "";
-  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
 
-  const frenchDate = text.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/);
-  if (frenchDate) {
-    const day = frenchDate[1].padStart(2, "0");
-    const month = frenchDate[2].padStart(2, "0");
-    const rawYear = frenchDate[3];
-    const year = rawYear.length === 2 ? `20${rawYear}` : rawYear;
-    return `${year}-${month}-${day}`;
+  // M1 (v1.16.1) : on extrait d'abord les composants (ISO ou FR), PUIS on
+  // valide qu'ils forment une date reellement existante via round-trip Date
+  // (sinon "31/13/2026", "30/02/2026", "29/02/2025" etaient acceptes -> fausse
+  // date stockee et bucketing ERP par date incoherent).
+  let y, m, d;
+  const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    y = Number(isoMatch[1]); m = Number(isoMatch[2]); d = Number(isoMatch[3]);
+  } else {
+    const fr = text.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/);
+    if (!fr) return "";
+    d = Number(fr[1]); m = Number(fr[2]);
+    // M1 (revue) : pivot 2 chiffres. "01/01/99" doit etre 1999 (legacy
+    // commercial), pas 2099. Convention : <=30 -> 20XX, sinon 19XX.
+    if (fr[3].length === 2) {
+      const yy = Number(fr[3]);
+      y = yy <= 30 ? 2000 + yy : 1900 + yy;
+    } else {
+      y = Number(fr[3]);
+    }
   }
 
-  return "";
+  return validateAndFormatYMD(y, m, d);
+}
+
+// Helper M1 : validation round-trip + formatage YYYY-MM-DD. Centralise la
+// validation pour qu'elle s'applique aussi au path number/Date (Excel epoch,
+// Date object) - pas seulement au path texte.
+function validateAndFormatYMD(y, m, d) {
+  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return "";
+  if (m < 1 || m > 12 || d < 1 || d > 31 || y < 1900 || y > 2199) return "";
+  const probe = new Date(Date.UTC(y, m - 1, d));
+  if (probe.getUTCFullYear() !== y || probe.getUTCMonth() !== m - 1 || probe.getUTCDate() !== d) {
+    return "";
+  }
+  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }
 
 async function readExcelRows(filePath) {
@@ -3169,12 +3199,18 @@ function estimateRouteMetrics(orders) {
       break;
     }
 
-    totalDistance = (totalDistance || 0) + distance(previous, current) * 111;
+    // M6 (v1.16.1) : distance() retourne deja des km (Haversine), plus de * 111
+    totalDistance = (totalDistance || 0) + distance(previous, current);
   }
 
   const estimatedDuration = totalDistance === null
     ? null
-    : Math.round((totalDistance / 35) * 60 + orders.length * 6);
+    // M6 (v1.16.1, revue) : 35 km/h etait calibre sur la distance gonflee
+    // Pythagore*111 (~30% trop). Avec Haversine on a maintenant la distance
+    // vol-d'oiseau, qui sous-estime de ~30% la distance routiere (detours,
+    // virages, sens unique). 35 -> 28 km/h pour absorber ce facteur et
+    // produire une estimation honnete vs route reelle (~50 km/h * 0.55 stops).
+    : Math.round((totalDistance / 28) * 60 + orders.length * 6);
 
   return {
     totalDistance: totalDistance === null ? null : Math.round(totalDistance * 10) / 10,
@@ -3182,16 +3218,24 @@ function estimateRouteMetrics(orders) {
   };
 }
 
+// M6 (v1.16.1) : formule HAVERSINE - distance grand-cercle en km. Remplace le
+// Pythagore sur (lat,lng) * 111 qui surevalue de ~30% les distances courtes
+// Est-Ouest a 45N (un degre de longitude vaut 111*cos(lat) km, pas 111).
+// Verification : Besancon-Dole = 45 km (avant: ~61 km).
 function distance(a, b) {
   const coordsA = getCoordinates(a);
   const coordsB = getCoordinates(b);
 
   if (!coordsA || !coordsB) return Number.POSITIVE_INFINITY;
 
-  return Math.sqrt(
-    Math.pow(coordsA.lat - coordsB.lat, 2) +
-    Math.pow(coordsA.lng - coordsB.lng, 2)
-  );
+  const R = 6371; // Rayon Terre en km
+  const toRad = deg => (deg * Math.PI) / 180;
+  const lat1 = toRad(coordsA.lat);
+  const lat2 = toRad(coordsB.lat);
+  const dLat = lat2 - lat1;
+  const dLng = toRad(coordsB.lng - coordsA.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
 }
 
 app.get("/api/db", (req, res) => {
@@ -3506,6 +3550,12 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
 app.post("/api/import/ventes", uploadExcel, async (req, res) => {
   const uploadedPath = req.file?.path;
 
+  // M2 (revue) : compteur des quantites Excel negatives silencieusement
+  // clampees a 0. Expose dans la reponse pour traceability (audit) - une
+  // qty negative dans Ximi est souvent un retour/avoir, le clamp silencieux
+  // pourrait masquer cette info metier.
+  let clampedNegativeQtyCount = 0;
+
   try {
     const rows = await readExcelRows(uploadedPath);
 
@@ -3539,7 +3589,9 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
         const date = excelDate(dateCell);
         const dateCommandeIso = excelDateToIso(dateCell);
         const deliveryDate = normalizeDateInput(getCellByNames(row, headers, ["Date livraison", "Livraison", "Date de livraison"]));
-        const quantite = number(getCellByNames(row, headers, ["Quantite", "Quantité", "Qte", "Qté"]), 1);
+        const rawQty = number(getCellByNames(row, headers, ["Quantite", "Quantité", "Qte", "Qté"]), 1);
+        const quantite = Math.max(0, rawQty);
+        if (rawQty < 0) clampedNegativeQtyCount += 1;
         const prixUnitaire = number(getCell(row, headers, "Prix unitaire", 1), 0);
         const ht = number(getCell(row, headers, "HT", 1), 0);
         const ttc = number(getCell(row, headers, "TTC", 1), 0);
@@ -3768,10 +3820,13 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       ? `, ${importedAsLivreCount} commande(s) importee(s) comme deja livree(s) (statut facture Envoyee)`
       : "";
     const commandeStats = `${createdCount} commande(s) creee(s), ${updatedCount} mise(s) a jour, ${skippedIdenticalCount} identique(s) ignoree(s)`;
+    const clampedMessage = clampedNegativeQtyCount > 0
+      ? `, ⚠ ${clampedNegativeQtyCount} quantite(s) negative(s) clampee(s) a 0 (verifier retours/avoirs Ximi)`
+      : "";
     addHistory(
       db,
       "Import ventes",
-      `${db.ventes.length} vente(s) importee(s), ${importedClients.length} client(s) detecte(s), ${commandeStats}${preservedMessage}${mergedMessage}${livreMessage}`,
+      `${db.ventes.length} vente(s) importee(s), ${importedClients.length} client(s) detecte(s), ${commandeStats}${preservedMessage}${mergedMessage}${livreMessage}${clampedMessage}`,
       {
         fichier: req.file.originalname
       }
@@ -3801,6 +3856,8 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       created: createdCount,
       updated: updatedCount,
       skippedIdentical: skippedIdenticalCount,
+      // M2 (revue) : trace metier pour audit (retours/avoirs masques sinon)
+      clampedNegativeQuantities: clampedNegativeQtyCount,
       archive
     });
   } catch (error) {
@@ -4337,6 +4394,11 @@ module.exports = {
   _getLastStorageRecovery: () => lastStorageRecovery,
   _resetStorageRecoveryForTest: () => { lastStorageRecovery = null; storageRecoveryFatal = null; },
   _isCorruptionError: isCorruptionError,
+  _normalizeDateInput: normalizeDateInput,
+  _excelDateToIso: excelDateToIso,
+  _distance: distance,
+  _number: number,
+  _importQuantity: importQuantity,
   _getAuthRateLimitMaxAttempts: () => AUTH_RATE_LIMIT_MAX_ATTEMPTS,
   DB_PATH,
   SQLITE_PATH,
