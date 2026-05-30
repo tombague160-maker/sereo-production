@@ -2870,11 +2870,24 @@ label {
   margin: 0;
   font-size: 1.02rem;
   font-weight: 600;
+  /* M3 (v1.16.1) : un nom client tres long debordait des cards (3 lignes
+     desequilibrees). On tronque a 2 lignes avec ellipsis pour preserver le
+     layout. Le nom complet reste visible dans le modal detail. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
 }
 
 .bdc-card-client p {
   margin: 2px 0 0;
   font-size: 0.86rem;
+  /* Adresse longue : 1 ligne ellipsis */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .bdc-card-foot {
@@ -3659,3 +3672,50 @@ label {
   cursor: pointer;
 }
 .storage-recovery-dismiss:hover { background: rgba(255, 255, 255, 0.3); }
+
+/* T1 (v1.16.1) : toast persistant "Nouvelle version disponible" avec bouton
+   Recharger. Reste affiche jusqu'a action utilisateur (recharger ou fermer). */
+#sw-update-toast {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--color-brand-teal-dark, #0a4843);
+  color: #fff;
+  border-radius: 12px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+  font-size: 0.92rem;
+  max-width: calc(100vw - 32px);
+}
+.sw-update-toast-msg { flex: 1; min-width: 0; }
+.sw-update-toast-btn {
+  background: var(--color-pastel-orange-strong, #f47a5a);
+  color: #fff;
+  border: none;
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.sw-update-toast-btn:hover { filter: brightness(1.05); }
+.sw-update-toast-close {
+  background: transparent;
+  color: #fff;
+  border: none;
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 6px;
+}
+@media (max-width: 540px) {
+  #sw-update-toast {
+    left: 16px;
+    right: 16px;
+    flex-wrap: wrap;
+  }
+}
