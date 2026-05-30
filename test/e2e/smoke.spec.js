@@ -52,4 +52,40 @@ test.describe("Sereo smoke tests", () => {
         .toBeVisible({ timeout: 3000 });
     }
   });
+
+  // v1.17.1 : nouveaux panneaux Parametres (Reglages tournee + Diagnostic dates)
+  test("v1.17.1 — sliders tournee modifient l'affichage et persistent", async ({ page }) => {
+    await page.goto("/");
+    await page.locator('[data-target-tab="parametres"]').first().click();
+
+    await expect(page.getByText("Réglages tournée", { exact: false })).toBeVisible();
+
+    const speedSlider = page.locator("#tourneeSpeedSlider");
+    const speedValue = page.locator("#tourneeSpeedValue");
+    await expect(speedSlider).toBeVisible();
+
+    await speedSlider.fill("40");
+    // L'event "input" est emis par fill ; sinon dispatchEvent fallback.
+    await speedSlider.dispatchEvent("input");
+    await expect(speedValue).toHaveText("40 km/h");
+
+    // Debounce 500ms + sauvegarde HTTP
+    await expect(page.locator("#tourneeSettingsStatus")).toHaveText(/Enregistré/i, { timeout: 3000 });
+
+    // Reload : la valeur doit etre rechargee depuis le backend
+    await page.reload();
+    await page.locator('[data-target-tab="parametres"]').first().click();
+    await expect(page.locator("#tourneeSpeedSlider")).toHaveValue("40");
+    await expect(page.locator("#tourneeSpeedValue")).toHaveText("40 km/h");
+  });
+
+  test("v1.17.1 — bouton diagnostic dates affiche le resultat", async ({ page }) => {
+    await page.goto("/");
+    await page.locator('[data-target-tab="parametres"]').first().click();
+
+    await expect(page.getByText("Diagnostic dates", { exact: false })).toBeVisible();
+    await page.locator('[data-action="diagnostic-suspicious-dates"]').click();
+
+    await expect(page.locator("#diagnosticDatesStatus")).toContainText(/commandes/i, { timeout: 5000 });
+  });
 });

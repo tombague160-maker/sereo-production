@@ -1813,6 +1813,34 @@ label {
   gap: 10px;
 }
 
+/* v1.17.1 : sliders parametres tournee (vitesse + duree d'arret) */
+.settings-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+.settings-slider-row input[type="range"] {
+  flex: 1;
+  min-width: 140px;
+}
+.settings-slider-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  min-width: 64px;
+  text-align: right;
+}
+.settings-pre {
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow: auto;
+  max-height: 280px;
+  margin-top: 8px;
+}
+
 .toast-region {
   position: fixed;
   right: 18px;

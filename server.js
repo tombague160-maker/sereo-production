@@ -1262,7 +1262,10 @@ function defaultDb() {
         // Defaut "light" en attendant que le mode sombre soit valide en production.
         // Les utilisateurs peuvent passer en "auto" ou "dark" via le toggle Parametres.
         colorScheme: "light"
-      }
+      },
+      // Revue R1 NIT-18 : alignement avec normalizeSettings (defaut prod).
+      orderNumbering: { prefix: "CMD", resetAnnually: true },
+      tournee: { averageSpeedKmh: 28, stopDurationMin: 6 }
     }
   };
 }
@@ -1632,7 +1635,17 @@ function ensureOrderNumbers(db) {
   // suivent correctement quand resetAnnually est actif.
   missingNumero.forEach(order => {
     if (!order.dateCommande) {
-      order.dateCommande = order.dateImport || order.createdAt || new Date().toISOString();
+      // Revue R1 MINOR-14 : forcer YYYY-MM-DD (10 chars) au lieu d'ISO complet
+      // (24 chars). Les sources `dateImport`/`createdAt` sont des
+      // toISOString() complets ; on tronque pour que le diagnostic
+      // suspicious-dates ne les flag pas en faux-positif.
+      // R3 hardening : si jamais raw est un Date object (ne devrait pas
+      // arriver via le pipeline normal, mais defense en profondeur),
+      // utiliser toISOString() explicitement avant slice (sinon
+      // String(date)="Wed May 30 ..." -> slice(0,10)="Wed May 30").
+      const raw = order.dateImport || order.createdAt || new Date().toISOString();
+      const dateStr = raw instanceof Date ? raw.toISOString() : String(raw);
+      order.dateCommande = dateStr.slice(0, 10);
     }
     order.numero = generateOrderNumber(db, order.dateCommande);
   });
@@ -1658,8 +1671,24 @@ function normalizeSettings(settings = {}) {
   // chaque 1er janvier). False = compteur continu (jamais reset).
   const resetAnnually = orderNumberingRaw.resetAnnually !== false;
 
+  // v1.17.1 : parametres tournee calibrables. Defaut 28 km/h + 6 min/arret
+  // (estimation initiale apres passage en Haversine). Bornes pour eviter
+  // saisies aberrantes : vitesse [10,60] km/h, arret [0,30] min.
+  const tourneeRaw = settings && typeof settings === "object" && settings.tournee && typeof settings.tournee === "object"
+    ? settings.tournee
+    : {};
+  const rawSpeed = Number(tourneeRaw.averageSpeedKmh);
+  const averageSpeedKmh = Number.isFinite(rawSpeed) && rawSpeed >= 10 && rawSpeed <= 60 ? rawSpeed : 28;
+  const rawStop = Number(tourneeRaw.stopDurationMin);
+  const stopDurationMin = Number.isFinite(rawStop) && rawStop >= 0 && rawStop <= 30 ? rawStop : 6;
+
+  // Revue R1 NIT-15 + R2 minor : si `settings` est une string corrompue,
+  // `...settings` spread les indices de caracteres ("0":"a", "1":"b", ...).
+  // Si `settings` est un Array, `typeof === "object"` passe mais on spread
+  // les indices numeriques. Protection : objet plain (pas Array).
+  const base = settings && typeof settings === "object" && !Array.isArray(settings) ? settings : {};
   return {
-    ...settings,
+    ...base,
     appearance: {
       themeId: clean(appearance.themeId) || "sereo",
       brandImage: clean(appearance.brandImage),
@@ -1668,6 +1697,10 @@ function normalizeSettings(settings = {}) {
     orderNumbering: {
       prefix,
       resetAnnually
+    },
+    tournee: {
+      averageSpeedKmh,
+      stopDurationMin
     }
   };
 }
@@ -2971,7 +3004,11 @@ function createRoute(db, options = {}) {
   const optimizedOrders = optimizeOrders(orders);
   const routeId = `route-${crypto.randomUUID()}`;
   const now = new Date().toISOString();
-  const metrics = estimateRouteMetrics(optimizedOrders);
+  // v1.17.1 : passer settings.tournee pour vitesse + duree d'arret calibrables.
+  // Invariant : db issu de readDb -> normalizeDb -> normalizeSettings garantit
+  // db.settings.tournee. estimateRouteMetrics retombe sur ses defauts si
+  // tourneeSettings est undefined (defense en profondeur).
+  const metrics = estimateRouteMetrics(optimizedOrders, db.settings && db.settings.tournee);
 
   const route = {
     id: routeId,
@@ -3187,30 +3224,42 @@ function reorderRouteStops(db, routeId, stopIds) {
   return route;
 }
 
-function estimateRouteMetrics(orders) {
-  let totalDistance = null;
+function estimateRouteMetrics(orders, tourneeSettings) {
+  // v1.17.1 : vitesse et duree d'arret calibrables via Parametres (defaut
+  // 28 km/h, 6 min/arret). L'utilisateur ajuste apres quelques tournees
+  // reelles pour coller a son terrain (urbain Besancon vs rural Champagnole).
+  //
+  // Pieges evites (revue adverse R1) :
+  // 1. NE JAMAIS utiliser `|| 28` car stopDurationMin=0 est valide et serait
+  //    rebascule a 6 (0 est falsy). Test V1171.f le verifie.
+  // 2. averageSpeedKmh DOIT etre > 0 (division par zero produirait Infinity).
+  //    Asymetrie volontaire avec stopDurationMin qui accepte >= 0.
+  const rawSpeed = tourneeSettings && Number(tourneeSettings.averageSpeedKmh);
+  const speed = Number.isFinite(rawSpeed) && rawSpeed > 0 ? rawSpeed : 28;
+  const rawStop = tourneeSettings && Number(tourneeSettings.stopDurationMin);
+  const stop = Number.isFinite(rawStop) && rawStop >= 0 ? rawStop : 6;
 
+  let totalDistance = null;
   for (let i = 1; i < orders.length; i++) {
     const previous = orders[i - 1];
     const current = orders[i];
-
     if (!getCoordinates(previous) || !getCoordinates(current)) {
       totalDistance = null;
       break;
     }
-
     // M6 (v1.16.1) : distance() retourne deja des km (Haversine), plus de * 111
     totalDistance = (totalDistance || 0) + distance(previous, current);
   }
 
-  const estimatedDuration = totalDistance === null
-    ? null
-    // M6 (v1.16.1, revue) : 35 km/h etait calibre sur la distance gonflee
-    // Pythagore*111 (~30% trop). Avec Haversine on a maintenant la distance
-    // vol-d'oiseau, qui sous-estime de ~30% la distance routiere (detours,
-    // virages, sens unique). 35 -> 28 km/h pour absorber ce facteur et
-    // produire une estimation honnete vs route reelle (~50 km/h * 0.55 stops).
-    : Math.round((totalDistance / 28) * 60 + orders.length * 6);
+  // Revue R1 MINOR-4 : le temps d'arret existe meme sans distance calculable
+  // (1 stop, coords manquantes). Auparavant on retournait null pour
+  // estimatedDuration, perdant le signal. Maintenant : stopTime toujours
+  // remonte ; driveTime ajoute si distance disponible.
+  const stopTime = orders.length * stop;
+  const driveTime = totalDistance === null ? null : (totalDistance / speed) * 60;
+  const estimatedDuration = driveTime === null
+    ? (orders.length > 0 ? Math.round(stopTime) : null)
+    : Math.round(driveTime + stopTime);
 
   return {
     totalDistance: totalDistance === null ? null : Math.round(totalDistance * 10) / 10,
@@ -3288,6 +3337,78 @@ app.get("/api/storage/status", (req, res) => {
   });
 });
 
+// v1.17.1 : diagnostic des dates suspectes en DB. M1 a durci normalizeDateInput :
+// les commandes pre-1.17 stockees avec une date aberrante (`2025-13-31`,
+// `30/02/2026`, an > 2199...) verront cette date mutee vers today au prochain
+// readDb. Cet endpoint scan la base AVANT toute mutation pour quantifier
+// l'exposition. Lecture seule, aucune modification.
+// v1.17.1 : extraction en fonction pure pour pouvoir tester sans passer par
+// writeDb (qui normalise les dates aberrantes via normalizeOrder).
+//
+// Revue adverse R1 :
+// - MAJOR-3 : cap a SCAN_MAX_COMMANDES pour eviter event-loop blocking
+//   (DoS theorique : 1M commandes * 50us regex/normalize = 50s blocking).
+// - MINOR-3/12/14 : ISO datetime 24-char ('2026-05-05T10:00:00.000Z') ecrit
+//   par ensureOrderNumbers legacy n'est PAS suspect : son prefixe 10 chars
+//   est un ISO valide. On teste le prefixe, pas la chaine entiere.
+const SCAN_MAX_COMMANDES = 50000;
+
+function scanSuspiciousDates(commandes) {
+  const list = Array.isArray(commandes) ? commandes : [];
+  const isoRegex = /^\d{4}-\d{2}-\d{2}$/;
+  const samples = [];
+  let suspicious = 0;
+  let missingDate = 0;
+
+  const truncated = list.length > SCAN_MAX_COMMANDES;
+  const toScan = truncated ? list.slice(0, SCAN_MAX_COMMANDES) : list;
+
+  for (const order of toScan) {
+    const dc = order.dateCommande;
+    if (!dc) { missingDate += 1; continue; }
+    const dcStr = String(dc);
+    const head = dcStr.slice(0, 10);
+    // Revue R1 MINOR-3/14 : revalider sur le prefixe 10 chars, pas la chaine
+    // complete. normalizeDateInput ne reconnait pas l'ISO datetime complet
+    // ('2026-05-05T10:00:00.000Z') mais sait valider '2026-05-05'. Cela
+    // accepte les commandes legacy ecrites par ensureOrderNumbers.
+    const revalidated = normalizeDateInput(head);
+    if (!isoRegex.test(head) || revalidated !== head) {
+      suspicious += 1;
+      if (samples.length < 20) {
+        samples.push({
+          id: order.id,
+          numero: order.numero || "(sans numero)",
+          clientName: order.clientName || "",
+          dateCommandeRaw: dcStr,
+          dateCommandeApresValidation: revalidated || "(rejetee -> sera mutee vers today)"
+        });
+      }
+    }
+  }
+
+  return {
+    totalCommandes: list.length,
+    commandesAnalysees: toScan.length,
+    troncature: truncated,
+    datesManquantes: missingDate,
+    datesSuspectes: suspicious,
+    echantillon: samples,
+    note: suspicious === 0
+      ? "Aucune date suspecte detectee. Pas de risque de mutation."
+      : `${suspicious} commande(s) avec date a risque. Au prochain readDb, leur dateCommande sera recalculee.`
+  };
+}
+
+app.get("/api/diagnostic/suspicious-dates", (req, res) => {
+  // Revue R1 MINOR-10 : reponse contient PII (clientName, numero), pas de
+  // cache cote intermediaire/CDN.
+  res.set("Cache-Control", "no-store, max-age=0");
+  res.set("Vary", "Cookie");
+  const db = readDb();
+  res.json(scanSuspiciousDates(db.commandes));
+});
+
 // L'endpoint /api/version est declare plus haut (avant requireAccessAuth)
 // pour rester accessible sans authentification, notamment sur la page /login.
 
@@ -3333,6 +3454,12 @@ app.get("/api/settings/order-numbering", (req, res) => {
   res.json(normalizeSettings(db.settings || {}).orderNumbering);
 });
 
+// v1.17.1 : GET reglages tournee (vitesse + duree d'arret)
+app.get("/api/settings/tournee", (req, res) => {
+  const db = readDb();
+  res.json(normalizeSettings(db.settings || {}).tournee);
+});
+
 app.patch("/api/settings/order-numbering", (req, res) => {
   try {
     const db = readDb();
@@ -3354,6 +3481,52 @@ app.patch("/api/settings/order-numbering", (req, res) => {
     res.json(db.settings.orderNumbering);
   } catch (error) {
     handleRouteError(error, res, "Erreur parametres numerotation");
+  }
+});
+
+// v1.17.1 : reglages tournee. L'utilisateur ajuste vitesse moyenne et duree
+// d'arret apres confrontation aux tournees reelles (defaut 28 km/h + 6 min).
+//
+// Revue R1 :
+// - MINOR-11 : refuser explicitement les types non-number (Number(null)=0 et
+//   Number(false)=0 passeraient le check sinon)
+// - MINOR-16 : forcer entier (slider step=1, eviter "35.7 km/h" persiste)
+// - MINOR-9 (limite payload inline) : NON applique car le middleware global
+//   `app.use(express.json({limit:"5mb"}))` ligne 289 parse deja le body avant
+//   un middleware inline. Reduire la limite globale casserait brandImage.
+//   La protection reste : typeof + bornes serveur. Backlog : rate-limit
+//   global /api/settings/*.
+app.patch("/api/settings/tournee", (req, res) => {
+  try {
+    const db = readDb();
+    db.settings = normalizeSettings(db.settings || {});
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "averageSpeedKmh")) {
+      if (typeof req.body.averageSpeedKmh !== "number") {
+        throw badRequest("averageSpeedKmh doit etre un nombre");
+      }
+      const raw = req.body.averageSpeedKmh;
+      if (!Number.isFinite(raw) || raw < 10 || raw > 60) {
+        throw badRequest("Vitesse moyenne invalide : entre 10 et 60 km/h");
+      }
+      db.settings.tournee.averageSpeedKmh = Math.round(raw);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "stopDurationMin")) {
+      if (typeof req.body.stopDurationMin !== "number") {
+        throw badRequest("stopDurationMin doit etre un nombre");
+      }
+      const raw = req.body.stopDurationMin;
+      if (!Number.isFinite(raw) || raw < 0 || raw > 30) {
+        throw badRequest("Duree d'arret invalide : entre 0 et 30 minutes");
+      }
+      db.settings.tournee.stopDurationMin = Math.round(raw);
+    }
+
+    writeDb(db);
+    res.json(db.settings.tournee);
+  } catch (error) {
+    handleRouteError(error, res, "Erreur parametres tournee");
   }
 });
 
@@ -4399,6 +4572,8 @@ module.exports = {
   _distance: distance,
   _number: number,
   _importQuantity: importQuantity,
+  _estimateRouteMetrics: estimateRouteMetrics,
+  _scanSuspiciousDates: scanSuspiciousDates,
   _getAuthRateLimitMaxAttempts: () => AUTH_RATE_LIMIT_MAX_ATTEMPTS,
   DB_PATH,
   SQLITE_PATH,

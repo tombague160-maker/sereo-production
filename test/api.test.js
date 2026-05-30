@@ -1811,8 +1811,9 @@ test("ensureOrderNumbers: migration retroactive par date_import chronologique", 
   assert.equal(o2.numero, "CMD-2026-002", "o2 avril -> 002");
   assert.equal(o3.numero, "CMD-2026-003", "o3 avril plus tard -> 003");
 
-  // Les date_commande sont remplies par fallback sur dateImport
-  assert.equal(o1.dateCommande, "2026-03-01T09:00:00Z");
+  // v1.17.1 : dateCommande est maintenant tronquee a YYYY-MM-DD (slice 10) pour
+  // eviter que scanSuspiciousDates flag les ISO complets en faux positif.
+  assert.equal(o1.dateCommande, "2026-03-01");
 });
 
 test("ensureOrderNumbers: ne touche pas les commandes qui ont deja un numero", async () => {

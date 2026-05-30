@@ -743,6 +743,54 @@
             </div>
           </div>
 
+          <!-- v1.17.1 : reglages tournee (vitesse + duree d'arret) calibrables -->
+          <div class="panel">
+            <div class="panel-heading">
+              <h3>🚚 Réglages tournée</h3>
+              <span class="muted">Estimation durée de tournée</span>
+            </div>
+            <div class="settings-list">
+              <article class="item">
+                <h4>Vitesse moyenne</h4>
+                <p class="muted">Vitesse moyenne entre deux arrêts. Ajuste après quelques tournées si l'estimation est à côté.</p>
+                <div class="settings-slider-row">
+                  <input id="tourneeSpeedSlider" type="range" min="10" max="60" step="1" value="28"
+                         aria-label="Vitesse moyenne en km/h" />
+                  <span id="tourneeSpeedValue" class="settings-slider-value">28 km/h</span>
+                </div>
+              </article>
+              <article class="item">
+                <h4>Durée d'arrêt par livraison</h4>
+                <p class="muted">Temps moyen passé chez chaque client (déchargement + tampon + signature).</p>
+                <div class="settings-slider-row">
+                  <input id="tourneeStopSlider" type="range" min="0" max="30" step="1" value="6"
+                         aria-label="Durée d'arrêt en minutes" />
+                  <span id="tourneeStopValue" class="settings-slider-value">6 min</span>
+                </div>
+              </article>
+              <p id="tourneeSettingsStatus" class="muted" aria-live="polite">Chargement…</p>
+            </div>
+          </div>
+
+          <!-- v1.17.1 : diagnostic dates suspectes en base -->
+          <div class="panel">
+            <div class="panel-heading">
+              <h3>🔍 Diagnostic dates</h3>
+              <span class="muted">Détection des dates aberrantes</span>
+            </div>
+            <div class="settings-list">
+              <article class="item">
+                <h4>Scanner les commandes</h4>
+                <p class="muted">Compte les dates en base qui ne respectent pas le format ISO ou qui contiennent un mois/jour invalide.</p>
+                <button class="button secondary compact" type="button" data-action="diagnostic-suspicious-dates">
+                  Lancer le scan
+                </button>
+                <p id="diagnosticDatesStatus" class="muted" aria-live="polite"></p>
+                <pre id="diagnosticDatesSample" class="settings-pre" hidden></pre>
+              </article>
+            </div>
+          </div>
+
           <!-- v1.12.0 : historique des fichiers Excel importes (archives auto). -->
           <div class="settings-block">
             <header class="block-header">
