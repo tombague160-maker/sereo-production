@@ -406,6 +406,7 @@ function bindUi() {
     if (action === "start-tour") startTour();
     if (action === "reset-tour") runAction(actionButton, "Reset...", resetTour);
     if (action === "purge-orders") purgeOrdersHandler(actionButton);
+    if (action === "diagnostic-suspicious-dates") runAction(actionButton, "Scan...", runDiagnosticSuspiciousDates);
     if (action === "mark-delivered") runAction(actionButton, "Envoi...", () => updateCurrentDeliveryStatus("livre"));
     if (action === "mark-absent") runAction(actionButton, "Envoi...", () => updateCurrentDeliveryStatus("absent"));
     if (action === "mark-problem") runAction(actionButton, "Envoi...", () => updateCurrentDeliveryStatus("probleme"));
@@ -2455,9 +2456,116 @@ async function saveAppearance(patch) {
   });
 }
 
+// v1.17.1 : reglages tournee (vitesse + duree d'arret). Sliders persistes via
+// PATCH /api/settings/tournee avec debounce 500 ms (eviter spam HTTP au scroll).
+//
+// Revue R1 MAJOR-1 (race double-listener) : pattern promesse singleton +
+// dataset.listenerAttached.
+// Revue R2 MAJOR (race fetch overwrites user input) : si l'utilisateur bouge
+// un slider avant que le fetch initial ne reponde, le fetch ecraserait
+// silencieusement sa saisie. Correctif : skip l'overwrite si un timer de
+// sauvegarde est en cours (signal explicite d'interaction recente).
+let tourneeSettingsLoadingPromise = null;
+let tourneeSaveTimer = null;
+
+async function renderTourneeSettings() {
+  const speedSlider = document.getElementById("tourneeSpeedSlider");
+  const stopSlider = document.getElementById("tourneeStopSlider");
+  const speedLabel = document.getElementById("tourneeSpeedValue");
+  const stopLabel = document.getElementById("tourneeStopValue");
+  const status = document.getElementById("tourneeSettingsStatus");
+  if (!speedSlider || !stopSlider) return;
+
+  // Listeners attaches une seule fois (marque DOM = source de verite).
+  if (!speedSlider.dataset.listenerAttached) {
+    const onInput = () => {
+      speedLabel.textContent = `${speedSlider.value} km/h`;
+      stopLabel.textContent = `${stopSlider.value} min`;
+      if (status) status.textContent = "Enregistrement…";
+      clearTimeout(tourneeSaveTimer);
+      tourneeSaveTimer = setTimeout(async () => {
+        try {
+          await apiFetch("/api/settings/tournee", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              averageSpeedKmh: Number(speedSlider.value),
+              stopDurationMin: Number(stopSlider.value)
+            })
+          });
+          if (status) status.textContent = "Enregistré ✓";
+        } catch (error) {
+          if (status) status.textContent = `Erreur : ${error.message || "réseau"}`;
+        } finally {
+          tourneeSaveTimer = null;
+        }
+      }, 500);
+    };
+    speedSlider.addEventListener("input", onInput);
+    stopSlider.addEventListener("input", onInput);
+    speedSlider.dataset.listenerAttached = "1";
+    stopSlider.dataset.listenerAttached = "1";
+  }
+
+  if (tourneeSettingsLoadingPromise) {
+    return tourneeSettingsLoadingPromise;
+  }
+  tourneeSettingsLoadingPromise = (async () => {
+    try {
+      const tournee = await apiFetch("/api/settings/tournee");
+      // R2 MAJOR : ne PAS ecraser le slider si l'utilisateur l'a touche
+      // pendant le fetch (timer != null = interaction recente, PATCH en
+      // queue). Dans ce cas, sa saisie locale est la source de verite.
+      if (tourneeSaveTimer === null) {
+        speedSlider.value = String(tournee.averageSpeedKmh);
+        stopSlider.value = String(tournee.stopDurationMin);
+        speedLabel.textContent = `${tournee.averageSpeedKmh} km/h`;
+        stopLabel.textContent = `${tournee.stopDurationMin} min`;
+        if (status) status.textContent = "";
+      }
+    } catch (error) {
+      if (status) status.textContent = `Impossible de charger les réglages : ${error.message || "réseau"}`;
+      throw error;
+    } finally {
+      tourneeSettingsLoadingPromise = null;
+    }
+  })();
+  return tourneeSettingsLoadingPromise.catch(() => {});
+}
+
+// v1.17.1 : diagnostic des dates suspectes en base (mauvais format, mois 13,
+// 30 fevrier, etc.). Lance via bouton dans Parametres, affiche compteur +
+// echantillon de 20 cas pour pouvoir agir manuellement.
+async function runDiagnosticSuspiciousDates() {
+  const status = document.getElementById("diagnosticDatesStatus");
+  const sample = document.getElementById("diagnosticDatesSample");
+  if (!status || !sample) return;
+  status.textContent = "Scan en cours…";
+  sample.hidden = true;
+  try {
+    const result = await apiFetch("/api/diagnostic/suspicious-dates");
+    // Revue R2 MINOR : signaler explicitement si le scan a ete tronque
+    // (>50000 commandes) pour que l'admin sache que le compteur est partiel.
+    const base = `${result.totalCommandes} commandes — ${result.datesSuspectes} dates suspectes, ${result.datesManquantes} sans date.`;
+    const trunc = result.troncature
+      ? ` ⚠️ Scan tronqué a ${result.commandesAnalysees} commandes (limite de protection event-loop).`
+      : "";
+    status.textContent = base + trunc;
+    if (result.echantillon && result.echantillon.length) {
+      sample.textContent = JSON.stringify(result.echantillon, null, 2);
+      sample.hidden = false;
+    } else {
+      sample.hidden = true;
+    }
+  } catch (error) {
+    status.textContent = `Erreur : ${error.message || "réseau"}`;
+  }
+}
+
 function renderSettings() {
   renderThemePalettes();
   updateBrandImageStatus();
+  renderTourneeSettings();
 
   const sectorsContainer = document.getElementById("settingsSectors");
   if (!sectorsContainer) return;
