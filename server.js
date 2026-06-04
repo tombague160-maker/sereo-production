@@ -1734,8 +1734,15 @@ function writeDb(db, options = {}) {
 
   syncWorkflow(db);
 
+  // Revue R1 chantier 1 (P1 #2) : un echec de backup (disque plein,
+  // permission) NE DOIT PAS empecher l'ecriture des donnees. Le backup est
+  // un filet de securite, pas un prerequis. On log l'erreur sans bloquer.
   if (backup) {
-    backupDbIfNeeded();
+    try {
+      backupDbIfNeeded();
+    } catch (backupError) {
+      console.error(`[storage] Backup automatique echec (mutation poursuit): ${backupError.message || backupError}`);
+    }
   }
 
   if (useSqliteStorage()) {
@@ -1747,6 +1754,82 @@ function writeDb(db, options = {}) {
   const tempPath = `${DB_PATH}.${process.pid}.${Date.now()}.tmp`;
   fs.writeFileSync(tempPath, JSON.stringify(db, null, 2), "utf8");
   fs.renameSync(tempPath, DB_PATH);
+}
+
+// ============================================================================
+// Verrou applicatif global pour les ecritures (Chantier 1, audit 2026-06-04)
+// ============================================================================
+// Pattern : queue Promise minimaliste sans dependance. Tous les handlers qui
+// font le pattern read-mutate-write doivent passer par withWriteLock(async ()
+// => { ... }) pour serialiser leurs ecritures. Les LECTURES seules ne
+// passent PAS par ici (pas de blocage des GET).
+//
+// Pourquoi : SQLite BEGIN IMMEDIATE protege l'atomicite SQL mais pas
+// l'isolation applicative — `db = readDb(); ...; writeDb(db)` laisse une
+// fenetre TOCTOU ou deux requetes lisent le meme snapshot, modifient en
+// memoire, puis ecrivent l'une apres l'autre : la 1re ecriture est perdue.
+//
+// Implementation : une chaine de promesses serialisees. Chaque appel attend
+// la fin du precedent (succes OU echec — un fix qui throw ne doit pas
+// geler la queue).
+//
+// Revue R1 chantier 1 (P1 #1) : timeout 60s sur previousQueue ET sur fn(),
+// pour eviter qu'un handler bloque (disque defaillant, SQLite verrouille
+// indefiniment) ne deadlock toute la chaine d'ecritures. En cas de timeout,
+// on log mais on libere le maillon pour ne pas figer les suivants.
+const WRITE_LOCK_TIMEOUT_MS = 60000; // 60s — suffit largement pour un import 30MB
+let writeQueue = Promise.resolve();
+
+// Promise.race avec setTimeout, MAIS unref pour ne pas retenir le process
+// Node a la fin des tests, ET clearTimeout sur succes pour ne pas accumuler
+// des handles. Sans cela, chaque withWriteLock laisse un setTimeout actif
+// pendant 60s, ce qui empeche `node --test` de quitter rapidement.
+async function withTimeout(promise, ms, label) {
+  let timeoutId;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(
+      () => reject(new Error(`withWriteLock: ${label} timeout apres ${ms}ms`)),
+      ms
+    );
+    if (timeoutId.unref) timeoutId.unref();
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
+async function withWriteLock(fn) {
+  const previousQueue = writeQueue;
+  let resolveNext;
+  let rejectNext;
+  const next = new Promise((resolve, reject) => {
+    resolveNext = resolve;
+    rejectNext = reject;
+  });
+  writeQueue = next.catch(() => {}); // chaine ne meurt jamais
+
+  // Attendre le maillon precedent avec timeout
+  try {
+    await withTimeout(previousQueue, WRITE_LOCK_TIMEOUT_MS, "previousQueue");
+  } catch (err) {
+    console.warn(`[lock] previousQueue ${err.message}`);
+  }
+
+  // Executer fn() avec timeout
+  try {
+    const result = await withTimeout(
+      Promise.resolve().then(fn),
+      WRITE_LOCK_TIMEOUT_MS,
+      "fn()"
+    );
+    resolveNext(result);
+    return result;
+  } catch (err) {
+    rejectNext(err);
+    throw err;
+  }
 }
 
 // Limite la frequence des backups pour ne pas saturer le disque.
@@ -1785,45 +1868,70 @@ function pruneOldBackups() {
   });
 }
 
-function backupDbIfNeeded() {
+// Chantier 1 (2026-06-04) : refonte de la politique post-recovery selon doc
+// SQLite + retour d'experience prod (Oldmoe 2024) :
+// - mode `fresh_empty` : SUSPENSION maintenue (ne pas gzipper du vide qui
+//   evincerait les vrais backups historiques)
+// - mode `restored_backup` : faire UN backup IMMEDIAT taggue `post-restore-`
+//   pour fermer la fenetre entre l'etat restaure et les futures mutations,
+//   PUIS reprendre le throttle 1h normal
+// - endpoint manuel /api/backup/now pour forcer un backup hors throttle
+let postRestoreBackupDone = false;
+
+function backupDbIfNeeded(options = {}) {
+  const { force = false, tag = "" } = options;
   const sourcePath = useSqliteStorage() ? SQLITE_PATH : DB_PATH;
   if (!fs.existsSync(sourcePath)) return null;
 
-  // B3 v1.16.0 : apres TOUTE recovery (revue #4 : etendu de fresh_empty a
-  // restored_backup), on SUSPEND les backups automatiques pour la session.
-  // Raisons : (1) fresh_empty -> ne pas gzipper la base VIDE (empoisonnement) ;
-  // (2) restored_backup -> on a peut-etre restaure un backup ANCIEN (les recents
-  // etaient corrompus) ; le re-backuper en ferait le plus recent et evincerait
-  // les vrais backups intermediaires. On preserve donc la chaine existante
-  // jusqu'au prochain redemarrage propre (lastStorageRecovery repart a null).
-  if (lastStorageRecovery) {
+  // Cas fresh_empty : pas de backup automatique (base vraiment vide). Reste
+  // possible via /api/backup/now si l'admin le veut explicitement.
+  if (!force && lastStorageRecovery && lastStorageRecovery.mode === "fresh_empty") {
     return null;
   }
 
-  ensureDir(BACKUP_DIR);
-
-  // Throttle : on skip si un backup recent existe deja (< 1h).
-  const entries = listBackupEntries();
-  const mostRecent = entries[0];
-  if (mostRecent && Date.now() - mostRecent.mtimeMs < BACKUP_THROTTLE_MS) {
-    return null; // skipped, deja recent
+  // Cas restored_backup : faire UN snapshot post-restore une seule fois, puis
+  // continuer normalement (audit Sereo 2026-06-04 + SQLite docs). Le snapshot
+  // est tagge "post-restore" pour traçabilite forensique.
+  //
+  // Revue R1 P1 #5 : flag postRestoreBackupDone = true APRES succes, pas
+  // avant. Si writeBackupNow throw (disque plein), on doit retenter au
+  // prochain writeDb.
+  if (!force && lastStorageRecovery && lastStorageRecovery.mode === "restored_backup" && !postRestoreBackupDone) {
+    const path = writeBackupNow("post-restore");
+    if (path) postRestoreBackupDone = true;
+    return path;
   }
 
+  // Throttle normal : skip si un backup recent existe (< 1h).
+  if (!force) {
+    const entries = listBackupEntries();
+    const mostRecent = entries[0];
+    if (mostRecent && Date.now() - mostRecent.mtimeMs < BACKUP_THROTTLE_MS) {
+      return null;
+    }
+  }
+
+  return writeBackupNow(tag);
+}
+
+function writeBackupNow(tag = "") {
+  const sourcePath = useSqliteStorage() ? SQLITE_PATH : DB_PATH;
+  if (!fs.existsSync(sourcePath)) return null;
+
+  ensureDir(BACKUP_DIR);
   if (useSqliteStorage()) {
     getSqliteStore().checkpoint();
   }
 
   const baseExtension = useSqliteStorage() ? ".sqlite" : ".json";
-  const backupPath = path.join(BACKUP_DIR, `db-${safeTimestamp()}${baseExtension}.gz`);
+  const tagPart = tag ? `-${tag.replace(/[^a-zA-Z0-9_-]/g, "")}` : "";
+  const backupPath = path.join(BACKUP_DIR, `db-${safeTimestamp()}${tagPart}${baseExtension}.gz`);
 
-  // Compression gzip : reduit la taille de 60-70% sur SQLite, 80%+ sur JSON.
   const sourceData = fs.readFileSync(sourcePath);
   const compressed = zlib.gzipSync(sourceData);
   fs.writeFileSync(backupPath, compressed);
 
-  // Retention : supprime les plus anciens au-dela de BACKUP_RETENTION.
   pruneOldBackups();
-
   return backupPath;
 }
 
@@ -2364,11 +2472,30 @@ function getQuantityForProductInOrder(product, order) {
   }, 0);
 }
 
+// Chantier 1 (2026-06-04) : ajout "probleme_livraison" et "a_reprogrammer"
+// dans la liste des statuts qui MAINTIENNENT la reservation. Avant ce fix,
+// `reserveStockForOrder` deduisait physiquement le stock mais
+// `calculateReservedStock` excluait ces statuts de la metrique reserved —
+// asymetrie comptable invisible (stock dispo affiche > stock physique reel).
+//
+// Pattern ERP standard (Odoo unrelease, ERPNext stock reservation) : un
+// echec de livraison ne libere PAS la reservation (livraison client absent
+// = relivraison sous 24-72h sur meme stock). Pour annuler une reservation,
+// utiliser l'endpoint explicite POST /api/orders/:id/release-stock.
+const RESERVED_ORDER_STATUSES = [
+  "en_preparation",
+  "preparation_terminee",
+  "pret_livraison",
+  "en_livraison",
+  "probleme_livraison",
+  "a_reprogrammer"
+];
+
 function calculateReservedStock(db, product) {
   return db.commandes.reduce((total, order) => {
     const isReserved = Boolean(
       order.stockReservedAt
-      && ["en_preparation", "preparation_terminee", "pret_livraison", "en_livraison"].includes(order.status)
+      && RESERVED_ORDER_STATUSES.includes(order.status)
     );
 
     return isReserved ? total + getQuantityForProductInOrder(product, order) : total;
@@ -2827,6 +2954,10 @@ function normalizeOrder(order) {
     lng: order.lng ?? order.longitude ?? "",
     deliveryDate: normalizeDateInput(order.deliveryDate || order.dateLivraison || order.livraisonDate),
     stockReservedAt: order.stockReservedAt || null,
+    // Chantier 1 (2026-06-04) : preserver l'historique des liberations de stock
+    // manuelles (audit log). Null tant que jamais libere.
+    stockReleasedAt: order.stockReleasedAt || null,
+    stockReleaseReason: order.stockReleaseReason || null,
     routeId: order.routeId || null,
     importedAsLivre: order.importedAsLivre || false
   };
@@ -2834,7 +2965,8 @@ function normalizeOrder(order) {
 
 function enrichOrder(order, stock) {
   const stockCheck = analyzeOrderStock(order, stock);
-  const stockReserved = Boolean(order.stockReservedAt && ["en_preparation", "preparation_terminee", "pret_livraison", "en_livraison"].includes(order.status));
+  // Chantier 1 : aligne sur RESERVED_ORDER_STATUSES (inclut probleme/a_reprogrammer)
+  const stockReserved = Boolean(order.stockReservedAt && RESERVED_ORDER_STATUSES.includes(order.status));
 
   return {
     ...order,
@@ -2891,6 +3023,16 @@ function setOrderStatus(order, status) {
   order.preparationStatus = inferPreparationStatus(status);
   order.deliveryStatus = inferDeliveryStatus(status);
   order.updatedAt = new Date().toISOString();
+
+  // Revue R1 chantier 1 (P1 #4) : sur livraison effective, la reservation
+  // est CONSOMMEE (le stock a deja ete physiquement deduit en preparation,
+  // la livraison ne refait rien sur le stock). On nullify stockReservedAt
+  // pour que calculateReservedStock ne double-compte pas indefiniment.
+  if (status === "livre" && order.stockReservedAt) {
+    order.stockReservedAt = null;
+    order.stockReleasedAt = order.updatedAt;
+    order.stockReleaseReason = "consumed_by_delivery";
+  }
 }
 
 function reserveStockForOrder(db, order) {
@@ -2910,6 +3052,45 @@ function reserveStockForOrder(db, order) {
   });
 
   order.stockReservedAt = new Date().toISOString();
+}
+
+// Chantier 1 : symetrique de reserveStockForOrder. Restitue les quantites
+// physiquement deduites quand une commande quitte le workflow sans etre livree
+// (probleme_livraison, a_reprogrammer, annule). Idempotent : ne fait rien si
+// la commande n'avait pas de reservation (stockReservedAt null).
+//
+// Critere d'appel : transitions terminales NON-livre. Si la commande revient
+// ensuite en preparation, reserveStockForOrder() re-deduira proprement.
+function releaseOrderStockReservation(db, order, reason) {
+  if (!order.stockReservedAt) return false;
+
+  // On recalcule les lignes via analyzeOrderStock plutot que de stocker la
+  // reservation dans l'order : on garde une source unique de verite (les
+  // products de l'order) et on est resilient au schema (lignes ajoutees/
+  // retirees apres reservation sont rares mais possibles via un re-import).
+  const stockCheck = analyzeOrderStock(order, db.stock);
+  let restoredCount = 0;
+  stockCheck.lines.forEach(line => {
+    if (!line.required || line.required <= 0) return;
+    const product = db.stock.find(item => String(item.id) === String(line.stockId));
+    if (!product) return;
+    const available = getStockQuantity(product) ?? 0;
+    setStockQuantity(product, available + line.required);
+    restoredCount += 1;
+  });
+
+  order.stockReservedAt = null;
+  order.stockReleasedAt = new Date().toISOString();
+  order.stockReleaseReason = reason || "release";
+
+  addHistory(db, "Stock libere", `Commande ${order.numero || order.id} : ${restoredCount} ligne(s) restituee(s)`, {
+    orderId: order.id,
+    numero: order.numero,
+    reason: reason || "release",
+    lines: restoredCount
+  });
+
+  return true;
 }
 
 function findOrder(db, orderId) {
@@ -3333,8 +3514,39 @@ app.get("/api/storage/status", (req, res) => {
     path: useSqliteStorage() ? SQLITE_PATH : DB_PATH,
     // B3 v1.16.0 : expose la derniere recovery de corruption (null si aucune)
     // pour qu'un client/admin puisse afficher une alerte de perte de donnees.
-    lastRecovery: lastStorageRecovery
+    lastRecovery: lastStorageRecovery,
+    // Chantier 1 : flag indiquant si le snapshot post-restore a deja ete fait
+    // (visible pour debug ; le snapshot est cree au premier appel writeDb).
+    postRestoreBackupDone
   });
+});
+
+// Chantier 1 (2026-06-04) : force un backup immediat, hors throttle. Utilise
+// par l'admin avant une operation a risque (purge, migration, restauration
+// manuelle) ou apres un long deploiement sans mutation. Tag optionnel.
+//
+// Revue R1 P0 : addHistory + writeDb dans withWriteLock pour persister
+// l'entree de log (avant, addHistory(readDb(), ...) sans writeDb perdait
+// l'entree silencieusement).
+app.post("/api/backup/now", async (req, res) => {
+  try {
+    const tag = clean(req.body?.tag || "manual").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 32);
+    const result = await withWriteLock(async () => {
+      const backupPath = writeBackupNow(tag);
+      if (!backupPath) return { ok: false, error: "Backup impossible (source absente)" };
+
+      const db = readDb();
+      addHistory(db, "Backup manuel", `Backup forcé créé : ${path.basename(backupPath)}`, { tag, backupPath });
+      writeDb(db, { backup: false }); // pas de double-backup recursif
+      return { ok: true, backupPath: path.basename(backupPath), tag };
+    });
+    if (!result.ok) {
+      return res.status(503).json(result);
+    }
+    res.json(result);
+  } catch (error) {
+    handleRouteError(error, res, "Erreur backup manuel");
+  }
 });
 
 // v1.17.1 : diagnostic des dates suspectes en DB. M1 a durci normalizeDateInput :
@@ -3416,34 +3628,37 @@ app.get("/api/settings/appearance", (req, res) => {
   res.json(getAppearanceSettings(readDb()));
 });
 
-app.patch("/api/settings/appearance", (req, res) => {
+app.patch("/api/settings/appearance", async (req, res) => {
   try {
-    const db = readDb();
-    const appearance = getAppearanceSettings(db);
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      const appearance = getAppearanceSettings(db);
 
-    if (Object.prototype.hasOwnProperty.call(req.body || {}, "themeId")) {
-      const themeId = clean(req.body.themeId);
-      if (!themeId || !/^[a-z0-9_-]{1,40}$/i.test(themeId)) {
-        throw badRequest("Palette invalide");
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "themeId")) {
+        const themeId = clean(req.body.themeId);
+        if (!themeId || !/^[a-z0-9_-]{1,40}$/i.test(themeId)) {
+          throw badRequest("Palette invalide");
+        }
+        appearance.themeId = themeId;
       }
-      appearance.themeId = themeId;
-    }
 
-    if (Object.prototype.hasOwnProperty.call(req.body || {}, "brandImage")) {
-      appearance.brandImage = validateBrandImage(req.body.brandImage);
-    }
-
-    if (Object.prototype.hasOwnProperty.call(req.body || {}, "colorScheme")) {
-      const raw = clean(req.body.colorScheme).toLowerCase();
-      if (!VALID_COLOR_SCHEMES.has(raw)) {
-        throw badRequest("Mode d'affichage invalide");
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "brandImage")) {
+        appearance.brandImage = validateBrandImage(req.body.brandImage);
       }
-      appearance.colorScheme = raw;
-    }
 
-    db.settings.appearance = appearance;
-    writeDb(db);
-    res.json(appearance);
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "colorScheme")) {
+        const raw = clean(req.body.colorScheme).toLowerCase();
+        if (!VALID_COLOR_SCHEMES.has(raw)) {
+          throw badRequest("Mode d'affichage invalide");
+        }
+        appearance.colorScheme = raw;
+      }
+
+      db.settings.appearance = appearance;
+      writeDb(db);
+      return appearance;
+    });
+    res.json(result);
   } catch (error) {
     handleRouteError(error, res, "Erreur parametres");
   }
@@ -3460,25 +3675,28 @@ app.get("/api/settings/tournee", (req, res) => {
   res.json(normalizeSettings(db.settings || {}).tournee);
 });
 
-app.patch("/api/settings/order-numbering", (req, res) => {
+app.patch("/api/settings/order-numbering", async (req, res) => {
   try {
-    const db = readDb();
-    db.settings = normalizeSettings(db.settings || {});
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      db.settings = normalizeSettings(db.settings || {});
 
-    if (Object.prototype.hasOwnProperty.call(req.body || {}, "prefix")) {
-      const raw = clean(req.body.prefix).toUpperCase();
-      if (!/^[A-Z0-9]{2,8}$/.test(raw)) {
-        throw badRequest("Prefixe invalide : 2 a 8 caracteres alphanumeriques (ex: CMD, ORD, BC)");
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "prefix")) {
+        const raw = clean(req.body.prefix).toUpperCase();
+        if (!/^[A-Z0-9]{2,8}$/.test(raw)) {
+          throw badRequest("Prefixe invalide : 2 a 8 caracteres alphanumeriques (ex: CMD, ORD, BC)");
+        }
+        db.settings.orderNumbering.prefix = raw;
       }
-      db.settings.orderNumbering.prefix = raw;
-    }
 
-    if (Object.prototype.hasOwnProperty.call(req.body || {}, "resetAnnually")) {
-      db.settings.orderNumbering.resetAnnually = !!req.body.resetAnnually;
-    }
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "resetAnnually")) {
+        db.settings.orderNumbering.resetAnnually = !!req.body.resetAnnually;
+      }
 
-    writeDb(db);
-    res.json(db.settings.orderNumbering);
+      writeDb(db);
+      return db.settings.orderNumbering;
+    });
+    res.json(result);
   } catch (error) {
     handleRouteError(error, res, "Erreur parametres numerotation");
   }
@@ -3496,35 +3714,38 @@ app.patch("/api/settings/order-numbering", (req, res) => {
 //   un middleware inline. Reduire la limite globale casserait brandImage.
 //   La protection reste : typeof + bornes serveur. Backlog : rate-limit
 //   global /api/settings/*.
-app.patch("/api/settings/tournee", (req, res) => {
+app.patch("/api/settings/tournee", async (req, res) => {
   try {
-    const db = readDb();
-    db.settings = normalizeSettings(db.settings || {});
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      db.settings = normalizeSettings(db.settings || {});
 
-    if (Object.prototype.hasOwnProperty.call(req.body || {}, "averageSpeedKmh")) {
-      if (typeof req.body.averageSpeedKmh !== "number") {
-        throw badRequest("averageSpeedKmh doit etre un nombre");
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "averageSpeedKmh")) {
+        if (typeof req.body.averageSpeedKmh !== "number") {
+          throw badRequest("averageSpeedKmh doit etre un nombre");
+        }
+        const raw = req.body.averageSpeedKmh;
+        if (!Number.isFinite(raw) || raw < 10 || raw > 60) {
+          throw badRequest("Vitesse moyenne invalide : entre 10 et 60 km/h");
+        }
+        db.settings.tournee.averageSpeedKmh = Math.round(raw);
       }
-      const raw = req.body.averageSpeedKmh;
-      if (!Number.isFinite(raw) || raw < 10 || raw > 60) {
-        throw badRequest("Vitesse moyenne invalide : entre 10 et 60 km/h");
-      }
-      db.settings.tournee.averageSpeedKmh = Math.round(raw);
-    }
 
-    if (Object.prototype.hasOwnProperty.call(req.body || {}, "stopDurationMin")) {
-      if (typeof req.body.stopDurationMin !== "number") {
-        throw badRequest("stopDurationMin doit etre un nombre");
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "stopDurationMin")) {
+        if (typeof req.body.stopDurationMin !== "number") {
+          throw badRequest("stopDurationMin doit etre un nombre");
+        }
+        const raw = req.body.stopDurationMin;
+        if (!Number.isFinite(raw) || raw < 0 || raw > 30) {
+          throw badRequest("Duree d'arret invalide : entre 0 et 30 minutes");
+        }
+        db.settings.tournee.stopDurationMin = Math.round(raw);
       }
-      const raw = req.body.stopDurationMin;
-      if (!Number.isFinite(raw) || raw < 0 || raw > 30) {
-        throw badRequest("Duree d'arret invalide : entre 0 et 30 minutes");
-      }
-      db.settings.tournee.stopDurationMin = Math.round(raw);
-    }
 
-    writeDb(db);
-    res.json(db.settings.tournee);
+      writeDb(db);
+      return db.settings.tournee;
+    });
+    res.json(result);
   } catch (error) {
     handleRouteError(error, res, "Erreur parametres tournee");
   }
@@ -3584,6 +3805,11 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
 
     const headers = rows[headerIndex];
     const dataRows = rows.slice(headerIndex + 1);
+
+    // Chantier 1 : wrap mutations dans withWriteLock pour eviter le TOCTOU
+    // contre d'autres imports/PATCH concurrents. Lecture Excel deja faite
+    // hors-verrou (cout 5-30s).
+    const response = await withWriteLock(async () => {
     const db = readDb();
 
     // Index des produits existants par productKey (code/nom normalises)
@@ -3703,7 +3929,7 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
 
     writeDb(db);
 
-    res.json({
+    return {
       success: true,
       stock: db.stock,
       commandes: db.commandes,
@@ -3712,7 +3938,9 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
       updated: updatedCount,
       preserved: preservedProducts.length,
       archive
+    };
     });
+    res.json(response);
   } catch (error) {
     handleRouteError(error, res, "Erreur import stock");
   } finally {
@@ -3746,6 +3974,10 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
 
     const headers = rows[headerIndex];
     const dataRows = rows.slice(headerIndex + 1);
+
+    // Chantier 1 : wrap dans withWriteLock pour eviter les races avec
+    // d'autres imports/PATCH concurrents.
+    const response = await withWriteLock(async () => {
     const db = readDb();
     const existingClients = new Map(db.clients.map(client => [clientKey(client), client]));
 
@@ -4018,7 +4250,7 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
 
     writeDb(db);
 
-    res.json({
+    return {
       success: true,
       ventes: db.ventes,
       clients: db.clients,
@@ -4029,10 +4261,11 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       created: createdCount,
       updated: updatedCount,
       skippedIdentical: skippedIdenticalCount,
-      // M2 (revue) : trace metier pour audit (retours/avoirs masques sinon)
       clampedNegativeQuantities: clampedNegativeQtyCount,
       archive
-    });
+    };
+    }); // fin withWriteLock
+    res.json(response);
   } catch (error) {
     handleRouteError(error, res, "Erreur import ventes");
   } finally {
@@ -4087,33 +4320,35 @@ app.get("/api/imports/archives/:id/download", (req, res) => {
 //
 // La purge laisse l'utilisateur pouvoir reimporter ses Excel originaux
 // depuis Parametres -> Historique imports -> Telecharger.
-app.post("/api/orders/purge", (req, res) => {
+app.post("/api/orders/purge", async (req, res) => {
   try {
-    const db = readDb();
-    const purgedCounts = {
-      commandes: db.commandes.length,
-      clients: db.clients.length,
-      ventes: db.ventes.length,
-      routes: db.routes.length
-    };
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      const purgedCounts = {
+        commandes: db.commandes.length,
+        clients: db.clients.length,
+        ventes: db.ventes.length,
+        routes: db.routes.length
+      };
 
-    db.commandes = [];
-    db.clients = [];
-    db.ventes = [];
-    db.routes = [];
+      db.commandes = [];
+      db.clients = [];
+      db.ventes = [];
+      db.routes = [];
 
-    addHistory(
-      db,
-      "Purge",
-      `Reset bons de commande : ${purgedCounts.commandes} commande(s), ${purgedCounts.clients} client(s), ${purgedCounts.ventes} vente(s), ${purgedCounts.routes} tournee(s) supprimees. Stock et historique preserves.`,
-      purgedCounts
-    );
+      addHistory(
+        db,
+        "Purge",
+        `Reset bons de commande : ${purgedCounts.commandes} commande(s), ${purgedCounts.clients} client(s), ${purgedCounts.ventes} vente(s), ${purgedCounts.routes} tournee(s) supprimees. Stock et historique preserves.`,
+        purgedCounts
+      );
 
-    writeDb(db);
-
+      writeDb(db);
+      return purgedCounts;
+    });
     res.json({
       success: true,
-      purged: purgedCounts,
+      purged: result,
       message: "Bons de commande purges. Re-importez vos Excel depuis Parametres > Historique imports."
     });
   } catch (error) {
@@ -4121,34 +4356,37 @@ app.post("/api/orders/purge", (req, res) => {
   }
 });
 
-app.patch("/api/stock/:id", (req, res) => {
+app.patch("/api/stock/:id", async (req, res) => {
   try {
-    const db = readDb();
-    const product = db.stock.find(p => String(p.id) === String(req.params.id));
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      const product = db.stock.find(p => String(p.id) === String(req.params.id));
 
-    if (!product) {
-      throw notFound("Produit introuvable");
-    }
+      if (!product) {
+        throw notFound("Produit introuvable");
+      }
 
-    const nextQuantity = Number(String(req.body.quantite ?? "").replace(",", "."));
+      const nextQuantity = Number(String(req.body.quantite ?? "").replace(",", "."));
 
-    if (!Number.isFinite(nextQuantity) || nextQuantity < 0) {
-      throw badRequest("Quantite invalide");
-    }
+      if (!Number.isFinite(nextQuantity) || nextQuantity < 0) {
+        throw badRequest("Quantite invalide");
+      }
 
-    const oldQuantity = getStockQuantity(product) ?? 0;
-    setStockQuantity(product, nextQuantity);
-    recordStockMovement(db, product, oldQuantity, product.quantite, req.body.reason);
+      const oldQuantity = getStockQuantity(product) ?? 0;
+      setStockQuantity(product, nextQuantity);
+      recordStockMovement(db, product, oldQuantity, product.quantite, req.body.reason);
 
-    syncWorkflow(db);
-    addHistory(db, "Stock", `${product.nom} : stock ${oldQuantity} -> ${product.quantite}`, {
-      produitId: product.id,
-      ancienStock: oldQuantity,
-      nouveauStock: product.quantite
+      syncWorkflow(db);
+      addHistory(db, "Stock", `${product.nom} : stock ${oldQuantity} -> ${product.quantite}`, {
+        produitId: product.id,
+        ancienStock: oldQuantity,
+        nouveauStock: product.quantite
+      });
+
+      writeDb(db);
+      return enrichStockItem(db, product);
     });
-
-    writeDb(db);
-    res.json(enrichStockItem(db, product));
+    res.json(result);
   } catch (error) {
     handleRouteError(error, res, "Erreur modification stock");
   }
@@ -4159,359 +4397,448 @@ app.patch("/api/stock/:id", (req, res) => {
 // "Compléter le profil client" depuis la modal detail bon de commande v1.11.0.
 // Propage les changements vers la/les commande(s) active(s) du client pour que
 // les ecrans Livraison/Preparation reflechent l'adresse a jour.
-app.patch("/api/clients/:id", (req, res) => {
+app.patch("/api/clients/:id", async (req, res) => {
   try {
-    const db = readDb();
-    const client = db.clients.find(c => String(c.id) === String(req.params.id));
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      const client = db.clients.find(c => String(c.id) === String(req.params.id));
 
-    if (!client) {
-      throw notFound("Client introuvable");
-    }
+      if (!client) {
+        throw notFound("Client introuvable");
+      }
 
-    const updates = {};
-    if (req.body.nom !== undefined) updates.nom = clean(req.body.nom);
-    if (req.body.rue !== undefined) updates.rue = clean(req.body.rue);
-    if (req.body.codePostal !== undefined) updates.codePostal = clean(req.body.codePostal);
-    if (req.body.ville !== undefined) {
-      const newVille = normalizeCity(clean(req.body.ville));
-      updates.ville = newVille;
-      // Le secteur DOIT etre recalcule depuis la nouvelle ville (sans tenir
-      // compte de l'ancien). Si le user fournit explicitement un secteur, on
-      // le respecte, sinon on le derive de la nouvelle ville seulement.
-      const explicitSector = req.body.secteur !== undefined ? clean(req.body.secteur) : "";
-      updates.secteur = deriveSector(newVille, explicitSector);
-    }
-    if (req.body.telephone !== undefined) updates.telephone = clean(req.body.telephone);
-    if (req.body.notes !== undefined) updates.notes = clean(req.body.notes);
+      const updates = {};
+      if (req.body.nom !== undefined) updates.nom = clean(req.body.nom);
+      if (req.body.rue !== undefined) updates.rue = clean(req.body.rue);
+      if (req.body.codePostal !== undefined) updates.codePostal = clean(req.body.codePostal);
+      if (req.body.ville !== undefined) {
+        const newVille = normalizeCity(clean(req.body.ville));
+        updates.ville = newVille;
+        const explicitSector = req.body.secteur !== undefined ? clean(req.body.secteur) : "";
+        updates.secteur = deriveSector(newVille, explicitSector);
+      }
+      if (req.body.telephone !== undefined) updates.telephone = clean(req.body.telephone);
+      if (req.body.notes !== undefined) updates.notes = clean(req.body.notes);
 
-    Object.assign(client, updates);
-    client.updatedAt = new Date().toISOString();
+      Object.assign(client, updates);
+      client.updatedAt = new Date().toISOString();
 
-    // Propager vers la ou les commandes du client (peut etre plusieurs depuis Phase 2 ERP)
-    const matchingOrders = db.commandes.filter(o => String(o.clientId) === String(client.id));
-    matchingOrders.forEach(order => {
-      if (updates.nom !== undefined) order.clientName = updates.nom;
-      if (updates.rue !== undefined) order.address = updates.rue;
-      if (updates.codePostal !== undefined) order.postalCode = updates.codePostal;
-      if (updates.ville !== undefined) order.city = updates.ville;
-      if (updates.ville !== undefined) order.sector = updates.secteur;
-      if (updates.telephone !== undefined) order.phone = updates.telephone;
-      if (updates.notes !== undefined) order.notes = updates.notes;
-      order.updatedAt = new Date().toISOString();
+      const matchingOrders = db.commandes.filter(o => String(o.clientId) === String(client.id));
+      matchingOrders.forEach(order => {
+        if (updates.nom !== undefined) order.clientName = updates.nom;
+        if (updates.rue !== undefined) order.address = updates.rue;
+        if (updates.codePostal !== undefined) order.postalCode = updates.codePostal;
+        if (updates.ville !== undefined) order.city = updates.ville;
+        if (updates.ville !== undefined) order.sector = updates.secteur;
+        if (updates.telephone !== undefined) order.phone = updates.telephone;
+        if (updates.notes !== undefined) order.notes = updates.notes;
+        order.updatedAt = new Date().toISOString();
+      });
+
+      addHistory(db, "Client", `${client.nom} : profil mis a jour`, {
+        clientId: client.id,
+        champsModifies: Object.keys(updates)
+      });
+
+      writeDb(db);
+      return { client, ordersUpdated: matchingOrders.length };
     });
-
-    addHistory(db, "Client", `${client.nom} : profil mis a jour`, {
-      clientId: client.id,
-      champsModifies: Object.keys(updates)
-    });
-
-    writeDb(db);
-    res.json({ client, ordersUpdated: matchingOrders.length });
+    res.json(result);
   } catch (error) {
     handleRouteError(error, res, "Erreur mise a jour client");
   }
 });
 
-app.patch("/api/clients/:id/coordinates", (req, res) => {
+app.patch("/api/clients/:id/coordinates", async (req, res) => {
   try {
-    const db = readDb();
-    const client = db.clients.find(c => String(c.id) === String(req.params.id));
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      const client = db.clients.find(c => String(c.id) === String(req.params.id));
 
-    if (!client) {
-      throw notFound("Client introuvable");
-    }
+      if (!client) {
+        throw notFound("Client introuvable");
+      }
 
-    const lat = parseCoordinate(req.body.lat, -90, 90);
-    const lng = parseCoordinate(req.body.lng, -180, 180);
+      const lat = parseCoordinate(req.body.lat, -90, 90);
+      const lng = parseCoordinate(req.body.lng, -180, 180);
 
-    if (!lat.ok || !lng.ok) {
-      throw badRequest("Coordonnees invalides");
-    }
+      if (!lat.ok || !lng.ok) {
+        throw badRequest("Coordonnees invalides");
+      }
 
-    client.lat = lat.value;
-    client.lng = lng.value;
+      client.lat = lat.value;
+      client.lng = lng.value;
 
-    const order = db.commandes.find(item => String(item.clientId) === String(client.id));
-    if (order) {
-      order.lat = lat.value;
-      order.lng = lng.value;
-      order.updatedAt = new Date().toISOString();
-    }
+      const order = db.commandes.find(item => String(item.clientId) === String(client.id));
+      if (order) {
+        order.lat = lat.value;
+        order.lng = lng.value;
+        order.updatedAt = new Date().toISOString();
+      }
 
-    addHistory(db, "Coordonnees", `${client.nom} : coordonnees mises a jour`, {
-      clientId: client.id,
-      lat: client.lat,
-      lng: client.lng
+      addHistory(db, "Coordonnees", `${client.nom} : coordonnees mises a jour`, {
+        clientId: client.id,
+        lat: client.lat,
+        lng: client.lng
+      });
+
+      writeDb(db);
+      return client;
     });
-
-    writeDb(db);
-    res.json(client);
+    res.json(result);
   } catch (error) {
     handleRouteError(error, res, "Erreur coordonnees");
   }
 });
 
-app.post("/api/orders/:id/start-preparation", (req, res) => {
+app.post("/api/orders/:id/start-preparation", async (req, res) => {
   try {
-    const db = readDb();
-    const order = findOrder(db, req.params.id);
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      const order = findOrder(db, req.params.id);
 
-    reserveStockForOrder(db, order);
-    setOrderStatus(order, "en_preparation");
+      reserveStockForOrder(db, order);
+      setOrderStatus(order, "en_preparation");
 
-    addHistory(db, "Preparation", `${order.clientName} : preparation demarree`, {
-      orderId: order.id,
-      clientId: order.clientId
+      addHistory(db, "Preparation", `${order.clientName} : preparation demarree`, {
+        orderId: order.id,
+        clientId: order.clientId
+      });
+
+      writeDb(db);
+      return order;
     });
-
-    writeDb(db);
-    res.json(order);
+    res.json(result);
   } catch (error) {
     handleRouteError(error, res, "Erreur preparation");
   }
 });
 
-app.post("/api/orders/:id/finish-preparation", (req, res) => {
+app.post("/api/orders/:id/finish-preparation", async (req, res) => {
   try {
-    const db = readDb();
-    const order = findOrder(db, req.params.id);
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      const order = findOrder(db, req.params.id);
 
-    if (!["en_preparation", "preparation_terminee", "pret_livraison"].includes(order.status)) {
-      throw badRequest("La commande doit etre en preparation avant validation");
-    }
+      if (!["en_preparation", "preparation_terminee", "pret_livraison"].includes(order.status)) {
+        throw badRequest("La commande doit etre en preparation avant validation");
+      }
 
-    setOrderStatus(order, "pret_livraison");
-    order.deliveryDate = normalizeDateInput(req.body?.deliveryDate) || order.deliveryDate || new Date().toISOString().slice(0, 10);
+      setOrderStatus(order, "pret_livraison");
+      order.deliveryDate = normalizeDateInput(req.body?.deliveryDate) || order.deliveryDate || new Date().toISOString().slice(0, 10);
 
-    addHistory(db, "Preparation", `${order.clientName} : pret pour livraison`, {
-      orderId: order.id,
-      clientId: order.clientId,
-      deliveryDate: order.deliveryDate
+      addHistory(db, "Preparation", `${order.clientName} : pret pour livraison`, {
+        orderId: order.id,
+        clientId: order.clientId,
+        deliveryDate: order.deliveryDate
+      });
+
+      writeDb(db);
+      return order;
     });
-
-    writeDb(db);
-    res.json(order);
+    res.json(result);
   } catch (error) {
     handleRouteError(error, res, "Erreur fin preparation");
   }
 });
 
-app.patch("/api/orders/:id", (req, res) => {
+app.patch("/api/orders/:id", async (req, res) => {
   try {
-    const db = readDb();
-    const order = findOrder(db, req.params.id);
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      const order = findOrder(db, req.params.id);
 
-    if (req.body.notes !== undefined) order.notes = clean(req.body.notes);
-    if (req.body.priority !== undefined) order.priority = clean(req.body.priority);
-    if (req.body.sector !== undefined) order.sector = deriveSector(order.city, req.body.sector);
-    if (req.body.deliveryDate !== undefined) order.deliveryDate = normalizeDateInput(req.body.deliveryDate);
-    if (req.body.status !== undefined) setOrderStatus(order, req.body.status);
+      if (req.body.notes !== undefined) order.notes = clean(req.body.notes);
+      if (req.body.priority !== undefined) order.priority = clean(req.body.priority);
+      if (req.body.sector !== undefined) order.sector = deriveSector(order.city, req.body.sector);
+      if (req.body.deliveryDate !== undefined) order.deliveryDate = normalizeDateInput(req.body.deliveryDate);
+      if (req.body.status !== undefined) setOrderStatus(order, req.body.status);
 
-    order.updatedAt = new Date().toISOString();
-    writeDb(db);
-    res.json(order);
+      order.updatedAt = new Date().toISOString();
+      writeDb(db);
+      return order;
+    });
+    res.json(result);
   } catch (error) {
     handleRouteError(error, res, "Erreur commande");
   }
 });
 
-app.post("/api/routes", (req, res) => {
+// Chantier 1 (2026-06-04) : endpoint admin explicite pour LIBERER la reservation
+// de stock d'une commande en `probleme_livraison` ou `a_reprogrammer`. Pattern
+// ERP standard (Odoo, ERPNext) : la liberation n'est jamais auto sur ces
+// statuts (livraison echouee = relivraison sous 24-72h sur meme stock). Mais
+// l'admin doit pouvoir le decider explicitement quand la commande n'est plus
+// reprogrammable.
+//
+// Reponse : { released: bool, lines: number, reason: string }
+app.post("/api/orders/:id/release-stock", async (req, res) => {
   try {
-    const db = readDb();
-    const route = createRoute(db, {
-      sector: req.body.sector,
-      city: req.body.city,
-      deliveryDate: req.body.deliveryDate,
-      orderIds: req.body.orderIds
-    });
+    const reason = clean(req.body?.reason) || "manual_release";
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      const order = findOrder(db, req.params.id);
 
-    addHistory(db, "Tournee", `${route.stops.length} arret(s) ajoutes a la tournee ${route.sector}`, {
-      routeId: route.id,
-      sector: route.sector
-    });
+      if (!order.stockReservedAt) {
+        return { released: false, lines: 0, reason: "no_reservation", message: "Aucune reservation active sur cette commande" };
+      }
+      if (!["probleme_livraison", "a_reprogrammer"].includes(order.status)) {
+        throw badRequest("La liberation manuelle de stock est reservee aux commandes en probleme_livraison ou a_reprogrammer");
+      }
 
-    writeDb(db);
+      const released = releaseOrderStockReservation(db, order, reason);
+      order.updatedAt = new Date().toISOString();
+
+      writeDb(db);
+      return { released, lines: released ? 1 : 0, reason, order };
+    });
+    res.json(result);
+  } catch (error) {
+    handleRouteError(error, res, "Erreur liberation stock");
+  }
+});
+
+app.post("/api/routes", async (req, res) => {
+  try {
+    const route = await withWriteLock(async () => {
+      const db = readDb();
+      const r = createRoute(db, {
+        sector: req.body.sector,
+        city: req.body.city,
+        deliveryDate: req.body.deliveryDate,
+        orderIds: req.body.orderIds
+      });
+
+      addHistory(db, "Tournee", `${r.stops.length} arret(s) ajoutes a la tournee ${r.sector}`, {
+        routeId: r.id,
+        sector: r.sector
+      });
+
+      writeDb(db);
+      return r;
+    });
     res.status(201).json(route);
   } catch (error) {
     handleRouteError(error, res, "Erreur creation tournee");
   }
 });
 
-app.post("/api/routes/:id/start", (req, res) => {
+app.post("/api/routes/:id/start", async (req, res) => {
   try {
-    const db = readDb();
-    const route = startRoute(db, req.params.id);
+    const route = await withWriteLock(async () => {
+      const db = readDb();
+      const r = startRoute(db, req.params.id);
 
-    addHistory(db, "Tournee", `${route.stops.length} arret(s) en livraison`, {
-      routeId: route.id
+      addHistory(db, "Tournee", `${r.stops.length} arret(s) en livraison`, {
+        routeId: r.id
+      });
+
+      writeDb(db);
+      return r;
     });
-
-    writeDb(db);
     res.json(route);
   } catch (error) {
     handleRouteError(error, res, "Erreur demarrage tournee");
   }
 });
 
-app.patch("/api/routes/:routeId/stops/:stopId", (req, res) => {
+app.patch("/api/routes/:routeId/stops/:stopId", async (req, res) => {
   try {
-    const db = readDb();
-    const result = updateRouteStop(db, req.params.routeId, req.params.stopId, req.body.status, req.body.notes);
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      const r = updateRouteStop(db, req.params.routeId, req.params.stopId, req.body.status, req.body.notes);
 
-    addHistory(db, "Livraison", `${result.stop.clientName} : ${result.stop.status}`, {
-      routeId: result.route.id,
-      stopId: result.stop.id,
-      orderId: result.order.id
+      addHistory(db, "Livraison", `${r.stop.clientName} : ${r.stop.status}`, {
+        routeId: r.route.id,
+        stopId: r.stop.id,
+        orderId: r.order.id
+      });
+
+      writeDb(db);
+      return r;
     });
-
-    writeDb(db);
     res.json(result);
   } catch (error) {
     handleRouteError(error, res, "Erreur statut livraison");
   }
 });
 
-app.patch("/api/routes/:id/reorder", (req, res) => {
+app.patch("/api/routes/:id/reorder", async (req, res) => {
   try {
-    const db = readDb();
-    const route = reorderRouteStops(db, req.params.id, req.body.stopIds);
+    const route = await withWriteLock(async () => {
+      const db = readDb();
+      const r = reorderRouteStops(db, req.params.id, req.body.stopIds);
 
-    addHistory(db, "Tournee", "Ordre de tournee modifie", {
-      routeId: route.id
+      addHistory(db, "Tournee", "Ordre de tournee modifie", {
+        routeId: r.id
+      });
+
+      writeDb(db);
+      return r;
     });
-
-    writeDb(db);
     res.json(route);
   } catch (error) {
     handleRouteError(error, res, "Erreur ordre tournee");
   }
 });
 
-app.post("/api/livraison", (req, res) => {
+// Revue R1 P1 #7+#8 : depuis Phase 2 ERP, un client peut avoir PLUSIEURS
+// commandes actives. L'ancien code ne mettait a jour que la 1re trouvee, et
+// retournait 200 meme quand aucune commande n'etait trouvee (silent failure).
+// Maintenant :
+// - on cherche TOUTES les commandes du client en cours de livraison
+// - si aucune trouvee mais le client existe : 200 avec ordersUpdated:0
+// - on retourne le compte des commandes mises a jour pour traçabilite
+app.post("/api/livraison", async (req, res) => {
   try {
-    const db = readDb();
-    const { clientId, statut } = req.body;
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      const { clientId, statut, orderId } = req.body;
 
-    if (!DELIVERY_STATUSES.has(statut)) {
-      throw badRequest("Statut livraison invalide");
-    }
+      if (!DELIVERY_STATUSES.has(statut)) {
+        throw badRequest("Statut livraison invalide");
+      }
 
-    const client = db.clients.find(c => String(c.id) === String(clientId));
+      const c = db.clients.find(x => String(x.id) === String(clientId));
+      if (!c) {
+        throw notFound("Client introuvable");
+      }
+      c.statut = statut;
 
-    if (!client) {
-      throw notFound("Client introuvable");
-    }
+      // Filtre des commandes a affecter :
+      // - si orderId est fourni : juste cette commande (precis)
+      // - sinon : TOUTES les commandes actives (non-livre, non-archived) du client
+      const candidateOrders = orderId
+        ? db.commandes.filter(item => String(item.id) === String(orderId) && String(item.clientId) === String(clientId))
+        : db.commandes.filter(item =>
+            String(item.clientId) === String(clientId)
+            && !["livre"].includes(item.status)
+          );
 
-    client.statut = statut;
+      let ordersUpdated = 0;
+      candidateOrders.forEach(order => {
+        const targetStatus =
+          statut === "livree" ? "livre"
+          : statut === "en_cours" ? "en_livraison"
+          : ["absent", "probleme", "non_livre"].includes(statut) ? "probleme_livraison"
+          : null;
+        if (targetStatus && isValidOrderStatusTransition(order.status, targetStatus)) {
+          setOrderStatus(order, targetStatus);
+          ordersUpdated += 1;
+        }
+      });
 
-    const order = db.commandes.find(item => String(item.clientId) === String(clientId));
-    if (order) {
-      if (statut === "livree") setOrderStatus(order, "livre");
-      else if (statut === "en_cours") setOrderStatus(order, "en_livraison");
-      else if (["absent", "probleme", "non_livre"].includes(statut)) setOrderStatus(order, "probleme_livraison");
-    }
+      addHistory(db, "Livraison", `${c.nom} : ${statut} (${ordersUpdated} commande(s))`, {
+        clientId,
+        statut,
+        ordersUpdated,
+        orderId: orderId || null
+      });
 
-    addHistory(db, "Livraison", `${client.nom} : ${statut}`, {
-      clientId,
-      statut
+      writeDb(db);
+      return { client: c, ordersUpdated, orderIds: candidateOrders.filter((_, i) => i < ordersUpdated).map(o => o.id) };
     });
-
-    writeDb(db);
-    res.json(client);
+    res.json(result);
   } catch (error) {
     handleRouteError(error, res, "Erreur livraison");
   }
 });
 
-app.post("/api/reset-tournee", (req, res) => {
-  const db = readDb();
+app.post("/api/reset-tournee", async (req, res) => {
+  try {
+    await withWriteLock(async () => {
+      const db = readDb();
 
-  db.clients = db.clients.map(client => ({
-    ...client,
-    statut: "restant"
-  }));
+      db.clients = db.clients.map(client => ({
+        ...client,
+        statut: "restant"
+      }));
 
-  db.commandes = db.commandes.map(order => {
-    if (["en_livraison", "livre", "probleme_livraison", "a_reprogrammer"].includes(order.status)) {
-      setOrderStatus(order, order.preparationStatus === "terminee" ? "pret_livraison" : "stock_a_verifier");
-    }
+      db.commandes = db.commandes.map(order => {
+        if (["en_livraison", "livre", "probleme_livraison", "a_reprogrammer"].includes(order.status)) {
+          setOrderStatus(order, order.preparationStatus === "terminee" ? "pret_livraison" : "stock_a_verifier");
+        }
 
-    return order;
-  });
+        return order;
+      });
 
-  db.routes = db.routes.map(route => ({
-    ...route,
-    status: route.status === "en_livraison" ? "prete" : route.status,
-    stops: route.stops.map(stop => ({
-      ...stop,
-      status: stop.status === "en_livraison" ? "pret_livraison" : stop.status
-    }))
-  }));
+      db.routes = db.routes.map(route => ({
+        ...route,
+        status: route.status === "en_livraison" ? "prete" : route.status,
+        stops: route.stops.map(stop => ({
+          ...stop,
+          status: stop.status === "en_livraison" ? "pret_livraison" : stop.status
+        }))
+      }));
 
-  addHistory(db, "Tournee", "Tournee reinitialisee");
-
-  writeDb(db);
-  res.json({
-    success: true
-  });
+      addHistory(db, "Tournee", "Tournee reinitialisee");
+      writeDb(db);
+    });
+    res.json({ success: true });
+  } catch (error) {
+    handleRouteError(error, res, "Erreur reset tournee");
+  }
 });
 
-app.post("/api/optimize-route", (req, res) => {
-  const db = readDb();
-  const requestedIds = Array.isArray(req.body?.clientIds) ? new Set(req.body.clientIds.map(String)) : null;
+app.post("/api/optimize-route", async (req, res) => {
+  try {
+    const optimizedClients = await withWriteLock(async () => {
+      const db = readDb();
+      const requestedIds = Array.isArray(req.body?.clientIds) ? new Set(req.body.clientIds.map(String)) : null;
 
-  const source = requestedIds
-    ? db.clients.filter(client => requestedIds.has(String(client.id)))
-    : db.clients.filter(client => ["restant", "en_cours"].includes(client.statut || "restant"));
+      const source = requestedIds
+        ? db.clients.filter(client => requestedIds.has(String(client.id)))
+        : db.clients.filter(client => ["restant", "en_cours"].includes(client.statut || "restant"));
 
-  const withCoords = source.filter(client => getCoordinates(client));
-  const withoutCoords = source.filter(client => !getCoordinates(client));
+      const withCoords = source.filter(client => getCoordinates(client));
+      const withoutCoords = source.filter(client => !getCoordinates(client));
 
-  let remaining = [...withCoords];
-  const optimized = [];
+      let remaining = [...withCoords];
+      const optimized = [];
 
-  if (remaining.length > 0) {
-    let current = remaining.shift();
-    optimized.push(current);
+      if (remaining.length > 0) {
+        let current = remaining.shift();
+        optimized.push(current);
 
-    while (remaining.length > 0) {
-      remaining.sort((a, b) => distance(current, a) - distance(current, b));
-      current = remaining.shift();
-      optimized.push(current);
-    }
+        while (remaining.length > 0) {
+          remaining.sort((a, b) => distance(current, a) - distance(current, b));
+          current = remaining.shift();
+          optimized.push(current);
+        }
+      }
+
+      const result = [...optimized, ...withoutCoords.sort((a, b) => fallbackOrderSort(
+        {
+          sector: a.secteur,
+          city: a.ville,
+          postalCode: a.codePostal,
+          address: a.rue,
+          clientName: a.nom
+        },
+        {
+          sector: b.secteur,
+          city: b.ville,
+          postalCode: b.codePostal,
+          address: b.rue,
+          clientName: b.nom
+        }
+      ))];
+
+      if (!requestedIds) {
+        const optimizedIds = new Set(result.map(client => String(client.id)));
+        db.clients = [
+          ...result,
+          ...db.clients.filter(client => !optimizedIds.has(String(client.id)))
+        ];
+        addHistory(db, "Tournee", "Tournee optimisee");
+        writeDb(db);
+      }
+      return result;
+    });
+    res.json({ success: true, route: optimizedClients });
+  } catch (error) {
+    handleRouteError(error, res, "Erreur optimisation tournee");
   }
-
-  const optimizedClients = [...optimized, ...withoutCoords.sort((a, b) => fallbackOrderSort(
-    {
-      sector: a.secteur,
-      city: a.ville,
-      postalCode: a.codePostal,
-      address: a.rue,
-      clientName: a.nom
-    },
-    {
-      sector: b.secteur,
-      city: b.ville,
-      postalCode: b.codePostal,
-      address: b.rue,
-      clientName: b.nom
-    }
-  ))];
-
-  if (!requestedIds) {
-    const optimizedIds = new Set(optimizedClients.map(client => String(client.id)));
-    db.clients = [
-      ...optimizedClients,
-      ...db.clients.filter(client => !optimizedIds.has(String(client.id)))
-    ];
-    addHistory(db, "Tournee", "Tournee optimisee");
-    writeDb(db);
-  }
-
-  res.json({
-    success: true,
-    route: optimizedClients
-  });
 });
 
 function startServer(port = PORT, host = HOST) {
