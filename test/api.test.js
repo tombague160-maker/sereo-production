@@ -20,7 +20,7 @@ process.env.SEREO_BACKUP_DIR = backupDir;
 process.env.SEREO_AUTH_USER = "";
 process.env.SEREO_AUTH_PASSWORD = "";
 
-const { app, closeStorage, defaultDb, readDb, writeDb } = require("../server");
+const { app, closeStorage, defaultDb, readDb, writeDb, _flushPendingBackup } = require("../server");
 
 let server;
 let baseUrl;
@@ -199,6 +199,9 @@ test("mutating routes reject foreign origins", async () => {
 });
 
 test("stock update persists quantity and creates a backup", async () => {
+  // Chantier 2 : drainer tout backup async d'un test precedent AVANT rmSync
+  // (sinon un .gz fantome reapparait juste apres et fausse les assertions).
+  await _flushPendingBackup();
   fs.rmSync(backupDir, { recursive: true, force: true });
   seedDb({
     ...defaultDb(),
@@ -216,6 +219,8 @@ test("stock update persists quantity and creates a backup", async () => {
 
   const db = readDb();
   assert.equal(db.stock[0].quantite, 7);
+  // Chantier 2 : backup async fire-and-forget -> attendre la fin avant assert FS.
+  await _flushPendingBackup();
   // Depuis v1.2.0 les backups sont compresses en .sqlite.gz (ou .json.gz en mode JSON)
   assert.equal(
     fs.readdirSync(backupDir).some(name => name.endsWith(".sqlite") || name.endsWith(".sqlite.gz")),
@@ -1964,6 +1969,7 @@ test("getRecommendations preserve un seuil 0 (ne le force plus a 5)", async () =
 });
 
 test("backups : 2eme ecriture dans la meme heure ne cree pas de 2eme fichier (throttle)", async () => {
+  await _flushPendingBackup();
   fs.rmSync(backupDir, { recursive: true, force: true });
   seedDb({
     ...defaultDb(),
@@ -1976,6 +1982,7 @@ test("backups : 2eme ecriture dans la meme heure ne cree pas de 2eme fichier (th
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ quantite: 7 })
   });
+  await _flushPendingBackup();
 
   const afterFirst = fs.existsSync(backupDir) ? fs.readdirSync(backupDir) : [];
   const backupsFirst = afterFirst.filter(n => n.endsWith(".sqlite") || n.endsWith(".sqlite.gz"));
@@ -1987,6 +1994,7 @@ test("backups : 2eme ecriture dans la meme heure ne cree pas de 2eme fichier (th
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ quantite: 9 })
   });
+  await _flushPendingBackup();
 
   const afterSecond = fs.existsSync(backupDir) ? fs.readdirSync(backupDir) : [];
   const backupsSecond = afterSecond.filter(n => n.endsWith(".sqlite") || n.endsWith(".sqlite.gz"));
@@ -1994,6 +2002,7 @@ test("backups : 2eme ecriture dans la meme heure ne cree pas de 2eme fichier (th
 });
 
 test("backups : compresses en gzip (.sqlite.gz) plus petits que la base", async () => {
+  await _flushPendingBackup();
   fs.rmSync(backupDir, { recursive: true, force: true });
   seedDb({
     ...defaultDb(),
@@ -2010,6 +2019,7 @@ test("backups : compresses en gzip (.sqlite.gz) plus petits que la base", async 
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ quantite: 99 })
   });
+  await _flushPendingBackup();
 
   const files = fs.readdirSync(backupDir);
   const gzBackup = files.find(n => n.endsWith(".sqlite.gz"));

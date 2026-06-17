@@ -122,6 +122,18 @@ Voir `CONTRIBUTING.md` pour la liste complète + `.release-please-config.json` p
 3. Merger la PR de release → tag + GitHub release créés.
 4. **L'OMV récupère automatiquement dans 15 min** (sereo-updater poll les tags via `git tag --points-at HEAD`).
 
+**Si release-please est cassé** (PAT expiré, tags manuels) : à chaque tag manuel, soit bumper `package.json` à la même version dans le commit, soit s'assurer que `SEREO_APP_VERSION` est posée côté OMV. Cf section **Détection de version**.
+
+### Détection de version (v1.19.0+)
+
+Le serveur lit sa version dans cet ordre :
+1. Variable d'environnement `SEREO_APP_VERSION` (recommandée en prod — posée par le wrapper sereo-updater via `SEREO_APP_VERSION=$(git -C /repo describe --tags --abbrev=0 | sed 's/^v//')`).
+2. Fichier `VERSION` à la racine (écrit par un script de déploiement ou un GitHub Action).
+3. `package.json` (legacy, valide tant que release-please marche).
+4. Fallback `"0.0.0"`.
+
+Le préfixe `v` est strippé automatiquement (`v1.18.0` → `1.18.0`).
+
 ### Auto-deploy en prod
 - Le service `sereo-updater` (Tom.yml côté OMV, hors repo) ne déploie **que les tags `vX.Y.Z`**, pas les commits intermédiaires sur main. Donc une PR feature mergée n'est pas déployée tant que release-please n'a pas créé la release.
 - Si le rebuild échoue, le container `sereo` reste sur l'ancienne image (fallback non-destructif). Logs visibles via `docker logs sereo-updater`.

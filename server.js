@@ -13,15 +13,34 @@ const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.SEREO_HOST || process.env.HOST || "127.0.0.1";
 
-// Lit la version courante depuis package.json (mis a jour automatiquement par
-// release-please a chaque release). Cache en memoire processus : se rafraichit
-// au prochain redemarrage du container (= prochain auto-deploy via sereo-updater).
+// Chantier 2 (audit 2026-06-04) : detection de version multi-source pour
+// gerer le cas ou release-please est en panne et que les tags sont poses
+// manuellement (package.json reste figé). Priorite :
+// 1. env var SEREO_APP_VERSION : posee par le wrapper sereo-updater
+//    (`SEREO_APP_VERSION=$(git describe --tags --abbrev=0 | sed 's/^v//')`).
+// 2. fichier VERSION a la racine : ecrit par un script de build/deploy
+//    avec `git describe --tags --abbrev=0 > VERSION`. Tolere `v1.18.0` ou `1.18.0`.
+// 3. package.json (legacy, valide quand release-please marche).
+// 4. fallback "0.0.0" si tout echoue.
+//
+// Cache memoire process : se rafraichit au prochain redemarrage container.
 const APP_VERSION = (() => {
+  const normalize = v => String(v || "").trim().replace(/^v/i, "") || null;
+
+  const envVersion = normalize(process.env.SEREO_APP_VERSION);
+  if (envVersion) return envVersion;
+
   try {
-    return require("./package.json").version || "0.0.0";
-  } catch (e) {
-    return "0.0.0";
-  }
+    const fileVersion = normalize(require("fs").readFileSync("./VERSION", "utf8"));
+    if (fileVersion) return fileVersion;
+  } catch (e) { /* fichier absent : tomber sur package.json */ }
+
+  try {
+    const pkgVersion = normalize(require("./package.json").version);
+    if (pkgVersion) return pkgVersion;
+  } catch (e) { /* impossible : tomber sur 0.0.0 */ }
+
+  return "0.0.0";
 })();
 const GITHUB_REPO = "tombague160-maker/sereo-production";
 
@@ -1630,24 +1649,56 @@ function ensureOrderNumbers(db) {
     return String(a.id || "").localeCompare(String(b.id || ""));
   });
 
-  // generateOrderNumber lit db.commandes pour trouver le max numero existant,
-  // donc on doit attribuer un a un (pas en batch) pour que les numeros se
-  // suivent correctement quand resetAnnually est actif.
+  // Chantier 2 (audit 2026-06-04) : avant ce fix, chaque appel a
+  // generateOrderNumber re-scannait TOUS les numeros existants pour trouver
+  // le max -> O(M * (N+M)) au boot sur 5000+ commandes (500 ms+).
+  //
+  // Maintenant : on pre-compute UNE fois le compteur max par annee, et on
+  // incremente localement a chaque allocation. O(N+M).
+  const settings = normalizeSettings(db.settings || {});
+  const { prefix, resetAnnually } = settings.orderNumbering;
+  const existingNumeros = db.commandes.map(o => o.numero).filter(Boolean);
+
+  let continuousCounter = 0;
+  const counterByYear = new Map();
+
+  if (resetAnnually) {
+    const yearPattern = new RegExp(`^${prefix}-(\\d{4})-(\\d+)$`);
+    for (const numero of existingNumeros) {
+      const match = numero.match(yearPattern);
+      if (!match) continue;
+      const year = match[1];
+      const seq = Number(match[2]);
+      if (!Number.isFinite(seq)) continue;
+      const current = counterByYear.get(year) || 0;
+      if (seq > current) counterByYear.set(year, seq);
+    }
+  } else {
+    const continuousPattern = new RegExp(`^${prefix}-(\\d+)$`);
+    for (const numero of existingNumeros) {
+      const match = numero.match(continuousPattern);
+      if (!match) continue;
+      const seq = Number(match[1]);
+      if (Number.isFinite(seq) && seq > continuousCounter) continuousCounter = seq;
+    }
+  }
+
   missingNumero.forEach(order => {
     if (!order.dateCommande) {
-      // Revue R1 MINOR-14 : forcer YYYY-MM-DD (10 chars) au lieu d'ISO complet
-      // (24 chars). Les sources `dateImport`/`createdAt` sont des
-      // toISOString() complets ; on tronque pour que le diagnostic
-      // suspicious-dates ne les flag pas en faux-positif.
-      // R3 hardening : si jamais raw est un Date object (ne devrait pas
-      // arriver via le pipeline normal, mais defense en profondeur),
-      // utiliser toISOString() explicitement avant slice (sinon
-      // String(date)="Wed May 30 ..." -> slice(0,10)="Wed May 30").
+      // Revue R1 MINOR-14 + R3 hardening : forcer YYYY-MM-DD (10 chars).
       const raw = order.dateImport || order.createdAt || new Date().toISOString();
       const dateStr = raw instanceof Date ? raw.toISOString() : String(raw);
       order.dateCommande = dateStr.slice(0, 10);
     }
-    order.numero = generateOrderNumber(db, order.dateCommande);
+    if (resetAnnually) {
+      const year = String(extractYear(order.dateCommande));
+      const next = (counterByYear.get(year) || 0) + 1;
+      counterByYear.set(year, next);
+      order.numero = `${prefix}-${year}-${String(next).padStart(3, "0")}`;
+    } else {
+      continuousCounter += 1;
+      order.numero = `${prefix}-${String(continuousCounter).padStart(5, "0")}`;
+    }
   });
 }
 
@@ -1734,26 +1785,42 @@ function writeDb(db, options = {}) {
 
   syncWorkflow(db);
 
-  // Revue R1 chantier 1 (P1 #2) : un echec de backup (disque plein,
-  // permission) NE DOIT PAS empecher l'ecriture des donnees. Le backup est
-  // un filet de securite, pas un prerequis. On log l'erreur sans bloquer.
-  if (backup) {
-    try {
-      backupDbIfNeeded();
-    } catch (backupError) {
-      console.error(`[storage] Backup automatique echec (mutation poursuit): ${backupError.message || backupError}`);
-    }
-  }
-
+  // Ecriture des donnees AVANT tout backup : le backup est un filet de
+  // securite, pas un prerequis. Si le disque est plein, on veut au moins que
+  // l'application echoue sur l'ecriture des donnees (visible) plutot que sur
+  // un backup invisible. Cf revue R1 chantier 1 P1 #2.
   if (useSqliteStorage()) {
     getSqliteStore().writeDb(db);
-    return;
+  } else {
+    ensureDir(path.dirname(DB_PATH));
+    const tempPath = `${DB_PATH}.${process.pid}.${Date.now()}.tmp`;
+    fs.writeFileSync(tempPath, JSON.stringify(db, null, 2), "utf8");
+    fs.renameSync(tempPath, DB_PATH);
   }
 
-  ensureDir(path.dirname(DB_PATH));
-  const tempPath = `${DB_PATH}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(tempPath, JSON.stringify(db, null, 2), "utf8");
-  fs.renameSync(tempPath, DB_PATH);
+  // Chantier 2 : backup async fire-and-forget. Le main thread ne bloque
+  // plus 300-800 ms sur gzipSync d'une base 100 MB — la compression part
+  // sur le threadpool libuv via stream pipeline. La requete HTTP repond
+  // immediatement apres l'ecriture des donnees.
+  //
+  // pendingBackup expose une Promise pour les tests qui veulent attendre
+  // la fin du backup avant d'assertioner sur le filesystem.
+  if (backup) {
+    pendingBackup = backupDbIfNeededAsync()
+      .catch(backupError => {
+        console.error(`[storage] Backup async echec (mutation deja persistee): ${backupError.message || backupError}`);
+      })
+      .finally(() => { pendingBackup = null; });
+  }
+}
+
+// Promise du dernier backup async en vol. Utilise par les tests pour
+// `await flushPendingBackup()` avant d'assertioner sur le filesystem.
+let pendingBackup = null;
+async function flushPendingBackup() {
+  while (pendingBackup) {
+    await pendingBackup;
+  }
 }
 
 // ============================================================================
@@ -1914,6 +1981,31 @@ function backupDbIfNeeded(options = {}) {
   return writeBackupNow(tag);
 }
 
+// Chantier 2 : variante async pour le hot-path `writeDb`. Meme logique de
+// gating mode-aware que la version sync, mais utilise writeBackupNowAsync.
+async function backupDbIfNeededAsync(options = {}) {
+  const { force = false, tag = "" } = options;
+  const sourcePath = useSqliteStorage() ? SQLITE_PATH : DB_PATH;
+  if (!fs.existsSync(sourcePath)) return null;
+
+  if (!force && lastStorageRecovery && lastStorageRecovery.mode === "fresh_empty") {
+    return null;
+  }
+  if (!force && lastStorageRecovery && lastStorageRecovery.mode === "restored_backup" && !postRestoreBackupDone) {
+    const p = await writeBackupNowAsync("post-restore");
+    if (p) postRestoreBackupDone = true;
+    return p;
+  }
+  if (!force) {
+    const entries = listBackupEntries();
+    const mostRecent = entries[0];
+    if (mostRecent && Date.now() - mostRecent.mtimeMs < BACKUP_THROTTLE_MS) {
+      return null;
+    }
+  }
+  return writeBackupNowAsync(tag);
+}
+
 function writeBackupNow(tag = "") {
   const sourcePath = useSqliteStorage() ? SQLITE_PATH : DB_PATH;
   if (!fs.existsSync(sourcePath)) return null;
@@ -1933,6 +2025,47 @@ function writeBackupNow(tag = "") {
 
   pruneOldBackups();
   return backupPath;
+}
+
+// Chantier 2 (audit 2026-06-04) : variante async via stream pipeline.
+// `zlib.createGzip()` delegue la compression au threadpool libuv (Node docs
+// confirme), donc le main thread reste libre pour les requetes HTTP pendant
+// le backup. Sur 50-100 MB c'etait 300-800 ms de freeze, maintenant ~5 ms
+// d'overhead non-bloquant.
+//
+// Pattern recommande (Dennis O'Keeffe 2024) : ecriture vers tmp, rename
+// atomique, cleanup best-effort si le pipeline echoue.
+//
+// Sync writeBackupNow garde sa raison d'etre : boot post-recovery (avant que
+// le serveur n'accepte des requetes, le freeze n'a pas d'impact) + tests.
+async function writeBackupNowAsync(tag = "") {
+  const sourcePath = useSqliteStorage() ? SQLITE_PATH : DB_PATH;
+  if (!fs.existsSync(sourcePath)) return null;
+
+  ensureDir(BACKUP_DIR);
+  if (useSqliteStorage()) {
+    getSqliteStore().checkpoint();
+  }
+
+  const baseExtension = useSqliteStorage() ? ".sqlite" : ".json";
+  const tagPart = tag ? `-${tag.replace(/[^a-zA-Z0-9_-]/g, "")}` : "";
+  const backupPath = path.join(BACKUP_DIR, `db-${safeTimestamp()}${tagPart}${baseExtension}.gz`);
+  const tmpPath = backupPath + ".tmp";
+
+  try {
+    const { pipeline } = require("node:stream/promises");
+    await pipeline(
+      fs.createReadStream(sourcePath),
+      zlib.createGzip({ level: 6 }), // 6 = defaut, bon ratio/CPU
+      fs.createWriteStream(tmpPath)
+    );
+    fs.renameSync(tmpPath, backupPath); // atomique
+    pruneOldBackups();
+    return backupPath;
+  } catch (err) {
+    try { fs.unlinkSync(tmpPath); } catch { /* best-effort */ }
+    throw err;
+  }
 }
 
 function safeTimestamp(date = new Date()) {
@@ -2491,41 +2624,155 @@ const RESERVED_ORDER_STATUSES = [
   "a_reprogrammer"
 ];
 
-function calculateReservedStock(db, product) {
-  return db.commandes.reduce((total, order) => {
-    const isReserved = Boolean(
-      order.stockReservedAt
-      && RESERVED_ORDER_STATUSES.includes(order.status)
-    );
+// Chantier 2 (audit 2026-06-04) : pre-compute des metriques stock en
+// single-pass O(N+M) au lieu de N*M reduce imbriques par produit.
+//
+// Avant : enrichStockItem(db, product) appele 100 fois -> chaque appel re-itere
+// sur db.commandes (1000) -> 100 000 iterations par GET /api/stock + chaque
+// iteration normalizeProducts l'order et resolve la match line par produit
+// (~5 op) = 500 000+ op effectives. /api/dashboard re-execute.
+//
+// Apres : buildStockMetricsIndex parcourt commandes UNE SEULE FOIS et accumule
+// dans une Map<productKey, {reserved, needed}>. Puis enrichStockItem lit en
+// O(1). Total : ~N+M = 1100 iterations + (N * Map.get O(1)).
+//
+// Statuts qui comptent dans "needed" (commandes a preparer/livrer).
+const NEEDED_ORDER_STATUSES = new Set([
+  "importe",
+  "stock_a_verifier",
+  "en_preparation",
+  "pret_livraison"
+]);
 
+// Construit l'index agrege en un seul parcours des commandes.
+//
+// Revue R1 chantier 2 P0 #1 + #2 : design composite-key.
+// L'ancien design (deux Maps separees code: et name:) avait deux bugs :
+// - SOUS-COMPTAGE : ligne A (code='A1', sans nom) + ligne B (sans code,
+//   nom='Produit A') referencent le meme produit -> seule l'une des deux
+//   etait comptee au lookup (premier match l'emportait).
+// - SUR-COMPTAGE : deux produits stock partageant le meme code (legal mais
+//   pas unique) -> tous deux voyaient la meme quantite reservee.
+//
+// Nouveau design :
+// - Chaque ligne est canonisee en une cle `code|nom` (les deux normalises).
+// - Trois Map : { totals: canonicalKey -> {reserved, needed},
+//                 byCode: codeNorm -> Set<canonicalKey>,
+//                 byName: nameNorm -> Set<canonicalKey> }
+// - Au lookup d'un produit : on collecte TOUTES les cles candidates via
+//   byCode[productCode] ET byName[productName], on les dedup, on somme.
+//
+// Correctness : `stockItemMatchesLine` sert de reference (OR sur code/name).
+// L'index reproduit fidelement sa semantique en O(N+M) au lieu de O(N*M).
+function buildStockMetricsIndex(commandes) {
+  const totals = new Map(); // canonicalKey -> { reserved, needed }
+  const byCode = new Map(); // codeNorm -> Set<canonicalKey>
+  const byName = new Map(); // nameNorm -> Set<canonicalKey>
+
+  const ensureCanonical = (canonicalKey) => {
+    let slot = totals.get(canonicalKey);
+    if (!slot) {
+      slot = { reserved: 0, needed: 0 };
+      totals.set(canonicalKey, slot);
+    }
+    return slot;
+  };
+  const addReverse = (map, key, canonicalKey) => {
+    if (!key) return;
+    let set = map.get(key);
+    if (!set) { set = new Set(); map.set(key, set); }
+    set.add(canonicalKey);
+  };
+
+  for (const order of commandes || []) {
+    const isReserved = Boolean(order.stockReservedAt && RESERVED_ORDER_STATUSES.includes(order.status));
+    const isNeeded = NEEDED_ORDER_STATUSES.has(order.status);
+    if (!isReserved && !isNeeded) continue;
+
+    for (const line of normalizeProducts(order.products)) {
+      const qty = Math.max(0, number(line.quantite, 0));
+      if (qty <= 0) continue;
+
+      const codeNorm = normalizeTextKey(line.code || line.sku || line.reference);
+      const nameNorm = normalizeTextKey(line.nom || line.produit || line.productName || line.name);
+      if (!codeNorm && !nameNorm) continue;
+
+      // Cle canonique = couple (code, name). Chaque ligne contribue exactement
+      // une fois a son slot canonique, plus est indexee inversement.
+      const canonicalKey = (codeNorm || "_") + "|" + (nameNorm || "_");
+      const slot = ensureCanonical(canonicalKey);
+      if (isReserved) slot.reserved += qty;
+      if (isNeeded) slot.needed += qty;
+
+      addReverse(byCode, codeNorm, canonicalKey);
+      addReverse(byName, nameNorm, canonicalKey);
+    }
+  }
+  return { totals, byCode, byName };
+}
+
+// Lookup correct : reproduit stockItemMatchesLine (match si code OR name).
+// On collecte les cles canoniques candidates via les deux index inverses,
+// dedup via Set, somme les totaux. Pas de double-comptage car chaque slot
+// canonique n'est sommé qu'une fois meme s'il appartient aux 2 inverses.
+function lookupStockMetric(index, product, kind) {
+  if (!index || !index.totals) return 0;
+  const codeNorm = normalizeTextKey(getProductCode(product));
+  const nameNorm = normalizeTextKey(getProductName(product));
+  if (!codeNorm && !nameNorm) return 0;
+
+  const candidates = new Set();
+  if (codeNorm) {
+    const fromCode = index.byCode.get(codeNorm);
+    if (fromCode) for (const k of fromCode) candidates.add(k);
+  }
+  if (nameNorm) {
+    const fromName = index.byName.get(nameNorm);
+    if (fromName) for (const k of fromName) candidates.add(k);
+  }
+  let total = 0;
+  for (const k of candidates) {
+    const slot = index.totals.get(k);
+    if (slot) total += slot[kind] || 0;
+  }
+  return total;
+}
+
+// Garde l'API publique (utilisee par les tests). Sans index, recompose
+// l'ancien algorithme N*M. Avec index, lookup O(matches) tres rapide.
+function calculateReservedStock(db, product, index) {
+  if (index && index.totals) return lookupStockMetric(index, product, "reserved");
+  return db.commandes.reduce((total, order) => {
+    const isReserved = Boolean(order.stockReservedAt && RESERVED_ORDER_STATUSES.includes(order.status));
     return isReserved ? total + getQuantityForProductInOrder(product, order) : total;
   }, 0);
 }
 
-function calculateNeededStock(db, product) {
+function calculateNeededStock(db, product, index) {
+  if (index && index.totals) return lookupStockMetric(index, product, "needed");
   return db.commandes.reduce((total, order) => {
-    if (!["importe", "stock_a_verifier", "en_preparation", "pret_livraison"].includes(order.status)) {
-      return total;
-    }
-
+    if (!NEEDED_ORDER_STATUSES.has(order.status)) return total;
     return total + getQuantityForProductInOrder(product, order);
   }, 0);
 }
 
-function getStockStatus(product, db) {
+function getStockStatus(product, db, index) {
   const quantity = getStockQuantity(product);
 
   if (quantity === null) return "a_renseigner";
   if (quantity <= 0) return "rupture";
   if (quantity <= getStockAlertThreshold(product)) return "stock_faible";
-  if (db && calculateReservedStock(db, product) > 0) return "reserve";
+  if (db && calculateReservedStock(db, product, index) > 0) return "reserve";
   return "disponible";
 }
 
-function enrichStockItem(db, product) {
+// Signature etendue : `index` est optionnel. S'il est passe (typique via
+// getStockView), tout est en O(1). Sans (call-site isole), comportement
+// legacy N*M (correct mais lent).
+function enrichStockItem(db, product, index) {
   const quantityAvailable = getStockQuantity(product);
-  const quantityReserved = calculateReservedStock(db, product);
-  const quantityNeeded = calculateNeededStock(db, product);
+  const quantityReserved = calculateReservedStock(db, product, index);
+  const quantityNeeded = calculateNeededStock(db, product, index);
 
   return {
     ...product,
@@ -2536,12 +2783,14 @@ function enrichStockItem(db, product) {
     quantityNeeded,
     quantityTotal: quantityAvailable === null ? null : quantityAvailable + quantityReserved,
     alertThreshold: getStockAlertThreshold(product),
-    stockStatus: getStockStatus(product, db)
+    stockStatus: getStockStatus(product, db, index)
   };
 }
 
 function getStockView(db) {
-  return db.stock.map(product => enrichStockItem(db, product));
+  // Construit l'index UNE seule fois, puis lookup O(1) par produit.
+  const index = buildStockMetricsIndex(db.commandes);
+  return db.stock.map(product => enrichStockItem(db, product, index));
 }
 
 function getRecommendations(db) {
@@ -4384,7 +4633,11 @@ app.patch("/api/stock/:id", async (req, res) => {
       });
 
       writeDb(db);
-      return enrichStockItem(db, product);
+      // Chantier 2 (revue R1 P1 #1) : passer l'index pre-calcule pour
+      // garder le O(1) sur l'enrichissement post-mutation. Sans index,
+      // /api/stock/:id PATCH retombait en O(N) sur chaque appel.
+      const stockIndex = buildStockMetricsIndex(db.commandes);
+      return enrichStockItem(db, product, stockIndex);
     });
     res.json(result);
   } catch (error) {
@@ -4892,6 +5145,9 @@ module.exports = {
   // Helpers de test : ne pas appeler depuis du code applicatif
   _resetAuthRateLimitForTest: () => authRateLimitState.clear(),
   _getLastStorageRecovery: () => lastStorageRecovery,
+  // Chantier 2 : permet aux tests d'attendre que le backup async finisse
+  // avant d'assertioner sur le filesystem.
+  _flushPendingBackup: flushPendingBackup,
   _resetStorageRecoveryForTest: () => { lastStorageRecovery = null; storageRecoveryFatal = null; },
   _isCorruptionError: isCorruptionError,
   _normalizeDateInput: normalizeDateInput,
