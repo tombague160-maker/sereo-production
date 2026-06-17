@@ -540,62 +540,83 @@ function initMap() {
 async function loadData() {
   setStatus("Chargement...");
 
-  try {
-    const [
-      clientsData,
-      stockData,
-      ventesData,
-      historiqueData,
-      ordersData,
-      sectorsData,
-      routesData,
-      stockMovementsData,
-      dashboardData
-    ] = await Promise.all([
-      apiFetch("/api/clients"),
-      apiFetch("/api/stock"),
-      apiFetch("/api/ventes"),
-      apiFetch("/api/historique"),
-      apiFetch("/api/orders"),
-      apiFetch("/api/sectors"),
-      apiFetch("/api/routes"),
-      apiFetch("/api/stock-movements"),
-      apiFetch("/api/dashboard")
-    ]);
+  // Chantier 2 (audit 2026-06-04) : Promise.allSettled au lieu de Promise.all.
+  // Avant : si UN seul endpoint timeout (30s), tout etait wipe (clients=[],
+  // orders=[], stock=[]). UX catastrophique sur slow network.
+  // Apres : chaque endpoint a son sort. Si le stock timeout, on garde la prep,
+  // les clients, etc. Le user voit "Stock indisponible" sans tout perdre.
+  const endpoints = [
+    { key: "clients", path: "/api/clients", fallback: [] },
+    { key: "stock", path: "/api/stock", fallback: [] },
+    { key: "ventes", path: "/api/ventes", fallback: [] },
+    { key: "historique", path: "/api/historique", fallback: [] },
+    { key: "orders", path: "/api/orders", fallback: [] },
+    { key: "sectors", path: "/api/sectors", fallback: [] },
+    { key: "routes", path: "/api/routes", fallback: [] },
+    { key: "stockMovements", path: "/api/stock-movements", fallback: [] },
+    { key: "dashboard", path: "/api/dashboard", fallback: null }
+  ];
 
-    clients = clientsData.map(client => ({
-      ...client,
-      statut: client.statut || "restant"
-    }));
-    stock = stockData;
-    ventes = ventesData;
-    historique = historiqueData;
-    orders = ordersData;
-    sectors = sectorsData;
-    deliveryRoutes = routesData;
-    stockMovements = stockMovementsData;
-    dashboard = dashboardData;
+  const results = await Promise.allSettled(endpoints.map(e => apiFetch(e.path)));
 
-    refreshActiveRoute();
-    route = activeRoute ? activeRoute.stops : (currentIndex >= 0 ? route : [...clients]);
+  // Revue R1 P0 #3 : si un endpoint renvoie 401, apiFetch a deja declenche
+  // window.location.href = /login. On abandonne loadData proprement (la
+  // redirection en cours va remplacer la page). On detecte le throw via le
+  // message "Session expiree" pose par apiFetch lui-meme.
+  const sessionExpired = results.some(r =>
+    r.status === "rejected"
+    && r.reason && String(r.reason.message || "").includes("Session expiree")
+  );
+  if (sessionExpired) {
+    setStatus("Reconnexion...");
+    return;
+  }
 
-    renderAll();
+  const failed = [];
+  const data = {};
+  results.forEach((r, i) => {
+    const e = endpoints[i];
+    if (r.status === "fulfilled") {
+      data[e.key] = r.value;
+    } else {
+      data[e.key] = e.fallback;
+      failed.push(e.key);
+    }
+  });
+
+  clients = (data.clients || []).map(client => ({
+    ...client,
+    statut: client.statut || "restant"
+  }));
+  stock = data.stock;
+  ventes = data.ventes;
+  historique = data.historique;
+  orders = data.orders;
+  sectors = data.sectors;
+  deliveryRoutes = data.routes;
+  stockMovements = data.stockMovements;
+  dashboard = data.dashboard;
+
+  refreshActiveRoute();
+  route = activeRoute ? activeRoute.stops : (currentIndex >= 0 ? route : [...clients]);
+
+  renderAll();
+
+  if (failed.length === 0) {
     setStatus("À jour");
-  } catch (error) {
-    clients = [];
-    orders = [];
-    stock = [];
-    ventes = [];
-    historique = [];
-    sectors = [];
-    deliveryRoutes = [];
-    stockMovements = [];
-    dashboard = null;
-    route = [];
-    activeRoute = null;
-    renderAll();
+  } else if (failed.length === endpoints.length) {
     setStatus("Erreur");
-    notify(error.message || "Impossible de charger les données", "error");
+    notify("Impossible de joindre le serveur — les données affichées sont vides.", "error");
+  } else {
+    setStatus(`Partiel (${failed.length} indispo)`);
+    // Map cle interne -> label utilisateur lisible
+    const labels = {
+      clients: "clients", stock: "stock", ventes: "ventes", historique: "historique",
+      orders: "commandes", sectors: "secteurs", routes: "tournées",
+      stockMovements: "mouvements stock", dashboard: "tableau de bord"
+    };
+    const friendly = failed.map(k => labels[k] || k).join(", ");
+    notify(`Sections indisponibles : ${friendly}. Le reste est à jour.`, "warning");
   }
 }
 
