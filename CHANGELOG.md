@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.16.0](https://github.com/tombague160-maker/sereo-production/compare/v1.15.0...v1.16.0) (2026-06-17)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **audit:** lot P1 + revue adverse - M1 date stricte, M2 qty import, M6 Haversine, T1 SW notif, T4 timeout, M3 ellipsis ([#76](https://github.com/tombague160-maker/sereo-production/issues/76)) ([90187bc](https://github.com/tombague160-maker/sereo-production/commit/90187bc2c0daf6240696ecef4e3495bd1a4bfbfa))
+* **concurrency:** verrou applicatif + integrite stock + backup post-recovery ([#79](https://github.com/tombague160-maker/sereo-production/issues/79)) ([c8f35c5](https://github.com/tombague160-maker/sereo-production/commit/c8f35c5d01f07806315bb2c7fe5d357d4ea832f7))
+* **storage:** recovery automatique sur corruption SQLite (B3) + alerte perte de donnees ([#75](https://github.com/tombague160-maker/sereo-production/issues/75)) ([8a397a9](https://github.com/tombague160-maker/sereo-production/commit/8a397a9a274c5900e1947584d703b8846f5ae4f6))
+* **tournee:** calibrage vitesse/arret + diagnostic dates suspectes ([#77](https://github.com/tombague160-maker/sereo-production/issues/77)) ([905812d](https://github.com/tombague160-maker/sereo-production/commit/905812d8c8abffc99f29bac29da4021d4e35a622))
+
+
+### 🐛 Corrections de bugs
+
+* **ui:** Parametres v1.15 - Historique + Zone danger en pleine largeur sous les 3 panels ([#72](https://github.com/tombague160-maker/sereo-production/issues/72)) ([6f27675](https://github.com/tombague160-maker/sereo-production/commit/6f27675b05a412ee0c3f151fe54c65173341681e))
+
+
+### ⚡ Optimisations
+
+* chantier 2 audit 2026-06-04 + fix version v1.15.0 figee (v1.19.0) ([#80](https://github.com/tombague160-maker/sereo-production/issues/80)) ([7ca6f0d](https://github.com/tombague160-maker/sereo-production/commit/7ca6f0d6e2d5de427dddd801e072ff16ab51983f))
+
+
+### 📚 Documentation
+
+* **audit:** rapport complet 25 mai 2026 (10 axes parallels) ([#73](https://github.com/tombague160-maker/sereo-production/issues/73)) ([55eff4e](https://github.com/tombague160-maker/sereo-production/commit/55eff4e92754ee877aa55f0d2e45db007cf3d532))
+
 ## [1.15.0](https://github.com/tombague160-maker/sereo-production/compare/v1.14.1...v1.15.0) (2026-05-23)
 
 
