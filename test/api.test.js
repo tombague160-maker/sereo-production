@@ -2778,6 +2778,34 @@ test("route multi-stops : reorder avec liste partielle est rejetee ou ignoree", 
   }
 });
 
+test("Lot6 - route multi-stops : reorder avec stopIds dupliques est rejete (aucun stop perdu)", async () => {
+  seedThreeStopsReady();
+
+  const created = await requestJson("/api/routes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sector: "Besancon",
+      deliveryDate: "2026-05-04",
+      orderIds: ["o-a", "o-b", "o-c"]
+    })
+  });
+  const routeId = created.body.id;
+  const stopIds = created.body.stops.map(s => s.id);
+
+  // Bonne longueur (3) mais un doublon : [s0, s0, s1]. Avant le fix, s2
+  // disparaissait silencieusement (stopMap.get resout s0 deux fois).
+  const dup = await requestJson(`/api/routes/${routeId}/reorder`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ stopIds: [stopIds[0], stopIds[0], stopIds[1]] })
+  });
+  assert.equal(dup.res.status, 400, "stopIds dupliques rejetes");
+
+  const route = readDb().routes.find(r => String(r.id) === String(routeId));
+  assert.equal(route.stops.length, 3, "aucun stop perdu apres un reorder invalide");
+});
+
 // ============================================================================
 // V1.9.0 - ERP Phase 2 : refonte import ventes en bons de commande.
 // Bucket par (client, dateCommande) : meme client + meme date Excel = meme
