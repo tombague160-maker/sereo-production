@@ -973,6 +973,56 @@ test("Lot4b - cellule Cout non numerique preserve le prix DB (revue #87)", async
   assert.equal(b1.tarif, 22, "tarif mis a jour (valeur numerique valide)");
 });
 
+test("Lot5 - purge libere les reservations de stock (restitue le physique)", async () => {
+  // Produit avec 3 unites deja reservees (physique 10 -> 7) par une commande
+  // en preparation. Purger sans liberer laissait le stock a 7 pour toujours.
+  seedDb({
+    ...defaultDb(),
+    stock: [{ id: "p1", code: "A1", nom: "Produit A", quantite: 7, alertThreshold: 5 }],
+    commandes: [{
+      id: "o1", clientId: "c1", clientName: "Client", numero: "CMD-2026-001",
+      products: [{ code: "A1", nom: "Produit A", quantite: 3 }],
+      status: "en_preparation", stockReservedAt: "2026-06-01T10:00:00Z"
+    }]
+  });
+
+  let p1 = readDb().stock.find(p => p.code === "A1");
+  assert.equal(p1.quantite, 7, "stock physique ampute des 3 reservees au depart");
+
+  const r = await requestJson("/api/orders/purge", { method: "POST" });
+  assert.equal(r.res.status, 200);
+  assert.equal(r.body.purged.commandes, 1);
+
+  const db = readDb();
+  assert.equal(db.commandes.length, 0, "commandes purgees");
+  p1 = db.stock.find(p => p.code === "A1");
+  assert.equal(p1.quantite, 10, "les 3 unites reservees sont restituees (7 -> 10)");
+});
+
+test("Lot5 - purge ne restitue PAS le stock des commandes livrees (marchandise partie)", async () => {
+  // Commande deja livree ayant garde stockReservedAt (cas legacy). La
+  // marchandise a physiquement quitte le stock -> ne PAS la restituer, sinon
+  // sur-comptage fantome (revue #89).
+  seedDb({
+    ...defaultDb(),
+    stock: [{ id: "p2", code: "B1", nom: "Produit B", quantite: 4, alertThreshold: 5 }],
+    commandes: [{
+      id: "o2", clientId: "c2", clientName: "Client B", numero: "CMD-2026-002",
+      products: [{ code: "B1", nom: "Produit B", quantite: 6 }],
+      status: "livre", stockReservedAt: "2026-06-01T10:00:00Z"
+    }]
+  });
+
+  let p2 = readDb().stock.find(p => p.code === "B1");
+  assert.equal(p2.quantite, 4);
+
+  const r = await requestJson("/api/orders/purge", { method: "POST" });
+  assert.equal(r.res.status, 200);
+
+  p2 = readDb().stock.find(p => p.code === "B1");
+  assert.equal(p2.quantite, 4, "commande livree : stock NON restitue (marchandise deja partie)");
+});
+
 test("sales import sums quantities when same product appears twice for one client", async () => {
   seedDb(defaultDb());
 

@@ -4785,6 +4785,25 @@ app.post("/api/orders/purge", async (req, res) => {
         routes: db.routes.length
       };
 
+      // Lot 5 (audit 2026-07-08) : liberer les reservations de stock AVANT de
+      // supprimer les commandes. reserveStockForOrder (start-preparation) deduit
+      // physiquement les quantites ; sans release, purger les commandes laisse
+      // le stock ampute sans aucune commande pour le justifier -> inventaire
+      // sous-compte a vie (l'historique disait pourtant "Stock preserve").
+      //
+      // Revue #89 : on ne restitue QUE les commandes dont la marchandise est
+      // encore en entrepot. Une commande 'livre' (consommee) ou 'en_livraison'
+      // (dans le camion) a physiquement quitte le stock -> la restituer
+      // sur-compterait l'inventaire. On filtre sur le STATUT et pas seulement sur
+      // stockReservedAt : des commandes 'livre' legacy/importees peuvent avoir
+      // garde stockReservedAt non nul (le nullify-a-la-livraison est recent).
+      const CONSUMED_STATUSES = new Set(["livre", "en_livraison"]);
+      let stockReservationsReleased = 0;
+      db.commandes.forEach(order => {
+        if (CONSUMED_STATUSES.has(order.status)) return;
+        if (releaseOrderStockReservation(db, order, "purge")) stockReservationsReleased += 1;
+      });
+
       db.commandes = [];
       db.clients = [];
       db.ventes = [];
@@ -4793,8 +4812,8 @@ app.post("/api/orders/purge", async (req, res) => {
       addHistory(
         db,
         "Purge",
-        `Reset bons de commande : ${purgedCounts.commandes} commande(s), ${purgedCounts.clients} client(s), ${purgedCounts.ventes} vente(s), ${purgedCounts.routes} tournee(s) supprimees. Stock et historique preserves.`,
-        purgedCounts
+        `Reset bons de commande : ${purgedCounts.commandes} commande(s), ${purgedCounts.clients} client(s), ${purgedCounts.ventes} vente(s), ${purgedCounts.routes} tournee(s) supprimees. ${stockReservationsReleased} reservation(s) de stock restituee(s). Catalogue stock et historique preserves.`,
+        { ...purgedCounts, stockReservationsReleased }
       );
 
       writeDb(db);
