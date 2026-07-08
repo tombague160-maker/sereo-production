@@ -3805,6 +3805,17 @@ function reorderRouteStops(db, routeId, stopIds) {
     throw badRequest("Ordre de tournee invalide");
   }
 
+  // Lot 6 (audit 2026-07-08) : refuser les stopIds DUPLIQUES. Sans ce controle,
+  // [s1, s1] passait (longueur ok) : stopMap.get resolvait s1 deux fois, la
+  // verification !stop ne detectait rien, et un arret disparaissait
+  // silencieusement de la tournee (sa commande gardait routeId mais n'etait
+  // plus livrable). On exige une vraie permutation : autant d'ids DISTINCTS
+  // que de stops.
+  const uniqueIds = new Set(stopIds.map(id => String(id)));
+  if (uniqueIds.size !== route.stops.length) {
+    throw badRequest("Ordre de tournee invalide (arrets dupliques ou manquants)");
+  }
+
   const stopMap = new Map(route.stops.map(stop => [String(stop.id), stop]));
   const reordered = stopIds.map(id => stopMap.get(String(id)));
 
@@ -3816,6 +3827,11 @@ function reorderRouteStops(db, routeId, stopIds) {
     ...stop,
     orderIndex: index + 1
   }));
+  // Revue #90 : garder selectedOrderIds coherent avec le nouvel ordre des stops
+  // (meme derivation que normalizeRoute), sinon la reponse PATCH immediate est
+  // desynchronisee (stops reordonnes vs selectedOrderIds ancien ordre) jusqu'au
+  // prochain GET.
+  route.selectedOrderIds = route.stops.map(stop => stop.orderId);
 
   return route;
 }
