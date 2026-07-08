@@ -2245,6 +2245,10 @@ function excelDate(value) {
   }
 
   if (typeof value === "number") {
+    // Meme borne que normalizeDateInput/excelDateToIso : un serial aberrant
+    // (> ~an 2119) ou negatif ne doit pas produire une date d'affichage
+    // fantaisiste (ex: "01/01/3268") ni "Invalid Date".
+    if (!Number.isFinite(value) || value < 0 || value > 80000) return "";
     const date = new Date(Date.UTC(1899, 11, 30) + value * 24 * 60 * 60 * 1000);
     return date.toLocaleDateString("fr-FR", { timeZone: "UTC" });
   }
@@ -2288,7 +2292,12 @@ function normalizeDateInput(value) {
   // (sinon "31/13/2026", "30/02/2026", "29/02/2025" etaient acceptes -> fausse
   // date stockee et bucketing ERP par date incoherent).
   let y, m, d;
-  const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  // Accepte un ISO date (YYYY-MM-DD) avec un suffixe horaire optionnel
+  // ("2026-05-05T10:00:00.000Z" ou "2026-05-05 10:00") : on tronque a la date.
+  // Sans ca, un ISO datetime valide etait rejete (-> "") puis mute vers today
+  // par normalizeOrder (P0 audit 2026-07-08). Le suffixe DOIT commencer par
+  // "T" ou espace, donc "2026-05-05abc" reste rejete.
+  const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ].*)?$/);
   if (isoMatch) {
     y = Number(isoMatch[1]); m = Number(isoMatch[2]); d = Number(isoMatch[3]);
   } else {
@@ -3255,6 +3264,20 @@ function normalizeOrder(order) {
   const deliveryStatus = order.deliveryStatus || inferDeliveryStatus(status);
   const now = new Date().toISOString();
 
+  // P0 (audit 2026-07-08) : dateCommande est la cle de bucket ERP. On ne doit
+  // JAMAIS ecraser une date metier existante mais non normalisable par la date
+  // du jour : ce fallback silencieux corrompait en masse les dates a chaque
+  // writeDb (syncWorkflow re-normalise TOUTES les commandes). On preserve donc
+  // la valeur brute (string) telle quelle : le diagnostic /api/diagnostic/
+  // suspicious-dates la signale pour correction manuelle, sans perte. Le defaut
+  // "aujourd'hui" ne s'applique qu'a une commande SANS aucune date fournie.
+  const rawDateCommande = order.dateCommande || order.dateImport || order.createdAt;
+  const normalizedDateCommande = normalizeDateInput(rawDateCommande);
+  const dateCommande = normalizedDateCommande
+    || (typeof rawDateCommande === "string" && rawDateCommande.trim()
+      ? rawDateCommande.trim()
+      : now.slice(0, 10));
+
   return {
     id: order.id || `cmd-${order.clientId || crypto.randomUUID()}`,
     // Champs ERP v1.9.0 : numero humain (CMD-2026-001) + date metier de la
@@ -3262,10 +3285,11 @@ function normalizeOrder(order) {
     // Sont attribues par generateOrderNumber() et computeOrderHash() au moment
     // de la creation (import ou creation manuelle), preserves a chaque re-import.
     numero: order.numero || "",
-    // dateCommande TOUJOURS au format ISO YYYY-MM-DD pour permettre le match
-    // exact (clientId, dateCommande) lors d'un re-import. normalizeDateInput
-    // accepte FR (DD/MM/YYYY), ISO et Date object. Fallback : la date du jour.
-    dateCommande: normalizeDateInput(order.dateCommande || order.dateImport || order.createdAt) || now.slice(0, 10),
+    // dateCommande : ISO YYYY-MM-DD canonique quand normalisable (match exact
+    // (clientId, dateCommande) au re-import) ; sinon la valeur brute preservee
+    // (cf. calcul ci-dessus), jamais today. normalizeDateInput accepte FR
+    // (DD/MM/YYYY), ISO (avec ou sans heure) et Date object.
+    dateCommande,
     excelRowHash: order.excelRowHash || "",
     clientId: order.clientId,
     clientName: clean(order.clientName || order.nom || order.client || "Client sans nom"),
@@ -3899,7 +3923,6 @@ const SCAN_MAX_COMMANDES = 50000;
 
 function scanSuspiciousDates(commandes) {
   const list = Array.isArray(commandes) ? commandes : [];
-  const isoRegex = /^\d{4}-\d{2}-\d{2}$/;
   const samples = [];
   let suspicious = 0;
   let missingDate = 0;
@@ -3908,26 +3931,27 @@ function scanSuspiciousDates(commandes) {
   const toScan = truncated ? list.slice(0, SCAN_MAX_COMMANDES) : list;
 
   for (const order of toScan) {
-    const dc = order.dateCommande;
-    if (!dc) { missingDate += 1; continue; }
-    const dcStr = String(dc);
-    const head = dcStr.slice(0, 10);
-    // Revue R1 MINOR-3/14 : revalider sur le prefixe 10 chars, pas la chaine
-    // complete. normalizeDateInput ne reconnait pas l'ISO datetime complet
-    // ('2026-05-05T10:00:00.000Z') mais sait valider '2026-05-05'. Cela
-    // accepte les commandes legacy ecrites par ensureOrderNumbers.
-    const revalidated = normalizeDateInput(head);
-    if (!isoRegex.test(head) || revalidated !== head) {
-      suspicious += 1;
-      if (samples.length < 20) {
-        samples.push({
-          id: order.id,
-          numero: order.numero || "(sans numero)",
-          clientName: order.clientName || "",
-          dateCommandeRaw: dcStr,
-          dateCommandeApresValidation: revalidated || "(rejetee -> sera mutee vers today)"
-        });
-      }
+    // Mirror EXACT de normalizeOrder (meme valeur BRUTE, pas String() qui
+    // casserait le path number d'un serial Excel en mode JSON) :
+    //   normalizeDateInput(raw) truthy      -> canonisee sans perte (saine)
+    //   sinon string non vide               -> PRESERVEE brute (a corriger)
+    //   sinon (blanc / non-string / absente)-> today (defaut silencieux)
+    const raw = order.dateCommande;
+    if (!raw) { missingDate += 1; continue; }
+    if (normalizeDateInput(raw)) continue;
+
+    const preservedRaw = typeof raw === "string" && raw.trim();
+    if (!preservedRaw) { missingDate += 1; continue; }
+
+    suspicious += 1;
+    if (samples.length < 20) {
+      samples.push({
+        id: order.id,
+        numero: order.numero || "(sans numero)",
+        clientName: order.clientName || "",
+        dateCommandeRaw: String(raw),
+        dateCommandeApresValidation: "(non normalisable -> preservee telle quelle, a corriger manuellement)"
+      });
     }
   }
 
@@ -3939,8 +3963,8 @@ function scanSuspiciousDates(commandes) {
     datesSuspectes: suspicious,
     echantillon: samples,
     note: suspicious === 0
-      ? "Aucune date suspecte detectee. Pas de risque de mutation."
-      : `${suspicious} commande(s) avec date a risque. Au prochain readDb, leur dateCommande sera recalculee.`
+      ? "Aucune date suspecte. Rien a corriger manuellement."
+      : `${suspicious} date(s) non normalisable(s) : preservee(s) telle(s) quelle(s) (jamais mutee vers today), a corriger manuellement.`
   };
 }
 
@@ -5228,6 +5252,7 @@ module.exports = {
   // Helpers de test : ne pas appeler depuis du code applicatif
   _resetAuthRateLimitForTest: () => authRateLimitState.clear(),
   _createAccessSessionValueForTest: createAccessSessionValue,
+  _normalizeOrder: normalizeOrder,
   _getLastStorageRecovery: () => lastStorageRecovery,
   // Chantier 2 : permet aux tests d'attendre que le backup async finisse
   // avant d'assertioner sur le filesystem.
