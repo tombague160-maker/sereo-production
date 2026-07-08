@@ -949,6 +949,30 @@ test("Lot4b - re-import stock partiel (sans colonnes Cout/Tarif) preserve les pr
   assert.equal(a1.quantite, 7, "quantite bien mise a jour depuis l'Excel");
 });
 
+test("Lot4b - cellule Cout non numerique preserve le prix DB (revue #87)", async () => {
+  seedDb(defaultDb());
+
+  const form1 = new FormData();
+  form1.append("file", workbookBlob([
+    ["Code", "Nom", "Coût", "Tarif", "Quantité"],
+    ["B1", "Produit B", "8,00", "20,00", "5"]
+  ]), "stock.xlsx");
+  await requestJson("/api/import/stock", { method: "POST", body: form1 });
+
+  // Colonne Cout PRESENTE mais cellule non numerique ('N/A') : ne doit PAS
+  // ecraser le prix DB par 0. Le Tarif (valeur valide) est bien mis a jour.
+  const form2 = new FormData();
+  form2.append("file", workbookBlob([
+    ["Code", "Nom", "Coût", "Tarif", "Quantité"],
+    ["B1", "Produit B", "N/A", "22,00", "5"]
+  ]), "stock.xlsx");
+  await requestJson("/api/import/stock", { method: "POST", body: form2 });
+
+  const b1 = readDb().stock.find(p => p.code === "B1");
+  assert.equal(b1.cout, 8, "cout preserve (cellule 'N/A' non numerique, pas 0)");
+  assert.equal(b1.tarif, 22, "tarif mis a jour (valeur numerique valide)");
+});
+
 test("sales import sums quantities when same product appears twice for one client", async () => {
   seedDb(defaultDb());
 

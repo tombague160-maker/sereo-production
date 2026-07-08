@@ -4249,19 +4249,26 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
       .map(row => {
         const code = clean(getCellByNames(row, headers, ["Code", "Reference", "Référence", "SKU"]));
         const nom = clean(getCellByNames(row, headers, ["Nom", "Produit", "Article"]));
-        // Lot 4b : on capture la PRESENCE de chaque colonne (cellule non vide)
-        // pour distinguer "colonne absente d'un Excel partiel" de "valeur 0/vide
-        // explicite". cout/tarif/statut/category/seuil d'un produit ne viennent
-        // QUE de l'import (jamais edites cote app) : quand la colonne manque, il
-        // faut PRESERVER la valeur DB, pas l'ecraser par 0/"".
+        // Lot 4b : cout/tarif/statut/category/seuil d'un produit ne viennent QUE
+        // de l'import (jamais edites cote app). Quand une colonne est absente d'un
+        // Excel partiel (ou sa cellule vide/illisible), on PRESERVE la valeur DB
+        // au lieu de l'ecraser par 0/"". Note (revue #87) : getCellByNames renvoie
+        // "" aussi bien pour une colonne absente que pour une cellule vide -> on
+        // ne distingue pas les deux (vider volontairement un champ via import
+        // n'est pas supporte, c'est le prix de la surete des imports partiels).
         const coutCell = getCellByNames(row, headers, ["Cout", "Coût", "Prix achat"]);
         const tarifCell = getCellByNames(row, headers, ["Tarif", "Prix", "Prix vente"]);
         const statutCell = getCell(row, headers, "Statut", 1);
-        const cout = number(coutCell, 0);
-        const tarif = number(tarifCell, 0);
+        // "Presence" = valeur NUMERIQUE valide, pas juste cellule non vide (revue
+        // #87) : une cellule Cout/Tarif au contenu texte ('N/A', '-', '12 EUR')
+        // ne doit PAS ecraser le prix DB par 0 (number(...,0) donnerait 0).
+        const coutParsed = number(coutCell, NaN);
+        const tarifParsed = number(tarifCell, NaN);
+        const hasCout = Number.isFinite(coutParsed);
+        const hasTarif = Number.isFinite(tarifParsed);
+        const cout = hasCout ? coutParsed : 0;
+        const tarif = hasTarif ? tarifParsed : 0;
         const statut = clean(statutCell);
-        const hasCout = clean(coutCell) !== "";
-        const hasTarif = clean(tarifCell) !== "";
         const excelQuantite = optionalQuantity(getCellByNames(row, headers, ["Quantite", "Stock", "Qte"]));
         const category = clean(getCellByNames(row, headers, ["Categorie", "Category", "Type"]));
         const alertThreshold = optionalQuantity(getCellByNames(row, headers, ["Seuil", "Seuil alerte", "Minimum", "Alerte"]));
