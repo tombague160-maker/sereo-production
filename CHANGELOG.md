@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.19.1](https://github.com/tombague160-maker/sereo-production/compare/v1.19.0...v1.19.1) (2026-07-08)
+
+
+### 🐛 Corrections de bugs
+
+* **auth:** rate-limit Basic auth + durcissement cookie/redirect (Lot 1 — P0 audit) ([#82](https://github.com/tombague160-maker/sereo-production/issues/82)) ([a14b1d6](https://github.com/tombague160-maker/sereo-production/commit/a14b1d6417f33abdc2b750e8eb2bdd1bbadf6ac4))
+* **backups:** re-arme les backups apres fresh_empty + expose la sante backup (Lot 3a — P0 audit) ([#84](https://github.com/tombague160-maker/sereo-production/issues/84)) ([157a18e](https://github.com/tombague160-maker/sereo-production/commit/157a18e113320ac174fc80171502b6a30b587354))
+* **dates:** stoppe la mutation en masse des dateCommande vers today (Lot 2 — P0 audit) ([#83](https://github.com/tombague160-maker/sereo-production/issues/83)) ([d5640e2](https://github.com/tombague160-maker/sereo-production/commit/d5640e25d337ac58dc4d2816eb80bb572242f6f5))
+* **release:** restaure la version 1.19.0 sur main (manifest + package.json) ([#81](https://github.com/tombague160-maker/sereo-production/issues/81)) ([14fb956](https://github.com/tombague160-maker/sereo-production/commit/14fb956170666826f573974cc24e41aefbdf2b40))
+
 ## [1.16.0](https://github.com/tombague160-maker/sereo-production/compare/v1.15.0...v1.16.0) (2026-06-17)
 
 
