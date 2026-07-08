@@ -589,11 +589,22 @@ function isHtmlNavigationRequest(req) {
     && (req.path === "/" || req.path === "/index.html" || String(req.get("accept") || "").includes("text/html"));
 }
 
-// Reponse de refus d'acces, format adapte au type de requete (API JSON vs
-// navigation HTML). Pour une tentative Basic echouee sur une navigation HTML,
-// on renvoie le statut avec WWW-Authenticate (re-prompt du dialogue Basic)
-// plutot que la page de login cookie.
-function denyAccess(req, res, statusCode, message) {
+// Reponse de refus d'acces sur une tentative de credentials, format adapte au
+// type de requete.
+// - Navigation HTML (GET) : page de login conviviale via renderLoginPage, qui
+//   lit l'etat de lockout depuis le store et pose lui-meme 200/429 + Retry-After
+//   + le compte a rebours. On EVITE ainsi le dialogue Basic natif du navigateur
+//   quand des credentials Basic perimees sont re-envoyees automatiquement
+//   (ex. apres rotation du mot de passe : le navigateur rejoue le vieux Basic).
+// - API : JSON { error } + Retry-After/WWW-Authenticate selon le cas.
+function denyAccessAttempt(req, res, statusCode, message, retryAfterMs = 0) {
+  if (req.method === "GET" && isHtmlNavigationRequest(req)) {
+    renderLoginPage(req, res);
+    return;
+  }
+  if (retryAfterMs > 0) {
+    res.setHeader("Retry-After", String(Math.ceil(retryAfterMs / 1000)));
+  }
   if (statusCode === 401) {
     res.setHeader("WWW-Authenticate", `Basic realm="${AUTH_REALM}", charset="UTF-8"`);
   }
@@ -633,8 +644,7 @@ function requireAccessAuth(req, res, next) {
 
     const status = getAuthRateLimitStatus(ip);
     if (status.locked) {
-      res.setHeader("Retry-After", String(Math.ceil(status.remainingMs / 1000)));
-      denyAccess(req, res, 429, "Trop de tentatives de connexion. Reessayez plus tard.");
+      denyAccessAttempt(req, res, 429, "Trop de tentatives de connexion. Reessayez plus tard.", status.remainingMs);
       return;
     }
 
@@ -649,11 +659,10 @@ function requireAccessAuth(req, res, next) {
 
     const updated = recordAuthFailure(ip);
     if (updated.locked) {
-      res.setHeader("Retry-After", String(Math.ceil(updated.remainingMs / 1000)));
-      denyAccess(req, res, 429, "Trop de tentatives de connexion. Reessayez plus tard.");
+      denyAccessAttempt(req, res, 429, "Trop de tentatives de connexion. Reessayez plus tard.", updated.remainingMs);
       return;
     }
-    denyAccess(req, res, 401, "Connexion requise");
+    denyAccessAttempt(req, res, 401, "Connexion requise");
     return;
   }
 

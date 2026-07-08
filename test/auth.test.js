@@ -289,6 +289,44 @@ test("rate limit Basic : un succes Basic efface le compteur d'echecs", async () 
   }
 });
 
+test("nav HTML avec Basic errone rend la page login (pas de dialogue Basic natif)", async () => {
+  _resetAuthRateLimitForTest();
+
+  // Un navigateur qui a memorise des creds Basic les rejoue automatiquement.
+  // Sur une navigation HTML, on veut la page de login conviviale, PAS le popup
+  // Basic natif (regression de degradation gracieuse relevee en revue).
+  const res = await fetch(`${baseUrl}/`, {
+    headers: { Authorization: basicAuth("admin-test", "mauvais"), Accept: "text/html" },
+    redirect: "manual"
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("www-authenticate"), null);
+  const html = await res.text();
+  assert.match(html, /name="password"/);
+});
+
+test("nav HTML avec Basic pendant lockout rend la page login (429 + compte a rebours)", async () => {
+  _resetAuthRateLimitForTest();
+
+  for (let i = 0; i < 5; i += 1) {
+    await fetch(`${baseUrl}/api/storage/status`, {
+      headers: { Authorization: basicAuth("admin-test", "mauvais") }
+    });
+  }
+
+  // IP verrouillee + navigation HTML avec Basic perime -> page login avec
+  // countdown (429), pas de 429 brut ni de dialogue Basic natif.
+  const res = await fetch(`${baseUrl}/`, {
+    headers: { Authorization: basicAuth("admin-test", "mauvais"), Accept: "text/html" },
+    redirect: "manual"
+  });
+  assert.equal(res.status, 429);
+  assert.match(res.headers.get("retry-after") || "", /^\d+$/);
+  assert.equal(res.headers.get("www-authenticate"), null);
+  const html = await res.text();
+  assert.match(html, /id="lockout-countdown"/);
+});
+
 // =============================================================================
 // Robustesse cookie + session (regression P2 + test de garde manquant)
 // =============================================================================

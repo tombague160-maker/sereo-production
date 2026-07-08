@@ -3460,9 +3460,11 @@ async function apiFetch(url, options = {}) {
   clearTimeout(timer);
 
   // Session expiree (cookie 12h) -> redirige vers /login en preservant l'URL courante.
-  // Garde-fou : si on est deja sur /login, on ne re-redirige pas (boucle infinie possible
-  // sur certains navigateurs).
-  if (res.status === 401 && !window.location.pathname.startsWith("/login")) {
+  // 429 = IP verrouillee (rate-limit auth) : on redirige aussi vers /login, qui
+  // affiche le compte a rebours de lockout (sinon l'app afficherait un toast
+  // "Erreur HTTP 429" opaque). Garde-fou : si on est deja sur /login, on ne
+  // re-redirige pas (boucle infinie possible sur certains navigateurs).
+  if ((res.status === 401 || res.status === 429) && !window.location.pathname.startsWith("/login")) {
     const next = window.location.pathname + window.location.search + window.location.hash;
     window.location.href = `/login?next=${encodeURIComponent(next)}`;
     // On throw quand meme pour interrompre proprement le code appelant.
