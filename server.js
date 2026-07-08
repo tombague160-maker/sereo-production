@@ -3827,6 +3827,11 @@ function reorderRouteStops(db, routeId, stopIds) {
     ...stop,
     orderIndex: index + 1
   }));
+  // Revue #90 : garder selectedOrderIds coherent avec le nouvel ordre des stops
+  // (meme derivation que normalizeRoute), sinon la reponse PATCH immediate est
+  // desynchronisee (stops reordonnes vs selectedOrderIds ancien ordre) jusqu'au
+  // prochain GET.
+  route.selectedOrderIds = route.stops.map(stop => stop.orderId);
 
   return route;
 }
