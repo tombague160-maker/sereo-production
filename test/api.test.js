@@ -916,6 +916,39 @@ test("stock import deduplicates rows with same code (keeps first occurrence)", a
   assert.equal(abc.quantite, 10);
 });
 
+test("Lot4b - re-import stock partiel (sans colonnes Cout/Tarif) preserve les prix existants", async () => {
+  seedDb(defaultDb());
+
+  // Import complet avec prix + statut
+  const form1 = new FormData();
+  form1.append("file", workbookBlob([
+    ["Code", "Nom", "Coût", "Tarif", "Quantité", "Statut"],
+    ["A1", "Produit A", "12,50", "25,00", "10", "actif"]
+  ]), "stock.xlsx");
+  const imp1 = await requestJson("/api/import/stock", { method: "POST", body: form1 });
+  assert.equal(imp1.res.status, 200);
+  let a1 = readDb().stock.find(p => p.code === "A1");
+  assert.equal(a1.cout, 12.5);
+  assert.equal(a1.tarif, 25);
+  assert.equal(a1.statut, "actif");
+
+  // Re-import PARTIEL : seulement Code / Nom / Quantite (export Ximi simplifie).
+  // Avant le fix : cout/tarif remis a 0 et statut vide (perte des prix/marges).
+  const form2 = new FormData();
+  form2.append("file", workbookBlob([
+    ["Code", "Nom", "Quantité"],
+    ["A1", "Produit A", "7"]
+  ]), "stock.xlsx");
+  const imp2 = await requestJson("/api/import/stock", { method: "POST", body: form2 });
+  assert.equal(imp2.res.status, 200);
+
+  a1 = readDb().stock.find(p => p.code === "A1");
+  assert.equal(a1.cout, 12.5, "cout preserve (colonne Cout absente)");
+  assert.equal(a1.tarif, 25, "tarif preserve (colonne Tarif absente)");
+  assert.equal(a1.statut, "actif", "statut preserve (colonne Statut absente)");
+  assert.equal(a1.quantite, 7, "quantite bien mise a jour depuis l'Excel");
+});
+
 test("sales import sums quantities when same product appears twice for one client", async () => {
   seedDb(defaultDb());
 

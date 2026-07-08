@@ -4249,8 +4249,19 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
       .map(row => {
         const code = clean(getCellByNames(row, headers, ["Code", "Reference", "Référence", "SKU"]));
         const nom = clean(getCellByNames(row, headers, ["Nom", "Produit", "Article"]));
-        const cout = number(getCellByNames(row, headers, ["Cout", "Coût", "Prix achat"]), 0);
-        const tarif = number(getCellByNames(row, headers, ["Tarif", "Prix", "Prix vente"]), 0);
+        // Lot 4b : on capture la PRESENCE de chaque colonne (cellule non vide)
+        // pour distinguer "colonne absente d'un Excel partiel" de "valeur 0/vide
+        // explicite". cout/tarif/statut/category/seuil d'un produit ne viennent
+        // QUE de l'import (jamais edites cote app) : quand la colonne manque, il
+        // faut PRESERVER la valeur DB, pas l'ecraser par 0/"".
+        const coutCell = getCellByNames(row, headers, ["Cout", "Coût", "Prix achat"]);
+        const tarifCell = getCellByNames(row, headers, ["Tarif", "Prix", "Prix vente"]);
+        const statutCell = getCell(row, headers, "Statut", 1);
+        const cout = number(coutCell, 0);
+        const tarif = number(tarifCell, 0);
+        const statut = clean(statutCell);
+        const hasCout = clean(coutCell) !== "";
+        const hasTarif = clean(tarifCell) !== "";
         const excelQuantite = optionalQuantity(getCellByNames(row, headers, ["Quantite", "Stock", "Qte"]));
         const category = clean(getCellByNames(row, headers, ["Categorie", "Category", "Type"]));
         const alertThreshold = optionalQuantity(getCellByNames(row, headers, ["Seuil", "Seuil alerte", "Minimum", "Alerte"]));
@@ -4261,7 +4272,7 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
           nom,
           tarif,
           cout,
-          statut: clean(getCell(row, headers, "Statut", 1)),
+          statut,
           type: category,
           category,
           alertThreshold
@@ -4276,10 +4287,24 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
           // qu'a importer le catalogue produits). Une valeur explicite dans la
           // colonne Quantite de l'Excel ecrase quand meme le stock manuel pour
           // permettre une remise a zero ponctuelle si vraiment souhaitee.
+          //
+          // Lot 4b : pour cout/tarif/statut/category/nom/seuil, on ne prend la
+          // valeur Excel QUE si la colonne est presente (sinon on garde la DB).
+          // Sinon un reimport partiel [Code,Nom,Quantite] mettait cout=tarif=0 et
+          // vidait statut/category pour tous les produits (perte des prix/marges).
           return {
             ...existing,
             ...fieldsFromExcel,
             id: existing.id,
+            nom: nom || existing.nom || nom,
+            cout: hasCout ? cout : (existing.cout ?? cout),
+            tarif: hasTarif ? tarif : (existing.tarif ?? tarif),
+            statut: statut || existing.statut || "",
+            category: category || existing.category || "",
+            type: category || existing.type || existing.category || "",
+            alertThreshold: alertThreshold !== null && alertThreshold !== undefined
+              ? alertThreshold
+              : (existing.alertThreshold ?? null),
             quantite: excelQuantite !== null && excelQuantite !== undefined
               ? excelQuantite
               : existing.quantite
