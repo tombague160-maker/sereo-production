@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.19.2](https://github.com/tombague160-maker/sereo-production/compare/v1.19.1...v1.19.2) (2026-07-08)
+
+
+### 🐛 Corrections de bugs
+
+* **import:** MERGE stock préserve coût/tarif/statut quand la colonne Excel manque (Lot 4b) ([#87](https://github.com/tombague160-maker/sereo-production/issues/87)) ([aa2fd79](https://github.com/tombague160-maker/sereo-production/commit/aa2fd79cbdf57b82fc090366de91f5a75c425003))
+* **stock:** purge libère les réservations de stock (Lot 5) ([#89](https://github.com/tombague160-maker/sereo-production/issues/89)) ([5a72737](https://github.com/tombague160-maker/sereo-production/commit/5a72737452e956289c5ea263abbcccd8726457d3))
+* **tournee:** reorderRouteStops rejette les stopIds dupliqués (Lot 6) ([#90](https://github.com/tombague160-maker/sereo-production/issues/90)) ([08a7e94](https://github.com/tombague160-maker/sereo-production/commit/08a7e94f1eb1093ab2df77667b799fe3d60f5a1c))
+
 ## [1.19.1](https://github.com/tombague160-maker/sereo-production/compare/v1.19.0...v1.19.1) (2026-07-08)
 
 
