@@ -4370,6 +4370,29 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
   }
 });
 
+// Lot 4 (audit 2026-07-08) : synchronise sur une commande EXISTANTE les champs
+// "donnees courantes" (adresse, contact, date de livraison, notes, priorite)
+// issus d'un re-import, sans toucher a l'identite (produits/date) ni au statut
+// workflow. MERGE : n'ecrase que si la valeur importee est non vide (preserve
+// les saisies manuelles quand la colonne Excel est absente). Applique aux
+// chemins 1 (hash identique) ET 2 (meme cle) : avant, re-importer une adresse /
+// telephone / date de livraison corriges etait perdu (commande routee vers
+// l'ancienne adresse) selon que les produits avaient change ou non, et le
+// chemin 2 omettait deliveryDate/notes/priority.
+function syncOrderImportedFields(order, client, orderData) {
+  order.address = client.rue || order.address;
+  order.city = client.ville || order.city;
+  order.postalCode = client.codePostal || order.postalCode;
+  order.sector = client.secteur || order.sector;
+  order.phone = client.telephone || order.phone;
+  if (client.lat !== "" && client.lat !== undefined && client.lat !== null) order.lat = client.lat;
+  if (client.lng !== "" && client.lng !== undefined && client.lng !== null) order.lng = client.lng;
+  if (orderData && orderData.deliveryDate) order.deliveryDate = orderData.deliveryDate;
+  if (client.notes) order.notes = client.notes;
+  if (client.priority) order.priority = client.priority;
+  order.updatedAt = new Date().toISOString();
+}
+
 app.post("/api/import/ventes", uploadExcel, async (req, res) => {
   const uploadedPath = req.file?.path;
 
@@ -4572,10 +4595,15 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
           products: orderData.produits
         });
 
-        // Chemin 1 : hash strict = meme contenu, re-import identique idempotent
+        // Chemin 1 : hash strict = meme CONTENU (produits/date), re-import
+        // idempotent. Mais les donnees courantes (adresse, contact, date de
+        // livraison) ont pu etre corrigees dans l'Excel -> on les synchronise
+        // quand meme (sinon la commande garde l'ancienne adresse et la tournee
+        // route au mauvais endroit). Un re-import STRICTEMENT identique reste
+        // un no-op (les valeurs sont egales).
         const sameHashOrder = db.commandes.find(o => o.excelRowHash && o.excelRowHash === hash);
         if (sameHashOrder) {
-          sameHashOrder.updatedAt = new Date().toISOString();
+          syncOrderImportedFields(sameHashOrder, client, orderData);
           skippedIdenticalCount += 1;
           return;
         }
@@ -4588,16 +4616,11 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
         if (sameKeyOrder) {
           sameKeyOrder.products = normalizeProducts(orderData.produits);
           sameKeyOrder.excelRowHash = hash;
-          sameKeyOrder.updatedAt = new Date().toISOString();
-          // Sync coordonnees client (peuvent avoir change). lat/lng client manuel
-          // (PATCH /api/clients/:id/coordinates) deja merge dans client.lat/lng.
-          sameKeyOrder.address = client.rue || sameKeyOrder.address;
-          sameKeyOrder.city = client.ville || sameKeyOrder.city;
-          sameKeyOrder.postalCode = client.codePostal || sameKeyOrder.postalCode;
-          sameKeyOrder.sector = client.secteur || sameKeyOrder.sector;
-          sameKeyOrder.phone = client.telephone || sameKeyOrder.phone;
-          if (client.lat !== "") sameKeyOrder.lat = client.lat;
-          if (client.lng !== "") sameKeyOrder.lng = client.lng;
+          // Sync des donnees courantes (adresse, contact, date de livraison,
+          // notes, priorite). Avant, deliveryDate/notes/priority etaient omis
+          // -> replanifier une livraison dans Ximi n'etait propage par AUCUN
+          // des 3 chemins. lat/lng manuel deja merge dans client.lat/lng.
+          syncOrderImportedFields(sameKeyOrder, client, orderData);
           updatedCount += 1;
           return;
         }

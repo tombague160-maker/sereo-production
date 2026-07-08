@@ -916,6 +916,47 @@ test("stock import deduplicates rows with same code (keeps first occurrence)", a
   assert.equal(abc.quantite, 10);
 });
 
+test("Lot4 - re-import propage adresse/telephone/date de livraison sur la commande existante", async () => {
+  seedDb(defaultDb());
+
+  const header = ["Client", "Quantite", "Produit", "Code", "Rue", "Ville", "Code Postal", "Telephone", "Date", "Date livraison"];
+
+  const form1 = new FormData();
+  form1.append("file", workbookBlob([
+    header,
+    ["Client X", "2", "Produit A", "A1", "1 rue ancienne", "Besancon", "25000", "0300000000", "2026-05-05", "2026-05-10"]
+  ]), "ventes.xlsx");
+  const imp1 = await requestJson("/api/import/ventes", { method: "POST", body: form1 });
+  assert.equal(imp1.res.status, 200);
+
+  let db = readDb();
+  let order = db.commandes.find(o => o.clientName === "Client X");
+  assert.ok(order, "commande creee au 1er import");
+  assert.equal(order.address, "1 rue ancienne");
+  assert.equal(order.deliveryDate, "2026-05-10");
+
+  // Re-import : memes produits + meme date de commande (=> hash identique,
+  // chemin 1), mais adresse / telephone / date de livraison CORRIGES. Sans le
+  // fix, le chemin 1 etait un no-op et la commande gardait l'ancienne adresse
+  // (tournee vers le mauvais endroit). Le clientId est preserve par la cle
+  // secondaire (nom+CP), donc le hash reste identique malgre le changement d'adresse.
+  const form2 = new FormData();
+  form2.append("file", workbookBlob([
+    header,
+    ["Client X", "2", "Produit A", "A1", "2 rue corrigee", "Besancon", "25000", "0399999999", "2026-05-05", "2026-05-12"]
+  ]), "ventes.xlsx");
+  const imp2 = await requestJson("/api/import/ventes", { method: "POST", body: form2 });
+  assert.equal(imp2.res.status, 200);
+
+  db = readDb();
+  const ordersX = db.commandes.filter(o => o.clientName === "Client X");
+  assert.equal(ordersX.length, 1, "pas de commande doublon (meme bon)");
+  order = ordersX[0];
+  assert.equal(order.address, "2 rue corrigee", "adresse corrigee propagee (chemin 1 hash)");
+  assert.equal(order.phone, "0399999999", "telephone corrige propage");
+  assert.equal(order.deliveryDate, "2026-05-12", "date de livraison replanifiee propagee");
+});
+
 test("sales import sums quantities when same product appears twice for one client", async () => {
   seedDb(defaultDb());
 
