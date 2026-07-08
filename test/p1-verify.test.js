@@ -18,7 +18,7 @@ process.env.SEREO_BACKUP_DIR = path.join(tmpRoot, "data", "backups");
 process.env.SEREO_AUTH_USER = "";
 process.env.SEREO_AUTH_PASSWORD = "";
 
-const { _normalizeDateInput, _excelDateToIso, _distance, _number, _importQuantity } = require("../server");
+const { _normalizeDateInput, _excelDateToIso, _distance, _number, _importQuantity, _normalizeOrder } = require("../server");
 
 // ── M1 : validation de date stricte (rejet des dates aberrantes) ────────────
 test("M1.a — date avec mois invalide (13) est REJETEE", () => {
@@ -54,6 +54,42 @@ test("M1.g — ISO YYYY-MM-DD valide passe tel quel", () => {
 test("M1.h — ISO avec composants invalides est REJETEE (pas seulement par le regex de format)", () => {
   assert.equal(_normalizeDateInput("2026-13-05"), "", "mois 13 en ISO rejeté");
   assert.equal(_normalizeDateInput("2026-02-30"), "", "30 fev en ISO rejeté");
+});
+
+// ── Lot 2 (audit 2026-07-08) : integrite des dates ──────────────────────────
+
+test("Lot2.a — ISO datetime complet est ACCEPTE (tronque a la date), plus rejete", () => {
+  // Avant : rejete (regex 10 chars) -> mute vers today par normalizeOrder (P0).
+  assert.equal(_normalizeDateInput("2026-05-05T10:00:00.000Z"), "2026-05-05");
+  assert.equal(_normalizeDateInput("2026-05-05 10:00"), "2026-05-05");
+  // Un datetime dont la DATE est invalide reste rejete
+  assert.equal(_normalizeDateInput("2026-13-05T10:00:00Z"), "");
+  // Un suffixe non horaire (pas de T ni espace) reste rejete
+  assert.equal(_normalizeDateInput("2026-05-05abc"), "");
+});
+
+test("Lot2.b — normalizeOrder PRESERVE une date brute non normalisable (jamais today)", () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const o = _normalizeOrder({ id: "x", clientId: "c", dateCommande: "2025-13-31" });
+  assert.equal(o.dateCommande, "2025-13-31", "date invalide preservee telle quelle");
+  assert.notEqual(o.dateCommande, today, "surtout PAS mutee vers today");
+});
+
+test("Lot2.c — normalizeOrder normalise un datetime en date canonique (sans perte)", () => {
+  const o = _normalizeOrder({ id: "x", clientId: "c", dateCommande: "2026-05-05T10:00:00.000Z" });
+  assert.equal(o.dateCommande, "2026-05-05");
+});
+
+test("Lot2.d — normalizeOrder : commande SANS date -> defaut aujourd'hui", () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const o = _normalizeOrder({ id: "x", clientId: "c" });
+  assert.equal(o.dateCommande, today, "nouvelle commande sans date = today (defaut acceptable)");
+});
+
+test("Lot2.e — excelDate borne les serials aberrants (pas de date fantaisiste)", () => {
+  // excelDateToIso delegue a normalizeDateInput qui borne deja a 80000.
+  assert.equal(_excelDateToIso(500000), "", "serial aberrant -> vide, pas an 3268");
+  assert.equal(_excelDateToIso(-5), "", "serial negatif -> vide");
 });
 
 test("M1.i — Date object Excel est aussi validee (cohrence path texte/objet)", () => {
