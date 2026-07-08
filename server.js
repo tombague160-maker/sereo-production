@@ -1391,6 +1391,18 @@ let lastStorageRecovery = null;
 // Memorise un echec TOTAL de recovery (disque plein...) pour ne pas la rejouer
 // a chaque requete (revue #2).
 let storageRecoveryFatal = null;
+// Lot 3 (audit 2026-07-08) : apres une recovery "fresh_empty" (base repartie
+// VIERGE), les backups auto sont suspendus pour ne pas gzipper du vide et
+// evincer les backups historiques. MAIS ils DOIVENT reprendre des que
+// l'operateur re-saisit de vraies donnees, sinon une 2e corruption = perte
+// totale definitive (avant : suspension a vie, flag jamais re-arme). Ce flag
+// porte la suspension ; writeDb la leve au 1er write contenant des donnees.
+let backupsSuspendedFreshEmpty = false;
+// Lot 3 : sante des backups exposee via /api/storage/status. Avant, un echec
+// de backup async etait totalement silencieux (fausse securite) : l'app
+// pouvait tourner des jours sans nouveau backup en paraissant saine.
+let lastBackupAt = null;
+let lastBackupError = null;
 // Nombre max de fichiers .corrupt-<ts> conserves (forensic) avant purge
 const QUARANTINE_RETENTION = 5;
 
@@ -1612,6 +1624,10 @@ function recoverCorruptSqliteStore(originalError) {
       source: null,
       message: `Aucun backup exploitable : base reinitialisee VIERGE (donnees perdues). Erreur initiale: ${originalError.message}`
     };
+    // Lot 3 : suspend les backups auto TANT QUE la base reste vide (evite de
+    // gzipper du vide et d'evincer d'eventuels backups). writeDb re-arme des la
+    // 1ere re-saisie de donnees (sinon perte totale a la 2e corruption).
+    backupsSuspendedFreshEmpty = true;
     console.error(`[storage] RECOVERY: ${lastStorageRecovery.message}`);
     pruneOldQuarantineFiles();
     return freshStore;
@@ -1863,10 +1879,35 @@ function validateBrandImage(value) {
   return brandImage;
 }
 
+// Lot 3 : la base contient-elle des donnees metier reelles ? Sert a re-armer
+// les backups apres une recovery fresh_empty (ne re-armer que sur du contenu).
+function dbHasData(db) {
+  return Boolean(
+    (db.commandes && db.commandes.length)
+    || (db.clients && db.clients.length)
+    || (db.stock && db.stock.length)
+    || (db.ventes && db.ventes.length)
+  );
+}
+
 function writeDb(db, options = {}) {
   const { backup = true } = options;
 
   syncWorkflow(db);
+
+  // Lot 3 (audit 2026-07-08) : re-armer les backups auto si l'operateur a
+  // re-saisi des donnees apres une recovery fresh_empty. Fait AVANT l'ecriture
+  // pour que l'entree d'historique soit persistee dans ce meme write.
+  let forceReArmBackup = false;
+  if (backupsSuspendedFreshEmpty && dbHasData(db)) {
+    backupsSuspendedFreshEmpty = false;
+    // Revue #84 : on FORCE le backup de re-arm (bypass throttle). Sinon, quand
+    // le fresh_empty vient de .gz CORROMPUS laisses sur disque par la recovery
+    // (mtime recent), le throttle 1h se cale dessus et les donnees re-saisies
+    // ne sont pas sauvegardees pendant ~1h -> fenetre de re-perte totale.
+    forceReArmBackup = true;
+    addHistory(db, "Stockage", "Backups automatiques reactives : donnees re-saisies apres reinitialisation vierge.");
+  }
 
   // Ecriture des donnees AVANT tout backup : le backup est un filet de
   // securite, pas un prerequis. Si le disque est plein, on veut au moins que
@@ -1888,9 +1929,17 @@ function writeDb(db, options = {}) {
   //
   // pendingBackup expose une Promise pour les tests qui veulent attendre
   // la fin du backup avant d'assertioner sur le filesystem.
-  if (backup) {
-    pendingBackup = backupDbIfNeededAsync()
+  //
+  // Revue #84 : on SERIALISE les backups async (skip si un backup est deja en
+  // vol, sauf re-arm force). Deux backups concurrents (fire-and-forget, hors
+  // verrou) provoquaient un signal de sante incoherent (un echec tardif
+  // ecrasant un succes plus recent) et un risque de torn-read.
+  if (backup && (forceReArmBackup || !pendingBackup)) {
+    pendingBackup = backupDbIfNeededAsync({ force: forceReArmBackup })
       .catch(backupError => {
+        // Lot 3 : tracer l'echec (expose via /api/storage/status) au lieu de le
+        // perdre dans les logs -> fin de la "fausse securite" du fire-and-forget.
+        lastBackupError = { at: new Date().toISOString(), message: String(backupError.message || backupError) };
         console.error(`[storage] Backup async echec (mutation deja persistee): ${backupError.message || backupError}`);
       })
       .finally(() => { pendingBackup = null; });
@@ -2033,9 +2082,12 @@ function backupDbIfNeeded(options = {}) {
   const sourcePath = useSqliteStorage() ? SQLITE_PATH : DB_PATH;
   if (!fs.existsSync(sourcePath)) return null;
 
-  // Cas fresh_empty : pas de backup automatique (base vraiment vide). Reste
-  // possible via /api/backup/now si l'admin le veut explicitement.
-  if (!force && lastStorageRecovery && lastStorageRecovery.mode === "fresh_empty") {
+  // Cas fresh_empty : pas de backup automatique tant que la base reste vide.
+  // Reste possible via /api/backup/now. Lot 3 : gate sur le flag re-armable
+  // (leve par writeDb a la re-saisie de donnees), plus sur lastStorageRecovery
+  // .mode qui n'etait JAMAIS re-arme (suspension a vie -> perte totale a la 2e
+  // corruption).
+  if (!force && backupsSuspendedFreshEmpty) {
     return null;
   }
 
@@ -2071,7 +2123,10 @@ async function backupDbIfNeededAsync(options = {}) {
   const sourcePath = useSqliteStorage() ? SQLITE_PATH : DB_PATH;
   if (!fs.existsSync(sourcePath)) return null;
 
-  if (!force && lastStorageRecovery && lastStorageRecovery.mode === "fresh_empty") {
+  // Lot 3 : gate sur le flag re-armable (comme la version sync), et non plus
+  // sur lastStorageRecovery.mode qui n'etait JAMAIS re-arme -> les backups auto
+  // du hot-path writeDb restaient suspendus a vie apres un fresh_empty.
+  if (!force && backupsSuspendedFreshEmpty) {
     return null;
   }
   if (!force && lastStorageRecovery && lastStorageRecovery.mode === "restored_backup" && !postRestoreBackupDone) {
@@ -2107,6 +2162,8 @@ function writeBackupNow(tag = "") {
   fs.writeFileSync(backupPath, compressed);
 
   pruneOldBackups();
+  lastBackupAt = new Date().toISOString();
+  lastBackupError = null;
   return backupPath;
 }
 
@@ -2144,6 +2201,8 @@ async function writeBackupNowAsync(tag = "") {
     );
     fs.renameSync(tmpPath, backupPath); // atomique
     pruneOldBackups();
+    lastBackupAt = new Date().toISOString();
+    lastBackupError = null;
     return backupPath;
   } catch (err) {
     try { fs.unlinkSync(tmpPath); } catch { /* best-effort */ }
@@ -3873,7 +3932,14 @@ app.get("/api/storage/status", (req, res) => {
     lastRecovery: lastStorageRecovery,
     // Chantier 1 : flag indiquant si le snapshot post-restore a deja ete fait
     // (visible pour debug ; le snapshot est cree au premier appel writeDb).
-    postRestoreBackupDone
+    postRestoreBackupDone,
+    // Lot 3 (audit 2026-07-08) : sante des backups. backupsSuspended=true =>
+    // recovery fresh_empty en cours, aucun backup auto tant qu'aucune donnee
+    // n'est re-saisie (l'UI doit alerter). lastBackupError != null => dernier
+    // backup async a echoue (disque plein/permissions) : a surveiller.
+    backupsSuspended: backupsSuspendedFreshEmpty,
+    lastBackupAt,
+    lastBackupError
   });
 });
 
@@ -5257,7 +5323,7 @@ module.exports = {
   // Chantier 2 : permet aux tests d'attendre que le backup async finisse
   // avant d'assertioner sur le filesystem.
   _flushPendingBackup: flushPendingBackup,
-  _resetStorageRecoveryForTest: () => { lastStorageRecovery = null; storageRecoveryFatal = null; },
+  _resetStorageRecoveryForTest: () => { lastStorageRecovery = null; storageRecoveryFatal = null; backupsSuspendedFreshEmpty = false; lastBackupAt = null; lastBackupError = null; },
   _isCorruptionError: isCorruptionError,
   _normalizeDateInput: normalizeDateInput,
   _excelDateToIso: excelDateToIso,
