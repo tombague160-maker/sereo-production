@@ -253,6 +253,20 @@ test("V1171.R1.d — scanSuspiciousDates accepte ISO datetime complet (legacy en
   assert.equal(result.datesSuspectes, 0, "ISO complet accepte (prefixe 10 chars valide)");
 });
 
+test("V1171.R1.f — scanSuspiciousDates mirror EXACT de normalizeOrder (serial/blanc)", () => {
+  // Consistance (revue Lot 2) : la valeur BRUTE est passee a normalizeDateInput,
+  // exactement comme normalizeOrder. Un serial Excel numerique est sain (path
+  // number), un blanc retombe sur today (manquant, pas "a corriger"), seule une
+  // vraie date non normalisable compte comme suspecte.
+  const result = _scanSuspiciousDates([
+    { id: "n", dateCommande: 45000 },        // serial Excel ~2023 -> sain
+    { id: "b", dateCommande: "   " },        // blanc -> today (manquant)
+    { id: "g", dateCommande: "2026-13-05" }  // mois 13 -> non normalisable -> suspect
+  ]);
+  assert.equal(result.datesSuspectes, 1, "seule la date non normalisable est suspecte");
+  assert.equal(result.datesManquantes, 1, "le blanc compte comme manquant, pas suspect");
+});
+
 test("V1171.R1.e — scanSuspiciousDates cap MAX_SCAN avec troncature signalee", () => {
   // MAJOR-3 : 60000 commandes -> 50000 scannees + flag troncature
   const commandes = Array.from({ length: 60000 }, (_, i) => ({

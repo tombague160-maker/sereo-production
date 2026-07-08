@@ -3931,17 +3931,17 @@ function scanSuspiciousDates(commandes) {
   const toScan = truncated ? list.slice(0, SCAN_MAX_COMMANDES) : list;
 
   for (const order of toScan) {
-    const dc = order.dateCommande;
-    if (!dc) { missingDate += 1; continue; }
-    const dcStr = String(dc);
-    // Aligne EXACTEMENT sur normalizeOrder : meme normalizeDateInput, sur la
-    // chaine ENTIERE (pas un prefixe 10 chars, qui donnait un faux "aucun
-    // risque"). Une valeur normalisable (canonique, ISO datetime, FR...) est
-    // saine : normalizeOrder la canonise sans perte. Seules les valeurs NON
-    // normalisables comptent : normalizeOrder les preserve telles quelles
-    // (jamais mutees vers today depuis le fix P0) et elles doivent etre
-    // corrigees manuellement.
-    if (normalizeDateInput(dcStr)) continue;
+    // Mirror EXACT de normalizeOrder (meme valeur BRUTE, pas String() qui
+    // casserait le path number d'un serial Excel en mode JSON) :
+    //   normalizeDateInput(raw) truthy      -> canonisee sans perte (saine)
+    //   sinon string non vide               -> PRESERVEE brute (a corriger)
+    //   sinon (blanc / non-string / absente)-> today (defaut silencieux)
+    const raw = order.dateCommande;
+    if (!raw) { missingDate += 1; continue; }
+    if (normalizeDateInput(raw)) continue;
+
+    const preservedRaw = typeof raw === "string" && raw.trim();
+    if (!preservedRaw) { missingDate += 1; continue; }
 
     suspicious += 1;
     if (samples.length < 20) {
@@ -3949,7 +3949,7 @@ function scanSuspiciousDates(commandes) {
         id: order.id,
         numero: order.numero || "(sans numero)",
         clientName: order.clientName || "",
-        dateCommandeRaw: dcStr,
+        dateCommandeRaw: String(raw),
         dateCommandeApresValidation: "(non normalisable -> preservee telle quelle, a corriger manuellement)"
       });
     }
