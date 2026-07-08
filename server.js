@@ -1898,8 +1898,14 @@ function writeDb(db, options = {}) {
   // Lot 3 (audit 2026-07-08) : re-armer les backups auto si l'operateur a
   // re-saisi des donnees apres une recovery fresh_empty. Fait AVANT l'ecriture
   // pour que l'entree d'historique soit persistee dans ce meme write.
+  let forceReArmBackup = false;
   if (backupsSuspendedFreshEmpty && dbHasData(db)) {
     backupsSuspendedFreshEmpty = false;
+    // Revue #84 : on FORCE le backup de re-arm (bypass throttle). Sinon, quand
+    // le fresh_empty vient de .gz CORROMPUS laisses sur disque par la recovery
+    // (mtime recent), le throttle 1h se cale dessus et les donnees re-saisies
+    // ne sont pas sauvegardees pendant ~1h -> fenetre de re-perte totale.
+    forceReArmBackup = true;
     addHistory(db, "Stockage", "Backups automatiques reactives : donnees re-saisies apres reinitialisation vierge.");
   }
 
@@ -1923,8 +1929,13 @@ function writeDb(db, options = {}) {
   //
   // pendingBackup expose une Promise pour les tests qui veulent attendre
   // la fin du backup avant d'assertioner sur le filesystem.
-  if (backup) {
-    pendingBackup = backupDbIfNeededAsync()
+  //
+  // Revue #84 : on SERIALISE les backups async (skip si un backup est deja en
+  // vol, sauf re-arm force). Deux backups concurrents (fire-and-forget, hors
+  // verrou) provoquaient un signal de sante incoherent (un echec tardif
+  // ecrasant un succes plus recent) et un risque de torn-read.
+  if (backup && (forceReArmBackup || !pendingBackup)) {
+    pendingBackup = backupDbIfNeededAsync({ force: forceReArmBackup })
       .catch(backupError => {
         // Lot 3 : tracer l'echec (expose via /api/storage/status) au lieu de le
         // perdre dans les logs -> fin de la "fausse securite" du fire-and-forget.
