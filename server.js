@@ -4790,9 +4790,17 @@ app.post("/api/orders/purge", async (req, res) => {
       // physiquement les quantites ; sans release, purger les commandes laisse
       // le stock ampute sans aucune commande pour le justifier -> inventaire
       // sous-compte a vie (l'historique disait pourtant "Stock preserve").
-      // releaseOrderStockReservation est idempotent (no-op si pas de reservation).
+      //
+      // Revue #89 : on ne restitue QUE les commandes dont la marchandise est
+      // encore en entrepot. Une commande 'livre' (consommee) ou 'en_livraison'
+      // (dans le camion) a physiquement quitte le stock -> la restituer
+      // sur-compterait l'inventaire. On filtre sur le STATUT et pas seulement sur
+      // stockReservedAt : des commandes 'livre' legacy/importees peuvent avoir
+      // garde stockReservedAt non nul (le nullify-a-la-livraison est recent).
+      const CONSUMED_STATUSES = new Set(["livre", "en_livraison"]);
       let stockReservationsReleased = 0;
       db.commandes.forEach(order => {
+        if (CONSUMED_STATUSES.has(order.status)) return;
         if (releaseOrderStockReservation(db, order, "purge")) stockReservationsReleased += 1;
       });
 

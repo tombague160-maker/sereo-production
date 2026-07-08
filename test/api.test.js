@@ -999,6 +999,30 @@ test("Lot5 - purge libere les reservations de stock (restitue le physique)", asy
   assert.equal(p1.quantite, 10, "les 3 unites reservees sont restituees (7 -> 10)");
 });
 
+test("Lot5 - purge ne restitue PAS le stock des commandes livrees (marchandise partie)", async () => {
+  // Commande deja livree ayant garde stockReservedAt (cas legacy). La
+  // marchandise a physiquement quitte le stock -> ne PAS la restituer, sinon
+  // sur-comptage fantome (revue #89).
+  seedDb({
+    ...defaultDb(),
+    stock: [{ id: "p2", code: "B1", nom: "Produit B", quantite: 4, alertThreshold: 5 }],
+    commandes: [{
+      id: "o2", clientId: "c2", clientName: "Client B", numero: "CMD-2026-002",
+      products: [{ code: "B1", nom: "Produit B", quantite: 6 }],
+      status: "livre", stockReservedAt: "2026-06-01T10:00:00Z"
+    }]
+  });
+
+  let p2 = readDb().stock.find(p => p.code === "B1");
+  assert.equal(p2.quantite, 4);
+
+  const r = await requestJson("/api/orders/purge", { method: "POST" });
+  assert.equal(r.res.status, 200);
+
+  p2 = readDb().stock.find(p => p.code === "B1");
+  assert.equal(p2.quantite, 4, "commande livree : stock NON restitue (marchandise deja partie)");
+});
+
 test("sales import sums quantities when same product appears twice for one client", async () => {
   seedDb(defaultDb());
 
