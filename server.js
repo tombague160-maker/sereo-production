@@ -4785,6 +4785,17 @@ app.post("/api/orders/purge", async (req, res) => {
         routes: db.routes.length
       };
 
+      // Lot 5 (audit 2026-07-08) : liberer les reservations de stock AVANT de
+      // supprimer les commandes. reserveStockForOrder (start-preparation) deduit
+      // physiquement les quantites ; sans release, purger les commandes laisse
+      // le stock ampute sans aucune commande pour le justifier -> inventaire
+      // sous-compte a vie (l'historique disait pourtant "Stock preserve").
+      // releaseOrderStockReservation est idempotent (no-op si pas de reservation).
+      let stockReservationsReleased = 0;
+      db.commandes.forEach(order => {
+        if (releaseOrderStockReservation(db, order, "purge")) stockReservationsReleased += 1;
+      });
+
       db.commandes = [];
       db.clients = [];
       db.ventes = [];
@@ -4793,8 +4804,8 @@ app.post("/api/orders/purge", async (req, res) => {
       addHistory(
         db,
         "Purge",
-        `Reset bons de commande : ${purgedCounts.commandes} commande(s), ${purgedCounts.clients} client(s), ${purgedCounts.ventes} vente(s), ${purgedCounts.routes} tournee(s) supprimees. Stock et historique preserves.`,
-        purgedCounts
+        `Reset bons de commande : ${purgedCounts.commandes} commande(s), ${purgedCounts.clients} client(s), ${purgedCounts.ventes} vente(s), ${purgedCounts.routes} tournee(s) supprimees. ${stockReservationsReleased} reservation(s) de stock restituee(s). Catalogue stock et historique preserves.`,
+        { ...purgedCounts, stockReservationsReleased }
       );
 
       writeDb(db);
