@@ -21,7 +21,12 @@ process.env.SEREO_AUTH_MAX_ATTEMPTS = "5";
 process.env.SEREO_AUTH_RATE_WINDOW_MS = "60000";
 process.env.SEREO_AUTH_LOCKOUT_MS = "1500";
 
-const { app, closeStorage, _resetAuthRateLimitForTest } = require("../server");
+const {
+  app,
+  closeStorage,
+  _resetAuthRateLimitForTest,
+  _createAccessSessionValueForTest
+} = require("../server");
 
 let server;
 let baseUrl;
@@ -207,4 +212,178 @@ test("login.js est accessible sans auth (CSP script-src 'self' OK)", async () =>
   const body = await js.text();
   assert.match(body, /data-locked-until/);
   assert.match(body, /lockout-countdown/);
+});
+
+// =============================================================================
+// Rate limit Basic auth (anti brute-force via en-tete Authorization)
+// Regression du P0 : avant, le lockout ne couvrait QUE POST /login ; l'en-tete
+// Basic sur n'importe quelle route protegee permettait un brute-force illimite.
+// =============================================================================
+
+test("rate limit Basic : 5 tentatives ratees verrouillent l'IP (429 + Retry-After)", async () => {
+  _resetAuthRateLimitForTest();
+
+  for (let i = 0; i < 4; i += 1) {
+    const r = await fetch(`${baseUrl}/api/storage/status`, {
+      headers: { Authorization: basicAuth("admin-test", "mauvais") }
+    });
+    assert.equal(r.status, 401, `tentative ${i + 1} doit rester 401`);
+  }
+
+  // 5e echec : l'IP doit passer verrouillee -> 429 (et non 401 a l'infini)
+  const fifth = await fetch(`${baseUrl}/api/storage/status`, {
+    headers: { Authorization: basicAuth("admin-test", "mauvais") }
+  });
+  assert.equal(fifth.status, 429);
+  assert.match(fifth.headers.get("retry-after") || "", /^\d+$/);
+
+  // Pendant le lockout, meme les BONS credentials Basic sont refuses
+  // (on bloque avant de comparer, comme sur POST /login).
+  const validButLocked = await fetch(`${baseUrl}/api/storage/status`, {
+    headers: { Authorization: basicAuth("admin-test", "mot-de-passe-test-long") }
+  });
+  assert.equal(validButLocked.status, 429);
+});
+
+test("rate limit Basic : une session cookie valide reste acceptee meme IP verrouillee", async () => {
+  _resetAuthRateLimitForTest();
+
+  const login = await postLogin("admin-test", "mot-de-passe-test-long");
+  const cookie = login.headers.get("set-cookie");
+  assert.match(cookie || "", /sereo_access=/);
+
+  // Verrouiller l'IP via 5 echecs Basic
+  for (let i = 0; i < 5; i += 1) {
+    await fetch(`${baseUrl}/api/storage/status`, {
+      headers: { Authorization: basicAuth("admin-test", "mauvais") }
+    });
+  }
+
+  // La session valide ne doit PAS etre bloquee par le lockout d'IP
+  const withSession = await fetch(`${baseUrl}/api/storage/status`, {
+    headers: { Cookie: cookie }
+  });
+  assert.equal(withSession.status, 200);
+});
+
+test("rate limit Basic : un succes Basic efface le compteur d'echecs", async () => {
+  _resetAuthRateLimitForTest();
+
+  for (let i = 0; i < 3; i += 1) {
+    await fetch(`${baseUrl}/api/storage/status`, {
+      headers: { Authorization: basicAuth("admin-test", "mauvais") }
+    });
+  }
+
+  const ok = await fetch(`${baseUrl}/api/storage/status`, {
+    headers: { Authorization: basicAuth("admin-test", "mot-de-passe-test-long") }
+  });
+  assert.equal(ok.status, 200);
+
+  // 4 nouveaux echecs ne doivent PAS verrouiller (compteur remis a 0 par le succes)
+  for (let i = 0; i < 4; i += 1) {
+    const r = await fetch(`${baseUrl}/api/storage/status`, {
+      headers: { Authorization: basicAuth("admin-test", "mauvais") }
+    });
+    assert.equal(r.status, 401, `iteration ${i + 1} doit rester 401, pas de lockout premature`);
+  }
+});
+
+test("nav HTML avec Basic errone rend la page login (pas de dialogue Basic natif)", async () => {
+  _resetAuthRateLimitForTest();
+
+  // Un navigateur qui a memorise des creds Basic les rejoue automatiquement.
+  // Sur une navigation HTML, on veut la page de login conviviale, PAS le popup
+  // Basic natif (regression de degradation gracieuse relevee en revue).
+  const res = await fetch(`${baseUrl}/`, {
+    headers: { Authorization: basicAuth("admin-test", "mauvais"), Accept: "text/html" },
+    redirect: "manual"
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("www-authenticate"), null);
+  const html = await res.text();
+  assert.match(html, /name="password"/);
+});
+
+test("nav HTML avec Basic pendant lockout rend la page login (429 + compte a rebours)", async () => {
+  _resetAuthRateLimitForTest();
+
+  for (let i = 0; i < 5; i += 1) {
+    await fetch(`${baseUrl}/api/storage/status`, {
+      headers: { Authorization: basicAuth("admin-test", "mauvais") }
+    });
+  }
+
+  // IP verrouillee + navigation HTML avec Basic perime -> page login avec
+  // countdown (429), pas de 429 brut ni de dialogue Basic natif.
+  const res = await fetch(`${baseUrl}/`, {
+    headers: { Authorization: basicAuth("admin-test", "mauvais"), Accept: "text/html" },
+    redirect: "manual"
+  });
+  assert.equal(res.status, 429);
+  assert.match(res.headers.get("retry-after") || "", /^\d+$/);
+  assert.equal(res.headers.get("www-authenticate"), null);
+  const html = await res.text();
+  assert.match(html, /id="lockout-countdown"/);
+});
+
+// =============================================================================
+// Robustesse cookie + session (regression P2 + test de garde manquant)
+// =============================================================================
+
+test("cookie malforme ne provoque pas de 500 avant auth", async () => {
+  _resetAuthRateLimitForTest();
+
+  // "%E0%A4%A" : percent-encoding incomplet -> decodeURIComponent throw.
+  // parseCookies s'execute avant l'auth : sans garde, ce serait un 500 pre-auth.
+  const res = await fetch(`${baseUrl}/api/storage/status`, {
+    headers: { Cookie: "sereo_access=%E0%A4%A" }
+  });
+  assert.equal(res.status, 401);
+});
+
+test("session : cookie a signature invalide ou expire est rejete", async () => {
+  _resetAuthRateLimitForTest();
+
+  // Signature bidon sur un payload structurellement plausible
+  const forged = `${Buffer.from(JSON.stringify({ user: "admin-test", issuedAt: Date.now() })).toString("base64url")}.signature-bidon`;
+  const badSig = await fetch(`${baseUrl}/api/storage/status`, {
+    headers: { Cookie: `sereo_access=${forged}` }
+  });
+  assert.equal(badSig.status, 401);
+
+  // Cookie correctement signe mais emis il y a plus de 12h -> expire
+  const expired = _createAccessSessionValueForTest(Date.now() - 13 * 60 * 60 * 1000);
+  const expiredRes = await fetch(`${baseUrl}/api/storage/status`, {
+    headers: { Cookie: `sereo_access=${expired}` }
+  });
+  assert.equal(expiredRes.status, 401);
+
+  // Sanity : un cookie frais correctement signe passe
+  const fresh = _createAccessSessionValueForTest(Date.now());
+  const freshRes = await fetch(`${baseUrl}/api/storage/status`, {
+    headers: { Cookie: `sereo_access=${fresh}` }
+  });
+  assert.equal(freshRes.status, 200);
+});
+
+// =============================================================================
+// Open redirect post-login (regression P2)
+// =============================================================================
+
+test("open redirect : next avec backslash est ramene a /", async () => {
+  _resetAuthRateLimitForTest();
+
+  const login = await fetch(`${baseUrl}/login`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      username: "admin-test",
+      password: "mot-de-passe-test-long",
+      next: "/\\evil.com"
+    }),
+    redirect: "manual"
+  });
+  assert.equal(login.status, 303);
+  assert.equal(login.headers.get("location"), "/");
 });

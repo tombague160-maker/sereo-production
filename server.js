@@ -496,7 +496,15 @@ function parseCookies(header) {
       const value = part.slice(separatorIndex + 1).trim();
       if (!name) return cookies;
 
-      cookies[name] = decodeURIComponent(value);
+      // decodeURIComponent throw sur un cookie malforme (ex: "%" non suivi de
+      // 2 hex). parseCookies s'execute AVANT l'auth (getAccessSessionCookie) :
+      // une exception ici renverrait 500 avant la verification d'acces (DoS
+      // trivial et pre-auth). On retombe sur la valeur brute.
+      try {
+        cookies[name] = decodeURIComponent(value);
+      } catch {
+        cookies[name] = value;
+      }
       return cookies;
     }, {});
 }
@@ -581,6 +589,32 @@ function isHtmlNavigationRequest(req) {
     && (req.path === "/" || req.path === "/index.html" || String(req.get("accept") || "").includes("text/html"));
 }
 
+// Reponse de refus d'acces sur une tentative de credentials, format adapte au
+// type de requete.
+// - Navigation HTML (GET) : page de login conviviale via renderLoginPage, qui
+//   lit l'etat de lockout depuis le store et pose lui-meme 200/429 + Retry-After
+//   + le compte a rebours. On EVITE ainsi le dialogue Basic natif du navigateur
+//   quand des credentials Basic perimees sont re-envoyees automatiquement
+//   (ex. apres rotation du mot de passe : le navigateur rejoue le vieux Basic).
+// - API : JSON { error } + Retry-After/WWW-Authenticate selon le cas.
+function denyAccessAttempt(req, res, statusCode, message, retryAfterMs = 0) {
+  if (req.method === "GET" && isHtmlNavigationRequest(req)) {
+    renderLoginPage(req, res);
+    return;
+  }
+  if (retryAfterMs > 0) {
+    res.setHeader("Retry-After", String(Math.ceil(retryAfterMs / 1000)));
+  }
+  if (statusCode === 401) {
+    res.setHeader("WWW-Authenticate", `Basic realm="${AUTH_REALM}", charset="UTF-8"`);
+  }
+  if (isApiRequest(req)) {
+    res.status(statusCode).json({ error: message });
+    return;
+  }
+  res.status(statusCode).send(message);
+}
+
 function requireAccessAuth(req, res, next) {
   if (isAccessAuthMisconfigured()) {
     res.status(500).json({
@@ -589,11 +623,52 @@ function requireAccessAuth(req, res, next) {
     return;
   }
 
-  if (isAuthorizedRequest(req)) {
+  // Une session cookie valide autorise directement, sans passer par le
+  // rate-limit : ce n'est pas une tentative de credentials (et une session
+  // legitime ne doit pas etre bloquee par un lockout d'IP partagee).
+  if (isSessionAuthorizedRequest(req)) {
     next();
     return;
   }
 
+  // Pas de session valide. Si des credentials Basic sont presentes, on les
+  // verifie sous le MEME rate-limit que POST /login. Sans ca, l'en-tete Basic
+  // sur n'importe quelle route protegee permettait un brute-force ILLIMITE du
+  // mot de passe (le lockout ne couvrait que /login).
+  const basicCredentials = isAccessAuthEnabled()
+    ? parseBasicAuthHeader(req.get("authorization"))
+    : null;
+
+  if (basicCredentials) {
+    const ip = getClientIp(req);
+
+    const status = getAuthRateLimitStatus(ip);
+    if (status.locked) {
+      denyAccessAttempt(req, res, 429, "Trop de tentatives de connexion. Reessayez plus tard.", status.remainingMs);
+      return;
+    }
+
+    const valid = constantTimeEqual(basicCredentials.username, AUTH_USER)
+      && constantTimeEqual(basicCredentials.password, AUTH_PASSWORD);
+
+    if (valid) {
+      clearAuthFailures(ip);
+      next();
+      return;
+    }
+
+    const updated = recordAuthFailure(ip);
+    if (updated.locked) {
+      denyAccessAttempt(req, res, 429, "Trop de tentatives de connexion. Reessayez plus tard.", updated.remainingMs);
+      return;
+    }
+    denyAccessAttempt(req, res, 401, "Connexion requise");
+    return;
+  }
+
+  // Aucun credential presente (navigation anonyme, session SPA expiree...) :
+  // parcours normal, sans enregistrer d'echec (sinon un simple navigateur
+  // deconnecte declencherait le lockout).
   if (isApiRequest(req)) {
     res.setHeader("WWW-Authenticate", `Basic realm="${AUTH_REALM}", charset="UTF-8"`);
     res.status(401).json({ error: "Connexion requise" });
@@ -612,7 +687,15 @@ function requireAccessAuth(req, res, next) {
 function getSafeRedirectTarget(value) {
   const target = String(value || "/");
 
-  if (!target.startsWith("/") || target.startsWith("//") || target.startsWith("/login")) {
+  // Doit etre un chemin interne simple. On rejette aussi les backslash : un
+  // navigateur peut interpreter "/\evil.com" (ou "/\/evil.com") comme une URL
+  // protocole-relative -> open redirect externe apres login.
+  if (
+    !target.startsWith("/")
+    || target.startsWith("//")
+    || target.includes("\\")
+    || target.startsWith("/login")
+  ) {
     return "/";
   }
 
@@ -5144,6 +5227,7 @@ module.exports = {
   isAccessAuthEnabled,
   // Helpers de test : ne pas appeler depuis du code applicatif
   _resetAuthRateLimitForTest: () => authRateLimitState.clear(),
+  _createAccessSessionValueForTest: createAccessSessionValue,
   _getLastStorageRecovery: () => lastStorageRecovery,
   // Chantier 2 : permet aux tests d'attendre que le backup async finisse
   // avant d'assertioner sur le filesystem.
