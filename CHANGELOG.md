@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.20.0](https://github.com/tombague160-maker/sereo-production/compare/v1.19.2...v1.20.0) (2026-07-22)
+
+
+### Nouvelles fonctionnalites
+
+* finalise SEREO V7 CRM, themes et workflow livraison ([#92](https://github.com/tombague160-maker/sereo-production/issues/92)) ([897b2ba](https://github.com/tombague160-maker/sereo-production/commit/897b2ba1385975d8eba965e4c0207c2d390ce005))
+
+
+### Documentation
+
+* **audit:** audit ultra-complet 2026-06-04 (12 lentilles, 160 findings) ([#78](https://github.com/tombague160-maker/sereo-production/issues/78)) ([4c16501](https://github.com/tombague160-maker/sereo-production/commit/4c16501e3bdc35531ab3d26a867d9079289b8343))
+
 ## [1.19.2](https://github.com/tombague160-maker/sereo-production/compare/v1.19.1...v1.19.2) (2026-07-08)
 
 
