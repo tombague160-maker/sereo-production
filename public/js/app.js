@@ -998,7 +998,7 @@ function bindUi() {
 
     const customerQtyInput = event.target.closest("[data-customer-qty-input]");
     if (customerQtyInput) {
-      setCustomerCart(customerQtyInput.dataset.productId, customerQtyInput.value);
+      setCustomerCart(customerQtyInput.dataset.productId, customerQtyInput.value, customerQtyInput);
       return;
     }
 
@@ -1756,26 +1756,43 @@ function changeCustomerCart(productId, delta) {
 // Audit UI 2026-07 : saisie directe de la quantite (valeur absolue) en plus
 // des boutons -/+, pour ne plus taper 30 fois "+". Reutilise la meme
 // validation de stock que changeCustomerCart.
-function setCustomerCart(productId, value) {
+// Revue R2 : (1) ne PAS re-rendre tout le catalogue (le re-render sur `change`
+// detachait le bouton +/- adjacent avant le mouseup -> clic avale). On met a
+// jour uniquement le champ concerne + le panier. (2) une saisie non numerique
+// (collage "3x") est ignoree au lieu de supprimer silencieusement l'article.
+function setCustomerCart(productId, value, inputEl) {
   const product = stock.find(item => String(item.id) === String(productId));
   if (!product) return;
-  const current = customerCart.get(String(productId)) || {
+  const current = customerCart.get(String(productId));
+  const currentQuantity = current?.quantite || 0;
+  const raw = String(value).trim();
+
+  // Entree invalide (non entier) : on restaure l'affichage sans toucher au panier.
+  if (raw !== "" && !/^\d+$/.test(raw)) {
+    if (inputEl) inputEl.value = currentQuantity;
+    return;
+  }
+
+  const available = getProductQuantity(product);
+  const isPlannedOrder = document.getElementById("customerOrderType")?.value === "planifiee";
+  let nextQuantity = Math.max(0, Math.floor(Number(raw) || 0));
+  if (!isPlannedOrder && available !== null && nextQuantity > available) {
+    notify("Stock insuffisant pour ce produit.", "warning");
+    nextQuantity = available;
+  }
+
+  const base = current || {
     productId: product.id,
     code: product.code || product.sku || "",
     nom: getProductName(product),
     quantite: 0,
     prixUnitaire: getProductPrice(product)
   };
-  const available = getProductQuantity(product);
-  const isPlannedOrder = document.getElementById("customerOrderType")?.value === "planifiee";
-  let nextQuantity = Math.max(0, Math.floor(Number(value) || 0));
-  if (!isPlannedOrder && available !== null && nextQuantity > available) {
-    notify("Stock insuffisant pour ce produit.", "warning");
-    nextQuantity = available;
-  }
   if (nextQuantity === 0) customerCart.delete(String(productId));
-  else customerCart.set(String(productId), { ...current, quantite: nextQuantity });
-  renderCustomerCatalog();
+  else customerCart.set(String(productId), { ...base, quantite: nextQuantity });
+
+  // Reflete la valeur retenue (utile si clampee) sans re-rendre le catalogue.
+  if (inputEl) inputEl.value = nextQuantity;
   renderCustomerCart();
 }
 
@@ -1812,7 +1829,10 @@ function updateCustomerCartBar() {
   const total = lines.reduce((sum, line) => sum + line.quantite * line.prixUnitaire, 0);
   if (totalBar) totalBar.textContent = formatMoney(total);
   const onCustomerTab = document.getElementById("commande-client")?.classList.contains("active");
-  bar.hidden = !(onCustomerTab && lines.length > 0);
+  const visible = onCustomerTab && lines.length > 0;
+  bar.hidden = !visible;
+  // La reserve d'espace en bas de l'onglet n'est posee que quand la barre est la.
+  document.getElementById("commande-client")?.classList.toggle("has-cart-bar", visible);
 }
 
 function fillCustomerFormFromClient(clientId) {
@@ -2056,8 +2076,9 @@ function renderBarChart(id, rows) {
   container.innerHTML = rows.map(row => {
     const total = Number(row.total) || 0;
     const height = total > 0 ? Math.max(3, total / max * 100) : 2;
+    const label = `${row.date} : ${formatMoney(row.total)}`;
     return `
-    <div class="bar-item ${total > 0 ? "is-active" : ""}" title="${escapeAttribute(row.date)} — ${escapeAttribute(formatMoney(row.total))}">
+    <div class="bar-item ${total > 0 ? "is-active" : ""}" title="${escapeAttribute(label)}" role="img" aria-label="${escapeAttribute(label)}">
       <span style="height:${height}%"></span>
       <small>${escapeHtml(String(row.date).slice(5))}</small>
     </div>

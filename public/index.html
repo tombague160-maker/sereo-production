@@ -338,17 +338,6 @@
       </div>
     </div>
 
-    <!-- Barre panier collante (mobile), au niveau .app pour ne pas etre
-         "piegee" par le transform de .page.active. Visibilite geree par JS
-         (onglet Commande client actif + panier non vide). -->
-    <div class="customer-cart-bar" id="customerCartBar" hidden>
-      <div class="ccb-total">
-        <span class="ccb-label">Total panier</span>
-        <strong id="customerCartTotalBar">0,00 €</strong>
-      </div>
-      <button class="button ok" type="submit" form="customerOrderForm">Valider la commande</button>
-    </div>
-
     <main class="content">
       <header class="topbar">
         <div>
@@ -1219,6 +1208,19 @@
         </div>
       </section>
     </main>
+
+    <!-- Barre panier collante (mobile). Placee APRES <main> (donc apres le
+         bouton "Valider la commande" du form) pour que ce dernier reste le
+         submit par defaut (touche Entree sur desktop), et hors des .page pour
+         ne pas etre piegee par le transform residuel de .page.active.
+         Visibilite geree par updateCustomerCartBar (onglet actif + panier). -->
+    <div class="customer-cart-bar" id="customerCartBar" hidden>
+      <div class="ccb-total">
+        <span class="ccb-label">Total panier</span>
+        <strong id="customerCartTotalBar">0,00 €</strong>
+      </div>
+      <button class="button ok" type="submit" form="customerOrderForm">Valider la commande</button>
+    </div>
   </div>
 
   <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>

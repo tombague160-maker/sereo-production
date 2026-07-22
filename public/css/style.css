@@ -7789,13 +7789,8 @@ html[data-app-theme="blanc"] body,
     padding: 8px 10px;
   }
 
-  /* --- Coherence dark : masquer la recherche + version de la sidebar
-     sur mobile pour TOUS les themes (jusqu'ici scope light seulement,
-     donc en dark la sidebar reapparaissait en haut). --- */
-  .sidebar-search,
-  .sidebar-version {
-    display: none;
-  }
+  /* (masquage recherche/version sidebar deplace en @media 820px ci-dessous,
+     R2 : le passage sidebar->barre horizontale se fait des 820px, pas 560) */
 
   /* --- Statistiques : KPIs en 2 colonnes compactes --- */
   :root[data-color-scheme] .stats-kpis,
@@ -7923,11 +7918,14 @@ html[data-app-theme="blanc"] body,
   background: var(--surface);
 }
 
-/* Controles de zoom Leaflet : cible tactile 44px sur appareils tactiles. */
-.leaflet-touch .leaflet-bar a {
-  width: 44px;
-  height: 44px;
-  line-height: 44px;
+/* Controles de zoom Leaflet : cible tactile 44px. Borne en pointer:coarse
+   (R2) pour ne pas surdimensionner les boutons sur desktop a ecran tactile. */
+@media (pointer: coarse) {
+  .leaflet-touch .leaflet-bar a {
+    width: 44px;
+    height: 44px;
+    line-height: 44px;
+  }
 }
 
 /* ================================================================
@@ -7956,14 +7954,34 @@ html[data-app-theme="blanc"] body,
   :root:not([data-color-scheme]) .mobile-tabbar {
     backdrop-filter: saturate(1.1) blur(6px);
   }
+
+  /* Colle le hero a la barre de marque : sans ca, le padding-top de .content
+     laissait un filet de fond de page + des coins hauts carres "flottants"
+     sous la sidebar (R2). */
+  :root[data-color-scheme] .content,
+  :root:not([data-color-scheme]) .content {
+    padding-top: 0;
+  }
 }
 
-/* Champ quantite editable du stepper commande client (audit UI 2026-07). */
+/* Coherence dark : la sidebar passe en barre horizontale des 820px (tous
+   themes) -> masquer sa recherche + version des 820px aussi, sinon en dark
+   elles reapparaissaient entre 561 et 820px (R2). */
+@media (max-width: 820px) {
+  .sidebar-search,
+  .sidebar-version {
+    display: none;
+  }
+}
+
+/* Champ quantite editable du stepper commande client (audit UI 2026-07).
+   font-size 1.3rem : retrouve la proeminence de l'ancien <strong> (R2). */
 .stepper-input {
   width: 100%;
   min-width: 0;
   text-align: center;
   font-weight: 800;
+  font-size: 1.3rem;
   font-variant-numeric: tabular-nums;
   padding-inline: 4px;
 }
@@ -7990,7 +8008,9 @@ html[data-app-theme="blanc"] body,
   .customer-cart-bar .ccb-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
   .customer-cart-bar #customerCartTotalBar { font-size: 18px; font-variant-numeric: tabular-nums; }
   .customer-cart-bar .button { flex: 1 1 auto; min-width: 0; }
-  #commande-client { padding-bottom: 90px; }
+  /* Reserve d'espace UNIQUEMENT quand la barre est affichee (R2 : classe
+     posee par updateCustomerCartBar), sinon espace mort a chaque panier vide. */
+  #commande-client.has-cart-bar { padding-bottom: 90px; }
 }
 
 /* Barre de recherche/filtre de la preparation (audit UI 2026-07). */
