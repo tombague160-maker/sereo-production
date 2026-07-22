@@ -1,4 +1,4 @@
-const CACHE_NAME = "sereo-shell-20260514-version-nocache";
+const CACHE_NAME = "sereo-shell-20260702-themes";
 const API_CACHE_NAME = "sereo-api-20260514";
 const APP_SHELL = [
   "/css/style.css",

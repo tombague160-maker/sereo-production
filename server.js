@@ -5,6 +5,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
+const { zipSync, strToU8 } = require("fflate");
 const { createSqliteStore } = require("./storage/sqliteStore");
 
 loadEnvFile(path.join(__dirname, ".env"));
@@ -172,6 +173,11 @@ const MAX_BRAND_IMAGE_DATA_URL_SIZE = 3 * 1024 * 1024;
 const ACCEPTED_EXCEL_EXTENSIONS = [".xlsx"];
 const DELIVERY_STATUSES = new Set(["restant", "en_cours", "livree", "absent", "probleme", "non_livre"]);
 const ORDER_STATUSES = new Set([
+  "brouillon",
+  "planifiee",
+  "a_confirmer",
+  "annulee",
+  "commande_client_validee",
   "importe",
   "stock_a_verifier",
   "en_preparation",
@@ -201,8 +207,13 @@ const ORDER_STATUSES = new Set([
 //   en_preparation -> pret_livraison (saute preparation_terminee, deja gere ligne 2621)
 //   en_livraison -> a_reprogrammer (direct depuis tournee, code existant 2034)
 const ORDER_STATUS_TRANSITIONS = {
+  brouillon: ["planifiee", "commande_client_validee", "stock_a_verifier", "annulee"],
+  planifiee: ["a_confirmer", "annulee"],
+  a_confirmer: ["commande_client_validee", "stock_a_verifier", "annulee", "planifiee"],
+  annulee: [],
+  commande_client_validee: ["stock_a_verifier", "en_preparation", "annulee"],
   importe: ["stock_a_verifier", "en_preparation"],
-  stock_a_verifier: ["en_preparation", "pret_livraison"],
+  stock_a_verifier: ["en_preparation", "pret_livraison", "annulee"],
   en_preparation: ["preparation_terminee", "pret_livraison"],
   preparation_terminee: ["pret_livraison"],
   pret_livraison: ["en_livraison", "en_preparation"],
@@ -220,6 +231,8 @@ function isValidOrderStatusTransition(fromStatus, toStatus) {
 const ROUTE_STATUSES = new Set(["brouillon", "prete", "en_livraison", "terminee"]);
 const STOP_STATUSES = new Set(["pret_livraison", "en_livraison", "livre", "absent", "probleme", "a_reprogrammer"]);
 const CORE_SECTORS = ["Besancon", "Champagnole", "Dole"];
+const CRM_STATUSES = new Set(["prospect", "client_actif", "client_a_relancer", "client_inactif"]);
+const RELANCE_STATUSES = new Set(["a_faire", "fait", "reporte", "annule"]);
 
 ensureDir(path.dirname(DB_PATH));
 ensureDir(path.dirname(SQLITE_PATH));
@@ -1354,6 +1367,8 @@ function defaultDb() {
     historique: [],
     commandes: [],
     routes: [],
+    relances: [],
+    deliverySectors: defaultDeliverySectors(),
     stockMovements: [],
     importsArchives: [],
     settings: {
@@ -1689,6 +1704,9 @@ function normalizeDb(db) {
   db.historique = Array.isArray(db.historique) ? db.historique : [];
   db.commandes = Array.isArray(db.commandes) ? db.commandes : [];
   db.routes = Array.isArray(db.routes) ? db.routes : [];
+  db.relances = Array.isArray(db.relances) ? db.relances.map(normalizeCrmReminder) : [];
+  db.deliverySectors = Array.isArray(db.deliverySectors) ? db.deliverySectors.map(normalizeDeliverySector) : defaultDeliverySectors();
+  if (!db.deliverySectors.length) db.deliverySectors = defaultDeliverySectors().map(normalizeDeliverySector);
   db.stockMovements = Array.isArray(db.stockMovements) ? db.stockMovements : [];
   db.importsArchives = Array.isArray(db.importsArchives) ? db.importsArchives : [];
   db.settings = normalizeSettings(db.settings);
@@ -2278,8 +2296,26 @@ function deriveSector(city, explicitSector = "") {
 
 function number(value, fallback = 0) {
   if (value === null || value === undefined || value === "") return fallback;
-  const n = Number(String(value).replace(",", "."));
+  let text = String(value).trim().replace(/\s|\u00a0/g, "");
+  text = text.replace(/[^\d,.-]/g, "");
+  if (!text) return fallback;
+  if (text.includes(".") && text.includes(",")) {
+    text = text.lastIndexOf(",") > text.lastIndexOf(".")
+      ? text.replace(/\./g, "").replace(",", ".")
+      : text.replace(/,/g, "");
+  } else {
+    text = text.replace(",", ".");
+  }
+  const n = Number(text);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function firstPositiveNumber(...values) {
+  for (const value of values) {
+    const parsed = number(value, NaN);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return 0;
 }
 
 function optionalQuantity(value) {
@@ -2726,15 +2762,36 @@ function productKey(product) {
 // deja livree dans le systeme source. Permet d'importer la commande
 // directement comme "livre" sans la faire passer par la file de preparation.
 const FACTURE_STATUS_LIVRE = new Set(["envoyee", "envoye", "expediee", "expedie", "sent"]);
+const DEFAULT_STOCK_ALERT_THRESHOLD = 5;
 
 function isFactureStatusLivre(rawStatut) {
   return FACTURE_STATUS_LIVRE.has(normalizeTextKey(rawStatut || ""));
 }
 
 function getStockAlertThreshold(product) {
-  const raw = product.alertThreshold ?? product.seuilAlerte ?? product.seuil ?? product.minimum;
-  const threshold = number(raw, 5);
-  return Math.max(0, threshold);
+  const raw = product.alertThreshold
+    ?? product.stockMinimum
+    ?? product.seuilMinimum
+    ?? product.seuil_minimum
+    ?? product.seuilAlerte
+    ?? product.seuil
+    ?? product.minimum;
+  const threshold = number(raw, DEFAULT_STOCK_ALERT_THRESHOLD);
+  return Math.max(0, Math.round(threshold));
+}
+
+function parseStockAlertThresholdInput(value) {
+  const text = clean(value);
+  if (!text || /[,.]/.test(text)) {
+    throw badRequest("Seuil minimum invalide");
+  }
+
+  const threshold = Number(text);
+  if (!Number.isFinite(threshold) || !Number.isInteger(threshold) || threshold < 0) {
+    throw badRequest("Seuil minimum invalide");
+  }
+
+  return threshold;
 }
 
 function stockItemMatchesLine(product, line) {
@@ -2789,6 +2846,7 @@ const RESERVED_ORDER_STATUSES = [
 //
 // Statuts qui comptent dans "needed" (commandes a preparer/livrer).
 const NEEDED_ORDER_STATUSES = new Set([
+  "commande_client_validee",
   "importe",
   "stock_a_verifier",
   "en_preparation",
@@ -2934,8 +2992,41 @@ function enrichStockItem(db, product, index) {
     quantityNeeded,
     quantityTotal: quantityAvailable === null ? null : quantityAvailable + quantityReserved,
     alertThreshold: getStockAlertThreshold(product),
+    stockMinimum: getStockAlertThreshold(product),
     stockStatus: getStockStatus(product, db, index)
   };
+}
+
+function defaultDeliverySectors() {
+  return [
+    {
+      id: "secteur-champagnole",
+      secteur: "Champagnole",
+      villePrincipale: "Champagnole",
+      jourMois: 5,
+      frequence: "mensuelle",
+      pointDepart: "Champagnole",
+      notes: "Secteur local par defaut."
+    },
+    {
+      id: "secteur-dole",
+      secteur: "Dole",
+      villePrincipale: "Dole",
+      jourMois: 15,
+      frequence: "mensuelle",
+      pointDepart: "Champagnole",
+      notes: "Tournee mensuelle sans geocodage externe."
+    },
+    {
+      id: "secteur-besancon",
+      secteur: "Besancon",
+      villePrincipale: "Besancon",
+      jourMois: 25,
+      frequence: "mensuelle",
+      pointDepart: "Champagnole",
+      notes: "Tournee mensuelle sans geocodage externe."
+    }
+  ];
 }
 
 function getStockView(db) {
@@ -2953,7 +3044,7 @@ function getRecommendations(db) {
       // Seuil 0 legitime preserve : on ne le remplace par 5 que si la valeur est invalide
       // (null, undefined, NaN, "" -> non finite). Cf. fix v1.1.0 sur normalizeProducts.
       const thresholdRaw = Number(product.alertThreshold);
-      const minimum = Number.isFinite(thresholdRaw) ? thresholdRaw : 5;
+      const minimum = Number.isFinite(thresholdRaw) ? thresholdRaw : DEFAULT_STOCK_ALERT_THRESHOLD;
       const recommended = Math.max(0, Math.ceil(Math.max(minimum - available, needed - available)));
 
       return {
@@ -2994,11 +3085,14 @@ function getDashboardSummary(db) {
     readyDelivery: db.commandes.filter(order => order.status === "pret_livraison").length,
     inDelivery: db.commandes.filter(order => order.status === "en_livraison").length,
     delivered: db.commandes.filter(order => order.status === "livre").length,
+    planned: db.commandes.filter(order => order.status === "planifiee").length,
+    toConfirm: db.commandes.filter(order => order.status === "a_confirmer").length,
     deliveryProblems: db.commandes.filter(order => ["probleme_livraison", "a_reprogrammer"].includes(order.status)).length,
     missingAddress: db.commandes.filter(order => !clean(order.address) || !clean(order.city)).length,
     missingPhone: db.commandes.filter(order => !clean(order.phone)).length,
     deliveryToday: db.commandes.filter(order => order.deliveryDate === today && ["pret_livraison", "en_livraison"].includes(order.status)).length,
-    deliveryUpcoming: db.commandes.filter(order => order.deliveryDate && order.deliveryDate > today && ["pret_livraison", "en_livraison"].includes(order.status)).length
+    deliveryUpcoming: db.commandes.filter(order => order.deliveryDate && order.deliveryDate > today && ["pret_livraison", "en_livraison"].includes(order.status)).length,
+    remindersDue: db.relances.filter(reminder => reminder.status === "a_faire" && reminder.datePrevue <= today).length
   };
   const stockCounts = {
     total: stockView.length,
@@ -3163,12 +3257,35 @@ function normalizeProducts(products) {
       // au lieu de `||` pour ne pas confondre 0 (valide) avec null/undefined (fallback).
       const rawQty = isObject ? (product.quantite ?? product.quantity ?? product.qte) : 1;
       const quantity = Math.max(0, number(rawQty, 1));
+      const explicitLineTotal = isObject
+        ? firstPositiveNumber(
+            product.totalLigne,
+            product.lineTotal,
+            product.total,
+            product.ttc,
+            product.TTC,
+            product.totalTtc,
+            product.montantTtc,
+            product.ht,
+            product.HT,
+            product.totalHt,
+            product.montantHt,
+            product.montant
+          )
+        : 0;
+      const rawUnitPrice = isObject
+        ? firstPositiveNumber(product.prixUnitaire, product.unitPrice, product.price, product.tarif, product.prix)
+        : 0;
+      const unitPrice = rawUnitPrice || (quantity > 0 && explicitLineTotal ? explicitLineTotal / quantity : 0);
+      const lineTotal = explicitLineTotal || (quantity * unitPrice);
 
       return {
         id: isObject ? product.id || `${code || name || "produit"}-${index}` : `${name || "produit"}-${index}`,
         code,
         nom: name || code || "Produit",
-        quantite: quantity
+        quantite: quantity,
+        prixUnitaire: Math.round(unitPrice * 100) / 100,
+        totalLigne: Math.round(lineTotal * 100) / 100
       };
     })
     .filter(product => product.code || product.nom);
@@ -3311,7 +3428,40 @@ function normalizeClient(client) {
     lng: client.lng ?? client.longitude ?? "",
     secteur: sector,
     notes: clean(client.notes || client.remarques),
-    priority: clean(client.priority || client.priorite)
+    priority: clean(client.priority || client.priorite),
+    prenom: clean(client.prenom || client.firstName),
+    email: clean(client.email || client.mail),
+    crmStatus: CRM_STATUSES.has(client.crmStatus || client.statutCrm) ? (client.crmStatus || client.statutCrm) : "",
+    firstContactDate: normalizeDateInput(client.firstContactDate || client.datePremierContact || client.dateCreation),
+    lastVisitDate: normalizeDateInput(client.lastVisitDate || client.dateDerniereVisite),
+    nextReminderDate: normalizeDateInput(client.nextReminderDate || client.prochaineRelance),
+    source: clean(client.source || client.sourceContact),
+    preferences: clean(client.preferences || client.produitsPreferes),
+    needs: clean(client.needs || client.besoinsParticuliers),
+    estimatedFrequency: clean(client.estimatedFrequency || client.frequenceCommande),
+    nextDeliveryDate: normalizeDateInput(client.nextDeliveryDate || client.prochaineLivraison),
+    crmArchived: Boolean(client.crmArchived),
+    crmConvertedAt: client.crmConvertedAt || ""
+  };
+}
+
+function normalizeDeliverySector(sector = {}) {
+  const city = normalizeCity(sector.villePrincipale || sector.mainCity || sector.ville || sector.city);
+  const sectorName = clean(sector.secteur || sector.name || sector.nom || deriveSector(city));
+  const day = Math.max(1, Math.min(31, Math.round(number(sector.jourMois ?? sector.dayOfMonth, 1))));
+  const now = new Date().toISOString();
+
+  return {
+    ...sector,
+    id: sector.id || `secteur-${crypto.randomUUID()}`,
+    secteur: sectorName || "Secteur",
+    villePrincipale: city || sectorName || "",
+    jourMois: day,
+    frequence: clean(sector.frequence || sector.frequency || "mensuelle"),
+    pointDepart: clean(sector.pointDepart || sector.departurePoint) || "Champagnole",
+    notes: clean(sector.notes || sector.remarques),
+    createdAt: sector.createdAt || now,
+    updatedAt: sector.updatedAt || now
   };
 }
 
@@ -3374,7 +3524,15 @@ function normalizeOrder(order) {
     stockReleasedAt: order.stockReleasedAt || null,
     stockReleaseReason: order.stockReleaseReason || null,
     routeId: order.routeId || null,
-    importedAsLivre: order.importedAsLivre || false
+    importedAsLivre: order.importedAsLivre || false,
+    source: clean(order.source || order.orderSource || order.sourceExcel),
+    orderType: clean(order.orderType || order.typeCommande || order.type || (order.source === "commande_planifiee" ? "planifiee" : "immediate")),
+    parentOrderId: clean(order.parentOrderId || order.commandeOrigineId || order.sourceOrderId),
+    confirmedAt: order.confirmedAt || "",
+    plannedReminderId: clean(order.plannedReminderId || order.reminderId),
+    reminderLeadDays: Math.max(0, Math.round(number(order.reminderLeadDays, 7))),
+    total: Math.max(0, number(order.total, 0)),
+    sentToPreparationAt: order.sentToPreparationAt || ""
   };
 }
 
@@ -3394,6 +3552,7 @@ function enrichOrder(order, stock) {
 function inferOrderStatus(order) {
   const deliveryStatus = order.deliveryStatus || order.statut;
 
+  if (order.status === "planifiee" || order.orderType === "planifiee") return "planifiee";
   if (deliveryStatus === "livree" || deliveryStatus === "livre") return "livre";
   if (["absent", "probleme", "non_livre"].includes(deliveryStatus)) return "probleme_livraison";
   if (deliveryStatus === "en_cours" || deliveryStatus === "en_livraison") return "en_livraison";
@@ -3403,12 +3562,17 @@ function inferOrderStatus(order) {
 }
 
 function inferPreparationStatus(status) {
+  if (["planifiee", "a_confirmer"].includes(status)) return "planifiee";
+  if (status === "annulee") return "annulee";
   if (["en_preparation"].includes(status)) return "en_cours";
   if (["preparation_terminee", "pret_livraison", "en_livraison", "livre", "probleme_livraison", "a_reprogrammer"].includes(status)) return "terminee";
+  if (status === "commande_client_validee" || status === "brouillon") return "commande_client";
   return "a_preparer";
 }
 
 function inferDeliveryStatus(status) {
+  if (["planifiee", "a_confirmer"].includes(status)) return "planifiee";
+  if (status === "annulee") return "annulee";
   if (status === "en_livraison") return "en_livraison";
   if (status === "livre") return "livre";
   if (status === "probleme_livraison") return "probleme";
@@ -3518,6 +3682,852 @@ function findClient(db, clientId) {
   return db.clients.find(item => String(item.id) === String(clientId));
 }
 
+function normalizeCrmStatus(value, fallback = "prospect") {
+  const raw = normalizeTextKey(value).replace(/\s+/g, "_");
+  const aliases = {
+    actif: "client_actif",
+    client: "client_actif",
+    client_actif: "client_actif",
+    a_relancer: "client_a_relancer",
+    relancer: "client_a_relancer",
+    client_a_relancer: "client_a_relancer",
+    inactive: "client_inactif",
+    inactif: "client_inactif",
+    client_inactif: "client_inactif",
+    prospect: "prospect"
+  };
+  const status = aliases[raw] || raw;
+  return CRM_STATUSES.has(status) ? status : fallback;
+}
+
+function normalizeRelanceStatus(value, fallback = "a_faire") {
+  const raw = normalizeTextKey(value).replace(/\s+/g, "_");
+  const aliases = {
+    a_faire: "a_faire",
+    faire: "a_faire",
+    fait: "fait",
+    faite: "fait",
+    reporte: "reporte",
+    reportee: "reporte",
+    annule: "annule",
+    annulee: "annule"
+  };
+  const status = aliases[raw] || raw;
+  return RELANCE_STATUSES.has(status) ? status : fallback;
+}
+
+function normalizeCrmReminder(reminder = {}) {
+  const now = new Date().toISOString();
+  const status = normalizeRelanceStatus(reminder.status || reminder.statut);
+  return {
+    ...reminder,
+    id: reminder.id || `relance-${crypto.randomUUID()}`,
+    clientId: clean(reminder.clientId || reminder.client_id),
+    commandeId: clean(reminder.commandeId || reminder.orderId || reminder.commande_id),
+    type: clean(reminder.type || reminder.kind || "crm"),
+    datePrevue: normalizeDateInput(reminder.datePrevue || reminder.reminderDate || reminder.date_prevue) || now.slice(0, 10),
+    motif: clean(reminder.motif || reminder.reason),
+    commentaire: clean(reminder.commentaire || reminder.comment),
+    status,
+    dateRealisation: status === "fait"
+      ? (normalizeDateInput(reminder.dateRealisation || reminder.doneDate) || now.slice(0, 10))
+      : normalizeDateInput(reminder.dateRealisation || reminder.doneDate),
+    resultat: clean(reminder.resultat || reminder.result),
+    createdAt: reminder.createdAt || now,
+    updatedAt: reminder.updatedAt || now
+  };
+}
+
+function getClientOrderHistory(db, clientId) {
+  return db.commandes
+    .filter(order => String(order.clientId) === String(clientId))
+    .sort((a, b) => String(b.dateCommande || "").localeCompare(String(a.dateCommande || "")));
+}
+
+function inferCrmStatus(client, orders) {
+  const explicit = normalizeCrmStatus(client.crmStatus || client.statutCrm || "");
+  if (client.crmStatus || client.statutCrm) return explicit;
+  if (orders.some(order => ["planifiee", "a_confirmer"].includes(order.status))) {
+    return "client_a_relancer";
+  }
+  if (orders.some(order => ["livre", "en_livraison", "pret_livraison", "en_preparation", "stock_a_verifier", "commande_client_validee"].includes(order.status))) {
+    return "client_actif";
+  }
+  if (client.nextReminderDate) return "client_a_relancer";
+  return "prospect";
+}
+
+function crmClientView(db, client) {
+  const orders = getClientOrderHistory(db, client.id);
+  const reminders = db.relances
+    .filter(reminder => String(reminder.clientId) === String(client.id))
+    .sort((a, b) => String(b.datePrevue || "").localeCompare(String(a.datePrevue || "")));
+  const latestOrder = orders[0];
+  const firstOrder = orders[orders.length - 1];
+
+  return {
+    ...client,
+    crmStatus: inferCrmStatus(client, orders),
+    firstContactDate: client.firstContactDate || firstOrder?.dateCommande || "",
+    lastVisitDate: client.lastVisitDate || latestOrder?.dateCommande || "",
+    nextReminderDate: client.nextReminderDate || reminders.find(item => item.status === "a_faire")?.datePrevue || "",
+    orderHistory: orders,
+    reminderHistory: reminders,
+    visitHistory: Array.isArray(client.visitHistory) ? client.visitHistory : [],
+    totalOrders: orders.length,
+    totalRevenue: Math.round(orders.reduce((total, order) => total + getOrderTotal(order), 0) * 100) / 100
+  };
+}
+
+function getReminderViews(db, query = {}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const range = clean(query.range || "");
+  let list = db.relances.map(reminder => ({
+    ...reminder,
+    client: db.clients.find(client => String(client.id) === String(reminder.clientId)) || null,
+    order: db.commandes.find(order => String(order.id) === String(reminder.commandeId)) || null
+  }));
+
+  if (query.clientId) {
+    list = list.filter(reminder => String(reminder.clientId) === String(query.clientId));
+  }
+  if (query.orderId || query.commandeId) {
+    const orderId = query.orderId || query.commandeId;
+    list = list.filter(reminder => String(reminder.commandeId) === String(orderId));
+  }
+  if (query.status) {
+    const status = normalizeRelanceStatus(query.status, "");
+    if (status) list = list.filter(reminder => reminder.status === status);
+  }
+  if (range === "today") list = list.filter(reminder => reminder.datePrevue === today);
+  if (range === "late") list = list.filter(reminder => reminder.status === "a_faire" && reminder.datePrevue < today);
+  if (range === "upcoming") list = list.filter(reminder => reminder.status === "a_faire" && reminder.datePrevue > today);
+  if (range === "week") {
+    const limit = toYmd(addDays(startOfLocalDay(new Date()), 7));
+    list = list.filter(reminder => reminder.datePrevue >= today && reminder.datePrevue <= limit);
+  }
+
+  return list.sort((a, b) => String(a.datePrevue).localeCompare(String(b.datePrevue)));
+}
+
+function validateCrmClientPayload(payload = {}, existing = {}) {
+  const city = normalizeCity(payload.ville ?? payload.city ?? existing.ville ?? "");
+  const next = {
+    ...existing,
+    nom: clean(payload.nom ?? existing.nom ?? "Client sans nom"),
+    prenom: clean(payload.prenom ?? existing.prenom),
+    telephone: clean(payload.telephone ?? existing.telephone),
+    email: clean(payload.email ?? existing.email),
+    rue: clean(payload.rue ?? payload.adresse ?? existing.rue),
+    ville: city,
+    codePostal: clean(payload.codePostal ?? payload.postalCode ?? existing.codePostal),
+    secteur: deriveSector(city, payload.secteur ?? existing.secteur),
+    notes: clean(payload.notes ?? existing.notes),
+    crmStatus: normalizeCrmStatus(payload.crmStatus ?? payload.statutCrm ?? existing.crmStatus),
+    firstContactDate: normalizeDateInput(payload.firstContactDate ?? existing.firstContactDate) || existing.firstContactDate || new Date().toISOString().slice(0, 10),
+    lastVisitDate: normalizeDateInput(payload.lastVisitDate ?? existing.lastVisitDate),
+    nextReminderDate: normalizeDateInput(payload.nextReminderDate ?? existing.nextReminderDate),
+    source: clean(payload.source ?? existing.source),
+    preferences: clean(payload.preferences ?? existing.preferences),
+    needs: clean(payload.needs ?? existing.needs),
+    estimatedFrequency: clean(payload.estimatedFrequency ?? existing.estimatedFrequency),
+    updatedAt: new Date().toISOString()
+  };
+
+  if (!next.nom) throw badRequest("Nom client obligatoire");
+  return normalizeClient(next);
+}
+
+function findDuplicateClient(db, payload, ignoreId = "") {
+  const phone = normalizeTextKey(payload.telephone || payload.phone || "");
+  const secondary = clientSecondaryKey({
+    nom: [payload.prenom, payload.nom].filter(Boolean).join(" ") || payload.nom,
+    codePostal: payload.codePostal || payload.postalCode
+  });
+
+  return db.clients.find(client => {
+    if (ignoreId && String(client.id) === String(ignoreId)) return false;
+    const clientPhone = normalizeTextKey(client.telephone || "");
+    if (phone && clientPhone && phone === clientPhone) return true;
+    if (secondary && clientSecondaryKey(client) === secondary) return true;
+    return false;
+  });
+}
+
+function findOrCreateCustomerClient(db, payload = {}) {
+  if (payload.clientId) {
+    const existing = findClient(db, payload.clientId);
+    if (existing) return existing;
+  }
+
+  const duplicate = findDuplicateClient(db, payload);
+  if (duplicate) {
+    Object.assign(duplicate, validateCrmClientPayload(payload, duplicate));
+    return duplicate;
+  }
+
+  const client = validateCrmClientPayload({
+    ...payload,
+    crmStatus: payload.crmStatus || "prospect"
+  }, {
+    id: `client-${crypto.randomUUID()}`,
+    createdAt: new Date().toISOString(),
+    produits: []
+  });
+  db.clients.push(client);
+  return client;
+}
+
+function getProductUnitPrice(product) {
+  return Math.max(0, number(product.prixUnitaire ?? product.unitPrice ?? product.tarif ?? product.prix ?? product.price ?? product.cout, 0));
+}
+
+function buildCustomerOrderLines(db, products, options = {}) {
+  if (!Array.isArray(products) || !products.length) {
+    throw badRequest("Ajoute au moins un produit a la commande");
+  }
+  const checkStock = options.checkStock !== false;
+
+  return products.map(item => {
+    const stockItem = db.stock.find(product => String(product.id) === String(item.productId || item.stockId || item.id))
+      || db.stock.find(product => productKey(product) === productKey(item));
+    if (!stockItem) throw badRequest(`Produit introuvable : ${clean(item.nom || item.code || item.productId)}`);
+
+    const quantity = Math.max(0, number(item.quantite ?? item.quantity, 0));
+    if (quantity <= 0) throw badRequest("Quantite produit invalide");
+
+    const available = getStockQuantity(stockItem);
+    if (checkStock && available !== null && quantity > available) {
+      throw badRequest(`Stock insuffisant pour ${getProductName(stockItem)} (${available} disponible)`);
+    }
+
+    const prixUnitaire = getProductUnitPrice(item) || getProductUnitPrice(stockItem);
+    return {
+      id: `line-${crypto.randomUUID()}`,
+      stockId: stockItem.id,
+      code: getProductCode(stockItem),
+      nom: getProductName(stockItem),
+      quantite: quantity,
+      prixUnitaire,
+      totalLigne: Math.round(quantity * prixUnitaire * 100) / 100
+    };
+  });
+}
+
+function getOrderTotal(order) {
+  const explicit = firstPositiveNumber(order.total, order.totalTtc, order.ttc, order.montantTotal, order.montant);
+  if (explicit > 0) return Math.round(explicit * 100) / 100;
+  return normalizeProducts(order.products).reduce((total, line) => {
+    const unit = Math.max(0, number(line.prixUnitaire ?? line.tarif ?? line.price, 0));
+    const lineTotal = firstPositiveNumber(line.totalLigne, line.total, line.ttc, line.ht);
+    return total + (lineTotal || Math.max(0, number(line.quantite, 0)) * unit);
+  }, 0);
+}
+
+function createCustomerOrder(db, payload = {}) {
+  const requestedType = clean(payload.orderType || payload.typeCommande || payload.type).toLowerCase();
+  if (requestedType === "planifiee" || requestedType === "planifie" || requestedType === "planned") {
+    return createPlannedOrder(db, payload).order;
+  }
+
+  const client = findOrCreateCustomerClient(db, {
+    clientId: payload.clientId,
+    ...(payload.client || {})
+  });
+  const dateCommande = normalizeDateInput(payload.dateCommande) || new Date().toISOString().slice(0, 10);
+  const lines = buildCustomerOrderLines(db, payload.products || payload.produits);
+  const total = Math.round(lines.reduce((sum, line) => sum + line.totalLigne, 0) * 100) / 100;
+  const numero = generateOrderNumber(db, dateCommande);
+  const order = normalizeOrder({
+    id: `cmd-${numero.toLowerCase()}`,
+    numero,
+    clientId: client.id,
+    clientName: [client.prenom, client.nom].filter(Boolean).join(" ") || client.nom,
+    address: payload.deliveryAddress || client.rue,
+    city: payload.city || client.ville,
+    postalCode: payload.postalCode || client.codePostal,
+    sector: client.secteur,
+    phone: client.telephone,
+    products: lines,
+    status: "commande_client_validee",
+    source: "commande_terrain",
+    orderType: "immediate",
+    total,
+    notes: clean(payload.notes || payload.deliveryNotes),
+    dateCommande,
+    deliveryDate: normalizeDateInput(payload.deliveryDate || payload.dateLivraison),
+    createdAt: new Date().toISOString()
+  });
+
+  client.crmStatus = "client_actif";
+  client.crmConvertedAt = client.crmConvertedAt || new Date().toISOString();
+  client.lastVisitDate = dateCommande;
+  client.nextReminderDate = client.nextReminderDate || "";
+  db.commandes.push(order);
+  reserveStockForOrder(db, order);
+  setOrderStatus(order, "stock_a_verifier");
+  order.sentToPreparationAt = new Date().toISOString();
+  return order;
+}
+
+function dateFromYmd(dateString) {
+  const normalized = normalizeDateInput(dateString);
+  if (!normalized) return null;
+  const [year, month, day] = normalized.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day);
+}
+
+function findDeliverySectorConfig(db, sectorOrCity) {
+  const key = normalizeTextKey(sectorOrCity);
+  if (!key) return null;
+  return (db.deliverySectors || []).find(item => {
+    return normalizeTextKey(item.secteur) === key
+      || normalizeTextKey(item.villePrincipale) === key
+      || normalizeTextKey(item.ville) === key;
+  }) || null;
+}
+
+function nextSectorDeliveryDate(sectorConfig, fromDate = new Date()) {
+  const sourceDay = Math.max(1, Math.min(31, Math.round(number(sectorConfig?.jourMois, 1))));
+  const base = startOfLocalDay(fromDate);
+  let year = base.getFullYear();
+  let month = base.getMonth();
+
+  const makeCandidate = () => {
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    return new Date(year, month, Math.min(sourceDay, lastDay));
+  };
+
+  let candidate = makeCandidate();
+  if (candidate < base) {
+    month += 1;
+    if (month > 11) {
+      month = 0;
+      year += 1;
+    }
+    candidate = makeCandidate();
+  }
+
+  return toYmd(candidate);
+}
+
+function resolvePlannedDeliveryDate(db, client, payload = {}) {
+  const explicit = normalizeDateInput(payload.deliveryDate || payload.dateLivraison || payload.livraisonDate);
+  if (explicit) return explicit;
+  const config = findDeliverySectorConfig(db, payload.sector || payload.secteur || client.secteur || client.ville);
+  return config ? nextSectorDeliveryDate(config) : "";
+}
+
+function refreshClientReminderDate(db, clientId) {
+  const client = findClient(db, clientId);
+  if (!client) return;
+  const next = db.relances
+    .filter(reminder => String(reminder.clientId) === String(clientId) && reminder.status === "a_faire")
+    .sort((a, b) => String(a.datePrevue).localeCompare(String(b.datePrevue)))[0];
+  client.nextReminderDate = next?.datePrevue || "";
+}
+
+function createAutomaticOrderReminder(db, order, options = {}) {
+  if (!order?.clientId || !order.deliveryDate) return null;
+  const type = clean(options.type || "confirmation_livraison");
+  const leadDays = Math.max(0, Math.round(number(options.leadDays, order.reminderLeadDays ?? 7)));
+  const deliveryDate = dateFromYmd(order.deliveryDate);
+  if (!deliveryDate) return null;
+
+  const datePrevue = toYmd(addDays(deliveryDate, -leadDays));
+  const existing = db.relances.find(reminder =>
+    String(reminder.commandeId) === String(order.id)
+    && reminder.type === type
+    && reminder.status === "a_faire"
+  );
+  if (existing) {
+    existing.datePrevue = datePrevue;
+    existing.updatedAt = new Date().toISOString();
+    refreshClientReminderDate(db, order.clientId);
+    return existing;
+  }
+
+  const reminder = normalizeCrmReminder({
+    clientId: order.clientId,
+    commandeId: order.id,
+    type,
+    motif: options.motif || "Confirmer la livraison planifiee",
+    commentaire: options.commentaire || `Confirmer la commande ${order.numero || order.id} avant livraison du ${order.deliveryDate}.`,
+    datePrevue,
+    status: "a_faire"
+  });
+  db.relances.push(reminder);
+  order.plannedReminderId = reminder.id;
+  refreshClientReminderDate(db, order.clientId);
+  return reminder;
+}
+
+function createPlannedOrder(db, payload = {}) {
+  const client = findOrCreateCustomerClient(db, {
+    clientId: payload.clientId,
+    ...(payload.client || {})
+  });
+  const dateCommande = normalizeDateInput(payload.dateCommande) || new Date().toISOString().slice(0, 10);
+  const deliveryDate = resolvePlannedDeliveryDate(db, client, payload);
+  if (!deliveryDate) throw badRequest("Date de livraison obligatoire pour une commande planifiee");
+
+  const lines = buildCustomerOrderLines(db, payload.products || payload.produits, { checkStock: false });
+  const total = Math.round(lines.reduce((sum, line) => sum + line.totalLigne, 0) * 100) / 100;
+  const numero = generateOrderNumber(db, dateCommande);
+  const order = normalizeOrder({
+    id: `cmd-${numero.toLowerCase()}`,
+    numero,
+    clientId: client.id,
+    clientName: [client.prenom, client.nom].filter(Boolean).join(" ") || client.nom,
+    address: payload.deliveryAddress || client.rue,
+    city: payload.city || client.ville,
+    postalCode: payload.postalCode || client.codePostal,
+    sector: payload.sector || client.secteur,
+    phone: client.telephone,
+    products: lines,
+    status: "planifiee",
+    source: "commande_planifiee",
+    orderType: "planifiee",
+    parentOrderId: clean(payload.parentOrderId || payload.sourceOrderId),
+    total,
+    notes: clean(payload.notes || payload.deliveryNotes),
+    dateCommande,
+    deliveryDate,
+    createdAt: new Date().toISOString()
+  });
+
+  client.crmStatus = client.crmStatus === "client_actif" ? client.crmStatus : "client_a_relancer";
+  client.nextDeliveryDate = deliveryDate;
+  db.commandes.push(order);
+  const reminder = createAutomaticOrderReminder(db, order, {
+    leadDays: payload.reminderLeadDays,
+    motif: payload.reminderMotif
+  });
+  return { order, reminder };
+}
+
+function listPlannedOrders(db) {
+  return db.commandes
+    .filter(order => order.orderType === "planifiee" || order.source === "commande_planifiee" || ["planifiee", "a_confirmer"].includes(order.status))
+    .sort((a, b) => {
+      const dateCompare = String(a.deliveryDate || "").localeCompare(String(b.deliveryDate || ""));
+      if (dateCompare) return dateCompare;
+      return String(a.clientName || "").localeCompare(String(b.clientName || ""), "fr");
+    });
+}
+
+function updatePlannedOrder(db, orderId, payload = {}) {
+  const order = findOrder(db, orderId);
+  const isPlanned = order.orderType === "planifiee" || order.source === "commande_planifiee" || ["planifiee", "a_confirmer"].includes(order.status);
+  if (!isPlanned) throw badRequest("Commande planifiee introuvable");
+
+  if (payload.status !== undefined) {
+    const nextStatus = clean(payload.status);
+    if (!["planifiee", "a_confirmer", "annulee"].includes(nextStatus)) {
+      throw badRequest("Statut planifie invalide");
+    }
+    if (nextStatus === "annulee" && order.stockReservedAt) {
+      releaseOrderStockReservation(db, order, "planned_order_cancelled");
+    }
+    setOrderStatus(order, nextStatus);
+  }
+
+  if (payload.deliveryDate !== undefined || payload.dateLivraison !== undefined) {
+    const nextDeliveryDate = normalizeDateInput(payload.deliveryDate || payload.dateLivraison);
+    if (!nextDeliveryDate) throw badRequest("Date de livraison invalide");
+    order.deliveryDate = nextDeliveryDate;
+  }
+  if (payload.notes !== undefined || payload.deliveryNotes !== undefined) {
+    order.notes = clean(payload.notes || payload.deliveryNotes);
+  }
+  if (payload.products !== undefined || payload.produits !== undefined) {
+    if (order.stockReservedAt) throw badRequest("Impossible de modifier les produits apres reservation du stock");
+    const lines = buildCustomerOrderLines(db, payload.products || payload.produits, { checkStock: false });
+    order.products = lines;
+    order.total = Math.round(lines.reduce((sum, line) => sum + line.totalLigne, 0) * 100) / 100;
+  }
+
+  order.updatedAt = new Date().toISOString();
+  if (order.status !== "annulee") createAutomaticOrderReminder(db, order, { leadDays: payload.reminderLeadDays });
+  const client = findClient(db, order.clientId);
+  if (client) client.nextDeliveryDate = order.deliveryDate || client.nextDeliveryDate;
+  return order;
+}
+
+function confirmPlannedOrder(db, orderId) {
+  const order = findOrder(db, orderId);
+  const isPlanned = order.orderType === "planifiee" || order.source === "commande_planifiee" || ["planifiee", "a_confirmer"].includes(order.status);
+  if (!isPlanned) throw badRequest("Commande planifiee introuvable");
+  if (order.status === "annulee") throw badRequest("Commande planifiee annulee");
+
+  if (order.status === "planifiee") setOrderStatus(order, "a_confirmer");
+  if (order.status === "a_confirmer") setOrderStatus(order, "commande_client_validee");
+  reserveStockForOrder(db, order);
+  setOrderStatus(order, "stock_a_verifier");
+  order.confirmedAt = new Date().toISOString();
+  order.sentToPreparationAt = order.sentToPreparationAt || order.confirmedAt;
+
+  db.relances
+    .filter(reminder => String(reminder.commandeId) === String(order.id) && reminder.status === "a_faire")
+    .forEach(reminder => {
+      reminder.status = "fait";
+      reminder.dateRealisation = order.confirmedAt.slice(0, 10);
+      reminder.resultat = reminder.resultat || "Commande confirmee";
+      reminder.updatedAt = order.confirmedAt;
+    });
+  refreshClientReminderDate(db, order.clientId);
+
+  const client = findClient(db, order.clientId);
+  if (client) {
+    client.crmStatus = "client_actif";
+    client.crmConvertedAt = client.crmConvertedAt || order.confirmedAt;
+    client.lastVisitDate = order.confirmedAt.slice(0, 10);
+  }
+
+  return order;
+}
+
+function replanOrder(db, orderId, payload = {}) {
+  const sourceOrder = findOrder(db, orderId);
+  if (!["livre", "a_reprogrammer", "probleme_livraison"].includes(sourceOrder.status)) {
+    throw badRequest("Seules les commandes livrees ou a reprogrammer peuvent etre replanifiees");
+  }
+
+  const result = createPlannedOrder(db, {
+    clientId: sourceOrder.clientId,
+    client: {
+      nom: sourceOrder.clientName,
+      telephone: sourceOrder.phone,
+      adresse: sourceOrder.address,
+      codePostal: sourceOrder.postalCode,
+      ville: sourceOrder.city
+    },
+    products: payload.products || sourceOrder.products,
+    deliveryDate: payload.deliveryDate || payload.dateLivraison,
+    notes: payload.notes || `Replanification depuis ${sourceOrder.numero || sourceOrder.id}`,
+    parentOrderId: sourceOrder.id,
+    reminderLeadDays: payload.reminderLeadDays
+  });
+
+  addHistory(db, "Replanification", `Commande ${sourceOrder.numero || sourceOrder.id} replanifiee vers ${result.order.deliveryDate}`, {
+    sourceOrderId: sourceOrder.id,
+    newOrderId: result.order.id,
+    reminderId: result.reminder?.id
+  });
+  return result;
+}
+
+function getCustomerOrdersForDate(db, date = new Date().toISOString().slice(0, 10)) {
+  const target = normalizeDateInput(date) || new Date().toISOString().slice(0, 10);
+  return db.commandes
+    .filter(order => String(order.dateCommande || "").slice(0, 10) === target)
+    .filter(order => order.source === "commande_terrain" || order.status === "commande_client_validee")
+    .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+}
+
+function sendCustomerOrdersToPreparation(db, orderIds) {
+  const ids = new Set(Array.isArray(orderIds) ? orderIds.map(String) : []);
+  if (ids.size === 0) throw badRequest("Aucune commande selectionnee");
+
+  const updated = [];
+  db.commandes.forEach(order => {
+    if (!ids.has(String(order.id))) return;
+    if (order.status === "stock_a_verifier" || order.status === "en_preparation") {
+      updated.push(order);
+      return;
+    }
+    if (order.status !== "commande_client_validee") {
+      throw badRequest(`Commande ${order.numero || order.id} deja envoyee ou non eligible`);
+    }
+    reserveStockForOrder(db, order);
+    setOrderStatus(order, "stock_a_verifier");
+    order.sentToPreparationAt = new Date().toISOString();
+    updated.push(order);
+  });
+
+  if (!updated.length) throw notFound("Aucune commande trouvee");
+  return updated;
+}
+
+function startOfLocalDay(date = new Date()) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function addDays(date, days) {
+  const copy = new Date(date);
+  copy.setDate(copy.getDate() + days);
+  return copy;
+}
+
+function toYmd(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function startOfWeekMonday(date) {
+  const day = date.getDay() || 7;
+  return addDays(startOfLocalDay(date), 1 - day);
+}
+
+function orderDate(order) {
+  return normalizeDateInput(order.dateCommande || order.createdAt) || "";
+}
+
+function importedSaleDate(vente) {
+  return normalizeDateInput(vente.dateCommandeIso || vente.dateCommande || vente.date) || "";
+}
+
+function importedSaleLineTotal(vente) {
+  const quantity = Math.max(0, number(vente.quantite ?? vente.quantity, 0));
+  return firstPositiveNumber(
+    vente.totalLigne,
+    vente.total,
+    vente.ttc,
+    vente.TTC,
+    vente.ht,
+    vente.HT,
+    vente.montant,
+    number(vente.prixUnitaire, 0) * quantity
+  );
+}
+
+function importedOrderKey(clientName, date) {
+  return `${normalizeTextKey(clientName)}|${date || ""}`;
+}
+
+function buildImportedSalesIndex(ventes = []) {
+  const byOrder = new Map();
+  const byOrderProduct = new Map();
+
+  (Array.isArray(ventes) ? ventes : []).forEach(vente => {
+    const client = clean(vente.client || vente.clientName || vente.nomClient);
+    if (!client) return;
+    const date = importedSaleDate(vente);
+    const total = importedSaleLineTotal(vente);
+    if (!total) return;
+
+    const orderKey = importedOrderKey(client, date);
+    byOrder.set(orderKey, Math.round(((byOrder.get(orderKey) || 0) + total) * 100) / 100);
+
+    const lineKey = productKey({
+      code: vente.codeProduit || vente.code || vente.sku,
+      nom: vente.produit || vente.produitComplet || vente.nom
+    });
+    if (lineKey) {
+      const key = `${orderKey}|${lineKey}`;
+      byOrderProduct.set(key, Math.round(((byOrderProduct.get(key) || 0) + total) * 100) / 100);
+    }
+  });
+
+  return { byOrder, byOrderProduct };
+}
+
+function getImportedOrderTotal(importedIndex, order, date) {
+  if (!importedIndex || !order) return 0;
+  const clientName = clean(order.clientName || order.nom || order.client);
+  const exact = importedIndex.byOrder.get(importedOrderKey(clientName, date));
+  if (exact) return exact;
+  return importedIndex.byOrder.get(importedOrderKey(clientName, "")) || 0;
+}
+
+function getImportedProductTotal(importedIndex, order, date, line) {
+  if (!importedIndex || !order || !line) return 0;
+  const clientName = clean(order.clientName || order.nom || order.client);
+  const lineKey = productKey(line);
+  if (!lineKey) return 0;
+  const exact = importedIndex.byOrderProduct.get(`${importedOrderKey(clientName, date)}|${lineKey}`);
+  if (exact) return exact;
+  return importedIndex.byOrderProduct.get(`${importedOrderKey(clientName, "")}|${lineKey}`) || 0;
+}
+
+function computeStatistics(db, now = new Date()) {
+  const todayStart = startOfLocalDay(now);
+  const weekStart = startOfWeekMonday(now);
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const prevWeekStart = addDays(weekStart, -7);
+  const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const prevMonthEnd = monthStart;
+
+  const commercialStatuses = new Set(["commande_client_validee", "stock_a_verifier", "en_preparation", "pret_livraison", "en_livraison", "livre"]);
+  const importedSalesIndex = buildImportedSalesIndex(db.ventes);
+  const salesOrders = db.commandes
+    .filter(order => commercialStatuses.has(order.status))
+    .map(order => {
+      const _date = orderDate(order);
+      const explicitTotal = getOrderTotal(order);
+      return {
+        ...order,
+        _date,
+        _total: explicitTotal || getImportedOrderTotal(importedSalesIndex, order, _date)
+      };
+    })
+    .filter(order => order._date);
+
+  const inRange = (order, start, end) => order._date >= toYmd(start) && order._date < toYmd(end);
+  const sum = list => Math.round(list.reduce((total, order) => total + order._total, 0) * 100) / 100;
+  const todayOrders = salesOrders.filter(order => inRange(order, todayStart, addDays(todayStart, 1)));
+  const weekOrders = salesOrders.filter(order => inRange(order, weekStart, addDays(weekStart, 7)));
+  const monthOrders = salesOrders.filter(order => inRange(order, monthStart, new Date(now.getFullYear(), now.getMonth() + 1, 1)));
+  const prevWeekOrders = salesOrders.filter(order => inRange(order, prevWeekStart, weekStart));
+  const prevMonthOrders = salesOrders.filter(order => inRange(order, prevMonthStart, prevMonthEnd));
+
+  const productMap = new Map();
+  const clientMap = new Map();
+  monthOrders.forEach(order => {
+    clientMap.set(order.clientId, {
+      clientId: order.clientId,
+      name: order.clientName,
+      orders: (clientMap.get(order.clientId)?.orders || 0) + 1,
+      total: (clientMap.get(order.clientId)?.total || 0) + order._total
+    });
+    normalizeProducts(order.products).forEach(line => {
+      const key = productKey(line) || line.nom;
+      const current = productMap.get(key) || { name: line.nom, quantity: 0, total: 0 };
+      current.quantity += Math.max(0, number(line.quantite, 0));
+      current.total += firstPositiveNumber(
+        line.totalLigne,
+        line.total,
+        line.ttc,
+        line.ht,
+        getImportedProductTotal(importedSalesIndex, order, order._date, line)
+      )
+        || Math.max(0, number(line.quantite, 0)) * Math.max(0, number(line.prixUnitaire, 0));
+      productMap.set(key, current);
+    });
+  });
+
+  const periodEvolution = (current, previous) => {
+    if (previous === 0 && current === 0) return { label: "stable", percent: 0 };
+    if (previous === 0) return { label: "progression", percent: 100 };
+    const percent = Math.round(((current - previous) / previous) * 1000) / 10;
+    return {
+      label: Math.abs(percent) < 3 ? "stable" : (percent > 0 ? "progression" : "baisse"),
+      percent
+    };
+  };
+
+  const last14Days = Array.from({ length: 14 }, (_, index) => addDays(todayStart, index - 13))
+    .map(day => {
+      const end = addDays(day, 1);
+      const list = salesOrders.filter(order => inRange(order, day, end));
+      return { date: toYmd(day), total: sum(list), orders: list.length };
+    });
+
+  const newClientsMonth = db.clients.filter(client => {
+    const created = normalizeDateInput(client.firstContactDate || client.createdAt);
+    return created && created >= toYmd(monthStart);
+  }).length;
+
+  const convertedMonth = db.clients.filter(client => {
+    const converted = normalizeDateInput(client.crmConvertedAt);
+    return converted && converted >= toYmd(monthStart);
+  }).length;
+
+  return {
+    today: { revenue: sum(todayOrders), orders: todayOrders.length },
+    week: { revenue: sum(weekOrders), orders: weekOrders.length, evolution: periodEvolution(sum(weekOrders), sum(prevWeekOrders)) },
+    month: { revenue: sum(monthOrders), orders: monthOrders.length, evolution: periodEvolution(sum(monthOrders), sum(prevMonthOrders)) },
+    averageBasket: salesOrders.length ? Math.round((sum(salesOrders) / salesOrders.length) * 100) / 100 : 0,
+    newClientsMonth,
+    convertedProspectsMonth: convertedMonth,
+    topProducts: Array.from(productMap.values()).sort((a, b) => b.quantity - a.quantity).slice(0, 8),
+    topClients: Array.from(clientMap.values()).sort((a, b) => b.total - a.total).slice(0, 8),
+    salesByDay: last14Days
+  };
+}
+
+function xmlEscape(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function excelColumnName(index) {
+  let value = index + 1;
+  let name = "";
+  while (value > 0) {
+    const mod = (value - 1) % 26;
+    name = String.fromCharCode(65 + mod) + name;
+    value = Math.floor((value - mod) / 26);
+  }
+  return name;
+}
+
+function buildXlsx(rows) {
+  const sheetRows = rows.map((row, rowIndex) => {
+    const cells = row.map((value, columnIndex) => {
+      const ref = `${excelColumnName(columnIndex)}${rowIndex + 1}`;
+      if (typeof value === "number" && Number.isFinite(value)) {
+        return `<c r="${ref}"><v>${value}</v></c>`;
+      }
+      return `<c r="${ref}" t="inlineStr"><is><t>${xmlEscape(value)}</t></is></c>`;
+    }).join("");
+    return `<row r="${rowIndex + 1}">${cells}</row>`;
+  }).join("");
+
+  const files = {
+    "[Content_Types].xml": strToU8(`<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>`),
+    "_rels/.rels": strToU8(`<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`),
+    "xl/workbook.xml": strToU8(`<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Commandes" sheetId="1" r:id="rId1"/></sheets>
+</workbook>`),
+    "xl/_rels/workbook.xml.rels": strToU8(`<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>`),
+    "xl/worksheets/sheet1.xml": strToU8(`<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>${sheetRows}</sheetData>
+</worksheet>`)
+  };
+
+  return Buffer.from(zipSync(files, { level: 6 }));
+}
+
+function orderExportRows(orders) {
+  const headers = ["Date", "Client", "Adresse", "Telephone", "Produits", "Quantites", "Prix unitaires", "Total", "Statut", "Notes"];
+  const rows = orders.map(order => {
+    const lines = normalizeProducts(order.products);
+    return [
+      order.deliveryDate || order.dateCommande || "",
+      order.clientName || "",
+      [order.address, order.postalCode, order.city].filter(Boolean).join(", "),
+      order.phone || "",
+      lines.map(line => line.nom).join(" | "),
+      lines.map(line => line.quantite).join(" | "),
+      lines.map(line => line.prixUnitaire || 0).join(" | "),
+      getOrderTotal(order),
+      order.status || "",
+      order.notes || ""
+    ];
+  });
+  return [headers, ...rows];
+}
+
+function getOrdersForAnnexExport(db, query = {}) {
+  const type = clean(query.type || "annexe").toLowerCase();
+  let list = db.commandes || [];
+
+  if (type === "all" || type === "toutes") return list;
+  if (type === "planned" || type === "planifiees") return listPlannedOrders(db);
+  if (type === "terrain") return list.filter(order => order.source === "commande_terrain");
+
+  return list.filter(order => order.orderType === "annexe" || order.source === "commande_annexe");
+}
+
 function notFound(message) {
   const error = new Error(message);
   error.statusCode = 404;
@@ -3530,6 +4540,18 @@ function getSectors(db) {
   CORE_SECTORS.forEach(sector => {
     map.set(sector, {
       name: sector,
+      total: 0,
+      ready: 0,
+      inDelivery: 0,
+      problems: 0
+    });
+  });
+
+  (db.deliverySectors || []).forEach(sector => {
+    const name = sector.secteur || sector.villePrincipale;
+    if (!name || map.has(name)) return;
+    map.set(name, {
+      name,
       total: 0,
       ready: 0,
       inDelivery: 0,
@@ -4211,6 +5233,282 @@ app.get("/api/orders/by-number/:numero", (req, res) => {
   res.json(order);
 });
 
+app.get("/api/crm/clients", (req, res) => {
+  const db = readDb();
+  const query = normalizeTextKey(req.query.q || "");
+  const statusFilter = normalizeCrmStatus(req.query.status || "", "");
+  const today = new Date().toISOString().slice(0, 10);
+
+  let list = db.clients
+    .filter(client => !client.crmArchived)
+    .map(client => crmClientView(db, client));
+
+  if (query) {
+    list = list.filter(client => normalizeTextKey([
+      client.nom,
+      client.prenom,
+      client.telephone,
+      client.rue,
+      client.ville,
+      client.email,
+      client.crmStatus
+    ].join(" ")).includes(query));
+  }
+
+  if (statusFilter) {
+    list = list.filter(client => client.crmStatus === statusFilter);
+  }
+
+  if (req.query.relance === "today") {
+    list = list.filter(client => client.nextReminderDate === today);
+  }
+  if (req.query.relance === "late") {
+    list = list.filter(client => client.nextReminderDate && client.nextReminderDate < today);
+  }
+
+  res.json(list.sort((a, b) => String(a.nom).localeCompare(String(b.nom), "fr")));
+});
+
+app.post("/api/crm/clients", async (req, res) => {
+  try {
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      const duplicate = findDuplicateClient(db, req.body || {});
+      if (duplicate) {
+        throw Object.assign(badRequest("Client/prospect deja existant"), { statusCode: 409 });
+      }
+      const client = validateCrmClientPayload(req.body || {}, {
+        id: `client-${crypto.randomUUID()}`,
+        createdAt: new Date().toISOString(),
+        produits: []
+      });
+      db.clients.push(client);
+      addHistory(db, "CRM", `${[client.prenom, client.nom].filter(Boolean).join(" ") || client.nom} : fiche creee`, {
+        clientId: client.id,
+        crmStatus: client.crmStatus
+      });
+      writeDb(db);
+      return crmClientView(db, client);
+    });
+    res.status(201).json(result);
+  } catch (error) {
+    handleRouteError(error, res, "Erreur CRM");
+  }
+});
+
+app.get("/api/crm/clients/:id", (req, res) => {
+  const db = readDb();
+  const client = findClient(db, req.params.id);
+  if (!client) return res.status(404).json({ error: "Client introuvable" });
+  res.json(crmClientView(db, client));
+});
+
+app.patch("/api/crm/clients/:id", async (req, res) => {
+  try {
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      const client = findClient(db, req.params.id);
+      if (!client) throw notFound("Client introuvable");
+      const duplicate = findDuplicateClient(db, req.body || {}, client.id);
+      if (duplicate) throw Object.assign(badRequest("Client/prospect deja existant"), { statusCode: 409 });
+
+      Object.assign(client, validateCrmClientPayload(req.body || {}, client));
+      addHistory(db, "CRM", `${[client.prenom, client.nom].filter(Boolean).join(" ") || client.nom} : fiche mise a jour`, {
+        clientId: client.id
+      });
+      writeDb(db);
+      return crmClientView(db, client);
+    });
+    res.json(result);
+  } catch (error) {
+    handleRouteError(error, res, "Erreur CRM");
+  }
+});
+
+app.delete("/api/crm/clients/:id", async (req, res) => {
+  try {
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      const client = findClient(db, req.params.id);
+      if (!client) throw notFound("Client introuvable");
+      client.crmArchived = true;
+      client.updatedAt = new Date().toISOString();
+      addHistory(db, "CRM", `${client.nom} : fiche archivee`, { clientId: client.id });
+      writeDb(db);
+      return { ok: true, clientId: client.id };
+    });
+    res.json(result);
+  } catch (error) {
+    handleRouteError(error, res, "Erreur archivage CRM");
+  }
+});
+
+app.get("/api/crm/relances", (req, res) => {
+  const db = readDb();
+  res.json(getReminderViews(db, req.query));
+});
+
+app.get("/api/reminders", (req, res) => {
+  const db = readDb();
+  res.json(getReminderViews(db, req.query));
+});
+
+app.post("/api/crm/relances", async (req, res) => {
+  try {
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      const client = findClient(db, req.body?.clientId);
+      if (!client) throw notFound("Client introuvable");
+      const reminder = normalizeCrmReminder(req.body || {});
+      db.relances.push(reminder);
+      refreshClientReminderDate(db, client.id);
+      if (client.crmStatus !== "client_actif") client.crmStatus = "client_a_relancer";
+      addHistory(db, "Relance CRM", `${client.nom} : relance ${reminder.datePrevue}`, {
+        clientId: client.id,
+        relanceId: reminder.id,
+        orderId: reminder.commandeId
+      });
+      writeDb(db);
+      return reminder;
+    });
+    res.status(201).json(result);
+  } catch (error) {
+    handleRouteError(error, res, "Erreur relance CRM");
+  }
+});
+
+app.patch("/api/crm/relances/:id", async (req, res) => {
+  try {
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      const reminder = db.relances.find(item => String(item.id) === String(req.params.id));
+      if (!reminder) throw notFound("Relance introuvable");
+      const next = normalizeCrmReminder({ ...reminder, ...req.body, id: reminder.id, updatedAt: new Date().toISOString() });
+      Object.assign(reminder, next);
+      const client = findClient(db, reminder.clientId);
+      if (client) refreshClientReminderDate(db, client.id);
+      addHistory(db, "Relance CRM", `Relance ${reminder.status}`, {
+        clientId: reminder.clientId,
+        relanceId: reminder.id
+      });
+      writeDb(db);
+      return reminder;
+    });
+    res.json(result);
+  } catch (error) {
+    handleRouteError(error, res, "Erreur relance CRM");
+  }
+});
+
+app.post("/api/customer-orders", async (req, res) => {
+  try {
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      const order = createCustomerOrder(db, req.body || {});
+      addHistory(db, "Commande client", `${order.clientName} : commande ${order.numero} validee`, {
+        orderId: order.id,
+        clientId: order.clientId,
+        total: order.total
+      });
+      writeDb(db);
+      return order;
+    });
+    res.status(201).json(result);
+  } catch (error) {
+    handleRouteError(error, res, "Erreur commande client");
+  }
+});
+
+app.get("/api/customer-orders/today", (req, res) => {
+  const db = readDb();
+  res.json(getCustomerOrdersForDate(db, req.query.date));
+});
+
+app.post("/api/customer-orders/send-preparation", async (req, res) => {
+  try {
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      const updated = sendCustomerOrdersToPreparation(db, req.body?.orderIds);
+      addHistory(db, "Commande client", `${updated.length} commande(s) envoyee(s) en preparation`, {
+        orderIds: updated.map(order => order.id)
+      });
+      writeDb(db);
+      return { updated: updated.length, orders: updated };
+    });
+    res.json(result);
+  } catch (error) {
+    handleRouteError(error, res, "Erreur envoi preparation");
+  }
+});
+
+app.get("/api/planned-orders", (req, res) => {
+  const db = readDb();
+  let list = listPlannedOrders(db);
+  const status = clean(req.query.status || "");
+  if (status) list = list.filter(order => order.status === status);
+  res.json(list);
+});
+
+app.post("/api/planned-orders", async (req, res) => {
+  try {
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      const planned = createPlannedOrder(db, req.body || {});
+      addHistory(db, "Commande planifiee", `${planned.order.clientName} : commande ${planned.order.numero} planifiee au ${planned.order.deliveryDate}`, {
+        orderId: planned.order.id,
+        clientId: planned.order.clientId,
+        reminderId: planned.reminder?.id
+      });
+      writeDb(db);
+      return planned;
+    });
+    res.status(201).json(result);
+  } catch (error) {
+    handleRouteError(error, res, "Erreur commande planifiee");
+  }
+});
+
+app.patch("/api/planned-orders/:id", async (req, res) => {
+  try {
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      const order = updatePlannedOrder(db, req.params.id, req.body || {});
+      addHistory(db, "Commande planifiee", `${order.numero || order.id} : mise a jour`, {
+        orderId: order.id,
+        status: order.status
+      });
+      writeDb(db);
+      return order;
+    });
+    res.json(result);
+  } catch (error) {
+    handleRouteError(error, res, "Erreur commande planifiee");
+  }
+});
+
+app.post("/api/planned-orders/:id/confirm", async (req, res) => {
+  try {
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      const order = confirmPlannedOrder(db, req.params.id);
+      addHistory(db, "Commande planifiee", `${order.numero || order.id} confirmee et envoyee en preparation`, {
+        orderId: order.id,
+        clientId: order.clientId
+      });
+      writeDb(db);
+      return order;
+    });
+    res.json(result);
+  } catch (error) {
+    handleRouteError(error, res, "Erreur confirmation commande planifiee");
+  }
+});
+
+app.get("/api/statistics", (req, res) => {
+  const db = readDb();
+  res.json(computeStatistics(db));
+});
+
 app.get("/api/recommendations", (req, res) => {
   const db = readDb();
   res.json(getRecommendations(db));
@@ -4219,6 +5517,74 @@ app.get("/api/recommendations", (req, res) => {
 app.get("/api/sectors", (req, res) => {
   const db = readDb();
   res.json(getSectors(db));
+});
+
+app.get("/api/delivery-sectors", (req, res) => {
+  const db = readDb();
+  res.json(db.deliverySectors || []);
+});
+
+app.post("/api/delivery-sectors", async (req, res) => {
+  try {
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      const sector = normalizeDeliverySector(req.body || {});
+      db.deliverySectors.push(sector);
+      addHistory(db, "Secteurs livraison", `${sector.secteur} : secteur ajoute`, { sectorId: sector.id });
+      writeDb(db);
+      return sector;
+    });
+    res.status(201).json(result);
+  } catch (error) {
+    handleRouteError(error, res, "Erreur secteur livraison");
+  }
+});
+
+app.patch("/api/delivery-sectors/:id", async (req, res) => {
+  try {
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      const sector = (db.deliverySectors || []).find(item => String(item.id) === String(req.params.id));
+      if (!sector) throw notFound("Secteur livraison introuvable");
+      Object.assign(sector, normalizeDeliverySector({ ...sector, ...req.body, id: sector.id, updatedAt: new Date().toISOString() }));
+      addHistory(db, "Secteurs livraison", `${sector.secteur} : secteur mis a jour`, { sectorId: sector.id });
+      writeDb(db);
+      return sector;
+    });
+    res.json(result);
+  } catch (error) {
+    handleRouteError(error, res, "Erreur secteur livraison");
+  }
+});
+
+app.delete("/api/delivery-sectors/:id", async (req, res) => {
+  try {
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      const index = (db.deliverySectors || []).findIndex(item => String(item.id) === String(req.params.id));
+      if (index < 0) throw notFound("Secteur livraison introuvable");
+      const [sector] = db.deliverySectors.splice(index, 1);
+      addHistory(db, "Secteurs livraison", `${sector.secteur} : secteur supprime`, { sectorId: sector.id });
+      writeDb(db);
+      return { ok: true, sectorId: sector.id };
+    });
+    res.json(result);
+  } catch (error) {
+    handleRouteError(error, res, "Erreur secteur livraison");
+  }
+});
+
+app.get("/api/exports/commandes-annexes.xlsx", (req, res) => {
+  try {
+    const db = readDb();
+    const exportOrders = getOrdersForAnnexExport(db, req.query);
+    const buffer = buildXlsx(orderExportRows(exportOrders));
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", 'attachment; filename="commandes-annexes.xlsx"');
+    res.send(buffer);
+  } catch (error) {
+    handleRouteError(error, res, "Erreur export commandes annexes");
+  }
 });
 
 app.get("/api/routes", (req, res) => {
@@ -4297,9 +5663,14 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
           cout,
           statut,
           type: category,
-          category,
-          alertThreshold
+          category
         };
+        if (alertThreshold !== null && alertThreshold !== undefined) {
+          const normalizedThreshold = Math.max(0, Math.round(alertThreshold));
+          fieldsFromExcel.alertThreshold = normalizedThreshold;
+          fieldsFromExcel.stockMinimum = normalizedThreshold;
+          fieldsFromExcel.seuilMinimum = normalizedThreshold;
+        }
 
         const key = productKey(fieldsFromExcel);
         const existing = key ? existingByKey.get(key) : null;
@@ -4338,6 +5709,9 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
         return {
           ...fieldsFromExcel,
           id: crypto.randomUUID(),
+          alertThreshold: fieldsFromExcel.alertThreshold ?? DEFAULT_STOCK_ALERT_THRESHOLD,
+          stockMinimum: fieldsFromExcel.stockMinimum ?? DEFAULT_STOCK_ALERT_THRESHOLD,
+          seuilMinimum: fieldsFromExcel.seuilMinimum ?? DEFAULT_STOCK_ALERT_THRESHOLD,
           quantite: excelQuantite
         };
       })
@@ -4571,10 +5945,17 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       }
 
       // Agregation/dedup produit dans la commande (meme produit 2 lignes Excel = somme)
+      const lineTotal = firstPositiveNumber(vente.ttc, vente.ht, vente.prixUnitaire * vente.quantite);
+      const lineUnitPrice = firstPositiveNumber(
+        vente.prixUnitaire,
+        vente.quantite > 0 ? lineTotal / vente.quantite : 0
+      );
       const newLine = {
         code: vente.codeProduit,
         nom: vente.produit,
-        quantite: vente.quantite
+        quantite: vente.quantite,
+        prixUnitaire: lineUnitPrice,
+        totalLigne: lineTotal
       };
       const newLineKey = productKey(newLine);
       const orderBucket = clientsMap[key].ordersByDate[dateCommande];
@@ -4583,6 +5964,10 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
         : null;
       if (existingOrderLine) {
         existingOrderLine.quantite = number(existingOrderLine.quantite, 0) + number(newLine.quantite, 0);
+        existingOrderLine.totalLigne = Math.round((number(existingOrderLine.totalLigne, 0) + number(newLine.totalLigne, 0)) * 100) / 100;
+        existingOrderLine.prixUnitaire = existingOrderLine.quantite > 0
+          ? Math.round((existingOrderLine.totalLigne / existingOrderLine.quantite) * 100) / 100
+          : number(existingOrderLine.prixUnitaire, 0);
       } else {
         orderBucket.produits.push({ ...newLine });
       }
@@ -4593,6 +5978,10 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
         : null;
       if (flatExistingLine) {
         flatExistingLine.quantite = number(flatExistingLine.quantite, 0) + number(newLine.quantite, 0);
+        flatExistingLine.totalLigne = Math.round((number(flatExistingLine.totalLigne, 0) + number(newLine.totalLigne, 0)) * 100) / 100;
+        flatExistingLine.prixUnitaire = flatExistingLine.quantite > 0
+          ? Math.round((flatExistingLine.totalLigne / flatExistingLine.quantite) * 100) / 100
+          : number(flatExistingLine.prixUnitaire, 0);
       } else {
         clientsMap[key].produits.push({ ...newLine });
       }
@@ -4855,22 +6244,57 @@ app.patch("/api/stock/:id", async (req, res) => {
         throw notFound("Produit introuvable");
       }
 
-      const nextQuantity = Number(String(req.body.quantite ?? "").replace(",", "."));
+      const body = req.body || {};
+      const hasQuantity = Object.prototype.hasOwnProperty.call(body, "quantite");
+      const thresholdField = ["alertThreshold", "stockMinimum", "seuilMinimum", "seuil_minimum"]
+        .find(field => Object.prototype.hasOwnProperty.call(body, field));
+      const hasThreshold = Boolean(thresholdField);
 
-      if (!Number.isFinite(nextQuantity) || nextQuantity < 0) {
-        throw badRequest("Quantite invalide");
+      if (!hasQuantity && !hasThreshold) {
+        throw badRequest("Aucune modification stock fournie");
       }
 
       const oldQuantity = getStockQuantity(product) ?? 0;
-      setStockQuantity(product, nextQuantity);
-      recordStockMovement(db, product, oldQuantity, product.quantite, req.body.reason);
+      let quantityChanged = false;
+      let thresholdChanged = false;
+      let oldThreshold = getStockAlertThreshold(product);
+      let nextThreshold = oldThreshold;
+
+      if (hasQuantity) {
+        const nextQuantity = Number(String(body.quantite ?? "").replace(",", "."));
+
+        if (!Number.isFinite(nextQuantity) || nextQuantity < 0) {
+          throw badRequest("Quantite invalide");
+        }
+
+        setStockQuantity(product, nextQuantity);
+        quantityChanged = product.quantite !== oldQuantity;
+        recordStockMovement(db, product, oldQuantity, product.quantite, body.reason);
+      }
+
+      if (hasThreshold) {
+        nextThreshold = parseStockAlertThresholdInput(body[thresholdField]);
+        product.alertThreshold = nextThreshold;
+        product.stockMinimum = nextThreshold;
+        product.seuilMinimum = nextThreshold;
+        thresholdChanged = nextThreshold !== oldThreshold;
+      }
 
       syncWorkflow(db);
-      addHistory(db, "Stock", `${product.nom} : stock ${oldQuantity} -> ${product.quantite}`, {
-        produitId: product.id,
-        ancienStock: oldQuantity,
-        nouveauStock: product.quantite
-      });
+      if (quantityChanged) {
+        addHistory(db, "Stock", `${product.nom} : stock ${oldQuantity} -> ${product.quantite}`, {
+          produitId: product.id,
+          ancienStock: oldQuantity,
+          nouveauStock: product.quantite
+        });
+      }
+      if (thresholdChanged) {
+        addHistory(db, "Stock", `${product.nom} : seuil minimum ${oldThreshold} -> ${nextThreshold}`, {
+          produitId: product.id,
+          ancienSeuil: oldThreshold,
+          nouveauSeuil: nextThreshold
+        });
+      }
 
       writeDb(db);
       // Chantier 2 (revue R1 P1 #1) : passer l'index pre-calcule pour
@@ -4984,12 +6408,29 @@ app.patch("/api/clients/:id/coordinates", async (req, res) => {
   }
 });
 
+app.post("/api/orders/:id/replan", async (req, res) => {
+  try {
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      const replanned = replanOrder(db, req.params.id, req.body || {});
+      writeDb(db);
+      return replanned;
+    });
+    res.status(201).json(result);
+  } catch (error) {
+    handleRouteError(error, res, "Erreur replanification");
+  }
+});
+
 app.post("/api/orders/:id/start-preparation", async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
       const db = readDb();
       const order = findOrder(db, req.params.id);
 
+      if (["planifiee", "a_confirmer"].includes(order.status)) {
+        throw badRequest("Confirme la commande planifiee avant de lancer la preparation");
+      }
       reserveStockForOrder(db, order);
       setOrderStatus(order, "en_preparation");
 
@@ -5045,7 +6486,12 @@ app.patch("/api/orders/:id", async (req, res) => {
       if (req.body.priority !== undefined) order.priority = clean(req.body.priority);
       if (req.body.sector !== undefined) order.sector = deriveSector(order.city, req.body.sector);
       if (req.body.deliveryDate !== undefined) order.deliveryDate = normalizeDateInput(req.body.deliveryDate);
-      if (req.body.status !== undefined) setOrderStatus(order, req.body.status);
+      if (req.body.status !== undefined) {
+        if (clean(req.body.status) === "annulee" && order.stockReservedAt) {
+          releaseOrderStockReservation(db, order, "order_cancelled");
+        }
+        setOrderStatus(order, req.body.status);
+      }
 
       order.updatedAt = new Date().toISOString();
       writeDb(db);

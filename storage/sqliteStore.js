@@ -72,6 +72,8 @@ function createSqliteStore(options) {
         historique: readPayloads(database, "historique"),
         commandes: readPayloads(database, "commandes"),
         routes: readPayloads(database, "routes"),
+        relances: readPayloads(database, "relances_crm"),
+        deliverySectors: readPayloads(database, "secteurs_livraison"),
         stockMovements: readPayloads(database, "mouvements_stock"),
         // v1.12.0 : historique des imports Excel archives (metadata + chemin
         // vers le fichier xlsx brut conserve dans /app/data/imports-archives/)
@@ -116,7 +118,7 @@ function migrateSchema(database) {
       reference TEXT,
       nom TEXT,
       stock_actuel REAL,
-      stock_minimum REAL,
+      stock_minimum REAL DEFAULT 5,
       stock_bloque REAL,
       unite TEXT,
       updated_at TEXT,
@@ -216,6 +218,27 @@ function migrateSchema(database) {
       sort_order INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS relances_crm (
+      id TEXT PRIMARY KEY,
+      client_id TEXT,
+      commande_id TEXT,
+      date_prevue TEXT,
+      statut TEXT,
+      payload TEXT NOT NULL,
+      sort_order INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS secteurs_livraison (
+      id TEXT PRIMARY KEY,
+      nom TEXT,
+      ville TEXT,
+      jour_mois INTEGER,
+      frequence TEXT,
+      point_depart TEXT,
+      payload TEXT NOT NULL,
+      sort_order INTEGER NOT NULL
+    );
+
     -- v1.12.0 : archivage automatique des fichiers Excel importes pour pouvoir
     -- les retelecharger plus tard et tracer l'historique (audit, debug, repro).
     -- Le fichier brut .xlsx est copie dans /app/data/imports-archives/, et un
@@ -246,6 +269,8 @@ function migrateSchema(database) {
   addColumnIfMissing(database, "commandes", "numero", "TEXT");
   addColumnIfMissing(database, "commandes", "date_commande", "TEXT");
   addColumnIfMissing(database, "commandes", "excel_row_hash", "TEXT");
+  addColumnIfMissing(database, "produits", "stock_minimum", "REAL DEFAULT 5");
+  addColumnIfMissing(database, "relances_crm", "commande_id", "TEXT");
 
   // Etape 3 : CREATE INDEX, maintenant que les colonnes existent garantissimement.
   database.exec(`
@@ -258,6 +283,11 @@ function migrateSchema(database) {
     CREATE INDEX IF NOT EXISTS idx_commandes_date_livraison ON commandes(date_livraison);
     CREATE INDEX IF NOT EXISTS idx_imports_archives_at ON imports_archives(imported_at DESC);
     CREATE INDEX IF NOT EXISTS idx_imports_archives_type ON imports_archives(type, imported_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_relances_crm_date ON relances_crm(date_prevue);
+    CREATE INDEX IF NOT EXISTS idx_relances_crm_statut ON relances_crm(statut);
+    CREATE INDEX IF NOT EXISTS idx_relances_crm_client ON relances_crm(client_id);
+    CREATE INDEX IF NOT EXISTS idx_relances_crm_commande ON relances_crm(commande_id);
+    CREATE INDEX IF NOT EXISTS idx_secteurs_livraison_ville ON secteurs_livraison(ville);
   `);
 }
 
@@ -300,6 +330,8 @@ function persistDatabase(database, db) {
       "lignes_commande",
       "livraisons",
       "routes",
+      "relances_crm",
+      "secteurs_livraison",
       "commandes",
       "clients",
       "produits",
@@ -314,6 +346,8 @@ function persistDatabase(database, db) {
     insertOrders(database, db.commandes || []);
     insertOrderLines(database, db.commandes || []);
     insertRoutes(database, db.routes || []);
+    insertCrmReminders(database, db.relances || []);
+    insertDeliverySectors(database, db.deliverySectors || []);
     insertDeliveries(database, db);
     insertMovements(database, db.stockMovements || []);
     insertSimplePayloads(database, "ventes", db.ventes || []);
@@ -358,7 +392,7 @@ function insertProducts(database, products) {
       text(product.reference || product.sku || product.code),
       text(product.nom || product.name || product.produit),
       numberOrNull(product.quantite ?? product.quantityAvailable ?? product.stockActuel),
-      numberOrNull(product.alertThreshold ?? product.stockMinimum),
+      stockMinimumOrDefault(product),
       numberOrNull(product.stockBloque ?? product.quantityReserved),
       text(product.unite || product.unit),
       text(product.updatedAt),
@@ -463,6 +497,46 @@ function insertRoutes(database, routes) {
       text(route.sector || route.secteur),
       text(route.deliveryDate || route.dateLivraison),
       stringify(route),
+      index
+    );
+  });
+}
+
+function insertCrmReminders(database, reminders) {
+  const statement = database.prepare(`
+    INSERT INTO relances_crm (id, client_id, commande_id, date_prevue, statut, payload, sort_order)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  reminders.forEach((reminder, index) => {
+    statement.run(
+      stableId(reminder, "relance", index),
+      text(reminder.clientId),
+      text(reminder.commandeId || reminder.orderId),
+      text(reminder.datePrevue || reminder.reminderDate),
+      text(reminder.status || reminder.statut),
+      stringify(reminder),
+      index
+    );
+  });
+}
+
+function insertDeliverySectors(database, sectors) {
+  const statement = database.prepare(`
+    INSERT INTO secteurs_livraison (
+      id, nom, ville, jour_mois, frequence, point_depart, payload, sort_order
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  sectors.forEach((sector, index) => {
+    statement.run(
+      stableId(sector, "secteur", index),
+      text(sector.secteur || sector.name || sector.nom),
+      text(sector.villePrincipale || sector.mainCity || sector.ville || sector.city),
+      numberOrNull(sector.jourMois || sector.dayOfMonth),
+      text(sector.frequence || sector.frequency),
+      text(sector.pointDepart || sector.departurePoint),
+      stringify(sector),
       index
     );
   });
@@ -628,6 +702,19 @@ function text(value) {
 function numberOrNull(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function stockMinimumOrDefault(product) {
+  const raw = product.alertThreshold
+    ?? product.stockMinimum
+    ?? product.seuilMinimum
+    ?? product.seuil_minimum
+    ?? product.seuilAlerte
+    ?? product.seuil
+    ?? product.minimum;
+  if (raw === undefined || raw === null || raw === "") return 5;
+  const number = Number(String(raw).replace(",", "."));
+  return Number.isFinite(number) ? Math.max(0, Math.round(number)) : 5;
 }
 
 function stringify(value) {
