@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.21.0](https://github.com/tombague160-maker/sereo-production/compare/v1.20.0...v1.21.0) (2026-07-22)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **ui:** refonte mobile app-like + densité + cohérence dark + a11y ([#94](https://github.com/tombague160-maker/sereo-production/issues/94)) ([b9c8d93](https://github.com/tombague160-maker/sereo-production/commit/b9c8d9322eb377d0a6ffdefed68569a4660b6a6a))
+
 ## [1.20.0](https://github.com/tombague160-maker/sereo-production/compare/v1.19.2...v1.20.0) (2026-07-22)
 
 
