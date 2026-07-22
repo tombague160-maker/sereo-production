@@ -9,7 +9,7 @@
        sombre dans localStorage. Pas de version conditionnelle prefers-color-scheme
        car elle causait un flash de couleur OS bar quand l'OS est en sombre
        mais que l'app force le mode clair. -->
-  <meta name="theme-color" content="#cfe9e1" />
+  <meta name="theme-color" content="#f5f3f1" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -47,7 +47,7 @@
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="stylesheet" href="/vendor/leaflet/leaflet.css" />
-  <link rel="stylesheet" href="/css/style.css?v=20260509-dark-mode" />
+  <link rel="stylesheet" href="/css/style.css?v=20260702-themes" />
 </head>
 
 <body>
@@ -111,6 +111,10 @@
       <circle cx="12" cy="12" r="1.6" />
       <circle cx="19" cy="12" r="1.6" />
     </symbol>
+    <symbol id="icon-search" viewBox="0 0 24 24">
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.5-3.5" />
+    </symbol>
     <symbol id="icon-receipt" viewBox="0 0 24 24">
       <path d="M4 3.5h16v17l-2.5-1.5-2.5 1.5-2.5-1.5-2.5 1.5-2.5-1.5L4 20.5z" />
       <line x1="8" y1="8" x2="16" y2="8" />
@@ -123,38 +127,124 @@
     <h1 class="sr-only">Séréo — gestion locale du stock, des préparations et des livraisons</h1>
     <aside class="sidebar" aria-label="Navigation principale">
       <div class="brand">
-        <img class="brand-logo" src="/brand/sereo-logo.svg" alt="Séréo" />
+        <img class="brand-logo" src="/brand/sereo-logo.svg?v=20260701" alt="SEREO" />
       </div>
 
-      <nav class="nav" role="tablist" aria-label="Sections">
-        <button id="tab-journee" class="tab active" type="button" role="tab" aria-selected="true" aria-controls="journee" data-tab="journee">
-          <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-home"></use></svg></span>
-          <span>Tableau de bord</span>
-        </button>
-        <button id="tab-stock" class="tab" type="button" role="tab" aria-selected="false" aria-controls="stock" data-tab="stock">
-          <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-box"></use></svg></span>
-          <span>Stock / Inventaire</span>
-        </button>
-        <button id="tab-preparation" class="tab" type="button" role="tab" aria-selected="false" aria-controls="preparation" data-tab="preparation">
-          <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-clipboard-list"></use></svg></span>
-          <span>Préparation</span>
-        </button>
-        <button id="tab-bons-commande" class="tab" type="button" role="tab" aria-selected="false" aria-controls="bons-commande" data-tab="bons-commande">
-          <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-receipt"></use></svg></span>
-          <span>Bons de commande</span>
-        </button>
-        <button id="tab-livreur" class="tab" type="button" role="tab" aria-selected="false" aria-controls="livreur" data-tab="livreur">
-          <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-truck"></use></svg></span>
-          <span>Livraison</span>
-        </button>
-        <button id="tab-recommande" class="tab" type="button" role="tab" aria-selected="false" aria-controls="recommande" data-tab="recommande">
-          <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-star"></use></svg></span>
-          <span>À recommander</span>
-        </button>
-        <button id="tab-commandes-livrees" class="tab" type="button" role="tab" aria-selected="false" aria-controls="commandes-livrees" data-tab="commandes-livrees">
-          <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-clipboard-list"></use></svg></span>
-          <span>Commandes livrées</span>
-        </button>
+      <label class="sidebar-search" for="menuSearch">
+        <svg class="icon" aria-hidden="true"><use href="#icon-search"></use></svg>
+        <input id="menuSearch" type="search" placeholder="Rechercher" autocomplete="off" />
+      </label>
+
+      <nav class="nav nav-categorized" aria-label="Sections">
+        <section class="nav-section open" data-nav-section data-nav-section-id="accueil">
+          <button class="nav-section-toggle" type="button" data-action="toggle-nav-section" data-nav-section-target="accueil" aria-expanded="true">
+            <span class="nav-section-label">Accueil</span>
+            <span class="nav-section-count">1</span>
+          </button>
+          <div class="nav-section-items">
+            <button id="tab-journee" class="tab active" type="button" role="tab" aria-selected="true" aria-controls="journee" data-tab="journee">
+              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-home"></use></svg></span>
+              <span>Tableau de bord</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="nav-section" data-nav-section data-nav-section-id="commandes">
+          <button class="nav-section-toggle" type="button" data-action="toggle-nav-section" data-nav-section-target="commandes" aria-expanded="false">
+            <span class="nav-section-label">Commandes</span>
+            <span class="nav-section-count">5</span>
+          </button>
+          <div class="nav-section-items">
+            <button id="tab-commande-client" class="tab" type="button" role="tab" aria-selected="false" aria-controls="commande-client" data-tab="commande-client">
+              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-receipt"></use></svg></span>
+              <span>Commande client</span>
+            </button>
+            <button id="tab-commandes-jour" class="tab" type="button" role="tab" aria-selected="false" aria-controls="commandes-jour" data-tab="commandes-jour">
+              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-clipboard-list"></use></svg></span>
+              <span>Commandes du jour</span>
+            </button>
+            <button id="tab-commandes-planifiees" class="tab" type="button" role="tab" aria-selected="false" aria-controls="commandes-planifiees" data-tab="commandes-planifiees">
+              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-bell"></use></svg></span>
+              <span>Commandes planifiees</span>
+            </button>
+            <button id="tab-bons-commande" class="tab" type="button" role="tab" aria-selected="false" aria-controls="bons-commande" data-tab="bons-commande">
+              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-receipt"></use></svg></span>
+              <span>Bons de commande</span>
+            </button>
+            <button id="tab-commandes-livrees" class="tab" type="button" role="tab" aria-selected="false" aria-controls="commandes-livrees" data-tab="commandes-livrees">
+              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-clipboard-list"></use></svg></span>
+              <span>Commandes livrées</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="nav-section" data-nav-section data-nav-section-id="livraison">
+          <button class="nav-section-toggle" type="button" data-action="toggle-nav-section" data-nav-section-target="livraison" aria-expanded="false">
+            <span class="nav-section-label">Livraison</span>
+            <span class="nav-section-count">2</span>
+          </button>
+          <div class="nav-section-items">
+            <button id="tab-preparation" class="tab" type="button" role="tab" aria-selected="false" aria-controls="preparation" data-tab="preparation">
+              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-clipboard-list"></use></svg></span>
+              <span>Préparation</span>
+            </button>
+            <button id="tab-livreur" class="tab" type="button" role="tab" aria-selected="false" aria-controls="livreur" data-tab="livreur">
+              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-truck"></use></svg></span>
+              <span>Livraison</span>
+            </button>
+          </div>
+        </section>
+
+        <section id="nav-section-stock" class="nav-section" data-nav-section data-nav-section-id="stock">
+          <button class="nav-section-toggle" type="button" data-action="toggle-nav-section" data-nav-section-target="stock" aria-expanded="false">
+            <span class="nav-section-label">Stock</span>
+            <span class="nav-section-count">2</span>
+          </button>
+          <div class="nav-section-items">
+            <button id="tab-stock" class="tab" type="button" role="tab" aria-selected="false" aria-controls="stock" data-tab="stock">
+              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-box"></use></svg></span>
+              <span>Stock / Inventaire</span>
+            </button>
+            <button id="tab-recommande" class="tab" type="button" role="tab" aria-selected="false" aria-controls="recommande" data-tab="recommande">
+              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-star"></use></svg></span>
+              <span>À recommander</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="nav-section" data-nav-section data-nav-section-id="clients">
+          <button class="nav-section-toggle" type="button" data-action="toggle-nav-section" data-nav-section-target="clients" aria-expanded="false">
+            <span class="nav-section-label">Clients</span>
+            <span class="nav-section-count">2</span>
+          </button>
+          <div class="nav-section-items">
+            <button id="tab-crm" class="tab" type="button" role="tab" aria-selected="false" aria-controls="crm" data-tab="crm">
+              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-home"></use></svg></span>
+              <span>CRM</span>
+            </button>
+            <button id="tab-relances" class="tab" type="button" role="tab" aria-selected="false" aria-controls="relances" data-tab="relances">
+              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-bell"></use></svg></span>
+              <span>Rappels</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="nav-section" data-nav-section data-nav-section-id="analyse">
+          <button class="nav-section-toggle" type="button" data-action="toggle-nav-section" data-nav-section-target="analyse" aria-expanded="false">
+            <span class="nav-section-label">Analyse</span>
+            <span class="nav-section-count">2</span>
+          </button>
+          <div class="nav-section-items">
+            <button id="tab-statistiques" class="tab" type="button" role="tab" aria-selected="false" aria-controls="statistiques" data-tab="statistiques">
+              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-star"></use></svg></span>
+              <span>Statistiques</span>
+            </button>
+            <button id="tab-exports" class="tab" type="button" role="tab" aria-selected="false" aria-controls="exports" data-tab="exports">
+              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-receipt"></use></svg></span>
+              <span>Exports</span>
+            </button>
+          </div>
+        </section>
       </nav>
 
       <div class="sidebar-visual" aria-hidden="true">
@@ -205,6 +295,30 @@
           <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-receipt"></use></svg></span>
           <span class="more-sheet-label">Bons de commande</span>
         </button>
+        <button class="more-sheet-item" type="button" role="menuitem" data-tab="crm" data-action="more-menu-pick">
+          <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-home"></use></svg></span>
+          <span class="more-sheet-label">CRM</span>
+        </button>
+        <button class="more-sheet-item" type="button" role="menuitem" data-tab="commande-client" data-action="more-menu-pick">
+          <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-receipt"></use></svg></span>
+          <span class="more-sheet-label">Commande client</span>
+        </button>
+        <button class="more-sheet-item" type="button" role="menuitem" data-tab="commandes-jour" data-action="more-menu-pick">
+          <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-clipboard-list"></use></svg></span>
+          <span class="more-sheet-label">Commandes du jour</span>
+        </button>
+        <button class="more-sheet-item" type="button" role="menuitem" data-tab="commandes-planifiees" data-action="more-menu-pick">
+          <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-bell"></use></svg></span>
+          <span class="more-sheet-label">Commandes planifiees</span>
+        </button>
+        <button class="more-sheet-item" type="button" role="menuitem" data-tab="relances" data-action="more-menu-pick">
+          <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-bell"></use></svg></span>
+          <span class="more-sheet-label">Rappels</span>
+        </button>
+        <button class="more-sheet-item" type="button" role="menuitem" data-tab="statistiques" data-action="more-menu-pick">
+          <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-star"></use></svg></span>
+          <span class="more-sheet-label">Statistiques</span>
+        </button>
         <button class="more-sheet-item" type="button" role="menuitem" data-tab="recommande" data-action="more-menu-pick">
           <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-star"></use></svg></span>
           <span class="more-sheet-label">À recommander</span>
@@ -212,6 +326,10 @@
         <button class="more-sheet-item" type="button" role="menuitem" data-tab="commandes-livrees" data-action="more-menu-pick">
           <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-clipboard-list"></use></svg></span>
           <span class="more-sheet-label">Commandes livrées</span>
+        </button>
+        <button class="more-sheet-item" type="button" role="menuitem" data-tab="exports" data-action="more-menu-pick">
+          <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-receipt"></use></svg></span>
+          <span class="more-sheet-label">Exports</span>
         </button>
         <button class="more-sheet-item" type="button" role="menuitem" data-tab="parametres" data-action="more-menu-pick">
           <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-settings"></use></svg></span>
@@ -228,9 +346,17 @@
           <p id="pageSubtitle">Vue rapide du stock, des préparations et des livraisons.</p>
         </div>
 
+        <label class="topbar-search" for="globalNavigationSearch">
+          <svg class="icon" aria-hidden="true"><use href="#icon-search"></use></svg>
+          <input id="globalNavigationSearch" type="search" placeholder="Recherche rapide..." autocomplete="off" />
+        </label>
+
         <div class="topbar-actions">
           <span id="syncStatus" class="status-chip" aria-live="polite">Prêt</span>
-          <button id="refreshButton" class="button secondary" type="button" data-action="refresh">Actualiser</button>
+          <button id="refreshButton" class="button secondary" type="button" data-action="refresh">
+            <svg class="icon button-icon" aria-hidden="true"><use href="#icon-rotate-ccw"></use></svg>
+            <span>Actualiser</span>
+          </button>
         </div>
       </header>
 
@@ -346,6 +472,230 @@
             <h4>Import déplacé</h4>
             <p>L'import Excel se fait maintenant directement depuis le tableau de bord.</p>
           </div>
+        </div>
+      </section>
+
+      <section id="crm" class="page" role="tabpanel" aria-labelledby="tab-crm">
+        <div class="field-app-grid">
+          <div class="panel">
+            <div class="panel-heading">
+              <div>
+                <h3>CRM terrain</h3>
+                <p class="muted">Prospects, clients et historique commercial.</p>
+              </div>
+              <span id="crmSummary" class="status-chip">0 contact</span>
+            </div>
+
+            <div class="crm-toolbar">
+              <input id="crmSearch" type="search" placeholder="Nom, téléphone, ville, adresse" autocomplete="off" />
+              <select id="crmStatusFilter">
+                <option value="all">Tous</option>
+                <option value="prospect">Prospects</option>
+                <option value="client_actif">Clients actifs</option>
+                <option value="client_a_relancer">Clients à relancer</option>
+                <option value="client_inactif">Clients inactifs</option>
+                <option value="relance_today">Relances du jour</option>
+                <option value="relance_late">Relances en retard</option>
+              </select>
+            </div>
+
+            <div id="crmList" class="crm-list"></div>
+          </div>
+
+          <form id="crmForm" class="panel crm-form">
+            <div class="panel-heading">
+              <h3>Nouveau client</h3>
+              <span class="muted">Fiche rapide terrain</span>
+            </div>
+            <div class="form-grid two">
+              <label>Nom<input name="nom" required autocomplete="family-name" /></label>
+              <label>Prénom<input name="prenom" autocomplete="given-name" /></label>
+              <label>Téléphone<input name="telephone" autocomplete="tel" /></label>
+              <label>Email<input name="email" type="email" autocomplete="email" /></label>
+              <label class="span-2">Adresse<input name="adresse" autocomplete="street-address" /></label>
+              <label>Code postal<input name="codePostal" autocomplete="postal-code" /></label>
+              <label>Ville<input name="ville" autocomplete="address-level2" /></label>
+              <label>Statut
+                <select name="crmStatus">
+                  <option value="prospect">Prospect</option>
+                  <option value="client_actif">Client actif</option>
+                  <option value="client_a_relancer">Client à relancer</option>
+                  <option value="client_inactif">Client inactif</option>
+                </select>
+              </label>
+              <label>Prochaine relance<input name="nextReminderDate" type="date" /></label>
+              <label class="span-2">Besoins particuliers<input name="needs" /></label>
+              <label class="span-2">Produits préférés<input name="preferences" /></label>
+              <label class="span-2">Notes<textarea name="notes" rows="3"></textarea></label>
+            </div>
+            <button class="button primary" type="submit">Enregistrer</button>
+          </form>
+        </div>
+      </section>
+
+      <section id="commande-client" class="page" role="tabpanel" aria-labelledby="tab-commande-client">
+        <div class="customer-order-layout">
+          <form id="customerOrderForm" class="panel customer-client-panel">
+            <div class="panel-heading">
+              <div>
+                <h3>Nouvelle commande</h3>
+                <p class="muted">Prise de commande chez le client.</p>
+              </div>
+            </div>
+            <label>Client existant<select id="customerClientSelect" name="clientId"></select></label>
+            <div class="form-grid two">
+              <label>Type
+                <select id="customerOrderType" name="orderType">
+                  <option value="immediate">Commande immediate</option>
+                  <option value="planifiee">Commande planifiee</option>
+                </select>
+              </label>
+              <label>Date livraison<input id="customerDeliveryDate" name="deliveryDate" type="date" /></label>
+            </div>
+            <div class="form-grid two">
+              <label>Nom<input name="nom" required /></label>
+              <label>Prénom<input name="prenom" /></label>
+              <label>Téléphone<input name="telephone" /></label>
+              <label>Code postal<input name="codePostal" /></label>
+              <label class="span-2">Adresse<input name="adresse" /></label>
+              <label>Ville<input name="ville" /></label>
+              <label>Email<input name="email" type="email" /></label>
+              <label class="span-2">Notes livraison<textarea name="notes" rows="3"></textarea></label>
+            </div>
+            <button class="button ok" type="submit">Valider la commande</button>
+          </form>
+
+          <div class="panel customer-catalog-panel">
+            <div class="panel-heading">
+              <h3>Catalogue</h3>
+              <span id="customerCatalogCount" class="muted"></span>
+            </div>
+            <div class="crm-toolbar">
+              <input id="customerProductSearch" type="search" placeholder="Rechercher un produit" autocomplete="off" />
+              <select id="customerCategoryFilter"><option value="all">Toutes catégories</option></select>
+            </div>
+            <div id="customerCatalog" class="product-catalog"></div>
+          </div>
+
+          <aside class="panel customer-cart-panel">
+            <div class="panel-heading">
+              <h3>Panier</h3>
+              <span id="customerCartCount" class="status-chip">0 produit</span>
+            </div>
+            <div id="customerCart" class="customer-cart"></div>
+            <div class="cart-total">
+              <span>Total</span>
+              <strong id="customerCartTotal">0,00 €</strong>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="commandes-jour" class="page" role="tabpanel" aria-labelledby="tab-commandes-jour">
+        <div class="panel">
+          <div class="panel-heading">
+            <div>
+              <h3>Commandes du jour</h3>
+              <p class="muted">Regroupe les commandes terrain avant préparation.</p>
+            </div>
+            <label class="compact-date">Date<input id="todayOrdersDate" type="date" /></label>
+          </div>
+          <div class="delivery-actions">
+            <button class="button secondary" type="button" data-action="select-all-today-orders">Tout sélectionner</button>
+            <button class="button secondary" type="button" data-action="clear-today-orders">Tout désélectionner</button>
+            <button class="button primary" type="button" data-action="send-today-orders-preparation">Envoyer en préparation</button>
+          </div>
+          <div id="todayOrdersList" class="list"></div>
+        </div>
+      </section>
+
+      <section id="commandes-planifiees" class="page" role="tabpanel" aria-labelledby="tab-commandes-planifiees">
+        <div class="panel">
+          <div class="panel-heading">
+            <div>
+              <h3>Commandes planifiees</h3>
+              <p class="muted">Rappels J-7 et confirmations avant preparation.</p>
+            </div>
+            <span id="plannedOrdersSummary" class="status-chip">0 planifiee</span>
+          </div>
+          <div id="plannedOrdersList" class="list"></div>
+        </div>
+      </section>
+
+      <section id="relances" class="page" role="tabpanel" aria-labelledby="tab-relances">
+        <div class="field-app-grid">
+          <div class="panel">
+            <div class="panel-heading">
+              <h3>Rappels</h3>
+              <span id="relanceSummary" class="status-chip">0 à faire</span>
+            </div>
+            <div class="recommend-toolbar">
+              <button class="button secondary compact active-filter" type="button" data-relance-filter="today">Aujourd'hui</button>
+              <button class="button secondary compact" type="button" data-relance-filter="late">En retard</button>
+              <button class="button secondary compact" type="button" data-relance-filter="week">Cette semaine</button>
+              <button class="button secondary compact" type="button" data-relance-filter="upcoming">À venir</button>
+              <button class="button secondary compact" type="button" data-relance-filter="all">Toutes</button>
+            </div>
+            <div id="relanceList" class="list"></div>
+          </div>
+
+          <form id="relanceForm" class="panel crm-form">
+            <div class="panel-heading">
+              <h3>Nouveau rappel</h3>
+              <span class="muted">Appel ou visite à prévoir</span>
+            </div>
+            <label>Client<select name="clientId" id="relanceClientSelect" required></select></label>
+            <label>Date prévue<input name="datePrevue" type="date" required /></label>
+            <label>Motif<input name="motif" placeholder="Reprendre contact, nouvelle commande..." /></label>
+            <label>Commentaire<textarea name="commentaire" rows="4"></textarea></label>
+            <button class="button primary" type="submit">Créer la relance</button>
+          </form>
+        </div>
+      </section>
+
+      <section id="statistiques" class="page" role="tabpanel" aria-labelledby="tab-statistiques">
+        <div class="stats-page">
+          <div class="stats-hero panel">
+            <div>
+              <p class="eyebrow">SEREO commercial</p>
+              <h3>Statistiques</h3>
+              <p class="muted">Ventes, clients et produits les plus actifs.</p>
+            </div>
+            <div id="statsEvolution" class="stats-evolution"></div>
+          </div>
+          <div id="statsKpis" class="stats-kpis"></div>
+          <div class="stats-grid">
+            <section class="panel">
+              <div class="panel-heading"><h3>Ventes par jour</h3><span class="muted">14 derniers jours</span></div>
+              <div id="salesChart" class="bar-chart"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-heading"><h3>Produits les plus vendus</h3><span class="muted">Mois en cours</span></div>
+              <div id="topProductsChart" class="rank-list"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-heading"><h3>Clients les plus actifs</h3><span class="muted">Mois en cours</span></div>
+              <div id="topClientsChart" class="rank-list"></div>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <section id="exports" class="page" role="tabpanel" aria-labelledby="tab-exports">
+        <div class="panel">
+          <div class="panel-heading">
+            <div>
+              <h3>Exports Excel</h3>
+              <p class="muted">Commandes annexes, planifiees ou toutes commandes.</p>
+            </div>
+            <span id="exportsSummary" class="status-chip">XLSX</span>
+          </div>
+          <div class="quick-actions export-actions">
+            <button class="button primary" type="button" data-action="export-annex-orders">Commandes annexes</button>
+            <button class="button secondary" type="button" data-action="export-planned-orders">Commandes planifiees</button>
+            <button class="button secondary" type="button" data-action="export-all-orders">Toutes les commandes</button>
+          </div>
+          <div id="exportsList" class="list compact-list"></div>
         </div>
       </section>
 
@@ -484,6 +834,7 @@
               <button id="markAbsentButton" class="button danger" type="button" data-action="mark-absent">Absent</button>
               <button id="markProblemButton" class="button warning" type="button" data-action="mark-problem">Problème</button>
               <button id="markRescheduleButton" class="button secondary" type="button" data-action="mark-reschedule">À reprogrammer</button>
+              <button id="replanCurrentButton" class="button secondary" type="button" data-action="replan-current-stop">Planifier suite</button>
               <button id="nextClientButton" class="button secondary" type="button" data-action="next-client">Suivant</button>
             </div>
           </div>
@@ -664,11 +1015,11 @@
         <div class="settings-grid">
           <div class="panel">
             <div class="panel-heading">
-              <h3>Identité visuelle</h3>
-              <span class="muted">Thème local</span>
+              <h3>Personnalisation de l'interface</h3>
+              <span class="muted">Thème de l'application</span>
             </div>
             <div class="brand-preview">
-              <img id="brandPreviewImage" src="/brand/sereo-logo.svg" alt="Logo Séréo" data-brand-preview />
+              <img id="brandPreviewImage" src="/brand/sereo-logo.svg?v=20260701" alt="Logo SEREO" data-brand-preview />
 
               <div class="settings-block">
                 <div>
@@ -696,11 +1047,11 @@
 
               <div class="settings-block">
                 <div>
-                  <h4>Palette pastel</h4>
-                  <p class="muted">Choisis une ambiance douce pour toute l'application.</p>
+                  <h4>Thème de l'application</h4>
+                  <p class="muted">Choisis un style visuel. Le thème s'applique immédiatement et reste sauvegardé.</p>
                 </div>
-                <div id="themePaletteList" class="theme-palette-grid" aria-label="Palettes pastel"></div>
-                <button class="button secondary compact" type="button" data-action="reset-theme">Revenir aux couleurs séréo</button>
+                <div id="themePaletteList" class="theme-palette-grid" aria-label="Thèmes de l'application"></div>
+                <button class="button secondary compact" type="button" data-action="reset-theme">Revenir au thème Vert</button>
               </div>
 
               <div class="settings-block">
@@ -724,6 +1075,23 @@
               <span class="muted">Déduction automatique</span>
             </div>
             <div id="settingsSectors" class="settings-list"></div>
+            <form id="deliverySectorForm" class="sector-form">
+              <div class="form-grid two">
+                <label>Secteur<input name="secteur" required /></label>
+                <label>Ville principale<input name="villePrincipale" required /></label>
+                <label>Jour du mois<input name="jourMois" type="number" min="1" max="31" value="1" required /></label>
+                <label>Frequence
+                  <select name="frequence">
+                    <option value="mensuelle">Mensuelle</option>
+                    <option value="bimensuelle">Bimensuelle</option>
+                    <option value="hebdomadaire">Hebdomadaire</option>
+                  </select>
+                </label>
+                <label>Depart<input name="pointDepart" value="Champagnole" /></label>
+                <label>Notes<input name="notes" /></label>
+              </div>
+              <button class="button primary" type="submit">Ajouter le secteur</button>
+            </form>
           </div>
 
           <div class="panel">
@@ -867,6 +1235,6 @@
   </div>
 
   <script src="/vendor/leaflet/leaflet.js"></script>
-  <script src="/js/app.js?v=20260502b"></script>
+  <script src="/js/app.js?v=20260702-themes"></script>
 </body>
 </html>

@@ -5,7 +5,13 @@ let stock = [];
 let stockMovements = [];
 let ventes = [];
 let historique = [];
+let crmClients = [];
+let crmRelances = [];
+let todayCustomerOrders = [];
+let plannedOrders = [];
+let statistics = null;
 let sectors = [];
+let deliverySectors = [];
 let deliveryRoutes = [];
 let dashboard = null;
 let route = [];
@@ -25,6 +31,17 @@ let stockFilter = {
   status: "all",
   category: "all"
 };
+let crmFilter = {
+  query: "",
+  status: "all"
+};
+let relanceFilter = "today";
+let customerProductFilter = {
+  query: "",
+  category: "all"
+};
+let customerCart = new Map();
+let todayOrdersSelection = new Set();
 let lastImportSummary = null;
 let recommendFilter = "urgent";
 let activeThemeId = "sereo";
@@ -35,9 +52,10 @@ let activeBrandImage = "/brand/sereo-logo.svg";
 // L'utilisateur peut basculer via Parametres > Mode d'affichage.
 let activeColorScheme = "light";
 
-const mainTabs = new Set(["journee", "stock", "preparation", "bons-commande", "livreur", "recommande", "commandes-livrees", "parametres"]);
+const mainTabs = new Set(["journee", "stock", "crm", "commande-client", "commandes-jour", "commandes-planifiees", "relances", "statistiques", "exports", "preparation", "bons-commande", "livreur", "recommande", "commandes-livrees", "parametres"]);
 const DEFAULT_BRAND_IMAGE = "/brand/sereo-logo.svg";
 const DEFAULT_BRAND_IMAGE_DARK = "/brand/sereo-logo-dark.svg";
+const DEFAULT_BRAND_CACHE_VERSION = "20260701";
 const MAX_BRAND_IMAGE_SIZE = 2 * 1024 * 1024;
 
 if ("scrollRestoration" in history) {
@@ -51,26 +69,26 @@ if ("scrollRestoration" in history) {
 const pastelThemes = {
   sereo: {
     id: "sereo",
-    name: "Séréo vert & orange",
-    hint: "Vert d'eau, orange pastel et teal séréo.",
-    swatches: ["#cfe9e1", "#ffc4a3", "#0e6b63"],
+    name: "Séréo premium",
+    hint: "Corail, vert canard, rose doux et vert d'eau.",
+    swatches: ["#f18c79", "#3b7374", "#e9c3bd", "#a8c9c8", "#eeeeee"],
     vars: {
-      "--color-brand-teal": "#0e6b63",
-      "--color-brand-teal-dark": "#0f3d3d",
-      "--color-pastel-green": "#cfe9e1",
-      "--color-pastel-green-light": "#e8f4ef",
-      "--color-pastel-orange": "#ffc4a3",
-      "--color-pastel-orange-light": "#fff0e8",
-      "--color-pastel-orange-strong": "#f47a5a"
+      "--color-brand-teal": "#3b7374",
+      "--color-brand-teal-dark": "#285a5b",
+      "--color-pastel-green": "#a8c9c8",
+      "--color-pastel-green-light": "#edf6f5",
+      "--color-pastel-orange": "#f18c79",
+      "--color-pastel-orange-light": "#fde2dc",
+      "--color-pastel-orange-strong": "#b95649"
     },
     darkVars: {
-      "--color-brand-teal": "#7fc9be",
-      "--color-brand-teal-dark": "#9adcd1",
-      "--color-pastel-green": "#1f3833",
-      "--color-pastel-green-light": "#142421",
-      "--color-pastel-orange": "#5d3a2a",
-      "--color-pastel-orange-light": "#3a261b",
-      "--color-pastel-orange-strong": "#f08864"
+      "--color-brand-teal": "#93cbc9",
+      "--color-brand-teal-dark": "#b9e1df",
+      "--color-pastel-green": "#243f42",
+      "--color-pastel-green-light": "#172b2d",
+      "--color-pastel-orange": "#7b453b",
+      "--color-pastel-orange-light": "#3b2724",
+      "--color-pastel-orange-strong": "#f5a08f"
     }
   },
   menthe: {
@@ -195,6 +213,312 @@ const pastelThemes = {
   }
 };
 
+const applicationThemes = {
+  sereo: {
+    id: "sereo",
+    name: "Vert",
+    hint: "Doux, professionnel, vert canard et vert d'eau.",
+    swatches: ["#285a5b", "#3b7374", "#a8c9c8", "#edf6f5", "#ffffff"],
+    metaColor: "#285a5b",
+    preview: { bg: "#eff3f1", sidebar: "#285a5b", card: "#ffffff", accent: "#a8c9c8" },
+    vars: {
+      "--color-brand-teal": "#3b7374",
+      "--color-brand-teal-dark": "#285a5b",
+      "--color-pastel-green": "#a8c9c8",
+      "--color-pastel-green-light": "#edf6f5",
+      "--color-pastel-orange": "#f18c79",
+      "--color-pastel-orange-light": "#fde2dc",
+      "--color-pastel-orange-strong": "#b95649",
+      "--neo-bg": "#eff3f1",
+      "--neo-page": "#f8faf8",
+      "--neo-sidebar": "#285a5b",
+      "--neo-sidebar-strong": "#1f494a",
+      "--neo-teal": "#3b7374",
+      "--neo-teal-dark": "#285a5b",
+      "--neo-aqua": "#a8c9c8",
+      "--neo-aqua-soft": "#edf6f5",
+      "--neo-coral": "#f18c79",
+      "--neo-coral-dark": "#b95649",
+      "--neo-coral-soft": "#fde2dc",
+      "--neo-blush": "#e9c3bd",
+      "--neo-blush-soft": "#fbefed",
+      "--neo-card": "#ffffff",
+      "--neo-line": "#dfe7e3",
+      "--neo-text": "#183233",
+      "--neo-muted": "#758483"
+    },
+    darkVars: {
+      "--color-brand-teal": "#93cbc9",
+      "--color-brand-teal-dark": "#b9e1df",
+      "--color-pastel-green": "#243f42",
+      "--color-pastel-green-light": "#172b2d",
+      "--color-pastel-orange": "#7b453b",
+      "--color-pastel-orange-light": "#3b2724",
+      "--color-pastel-orange-strong": "#f5a08f",
+      "--neo-bg": "#0d1518",
+      "--neo-page": "#111b1e",
+      "--neo-sidebar": "#101c1f",
+      "--neo-sidebar-strong": "#0a1113",
+      "--neo-teal": "#93cbc9",
+      "--neo-teal-dark": "#b9e1df",
+      "--neo-aqua": "#243f42",
+      "--neo-aqua-soft": "#172b2d",
+      "--neo-coral": "#f5a08f",
+      "--neo-coral-dark": "#ffb7aa",
+      "--neo-coral-soft": "#3b2724",
+      "--neo-blush": "#7b453b",
+      "--neo-blush-soft": "#2a1d1b",
+      "--neo-card": "#182226",
+      "--neo-line": "#2a3d3f",
+      "--neo-text": "#e8eef0",
+      "--neo-muted": "#a8b8bc"
+    }
+  },
+  orange: {
+    id: "orange",
+    name: "Orange",
+    hint: "Chaleureux, accueillant et dynamique.",
+    swatches: ["#d97732", "#f6a15a", "#fff1df", "#f7eadc", "#ffffff"],
+    metaColor: "#9a421d",
+    preview: { bg: "#f6efe7", sidebar: "#c96332", card: "#fffaf4", accent: "#f6a15a" },
+    vars: {
+      "--color-brand-teal": "#d97732",
+      "--color-brand-teal-dark": "#9a421d",
+      "--color-pastel-green": "#f7dcc2",
+      "--color-pastel-green-light": "#fff7ef",
+      "--color-pastel-orange": "#f6a15a",
+      "--color-pastel-orange-light": "#fff1df",
+      "--color-pastel-orange-strong": "#c05621",
+      "--neo-bg": "#f6efe7",
+      "--neo-page": "#fffaf4",
+      "--neo-sidebar": "#c96332",
+      "--neo-sidebar-strong": "#8d421c",
+      "--neo-teal": "#d97732",
+      "--neo-teal-dark": "#9a421d",
+      "--neo-aqua": "#f6c08a",
+      "--neo-aqua-soft": "#fff4e8",
+      "--neo-coral": "#f18c4e",
+      "--neo-coral-dark": "#b64e1f",
+      "--neo-coral-soft": "#ffe4cf",
+      "--neo-blush": "#f2c9a7",
+      "--neo-blush-soft": "#fff0e3",
+      "--neo-card": "#ffffff",
+      "--neo-line": "#ead8c5",
+      "--neo-text": "#352018",
+      "--neo-muted": "#8a6d5b"
+    },
+    darkVars: {
+      "--color-brand-teal": "#f4a15e",
+      "--color-brand-teal-dark": "#ffd3ad",
+      "--color-pastel-green": "#3a2418",
+      "--color-pastel-green-light": "#22150e",
+      "--color-pastel-orange": "#6d351b",
+      "--color-pastel-orange-light": "#351d12",
+      "--color-pastel-orange-strong": "#ffb07c",
+      "--neo-bg": "#130d0a",
+      "--neo-page": "#1b120d",
+      "--neo-sidebar": "#1e130d",
+      "--neo-sidebar-strong": "#0d0805",
+      "--neo-teal": "#f4a15e",
+      "--neo-teal-dark": "#ffd3ad",
+      "--neo-aqua": "#3a2418",
+      "--neo-aqua-soft": "#22150e",
+      "--neo-coral": "#ffb07c",
+      "--neo-coral-dark": "#ffd3ad",
+      "--neo-coral-soft": "#351d12",
+      "--neo-blush": "#6d351b",
+      "--neo-blush-soft": "#28160d",
+      "--neo-card": "#211712",
+      "--neo-line": "#493224",
+      "--neo-text": "#fff3e8",
+      "--neo-muted": "#d0b19a"
+    }
+  },
+  orange_vert: {
+    id: "orange_vert",
+    name: "Orange et vert",
+    hint: "Vert pour l'action, orange pour le rythme.",
+    swatches: ["#2f6f63", "#f18c4e", "#b7d7cd", "#fff2e8", "#ffffff"],
+    metaColor: "#2f6f63",
+    preview: { bg: "#f3f5ef", sidebar: "#2f6f63", card: "#ffffff", accent: "#f18c4e" },
+    vars: {
+      "--color-brand-teal": "#2f6f63",
+      "--color-brand-teal-dark": "#1f4d45",
+      "--color-pastel-green": "#b7d7cd",
+      "--color-pastel-green-light": "#edf7f3",
+      "--color-pastel-orange": "#f18c4e",
+      "--color-pastel-orange-light": "#fff2e8",
+      "--color-pastel-orange-strong": "#c95d22",
+      "--neo-bg": "#f3f5ef",
+      "--neo-page": "#fbfcf8",
+      "--neo-sidebar": "#2f6f63",
+      "--neo-sidebar-strong": "#1f4d45",
+      "--neo-teal": "#2f6f63",
+      "--neo-teal-dark": "#1f4d45",
+      "--neo-aqua": "#b7d7cd",
+      "--neo-aqua-soft": "#edf7f3",
+      "--neo-coral": "#f18c4e",
+      "--neo-coral-dark": "#c95d22",
+      "--neo-coral-soft": "#fff2e8",
+      "--neo-blush": "#f0c7aa",
+      "--neo-blush-soft": "#fff6ef",
+      "--neo-card": "#ffffff",
+      "--neo-line": "#dce7df",
+      "--neo-text": "#18302c",
+      "--neo-muted": "#6c7f7a"
+    },
+    darkVars: {
+      "--color-brand-teal": "#8bd0c1",
+      "--color-brand-teal-dark": "#b4eadf",
+      "--color-pastel-green": "#1d3833",
+      "--color-pastel-green-light": "#12231f",
+      "--color-pastel-orange": "#744025",
+      "--color-pastel-orange-light": "#321d12",
+      "--color-pastel-orange-strong": "#f4a66e",
+      "--neo-bg": "#0d1514",
+      "--neo-page": "#111c1a",
+      "--neo-sidebar": "#10211f",
+      "--neo-sidebar-strong": "#08110f",
+      "--neo-teal": "#8bd0c1",
+      "--neo-teal-dark": "#b4eadf",
+      "--neo-aqua": "#1d3833",
+      "--neo-aqua-soft": "#12231f",
+      "--neo-coral": "#f4a66e",
+      "--neo-coral-dark": "#ffc49e",
+      "--neo-coral-soft": "#321d12",
+      "--neo-blush": "#744025",
+      "--neo-blush-soft": "#24160f",
+      "--neo-card": "#182320",
+      "--neo-line": "#2d4540",
+      "--neo-text": "#edf6f3",
+      "--neo-muted": "#a8bbb5"
+    }
+  },
+  noir: {
+    id: "noir",
+    name: "Noir",
+    hint: "Sombre, premium, lisible et contrasté.",
+    swatches: ["#080a0b", "#171b1f", "#74d0c0", "#f18c79", "#f4f7f8"],
+    metaColor: "#080a0b",
+    preview: { bg: "#080a0b", sidebar: "#050607", card: "#171b1f", accent: "#74d0c0" },
+    vars: {
+      "--color-brand-teal": "#74d0c0",
+      "--color-brand-teal-dark": "#d7fff7",
+      "--color-pastel-green": "#21302f",
+      "--color-pastel-green-light": "#111719",
+      "--color-pastel-orange": "#f18c79",
+      "--color-pastel-orange-light": "#2d1b18",
+      "--color-pastel-orange-strong": "#ffb09f",
+      "--neo-bg": "#080a0b",
+      "--neo-page": "#0d1012",
+      "--neo-sidebar": "#050607",
+      "--neo-sidebar-strong": "#000000",
+      "--neo-teal": "#74d0c0",
+      "--neo-teal-dark": "#d7fff7",
+      "--neo-aqua": "#21302f",
+      "--neo-aqua-soft": "#111719",
+      "--neo-coral": "#f18c79",
+      "--neo-coral-dark": "#ffb09f",
+      "--neo-coral-soft": "#2d1b18",
+      "--neo-blush": "#4a302b",
+      "--neo-blush-soft": "#19100f",
+      "--neo-card": "#171b1f",
+      "--neo-line": "#2c3338",
+      "--neo-text": "#f4f7f8",
+      "--neo-muted": "#a8b1b5"
+    },
+    darkVars: {
+      "--color-brand-teal": "#74d0c0",
+      "--color-brand-teal-dark": "#d7fff7",
+      "--color-pastel-green": "#21302f",
+      "--color-pastel-green-light": "#111719",
+      "--color-pastel-orange": "#f18c79",
+      "--color-pastel-orange-light": "#2d1b18",
+      "--color-pastel-orange-strong": "#ffb09f",
+      "--neo-bg": "#080a0b",
+      "--neo-page": "#0d1012",
+      "--neo-sidebar": "#050607",
+      "--neo-sidebar-strong": "#000000",
+      "--neo-teal": "#74d0c0",
+      "--neo-teal-dark": "#d7fff7",
+      "--neo-aqua": "#21302f",
+      "--neo-aqua-soft": "#111719",
+      "--neo-coral": "#f18c79",
+      "--neo-coral-dark": "#ffb09f",
+      "--neo-coral-soft": "#2d1b18",
+      "--neo-blush": "#4a302b",
+      "--neo-blush-soft": "#19100f",
+      "--neo-card": "#171b1f",
+      "--neo-line": "#2c3338",
+      "--neo-text": "#f4f7f8",
+      "--neo-muted": "#a8b1b5"
+    }
+  },
+  blanc: {
+    id: "blanc",
+    name: "Blanc",
+    hint: "Très clair, minimaliste et épuré.",
+    swatches: ["#ffffff", "#f5f6f7", "#111827", "#d1d5db", "#6b7280"],
+    metaColor: "#ffffff",
+    preview: { bg: "#ffffff", sidebar: "#ffffff", card: "#f8fafc", accent: "#111827" },
+    vars: {
+      "--color-brand-teal": "#111827",
+      "--color-brand-teal-dark": "#020617",
+      "--color-pastel-green": "#f3f4f6",
+      "--color-pastel-green-light": "#f8fafc",
+      "--color-pastel-orange": "#d1d5db",
+      "--color-pastel-orange-light": "#f9fafb",
+      "--color-pastel-orange-strong": "#374151",
+      "--neo-bg": "#f6f7f8",
+      "--neo-page": "#ffffff",
+      "--neo-sidebar": "#ffffff",
+      "--neo-sidebar-strong": "#f3f4f6",
+      "--neo-teal": "#111827",
+      "--neo-teal-dark": "#020617",
+      "--neo-aqua": "#e5e7eb",
+      "--neo-aqua-soft": "#f8fafc",
+      "--neo-coral": "#6b7280",
+      "--neo-coral-dark": "#374151",
+      "--neo-coral-soft": "#f3f4f6",
+      "--neo-blush": "#e5e7eb",
+      "--neo-blush-soft": "#f9fafb",
+      "--neo-card": "#ffffff",
+      "--neo-line": "#e5e7eb",
+      "--neo-text": "#111827",
+      "--neo-muted": "#6b7280"
+    },
+    darkVars: {
+      "--color-brand-teal": "#111827",
+      "--color-brand-teal-dark": "#020617",
+      "--color-pastel-green": "#f3f4f6",
+      "--color-pastel-green-light": "#f8fafc",
+      "--color-pastel-orange": "#d1d5db",
+      "--color-pastel-orange-light": "#f9fafb",
+      "--color-pastel-orange-strong": "#374151",
+      "--neo-bg": "#f6f7f8",
+      "--neo-page": "#ffffff",
+      "--neo-sidebar": "#ffffff",
+      "--neo-sidebar-strong": "#f3f4f6",
+      "--neo-teal": "#111827",
+      "--neo-teal-dark": "#020617",
+      "--neo-aqua": "#e5e7eb",
+      "--neo-aqua-soft": "#f8fafc",
+      "--neo-coral": "#6b7280",
+      "--neo-coral-dark": "#374151",
+      "--neo-coral-soft": "#f3f4f6",
+      "--neo-blush": "#e5e7eb",
+      "--neo-blush-soft": "#f9fafb",
+      "--neo-card": "#ffffff",
+      "--neo-line": "#e5e7eb",
+      "--neo-text": "#111827",
+      "--neo-muted": "#6b7280"
+    }
+  }
+};
+
+Object.keys(pastelThemes).forEach(themeId => delete pastelThemes[themeId]);
+Object.assign(pastelThemes, applicationThemes);
+
 const titles = {
   journee: {
     title: "Tableau de bord",
@@ -208,6 +532,30 @@ const titles = {
     title: "Stock / Inventaire",
     subtitle: "Ajuste les quantités, contrôle les écarts et repère les produits à surveiller."
   },
+  crm: {
+    title: "CRM",
+    subtitle: "Prospects, clients, relances et historique commercial."
+  },
+  "commande-client": {
+    title: "Commande client",
+    subtitle: "Prends une commande simple et visuelle directement chez le client."
+  },
+  "commandes-jour": {
+    title: "Commandes du jour",
+    subtitle: "Regroupe les commandes terrain et envoie-les en préparation."
+  },
+  "commandes-planifiees": {
+    title: "Commandes planifiées",
+    subtitle: "Rappels, confirmations et commandes futures."
+  },
+  relances: {
+    title: "Rappels",
+    subtitle: "Appels, visites et confirmations liées aux commandes."
+  },
+  statistiques: {
+    title: "Statistiques",
+    subtitle: "Ventes, progression, paniers moyens et meilleurs clients."
+  },
   preparation: {
     title: "Préparation",
     subtitle: "Contrôle le stock, prépare les commandes et les envoie en livraison."
@@ -219,6 +567,10 @@ const titles = {
   "bons-commande": {
     title: "Bons de commande",
     subtitle: "Tous les bons importés, triables et filtrables par statut, secteur ou date."
+  },
+  exports: {
+    title: "Exports",
+    subtitle: "Télécharge les commandes au format Excel."
   },
   recommande: {
     title: "À recommander",
@@ -314,10 +666,117 @@ function showStorageRecoveryBanner(recovery) {
 
 window.addEventListener("load", () => resetViewportScroll(false), { once: true });
 
+function setNavigationSearchValue(value, sourceInput = null) {
+  document.querySelectorAll("#menuSearch, #globalNavigationSearch").forEach(input => {
+    if (input !== sourceInput) input.value = value;
+  });
+}
+
+function setNavigationSectionOpen(section, isOpen) {
+  if (!section) return;
+  section.classList.toggle("open", Boolean(isOpen));
+  section.querySelector(".nav-section-toggle")?.setAttribute("aria-expanded", isOpen ? "true" : "false");
+}
+
+function getNavigationSectionForTab(tabName) {
+  return Array.from(document.querySelectorAll(".sidebar .nav-section")).find(section => {
+    return Boolean(section.querySelector(`.tab[data-tab="${tabName}"]`));
+  });
+}
+
+function syncNavigationSections(activeTabName = getInitialTab()) {
+  const activeSection = getNavigationSectionForTab(activeTabName);
+  document.querySelectorAll(".sidebar .nav-section").forEach(section => {
+    const isActiveSection = section === activeSection;
+    section.classList.toggle("has-active-tab", isActiveSection);
+    setNavigationSectionOpen(section, isActiveSection);
+  });
+}
+
+function toggleNavSection(sectionId, forceOpen = null) {
+  const section = Array.from(document.querySelectorAll(".sidebar .nav-section")).find(item => {
+    return item.dataset.navSectionId === sectionId;
+  });
+  if (!section) return;
+  const shouldOpen = forceOpen === null ? !section.classList.contains("open") : Boolean(forceOpen);
+  if (shouldOpen) {
+    document.querySelectorAll(".sidebar .nav-section").forEach(item => {
+      if (item !== section) setNavigationSectionOpen(item, false);
+    });
+  }
+  setNavigationSectionOpen(section, shouldOpen);
+}
+
+function filterNavigation(value) {
+  const query = normalizeTextKey(value);
+  const isSearching = Boolean(query);
+
+  document.querySelectorAll(".sidebar .nav-section").forEach(section => {
+    const categoryLabel = normalizeTextKey(section.querySelector(".nav-section-label")?.textContent || "");
+    const categoryMatches = isSearching && categoryLabel.includes(query);
+    let hasVisibleTab = false;
+
+    section.querySelectorAll(".tab").forEach(tab => {
+      const label = normalizeTextKey(tab.textContent || "");
+      const isMatch = !isSearching || categoryMatches || label.includes(query);
+      tab.classList.toggle("is-hidden-by-search", isSearching && !isMatch);
+      if (isMatch) hasVisibleTab = true;
+    });
+
+    section.classList.toggle("is-filtering", isSearching);
+    section.classList.toggle("is-hidden-by-search", isSearching && !hasVisibleTab);
+    if (isSearching && hasVisibleTab) setNavigationSectionOpen(section, true);
+  });
+
+  if (!isSearching) syncNavigationSections(getInitialTab());
+}
+
+function navigateToFirstSearchMatch(value) {
+  const query = normalizeTextKey(value);
+  if (!query) return;
+
+  filterNavigation(value);
+  const sidebarTabs = Array.from(document.querySelectorAll(".sidebar .tab"));
+  const directMatch = sidebarTabs.find(tab => {
+    return normalizeTextKey(tab.textContent || "").includes(query);
+  });
+  const match = directMatch || sidebarTabs.find(tab => !tab.classList.contains("is-hidden-by-search"));
+
+  if (!match?.dataset.tab) return;
+  showTab(match.dataset.tab);
+  setNavigationSearchValue("");
+  filterNavigation("");
+}
+
+function bindNavigationSearch() {
+  const inputs = Array.from(document.querySelectorAll("#menuSearch, #globalNavigationSearch"));
+  inputs.forEach(input => {
+    input.addEventListener("input", event => {
+      const value = event.target.value;
+      setNavigationSearchValue(value, event.target);
+      filterNavigation(value);
+    });
+
+    input.addEventListener("keydown", event => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        navigateToFirstSearchMatch(event.target.value);
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.target.value = "";
+        setNavigationSearchValue("");
+        filterNavigation("");
+      }
+    });
+  });
+}
+
 function bindUi() {
   document.querySelectorAll("[data-tab]").forEach(button => {
     button.addEventListener("click", () => showTab(button.dataset.tab));
   });
+  bindNavigationSearch();
 
   document.getElementById("ventesForm")?.addEventListener("submit", event => {
     event.preventDefault();
@@ -350,6 +809,56 @@ function bindUi() {
     renderStock();
   });
 
+  document.getElementById("crmSearch")?.addEventListener("input", event => {
+    crmFilter.query = event.target.value;
+    renderCrm();
+  });
+
+  document.getElementById("crmStatusFilter")?.addEventListener("change", event => {
+    crmFilter.status = event.target.value;
+    renderCrm();
+  });
+
+  document.getElementById("crmForm")?.addEventListener("submit", event => {
+    event.preventDefault();
+    runAction(event.submitter, "Enregistrement...", () => saveCrmClient(event.currentTarget));
+  });
+
+  document.getElementById("relanceForm")?.addEventListener("submit", event => {
+    event.preventDefault();
+    runAction(event.submitter, "Création...", () => saveRelance(event.currentTarget));
+  });
+
+  document.getElementById("deliverySectorForm")?.addEventListener("submit", event => {
+    event.preventDefault();
+    runAction(event.submitter, "Enregistrement...", () => saveDeliverySector(event.currentTarget));
+  });
+
+  document.getElementById("customerOrderForm")?.addEventListener("submit", event => {
+    event.preventDefault();
+    runAction(event.submitter, "Validation...", () => submitCustomerOrder(event.currentTarget));
+  });
+
+  document.getElementById("customerClientSelect")?.addEventListener("change", event => {
+    fillCustomerFormFromClient(event.target.value);
+  });
+
+  document.getElementById("customerProductSearch")?.addEventListener("input", event => {
+    customerProductFilter.query = event.target.value;
+    renderCustomerCatalog();
+  });
+
+  document.getElementById("customerCategoryFilter")?.addEventListener("change", event => {
+    customerProductFilter.category = event.target.value;
+    renderCustomerCatalog();
+  });
+
+  document.getElementById("todayOrdersDate")?.addEventListener("change", async event => {
+    todayOrdersSelection.clear();
+    await loadTodayOrders(event.target.value);
+    renderTodayOrders();
+  });
+
   document.getElementById("deliveryDate")?.addEventListener("change", event => {
     deliveryFilter.date = event.target.value;
     applyDeliveryFilter();
@@ -360,6 +869,13 @@ function bindUi() {
   });
 
   document.addEventListener("click", event => {
+    const relanceButton = event.target.closest("[data-relance-filter]");
+    if (relanceButton) {
+      relanceFilter = relanceButton.dataset.relanceFilter || "today";
+      renderRelances();
+      return;
+    }
+
     const filterButton = event.target.closest("[data-recommend-filter]");
     if (!filterButton) return;
 
@@ -374,11 +890,35 @@ function bindUi() {
       return;
     }
 
+    const customerButton = event.target.closest("[data-customer-product]");
+    if (customerButton) {
+      const productId = customerButton.dataset.customerProduct;
+      const delta = Number(customerButton.dataset.customerDelta || 1);
+      changeCustomerCart(productId, delta);
+      return;
+    }
+
+    const crmStatusButton = event.target.closest("[data-crm-status-client]");
+    if (crmStatusButton) {
+      runAction(crmStatusButton, "...", () => updateCrmClientStatus(crmStatusButton.dataset.crmStatusClient, crmStatusButton.dataset.crmStatus));
+      return;
+    }
+
+    const relanceStatusButton = event.target.closest("[data-relance-status]");
+    if (relanceStatusButton) {
+      runAction(relanceStatusButton, "...", () => updateRelanceStatus(relanceStatusButton.dataset.relanceId, relanceStatusButton.dataset.relanceStatus));
+      return;
+    }
+
     const actionButton = event.target.closest("[data-action]");
     if (!actionButton) return;
 
     const action = actionButton.dataset.action;
 
+    if (action === "toggle-nav-section") {
+      toggleNavSection(actionButton.dataset.navSectionTarget);
+      return;
+    }
     if (action === "refresh") runAction(actionButton, "Actualisation...", loadData);
     if (action === "go-tab") showTab(actionButton.dataset.targetTab || "journee");
     if (action === "open-more-menu") openMoreMenu();
@@ -411,10 +951,26 @@ function bindUi() {
     if (action === "mark-absent") runAction(actionButton, "Envoi...", () => updateCurrentDeliveryStatus("absent"));
     if (action === "mark-problem") runAction(actionButton, "Envoi...", () => updateCurrentDeliveryStatus("probleme"));
     if (action === "mark-reschedule") runAction(actionButton, "Envoi...", () => updateCurrentDeliveryStatus("a_reprogrammer"));
+    if (action === "replan-current-stop") runAction(actionButton, "Planification...", replanCurrentStop);
     if (action === "next-client") nextClient();
     if (action === "open-maps") openGoogleMaps();
     if (action === "call-current-client") callCurrentClient();
     if (action === "save-coordinates") runAction(actionButton, "Sauvegarde...", saveCurrentCoordinates);
+    if (action === "select-all-today-orders") {
+      todayCustomerOrders.forEach(order => todayOrdersSelection.add(String(order.id)));
+      renderTodayOrders();
+    }
+    if (action === "clear-today-orders") {
+      todayOrdersSelection.clear();
+      renderTodayOrders();
+    }
+    if (action === "send-today-orders-preparation") runAction(actionButton, "Envoi...", sendTodayOrdersToPreparation);
+    if (action === "confirm-planned-order") runAction(actionButton, "Confirmation...", () => confirmPlannedOrder(actionButton.dataset.orderId));
+    if (action === "cancel-planned-order") runAction(actionButton, "Annulation...", () => cancelPlannedOrder(actionButton.dataset.orderId));
+    if (action === "export-annex-orders") downloadOrdersExport("annexe");
+    if (action === "export-planned-orders") downloadOrdersExport("planned");
+    if (action === "export-all-orders") downloadOrdersExport("all");
+    if (action === "delete-delivery-sector") runAction(actionButton, "Suppression...", () => deleteDeliverySector(actionButton.dataset.sectorId));
   });
 
   document.addEventListener("change", event => {
@@ -424,9 +980,22 @@ function bindUi() {
       return;
     }
 
+    const thresholdInput = event.target.closest("[data-stock-threshold-input]");
+    if (thresholdInput) {
+      runAction(thresholdInput, "Sauvegarde...", () => setStockThreshold(thresholdInput.dataset.productId, thresholdInput.value));
+      return;
+    }
+
     const deliveryCheckbox = event.target.closest("[data-delivery-order]");
     if (deliveryCheckbox) {
       setDeliverySelection(deliveryCheckbox.dataset.deliveryOrder, deliveryCheckbox.checked);
+    }
+
+    const todayOrderCheckbox = event.target.closest("[data-today-order]");
+    if (todayOrderCheckbox) {
+      if (todayOrderCheckbox.checked) todayOrdersSelection.add(String(todayOrderCheckbox.dataset.todayOrder));
+      else todayOrdersSelection.delete(String(todayOrderCheckbox.dataset.todayOrder));
+      renderTodayOrders();
     }
   });
 
@@ -442,7 +1011,7 @@ function getInitialTab() {
 // car > 5 destinations). Quand l'utilisateur navigue vers l'une d'elles, le
 // bouton "Plus" recoit la classe `.active` pour montrer visuellement qu'on est
 // dans ce groupe.
-const MOBILE_OVERFLOW_TABS = new Set(["bons-commande", "recommande", "commandes-livrees", "parametres"]);
+const MOBILE_OVERFLOW_TABS = new Set(["bons-commande", "crm", "commande-client", "commandes-jour", "commandes-planifiees", "relances", "statistiques", "exports", "recommande", "commandes-livrees", "parametres"]);
 
 function showTab(tabName, options = {}) {
   const { updateHash = true } = options;
@@ -454,6 +1023,7 @@ function showTab(tabName, options = {}) {
     tab.classList.toggle("active", isActive);
     tab.setAttribute("aria-selected", isActive ? "true" : "false");
   });
+  syncNavigationSections(nextTab);
 
   // Bouton "Plus" : actif si l'utilisateur est sur une destination "overflow"
   const moreBtn = document.getElementById("mobile-tab-more");
@@ -551,7 +1121,13 @@ async function loadData() {
     { key: "ventes", path: "/api/ventes", fallback: [] },
     { key: "historique", path: "/api/historique", fallback: [] },
     { key: "orders", path: "/api/orders", fallback: [] },
+    { key: "crmClients", path: "/api/crm/clients", fallback: [] },
+    { key: "crmRelances", path: "/api/reminders", fallback: [] },
+    { key: "todayCustomerOrders", path: `/api/customer-orders/today?date=${encodeURIComponent(getTodayOrdersDate())}`, fallback: [] },
+    { key: "plannedOrders", path: "/api/planned-orders", fallback: [] },
+    { key: "statistics", path: "/api/statistics", fallback: null },
     { key: "sectors", path: "/api/sectors", fallback: [] },
+    { key: "deliverySectors", path: "/api/delivery-sectors", fallback: [] },
     { key: "routes", path: "/api/routes", fallback: [] },
     { key: "stockMovements", path: "/api/stock-movements", fallback: [] },
     { key: "dashboard", path: "/api/dashboard", fallback: null }
@@ -592,7 +1168,13 @@ async function loadData() {
   ventes = data.ventes;
   historique = data.historique;
   orders = data.orders;
+  crmClients = data.crmClients;
+  crmRelances = data.crmRelances;
+  todayCustomerOrders = data.todayCustomerOrders;
+  plannedOrders = data.plannedOrders;
+  statistics = data.statistics;
   sectors = data.sectors;
+  deliverySectors = data.deliverySectors;
   deliveryRoutes = data.routes;
   stockMovements = data.stockMovements;
   dashboard = data.dashboard;
@@ -612,7 +1194,8 @@ async function loadData() {
     // Map cle interne -> label utilisateur lisible
     const labels = {
       clients: "clients", stock: "stock", ventes: "ventes", historique: "historique",
-      orders: "commandes", sectors: "secteurs", routes: "tournées",
+      orders: "commandes", plannedOrders: "commandes planifiées", sectors: "secteurs",
+      deliverySectors: "secteurs livraison", routes: "tournées",
       stockMovements: "mouvements stock", dashboard: "tableau de bord"
     };
     const friendly = failed.map(k => labels[k] || k).join(", ");
@@ -638,6 +1221,13 @@ function renderAll() {
   renderStats();
   renderDailySummary();
   renderImportSummary();
+  renderCrm();
+  renderRelances();
+  renderCustomerOrder();
+  renderTodayOrders();
+  renderPlannedOrders();
+  renderStatistics();
+  renderExports();
   renderStock();
   renderStockMovements();
   renderPreparation();
@@ -793,6 +1383,9 @@ function renderDailySummary() {
   const missingInfo = (orderCounts.missingAddress || 0) + (orderCounts.missingPhone || 0);
   const deliveryToday = orderCounts.deliveryToday ?? orders.filter(order => order.deliveryDate === getTodayDateInput() && ["pret_livraison", "en_livraison"].includes(order.status)).length;
   const deliveryUpcoming = orderCounts.deliveryUpcoming ?? orders.filter(order => order.deliveryDate && order.deliveryDate > getTodayDateInput() && ["pret_livraison", "en_livraison"].includes(order.status)).length;
+  const planned = orderCounts.planned ?? plannedOrders.filter(order => order.status === "planifiee").length;
+  const toConfirm = orderCounts.toConfirm ?? plannedOrders.filter(order => order.status === "a_confirmer").length;
+  const remindersDue = orderCounts.remindersDue ?? crmRelances.filter(reminder => reminder.status === "a_faire" && reminder.datePrevue <= getTodayDateInput()).length;
 
   container.innerHTML = `
     <article class="summary-item status-ok">
@@ -818,6 +1411,16 @@ function renderDailySummary() {
     <article class="summary-item ${missingInfo ? "status-warning" : "status-ok"}">
       <h4>Données à compléter</h4>
       <p>${missingInfo} commande(s) avec adresse ou téléphone manquant</p>
+    </article>
+
+    <article class="summary-item ${planned || toConfirm ? "status-neutral" : "status-ok"}">
+      <h4>Commandes planifiées</h4>
+      <p>${planned} planifiée(s), ${toConfirm} à confirmer</p>
+    </article>
+
+    <article class="summary-item ${remindersDue ? "status-warning" : "status-ok"}">
+      <h4>Rappels CRM</h4>
+      <p>${remindersDue} rappel(s) à traiter aujourd'hui ou en retard</p>
     </article>
 
     <article class="summary-item status-neutral">
@@ -858,6 +1461,554 @@ function renderImportSummary() {
       </article>
     ` : ""}
   `;
+}
+
+function crmStatusLabel(status) {
+  const labels = {
+    prospect: "Prospect",
+    client_actif: "Client actif",
+    client_a_relancer: "Client a relancer",
+    client_inactif: "Client inactif"
+  };
+  return labels[status] || "Prospect";
+}
+
+function crmStatusPill(status) {
+  if (status === "client_actif") return "pill-ok";
+  if (status === "client_a_relancer") return "pill-warning";
+  if (status === "client_inactif") return "pill-danger";
+  return "pill-blue";
+}
+
+function formatMoney(value) {
+  return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(value) || 0);
+}
+
+function renderCrm() {
+  const container = document.getElementById("crmList");
+  const summary = document.getElementById("crmSummary");
+  if (!container) return;
+
+  const today = getTodayDateInput();
+  const query = normalizeTextKey(crmFilter.query);
+  const filter = crmFilter.status || "all";
+  let list = crmClients.slice();
+
+  if (query) {
+    list = list.filter(client => normalizeTextKey([
+      client.nom, client.prenom, client.telephone, client.rue, client.ville, client.email
+    ].join(" ")).includes(query));
+  }
+  if (filter !== "all") {
+    if (filter === "relance_today") list = list.filter(client => client.nextReminderDate === today);
+    else if (filter === "relance_late") list = list.filter(client => client.nextReminderDate && client.nextReminderDate < today);
+    else list = list.filter(client => client.crmStatus === filter);
+  }
+
+  if (summary) summary.textContent = `${list.length} contact${list.length > 1 ? "s" : ""}`;
+  renderClientSelects();
+
+  if (!list.length) {
+    container.innerHTML = emptyState("Aucun contact", "Cree une fiche ou modifie les filtres.");
+    return;
+  }
+
+  container.innerHTML = list.map(client => `
+    <article class="crm-card">
+      <header class="item-header">
+        <div>
+          <h4>${escapeHtml([client.prenom, client.nom].filter(Boolean).join(" ") || client.nom)}</h4>
+          <p>${escapeHtml([client.rue, client.codePostal, client.ville].filter(Boolean).join(" - ") || "Adresse a completer")}</p>
+        </div>
+        <span class="pill ${crmStatusPill(client.crmStatus)}">${escapeHtml(crmStatusLabel(client.crmStatus))}</span>
+      </header>
+      <div class="crm-meta">
+        <span>${escapeHtml(client.telephone || "Telephone a completer")}</span>
+        <span>${escapeHtml(client.email || "Email non renseigne")}</span>
+        <span>${escapeHtml(client.totalOrders || 0)} commande(s)</span>
+        <span>${formatMoney(client.totalRevenue || 0)}</span>
+      </div>
+      <p class="muted">${escapeHtml(client.notes || client.needs || "Aucune note")}</p>
+      <div class="card-actions">
+        <button class="button ok compact" type="button" data-crm-status-client="${escapeAttribute(client.id)}" data-crm-status="client_actif">Client actif</button>
+        <button class="button warning compact" type="button" data-crm-status-client="${escapeAttribute(client.id)}" data-crm-status="client_a_relancer">A relancer</button>
+        <button class="button danger compact" type="button" data-crm-status-client="${escapeAttribute(client.id)}" data-crm-status="client_inactif">Inactif</button>
+      </div>
+    </article>
+  `).join("");
+}
+
+function renderClientSelects() {
+  const options = `<option value="">Nouveau client</option>` + crmClients
+    .slice()
+    .sort((a, b) => String(a.nom).localeCompare(String(b.nom), "fr"))
+    .map(client => `<option value="${escapeAttribute(client.id)}">${escapeHtml([client.prenom, client.nom].filter(Boolean).join(" ") || client.nom)}</option>`)
+    .join("");
+
+  const customerSelect = document.getElementById("customerClientSelect");
+  if (customerSelect && customerSelect.options.length !== crmClients.length + 1) customerSelect.innerHTML = options;
+
+  const relanceSelect = document.getElementById("relanceClientSelect");
+  if (relanceSelect) relanceSelect.innerHTML = options.replace("Nouveau client", "Choisir un client");
+}
+
+async function saveCrmClient(form) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  await apiFetch("/api/crm/clients", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  form.reset();
+  await loadData();
+  notify("Fiche CRM enregistree.", "success");
+}
+
+async function updateCrmClientStatus(clientId, status) {
+  await apiFetch(`/api/crm/clients/${encodeURIComponent(clientId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ crmStatus: status })
+  });
+  await loadData();
+  notify("Statut CRM mis a jour.", "success");
+}
+
+function renderRelances() {
+  const container = document.getElementById("relanceList");
+  const summary = document.getElementById("relanceSummary");
+  if (!container) return;
+
+  const today = getTodayDateInput();
+  let list = crmRelances.slice();
+  if (relanceFilter === "today") list = list.filter(item => item.datePrevue === today);
+  if (relanceFilter === "late") list = list.filter(item => item.status === "a_faire" && item.datePrevue < today);
+  if (relanceFilter === "week") {
+    const limit = new Date();
+    limit.setDate(limit.getDate() + 7);
+    const max = getTodayDateInput(limit);
+    list = list.filter(item => item.datePrevue >= today && item.datePrevue <= max);
+  }
+  if (relanceFilter === "upcoming") list = list.filter(item => item.status === "a_faire" && item.datePrevue > today);
+
+  document.querySelectorAll("[data-relance-filter]").forEach(button => {
+    button.classList.toggle("active-filter", button.dataset.relanceFilter === relanceFilter);
+  });
+
+  const todoCount = crmRelances.filter(item => item.status === "a_faire").length;
+  if (summary) summary.textContent = `${todoCount} à faire`;
+
+  if (!list.length) {
+    container.innerHTML = emptyState("Aucun rappel", "Les appels, visites et confirmations programmés apparaîtront ici.");
+    return;
+  }
+
+  container.innerHTML = list.map(item => {
+    const client = item.client || crmClients.find(c => String(c.id) === String(item.clientId)) || {};
+    const order = item.order || orders.find(order => String(order.id) === String(item.commandeId)) || null;
+    const level = item.status === "fait" ? "pill-ok" : (item.datePrevue < today ? "pill-danger" : (item.datePrevue === today ? "pill-warning" : "pill-blue"));
+    return `
+      <article class="item">
+        <div class="item-header">
+          <div>
+            <h4>${escapeHtml([client.prenom, client.nom].filter(Boolean).join(" ") || client.nom || "Client")}</h4>
+            <p>${escapeHtml(item.motif || "Rappel client")} - ${escapeHtml(formatDateDayOnly(item.datePrevue))}</p>
+            ${order ? `<p class="muted">${escapeHtml(order.numero || order.id)} - livraison ${escapeHtml(order.deliveryDate ? formatDeliveryDate(order.deliveryDate) : "à dater")}</p>` : ""}
+          </div>
+          <span class="pill ${level}">${escapeHtml(item.status === "a_faire" ? "À faire" : item.status)}</span>
+        </div>
+        <p class="muted">${escapeHtml(item.commentaire || "Aucun commentaire")}</p>
+        <div class="card-actions">
+          <button class="button ok compact" type="button" data-relance-id="${escapeAttribute(item.id)}" data-relance-status="fait">Fait</button>
+          <button class="button warning compact" type="button" data-relance-id="${escapeAttribute(item.id)}" data-relance-status="reporte">Reporte</button>
+          <button class="button danger compact" type="button" data-relance-id="${escapeAttribute(item.id)}" data-relance-status="annule">Annule</button>
+        </div>
+      </article>
+    `;
+  }).join("");
+}
+
+async function saveRelance(form) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  await apiFetch("/api/crm/relances", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  form.reset();
+  await loadData();
+  notify("Rappel créé.", "success");
+}
+
+async function updateRelanceStatus(relanceId, status) {
+  await apiFetch(`/api/crm/relances/${encodeURIComponent(relanceId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status, dateRealisation: status === "fait" ? getTodayDateInput() : "" })
+  });
+  await loadData();
+  notify("Rappel mis à jour.", "success");
+}
+
+function renderCustomerOrder() {
+  renderClientSelects();
+  renderCustomerCategoryFilter();
+  renderCustomerCatalog();
+  renderCustomerCart();
+}
+
+function renderCustomerCategoryFilter() {
+  const select = document.getElementById("customerCategoryFilter");
+  if (!select) return;
+  const current = customerProductFilter.category || "all";
+  const categories = [...new Set(stock.map(product => product.category || product.type || "").filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, "fr"));
+  select.innerHTML = `<option value="all">Toutes categories</option>${categories.map(category => `<option value="${escapeAttribute(category)}" ${category === current ? "selected" : ""}>${escapeHtml(category)}</option>`).join("")}`;
+}
+
+function renderCustomerCatalog() {
+  const container = document.getElementById("customerCatalog");
+  const count = document.getElementById("customerCatalogCount");
+  if (!container) return;
+  const query = normalizeTextKey(customerProductFilter.query);
+  const category = customerProductFilter.category || "all";
+  const products = stock.filter(product => {
+    if (query && !normalizeTextKey([getProductName(product), product.code, product.category, product.type].join(" ")).includes(query)) return false;
+    if (category !== "all" && String(product.category || product.type || "") !== category) return false;
+    return true;
+  });
+  if (count) count.textContent = `${products.length} produit${products.length > 1 ? "s" : ""}`;
+  if (!products.length) {
+    container.innerHTML = emptyState("Aucun produit", "Importe le stock ou modifie la recherche.");
+    return;
+  }
+  container.innerHTML = products.map(product => {
+    const quantity = getProductQuantity(product);
+    const selected = customerCart.get(String(product.id))?.quantite || 0;
+    return `
+      <article class="product-card">
+        <div>
+          <h4>${escapeHtml(getProductName(product))}</h4>
+          <p>${escapeHtml(product.code || product.sku || "Sans reference")}</p>
+          <span class="muted">Stock ${quantity === null ? "?" : escapeHtml(quantity)} - ${formatMoney(getProductPrice(product))}</span>
+        </div>
+        <div class="product-stepper">
+          <button class="button danger compact" type="button" data-customer-product="${escapeAttribute(product.id)}" data-customer-delta="-1">-</button>
+          <strong>${escapeHtml(selected)}</strong>
+          <button class="button ok compact" type="button" data-customer-product="${escapeAttribute(product.id)}" data-customer-delta="1">+</button>
+        </div>
+      </article>
+    `;
+  }).join("");
+}
+
+function getProductPrice(product) {
+  return Number(product.prixUnitaire ?? product.tarif ?? product.prix ?? product.price ?? product.cout ?? 0) || 0;
+}
+
+function changeCustomerCart(productId, delta) {
+  const product = stock.find(item => String(item.id) === String(productId));
+  if (!product) return;
+  const current = customerCart.get(String(productId)) || {
+    productId: product.id,
+    code: product.code || product.sku || "",
+    nom: getProductName(product),
+    quantite: 0,
+    prixUnitaire: getProductPrice(product)
+  };
+  const available = getProductQuantity(product);
+  const nextQuantity = Math.max(0, current.quantite + delta);
+  const isPlannedOrder = document.getElementById("customerOrderType")?.value === "planifiee";
+  if (!isPlannedOrder && available !== null && nextQuantity > available) {
+    notify("Stock insuffisant pour ce produit.", "warning");
+    return;
+  }
+  if (nextQuantity === 0) customerCart.delete(String(productId));
+  else customerCart.set(String(productId), { ...current, quantite: nextQuantity });
+  renderCustomerCatalog();
+  renderCustomerCart();
+}
+
+function renderCustomerCart() {
+  const container = document.getElementById("customerCart");
+  const count = document.getElementById("customerCartCount");
+  const totalEl = document.getElementById("customerCartTotal");
+  if (!container) return;
+  const lines = Array.from(customerCart.values());
+  const total = lines.reduce((sum, line) => sum + line.quantite * line.prixUnitaire, 0);
+  if (count) count.textContent = `${lines.length} produit${lines.length > 1 ? "s" : ""}`;
+  if (totalEl) totalEl.textContent = formatMoney(total);
+  if (!lines.length) {
+    container.innerHTML = emptyState("Panier vide", "Ajoute les produits depuis le catalogue.");
+    return;
+  }
+  container.innerHTML = lines.map(line => `
+    <div class="cart-line">
+      <div><strong>${escapeHtml(line.nom)}</strong><span class="muted">x ${escapeHtml(line.quantite)} - ${formatMoney(line.prixUnitaire)}</span></div>
+      <strong>${formatMoney(line.quantite * line.prixUnitaire)}</strong>
+    </div>
+  `).join("");
+}
+
+function fillCustomerFormFromClient(clientId) {
+  const client = crmClients.find(item => String(item.id) === String(clientId));
+  const form = document.getElementById("customerOrderForm");
+  if (!form || !client) return;
+  form.elements.nom.value = client.nom || "";
+  form.elements.prenom.value = client.prenom || "";
+  form.elements.telephone.value = client.telephone || "";
+  form.elements.codePostal.value = client.codePostal || "";
+  form.elements.adresse.value = client.rue || "";
+  form.elements.ville.value = client.ville || "";
+  form.elements.email.value = client.email || "";
+}
+
+async function submitCustomerOrder(form) {
+  const lines = Array.from(customerCart.values());
+  if (!lines.length) {
+    notify("Ajoute au moins un produit.", "warning");
+    return;
+  }
+  const data = Object.fromEntries(new FormData(form).entries());
+  if (data.orderType === "planifiee" && !data.deliveryDate) {
+    notify("Choisis une date de livraison pour une commande planifiée.", "warning");
+    return;
+  }
+  const endpoint = data.orderType === "planifiee" ? "/api/planned-orders" : "/api/customer-orders";
+  await apiFetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      clientId: data.clientId,
+      client: data,
+      products: lines,
+      notes: data.notes,
+      orderType: data.orderType,
+      deliveryDate: data.deliveryDate
+    })
+  });
+  customerCart.clear();
+  form.reset();
+  await loadData();
+  notify(data.orderType === "planifiee" ? "Commande planifiée créée." : "Commande client validée.", "success");
+  showTab(data.orderType === "planifiee" ? "commandes-planifiees" : "commandes-jour");
+}
+
+function getTodayOrdersDate() {
+  const input = document.getElementById("todayOrdersDate");
+  return input?.value || getTodayDateInput();
+}
+
+async function loadTodayOrders(date = getTodayOrdersDate()) {
+  todayCustomerOrders = await apiFetch(`/api/customer-orders/today?date=${encodeURIComponent(date)}`);
+}
+
+function renderTodayOrders() {
+  const input = document.getElementById("todayOrdersDate");
+  if (input && !input.value) input.value = getTodayDateInput();
+  const container = document.getElementById("todayOrdersList");
+  if (!container) return;
+  if (!todayCustomerOrders.length) {
+    container.innerHTML = emptyState("Aucune commande client", "Les commandes validees chez les clients apparaitront ici.");
+    return;
+  }
+  container.innerHTML = todayCustomerOrders.map(order => `
+    <article class="item today-order-card ${getOrderPill(order.status)}">
+      <div class="today-order-row">
+        <label class="select-row">
+          <input type="checkbox" data-today-order="${escapeAttribute(order.id)}" ${todayOrdersSelection.has(String(order.id)) ? "checked" : ""} ${order.status !== "commande_client_validee" ? "disabled" : ""}>
+          <span></span>
+        </label>
+        <div>
+          <h4>${escapeHtml(order.clientName)}</h4>
+          <p>${escapeHtml(formatOrderAddress(order))}</p>
+          <p class="muted">${escapeHtml((order.products || []).map(line => `${line.nom} x${line.quantite}`).join(" - "))}</p>
+        </div>
+        <div class="today-order-side">
+          <span class="pill ${getOrderPill(order.status)}">${escapeHtml(formatOrderStatus(order.status))}</span>
+          <strong>${formatMoney(order.total || 0)}</strong>
+        </div>
+      </div>
+    </article>
+  `).join("");
+}
+
+async function sendTodayOrdersToPreparation() {
+  await apiFetch("/api/customer-orders/send-preparation", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ orderIds: Array.from(todayOrdersSelection) })
+  });
+  todayOrdersSelection.clear();
+  await loadData();
+  notify("Commandes envoyees en preparation.", "success");
+}
+
+function renderPlannedOrders() {
+  const container = document.getElementById("plannedOrdersList");
+  const summary = document.getElementById("plannedOrdersSummary");
+  if (!container) return;
+
+  const active = plannedOrders.filter(order => order.status !== "annulee");
+  if (summary) summary.textContent = `${active.length} planifiée${active.length > 1 ? "s" : ""}`;
+
+  if (!plannedOrders.length) {
+    container.innerHTML = emptyState("Aucune commande planifiée", "Crée une commande planifiée depuis l'onglet Commande client.");
+    return;
+  }
+
+  container.innerHTML = plannedOrders.map(order => {
+    const reminder = crmRelances.find(item => String(item.commandeId) === String(order.id));
+    const canConfirm = ["planifiee", "a_confirmer"].includes(order.status);
+    const canCancel = !["annulee", "stock_a_verifier", "en_preparation", "pret_livraison", "en_livraison", "livre"].includes(order.status);
+    return `
+      <article class="item planned-order-card ${getOrderPill(order.status)}">
+        <div class="item-header">
+          <div>
+            <h4>${escapeHtml(order.clientName)}</h4>
+            <p>${escapeHtml(formatOrderAddress(order))}</p>
+            <p class="muted">${escapeHtml((order.products || []).map(line => `${line.nom} x${line.quantite}`).join(" - "))}</p>
+          </div>
+          <span class="pill ${getOrderPill(order.status)}">${escapeHtml(formatOrderStatus(order.status))}</span>
+        </div>
+        <div class="order-meta">
+          <span>Livraison : ${escapeHtml(order.deliveryDate ? formatDeliveryDate(order.deliveryDate) : "à dater")}</span>
+          <span>Rappel : ${escapeHtml(reminder?.datePrevue ? formatDeliveryDate(reminder.datePrevue) : "-")}</span>
+          <span>Total : ${formatMoney(order.total || 0)}</span>
+        </div>
+        <div class="card-actions">
+          <button class="button ok" type="button" data-action="confirm-planned-order" data-order-id="${escapeAttribute(order.id)}" ${canConfirm ? "" : "disabled"}>Confirmer</button>
+          <button class="button danger" type="button" data-action="cancel-planned-order" data-order-id="${escapeAttribute(order.id)}" ${canCancel ? "" : "disabled"}>Annuler</button>
+        </div>
+      </article>
+    `;
+  }).join("");
+}
+
+async function confirmPlannedOrder(orderId) {
+  await apiFetch(`/api/planned-orders/${encodeURIComponent(orderId)}/confirm`, { method: "POST" });
+  await loadData();
+  notify("Commande confirmée et envoyée en préparation.", "success");
+}
+
+async function cancelPlannedOrder(orderId) {
+  await apiFetch(`/api/planned-orders/${encodeURIComponent(orderId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status: "annulee" })
+  });
+  await loadData();
+  notify("Commande planifiée annulée.", "success");
+}
+
+function renderExports() {
+  const summary = document.getElementById("exportsSummary");
+  const list = document.getElementById("exportsList");
+  if (summary) summary.textContent = `${orders.length} commande${orders.length > 1 ? "s" : ""}`;
+  if (!list) return;
+  const annex = orders.filter(order => order.orderType === "annexe" || order.source === "commande_annexe").length;
+  list.innerHTML = `
+    <article class="item status-neutral">
+      <div class="item-header">
+        <div>
+          <h4>Commandes annexes</h4>
+          <p>${escapeHtml(annex)} commande${annex > 1 ? "s" : ""} disponible${annex > 1 ? "s" : ""}</p>
+        </div>
+        <span class="pill pill-blue">.xlsx</span>
+      </div>
+    </article>
+    <article class="item status-ok">
+      <div class="item-header">
+        <div>
+          <h4>Commandes planifiées</h4>
+          <p>${escapeHtml(plannedOrders.length)} commande${plannedOrders.length > 1 ? "s" : ""}</p>
+        </div>
+        <span class="pill pill-ok">Excel</span>
+      </div>
+    </article>
+  `;
+}
+
+function downloadOrdersExport(type) {
+  const url = `/api/exports/commandes-annexes.xlsx?type=${encodeURIComponent(type)}`;
+  window.open(url, "_blank", "noopener,noreferrer");
+  notify("Export Excel lancé.", "success");
+}
+
+function renderStatistics() {
+  const kpis = document.getElementById("statsKpis");
+  if (!kpis || !statistics) return;
+  const items = [
+    { label: "CA jour", value: formatMoney(statistics.today?.revenue), hint: `${statistics.today?.orders || 0} commande(s)`, tone: "success" },
+    { label: "CA semaine", value: formatMoney(statistics.week?.revenue), hint: formatEvolution(statistics.week?.evolution), tone: getEvolutionTone(statistics.week?.evolution) },
+    { label: "CA mois", value: formatMoney(statistics.month?.revenue), hint: `${statistics.month?.orders || 0} commande(s) - ${formatEvolution(statistics.month?.evolution)}`, tone: getEvolutionTone(statistics.month?.evolution) },
+    { label: "Panier moyen", value: formatMoney(statistics.averageBasket), hint: "Moyenne globale", tone: "info" },
+    { label: "Nouveaux clients", value: statistics.newClientsMonth || 0, hint: "Ce mois-ci", tone: "warning" },
+    { label: "Prospects convertis", value: statistics.convertedProspectsMonth || 0, hint: "Ce mois-ci", tone: "success" }
+  ];
+  kpis.innerHTML = items.map(item => `
+    <article class="stat-tile stat-tile-${escapeAttribute(item.tone)}">
+      <i aria-hidden="true"></i>
+      <span>${escapeHtml(item.label)}</span>
+      <strong>${escapeHtml(item.value)}</strong>
+      <small>${escapeHtml(item.hint)}</small>
+    </article>
+  `).join("");
+
+  const evolution = document.getElementById("statsEvolution");
+  if (evolution) {
+    evolution.innerHTML = `
+      <span class="pill ${statistics.week?.evolution?.label === "baisse" ? "pill-danger" : "pill-ok"}">${escapeHtml(formatEvolution(statistics.week?.evolution))}</span>
+      <span class="pill ${statistics.month?.evolution?.label === "baisse" ? "pill-danger" : "pill-blue"}">${escapeHtml(formatEvolution(statistics.month?.evolution))}</span>
+    `;
+  }
+
+  renderBarChart("salesChart", statistics.salesByDay || []);
+  renderRankList("topProductsChart", statistics.topProducts || [], "quantity");
+  renderRankList("topClientsChart", statistics.topClients || [], "total");
+}
+
+function getEvolutionTone(evolution = {}) {
+  if (evolution.label === "baisse") return "danger";
+  if (evolution.label === "progression") return "success";
+  return "info";
+}
+
+function formatEvolution(evolution = {}) {
+  if (!evolution.label) return "Stable";
+  const sign = Number(evolution.percent) > 0 ? "+" : "";
+  return `${evolution.label} ${sign}${evolution.percent || 0}%`;
+}
+
+function renderBarChart(id, rows) {
+  const container = document.getElementById(id);
+  if (!container) return;
+  const max = Math.max(1, ...rows.map(row => Number(row.total) || 0));
+  container.innerHTML = rows.map(row => `
+    <div class="bar-item ${Number(row.total) > 0 ? "is-active" : ""}" title="${escapeAttribute(row.date)} - ${escapeAttribute(formatMoney(row.total))}">
+      <em>${escapeHtml(Number(row.total) > 0 ? formatMoney(row.total) : "-")}</em>
+      <span style="height:${Number(row.total) > 0 ? Math.max(12, (Number(row.total) || 0) / max * 100) : 4}%"></span>
+      <small>${escapeHtml(String(row.date).slice(5))}</small>
+    </div>
+  `).join("");
+}
+
+function renderRankList(id, rows, mode) {
+  const container = document.getElementById(id);
+  if (!container) return;
+  if (!rows.length) {
+    container.innerHTML = emptyState("Aucune donnee", "Les ventes validees alimenteront ce graphique.");
+    return;
+  }
+  const max = Math.max(1, ...rows.map(row => Number(mode === "total" ? row.total : row.quantity) || 0));
+  container.innerHTML = rows.map((row, index) => `
+    <div class="rank-row">
+      <span>${index + 1}</span>
+      <strong>${escapeHtml(row.name || row.clientName || "Client")}</strong>
+      <em>${mode === "total" ? formatMoney(row.total) : `${escapeHtml(row.quantity)} vendu(s)`}</em>
+      <i style="width:${Math.max(8, (Number(mode === "total" ? row.total : row.quantity) || 0) / max * 100)}%"></i>
+    </div>
+  `).join("");
 }
 
 function renderStock() {
@@ -928,7 +2079,7 @@ function createStockCard(product) {
   const needed = product.quantityNeeded ?? getNeededQuantityForProduct(product);
   const reserved = product.quantityReserved ?? 0;
   const total = product.quantityTotal ?? (quantity === null ? null : quantity + reserved);
-  const threshold = product.alertThreshold ?? 5;
+  const threshold = getProductThreshold(product);
   const productId = escapeAttribute(product.id);
 
   const div = document.createElement("article");
@@ -957,6 +2108,10 @@ function createStockCard(product) {
       <input id="stock-${productId}" data-stock-input data-product-id="${productId}" type="number" min="0" step="1" value="${escapeAttribute(quantityValue)}">
       <button class="button ok compact" type="button" data-product-id="${productId}" data-stock-delta="1" aria-label="Ajouter 1 unité à ${escapeAttribute(getProductName(product))}">+1</button>
       <button class="button ok compact" type="button" data-product-id="${productId}" data-stock-delta="5" aria-label="Ajouter 5 unités à ${escapeAttribute(getProductName(product))}">+5</button>
+    </div>
+    <div class="stock-threshold-control">
+      <label for="stock-threshold-${productId}">Seuil minimum</label>
+      <input id="stock-threshold-${productId}" data-stock-threshold-input data-product-id="${productId}" type="number" min="0" step="1" value="${escapeAttribute(threshold)}">
     </div>
   `;
 
@@ -1022,6 +2177,29 @@ async function setStock(productId, value) {
 
   await loadData();
   notify("Stock mis à jour.", "success");
+}
+
+async function setStockThreshold(productId, value) {
+  const raw = String(value ?? "").trim();
+  const threshold = Number(raw);
+
+  if (!raw || /[,.]/.test(raw) || !Number.isFinite(threshold) || !Number.isInteger(threshold) || threshold < 0) {
+    notify("Seuil minimum invalide.", "warning");
+    return;
+  }
+
+  await apiFetch(`/api/stock/${encodeURIComponent(productId)}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      alertThreshold: threshold
+    })
+  });
+
+  await loadData();
+  notify("Seuil minimum mis a jour.", "success");
 }
 
 function renderPreparation() {
@@ -1261,7 +2439,7 @@ function getRecommendationItems() {
     .map(product => {
       const available = product.quantityAvailable ?? getProductQuantity(product) ?? 0;
       const needed = product.quantityNeeded ?? getNeededQuantityForProduct(product);
-      const threshold = product.alertThreshold ?? 5;
+      const threshold = getProductThreshold(product);
       const shortage = Math.max(0, needed - available);
       const thresholdGap = Math.max(0, threshold - available);
       const recommended = Math.ceil(Math.max(shortage, thresholdGap));
@@ -1366,6 +2544,7 @@ function getAlertItems() {
   stock.forEach(product => {
     const quantity = product.quantityAvailable ?? getProductQuantity(product);
     const level = getStockLevel(product);
+    const threshold = getProductThreshold(product);
 
     if (quantity === null) return;
 
@@ -1383,7 +2562,7 @@ function getAlertItems() {
         pill: "pill-warning",
         label: "Stock faible",
         title: getProductName(product),
-        message: `Stock faible : ${quantity} restant(s).`
+        message: `Stock faible : ${quantity} restant(s), seuil minimum ${threshold}.`
       });
     }
   });
@@ -2256,12 +3435,21 @@ function getEffectiveColorScheme() {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
+function getActiveTheme() {
+  return pastelThemes[activeThemeId] || pastelThemes.sereo;
+}
+
+function isVisuallyDarkTheme(theme = getActiveTheme()) {
+  return theme.id === "noir" || getEffectiveColorScheme() === "dark";
+}
+
 // Applique les variables d'un theme en respectant le mode actif (clair / sombre).
 // Le theme pastel definit ses 7 variables --color-* en 2 versions : `vars` et `darkVars`.
 function applyThemeVariables(theme) {
   const effective = getEffectiveColorScheme();
   const variables = effective === "dark" && theme.darkVars ? theme.darkVars : theme.vars;
   const root = document.documentElement;
+  root.dataset.appTheme = theme.id;
   Object.entries(variables).forEach(([name, value]) => {
     root.style.setProperty(name, value);
   });
@@ -2270,8 +3458,8 @@ function applyThemeVariables(theme) {
 // Met a jour la meta theme-color (couleur de la barre OS sur mobile)
 // pour refleter le mode actif. Utilise la couleur de fond.
 function updateMetaThemeColor() {
-  const effective = getEffectiveColorScheme();
-  const color = effective === "dark" ? "#0d1518" : "#cfe9e1";
+  const theme = getActiveTheme();
+  const color = theme.metaColor || (getEffectiveColorScheme() === "dark" ? "#0d1518" : "#f7f7f6");
   // On force une seule meta sans media query (override les 2 du HTML)
   let tag = document.querySelector('meta[name="theme-color"]:not([media])');
   if (!tag) {
@@ -2299,7 +3487,7 @@ function applyColorScheme(scheme, options = {}) {
   }
 
   // Re-applique les variables du theme actif avec la bonne palette (light/dark)
-  const theme = pastelThemes[activeThemeId] || pastelThemes.sereo;
+  const theme = getActiveTheme();
   applyThemeVariables(theme);
   updateMetaThemeColor();
   // Re-evalue le logo (variante claire/sombre si logo par defaut)
@@ -2328,7 +3516,7 @@ function watchSystemColorScheme() {
   const mq = window.matchMedia("(prefers-color-scheme: dark)");
   const handler = () => {
     if (activeColorScheme === "auto") {
-      const theme = pastelThemes[activeThemeId] || pastelThemes.sereo;
+      const theme = getActiveTheme();
       applyThemeVariables(theme);
       updateMetaThemeColor();
       applyBrandImage(activeBrandImage);
@@ -2345,15 +3533,17 @@ function applyTheme(themeId, options = {}) {
 
   activeThemeId = theme.id;
   applyThemeVariables(theme);
+  updateMetaThemeColor();
+  applyBrandImage(activeBrandImage);
 
   if (persist) {
     saveAppearance({ themeId: theme.id })
       .then(() => {
-        if (notifyUser) notify(`Palette "${theme.name}" appliquée.`, "success");
+        if (notifyUser) notify(`Thème "${theme.name}" appliqué.`, "success");
       })
       .catch(error => notify(error.message, "error"));
   } else if (notifyUser) {
-    notify(`Palette "${theme.name}" appliquée.`, "success");
+    notify(`Thème "${theme.name}" appliqué.`, "success");
   }
 
   renderThemePalettes();
@@ -2375,10 +3565,19 @@ function renderThemePalettes() {
 
   container.innerHTML = Object.values(pastelThemes).map(theme => {
     const isActive = theme.id === activeThemeId;
+    const preview = theme.preview || {};
     return `
       <button class="theme-card ${isActive ? "active" : ""}" type="button" data-action="select-theme" data-theme-id="${escapeAttribute(theme.id)}" aria-pressed="${isActive ? "true" : "false"}">
-        <span class="theme-card-title">${escapeHtml(theme.name)}</span>
+        <span class="theme-card-header">
+          <span class="theme-card-title">${escapeHtml(theme.name)}</span>
+          <span class="theme-card-status">${isActive ? "Actif" : "Appliquer"}</span>
+        </span>
         <span class="theme-card-hint">${escapeHtml(theme.hint)}</span>
+        <span class="theme-card-preview" aria-hidden="true" style="--preview-bg:${escapeAttribute(preview.bg || theme.swatches[0])};--preview-sidebar:${escapeAttribute(preview.sidebar || theme.swatches[0])};--preview-card:${escapeAttribute(preview.card || "#ffffff")};--preview-accent:${escapeAttribute(preview.accent || theme.swatches[1] || theme.swatches[0])}">
+          <i></i>
+          <b></b>
+          <em></em>
+        </span>
         <span class="theme-card-swatches" aria-hidden="true">
           ${theme.swatches.map(color => `<i style="--swatch:${escapeAttribute(color)}"></i>`).join("")}
         </span>
@@ -2447,9 +3646,10 @@ function applyBrandImage(src) {
   // Si c'est le logo par defaut, on swap automatiquement entre la variante claire
   // et sombre selon le mode actif. Si c'est un logo custom uploade, on l'affiche
   // tel quel (l'utilisateur a choisi son image).
-  const isDefault = imageSrc === DEFAULT_BRAND_IMAGE || imageSrc === DEFAULT_BRAND_IMAGE_DARK;
+  const isDefault = isDefaultBrandImageSrc(imageSrc);
+  const defaultSrc = isVisuallyDarkTheme() ? DEFAULT_BRAND_IMAGE_DARK : DEFAULT_BRAND_IMAGE;
   const effectiveSrc = isDefault
-    ? (getEffectiveColorScheme() === "dark" ? DEFAULT_BRAND_IMAGE_DARK : DEFAULT_BRAND_IMAGE)
+    ? `${defaultSrc}?v=${DEFAULT_BRAND_CACHE_VERSION}`
     : imageSrc;
 
   document.querySelectorAll(".brand-logo, [data-brand-preview]").forEach(image => {
@@ -2458,12 +3658,17 @@ function applyBrandImage(src) {
   updateBrandImageStatus(!isDefault);
 }
 
-function updateBrandImageStatus(isCustom = activeBrandImage !== DEFAULT_BRAND_IMAGE) {
+function isDefaultBrandImageSrc(src) {
+  const cleanSrc = String(src || "").split("?")[0];
+  return cleanSrc === DEFAULT_BRAND_IMAGE || cleanSrc === DEFAULT_BRAND_IMAGE_DARK;
+}
+
+function updateBrandImageStatus(isCustom = !isDefaultBrandImageSrc(activeBrandImage)) {
   const status = document.getElementById("brandImageStatus");
   if (status) {
     status.textContent = isCustom
       ? "Image personnalisée active pour l'application."
-      : "Logo séréo par défaut.";
+      : "Logo SEREO par défaut.";
   }
 }
 
@@ -2591,23 +3796,49 @@ function renderSettings() {
   const sectorsContainer = document.getElementById("settingsSectors");
   if (!sectorsContainer) return;
 
-  const visibleSectors = sectors.length ? sectors : [
-    { name: "Besancon", total: 0, ready: 0 },
-    { name: "Champagnole", total: 0, ready: 0 },
-    { name: "Dole", total: 0, ready: 0 }
+  const planned = deliverySectors.length ? deliverySectors : [
+    { id: "preview-besancon", secteur: "Besancon", villePrincipale: "Besancon", jourMois: 25, pointDepart: "Champagnole", frequence: "mensuelle" },
+    { id: "preview-champagnole", secteur: "Champagnole", villePrincipale: "Champagnole", jourMois: 5, pointDepart: "Champagnole", frequence: "mensuelle" },
+    { id: "preview-dole", secteur: "Dole", villePrincipale: "Dole", jourMois: 15, pointDepart: "Champagnole", frequence: "mensuelle" }
   ];
 
-  sectorsContainer.innerHTML = visibleSectors.map(sector => `
+  sectorsContainer.innerHTML = planned.map(sector => `
     <article class="item status-neutral">
       <div class="item-header">
         <div>
-          <h4>${escapeHtml(formatSectorLabel(sector.name))}</h4>
-          <p>${escapeHtml(sector.total || 0)} commande(s), ${escapeHtml(sector.ready || 0)} prête(s)</p>
+          <h4>${escapeHtml(formatSectorLabel(sector.secteur || sector.name))}</h4>
+          <p>${escapeHtml(sector.villePrincipale || "-")} - jour ${escapeHtml(sector.jourMois || "-")} - départ ${escapeHtml(sector.pointDepart || "Champagnole")}</p>
         </div>
-        <span class="pill pill-blue">Actif</span>
+        <div class="card-actions inline-actions">
+          <span class="pill pill-blue">${escapeHtml(sector.frequence || "mensuelle")}</span>
+          <button class="button danger compact" type="button" data-action="delete-delivery-sector" data-sector-id="${escapeAttribute(sector.id)}" ${String(sector.id || "").startsWith("preview-") ? "disabled" : ""}>Supprimer</button>
+        </div>
       </div>
     </article>
   `).join("");
+}
+
+async function saveDeliverySector(form) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  await apiFetch("/api/delivery-sectors", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...data,
+      jourMois: Number(data.jourMois || 1),
+      pointDepart: data.pointDepart || "Champagnole"
+    })
+  });
+  form.reset();
+  if (form.elements.pointDepart) form.elements.pointDepart.value = "Champagnole";
+  await loadData();
+  notify("Secteur de livraison ajouté.", "success");
+}
+
+async function deleteDeliverySector(sectorId) {
+  await apiFetch(`/api/delivery-sectors/${encodeURIComponent(sectorId)}`, { method: "DELETE" });
+  await loadData();
+  notify("Secteur supprimé.", "success");
 }
 
 // v1.12.0 : historique des fichiers Excel importes (archives auto).
@@ -3097,6 +4328,27 @@ async function updateLegacyClientDeliveryStatus(status) {
   notify("Statut livraison enregistré.", "success");
 }
 
+async function replanCurrentStop() {
+  const target = getCurrentDeliveryTarget();
+  if (!target?.orderId) {
+    notify("Sélectionne une commande livrée ou à reprogrammer.", "warning");
+    return;
+  }
+
+  const defaultDate = addMonthsToInputDate(getTodayDateInput(), 1);
+  const deliveryDate = window.prompt("Date de la prochaine livraison (AAAA-MM-JJ)", defaultDate);
+  if (!deliveryDate) return;
+
+  await apiFetch(`/api/orders/${encodeURIComponent(target.orderId)}/replan`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deliveryDate })
+  });
+  await loadData();
+  notify("Prochaine commande planifiée.", "success");
+  showTab("commandes-planifiees");
+}
+
 function renderClients() {
   const container = document.getElementById("clientsList");
   if (!container) return;
@@ -3296,6 +4548,7 @@ function updateDriverActionButtons(target = getCurrentDeliveryTarget()) {
   const hasNextStop = activeRoute
     ? activeRoute.stops.some((stop, index) => index > activeStopIndex && !isStopTerminal(stop.status))
     : currentIndex >= 0 && currentIndex < route.length - 1;
+  const canReplan = Boolean(target?.orderId && ["livre", "absent", "probleme", "a_reprogrammer"].includes(target.status));
 
   setButtonDisabled("callClientButton", !hasTarget || !buildPhoneUrl(target?.phone || target?.telephone));
   setButtonDisabled("mapsButton", !hasTarget || !buildGoogleMapsUrl(target));
@@ -3303,6 +4556,7 @@ function updateDriverActionButtons(target = getCurrentDeliveryTarget()) {
   setButtonDisabled("markAbsentButton", !canChangeStatus);
   setButtonDisabled("markProblemButton", !canChangeStatus);
   setButtonDisabled("markRescheduleButton", !canChangeStatus);
+  setButtonDisabled("replanCurrentButton", !canReplan);
   setButtonDisabled("nextClientButton", !hasTarget || !routeStarted || !hasNextStop);
 }
 
@@ -3654,6 +4908,20 @@ function getProductQuantity(product) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function getProductThreshold(product) {
+  const value = product.alertThreshold
+    ?? product.stockMinimum
+    ?? product.seuilMinimum
+    ?? product.seuil_minimum
+    ?? product.seuilAlerte
+    ?? product.seuil
+    ?? product.minimum;
+  if (value === null || value === undefined || value === "") return 5;
+
+  const parsed = Number(String(value).replace(",", "."));
+  return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : 5;
+}
+
 function getProductName(product) {
   return product.nom || product.Nom || product.produit || product.Produit || "Produit";
 }
@@ -3680,7 +4948,7 @@ function getStockLevel(product) {
     };
   }
 
-  if (status === "stock_faible" || quantity <= (product.alertThreshold ?? 5)) {
+  if (status === "stock_faible" || quantity <= getProductThreshold(product)) {
     return {
       className: "status-warning",
       pill: "pill-warning",
@@ -3720,7 +4988,7 @@ function getNeededQuantityForProduct(product) {
   const productName = normalizeTextKey(getProductName(product));
 
   return orders.reduce((total, order) => {
-    if (!["importe", "stock_a_verifier", "en_preparation"].includes(order.status)) return total;
+    if (!["commande_client_validee", "importe", "stock_a_verifier", "en_preparation"].includes(order.status)) return total;
 
     return total + (order.products || []).reduce((sum, line) => {
       const lineCode = normalizeTextKey(line.code);
@@ -3855,14 +5123,20 @@ function formatClientStatus(status) {
 }
 
 function getOrderPill(status) {
+  if (["brouillon", "commande_client_validee", "planifiee"].includes(status)) return "pill-blue";
   if (["livre", "pret_livraison"].includes(status)) return "pill-ok";
-  if (["en_preparation", "en_livraison", "a_reprogrammer"].includes(status)) return "pill-warning";
-  if (status === "probleme_livraison") return "pill-danger";
+  if (["a_confirmer", "en_preparation", "en_livraison", "a_reprogrammer"].includes(status)) return "pill-warning";
+  if (["probleme_livraison", "annulee"].includes(status)) return "pill-danger";
   return "pill-blue";
 }
 
 function formatOrderStatus(status) {
   const labels = {
+    brouillon: "Brouillon",
+    planifiee: "Planifiée",
+    a_confirmer: "À confirmer",
+    annulee: "Annulée",
+    commande_client_validee: "Commande client validee",
     importe: "Importé",
     stock_a_verifier: "Stock à vérifier",
     en_preparation: "En préparation",
@@ -3965,6 +5239,13 @@ function getTodayDateInput(date = new Date()) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function addMonthsToInputDate(value, months) {
+  const base = value ? new Date(`${value}T12:00:00`) : new Date();
+  if (Number.isNaN(base.getTime())) return getTodayDateInput();
+  base.setMonth(base.getMonth() + months);
+  return getTodayDateInput(base);
 }
 
 function formatDeliveryDate(value) {

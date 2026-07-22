@@ -7,25 +7,23 @@ const { test, expect } = require("@playwright/test");
 test.describe("Sereo smoke tests", () => {
   test("page d'accueil charge le tableau de bord", async ({ page }) => {
     await page.goto("/");
-    // L'app a un titre h1 visible ou aria-label sur la page tableau de bord
-    await expect(page.getByText("Tableau de bord", { exact: false })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Tableau de bord" })).toBeVisible();
   });
 
   test("navigation vers Bons de commande affiche la liste ou empty state", async ({ page }) => {
     await page.goto("/");
-    // Sidebar desktop : clic sur "Bons de commande"
-    const bonsCommandeBtn = page.locator('[data-tab="bons-commande"]').first();
-    await bonsCommandeBtn.click();
+    await page.locator('[data-action="toggle-nav-section"][data-nav-section-target="commandes"]').click();
+    await page.locator("#tab-bons-commande").click();
+    await expect(page.locator("#bons-commande")).toHaveClass(/active/);
     // Soit on a des cards, soit empty state "Aucune commande"
-    const hasContent = await page.locator(".bdc-card, .empty-state").first().isVisible({ timeout: 5000 });
+    const hasContent = await page.locator("#bons-commande .bdc-card, #bons-commande .empty-state").first().isVisible({ timeout: 5000 });
     expect(hasContent).toBe(true);
   });
 
   test("navigation vers Parametres affiche les sections theme + zone dangereuse", async ({ page }) => {
     await page.goto("/");
-    const settingsBtn = page.locator('[data-tab="parametres"]').first();
-    await settingsBtn.click();
-    await expect(page.getByText("Identité visuelle", { exact: false })).toBeVisible();
+    await page.locator('[data-action="go-tab"][data-target-tab="parametres"]').click();
+    await expect(page.getByText("Personnalisation de l'interface", { exact: false })).toBeVisible();
     // Zone dangereuse v1.12.0
     await expect(page.getByText("Zone dangereuse", { exact: false })).toBeVisible();
   });

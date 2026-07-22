@@ -266,6 +266,51 @@ test("stock update rejects invalid quantity", async () => {
   assert.match(body.error, /quantite/i);
 });
 
+test("stock threshold update persists and drives recommendations", async () => {
+  seedDb({
+    ...defaultDb(),
+    stock: [{ id: "p1", code: "A1", nom: "Produit seuil", quantite: 8, alertThreshold: 5 }]
+  });
+
+  const { res, body } = await requestJson("/api/stock/p1", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ alertThreshold: 10 })
+  });
+
+  assert.equal(res.status, 200);
+  assert.equal(body.alertThreshold, 10);
+  assert.equal(body.stockMinimum, 10);
+  assert.equal(body.stockStatus, "stock_faible");
+
+  const db = readDb();
+  assert.equal(db.stock[0].alertThreshold, 10);
+  assert.equal(db.stock[0].stockMinimum, 10);
+
+  const recommendations = await requestJson("/api/recommendations");
+  const item = recommendations.body.find(product => product.id === "p1");
+  assert.ok(item, "le produit sous son seuil personnalise doit etre recommande");
+  assert.equal(item.recommendedQuantity, 2);
+});
+
+test("stock threshold update rejects invalid values", async () => {
+  seedDb({
+    ...defaultDb(),
+    stock: [{ id: "p1", code: "A1", nom: "Produit seuil", quantite: 8, alertThreshold: 5 }]
+  });
+
+  for (const invalid of [-1, "", "abc", 2.5, "2,5"]) {
+    const { res, body } = await requestJson("/api/stock/p1", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ alertThreshold: invalid })
+    });
+
+    assert.equal(res.status, 400, `valeur invalide ${JSON.stringify(invalid)} refusee`);
+    assert.match(body.error, /seuil/i);
+  }
+});
+
 test("dashboard exposes workflow and stock counters", async () => {
   seedDb({
     ...defaultDb(),
@@ -308,6 +353,335 @@ test("recommendations expose low and missing stock products", async () => {
   assert.equal(body.length, 1);
   assert.equal(body[0].id, "p1");
   assert.equal(body[0].recommendationStatus, "bientot");
+});
+
+test("CRM creates a prospect and schedules a relance", async () => {
+  seedDb(defaultDb());
+
+  const created = await requestJson("/api/crm/clients", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      nom: "Client Test",
+      prenom: "Prospect",
+      telephone: "0600000000",
+      adresse: "1 rue du Test",
+      codePostal: "25000",
+      ville: "Besancon",
+      crmStatus: "prospect"
+    })
+  });
+
+  assert.equal(created.res.status, 201);
+  assert.equal(created.body.crmStatus, "prospect");
+
+  const relance = await requestJson("/api/crm/relances", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      clientId: created.body.id,
+      datePrevue: "2026-06-18",
+      motif: "Premier rappel"
+    })
+  });
+
+  assert.equal(relance.res.status, 201);
+  assert.equal(relance.body.status, "a_faire");
+
+  const list = await requestJson("/api/crm/clients?status=client_a_relancer");
+  assert.equal(list.res.status, 200);
+  assert.equal(list.body.length, 1);
+});
+
+test("customer order joins preparation flow and feeds statistics", async () => {
+  seedDb({
+    ...defaultDb(),
+    stock: [{ id: "p1", code: "A1", nom: "Produit A", quantite: 20, tarif: 12 }]
+  });
+
+  const order = await requestJson("/api/customer-orders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      client: {
+        nom: "Client Terrain",
+        telephone: "0611111111",
+        adresse: "2 rue terrain",
+        codePostal: "25000",
+        ville: "Besancon"
+      },
+      products: [{ productId: "p1", quantite: 2 }]
+    })
+  });
+
+  assert.equal(order.res.status, 201);
+  assert.equal(order.body.status, "stock_a_verifier");
+  assert.equal(order.body.total, 24);
+  assert.equal(readDb().stock[0].quantite, 18);
+
+  const today = await requestJson(`/api/customer-orders/today?date=${order.body.dateCommande}`);
+  assert.equal(today.res.status, 200);
+  assert.equal(today.body.length, 1);
+
+  const sent = await requestJson("/api/customer-orders/send-preparation", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ orderIds: [order.body.id] })
+  });
+  assert.equal(sent.res.status, 200);
+  assert.equal(sent.body.orders[0].status, "stock_a_verifier");
+  assert.equal(readDb().stock[0].quantite, 18);
+
+  const stats = await requestJson("/api/statistics");
+  assert.equal(stats.res.status, 200);
+  assert.ok(stats.body.month.revenue >= 24);
+});
+
+test("import ventes feeds statistics from TTC/HT amounts", async () => {
+  seedDb(defaultDb());
+
+  const now = new Date();
+  const todayFr = [
+    String(now.getDate()).padStart(2, "0"),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    now.getFullYear()
+  ].join("/");
+
+  const form = new FormData();
+  form.append("file", workbookBlob([
+    ["Statut", "Code", "Client", "Quantite", "Produit", "Rue", "Code Postal", "Ville", "Date", "Prix unitaire", "HT", "TTC"],
+    ["Envoyee", "P1", "Client CA", "2", "Produit A", "1 rue CA", "25000", "Besancon", todayFr, "12,50", "25", "30"],
+    ["Envoyee", "P2", "Client CA", "1", "Produit B", "1 rue CA", "25000", "Besancon", todayFr, "", "", "18,40 EUR"]
+  ]), "ventes.xlsx");
+
+  const imported = await requestJson("/api/import/ventes", { method: "POST", body: form });
+  assert.equal(imported.res.status, 200);
+
+  const order = imported.body.commandes.find(item => item.clientName === "Client CA");
+  assert.ok(order, "la commande importee doit exister");
+  assert.equal(order.products.length, 2);
+  assert.equal(order.products.reduce((sum, line) => sum + Number(line.totalLigne || 0), 0), 48.4);
+
+  const stats = await requestJson("/api/statistics");
+  assert.equal(stats.res.status, 200);
+  assert.equal(stats.body.month.revenue, 48.4);
+  assert.equal(stats.body.today.revenue, 48.4);
+  assert.equal(stats.body.topClients[0].total, 48.4);
+});
+
+test("planned order creates J-7 reminder and destocks only on confirmation", async () => {
+  seedDb({
+    ...defaultDb(),
+    stock: [{ id: "p1", code: "A1", nom: "Produit A", quantite: 5, tarif: 10 }]
+  });
+
+  const created = await requestJson("/api/planned-orders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      client: {
+        nom: "Client Planifie",
+        telephone: "0622222222",
+        adresse: "3 rue futur",
+        codePostal: "25000",
+        ville: "Besancon"
+      },
+      products: [{ productId: "p1", quantite: 2 }],
+      deliveryDate: "2026-07-20"
+    })
+  });
+
+  assert.equal(created.res.status, 201);
+  assert.equal(created.body.order.status, "planifiee");
+  assert.equal(created.body.order.deliveryDate, "2026-07-20");
+  assert.equal(created.body.reminder.datePrevue, "2026-07-13");
+  assert.equal(created.body.reminder.commandeId, created.body.order.id);
+  assert.equal(readDb().stock[0].quantite, 5, "commande planifiee ne destocke pas avant confirmation");
+
+  const reminders = await requestJson(`/api/reminders?orderId=${encodeURIComponent(created.body.order.id)}`);
+  assert.equal(reminders.res.status, 200);
+  assert.equal(reminders.body.length, 1);
+  assert.equal(reminders.body[0].order.id, created.body.order.id);
+
+  const confirmed = await requestJson(`/api/planned-orders/${created.body.order.id}/confirm`, {
+    method: "POST"
+  });
+
+  assert.equal(confirmed.res.status, 200);
+  assert.equal(confirmed.body.status, "stock_a_verifier");
+  assert.equal(readDb().stock[0].quantite, 3, "confirmation destocke la commande planifiee");
+
+  const after = readDb();
+  const reminder = after.relances.find(item => item.commandeId === created.body.order.id);
+  assert.equal(reminder.status, "fait");
+});
+
+test("delivery sectors CRUD keeps Champagnole default departure", async () => {
+  seedDb(defaultDb());
+
+  const list = await requestJson("/api/delivery-sectors");
+  assert.equal(list.res.status, 200);
+  assert.equal(list.body.some(sector => sector.pointDepart === "Champagnole"), true);
+
+  const created = await requestJson("/api/delivery-sectors", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      secteur: "Haut Jura",
+      villePrincipale: "Morez",
+      jourMois: 12,
+      frequence: "mensuelle",
+      notes: "Test"
+    })
+  });
+
+  assert.equal(created.res.status, 201);
+  assert.equal(created.body.pointDepart, "Champagnole");
+  assert.equal(created.body.jourMois, 12);
+
+  const patched = await requestJson(`/api/delivery-sectors/${created.body.id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jourMois: 18, pointDepart: "Champagnole" })
+  });
+  assert.equal(patched.res.status, 200);
+  assert.equal(patched.body.jourMois, 18);
+
+  const deleted = await requestJson(`/api/delivery-sectors/${created.body.id}`, { method: "DELETE" });
+  assert.equal(deleted.res.status, 200);
+  assert.equal(readDb().deliverySectors.some(sector => sector.id === created.body.id), false);
+});
+
+test("delivered order can be replanned as future planned order with reminder", async () => {
+  seedDb({
+    ...defaultDb(),
+    clients: [{ id: "c1", nom: "Client Livre", rue: "1 rue ok", ville: "Dole", codePostal: "39100", telephone: "0633333333" }],
+    stock: [{ id: "p1", code: "A1", nom: "Produit A", quantite: 10, tarif: 8 }],
+    commandes: [{
+      id: "o-livre",
+      numero: "CMD-2026-001",
+      clientId: "c1",
+      clientName: "Client Livre",
+      address: "1 rue ok",
+      city: "Dole",
+      postalCode: "39100",
+      sector: "Dole",
+      phone: "0633333333",
+      products: [{ code: "A1", nom: "Produit A", quantite: 1, prixUnitaire: 8, totalLigne: 8 }],
+      status: "livre",
+      deliveryDate: "2026-07-01",
+      total: 8
+    }]
+  });
+
+  const replanned = await requestJson("/api/orders/o-livre/replan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deliveryDate: "2026-08-10" })
+  });
+
+  assert.equal(replanned.res.status, 201);
+  assert.equal(replanned.body.order.status, "planifiee");
+  assert.equal(replanned.body.order.parentOrderId, "o-livre");
+  assert.equal(replanned.body.reminder.datePrevue, "2026-08-03");
+  assert.equal(readDb().stock[0].quantite, 10);
+});
+
+test("delivery route without coordinates falls back to coherent sector city address order", async () => {
+  seedDb({
+    ...defaultDb(),
+    clients: [],
+    stock: [
+      { id: "p1", code: "P1", nom: "Produit 1", quantite: 10 },
+      { id: "p2", code: "P2", nom: "Produit 2", quantite: 10 },
+      { id: "p3", code: "P3", nom: "Produit 3", quantite: 10 }
+    ],
+    commandes: [
+      { id: "o-dole", clientId: "c-d", clientName: "Client Dole", address: "2 rue B", city: "Dole", postalCode: "39100", sector: "Dole", products: [{ code: "P1", nom: "Produit 1", quantite: 1 }], status: "pret_livraison", deliveryDate: "2026-07-04" },
+      { id: "o-champ", clientId: "c-c", clientName: "Client Champagnole", address: "1 rue A", city: "Champagnole", postalCode: "39300", sector: "Champagnole", products: [{ code: "P2", nom: "Produit 2", quantite: 1 }], status: "pret_livraison", deliveryDate: "2026-07-04" },
+      { id: "o-bes", clientId: "c-b", clientName: "Client Besancon", address: "3 rue C", city: "Besancon", postalCode: "25000", sector: "Besancon", products: [{ code: "P3", nom: "Produit 3", quantite: 1 }], status: "pret_livraison", deliveryDate: "2026-07-04" }
+    ]
+  });
+
+  const route = await requestJson("/api/routes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sector: "Tous", deliveryDate: "2026-07-04", orderIds: ["o-dole", "o-champ", "o-bes"] })
+  });
+
+  assert.equal(route.res.status, 201);
+  assert.deepEqual(route.body.stops.map(stop => stop.sector), ["Besancon", "Champagnole", "Dole"]);
+});
+
+test("annex orders export returns a real xlsx file", async () => {
+  seedDb({
+    ...defaultDb(),
+    commandes: [{
+      id: "o-annexe",
+      numero: "ANN-1",
+      clientId: "c1",
+      clientName: "Client Annexe",
+      address: "1 rue export",
+      city: "Besancon",
+      postalCode: "25000",
+      phone: "0644444444",
+      products: [{ code: "A1", nom: "Produit A", quantite: 2, prixUnitaire: 9, totalLigne: 18 }],
+      status: "pret_livraison",
+      orderType: "annexe",
+      source: "commande_annexe",
+      deliveryDate: "2026-07-05",
+      total: 18
+    }]
+  });
+
+  const res = await fetch(`${baseUrl}/api/exports/commandes-annexes.xlsx`);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("content-type"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  const buffer = Buffer.from(await res.arrayBuffer());
+  assert.equal(buffer[0], 0x50);
+  assert.equal(buffer[1], 0x4b);
+  assert.ok(buffer.length > 500);
+});
+
+test("statistics recover revenue from imported ventes for legacy zero-total orders", async () => {
+  const now = new Date();
+  const todayIso = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0")
+  ].join("-");
+  seedDb({
+    ...defaultDb(),
+    ventes: [{
+      id: "v-legacy-1",
+      client: "Client Legacy CA",
+      codeProduit: "P1",
+      produit: "Produit Legacy",
+      quantite: 2,
+      ttc: "42,50 EUR",
+      dateCommandeIso: todayIso
+    }],
+    clients: [{
+      id: "c-legacy",
+      nom: "Client Legacy CA",
+      statut: "livre"
+    }],
+    commandes: [{
+      id: "o-legacy",
+      clientId: "c-legacy",
+      clientName: "Client Legacy CA",
+      dateCommande: todayIso,
+      status: "livre",
+      total: 0,
+      products: [{ code: "P1", nom: "Produit Legacy", quantite: 2 }]
+    }]
+  });
+
+  const stats = await requestJson("/api/statistics");
+  assert.equal(stats.res.status, 200);
+  assert.equal(stats.body.month.revenue, 42.5);
+  assert.equal(stats.body.today.revenue, 42.5);
+  assert.equal(stats.body.topProducts[0].total, 42.5);
 });
 
 test("import without file returns 400", async () => {
@@ -393,6 +767,36 @@ test("stock import keeps missing quantities as not initialized", async () => {
 
   assert.equal(res.status, 200);
   assert.equal(body.stock[0].quantite, null);
+});
+
+test("re-import stock preserves manually configured alert threshold when Excel has no Seuil column", async () => {
+  seedDb({
+    ...defaultDb(),
+    stock: [{ id: "p1", code: "A1", nom: "Produit A", quantite: 8, alertThreshold: 12, stockMinimum: 12 }]
+  });
+
+  const form = new FormData();
+  form.append(
+    "file",
+    workbookBlob([
+      ["Code", "Nom", "Quantite"],
+      ["A1", "Produit A", "8"]
+    ]),
+    "stock.xlsx"
+  );
+
+  const { res, body } = await requestJson("/api/import/stock", {
+    method: "POST",
+    body: form
+  });
+
+  assert.equal(res.status, 200);
+  assert.equal(body.stock[0].id, "p1");
+  assert.equal(body.stock[0].alertThreshold, 12);
+
+  const stockView = await requestJson("/api/stock");
+  assert.equal(stockView.body[0].alertThreshold, 12);
+  assert.equal(stockView.body[0].stockStatus, "stock_faible");
 });
 
 // Bug fix v1.8.3 : avant, chaque import recreait tous les produits avec un UUID
@@ -881,7 +1285,7 @@ test("PWA and brand assets are served locally", async () => {
   assert.equal(logo.status, 200);
   assert.match(await manifest.text(), /Séréo/);
   assert.match(await serviceWorker.text(), /CACHE_NAME/);
-  assert.match(await logo.text(), /séréo/);
+  assert.match(await logo.text(), /SEREO/);
 });
 
 test("stock import deduplicates rows with same code (keeps first occurrence)", async () => {

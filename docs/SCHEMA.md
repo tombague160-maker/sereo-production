@@ -19,7 +19,7 @@ erDiagram
         TEXT reference
         TEXT nom
         REAL stock_actuel
-        REAL stock_minimum
+        REAL stock_minimum "defaut 5"
         REAL stock_bloque
         TEXT unite
         TEXT updated_at
@@ -158,6 +158,7 @@ CREATE INDEX idx_imports_archives_type ON imports_archives(type, imported_at DES
 
 - **`payload` JSON** : chaque table principale stocke aussi le JSON complet de l'objet dans `payload` (TEXT). Permet de garder des champs custom hors schéma SQL sans migration. Le code parse/serialize via `JSON.parse/stringify`.
 - **Pas de `FOREIGN KEY` strict** sur les relations clients↔commandes : préserver la souplesse en cas de purge sélective. Les jointures se font côté code.
+- **Seuil stock minimum** : `produits.stock_minimum` vaut `5` par défaut pour préserver l'ancien comportement. Le payload produit expose aussi `alertThreshold` / `stockMinimum`; la logique métier recommande un produit quand `stock_actuel <= seuil minimum`.
 - **Pas de soft-delete** : un `DELETE` est définitif. Pour préserver l'historique, utiliser `mouvements_stock` (stock) ou `historique` (général).
 - **WAL mode** activé pour les écritures concurrentes (`PRAGMA journal_mode = WAL`).
 - **Numérotation `commandes.numero`** : voir [ADR 0001](adr/0001-erp-bucketing-par-client-date.md).

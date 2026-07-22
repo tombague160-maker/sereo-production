@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 160" role="img" aria-labelledby="title">
-  <title id="title">Séréo</title>
+  <title id="title">SEREO</title>
   <rect width="460" height="160" rx="18" fill="#ffffff"/>
   <g fill="#356f70">
-    <text x="52" y="98" font-family="Segoe UI, Arial, sans-serif" font-size="74" font-weight="800" letter-spacing="-1">séréo</text>
+    <text x="48" y="98" font-family="Segoe UI, Arial, sans-serif" font-size="74" font-weight="850" letter-spacing="0">SEREO</text>
     <path d="M280 112c22 18 54 18 75-1" fill="none" stroke="#356f70" stroke-width="10" stroke-linecap="round"/>
   </g>
   <g fill="#a8cbc7">
