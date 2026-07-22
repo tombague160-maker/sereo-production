@@ -1984,13 +1984,20 @@ function renderBarChart(id, rows) {
   const container = document.getElementById(id);
   if (!container) return;
   const max = Math.max(1, ...rows.map(row => Number(row.total) || 0));
-  container.innerHTML = rows.map(row => `
-    <div class="bar-item ${Number(row.total) > 0 ? "is-active" : ""}" title="${escapeAttribute(row.date)} - ${escapeAttribute(formatMoney(row.total))}">
-      <em>${escapeHtml(Number(row.total) > 0 ? formatMoney(row.total) : "-")}</em>
-      <span style="height:${Number(row.total) > 0 ? Math.max(12, (Number(row.total) || 0) / max * 100) : 4}%"></span>
+  // Audit UI 2026-07 : le label monetaire par barre (<em>) se cassait sur
+  // plusieurs lignes et devenait illisible (colonnes de ~20px). On le retire
+  // (la valeur reste dans le tooltip title) et la hauteur devient strictement
+  // proportionnelle (plancher 3% au lieu de 12% qui aplatissait les ecarts).
+  container.innerHTML = rows.map(row => {
+    const total = Number(row.total) || 0;
+    const height = total > 0 ? Math.max(3, total / max * 100) : 2;
+    return `
+    <div class="bar-item ${total > 0 ? "is-active" : ""}" title="${escapeAttribute(row.date)} — ${escapeAttribute(formatMoney(row.total))}">
+      <span style="height:${height}%"></span>
       <small>${escapeHtml(String(row.date).slice(5))}</small>
     </div>
-  `).join("");
+  `;
+  }).join("");
 }
 
 function renderRankList(id, rows, mode) {
@@ -4648,6 +4655,11 @@ function renderMap() {
     map.fitBounds(routeLine.getBounds(), {
       padding: [30, 30]
     });
+  } else if (points.length === 1) {
+    // Audit UI 2026-07 : cas frequent "1 arret" -> fitBounds n'etait pas
+    // appele, la carte restait sur le centre code en dur [46.9511,4.9027] et
+    // le marqueur unique tombait hors-cadre. On recentre sur ce point.
+    map.setView(points[0], 14);
   }
 }
 

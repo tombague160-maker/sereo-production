@@ -251,7 +251,7 @@
         <img src="/brand/sereo-sidebar-bg.svg" alt="" />
       </div>
 
-      <button class="sidebar-settings" type="button" data-action="go-tab" data-target-tab="parametres">
+      <button class="sidebar-settings" type="button" data-action="go-tab" data-target-tab="parametres" aria-label="Paramètres">
         <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-settings"></use></svg></span>
         <span>Paramètres</span>
       </button>
@@ -487,8 +487,8 @@
             </div>
 
             <div class="crm-toolbar">
-              <input id="crmSearch" type="search" placeholder="Nom, téléphone, ville, adresse" autocomplete="off" />
-              <select id="crmStatusFilter">
+              <input id="crmSearch" type="search" placeholder="Nom, téléphone, ville, adresse" autocomplete="off" aria-label="Rechercher un client" />
+              <select id="crmStatusFilter" aria-label="Filtrer par statut client">
                 <option value="all">Tous</option>
                 <option value="prospect">Prospects</option>
                 <option value="client_actif">Clients actifs</option>
