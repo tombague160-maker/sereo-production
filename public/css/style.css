@@ -2035,13 +2035,18 @@ label {
   .settings-grid {
     grid-template-columns: minmax(320px, 1fr) minmax(280px, 1.1fr) minmax(320px, 1fr);
   }
-  /* Annule le `grid-row: span 2` du panel:first-child de la base 2-cols */
-  .settings-grid .panel:first-child {
-    grid-row: 1;
+  /* Audit UI 2026-07 : les panels courts 4 (Reglages tournee) et 5
+     (Diagnostic dates) n'avaient aucun placement -> ils flottaient sous
+     Personnalisation en laissant ~700px de vide sous Secteurs/App mobile.
+     On empile 2/4 en colonne 2 et 3/5 en colonne 3, Personnalisation (tall)
+     occupant la colonne 1 sur 2 rangees. */
+  .settings-grid {
+    align-items: start;
   }
+  .settings-grid .panel:first-child,
   .settings-grid > .panel:nth-of-type(1) {
     grid-column: 1;
-    grid-row: 1;
+    grid-row: 1 / span 2;
   }
   .settings-grid > .panel:nth-of-type(2) {
     grid-column: 2;
@@ -2051,8 +2056,15 @@ label {
     grid-column: 3;
     grid-row: 1;
   }
-  /* Les 2 settings-block enfants directs (Historique + Danger) en pleine
-     largeur en row 2 et 3, en dessous des 3 panels */
+  .settings-grid > .panel:nth-of-type(4) {
+    grid-column: 2;
+    grid-row: 2;
+  }
+  .settings-grid > .panel:nth-of-type(5) {
+    grid-column: 3;
+    grid-row: 2;
+  }
+  /* Les 2 settings-block (Historique + Danger) en pleine largeur en dessous. */
   .settings-grid > .settings-block {
     grid-column: 1 / -1;
   }
@@ -7916,4 +7928,78 @@ html[data-app-theme="blanc"] body,
   width: 44px;
   height: 44px;
   line-height: 44px;
+}
+
+/* ================================================================
+   APP-SHELL MOBILE — audit UI 2026-07 : ressenti "vraie app"
+   Unifie la barre de marque (sidebar sticky) et le hero (topbar) en
+   UN seul bandeau teal continu, comme un header d'app natif.
+   ================================================================ */
+@media (max-width: 560px) {
+  /* Barre de marque sticky : plus d'ombre qui la detache du hero. */
+  :root[data-color-scheme] .sidebar,
+  :root:not([data-color-scheme]) .sidebar {
+    box-shadow: none;
+    padding-bottom: 8px;
+  }
+
+  /* Hero colle a la barre de marque, seul le bas est arrondi -> lecture
+     "un seul header". */
+  :root[data-color-scheme] .topbar,
+  :root:not([data-color-scheme]) .topbar {
+    margin-top: 0;
+    border-radius: 0 0 22px 22px;
+  }
+
+  /* Barre d'onglets flottante : legere separation du contenu au-dessus. */
+  :root[data-color-scheme] .mobile-tabbar,
+  :root:not([data-color-scheme]) .mobile-tabbar {
+    backdrop-filter: saturate(1.1) blur(6px);
+  }
+}
+
+/* Champ quantite editable du stepper commande client (audit UI 2026-07). */
+.stepper-input {
+  width: 100%;
+  min-width: 0;
+  text-align: center;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  padding-inline: 4px;
+}
+
+/* ---- Barre panier collante (commande client, mobile) ---- */
+.customer-cart-bar { display: none; }
+@media (max-width: 560px) {
+  .customer-cart-bar:not([hidden]) {
+    position: fixed;
+    left: max(8px, env(safe-area-inset-left));
+    right: max(8px, env(safe-area-inset-right));
+    bottom: calc(78px + env(safe-area-inset-bottom));
+    z-index: 1050;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px 10px 16px;
+    border-radius: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: 0 16px 40px rgba(15, 61, 61, 0.22);
+  }
+  .customer-cart-bar .ccb-total { display: flex; flex-direction: column; line-height: 1.12; }
+  .customer-cart-bar .ccb-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .customer-cart-bar #customerCartTotalBar { font-size: 18px; font-variant-numeric: tabular-nums; }
+  .customer-cart-bar .button { flex: 1 1 auto; min-width: 0; }
+  #commande-client { padding-bottom: 90px; }
+}
+
+/* Barre de recherche/filtre de la preparation (audit UI 2026-07). */
+.prep-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+@media (max-width: 560px) {
+  .prep-toolbar { grid-template-columns: 1fr; }
 }

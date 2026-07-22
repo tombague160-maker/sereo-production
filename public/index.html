@@ -165,7 +165,7 @@
             </button>
             <button id="tab-commandes-planifiees" class="tab" type="button" role="tab" aria-selected="false" aria-controls="commandes-planifiees" data-tab="commandes-planifiees">
               <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-bell"></use></svg></span>
-              <span>Commandes planifiees</span>
+              <span>Commandes planifiées</span>
             </button>
             <button id="tab-bons-commande" class="tab" type="button" role="tab" aria-selected="false" aria-controls="bons-commande" data-tab="bons-commande">
               <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-receipt"></use></svg></span>
@@ -309,7 +309,7 @@
         </button>
         <button class="more-sheet-item" type="button" role="menuitem" data-tab="commandes-planifiees" data-action="more-menu-pick">
           <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-bell"></use></svg></span>
-          <span class="more-sheet-label">Commandes planifiees</span>
+          <span class="more-sheet-label">Commandes planifiées</span>
         </button>
         <button class="more-sheet-item" type="button" role="menuitem" data-tab="relances" data-action="more-menu-pick">
           <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-bell"></use></svg></span>
@@ -336,6 +336,17 @@
           <span class="more-sheet-label">Paramètres</span>
         </button>
       </div>
+    </div>
+
+    <!-- Barre panier collante (mobile), au niveau .app pour ne pas etre
+         "piegee" par le transform de .page.active. Visibilite geree par JS
+         (onglet Commande client actif + panier non vide). -->
+    <div class="customer-cart-bar" id="customerCartBar" hidden>
+      <div class="ccb-total">
+        <span class="ccb-label">Total panier</span>
+        <strong id="customerCartTotalBar">0,00 €</strong>
+      </div>
+      <button class="button ok" type="submit" form="customerOrderForm">Valider la commande</button>
     </div>
 
     <main class="content">
@@ -546,8 +557,8 @@
             <div class="form-grid two">
               <label>Type
                 <select id="customerOrderType" name="orderType">
-                  <option value="immediate">Commande immediate</option>
-                  <option value="planifiee">Commande planifiee</option>
+                  <option value="immediate">Commande immédiate</option>
+                  <option value="planifiee">Commande planifiée</option>
                 </select>
               </label>
               <label>Date livraison<input id="customerDeliveryDate" name="deliveryDate" type="date" /></label>
@@ -613,10 +624,10 @@
         <div class="panel">
           <div class="panel-heading">
             <div>
-              <h3>Commandes planifiees</h3>
-              <p class="muted">Rappels J-7 et confirmations avant preparation.</p>
+              <h3>Commandes planifiées</h3>
+              <p class="muted">Rappels J-7 et confirmations avant préparation.</p>
             </div>
-            <span id="plannedOrdersSummary" class="status-chip">0 planifiee</span>
+            <span id="plannedOrdersSummary" class="status-chip">0 planifiée</span>
           </div>
           <div id="plannedOrdersList" class="list"></div>
         </div>
@@ -686,13 +697,13 @@
           <div class="panel-heading">
             <div>
               <h3>Exports Excel</h3>
-              <p class="muted">Commandes annexes, planifiees ou toutes commandes.</p>
+              <p class="muted">Commandes annexes, planifiées ou toutes commandes.</p>
             </div>
             <span id="exportsSummary" class="status-chip">XLSX</span>
           </div>
           <div class="quick-actions export-actions">
             <button class="button primary" type="button" data-action="export-annex-orders">Commandes annexes</button>
-            <button class="button secondary" type="button" data-action="export-planned-orders">Commandes planifiees</button>
+            <button class="button secondary" type="button" data-action="export-planned-orders">Commandes planifiées</button>
             <button class="button secondary" type="button" data-action="export-all-orders">Toutes les commandes</button>
           </div>
           <div id="exportsList" class="list compact-list"></div>
@@ -761,6 +772,13 @@
               <span><i class="dot orange-dot"></i> À vérifier</span>
               <span><i class="dot red-dot"></i> Bloqué</span>
             </div>
+          </div>
+
+          <div class="prep-toolbar">
+            <input id="preparationSearch" type="search" placeholder="Rechercher un client ou un numéro" autocomplete="off" aria-label="Rechercher une commande à préparer" />
+            <select id="preparationSectorFilter" aria-label="Filtrer par secteur">
+              <option value="all">Tous les secteurs</option>
+            </select>
           </div>
 
           <div id="preparationList" class="order-board"></div>

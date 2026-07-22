@@ -44,6 +44,7 @@ let customerCart = new Map();
 let todayOrdersSelection = new Set();
 let lastImportSummary = null;
 let recommendFilter = "urgent";
+let preparationFilter = { query: "", sector: "all" };
 let activeThemeId = "sereo";
 let activeBrandImage = "/brand/sereo-logo.svg";
 // "auto" suit l'OS (prefers-color-scheme), "light"/"dark" force.
@@ -809,6 +810,21 @@ function bindUi() {
     renderStock();
   });
 
+  let preparationSearchTimer = null;
+  document.getElementById("preparationSearch")?.addEventListener("input", event => {
+    const value = event.target.value;
+    clearTimeout(preparationSearchTimer);
+    preparationSearchTimer = setTimeout(() => {
+      preparationFilter.query = value;
+      renderPreparation();
+    }, 200);
+  });
+
+  document.getElementById("preparationSectorFilter")?.addEventListener("change", event => {
+    preparationFilter.sector = event.target.value;
+    renderPreparation();
+  });
+
   document.getElementById("crmSearch")?.addEventListener("input", event => {
     crmFilter.query = event.target.value;
     renderCrm();
@@ -980,6 +996,12 @@ function bindUi() {
       return;
     }
 
+    const customerQtyInput = event.target.closest("[data-customer-qty-input]");
+    if (customerQtyInput) {
+      setCustomerCart(customerQtyInput.dataset.productId, customerQtyInput.value);
+      return;
+    }
+
     const thresholdInput = event.target.closest("[data-stock-threshold-input]");
     if (thresholdInput) {
       runAction(thresholdInput, "Sauvegarde...", () => setStockThreshold(thresholdInput.dataset.productId, thresholdInput.value));
@@ -1035,6 +1057,8 @@ function showTab(tabName, options = {}) {
 
   setText("pageTitle", titles[nextTab].title);
   setText("pageSubtitle", titles[nextTab].subtitle);
+
+  updateCustomerCartBar();
 
   if (updateHash) {
     history.replaceState(null, "", `#${nextTab}`);
@@ -1663,7 +1687,7 @@ function renderCustomerCategoryFilter() {
   const current = customerProductFilter.category || "all";
   const categories = [...new Set(stock.map(product => product.category || product.type || "").filter(Boolean))]
     .sort((a, b) => a.localeCompare(b, "fr"));
-  select.innerHTML = `<option value="all">Toutes categories</option>${categories.map(category => `<option value="${escapeAttribute(category)}" ${category === current ? "selected" : ""}>${escapeHtml(category)}</option>`).join("")}`;
+  select.innerHTML = `<option value="all">Toutes catégories</option>${categories.map(category => `<option value="${escapeAttribute(category)}" ${category === current ? "selected" : ""}>${escapeHtml(category)}</option>`).join("")}`;
 }
 
 function renderCustomerCatalog() {
@@ -1693,9 +1717,9 @@ function renderCustomerCatalog() {
           <span class="muted">Stock ${quantity === null ? "?" : escapeHtml(quantity)} - ${formatMoney(getProductPrice(product))}</span>
         </div>
         <div class="product-stepper">
-          <button class="button danger compact" type="button" data-customer-product="${escapeAttribute(product.id)}" data-customer-delta="-1">-</button>
-          <strong>${escapeHtml(selected)}</strong>
-          <button class="button ok compact" type="button" data-customer-product="${escapeAttribute(product.id)}" data-customer-delta="1">+</button>
+          <button class="button secondary compact stepper-btn" type="button" data-customer-product="${escapeAttribute(product.id)}" data-customer-delta="-1" aria-label="Retirer une unité de ${escapeAttribute(getProductName(product))}">−</button>
+          <input class="stepper-input" type="text" inputmode="numeric" pattern="[0-9]*" value="${escapeAttribute(selected)}" data-customer-qty-input data-product-id="${escapeAttribute(product.id)}" aria-label="Quantité ${escapeAttribute(getProductName(product))}">
+          <button class="button secondary compact stepper-btn" type="button" data-customer-product="${escapeAttribute(product.id)}" data-customer-delta="1" aria-label="Ajouter une unité de ${escapeAttribute(getProductName(product))}">+</button>
         </div>
       </article>
     `;
@@ -1729,6 +1753,32 @@ function changeCustomerCart(productId, delta) {
   renderCustomerCart();
 }
 
+// Audit UI 2026-07 : saisie directe de la quantite (valeur absolue) en plus
+// des boutons -/+, pour ne plus taper 30 fois "+". Reutilise la meme
+// validation de stock que changeCustomerCart.
+function setCustomerCart(productId, value) {
+  const product = stock.find(item => String(item.id) === String(productId));
+  if (!product) return;
+  const current = customerCart.get(String(productId)) || {
+    productId: product.id,
+    code: product.code || product.sku || "",
+    nom: getProductName(product),
+    quantite: 0,
+    prixUnitaire: getProductPrice(product)
+  };
+  const available = getProductQuantity(product);
+  const isPlannedOrder = document.getElementById("customerOrderType")?.value === "planifiee";
+  let nextQuantity = Math.max(0, Math.floor(Number(value) || 0));
+  if (!isPlannedOrder && available !== null && nextQuantity > available) {
+    notify("Stock insuffisant pour ce produit.", "warning");
+    nextQuantity = available;
+  }
+  if (nextQuantity === 0) customerCart.delete(String(productId));
+  else customerCart.set(String(productId), { ...current, quantite: nextQuantity });
+  renderCustomerCatalog();
+  renderCustomerCart();
+}
+
 function renderCustomerCart() {
   const container = document.getElementById("customerCart");
   const count = document.getElementById("customerCartCount");
@@ -1738,6 +1788,7 @@ function renderCustomerCart() {
   const total = lines.reduce((sum, line) => sum + line.quantite * line.prixUnitaire, 0);
   if (count) count.textContent = `${lines.length} produit${lines.length > 1 ? "s" : ""}`;
   if (totalEl) totalEl.textContent = formatMoney(total);
+  updateCustomerCartBar();
   if (!lines.length) {
     container.innerHTML = emptyState("Panier vide", "Ajoute les produits depuis le catalogue.");
     return;
@@ -1748,6 +1799,20 @@ function renderCustomerCart() {
       <strong>${formatMoney(line.quantite * line.prixUnitaire)}</strong>
     </div>
   `).join("");
+}
+
+// Barre panier collante (mobile) : visible seulement sur l'onglet Commande
+// client ET quand le panier n'est pas vide. Placee au niveau .app (hors des
+// .page qui ont un transform residuel piegeant position:fixed).
+function updateCustomerCartBar() {
+  const bar = document.getElementById("customerCartBar");
+  if (!bar) return;
+  const totalBar = document.getElementById("customerCartTotalBar");
+  const lines = Array.from(customerCart.values());
+  const total = lines.reduce((sum, line) => sum + line.quantite * line.prixUnitaire, 0);
+  if (totalBar) totalBar.textContent = formatMoney(total);
+  const onCustomerTab = document.getElementById("commande-client")?.classList.contains("active");
+  bar.hidden = !(onCustomerTab && lines.length > 0);
 }
 
 function fillCustomerFormFromClient(clientId) {
@@ -2109,12 +2174,12 @@ function createStockCard(product) {
     </div>
 
     <div class="stock-controls">
-      <button class="button danger compact" type="button" data-product-id="${productId}" data-stock-delta="-5" aria-label="Retirer 5 unités de ${escapeAttribute(getProductName(product))}">-5</button>
-      <button class="button danger compact" type="button" data-product-id="${productId}" data-stock-delta="-1" aria-label="Retirer 1 unité de ${escapeAttribute(getProductName(product))}">-1</button>
+      <button class="button secondary compact stepper-dec" type="button" data-product-id="${productId}" data-stock-delta="-5" aria-label="Retirer 5 unités de ${escapeAttribute(getProductName(product))}">-5</button>
+      <button class="button secondary compact stepper-dec" type="button" data-product-id="${productId}" data-stock-delta="-1" aria-label="Retirer 1 unité de ${escapeAttribute(getProductName(product))}">-1</button>
       <label class="sr-only" for="stock-${productId}">Quantité ${escapeHtml(getProductName(product))}</label>
       <input id="stock-${productId}" data-stock-input data-product-id="${productId}" type="number" min="0" step="1" value="${escapeAttribute(quantityValue)}">
-      <button class="button ok compact" type="button" data-product-id="${productId}" data-stock-delta="1" aria-label="Ajouter 1 unité à ${escapeAttribute(getProductName(product))}">+1</button>
-      <button class="button ok compact" type="button" data-product-id="${productId}" data-stock-delta="5" aria-label="Ajouter 5 unités à ${escapeAttribute(getProductName(product))}">+5</button>
+      <button class="button secondary compact stepper-inc" type="button" data-product-id="${productId}" data-stock-delta="1" aria-label="Ajouter 1 unité à ${escapeAttribute(getProductName(product))}">+1</button>
+      <button class="button secondary compact stepper-inc" type="button" data-product-id="${productId}" data-stock-delta="5" aria-label="Ajouter 5 unités à ${escapeAttribute(getProductName(product))}">+5</button>
     </div>
     <div class="stock-threshold-control">
       <label for="stock-threshold-${productId}">Seuil minimum</label>
@@ -2209,8 +2274,32 @@ async function setStockThreshold(productId, value) {
   notify("Seuil minimum mis a jour.", "success");
 }
 
+// Audit UI 2026-07 : recherche (client/numero) + filtre secteur sur la
+// preparation, pour ne plus scroller tout le backlog.
+function matchesPreparationFilter(order) {
+  const q = preparationFilter.query.trim().toLowerCase();
+  const matchQuery = !q
+    || (order.clientName || "").toLowerCase().includes(q)
+    || (order.numero || "").toLowerCase().includes(q)
+    || (order.city || "").toLowerCase().includes(q);
+  const matchSector = preparationFilter.sector === "all"
+    || (order.sector || "") === preparationFilter.sector;
+  return matchQuery && matchSector;
+}
+
+function renderPreparationFilterOptions() {
+  const select = document.getElementById("preparationSectorFilter");
+  if (!select) return;
+  const sectors = Array.from(new Set(orders.map(order => order.sector).filter(Boolean))).sort();
+  const current = preparationFilter.sector;
+  select.innerHTML = `<option value="all">Tous les secteurs</option>`
+    + sectors.map(s => `<option value="${escapeAttribute(s)}"${s === current ? " selected" : ""}>${escapeHtml(s)}</option>`).join("");
+  if (current !== "all" && !sectors.includes(current)) preparationFilter.sector = "all";
+}
+
 function renderPreparation() {
   renderPreparationStats();
+  renderPreparationFilterOptions();
 
   const container = document.getElementById("preparationList");
   if (!container) return;
@@ -2244,6 +2333,14 @@ function renderPreparation() {
       orders: orders.filter(order => ["importe", "stock_a_verifier"].includes(order.status) && !order.canPrepare)
     }
   ];
+
+  groups.forEach(group => { group.orders = group.orders.filter(matchesPreparationFilter); });
+
+  const hasFilter = preparationFilter.query.trim() || preparationFilter.sector !== "all";
+  if (hasFilter && !groups.some(group => group.orders.length)) {
+    container.innerHTML = emptyState("Aucune commande ne correspond", "Ajuste la recherche ou le secteur.");
+    return;
+  }
 
   groups.forEach(group => {
     const column = document.createElement("section");
