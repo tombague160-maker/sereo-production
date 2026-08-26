@@ -1,10 +1,16 @@
-const CACHE_NAME = "sereo-shell-20260702-themes";
+// IMPORTANT : bumper CACHE_NAME a chaque modification d'un fichier d'APP_SHELL.
+// Sans bump, l'ancienne version reste servie depuis le cache indefiniment —
+// notamment manifest.webmanifest, dont une version perimee casse l'installation
+// sur l'ecran d'accueil sans aucun message d'erreur.
+const CACHE_NAME = "sereo-shell-20260826-icons";
 const API_CACHE_NAME = "sereo-api-20260514";
 const APP_SHELL = [
   "/css/style.css",
   "/js/app.js",
   "/js/anti-fart.js",
   "/favicon.svg",
+  "/icons/icon-192.png",
+  "/icons/icon-512.png",
   "/manifest.webmanifest",
   "/brand/sereo-logo.svg",
   "/brand/sereo-mark.svg",

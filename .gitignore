@@ -25,3 +25,7 @@ exports/*
 playwright-report/
 test-results/
 playwright/.cache/
+
+# Captures d'ecran d'audit UI produites par data/capture.js.
+# Plusieurs dizaines de Mo par serie : utiles en local, jamais dans le depot.
+data/shots*/
