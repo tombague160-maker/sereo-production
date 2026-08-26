@@ -1,0 +1,468 @@
+// Palettes pastel et themes applicatifs.
+//
+// Donnees pures, sans logique. Chaque theme declare `vars` (mode clair) et
+// `darkVars` (mode sombre) ; applyTheme les pose en variables CSS sur :root.
+// Toute couleur ajoutee ici doit exister dans les deux jeux, sinon le mode
+// sombre herite d'une valeur claire et devient illisible.
+
+export const DEFAULT_BRAND_IMAGE = "/brand/sereo-logo.svg";
+
+export const DEFAULT_BRAND_IMAGE_DARK = "/brand/sereo-logo-dark.svg";
+
+export const DEFAULT_BRAND_CACHE_VERSION = "20260701";
+
+export const MAX_BRAND_IMAGE_SIZE = 2 * 1024 * 1024;
+
+// Chaque theme a 2 palettes : `vars` (mode clair) et `darkVars` (mode sombre).
+// applyTheme applique l'un ou l'autre selon le colorScheme actif.
+// Les couleurs dark sont calibrees pour passer WCAG AA (4.5:1 sur texte) avec
+// le fond sombre standard (#0d1518 a #182226).
+export const pastelThemes = {
+  sereo: {
+    id: "sereo",
+    name: "Séréo premium",
+    hint: "Corail, vert canard, rose doux et vert d'eau.",
+    swatches: ["#f18c79", "#3b7374", "#e9c3bd", "#a8c9c8", "#eeeeee"],
+    vars: {
+      "--color-brand-teal": "#3b7374",
+      "--color-brand-teal-dark": "#285a5b",
+      "--color-pastel-green": "#a8c9c8",
+      "--color-pastel-green-light": "#edf6f5",
+      "--color-pastel-orange": "#f18c79",
+      "--color-pastel-orange-light": "#fde2dc",
+      "--color-pastel-orange-strong": "#b95649"
+    },
+    darkVars: {
+      "--color-brand-teal": "#93cbc9",
+      "--color-brand-teal-dark": "#b9e1df",
+      "--color-pastel-green": "#243f42",
+      "--color-pastel-green-light": "#172b2d",
+      "--color-pastel-orange": "#7b453b",
+      "--color-pastel-orange-light": "#3b2724",
+      "--color-pastel-orange-strong": "#f5a08f"
+    }
+  },
+  menthe: {
+    id: "menthe",
+    name: "Menthe & pêche",
+    hint: "Plus clair, très doux sur tablette et mobile.",
+    swatches: ["#d8f3e8", "#ffd6bd", "#0f6a5f"],
+    vars: {
+      "--color-brand-teal": "#0f6a5f",
+      "--color-brand-teal-dark": "#0d3f3b",
+      "--color-pastel-green": "#d8f3e8",
+      "--color-pastel-green-light": "#effaf6",
+      "--color-pastel-orange": "#ffd6bd",
+      "--color-pastel-orange-light": "#fff3eb",
+      "--color-pastel-orange-strong": "#ee8a67"
+    },
+    darkVars: {
+      "--color-brand-teal": "#84d2c4",
+      "--color-brand-teal-dark": "#a3e2d6",
+      "--color-pastel-green": "#1d3a32",
+      "--color-pastel-green-light": "#13241f",
+      "--color-pastel-orange": "#5b3b2a",
+      "--color-pastel-orange-light": "#38241a",
+      "--color-pastel-orange-strong": "#ed9573"
+    }
+  },
+  lavande: {
+    id: "lavande",
+    name: "Lavande & pêche",
+    hint: "Pastel plus chaleureux, sans perdre le contraste.",
+    swatches: ["#ded8f7", "#ffd1b8", "#5d5486"],
+    vars: {
+      "--color-brand-teal": "#5d5486",
+      "--color-brand-teal-dark": "#332d52",
+      "--color-pastel-green": "#ded8f7",
+      "--color-pastel-green-light": "#f5f2ff",
+      "--color-pastel-orange": "#ffd1b8",
+      "--color-pastel-orange-light": "#fff2eb",
+      "--color-pastel-orange-strong": "#e88465"
+    },
+    darkVars: {
+      "--color-brand-teal": "#b3a8d9",
+      "--color-brand-teal-dark": "#c8c0e5",
+      "--color-pastel-green": "#2c2748",
+      "--color-pastel-green-light": "#1d1932",
+      "--color-pastel-orange": "#5a3b29",
+      "--color-pastel-orange-light": "#36241a",
+      "--color-pastel-orange-strong": "#e89272"
+    }
+  },
+  ciel: {
+    id: "ciel",
+    name: "Bleu ciel & abricot",
+    hint: "Ambiance fraîche, lisible et très lumineuse.",
+    swatches: ["#d8eef8", "#ffd8a8", "#246b7a"],
+    vars: {
+      "--color-brand-teal": "#246b7a",
+      "--color-brand-teal-dark": "#173f48",
+      "--color-pastel-green": "#d8eef8",
+      "--color-pastel-green-light": "#eef9fd",
+      "--color-pastel-orange": "#ffd8a8",
+      "--color-pastel-orange-light": "#fff4e6",
+      "--color-pastel-orange-strong": "#e99452"
+    },
+    darkVars: {
+      "--color-brand-teal": "#7fb8c8",
+      "--color-brand-teal-dark": "#a0cfdc",
+      "--color-pastel-green": "#1c3640",
+      "--color-pastel-green-light": "#13242a",
+      "--color-pastel-orange": "#5b3f23",
+      "--color-pastel-orange-light": "#382617",
+      "--color-pastel-orange-strong": "#e8a668"
+    }
+  },
+  sauge: {
+    id: "sauge",
+    name: "Sauge & rose poudré",
+    hint: "Très calme, doux et premium.",
+    swatches: ["#dcebd7", "#ffd3d8", "#476a57"],
+    vars: {
+      "--color-brand-teal": "#476a57",
+      "--color-brand-teal-dark": "#284034",
+      "--color-pastel-green": "#dcebd7",
+      "--color-pastel-green-light": "#f3faf1",
+      "--color-pastel-orange": "#ffd3d8",
+      "--color-pastel-orange-light": "#fff1f3",
+      "--color-pastel-orange-strong": "#df7b86"
+    },
+    darkVars: {
+      "--color-brand-teal": "#a3c4a8",
+      "--color-brand-teal-dark": "#bdd5be",
+      "--color-pastel-green": "#1f3a26",
+      "--color-pastel-green-light": "#14251a",
+      "--color-pastel-orange": "#5b2f33",
+      "--color-pastel-orange-light": "#371d20",
+      "--color-pastel-orange-strong": "#df8a92"
+    }
+  },
+  vanille: {
+    id: "vanille",
+    name: "Vanille & corail doux",
+    hint: "Plus solaire, mais toujours pastel.",
+    swatches: ["#f6edc8", "#ffc7b5", "#6c5d24"],
+    vars: {
+      "--color-brand-teal": "#6c5d24",
+      "--color-brand-teal-dark": "#433817",
+      "--color-pastel-green": "#f6edc8",
+      "--color-pastel-green-light": "#fff9df",
+      "--color-pastel-orange": "#ffc7b5",
+      "--color-pastel-orange-light": "#fff0ea",
+      "--color-pastel-orange-strong": "#e98368"
+    },
+    darkVars: {
+      "--color-brand-teal": "#d4c47e",
+      "--color-brand-teal-dark": "#e6d99a",
+      "--color-pastel-green": "#3a3217",
+      "--color-pastel-green-light": "#26200d",
+      "--color-pastel-orange": "#5a3a2a",
+      "--color-pastel-orange-light": "#38241a",
+      "--color-pastel-orange-strong": "#ec9176"
+    }
+  }
+};
+
+export const applicationThemes = {
+  sereo: {
+    id: "sereo",
+    name: "Vert",
+    hint: "Doux, professionnel, vert canard et vert d'eau.",
+    swatches: ["#285a5b", "#3b7374", "#a8c9c8", "#edf6f5", "#ffffff"],
+    metaColor: "#285a5b",
+    preview: { bg: "#eff3f1", sidebar: "#285a5b", card: "#ffffff", accent: "#a8c9c8" },
+    vars: {
+      "--color-brand-teal": "#3b7374",
+      "--color-brand-teal-dark": "#285a5b",
+      "--color-pastel-green": "#a8c9c8",
+      "--color-pastel-green-light": "#edf6f5",
+      "--color-pastel-orange": "#f18c79",
+      "--color-pastel-orange-light": "#fde2dc",
+      "--color-pastel-orange-strong": "#b95649",
+      "--neo-bg": "#eff3f1",
+      "--neo-page": "#f8faf8",
+      "--neo-sidebar": "#285a5b",
+      "--neo-sidebar-strong": "#1f494a",
+      "--neo-teal": "#3b7374",
+      "--neo-teal-dark": "#285a5b",
+      "--neo-aqua": "#a8c9c8",
+      "--neo-aqua-soft": "#edf6f5",
+      "--neo-coral": "#f18c79",
+      "--neo-coral-dark": "#b95649",
+      "--neo-coral-soft": "#fde2dc",
+      "--neo-blush": "#e9c3bd",
+      "--neo-blush-soft": "#fbefed",
+      "--neo-card": "#ffffff",
+      "--neo-line": "#dfe7e3",
+      "--neo-text": "#183233",
+      "--neo-muted": "#758483"
+    },
+    darkVars: {
+      "--color-brand-teal": "#93cbc9",
+      "--color-brand-teal-dark": "#b9e1df",
+      "--color-pastel-green": "#243f42",
+      "--color-pastel-green-light": "#172b2d",
+      "--color-pastel-orange": "#7b453b",
+      "--color-pastel-orange-light": "#3b2724",
+      "--color-pastel-orange-strong": "#f5a08f",
+      "--neo-bg": "#0d1518",
+      "--neo-page": "#111b1e",
+      "--neo-sidebar": "#101c1f",
+      "--neo-sidebar-strong": "#0a1113",
+      "--neo-teal": "#93cbc9",
+      "--neo-teal-dark": "#b9e1df",
+      "--neo-aqua": "#243f42",
+      "--neo-aqua-soft": "#172b2d",
+      "--neo-coral": "#f5a08f",
+      "--neo-coral-dark": "#ffb7aa",
+      "--neo-coral-soft": "#3b2724",
+      "--neo-blush": "#7b453b",
+      "--neo-blush-soft": "#2a1d1b",
+      "--neo-card": "#182226",
+      "--neo-line": "#2a3d3f",
+      "--neo-text": "#e8eef0",
+      "--neo-muted": "#a8b8bc"
+    }
+  },
+  orange: {
+    id: "orange",
+    name: "Orange",
+    hint: "Chaleureux, accueillant et dynamique.",
+    swatches: ["#d97732", "#f6a15a", "#fff1df", "#f7eadc", "#ffffff"],
+    metaColor: "#9a421d",
+    preview: { bg: "#f6efe7", sidebar: "#c96332", card: "#fffaf4", accent: "#f6a15a" },
+    vars: {
+      "--color-brand-teal": "#d97732",
+      "--color-brand-teal-dark": "#9a421d",
+      "--color-pastel-green": "#f7dcc2",
+      "--color-pastel-green-light": "#fff7ef",
+      "--color-pastel-orange": "#f6a15a",
+      "--color-pastel-orange-light": "#fff1df",
+      "--color-pastel-orange-strong": "#c05621",
+      "--neo-bg": "#f6efe7",
+      "--neo-page": "#fffaf4",
+      "--neo-sidebar": "#c96332",
+      "--neo-sidebar-strong": "#8d421c",
+      "--neo-teal": "#d97732",
+      "--neo-teal-dark": "#9a421d",
+      "--neo-aqua": "#f6c08a",
+      "--neo-aqua-soft": "#fff4e8",
+      "--neo-coral": "#f18c4e",
+      "--neo-coral-dark": "#b64e1f",
+      "--neo-coral-soft": "#ffe4cf",
+      "--neo-blush": "#f2c9a7",
+      "--neo-blush-soft": "#fff0e3",
+      "--neo-card": "#ffffff",
+      "--neo-line": "#ead8c5",
+      "--neo-text": "#352018",
+      "--neo-muted": "#8a6d5b"
+    },
+    darkVars: {
+      "--color-brand-teal": "#f4a15e",
+      "--color-brand-teal-dark": "#ffd3ad",
+      "--color-pastel-green": "#3a2418",
+      "--color-pastel-green-light": "#22150e",
+      "--color-pastel-orange": "#6d351b",
+      "--color-pastel-orange-light": "#351d12",
+      "--color-pastel-orange-strong": "#ffb07c",
+      "--neo-bg": "#130d0a",
+      "--neo-page": "#1b120d",
+      "--neo-sidebar": "#1e130d",
+      "--neo-sidebar-strong": "#0d0805",
+      "--neo-teal": "#f4a15e",
+      "--neo-teal-dark": "#ffd3ad",
+      "--neo-aqua": "#3a2418",
+      "--neo-aqua-soft": "#22150e",
+      "--neo-coral": "#ffb07c",
+      "--neo-coral-dark": "#ffd3ad",
+      "--neo-coral-soft": "#351d12",
+      "--neo-blush": "#6d351b",
+      "--neo-blush-soft": "#28160d",
+      "--neo-card": "#211712",
+      "--neo-line": "#493224",
+      "--neo-text": "#fff3e8",
+      "--neo-muted": "#d0b19a"
+    }
+  },
+  orange_vert: {
+    id: "orange_vert",
+    name: "Orange et vert",
+    hint: "Vert pour l'action, orange pour le rythme.",
+    swatches: ["#2f6f63", "#f18c4e", "#b7d7cd", "#fff2e8", "#ffffff"],
+    metaColor: "#2f6f63",
+    preview: { bg: "#f3f5ef", sidebar: "#2f6f63", card: "#ffffff", accent: "#f18c4e" },
+    vars: {
+      "--color-brand-teal": "#2f6f63",
+      "--color-brand-teal-dark": "#1f4d45",
+      "--color-pastel-green": "#b7d7cd",
+      "--color-pastel-green-light": "#edf7f3",
+      "--color-pastel-orange": "#f18c4e",
+      "--color-pastel-orange-light": "#fff2e8",
+      "--color-pastel-orange-strong": "#c95d22",
+      "--neo-bg": "#f3f5ef",
+      "--neo-page": "#fbfcf8",
+      "--neo-sidebar": "#2f6f63",
+      "--neo-sidebar-strong": "#1f4d45",
+      "--neo-teal": "#2f6f63",
+      "--neo-teal-dark": "#1f4d45",
+      "--neo-aqua": "#b7d7cd",
+      "--neo-aqua-soft": "#edf7f3",
+      "--neo-coral": "#f18c4e",
+      "--neo-coral-dark": "#c95d22",
+      "--neo-coral-soft": "#fff2e8",
+      "--neo-blush": "#f0c7aa",
+      "--neo-blush-soft": "#fff6ef",
+      "--neo-card": "#ffffff",
+      "--neo-line": "#dce7df",
+      "--neo-text": "#18302c",
+      "--neo-muted": "#6c7f7a"
+    },
+    darkVars: {
+      "--color-brand-teal": "#8bd0c1",
+      "--color-brand-teal-dark": "#b4eadf",
+      "--color-pastel-green": "#1d3833",
+      "--color-pastel-green-light": "#12231f",
+      "--color-pastel-orange": "#744025",
+      "--color-pastel-orange-light": "#321d12",
+      "--color-pastel-orange-strong": "#f4a66e",
+      "--neo-bg": "#0d1514",
+      "--neo-page": "#111c1a",
+      "--neo-sidebar": "#10211f",
+      "--neo-sidebar-strong": "#08110f",
+      "--neo-teal": "#8bd0c1",
+      "--neo-teal-dark": "#b4eadf",
+      "--neo-aqua": "#1d3833",
+      "--neo-aqua-soft": "#12231f",
+      "--neo-coral": "#f4a66e",
+      "--neo-coral-dark": "#ffc49e",
+      "--neo-coral-soft": "#321d12",
+      "--neo-blush": "#744025",
+      "--neo-blush-soft": "#24160f",
+      "--neo-card": "#182320",
+      "--neo-line": "#2d4540",
+      "--neo-text": "#edf6f3",
+      "--neo-muted": "#a8bbb5"
+    }
+  },
+  noir: {
+    id: "noir",
+    name: "Noir",
+    hint: "Sombre, premium, lisible et contrasté.",
+    swatches: ["#080a0b", "#171b1f", "#74d0c0", "#f18c79", "#f4f7f8"],
+    metaColor: "#080a0b",
+    preview: { bg: "#080a0b", sidebar: "#050607", card: "#171b1f", accent: "#74d0c0" },
+    vars: {
+      "--color-brand-teal": "#74d0c0",
+      "--color-brand-teal-dark": "#d7fff7",
+      "--color-pastel-green": "#21302f",
+      "--color-pastel-green-light": "#111719",
+      "--color-pastel-orange": "#f18c79",
+      "--color-pastel-orange-light": "#2d1b18",
+      "--color-pastel-orange-strong": "#ffb09f",
+      "--neo-bg": "#080a0b",
+      "--neo-page": "#0d1012",
+      "--neo-sidebar": "#050607",
+      "--neo-sidebar-strong": "#000000",
+      "--neo-teal": "#74d0c0",
+      "--neo-teal-dark": "#d7fff7",
+      "--neo-aqua": "#21302f",
+      "--neo-aqua-soft": "#111719",
+      "--neo-coral": "#f18c79",
+      "--neo-coral-dark": "#ffb09f",
+      "--neo-coral-soft": "#2d1b18",
+      "--neo-blush": "#4a302b",
+      "--neo-blush-soft": "#19100f",
+      "--neo-card": "#171b1f",
+      "--neo-line": "#2c3338",
+      "--neo-text": "#f4f7f8",
+      "--neo-muted": "#a8b1b5"
+    },
+    darkVars: {
+      "--color-brand-teal": "#74d0c0",
+      "--color-brand-teal-dark": "#d7fff7",
+      "--color-pastel-green": "#21302f",
+      "--color-pastel-green-light": "#111719",
+      "--color-pastel-orange": "#f18c79",
+      "--color-pastel-orange-light": "#2d1b18",
+      "--color-pastel-orange-strong": "#ffb09f",
+      "--neo-bg": "#080a0b",
+      "--neo-page": "#0d1012",
+      "--neo-sidebar": "#050607",
+      "--neo-sidebar-strong": "#000000",
+      "--neo-teal": "#74d0c0",
+      "--neo-teal-dark": "#d7fff7",
+      "--neo-aqua": "#21302f",
+      "--neo-aqua-soft": "#111719",
+      "--neo-coral": "#f18c79",
+      "--neo-coral-dark": "#ffb09f",
+      "--neo-coral-soft": "#2d1b18",
+      "--neo-blush": "#4a302b",
+      "--neo-blush-soft": "#19100f",
+      "--neo-card": "#171b1f",
+      "--neo-line": "#2c3338",
+      "--neo-text": "#f4f7f8",
+      "--neo-muted": "#a8b1b5"
+    }
+  },
+  blanc: {
+    id: "blanc",
+    name: "Blanc",
+    hint: "Très clair, minimaliste et épuré.",
+    swatches: ["#ffffff", "#f5f6f7", "#111827", "#d1d5db", "#6b7280"],
+    metaColor: "#ffffff",
+    preview: { bg: "#ffffff", sidebar: "#ffffff", card: "#f8fafc", accent: "#111827" },
+    vars: {
+      "--color-brand-teal": "#111827",
+      "--color-brand-teal-dark": "#020617",
+      "--color-pastel-green": "#f3f4f6",
+      "--color-pastel-green-light": "#f8fafc",
+      "--color-pastel-orange": "#d1d5db",
+      "--color-pastel-orange-light": "#f9fafb",
+      "--color-pastel-orange-strong": "#374151",
+      "--neo-bg": "#f6f7f8",
+      "--neo-page": "#ffffff",
+      "--neo-sidebar": "#ffffff",
+      "--neo-sidebar-strong": "#f3f4f6",
+      "--neo-teal": "#111827",
+      "--neo-teal-dark": "#020617",
+      "--neo-aqua": "#e5e7eb",
+      "--neo-aqua-soft": "#f8fafc",
+      "--neo-coral": "#6b7280",
+      "--neo-coral-dark": "#374151",
+      "--neo-coral-soft": "#f3f4f6",
+      "--neo-blush": "#e5e7eb",
+      "--neo-blush-soft": "#f9fafb",
+      "--neo-card": "#ffffff",
+      "--neo-line": "#e5e7eb",
+      "--neo-text": "#111827",
+      "--neo-muted": "#6b7280"
+    },
+    darkVars: {
+      "--color-brand-teal": "#111827",
+      "--color-brand-teal-dark": "#020617",
+      "--color-pastel-green": "#f3f4f6",
+      "--color-pastel-green-light": "#f8fafc",
+      "--color-pastel-orange": "#d1d5db",
+      "--color-pastel-orange-light": "#f9fafb",
+      "--color-pastel-orange-strong": "#374151",
+      "--neo-bg": "#f6f7f8",
+      "--neo-page": "#ffffff",
+      "--neo-sidebar": "#ffffff",
+      "--neo-sidebar-strong": "#f3f4f6",
+      "--neo-teal": "#111827",
+      "--neo-teal-dark": "#020617",
+      "--neo-aqua": "#e5e7eb",
+      "--neo-aqua-soft": "#f8fafc",
+      "--neo-coral": "#6b7280",
+      "--neo-coral-dark": "#374151",
+      "--neo-coral-soft": "#f3f4f6",
+      "--neo-blush": "#e5e7eb",
+      "--neo-blush-soft": "#f9fafb",
+      "--neo-card": "#ffffff",
+      "--neo-line": "#e5e7eb",
+      "--neo-text": "#111827",
+      "--neo-muted": "#6b7280"
+    }
+  }
+};

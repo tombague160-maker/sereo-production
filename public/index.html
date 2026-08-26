@@ -1266,6 +1266,14 @@
   </div>
 
   <script src="/vendor/leaflet/leaflet.js"></script>
-  <script src="/js/app.js?v=20260702-themes"></script>
+
+  <!-- app.js est un module ES : il importe ./utils/* et ./config/*.
+       type="module" implique un chargement differe, donc l'execution a lieu
+       apres le parsing du document mais avant DOMContentLoaded — l'ecouteur
+       d'amorcage de app.js est donc bien enregistre a temps.
+       Leaflet reste un script classique et s'execute avant : `L` est defini
+       au moment ou le module tourne.
+       La CSP `script-src 'self'` couvre les modules sans modification. -->
+  <script type="module" src="/js/app.js?v=20260826-esm"></script>
 </body>
 </html>

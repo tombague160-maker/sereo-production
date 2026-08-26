@@ -2,12 +2,20 @@
 // Sans bump, l'ancienne version reste servie depuis le cache indefiniment —
 // notamment manifest.webmanifest, dont une version perimee casse l'installation
 // sur l'ecran d'accueil sans aucun message d'erreur.
-const CACHE_NAME = "sereo-shell-20260826-icons";
+const CACHE_NAME = "sereo-shell-20260826-esm";
 const API_CACHE_NAME = "sereo-api-20260514";
 const APP_SHELL = [
   "/css/style.css",
   "/js/app.js",
   "/js/anti-fart.js",
+  // Modules ES importes par app.js. Ils DOIVENT figurer ici : un import non
+  // pre-cache fait echouer le chargement complet du module en mode hors ligne,
+  // et l'application reste sur une page blanche sans message d'erreur.
+  "/js/utils/dom.js",
+  "/js/utils/text.js",
+  "/js/utils/address.js",
+  "/js/config/themes.js",
+  "/js/config/tabs.js",
   "/favicon.svg",
   "/icons/icon-192.png",
   "/icons/icon-512.png",

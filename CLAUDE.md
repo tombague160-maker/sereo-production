@@ -11,21 +11,43 @@ Sereo V7 est une application locale Node.js/Express + SPA vanilla JS pour gérer
 ```bash
 npm install                  # Installation des dépendances
 npm start                    # Lance le serveur sur PORT (défaut 3000)
-npm test                     # 130+ tests via node --test (api.test.js + auth.test.js)
-npm run check                # node --check sur server.js, app.js, sqliteStore.js, scripts
+npm test                     # 256 tests via node --test (suites api, auth, corruption, perf...)
+npm run check                # node --check sur server.js, TOUS les modules front, sqliteStore, scripts
+npm run test:e2e             # Playwright : smoke + parcours des 15 onglets
+npm run icons                # Régénère public/icons/ depuis la marque (rare)
 npm run migrate:sqlite       # Migration data/db.json -> data/sereo.sqlite (one-shot)
 ```
 
 Lancer un seul test : `node --test test/api.test.js --test-name-pattern="<regex sur le titre du test>"`.
 
-Avant tout commit qui touche `server.js` ou `public/js/app.js` : **toujours `npm run check` puis `npm test`**. Le syntax check est obligatoire car ces fichiers font 2700+ lignes et une typo casse la prod silencieusement (l'updater déploie sans valider).
+Avant tout commit qui touche `server.js` ou `public/js/` : **toujours `npm run check` puis `npm test`**. Le syntax check est obligatoire car `server.js` fait ~6900 lignes et `app.js` ~5000 : une typo casse la prod silencieusement (l'updater déploie sans valider).
+
+**Le front n'est couvert que par les tests e2e.** `npm test` teste le serveur en HTTP et ne charge jamais `public/js/`. Après toute modification du front, lancer `npm run test:e2e` : `test/e2e/tabs.spec.js` parcourt les 15 onglets et échoue à la moindre erreur console, ce qui attrape les `ReferenceError` qu'un `node --check` laisse passer.
 
 ## Architecture
 
 ### Stack
-- **Backend** : Express 4 (`server.js`, ~2700 lignes, monolithique)
+- **Backend** : Express 4 (`server.js`, ~6900 lignes, monolithique)
 - **Storage** : SQLite via `node:sqlite` natif (Node 24 requis), couche dans `storage/sqliteStore.js`. Le mode JSON (`SEREO_STORAGE=json`) est gardé pour migration mais n'est plus la source de vérité prod.
-- **Frontend** : SPA vanilla JS (`public/js/app.js`, ~2800 lignes), pas de framework, pas de bundler. Routing par `#hash`.
+- **Frontend** : SPA vanilla JS en **modules ES natifs**, pas de framework, pas de bundler. Routing par `#hash`.
+
+### Découpage du front (chantier V8 phase 0)
+
+`public/js/app.js` (~5000 lignes) est chargé via `<script type="module">` et importe :
+
+| Module | Rôle |
+|---|---|
+| `utils/dom.js` | `escapeHtml`, `escapeAttribute`, `cssEscape`, `emptyState`. Aucune dépendance. |
+| `utils/text.js` | Normalisation texte/téléphone, codes produit, Markdown minimal. |
+| `utils/address.js` | Adresses, coordonnées, liens `tel:` et Google Maps. |
+| `config/themes.js` | `pastelThemes`, `applicationThemes`, constantes de marque. Données pures. |
+| `config/tabs.js` | `mainTabs`, `MOBILE_OVERFLOW_TABS`, `titles`. |
+
+**Pas de bundler, volontairement** : les modules ES sont servis tels quels par Express et couverts par la CSP `script-src 'self'` sans aménagement. Aucune étape de build ne peut donc casser un déploiement.
+
+`app.js` conserve pour l'instant l'état global mutable (~24 `let` en tête de fichier) et le rendu. Le découpage par domaine viendra ensuite : il suppose d'abord un store partagé, car **on ne peut pas réassigner un binding importé en ESM**. Les 22 fonctions qui réassignent un global sont concentrées sur `loadData` et le groupe tournée (`activeRoute`, `activeStopIndex`, `route`, `currentIndex`).
+
+Découper **par domaine métier**, jamais par écran : les domaines viennent du modèle de données et sont stables, les écrans vont bouger avec la refonte.
 - **Carte** : Leaflet + tuiles OpenStreetMap (mode livreur, calcul de tournée).
 - **Import Excel** : `read-excel-file` pour les fichiers ventes/clients Ximi (.xlsx uniquement).
 - **Upload** : `multer` plafonné à 10 MB, fichiers .xlsx exclusivement.
@@ -162,7 +184,10 @@ Voir `.env.example` pour la liste complète. Les principales :
 - **Node 24 minimum** : le module `node:sqlite` (natif, sync) est utilisé directement. `engines` du package.json le force.
 - **CSP bloque les inline scripts** : tout `<script>` inline dans index.html sera silencieusement ignoré et causera des bugs visuels (flash dark mode résolu par PR #23 qui a externalisé le script anti-FART).
 - **Variables CSS dupliquées** dans 3 blocs (`:root`, `@media dark`, `[data-color-scheme="dark"]`). Garder les 3 synchronisés.
-- **Volume `brand:` à NE PAS monter en prod** : le mount `/app/public/brand` overshadowe les SVG bakés dans l'image → 404. Les brand images custom sont stockées en base64 dans la DB (`appearance.brandImage`), pas sur disque.
+- **Volume `brand:` à NE PAS monter en prod** : le mount `/app/public/brand` overshadowe les SVG bakés dans l'image → 404. Les brand images custom sont stockées en base64 dans la DB (`appearance.brandImage`), pas sur disque. **C'est pour cette raison que les icônes PWA vivent dans `public/icons/` et non `public/brand/`** : ce dossier n'est monté nulle part, les icônes survivent donc au volume.
+- **Tout module ES ajouté doit être inscrit dans 3 endroits** : l'`import` dans `app.js`, la liste `APP_SHELL` du service worker, et le script `check` du `package.json`. Un import absent d'`APP_SHELL` fait échouer le chargement complet du module hors ligne — l'app reste sur une page blanche, sans message d'erreur.
+- **Bumper `CACHE_NAME` du service worker** à chaque modification d'un fichier d'`APP_SHELL`. Sans bump, l'ancienne version continue d'être servie indéfiniment ; c'est particulièrement traître pour `manifest.webmanifest`, dont une version périmée casse l'installation sur l'écran d'accueil en silence.
+- **iOS ignore les icônes du manifeste** : il ne lit que les `<link rel="apple-touch-icon">` de `index.html`. Une icône ajoutée uniquement au manifeste n'apparaîtra jamais sur un iPhone.
 - **`Math.max(0, ...)` et non `Math.max(1, ...)`** sur les quantités produit (PR antérieure). Une qty 0 est légitime (erreur métier signalée), ne pas la forcer à 1.
 - **`pull_policy: build` + auto-update** : le `docker compose up --force-recreate` doit être lancé avec `--no-build` côté sereo-updater, sinon il tente de re-build le context host depuis le container. Configuration côté OMV (Tom.yml).
 
