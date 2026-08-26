@@ -30,6 +30,15 @@ uploads/
 imports/
 exports/
 
+# Archives d'imports : ce sont des fichiers Excel clients generes a l'execution
+# et montes en volume. Les embarquer dans l'image y ferait entrer des donnees
+# clients, et l'image grossirait a chaque build.
+data/imports-archives/
+
+# Captures d'ecran d'audit UI : plusieurs centaines de Mo de PNG qui n'ont
+# aucune raison d'etre envoyees au daemon Docker a chaque build.
+data/shots*/
+
 # Variables d'env locales - secrets
 .env
 .env.*

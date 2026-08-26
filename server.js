@@ -315,7 +315,17 @@ app.get("/login.js", (req, res) => {
   // pour etre accessible sans authentification.
   res.sendFile(path.join(__dirname, "public", "login.js"));
 });
-app.post("/login", handleLogin);
+// handleLogin est asynchrone depuis la phase 1 (scrypt). Express 4 n'attrape
+// PAS le rejet d'un handler async : sans ce .catch, une erreur laisserait la
+// requete pendante jusqu'au timeout et remonterait en unhandledRejection.
+app.post("/login", (req, res) => {
+  handleLogin(req, res).catch(error => {
+    console.error("[auth] echec du traitement de la connexion :", error);
+    if (res.headersSent) return;
+    const next = getSafeRedirectTarget(req.body && req.body.next);
+    res.redirect(303, `/login?error=1&next=${encodeURIComponent(next)}`);
+  });
+});
 app.post("/logout", handleLogout);
 app.use(requireAccessAuth);
 app.use(express.json({ limit: "5mb" }));
@@ -455,12 +465,241 @@ function securityHeaders(req, res, next) {
   next();
 }
 
-function isAccessAuthEnabled() {
+function isEnvAuthConfigured() {
   return Boolean(AUTH_USER && AUTH_PASSWORD);
 }
 
+/**
+ * Existe-t-il au moins un compte actif en base ?
+ *
+ * Enveloppe dans un try/catch parce que cette fonction est appelee sur le
+ * chemin d'authentification, donc avant /login — et que le stockage peut etre
+ * indisponible (recovery de corruption en cours, mode JSON legacy). Dans ce
+ * cas on retombe sur la seule protection par variables d'environnement plutot
+ * que de renvoyer 500 sur la page de connexion.
+ */
+function hasActiveUsers() {
+  if (!useSqliteStorage()) return false;
+  try {
+    return getSqliteStore().countUsers() > 0;
+  } catch {
+    return false;
+  }
+}
+
+function isAccessAuthEnabled() {
+  return isEnvAuthConfigured() || hasActiveUsers();
+}
+
 function isAccessAuthMisconfigured() {
-  return Boolean(AUTH_USER || AUTH_PASSWORD) && !isAccessAuthEnabled();
+  // Un seul des deux couples d'env vars renseigne reste une erreur de config,
+  // independamment des comptes en base.
+  return Boolean(AUTH_USER || AUTH_PASSWORD) && !isEnvAuthConfigured();
+}
+
+/**
+ * Identite associee a une requete authentifiee, ou null.
+ *
+ * Le role est relu en base a CHAQUE requete plutot que porte par le cookie :
+ * ainsi desactiver un compte ou changer son role prend effet immediatement,
+ * au lieu d'attendre l'expiration de la session (12 h).
+ */
+function getRequestIdentity(req) {
+  if (!isAccessAuthEnabled()) {
+    // Auth desactivee (dev) : tout le monde est administrateur, comme avant.
+    return { identifiant: "dev", role: "admin", uid: null, source: "desactivee" };
+  }
+
+  const session = readAccessSession(getAccessSessionCookie(req));
+  if (session) {
+    if (session.uid) {
+      const user = lookupActiveUser(session.uid);
+      return user
+        ? { identifiant: user.identifiant, role: user.role, uid: user.id, source: "compte" }
+        : null;
+    }
+    return { identifiant: AUTH_USER, role: "admin", uid: null, source: "environnement" };
+  }
+
+  // Authentification Basic : reservee au couple d'environnement (cf.
+  // isAuthorizedRequest). Elle donne donc toujours le role administrateur.
+  const credentials = parseBasicAuthHeader(req.get("authorization"));
+  if (
+    credentials
+    && isEnvAuthConfigured()
+    && constantTimeEqual(credentials.username, AUTH_USER)
+    && constantTimeEqual(credentials.password, AUTH_PASSWORD)
+  ) {
+    return { identifiant: AUTH_USER, role: "admin", uid: null, source: "basic" };
+  }
+
+  return null;
+}
+
+function lookupActiveUser(id) {
+  if (!useSqliteStorage()) return null;
+  try {
+    const user = getSqliteStore().getUser(id);
+    return user && user.actif ? user : null;
+  } catch {
+    return null;
+  }
+}
+
+// --- Service des comptes (V8 phase 1) --------------------------------------
+//
+// Couche metier entre les endpoints d'administration et le store : c'est ici
+// que vivent les validations, pour qu'un compte cree par un test, par l'API ou
+// par un script d'amorcage obeisse exactement aux memes regles.
+
+const MIN_PASSWORD_LENGTH = 10;
+const MIN_LOGIN_LENGTH = 3;
+const MAX_LOGIN_LENGTH = 60;
+
+function normalizeLogin(value) {
+  return String(value ?? "").trim();
+}
+
+function assertValidLogin(identifiant) {
+  if (identifiant.length < MIN_LOGIN_LENGTH || identifiant.length > MAX_LOGIN_LENGTH) {
+    throw badRequest(
+      `L'identifiant doit faire entre ${MIN_LOGIN_LENGTH} et ${MAX_LOGIN_LENGTH} caracteres.`
+    );
+  }
+  // Espaces et deux-points interdits : le deux-points est le separateur de
+  // l'authentification Basic, un identifiant en contenant serait ambigu.
+  if (/[\s:]/.test(identifiant)) {
+    throw badRequest("L'identifiant ne doit contenir ni espace ni deux-points.");
+  }
+}
+
+function assertValidPassword(motDePasse) {
+  if (String(motDePasse ?? "").length < MIN_PASSWORD_LENGTH) {
+    throw badRequest(`Le mot de passe doit faire au moins ${MIN_PASSWORD_LENGTH} caracteres.`);
+  }
+}
+
+function assertUsersSupported() {
+  if (!useSqliteStorage()) {
+    throw badRequest("Les comptes utilisateurs necessitent le stockage SQLite.");
+  }
+}
+
+async function createUserAccount({ identifiant, motDePasse, role, actif = true }) {
+  assertUsersSupported();
+
+  const login = normalizeLogin(identifiant);
+  assertValidLogin(login);
+  assertValidPassword(motDePasse);
+
+  if (!isKnownRole(role)) {
+    throw badRequest(`Role inconnu : ${role}. Roles valides : ${Object.keys(ROLES).join(", ")}.`);
+  }
+
+  const store = getSqliteStore();
+  if (store.findUserForAuth(login)) {
+    throw badRequest("Un compte porte deja cet identifiant.");
+  }
+
+  const sel = generatePasswordSalt();
+  const compte = {
+    id: crypto.randomUUID(),
+    identifiant: login,
+    hash: await hashPassword(motDePasse, sel),
+    sel,
+    role: String(role),
+    actif: Boolean(actif),
+    creeLe: new Date().toISOString()
+  };
+
+  store.saveUser(compte);
+  return store.getUser(compte.id);
+}
+
+/**
+ * Met a jour un compte. Seuls les champs fournis sont modifies ; le mot de
+ * passe n'est re-hashe que s'il est explicitement transmis.
+ */
+async function updateUserAccount(id, { role, actif, motDePasse } = {}) {
+  assertUsersSupported();
+
+  const store = getSqliteStore();
+  const existant = store.getUser(id);
+  if (!existant) throw notFound("Compte introuvable.");
+
+  const courant = store.findUserForAuth(existant.identifiant);
+  let hash = courant.hash;
+  let sel = courant.sel;
+
+  if (motDePasse !== undefined) {
+    assertValidPassword(motDePasse);
+    sel = generatePasswordSalt();
+    hash = await hashPassword(motDePasse, sel);
+  }
+
+  if (role !== undefined && !isKnownRole(role)) {
+    throw badRequest(`Role inconnu : ${role}.`);
+  }
+
+  const cible = {
+    id: existant.id,
+    identifiant: existant.identifiant,
+    hash,
+    sel,
+    role: role === undefined ? existant.role : String(role),
+    actif: actif === undefined ? existant.actif : Boolean(actif),
+    creeLe: existant.creeLe,
+    derniereConnexion: existant.derniereConnexion
+  };
+
+  assertLastAdminRemains(store, cible);
+  store.saveUser(cible);
+  return store.getUser(id);
+}
+
+function deleteUserAccount(id) {
+  assertUsersSupported();
+
+  const store = getSqliteStore();
+  const existant = store.getUser(id);
+  if (!existant) throw notFound("Compte introuvable.");
+
+  assertLastAdminRemains(store, { ...existant, supprime: true });
+  return store.deleteUser(id);
+}
+
+/**
+ * Empeche de supprimer, desactiver ou retrograder le dernier administrateur
+ * actif quand aucune protection par variables d'environnement n'existe.
+ *
+ * Sans cette garde, retirer son propre role admin verrouillerait definitivement
+ * l'administration de l'application, sans aucun moyen de revenir en arriere
+ * depuis l'interface.
+ */
+function assertLastAdminRemains(store, cible) {
+  if (isEnvAuthConfigured()) return; // Le compte d'environnement reste admin.
+
+  const restants = store
+    .listUsers()
+    .filter(user => user.id !== cible.id)
+    .filter(user => user.actif && getRole(user.role).administration);
+
+  if (restants.length > 0) return;
+
+  const cibleResteAdmin =
+    !cible.supprime && cible.actif && getRole(cible.role).administration;
+
+  if (!cibleResteAdmin) {
+    throw badRequest(
+      "Impossible : ce compte est le dernier administrateur actif. "
+        + "Nommer un autre administrateur avant de le modifier."
+    );
+  }
+}
+
+function listUserAccounts() {
+  assertUsersSupported();
+  return getSqliteStore().listUsers();
 }
 
 function parseBasicAuthHeader(header) {
@@ -485,6 +724,170 @@ function constantTimeEqual(left, right) {
   const leftHash = crypto.createHash("sha256").update(String(left)).digest();
   const rightHash = crypto.createHash("sha256").update(String(right)).digest();
   return crypto.timingSafeEqual(leftHash, rightHash);
+}
+
+// --- Mots de passe des comptes utilisateurs (V8 phase 1) -------------------
+//
+// scrypt via node:crypto : resistant au GPU, et AUCUNE dependance ajoutee.
+// bcrypt/argon2 imposeraient un module natif a recompiler a chaque bump de
+// Node, sur une image Alpine, pour un gain nul a cette echelle.
+//
+// Le format stocke embarque les parametres :
+//     scrypt$<N>$<r>$<p>$<cle en base64>
+// Les relire depuis l'enregistrement permet de durcir les parametres plus tard
+// sans invalider les mots de passe existants : un ancien hash se verifie avec
+// ses propres parametres, et sera re-hashe au prochain changement.
+const SCRYPT_PARAMS = { N: 16384, r: 8, p: 1, keylen: 64 };
+
+// 128 * N * r = 16 Mo pour N=16384, r=8. La limite par defaut de Node est de
+// 32 Mo : on la releve explicitement pour garder de la marge si N augmente.
+const SCRYPT_MAXMEM = 64 * 1024 * 1024;
+
+function generatePasswordSalt() {
+  return crypto.randomBytes(16).toString("base64");
+}
+
+/**
+ * scrypt est volontairement lent (~100 ms). On utilise la variante ASYNCHRONE :
+ * la version synchrone bloquerait la boucle d'evenements a chaque tentative de
+ * connexion, ce qui transformerait le formulaire de login en levier de deni de
+ * service, meme derriere le rate-limit par IP.
+ */
+function derivePasswordKey(password, salt, params) {
+  const { N, r, p, keylen } = params;
+  return new Promise((resolve, reject) => {
+    crypto.scrypt(
+      String(password),
+      String(salt),
+      keylen,
+      { N, r, p, maxmem: SCRYPT_MAXMEM },
+      (error, derived) => (error ? reject(error) : resolve(derived))
+    );
+  });
+}
+
+async function hashPassword(password, salt) {
+  const derived = await derivePasswordKey(password, salt, SCRYPT_PARAMS);
+  const { N, r, p } = SCRYPT_PARAMS;
+  return `scrypt$${N}$${r}$${p}$${derived.toString("base64")}`;
+}
+
+/**
+ * Comparaison a temps constant. Retourne false sur tout enregistrement
+ * illisible plutot que de lever : un hash corrompu en base doit refuser la
+ * connexion, pas faire tomber le serveur sur la page de login.
+ */
+async function verifyPassword(password, salt, storedHash) {
+  const parts = String(storedHash || "").split("$");
+  if (parts.length !== 5 || parts[0] !== "scrypt") return false;
+
+  const N = Number(parts[1]);
+  const r = Number(parts[2]);
+  const p = Number(parts[3]);
+  let expected;
+  try {
+    expected = Buffer.from(parts[4], "base64");
+  } catch {
+    return false;
+  }
+
+  if (!Number.isInteger(N) || !Number.isInteger(r) || !Number.isInteger(p)) return false;
+  if (N <= 0 || r <= 0 || p <= 0 || expected.length === 0) return false;
+
+  let derived;
+  try {
+    derived = await derivePasswordKey(password, salt, { N, r, p, keylen: expected.length });
+  } catch {
+    return false;
+  }
+
+  if (derived.length !== expected.length) return false;
+  return crypto.timingSafeEqual(derived, expected);
+}
+
+// --- Roles et permissions (V8 phase 1) -------------------------------------
+//
+// SEPARATION DES ACCES : DESACTIVEE.
+//
+// Decision de Tom, 26/08/2026 : l'equipe fait tout de bout en bout, tout le
+// monde doit voir tous les onglets. C'est plus simple a gerer aujourd'hui, et
+// la separation viendra si l'equipe grandit.
+//
+// Les portees par role restent declarees ci-dessous et restent TESTEES via
+// roleAllowsTabStrict, pour deux raisons : elles documentent l'intention, et
+// les activer se resume a poser SEREO_SEPARATION_ROLES=1. Sans cela, il
+// faudrait re-concevoir la repartition de zero le jour ou le besoin revient.
+//
+// A noter : `onglets` ne pilote que la NAVIGATION. Le masquage d'un onglet
+// n'est qu'un confort visuel — toute restriction reelle doit etre appliquee
+// cote serveur, sur les endpoints.
+const SEPARATION_DES_ROLES = process.env.SEREO_SEPARATION_ROLES === "1";
+
+const ROLES = {
+  admin: {
+    libelle: "Administrateur",
+    onglets: "*",
+    peutEcrire: true,
+    administration: true
+  },
+  bureau: {
+    libelle: "Bureau",
+    onglets: "*",
+    peutEcrire: true,
+    administration: false
+  },
+  preparateur: {
+    libelle: "Préparateur",
+    onglets: [
+      "journee",
+      "preparation",
+      "stock",
+      "bons-commande",
+      "commandes-jour",
+      "recommande"
+    ],
+    peutEcrire: true,
+    administration: false
+  },
+  livreur: {
+    libelle: "Livreur",
+    onglets: ["journee", "livreur", "commandes-jour", "commandes-livrees"],
+    peutEcrire: true,
+    administration: false
+  }
+};
+
+const DEFAULT_ROLE = "livreur";
+
+function isKnownRole(role) {
+  return Object.prototype.hasOwnProperty.call(ROLES, String(role));
+}
+
+function getRole(role) {
+  return ROLES[String(role)] || ROLES[DEFAULT_ROLE];
+}
+
+/**
+ * Portee reelle, telle qu'elle s'appliquerait si la separation etait active.
+ * Toujours testee, meme quand la separation est desactivee : c'est ce qui
+ * garantit que la repartition reste coherente et prete a l'emploi.
+ */
+function roleAllowsTabStrict(role, tab) {
+  const definition = getRole(role);
+  if (definition.onglets === "*") return true;
+  return definition.onglets.includes(String(tab));
+}
+
+/** Portee effective aujourd'hui : tout ouvert, sauf si la separation est activee. */
+function roleAllowsTab(role, tab) {
+  if (!SEPARATION_DES_ROLES) return true;
+  return roleAllowsTabStrict(role, tab);
+}
+
+/** Liste des onglets visibles, pour /api/me et le filtrage de la navigation. */
+function roleTabScope(role) {
+  if (!SEPARATION_DES_ROLES) return "*";
+  return getRole(role).onglets;
 }
 
 function escapeHtml(value) {
@@ -529,31 +932,64 @@ function signAuthPayload(payload) {
     .digest("base64url");
 }
 
-function createAccessSessionValue(now = Date.now()) {
+/**
+ * `now` reste le PREMIER parametre : test/auth.test.js appelle ce helper avec
+ * un horodatage en premiere position pour fabriquer des sessions expirees.
+ * L'identite arrive donc en second.
+ *
+ * Une session sans `uid` designe le compte issu des variables d'environnement,
+ * seul compte existant avant la phase 1. Les cookies emis avant cette version
+ * n'ont pas le champ : ils restent donc valides, personne n'est deconnecte par
+ * la mise a jour.
+ */
+function createAccessSessionValue(now = Date.now(), identity = null) {
   const payload = Buffer.from(JSON.stringify({
-    user: AUTH_USER,
+    user: identity ? identity.identifiant : AUTH_USER,
+    uid: identity ? identity.id : null,
     issuedAt: now
   })).toString("base64url");
 
   return `${payload}.${signAuthPayload(payload)}`;
 }
 
-function isValidAccessSessionValue(value, now = Date.now()) {
+/**
+ * Verifie la signature et la fraicheur, puis retourne la charge utile.
+ * Ne dit RIEN de la validite du compte : c'est le role de l'appelant.
+ */
+function readAccessSession(value, now = Date.now()) {
   const [payload, signature] = String(value || "").split(".");
-  if (!payload || !signature) return false;
+  if (!payload || !signature) return null;
 
   const expectedSignature = signAuthPayload(payload);
-  if (!constantTimeEqual(signature, expectedSignature)) return false;
+  if (!constantTimeEqual(signature, expectedSignature)) return null;
 
   try {
     const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
     const issuedAt = Number(session.issuedAt);
+    if (!Number.isFinite(issuedAt)) return null;
+    if (now - issuedAt > AUTH_COOKIE_MAX_AGE_SECONDS * 1000) return null;
 
-    if (session.user !== AUTH_USER || !Number.isFinite(issuedAt)) return false;
-    return now - issuedAt <= AUTH_COOKIE_MAX_AGE_SECONDS * 1000;
+    return {
+      user: typeof session.user === "string" ? session.user : "",
+      uid: session.uid ? String(session.uid) : null,
+      issuedAt
+    };
   } catch {
-    return false;
+    return null;
   }
+}
+
+function isValidAccessSessionValue(value, now = Date.now()) {
+  const session = readAccessSession(value, now);
+  if (!session) return false;
+
+  // Session rattachee a un compte en base : on revalide a chaque requete, de
+  // sorte qu'une desactivation prenne effet immediatement plutot qu'au bout
+  // des 12 h de duree de vie du cookie.
+  if (session.uid) return Boolean(lookupActiveUser(session.uid));
+
+  // Session du compte d'environnement.
+  return isEnvAuthConfigured() && session.user === AUTH_USER;
 }
 
 function getAccessSessionCookie(req) {
@@ -589,6 +1025,18 @@ function isAuthorizedRequest(req) {
   const credentials = parseBasicAuthHeader(req.get("authorization"));
   if (!credentials) return false;
 
+  // CRITIQUE : depuis la phase 1, l'auth peut etre activee par la seule
+  // presence de comptes en base, sans SEREO_AUTH_USER/PASSWORD. Dans ce cas
+  // AUTH_USER et AUTH_PASSWORD valent "" — et constantTimeEqual("", "") est
+  // vrai. Sans cette garde, un en-tete Basic vide authentifierait n'importe
+  // qui. Le couple d'environnement doit etre reellement configure pour que
+  // cette voie soit ouverte.
+  if (!isEnvAuthConfigured()) return false;
+
+  // L'authentification Basic reste volontairement reservee au couple
+  // d'environnement. Les comptes en base passent par le formulaire : leur
+  // verification est asynchrone (scrypt), alors que cette fonction est
+  // appelee de maniere synchrone sur CHAQUE requete, y compris les assets.
   return constantTimeEqual(credentials.username, AUTH_USER)
     && constantTimeEqual(credentials.password, AUTH_PASSWORD);
 }
@@ -648,7 +1096,12 @@ function requireAccessAuth(req, res, next) {
   // verifie sous le MEME rate-limit que POST /login. Sans ca, l'en-tete Basic
   // sur n'importe quelle route protegee permettait un brute-force ILLIMITE du
   // mot de passe (le lockout ne couvrait que /login).
-  const basicCredentials = isAccessAuthEnabled()
+  // isEnvAuthConfigured() et non isAccessAuthEnabled() : depuis la phase 1,
+  // la protection peut etre active du seul fait qu'il existe des comptes en
+  // base, sans SEREO_AUTH_USER/PASSWORD. AUTH_USER et AUTH_PASSWORD valent
+  // alors "", et la comparaison plus bas accepterait un en-tete Basic vide.
+  // Cette voie n'est ouverte que si le couple d'environnement existe vraiment.
+  const basicCredentials = isEnvAuthConfigured()
     ? parseBasicAuthHeader(req.get("authorization"))
     : null;
 
@@ -1281,7 +1734,7 @@ function renderLoginPage(req, res) {
 </html>`);
 }
 
-function handleLogin(req, res) {
+async function handleLogin(req, res) {
   if (isAccessAuthMisconfigured()) {
     res.status(500).send("Protection d'acces mal configuree.");
     return;
@@ -1306,7 +1759,9 @@ function handleLogin(req, res) {
     return;
   }
 
-  if (!constantTimeEqual(username, AUTH_USER) || !constantTimeEqual(password, AUTH_PASSWORD)) {
+  const identity = await authenticateCredentials(username, password);
+
+  if (!identity) {
     const updated = recordAuthFailure(ip);
     if (updated.locked) {
       res.setHeader("Retry-After", String(Math.ceil(updated.remainingMs / 1000)));
@@ -1318,8 +1773,87 @@ function handleLogin(req, res) {
   }
 
   clearAuthFailures(ip);
-  res.setHeader("Set-Cookie", buildAuthCookie(createAccessSessionValue(), AUTH_COOKIE_MAX_AGE_SECONDS, req));
+
+  if (identity.id) {
+    try {
+      getSqliteStore().touchUserLogin(identity.id, new Date().toISOString());
+    } catch {
+      // Horodatage de confort : ne doit jamais empecher de se connecter.
+    }
+  }
+
+  res.setHeader(
+    "Set-Cookie",
+    buildAuthCookie(createAccessSessionValue(Date.now(), identity), AUTH_COOKIE_MAX_AGE_SECONDS, req)
+  );
   res.redirect(303, next);
+}
+
+/**
+ * Hash factice, calcule une seule fois au demarrage.
+ *
+ * Quand l'identifiant saisi n'existe pas, on verifie quand meme le mot de
+ * passe contre ce hash. Sans cela, une reponse instantanee pour un identifiant
+ * inconnu et une reponse a ~60 ms pour un identifiant connu permettraient
+ * d'enumerer les comptes existants, malgre le message d'erreur identique.
+ */
+const DUMMY_PASSWORD_SALT = generatePasswordSalt();
+let dummyPasswordHash = null;
+
+async function getDummyPasswordHash() {
+  if (!dummyPasswordHash) {
+    dummyPasswordHash = await hashPassword(crypto.randomBytes(32).toString("hex"), DUMMY_PASSWORD_SALT);
+  }
+  return dummyPasswordHash;
+}
+
+/**
+ * Authentifie un couple identifiant/mot de passe.
+ *
+ * Deux sources, dans cet ordre :
+ *   1. le couple SEREO_AUTH_USER / SEREO_AUTH_PASSWORD, conserve tel quel pour
+ *      ne pas verrouiller une production existante hors de son application ;
+ *   2. les comptes de la table `utilisateurs`.
+ *
+ * Retourne l'identite en cas de succes, null sinon. Jamais de distinction
+ * entre "identifiant inconnu", "mot de passe faux" et "compte desactive" :
+ * l'appelant emet un message unique.
+ */
+async function authenticateCredentials(username, password) {
+  if (
+    isEnvAuthConfigured()
+    && constantTimeEqual(username, AUTH_USER)
+    && constantTimeEqual(password, AUTH_PASSWORD)
+  ) {
+    return { id: null, identifiant: AUTH_USER, role: "admin" };
+  }
+
+  if (!useSqliteStorage()) return null;
+
+  let user = null;
+  try {
+    user = getSqliteStore().findUserForAuth(username);
+  } catch {
+    return null;
+  }
+
+  if (!user) {
+    // Compte inexistant : on brule quand meme le temps d'un scrypt.
+    await verifyPassword(password, DUMMY_PASSWORD_SALT, await getDummyPasswordHash());
+    return null;
+  }
+
+  const motDePasseValide = await verifyPassword(password, user.sel, user.hash);
+
+  // La verification du mot de passe est faite AVANT de regarder `actif`, pour
+  // qu'un compte desactive coute exactement le meme temps qu'un compte actif.
+  if (!motDePasseValide || !user.actif) return null;
+
+  return {
+    id: user.id,
+    identifiant: user.identifiant,
+    role: isKnownRole(user.role) ? user.role : DEFAULT_ROLE
+  };
 }
 
 function handleLogout(req, res) {
@@ -6828,6 +7362,25 @@ module.exports = {
   parseBasicAuthHeader,
   isAuthorizedRequest,
   isAccessAuthEnabled,
+  // Comptes utilisateurs (V8 phase 1)
+  hashPassword,
+  verifyPassword,
+  generatePasswordSalt,
+  ROLES,
+  DEFAULT_ROLE,
+  getRole,
+  isKnownRole,
+  roleAllowsTab,
+  roleAllowsTabStrict,
+  roleTabScope,
+  SEPARATION_DES_ROLES,
+  createUserAccount,
+  updateUserAccount,
+  deleteUserAccount,
+  listUserAccounts,
+  authenticateCredentials,
+  getRequestIdentity,
+  isEnvAuthConfigured,
   // Helpers de test : ne pas appeler depuis du code applicatif
   _resetAuthRateLimitForTest: () => authRateLimitState.clear(),
   _createAccessSessionValueForTest: createAccessSessionValue,

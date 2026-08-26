@@ -45,6 +45,17 @@
   </style>
 
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="icon" href="/icons/icon-192.png" type="image/png" sizes="192x192" />
+
+  <!-- iOS ignore completement les icones du manifeste : il ne lit que ces
+       balises. Sans elles, l'ajout a l'ecran d'accueil produit une capture
+       de la page au lieu de l'icone. Les PNG sont a fond opaque (iOS
+       n'ajoute pas de fond et arrondit lui-meme les coins).
+       Fichiers generes par `npm run icons` a partir de la marque. -->
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" sizes="180x180" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon-167.png" sizes="167x167" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon-152.png" sizes="152x152" />
+
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="stylesheet" href="/vendor/leaflet/leaflet.css" />
   <link rel="stylesheet" href="/css/style.css?v=20260702-themes" />
@@ -1255,6 +1266,14 @@
   </div>
 
   <script src="/vendor/leaflet/leaflet.js"></script>
-  <script src="/js/app.js?v=20260702-themes"></script>
+
+  <!-- app.js est un module ES : il importe ./utils/* et ./config/*.
+       type="module" implique un chargement differe, donc l'execution a lieu
+       apres le parsing du document mais avant DOMContentLoaded — l'ecouteur
+       d'amorcage de app.js est donc bien enregistre a temps.
+       Leaflet reste un script classique et s'execute avant : `L` est defini
+       au moment ou le module tourne.
+       La CSP `script-src 'self'` couvre les modules sans modification. -->
+  <script type="module" src="/js/app.js?v=20260826-esm"></script>
 </body>
 </html>
