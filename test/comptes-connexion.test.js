@@ -298,3 +298,139 @@ test("comptes — le garde-fou du dernier admin ne s'applique pas si l'env prote
   // autorise. Le cas inverse est teste dans le fichier sans variables d'env.
   assert.equal(typeof livreur.id, "string");
 });
+
+// --- API d'administration des comptes ---------------------------------------
+
+function adminHeaders(extra = {}) {
+  // Le couple d'environnement a toujours le role administrateur.
+  const token = Buffer.from("admin-env:mot-de-passe-environnement").toString("base64");
+  return { authorization: `Basic ${token}`, ...extra };
+}
+
+async function apiAdmin(pathname, options = {}) {
+  return fetch(`${baseUrl}${pathname}`, {
+    ...options,
+    headers: adminHeaders(options.body ? { "content-type": "application/json" } : {})
+  });
+}
+
+test("api — /api/me decrit l'identite connectee", async () => {
+  const reponse = await fetch(`${baseUrl}/api/me`, { headers: adminHeaders() });
+  assert.equal(reponse.status, 200);
+
+  const moi = await reponse.json();
+  assert.equal(moi.identifiant, "admin-env");
+  assert.equal(moi.role, "admin");
+  assert.equal(moi.administration, true);
+  assert.equal(moi.source, "basic");
+  // Tant que la separation est eteinte, tous les onglets sont ouverts.
+  assert.equal(moi.onglets, "*");
+  assert.equal(moi.separationDesRoles, false);
+});
+
+test("api — /api/me refuse un anonyme", async () => {
+  const reponse = await fetch(`${baseUrl}/api/me`);
+  assert.equal(reponse.status, 401);
+});
+
+test("api — un administrateur cree, modifie et supprime un compte", async () => {
+  const creation = await apiAdmin("/api/comptes", {
+    method: "POST",
+    body: JSON.stringify({
+      identifiant: "compte-api",
+      motDePasse: "mot-de-passe-par-api-2026",
+      role: "bureau"
+    })
+  });
+  assert.equal(creation.status, 201);
+  const compte = await creation.json();
+  assert.equal(compte.role, "bureau");
+  assert.ok(!JSON.stringify(compte).includes("scrypt"), "la creation a renvoye un hash");
+
+  const modification = await apiAdmin(`/api/comptes/${compte.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ role: "livreur", actif: false })
+  });
+  assert.equal(modification.status, 200);
+  const modifie = await modification.json();
+  assert.equal(modifie.role, "livreur");
+  assert.equal(modifie.actif, false);
+
+  const liste = await (await apiAdmin("/api/comptes")).json();
+  assert.ok(liste.some(u => u.id === compte.id));
+
+  const suppression = await apiAdmin(`/api/comptes/${compte.id}`, { method: "DELETE" });
+  assert.equal(suppression.status, 200);
+
+  const apres = await (await apiAdmin("/api/comptes")).json();
+  assert.ok(!apres.some(u => u.id === compte.id));
+});
+
+test("api — la liste des comptes n'expose aucun secret", async () => {
+  const brut = await (await apiAdmin("/api/comptes")).text();
+  assert.ok(!brut.includes("scrypt"), "un hash a fuite par l'API");
+  assert.ok(!brut.includes("sel"), "le sel a fuite par l'API");
+});
+
+test("api — un compte non administrateur est refuse en 403", async () => {
+  // Meme si tout le monde voit tous les ONGLETS, l'administration des comptes
+  // reste reservee : c'est une operation sur la securite, pas du quotidien.
+  const compte = await createUserAccount({
+    identifiant: "simple-livreur",
+    motDePasse: "mot-de-passe-livreur-2026",
+    role: "livreur"
+  });
+
+  const cookie = sessionCookieFrom(await postLogin("simple-livreur", "mot-de-passe-livreur-2026"));
+  assert.ok(cookie, "le livreur aurait du pouvoir se connecter");
+
+  for (const [methode, chemin] of [
+    ["GET", "/api/comptes"],
+    ["POST", "/api/comptes"],
+    ["PATCH", `/api/comptes/${compte.id}`],
+    ["DELETE", `/api/comptes/${compte.id}`]
+  ]) {
+    const reponse = await fetch(`${baseUrl}${chemin}`, {
+      method: methode,
+      headers: { cookie, "content-type": "application/json" },
+      body: methode === "GET" || methode === "DELETE" ? undefined : JSON.stringify({ role: "admin" })
+    });
+    assert.equal(reponse.status, 403, `${methode} ${chemin} aurait du etre refuse`);
+  }
+
+  // Et surtout : il ne s'est pas promu administrateur au passage.
+  assert.equal(listUserAccounts().find(u => u.id === compte.id).role, "livreur");
+
+  deleteUserAccount(compte.id);
+});
+
+test("api — un mot de passe vide en PATCH ne change pas le mot de passe", async () => {
+  // Cas concret de l'ecran d'administration : le champ mot de passe est laisse
+  // vide quand on ne veut modifier que le role.
+  const compte = await createUserAccount({
+    identifiant: "patch-vide",
+    motDePasse: "mot-de-passe-initial-2026",
+    role: "livreur"
+  });
+
+  await apiAdmin(`/api/comptes/${compte.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ role: "bureau", motDePasse: "" })
+  });
+
+  assert.ok(
+    sessionCookieFrom(await postLogin("patch-vide", "mot-de-passe-initial-2026")),
+    "le mot de passe initial aurait du rester valide"
+  );
+  deleteUserAccount(compte.id);
+});
+
+test("api — une creation invalide renvoie un message exploitable", async () => {
+  const reponse = await apiAdmin("/api/comptes", {
+    method: "POST",
+    body: JSON.stringify({ identifiant: "ok-mais", motDePasse: "court", role: "livreur" })
+  });
+  assert.equal(reponse.status, 400);
+  const corps = await reponse.json();
+  assert.match(corps.error, /10 caracteres/);
+});

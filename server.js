@@ -7314,6 +7314,139 @@ app.post("/api/optimize-route", async (req, res) => {
   }
 });
 
+// --- API des comptes utilisateurs (V8 phase 1) -----------------------------
+
+/**
+ * Identite de la requete en cours.
+ *
+ * Sert au front pour afficher qui est connecte et, le jour ou la separation
+ * des roles sera activee, pour filtrer la navigation. `onglets` vaut "*" tant
+ * que tout le monde voit tout.
+ */
+app.get("/api/me", (req, res) => {
+  const identite = getRequestIdentity(req);
+  if (!identite) {
+    res.status(401).json({ error: "Connexion requise" });
+    return;
+  }
+
+  res.json({
+    identifiant: identite.identifiant,
+    role: identite.role,
+    roleLibelle: getRole(identite.role).libelle,
+    administration: getRole(identite.role).administration,
+    onglets: roleTabScope(identite.role),
+    separationDesRoles: SEPARATION_DES_ROLES,
+    // `source` distingue un compte en base d'un acces par variables
+    // d'environnement : le second ne peut pas etre modifie depuis l'interface.
+    source: identite.source
+  });
+});
+
+/**
+ * Reserve une route a l'administration de l'outil.
+ *
+ * Volontairement independant de la separation des onglets : meme quand tout le
+ * monde voit tout, creer ou supprimer un compte reste une operation
+ * d'administration, pas une tache du quotidien.
+ */
+function requireAdministration(req, res, next) {
+  const identite = getRequestIdentity(req);
+  if (!identite) {
+    res.status(401).json({ error: "Connexion requise" });
+    return;
+  }
+
+  if (!getRole(identite.role).administration) {
+    res.status(403).json({ error: "Reserve aux administrateurs." });
+    return;
+  }
+
+  req.identite = identite;
+  next();
+}
+
+app.get("/api/comptes", requireAdministration, (req, res) => {
+  try {
+    res.json(listUserAccounts());
+  } catch (error) {
+    handleRouteError(error, res, "Erreur lecture des comptes");
+  }
+});
+
+app.post("/api/comptes", requireAdministration, async (req, res) => {
+  try {
+    const compte = await createUserAccount({
+      identifiant: req.body?.identifiant,
+      motDePasse: req.body?.motDePasse,
+      role: req.body?.role || DEFAULT_ROLE,
+      actif: req.body?.actif === undefined ? true : Boolean(req.body.actif)
+    });
+
+    addHistoryEntry("Comptes", `Compte cree : ${compte.identifiant} (${compte.role})`);
+    res.status(201).json(compte);
+  } catch (error) {
+    handleRouteError(error, res, "Erreur creation du compte");
+  }
+});
+
+app.patch("/api/comptes/:id", requireAdministration, async (req, res) => {
+  try {
+    // On ne transmet que les champs REELLEMENT presents : updateUserAccount
+    // distingue "absent" de "vide", et ne re-hashe le mot de passe que s'il a
+    // ete explicitement fourni.
+    const patch = {};
+    if (req.body?.role !== undefined) patch.role = req.body.role;
+    if (req.body?.actif !== undefined) patch.actif = Boolean(req.body.actif);
+    if (req.body?.motDePasse !== undefined && req.body.motDePasse !== "") {
+      patch.motDePasse = req.body.motDePasse;
+    }
+
+    const compte = await updateUserAccount(req.params.id, patch);
+
+    const details = [
+      patch.role !== undefined ? `role=${patch.role}` : null,
+      patch.actif !== undefined ? (patch.actif ? "reactive" : "desactive") : null,
+      patch.motDePasse !== undefined ? "mot de passe change" : null
+    ].filter(Boolean).join(", ");
+
+    addHistoryEntry("Comptes", `Compte modifie : ${compte.identifiant}${details ? ` (${details})` : ""}`);
+    res.json(compte);
+  } catch (error) {
+    handleRouteError(error, res, "Erreur modification du compte");
+  }
+});
+
+app.delete("/api/comptes/:id", requireAdministration, (req, res) => {
+  try {
+    const store = getSqliteStore();
+    const compte = store.getUser(req.params.id);
+    deleteUserAccount(req.params.id);
+
+    addHistoryEntry("Comptes", `Compte supprime : ${compte ? compte.identifiant : req.params.id}`);
+    res.json({ ok: true });
+  } catch (error) {
+    handleRouteError(error, res, "Erreur suppression du compte");
+  }
+});
+
+/**
+ * Journalise une action dans l'historique applicatif.
+ *
+ * Les comptes vivant hors de readDb/writeDb, on relit la base uniquement pour
+ * y ajouter la trace. Best-effort : une ecriture d'historique qui echoue ne
+ * doit pas faire echouer l'operation deja effectuee.
+ */
+function addHistoryEntry(categorie, message) {
+  try {
+    const db = readDb();
+    addHistory(db, categorie, message);
+    writeDb(db);
+  } catch (error) {
+    console.error("[comptes] historique non ecrit :", error.message);
+  }
+}
+
 function startServer(port = PORT, host = HOST) {
   // P1 v1.14.0 : healing initial pour garantir la coherence apres restart
   // (notamment apres restauration d'un backup ou montee de version)
