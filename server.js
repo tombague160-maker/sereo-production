@@ -807,10 +807,22 @@ async function verifyPassword(password, salt, storedHash) {
 
 // --- Roles et permissions (V8 phase 1) -------------------------------------
 //
-// HYPOTHESE DE DEPART, a valider avec Tom : ce tableau est le seul endroit a
-// modifier pour changer qui voit quoi. `onglets` pilote la navigation cote
-// client ; `peutEcrire` et `administration` sont appliques cote SERVEUR — le
-// masquage d'un onglet n'est qu'un confort, il ne protege rien.
+// SEPARATION DES ACCES : DESACTIVEE.
+//
+// Decision de Tom, 26/08/2026 : l'equipe fait tout de bout en bout, tout le
+// monde doit voir tous les onglets. C'est plus simple a gerer aujourd'hui, et
+// la separation viendra si l'equipe grandit.
+//
+// Les portees par role restent declarees ci-dessous et restent TESTEES via
+// roleAllowsTabStrict, pour deux raisons : elles documentent l'intention, et
+// les activer se resume a poser SEREO_SEPARATION_ROLES=1. Sans cela, il
+// faudrait re-concevoir la repartition de zero le jour ou le besoin revient.
+//
+// A noter : `onglets` ne pilote que la NAVIGATION. Le masquage d'un onglet
+// n'est qu'un confort visuel — toute restriction reelle doit etre appliquee
+// cote serveur, sur les endpoints.
+const SEPARATION_DES_ROLES = process.env.SEREO_SEPARATION_ROLES === "1";
+
 const ROLES = {
   admin: {
     libelle: "Administrateur",
@@ -855,10 +867,27 @@ function getRole(role) {
   return ROLES[String(role)] || ROLES[DEFAULT_ROLE];
 }
 
-function roleAllowsTab(role, tab) {
+/**
+ * Portee reelle, telle qu'elle s'appliquerait si la separation etait active.
+ * Toujours testee, meme quand la separation est desactivee : c'est ce qui
+ * garantit que la repartition reste coherente et prete a l'emploi.
+ */
+function roleAllowsTabStrict(role, tab) {
   const definition = getRole(role);
   if (definition.onglets === "*") return true;
   return definition.onglets.includes(String(tab));
+}
+
+/** Portee effective aujourd'hui : tout ouvert, sauf si la separation est activee. */
+function roleAllowsTab(role, tab) {
+  if (!SEPARATION_DES_ROLES) return true;
+  return roleAllowsTabStrict(role, tab);
+}
+
+/** Liste des onglets visibles, pour /api/me et le filtrage de la navigation. */
+function roleTabScope(role) {
+  if (!SEPARATION_DES_ROLES) return "*";
+  return getRole(role).onglets;
 }
 
 function escapeHtml(value) {
@@ -7342,6 +7371,9 @@ module.exports = {
   getRole,
   isKnownRole,
   roleAllowsTab,
+  roleAllowsTabStrict,
+  roleTabScope,
+  SEPARATION_DES_ROLES,
   createUserAccount,
   updateUserAccount,
   deleteUserAccount,

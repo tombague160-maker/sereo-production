@@ -29,7 +29,10 @@ const {
   DEFAULT_ROLE,
   getRole,
   isKnownRole,
-  roleAllowsTab
+  roleAllowsTab,
+  roleAllowsTabStrict,
+  roleTabScope,
+  SEPARATION_DES_ROLES
 } = require("../server");
 
 const { createSqliteStore } = require("../storage/sqliteStore");
@@ -296,29 +299,70 @@ test("comptes — seul admin porte le drapeau administration", () => {
   assert.deepEqual(administrateurs, ["admin"]);
 });
 
-test("comptes — un livreur ne voit pas les onglets sensibles", () => {
+// --- Portee effective : separation DESACTIVEE ------------------------------
+
+test("comptes — aujourd'hui, tout le monde voit tous les onglets", () => {
+  // Decision de Tom, 26/08/2026 : l'equipe fait tout de bout en bout. La
+  // separation existe dans le code mais reste eteinte tant que
+  // SEREO_SEPARATION_ROLES n'est pas pose.
+  assert.equal(SEPARATION_DES_ROLES, false, "la separation devrait etre eteinte par defaut");
+
+  for (const role of Object.keys(ROLES)) {
+    for (const onglet of ["journee", "parametres", "exports", "stock", "crm", "livreur"]) {
+      assert.equal(
+        roleAllowsTab(role, onglet),
+        true,
+        `${role} devrait voir ${onglet} tant que la separation est eteinte`
+      );
+    }
+  }
+
+  assert.equal(roleTabScope("livreur"), "*");
+});
+
+// --- Portee stricte : ce qui s'appliquerait si on l'activait ----------------
+//
+// Ces tests tournent meme quand la separation est eteinte. Sans eux, la
+// repartition pourrait deriver en silence pendant des mois et l'activation
+// deviendrait un chantier au lieu d'un interrupteur.
+
+test("comptes — portee stricte : un livreur n'aurait pas les onglets sensibles", () => {
   for (const onglet of ["parametres", "exports", "stock", "crm", "statistiques"]) {
     assert.equal(
-      roleAllowsTab("livreur", onglet),
+      roleAllowsTabStrict("livreur", onglet),
       false,
       `le livreur ne devrait pas acceder a ${onglet}`
     );
   }
-  assert.equal(roleAllowsTab("livreur", "livreur"), true);
-  assert.equal(roleAllowsTab("livreur", "journee"), true);
+  assert.equal(roleAllowsTabStrict("livreur", "livreur"), true);
+  assert.equal(roleAllowsTabStrict("livreur", "journee"), true);
 });
 
-test("comptes — un preparateur voit la preparation mais pas les parametres", () => {
-  assert.equal(roleAllowsTab("preparateur", "preparation"), true);
-  assert.equal(roleAllowsTab("preparateur", "stock"), true);
-  assert.equal(roleAllowsTab("preparateur", "parametres"), false);
-  assert.equal(roleAllowsTab("preparateur", "exports"), false);
+test("comptes — portee stricte : un preparateur aurait la preparation, pas les parametres", () => {
+  assert.equal(roleAllowsTabStrict("preparateur", "preparation"), true);
+  assert.equal(roleAllowsTabStrict("preparateur", "stock"), true);
+  assert.equal(roleAllowsTabStrict("preparateur", "parametres"), false);
+  assert.equal(roleAllowsTabStrict("preparateur", "exports"), false);
 });
 
-test("comptes — admin et bureau voient tout", () => {
+test("comptes — portee stricte : admin et bureau voient tout", () => {
   for (const onglet of ["journee", "parametres", "exports", "livreur", "preparation"]) {
-    assert.equal(roleAllowsTab("admin", onglet), true);
-    assert.equal(roleAllowsTab("bureau", onglet), true);
+    assert.equal(roleAllowsTabStrict("admin", onglet), true);
+    assert.equal(roleAllowsTabStrict("bureau", onglet), true);
+  }
+});
+
+test("comptes — portee stricte : chaque onglet reste atteignable par au moins un role", () => {
+  // Garde-fou contre une portee qui rendrait un ecran inaccessible a tous.
+  const tousLesOnglets = [
+    "journee", "commande-client", "commandes-jour", "commandes-planifiees",
+    "bons-commande", "commandes-livrees", "preparation", "livreur", "stock",
+    "recommande", "crm", "relances", "statistiques", "exports", "parametres"
+  ];
+
+  for (const onglet of tousLesOnglets) {
+    const roles = Object.keys(ROLES).filter(role => roleAllowsTabStrict(role, onglet));
+    assert.ok(roles.length > 0, `aucun role ne peut atteindre l'onglet ${onglet}`);
   }
 });
 
