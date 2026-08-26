@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.22.0](https://github.com/tombague160-maker/sereo-production/compare/v1.21.0...v1.22.0) (2026-08-26)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **v8:** fondations du chantier V8 — icônes PWA, modules ES, comptes utilisateurs ([#95](https://github.com/tombague160-maker/sereo-production/issues/95)) ([fa57f04](https://github.com/tombague160-maker/sereo-production/commit/fa57f044d675d3ed4f612d9bd6354a72a68a79d9))
+
+
+### 🐛 Corrections
+
+* **sécurité:** un en-tête Basic vide n'authentifie plus lorsque la protection provient des comptes en base et non des variables d'environnement
+* **pwa:** icône unique marquée `any maskable` rognée par Android, et absence totale d'icône sur iOS
+* **docker:** `data/imports-archives/` entrait dans l'image à chaque build
+
 ## [1.21.0](https://github.com/tombague160-maker/sereo-production/compare/v1.20.0...v1.21.0) (2026-07-22)
 
 
