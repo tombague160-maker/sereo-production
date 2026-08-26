@@ -96,6 +96,96 @@ function createSqliteStore(options) {
       database.close();
     },
 
+    // --- Comptes utilisateurs (V8 phase 1) ------------------------------
+    //
+    // Volontairement en dehors de readDb/writeDb : voir le commentaire sur la
+    // table `utilisateurs` dans migrateSchema. Une seule methode expose le
+    // hash, findUserForAuth, et elle n'est appelee que sur le chemin d'auth.
+
+    countUsers() {
+      return database.prepare("SELECT COUNT(*) AS n FROM utilisateurs").get().n;
+    },
+
+    listUsers() {
+      return database
+        .prepare(
+          `SELECT id, identifiant, role, actif, cree_le, derniere_connexion
+           FROM utilisateurs ORDER BY identifiant COLLATE NOCASE`
+        )
+        .all()
+        .map(toPublicUser);
+    },
+
+    getUser(id) {
+      const row = database
+        .prepare(
+          `SELECT id, identifiant, role, actif, cree_le, derniere_connexion
+           FROM utilisateurs WHERE id = ?`
+        )
+        .get(String(id));
+      return row ? toPublicUser(row) : null;
+    },
+
+    /**
+     * Seul point d'acces au hash et au sel. Retourne aussi les comptes
+     * desactives : c'est a l'appelant de refuser la connexion, pour pouvoir
+     * distinguer "identifiant inconnu" de "compte desactive" dans les logs
+     * sans reveler la difference a l'utilisateur.
+     */
+    findUserForAuth(identifiant) {
+      const row = database
+        .prepare(
+          `SELECT id, identifiant, mot_de_passe_hash, sel, role, actif
+           FROM utilisateurs WHERE identifiant = ? COLLATE NOCASE`
+        )
+        .get(String(identifiant || ""));
+      if (!row) return null;
+      return {
+        id: row.id,
+        identifiant: row.identifiant,
+        hash: row.mot_de_passe_hash,
+        sel: row.sel,
+        role: row.role,
+        actif: Boolean(row.actif)
+      };
+    },
+
+    saveUser(user) {
+      database
+        .prepare(
+          `INSERT INTO utilisateurs
+             (id, identifiant, mot_de_passe_hash, sel, role, actif, cree_le, derniere_connexion)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+             identifiant = excluded.identifiant,
+             mot_de_passe_hash = excluded.mot_de_passe_hash,
+             sel = excluded.sel,
+             role = excluded.role,
+             actif = excluded.actif`
+        )
+        .run(
+          String(user.id),
+          String(user.identifiant),
+          String(user.hash),
+          String(user.sel),
+          String(user.role),
+          user.actif ? 1 : 0,
+          String(user.creeLe || new Date().toISOString()),
+          user.derniereConnexion ? String(user.derniereConnexion) : null
+        );
+    },
+
+    deleteUser(id) {
+      const result = database.prepare("DELETE FROM utilisateurs WHERE id = ?").run(String(id));
+      return result.changes > 0;
+    },
+
+    touchUserLogin(id, isoDate) {
+      database
+        .prepare("UPDATE utilisateurs SET derniere_connexion = ? WHERE id = ?")
+        .run(String(isoDate), String(id));
+    },
+
     sqlitePath
   };
 }
@@ -255,6 +345,30 @@ function migrateSchema(database) {
       stats_json TEXT,
       payload TEXT NOT NULL,
       sort_order INTEGER NOT NULL
+    );
+
+    -- V8 phase 1 : comptes utilisateurs.
+    --
+    -- Cette table est DELIBEREMENT hors de readDb()/writeDb(). Tout le reste de
+    -- la base est charge en memoire dans un objet db qui circule dans tout le
+    -- serveur et finit serialise par plusieurs endpoints. Un hash de mot de
+    -- passe n'a rien a faire dans cet objet : les comptes passent donc par des
+    -- accesseurs dedies, et seul le chemin d'authentification lit le hash.
+    --
+    -- (Ne jamais mettre de backtick dans ces commentaires : ils sont a
+    -- l'interieur d'un template literal JavaScript et le termineraient.)
+    --
+    -- identifiant est COLLATE NOCASE : "Tom" et "tom" sont le meme compte, ce
+    -- qui evite qu'un doublon a la casse pres cree deux acces distincts.
+    CREATE TABLE IF NOT EXISTS utilisateurs (
+      id TEXT PRIMARY KEY,
+      identifiant TEXT NOT NULL COLLATE NOCASE UNIQUE,
+      mot_de_passe_hash TEXT NOT NULL,
+      sel TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'livreur',
+      actif INTEGER NOT NULL DEFAULT 1,
+      cree_le TEXT NOT NULL,
+      derniere_connexion TEXT
     );
   `);
 
@@ -724,3 +838,19 @@ function stringify(value) {
 module.exports = {
   createSqliteStore
 };
+
+/**
+ * Projette une ligne `utilisateurs` vers la forme exposee au reste de
+ * l'application : jamais de hash, jamais de sel. Toute nouvelle colonne
+ * sensible ajoutee a la table doit etre omise ici par defaut.
+ */
+function toPublicUser(row) {
+  return {
+    id: row.id,
+    identifiant: row.identifiant,
+    role: row.role,
+    actif: Boolean(row.actif),
+    creeLe: row.cree_le,
+    derniereConnexion: row.derniere_connexion || null
+  };
+}

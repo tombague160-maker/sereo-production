@@ -487,6 +487,141 @@ function constantTimeEqual(left, right) {
   return crypto.timingSafeEqual(leftHash, rightHash);
 }
 
+// --- Mots de passe des comptes utilisateurs (V8 phase 1) -------------------
+//
+// scrypt via node:crypto : resistant au GPU, et AUCUNE dependance ajoutee.
+// bcrypt/argon2 imposeraient un module natif a recompiler a chaque bump de
+// Node, sur une image Alpine, pour un gain nul a cette echelle.
+//
+// Le format stocke embarque les parametres :
+//     scrypt$<N>$<r>$<p>$<cle en base64>
+// Les relire depuis l'enregistrement permet de durcir les parametres plus tard
+// sans invalider les mots de passe existants : un ancien hash se verifie avec
+// ses propres parametres, et sera re-hashe au prochain changement.
+const SCRYPT_PARAMS = { N: 16384, r: 8, p: 1, keylen: 64 };
+
+// 128 * N * r = 16 Mo pour N=16384, r=8. La limite par defaut de Node est de
+// 32 Mo : on la releve explicitement pour garder de la marge si N augmente.
+const SCRYPT_MAXMEM = 64 * 1024 * 1024;
+
+function generatePasswordSalt() {
+  return crypto.randomBytes(16).toString("base64");
+}
+
+/**
+ * scrypt est volontairement lent (~100 ms). On utilise la variante ASYNCHRONE :
+ * la version synchrone bloquerait la boucle d'evenements a chaque tentative de
+ * connexion, ce qui transformerait le formulaire de login en levier de deni de
+ * service, meme derriere le rate-limit par IP.
+ */
+function derivePasswordKey(password, salt, params) {
+  const { N, r, p, keylen } = params;
+  return new Promise((resolve, reject) => {
+    crypto.scrypt(
+      String(password),
+      String(salt),
+      keylen,
+      { N, r, p, maxmem: SCRYPT_MAXMEM },
+      (error, derived) => (error ? reject(error) : resolve(derived))
+    );
+  });
+}
+
+async function hashPassword(password, salt) {
+  const derived = await derivePasswordKey(password, salt, SCRYPT_PARAMS);
+  const { N, r, p } = SCRYPT_PARAMS;
+  return `scrypt$${N}$${r}$${p}$${derived.toString("base64")}`;
+}
+
+/**
+ * Comparaison a temps constant. Retourne false sur tout enregistrement
+ * illisible plutot que de lever : un hash corrompu en base doit refuser la
+ * connexion, pas faire tomber le serveur sur la page de login.
+ */
+async function verifyPassword(password, salt, storedHash) {
+  const parts = String(storedHash || "").split("$");
+  if (parts.length !== 5 || parts[0] !== "scrypt") return false;
+
+  const N = Number(parts[1]);
+  const r = Number(parts[2]);
+  const p = Number(parts[3]);
+  let expected;
+  try {
+    expected = Buffer.from(parts[4], "base64");
+  } catch {
+    return false;
+  }
+
+  if (!Number.isInteger(N) || !Number.isInteger(r) || !Number.isInteger(p)) return false;
+  if (N <= 0 || r <= 0 || p <= 0 || expected.length === 0) return false;
+
+  let derived;
+  try {
+    derived = await derivePasswordKey(password, salt, { N, r, p, keylen: expected.length });
+  } catch {
+    return false;
+  }
+
+  if (derived.length !== expected.length) return false;
+  return crypto.timingSafeEqual(derived, expected);
+}
+
+// --- Roles et permissions (V8 phase 1) -------------------------------------
+//
+// HYPOTHESE DE DEPART, a valider avec Tom : ce tableau est le seul endroit a
+// modifier pour changer qui voit quoi. `onglets` pilote la navigation cote
+// client ; `peutEcrire` et `administration` sont appliques cote SERVEUR — le
+// masquage d'un onglet n'est qu'un confort, il ne protege rien.
+const ROLES = {
+  admin: {
+    libelle: "Administrateur",
+    onglets: "*",
+    peutEcrire: true,
+    administration: true
+  },
+  bureau: {
+    libelle: "Bureau",
+    onglets: "*",
+    peutEcrire: true,
+    administration: false
+  },
+  preparateur: {
+    libelle: "Préparateur",
+    onglets: [
+      "journee",
+      "preparation",
+      "stock",
+      "bons-commande",
+      "commandes-jour",
+      "recommande"
+    ],
+    peutEcrire: true,
+    administration: false
+  },
+  livreur: {
+    libelle: "Livreur",
+    onglets: ["journee", "livreur", "commandes-jour", "commandes-livrees"],
+    peutEcrire: true,
+    administration: false
+  }
+};
+
+const DEFAULT_ROLE = "livreur";
+
+function isKnownRole(role) {
+  return Object.prototype.hasOwnProperty.call(ROLES, String(role));
+}
+
+function getRole(role) {
+  return ROLES[String(role)] || ROLES[DEFAULT_ROLE];
+}
+
+function roleAllowsTab(role, tab) {
+  const definition = getRole(role);
+  if (definition.onglets === "*") return true;
+  return definition.onglets.includes(String(tab));
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -6828,6 +6963,15 @@ module.exports = {
   parseBasicAuthHeader,
   isAuthorizedRequest,
   isAccessAuthEnabled,
+  // Comptes utilisateurs (V8 phase 1)
+  hashPassword,
+  verifyPassword,
+  generatePasswordSalt,
+  ROLES,
+  DEFAULT_ROLE,
+  getRole,
+  isKnownRole,
+  roleAllowsTab,
   // Helpers de test : ne pas appeler depuis du code applicatif
   _resetAuthRateLimitForTest: () => authRateLimitState.clear(),
   _createAccessSessionValueForTest: createAccessSessionValue,
