@@ -8023,3 +8023,69 @@ html[data-app-theme="blanc"] body,
 @media (max-width: 560px) {
   .prep-toolbar { grid-template-columns: 1fr; }
 }
+
+/* --- Comptes utilisateurs (V8 phase 1) -----------------------------------
+ *
+ * Le tableau reutilise volontairement .imports-archives-table-wrap et
+ * .imports-archives-table : ces classes portent deja leurs surcharges de mode
+ * clair et de theme sombre, que des classes neuves n'auraient pas. On n'ajoute
+ * ici que ce qui leur manque, en n'employant que des variables semantiques
+ * definies dans les trois blocs :root — donc valides dans les deux themes sans
+ * declaration supplementaire.
+ */
+.comptes-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.compte-role {
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  max-width: 160px;
+}
+
+.comptes-form {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+/* Sur mobile, les trois boutons d'action tiennent mal sur une ligne de tableau
+ * deja etroite : on les laisse s'empiler plutot que de rogner les libelles. */
+@media (max-width: 640px) {
+  .comptes-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .compte-role {
+    max-width: none;
+    width: 100%;
+  }
+}
+
+/* Pleine largeur a TOUTES les tailles, et pas seulement au-dela de 1400px.
+ *
+ * La regle `.settings-grid > .settings-block { grid-column: 1 / -1 }` n'existe
+ * que dans @media (min-width: 1400px). En dessous, la grille passe a deux
+ * colonnes et un tableau a cinq colonnes se retrouve dans ~470px : les
+ * libelles de boutons se cassent lettre par lettre et le selecteur de role est
+ * tronque. On cible ce bloc precisement plutot que tous les .settings-block,
+ * pour ne pas modifier la mise en page des blocs existants au passage.
+ *
+ * (Le tableau de l'historique des imports souffre du meme probleme entre 1024
+ * et 1399px — a traiter separement, ce n'est pas le sujet de ce lot.) */
+.settings-grid > #comptesBlock {
+  grid-column: 1 / -1;
+}

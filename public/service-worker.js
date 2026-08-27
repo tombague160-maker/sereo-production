@@ -2,7 +2,7 @@
 // Sans bump, l'ancienne version reste servie depuis le cache indefiniment —
 // notamment manifest.webmanifest, dont une version perimee casse l'installation
 // sur l'ecran d'accueil sans aucun message d'erreur.
-const CACHE_NAME = "sereo-shell-20260826-esm";
+const CACHE_NAME = "sereo-shell-20260826-comptes";
 const API_CACHE_NAME = "sereo-api-20260514";
 const APP_SHELL = [
   "/css/style.css",
@@ -16,6 +16,7 @@ const APP_SHELL = [
   "/js/utils/address.js",
   "/js/config/themes.js",
   "/js/config/tabs.js",
+  "/js/domains/comptes.js",
   "/favicon.svg",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
@@ -31,7 +32,17 @@ const APP_SHELL = [
 // /api/version : ne PAS cacher cote SW, sinon apres un auto-deploy le chip
 // version reste sur l'ancienne valeur tant que le SW sert le cache.
 // Le serveur envoie deja Cache-Control: no-store pour la couche HTTP.
-const API_CACHE_EXCLUDED = ["/api/storage/status", "/api/version"];
+// /api/me et /api/comptes : auth-sensibles. Contrairement a /api/version, le
+// serveur ne pose PAS Cache-Control: no-store dessus. Sans exclusion ici, la
+// strategie network-first resservirait une identite ou une liste de comptes
+// perimee apres un changement de role ou une deconnexion — panne discrete et
+// difficile a diagnostiquer.
+const API_CACHE_EXCLUDED = [
+  "/api/storage/status",
+  "/api/version",
+  "/api/me",
+  "/api/comptes"
+];
 
 // Network-first avec timeout puis fallback cache pour les GET /api/*.
 // Cible : reseau ok -> donnees fraiches, reseau lent/coupe -> derniere version connue.
