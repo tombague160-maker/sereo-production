@@ -702,6 +702,326 @@ function listUserAccounts() {
   return getSqliteStore().listUsers();
 }
 
+// --- Geocodage des adresses (V8 phase 2) -----------------------------------
+//
+// Le geocodage passe OBLIGATOIREMENT par le serveur : la CSP declare
+// `connect-src 'self'`, donc le navigateur ne peut appeler aucune API externe.
+// Ce n'est pas une contrainte subie, c'est la bonne architecture — on geocode
+// une fois, on met en cache, et on ne rappelle jamais l'API pour une adresse
+// deja connue.
+//
+// Service utilise : la Base Adresse Nationale (api-adresse.data.gouv.fr),
+// gratuite, sans cle, et conçue pour les adresses francaises. L'URL est
+// configurable pour que les tests puissent pointer un faux serveur local :
+// le projet n'a aucune bibliotheque de simulation reseau.
+
+const GEOCODER_URL = cleanEnv(process.env.SEREO_GEOCODER_URL)
+  || "https://api-adresse.data.gouv.fr/search/";
+
+// La BAN tolere une cadence elevee, mais rien ne presse : un import se geocode
+// en tache de fond. Cet intervalle evite d'etre pris pour un robot abusif.
+const GEOCODER_INTERVALLE_MS = Number(process.env.SEREO_GEOCODER_INTERVALLE_MS || 120);
+const GEOCODER_TIMEOUT_MS = Number(process.env.SEREO_GEOCODER_TIMEOUT_MS || 8000);
+
+// Plafond par lancement : evite qu'une base anormalement grosse ne parte en
+// boucle de plusieurs heures sans qu'on s'en apercoive.
+const GEOCODER_MAX_PAR_LOT = Number(process.env.SEREO_GEOCODER_MAX_PAR_LOT || 300);
+
+const GEOCODAGE_STATUTS = {
+  TROUVE: "trouve",
+  AMBIGU: "ambigu",
+  INTROUVABLE: "introuvable",
+  ERREUR: "erreur"
+};
+
+/**
+ * Cle de cache d'une adresse.
+ *
+ * Volontairement construite a partir des champs bruts et non de normalizeCity :
+ * cette derniere renvoie "Besancon" sans cedille pour les secteurs coeur et
+ * applique un titleCase qui ne decoupe que sur les espaces ("Saint-Claude"
+ * devient "Saint-claude"). Pour une cle de cache, seule compte la stabilite.
+ */
+/**
+ * Premiere coordonnee reellement renseignee.
+ *
+ * Remplace l'idiome `a ?? b ?? ""`, faux ici : dans tout le projet une
+ * coordonnee absente vaut la chaine vide et non null, et `??` ne se declenche
+ * pas dessus. Une valeur numerique 0 reste evidemment valide — d'ou le test
+ * explicite sur "" plutot qu'un test de veracite.
+ */
+function premiereCoordonnee(...valeurs) {
+  for (const valeur of valeurs) {
+    if (valeur === null || valeur === undefined || valeur === "") continue;
+    return valeur;
+  }
+  return "";
+}
+
+function cleGeocodage({ rue, codePostal, ville }) {
+  return [rue, codePostal, ville]
+    .map(part => clean(part).toLowerCase())
+    .join("|")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function adresseGeocodable({ rue, codePostal, ville }) {
+  // Sans code postal ni ville, la BAN ne peut pas desambiguiser une rue.
+  return Boolean(clean(rue)) && Boolean(clean(codePostal) || clean(ville));
+}
+
+/**
+ * Interroge la BAN pour une adresse.
+ *
+ * Ne leve JAMAIS : toute erreur devient un statut "erreur", pour qu'un incident
+ * reseau ne fasse pas echouer un import complet. L'appelant decide quoi faire.
+ */
+async function interrogerGeocodeur({ rue, codePostal, ville }) {
+  const requete = [clean(rue), clean(ville)].filter(Boolean).join(" ");
+  const url = new URL(GEOCODER_URL);
+  url.searchParams.set("q", requete);
+  url.searchParams.set("limit", "1");
+
+  // Le code postal est passe en filtre plutot qu'en texte libre : il est
+  // fiable a 100 % dans les donnees observees, alors que le nom de ville
+  // souffre des variations d'accent et de casse de l'export Ximi.
+  const cp = clean(codePostal);
+  if (cp) url.searchParams.set("postcode", cp);
+
+  try {
+    const reponse = await fetch(url, {
+      headers: { "User-Agent": "sereo-app" },
+      // fetchReleaseNotes, seul autre appel sortant du serveur, n'a AUCUN
+      // timeout. On ne reproduit pas ce defaut ici : sans plafond, une BAN
+      // lente bloquerait le lot entier.
+      signal: AbortSignal.timeout(GEOCODER_TIMEOUT_MS)
+    });
+
+    if (!reponse.ok) {
+      return { statut: GEOCODAGE_STATUTS.ERREUR, message: `HTTP ${reponse.status}`, requete };
+    }
+
+    const corps = await reponse.json();
+    const trait = Array.isArray(corps?.features) ? corps.features[0] : null;
+
+    if (!trait) {
+      return { statut: GEOCODAGE_STATUTS.INTROUVABLE, requete };
+    }
+
+    const [lng, lat] = trait.geometry?.coordinates || [];
+    const score = Number(trait.properties?.score ?? 0);
+    const type = String(trait.properties?.type || "");
+    const libelle = String(trait.properties?.label || "");
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return { statut: GEOCODAGE_STATUTS.ERREUR, message: "coordonnees absentes", requete };
+    }
+
+    return { statut: qualifierResultat(score, type), lat, lng, score, type, libelle, requete };
+  } catch (error) {
+    return {
+      statut: GEOCODAGE_STATUTS.ERREUR,
+      message: error.name === "TimeoutError" ? "delai depasse" : error.message,
+      requete
+    };
+  }
+}
+
+/**
+ * Qualifie un resultat de la BAN.
+ *
+ * `municipality` et `locality` renvoient le centre de la commune, pas l'adresse.
+ * Livrer a partir de ce point ferait croire a une position exacte alors qu'elle
+ * peut etre a plusieurs kilometres : ces types ne sont jamais consideres comme
+ * trouves, quel que soit leur score.
+ *
+ * Le seuil de 0,6 n'est pas arbitraire, il est mesure sur la BAN reelle
+ * (26/08/2026) :
+ *
+ *   "1 rue Megevand" 25000        -> 0,98  housenumber  adresse exacte
+ *   "place de la Revolution" 25000 -> 0,97  street       adresse exacte
+ *   "grande rue" 25000             -> 0,98  street       adresse exacte
+ *   "2 rue des Lilas" 39100        -> 0,46  housenumber  "2 Impasse des Lilas, Gevry"
+ *   "12 av. du General de Gaulle"  -> 0,44  housenumber  "12 rue general lecourbe"
+ *
+ * Les deux derniers cas sont le piege : la BAN renvoie un type `housenumber`
+ * rassurant pour une rue COMPLETEMENT differente. Se fier au type seul aurait
+ * livre le camion a la mauvaise adresse. Seul le score les separe, et l'ecart
+ * entre les vraies correspondances (>= 0,97) et les rapprochements hasardeux
+ * (<= 0,46) est assez large pour que 0,6 soit un choix sur.
+ */
+function qualifierResultat(score, type) {
+  const precis = type === "housenumber" || type === "street";
+  if (precis && score >= 0.6) return GEOCODAGE_STATUTS.TROUVE;
+  if (score >= 0.4) return GEOCODAGE_STATUTS.AMBIGU;
+  return GEOCODAGE_STATUTS.INTROUVABLE;
+}
+
+/**
+ * Geocode une adresse, en passant par le cache.
+ *
+ * `forcer` ignore le cache : utile pour retenter les adresses en erreur reseau
+ * sans avoir a vider la table.
+ */
+async function geocoderAdresse(adresse, { forcer = false } = {}) {
+  if (!useSqliteStorage()) return null;
+  if (!adresseGeocodable(adresse)) return null;
+
+  const cle = cleGeocodage(adresse);
+  const store = getSqliteStore();
+
+  if (!forcer) {
+    const enCache = store.getGeocodage(cle);
+    // Une erreur reseau n'est pas un resultat : on retente. Un "introuvable"
+    // en revanche est une reponse, on ne rappelle pas l'API pour rien.
+    if (enCache && enCache.statut !== GEOCODAGE_STATUTS.ERREUR) return enCache;
+  }
+
+  const resultat = await interrogerGeocodeur(adresse);
+
+  const entree = {
+    cle,
+    requete: resultat.requete,
+    lat: resultat.lat ?? null,
+    lng: resultat.lng ?? null,
+    score: resultat.score ?? null,
+    libelle: resultat.libelle || null,
+    type: resultat.type || null,
+    statut: resultat.statut,
+    source: "ban",
+    misAJourLe: new Date().toISOString()
+  };
+
+  store.saveGeocodage(entree);
+  return entree;
+}
+
+/** Adresse d'un client, sous la forme attendue par le geocodeur. */
+function adresseDuClient(client) {
+  return {
+    rue: client.rue || client.adresse || "",
+    codePostal: client.codePostal || "",
+    ville: client.ville || ""
+  };
+}
+
+function clientAGeocoder(client) {
+  return !getCoordinates(client) && adresseGeocodable(adresseDuClient(client));
+}
+
+/**
+ * Geocode les clients depourvus de coordonnees.
+ *
+ * L'ordre des operations est le point critique de cette fonction. Les appels
+ * reseau se font AVANT et EN DEHORS de tout verrou : withWriteLock serialise
+ * toutes les ecritures et impose un plafond de 60 s, or geocoder 200 clients
+ * a 120 ms d'intervalle depasse largement ce budget. Tenir le verrou pendant
+ * les appels gelerait l'application entiere pour tout le monde.
+ *
+ * On lit, on interroge le reseau sans verrou, puis on prend le verrou une
+ * seule fois pour ecrire. Un client cree entre-temps sera simplement traite au
+ * lancement suivant.
+ */
+async function geocoderClients({ forcer = false, max = GEOCODER_MAX_PAR_LOT } = {}) {
+  assertGeocodageSupporte();
+
+  const aTraiter = readDb().clients.filter(client =>
+    forcer ? adresseGeocodable(adresseDuClient(client)) : clientAGeocoder(client)
+  );
+
+  const lot = aTraiter.slice(0, max);
+  const resultats = new Map();
+  let premier = true;
+
+  for (const client of lot) {
+    // Espacement entre les appels, sauf avant le premier.
+    if (!premier) await pause(GEOCODER_INTERVALLE_MS);
+    premier = false;
+
+    const entree = await geocoderAdresse(adresseDuClient(client), { forcer });
+    if (entree) resultats.set(String(client.id), entree);
+  }
+
+  // Une seule prise de verrou, une seule ecriture, une fois le reseau termine.
+  const bilan = await withWriteLock(async () => {
+    const db = readDb();
+    let appliques = 0;
+
+    for (const client of db.clients) {
+      const entree = resultats.get(String(client.id));
+      if (!entree || entree.statut !== GEOCODAGE_STATUTS.TROUVE) continue;
+
+      client.lat = entree.lat;
+      client.lng = entree.lng;
+      appliques += 1;
+
+      // Propagation aux commandes du client : sans cela, les bons deja
+      // importes resteraient sans position et les tournees sans distance.
+      for (const order of db.commandes) {
+        if (String(order.clientId) !== String(client.id)) continue;
+        order.lat = entree.lat;
+        order.lng = entree.lng;
+      }
+    }
+
+    if (appliques > 0) {
+      addHistory(db, "Geocodage", `${appliques} client(s) geolocalise(s) automatiquement`);
+      writeDb(db);
+    }
+
+    return appliques;
+  });
+
+  const parStatut = { trouve: 0, ambigu: 0, introuvable: 0, erreur: 0 };
+  for (const entree of resultats.values()) parStatut[entree.statut] += 1;
+
+  return {
+    candidats: aTraiter.length,
+    traites: lot.length,
+    tronque: aTraiter.length > lot.length,
+    appliques: bilan,
+    parStatut
+  };
+}
+
+function assertGeocodageSupporte() {
+  if (!useSqliteStorage()) {
+    throw badRequest("Le geocodage necessite le stockage SQLite.");
+  }
+}
+
+function pause(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Etat du geocodage : ce qui reste a faire et ce que le cache contient deja.
+ * Sert d'indicateur d'avancement, et de base au futur ecran de reprise des
+ * adresses ambigues.
+ */
+function etatGeocodage() {
+  assertGeocodageSupporte();
+
+  const clients = readDb().clients;
+  const store = getSqliteStore();
+
+  const geolocalises = clients.filter(client => Boolean(getCoordinates(client))).length;
+  const sansAdresse = clients.filter(
+    client => !getCoordinates(client) && !adresseGeocodable(adresseDuClient(client))
+  ).length;
+
+  return {
+    clients: clients.length,
+    geolocalises,
+    aGeocoder: clients.filter(clientAGeocoder).length,
+    sansAdresseExploitable: sansAdresse,
+    cache: store.countGeocodagesParStatut()
+  };
+}
+
 function parseBasicAuthHeader(header) {
   const [scheme, encoded] = String(header || "").split(" ");
   if (!encoded || scheme.toLowerCase() !== "basic") return null;
@@ -5258,8 +5578,14 @@ function normalizeRoute(route, orders) {
       products: normalizeProducts(stop.products || order?.products || []),
       status: STOP_STATUSES.has(stop.status) ? stop.status : "pret_livraison",
       notes: stop.notes || order?.notes || "",
-      lat: stop.lat ?? order?.lat ?? "",
-      lng: stop.lng ?? order?.lng ?? ""
+      // `??` ne se declenche que sur null et undefined, PAS sur la chaine vide.
+      // Or les coordonnees absentes valent "" dans tout le projet, jamais null
+      // (cf. parseCoordinate, qui renvoie {ok:true, value:""}). Avec `??`, un
+      // stop cree avant le geocodage gardait donc "" indefiniment : les clients
+      // devenaient geolocalises, mais les tournees deja creees restaient sans
+      // distance — une panne qu'on aurait mis longtemps a imputer a cette ligne.
+      lat: premiereCoordonnee(stop.lat, order?.lat),
+      lng: premiereCoordonnee(stop.lng, order?.lng)
     };
   });
 
@@ -6920,8 +7246,13 @@ app.patch("/api/clients/:id/coordinates", async (req, res) => {
       client.lat = lat.value;
       client.lng = lng.value;
 
-      const order = db.commandes.find(item => String(item.clientId) === String(client.id));
-      if (order) {
+      // .filter et non .find : depuis le bucketing par (client, dateCommande)
+      // de la v1.9.0, un client a couramment PLUSIEURS bons de commande. Avec
+      // .find, une seule commande recevait les coordonnees et les autres
+      // restaient sans position. Le PATCH /api/clients/:id juste au-dessus
+      // utilise deja .filter — l'incoherence etait ici.
+      const orders = db.commandes.filter(item => String(item.clientId) === String(client.id));
+      for (const order of orders) {
         order.lat = lat.value;
         order.lng = lng.value;
         order.updatedAt = new Date().toISOString();
@@ -7366,6 +7697,36 @@ function requireAdministration(req, res, next) {
   next();
 }
 
+// --- API du geocodage (V8 phase 2) -----------------------------------------
+
+app.get("/api/geocodage/etat", (req, res) => {
+  try {
+    res.json(etatGeocodage());
+  } catch (error) {
+    handleRouteError(error, res, "Erreur etat du geocodage");
+  }
+});
+
+/**
+ * Lance un lot de geocodage.
+ *
+ * Peut durer plusieurs dizaines de secondes : la reponse n'arrive qu'une fois
+ * le lot termine, et le front doit prevoir un etat d'attente. C'est assume —
+ * une file de taches en arriere-plan serait disproportionnee pour un traitement
+ * declenche a la main quelques fois par mois.
+ */
+app.post("/api/geocodage/lancer", async (req, res) => {
+  try {
+    const bilan = await geocoderClients({
+      forcer: req.body?.forcer === true,
+      max: Number(req.body?.max) > 0 ? Number(req.body.max) : GEOCODER_MAX_PAR_LOT
+    });
+    res.json(bilan);
+  } catch (error) {
+    handleRouteError(error, res, "Erreur geocodage");
+  }
+});
+
 app.get("/api/comptes", requireAdministration, (req, res) => {
   try {
     res.json(listUserAccounts());
@@ -7495,6 +7856,15 @@ module.exports = {
   parseBasicAuthHeader,
   isAuthorizedRequest,
   isAccessAuthEnabled,
+  // Geocodage (V8 phase 2)
+  cleGeocodage,
+  adresseGeocodable,
+  qualifierResultat,
+  geocoderAdresse,
+  geocoderClients,
+  etatGeocodage,
+  premiereCoordonnee,
+  GEOCODAGE_STATUTS,
   // Comptes utilisateurs (V8 phase 1)
   hashPassword,
   verifyPassword,
