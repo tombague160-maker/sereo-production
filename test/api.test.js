@@ -12,6 +12,11 @@ const sqlitePath = path.join(tmpRoot, "data", "sereo.sqlite");
 const uploadDir = path.join(tmpRoot, "imports");
 const backupDir = path.join(tmpRoot, "data", "backups");
 
+// Aucun test ne doit appeler une API externe : lent, dependant du reseau, et
+// impoli envers un service public gratuit. Le geocodage automatique declenche
+// par les imports est donc coupe ici. geocodage.test.js teste le geocodage
+// lui-meme, contre un faux serveur local.
+process.env.SEREO_GEOCODAGE_AUTO = "0";
 process.env.SEREO_STORAGE = "sqlite";
 process.env.SEREO_DB_PATH = dbPath;
 process.env.SEREO_SQLITE_PATH = sqlitePath;

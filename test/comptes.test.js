@@ -12,6 +12,11 @@ const path = require("node:path");
 
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sereo-comptes-"));
 
+// Aucun test ne doit appeler une API externe : lent, dependant du reseau, et
+// impoli envers un service public gratuit. Le geocodage automatique declenche
+// par les imports est donc coupe ici. geocodage.test.js teste le geocodage
+// lui-meme, contre un faux serveur local.
+process.env.SEREO_GEOCODAGE_AUTO = "0";
 process.env.SEREO_STORAGE = "sqlite";
 process.env.SEREO_DB_PATH = path.join(tmpRoot, "data", "db.json");
 process.env.SEREO_SQLITE_PATH = path.join(tmpRoot, "data", "sereo.sqlite");

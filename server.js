@@ -6985,12 +6985,62 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     };
     }); // fin withWriteLock
     res.json(response);
+
+    // V8 phase 2 : geocodage des nouveaux clients, APRES avoir repondu.
+    //
+    // Volontairement non attendu. Un import de 50 clients inconnus prendrait
+    // plusieurs secondes de reseau, et l'utilisateur n'a aucune raison de
+    // patienter devant un ecran fige pour un traitement dont il n'a pas besoin
+    // immediatement. La reponse est deja partie ; le rendu suivant montrera les
+    // clients geolocalises.
+    //
+    // Le catch est indispensable : sans lui, un echec deviendrait un rejet non
+    // gere, que Node signale bruyamment et qui peut faire tomber le processus
+    // selon la configuration.
+    declencherGeocodageEnFond("import ventes");
   } catch (error) {
     handleRouteError(error, res, "Erreur import ventes");
   } finally {
     cleanupUploadedFile(uploadedPath);
   }
 });
+
+/**
+ * Lance un geocodage en tache de fond, sans jamais propager d'erreur.
+ *
+ * Un seul lot a la fois : `geocodageEnCours` evite que deux imports rapproches
+ * lancent deux series d'appels concurrents vers la BAN, ce qui doublerait la
+ * cadence et pourrait nous faire passer pour un robot abusif.
+ */
+let geocodageEnCours = false;
+
+// Declenchement automatique apres import. Actif par defaut en production, mais
+// coupable par variable d'environnement — les tests le desactivent, car des
+// tests qui appellent une API publique sont lents, dependants du reseau, et
+// impolis envers un service gratuit. Le lancement MANUEL, lui, reste toujours
+// disponible via POST /api/geocodage/lancer.
+const GEOCODAGE_AUTO = cleanEnv(process.env.SEREO_GEOCODAGE_AUTO) !== "0";
+
+function declencherGeocodageEnFond(origine) {
+  if (!GEOCODAGE_AUTO || !useSqliteStorage() || geocodageEnCours) return;
+
+  geocodageEnCours = true;
+  geocoderClients()
+    .then(bilan => {
+      if (bilan.traites > 0) {
+        console.log(
+          `[geocodage] ${origine} : ${bilan.appliques}/${bilan.traites} client(s) geolocalise(s)`
+            + (bilan.tronque ? ` (${bilan.candidats} candidats, lot plafonne)` : "")
+        );
+      }
+    })
+    .catch(error => {
+      console.error(`[geocodage] ${origine} : echec du lot —`, error.message);
+    })
+    .finally(() => {
+      geocodageEnCours = false;
+    });
+}
 
 // v1.12.0 : liste des fichiers Excel archives lors des imports passes.
 // Tries du plus recent au plus ancien. Inclut metadata (taille, sha256, stats)
