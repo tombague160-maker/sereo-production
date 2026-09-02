@@ -29,3 +29,9 @@ playwright/.cache/
 # Captures d'ecran d'audit UI produites par data/capture.js.
 # Plusieurs dizaines de Mo par serie : utiles en local, jamais dans le depot.
 data/shots*/
+
+# Canevas de maquettes assemble : ~2 Mo d'editeur embarque, reconstruit a la
+# demande depuis les .dc.html par le script de seed. Ce sont les sources qui
+# sont versionnees, pas le produit.
+design/maquettes-v8/*.html
+!design/maquettes-v8/*.dc.html

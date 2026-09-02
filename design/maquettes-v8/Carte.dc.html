@@ -1,0 +1,156 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap">
+  <style>
+    body {
+      margin: 0;
+      font-family: "Poppins", "Segoe UI", system-ui, sans-serif;
+      background: #EFF4F2;
+      color: #386B6D;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: #C02B0A; } a:hover { color: #9c2208; }
+
+    /* Le trace de tournee se dessine, une fois, a l'ouverture. */
+    @keyframes seroTrace { to { stroke-dashoffset: 0; } }
+    .trace {
+      stroke-dasharray: 900;
+      stroke-dashoffset: 900;
+      animation: seroTrace 2.4s cubic-bezier(.4,0,.2,1) .3s forwards;
+    }
+    @keyframes seroHalo {
+      0%, 100% { r: 15; opacity: .45; }
+      50%      { r: 23; opacity: 0; }
+    }
+    .halo { animation: seroHalo 2.2s ease-out infinite; }
+    @keyframes seroMonte {
+      from { opacity: 0; transform: translateY(20px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .monte { animation: seroMonte .55s cubic-bezier(.22,1,.36,1) .2s both; }
+    @media (prefers-reduced-motion: reduce) {
+      .trace { animation: none; stroke-dashoffset: 0; }
+      .halo, .monte { animation: none; }
+    }
+  </style>
+</helmet>
+
+<div style="width: 390px; height: 844px; position: relative; background: #EFF4F2; overflow: hidden;">
+
+  <!-- Fond de carte stylise. Ce n'est pas une vraie carte : c'est une maquette,
+       les formes evoquent les zones, l'eau et les axes sans pretendre etre
+       geographiquement justes. -->
+  <svg width="390" height="844" viewBox="0 0 390 844" style="position: absolute; inset: 0;">
+    <rect width="390" height="844" fill="#EFF4F2"/>
+
+    <!-- Zones vertes -->
+    <path d="M-30 120 C 60 70, 140 110, 170 180 C 195 240, 120 290, 40 270 C -20 255, -40 180, -30 120 Z" fill="#DCE9E7"/>
+    <path d="M250 480 C 330 450, 420 500, 410 590 C 400 670, 300 700, 250 650 C 205 605, 200 500, 250 480 Z" fill="#DCE9E7"/>
+    <path d="M60 700 C 130 680, 190 720, 180 790 C 172 845, 90 860, 40 820 C 5 790, 15 715, 60 700 Z" fill="#E4EEEB"/>
+
+    <!-- Riviere -->
+    <path d="M-20 380 C 80 350, 130 430, 230 400 C 320 373, 360 300, 410 320" fill="none" stroke="#C3DBD7" stroke-width="20" stroke-linecap="round"/>
+
+    <!-- Axes -->
+    <g stroke="#ffffff" stroke-linecap="round" fill="none">
+      <path d="M-10 250 C 90 230, 150 300, 250 275 C 330 255, 360 200, 400 210" stroke-width="14"/>
+      <path d="M70 -10 C 90 120, 60 260, 110 400 C 150 520, 120 660, 140 850" stroke-width="12"/>
+      <path d="M300 -10 C 290 130, 330 240, 300 360 C 275 460, 310 560, 290 850" stroke-width="10"/>
+      <path d="M-10 560 C 100 545, 200 590, 300 565 C 350 552, 380 540, 400 545" stroke-width="9"/>
+    </g>
+    <g stroke="#F5F9F8" stroke-linecap="round" fill="none" stroke-width="5">
+      <path d="M20 160 C 110 175, 160 140, 240 165"/>
+      <path d="M40 460 C 130 480, 190 445, 270 470"/>
+      <path d="M150 640 C 210 660, 260 630, 330 655"/>
+    </g>
+
+    <!-- Trace de la tournee -->
+    <path class="trace" d="M92 214 C 130 250, 175 245, 205 292 C 232 334, 190 372, 213 416 C 236 458, 300 452, 305 500 C 310 548, 250 570, 245 612 C 240 656, 175 668, 160 706"
+          fill="none" stroke="#EF9177" stroke-width="4.5" stroke-linecap="round" stroke-dasharray="900"/>
+
+    <!-- Arrets faits -->
+    <g>
+      <circle cx="92" cy="214" r="14" fill="#386B6D"/>
+      <path d="M86 214 l4 4 8 -8" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g>
+      <circle cx="205" cy="292" r="14" fill="#386B6D"/>
+      <path d="M199 292 l4 4 8 -8" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+
+    <!-- Arret en cours -->
+    <circle class="halo" cx="213" cy="416" r="15" fill="#EF9177"/>
+    <circle cx="213" cy="416" r="17" fill="#EF9177" stroke="#ffffff" stroke-width="3.5"/>
+    <text x="213" y="421" text-anchor="middle" font-family="Poppins, sans-serif" font-size="13" font-weight="700" fill="#ffffff">3</text>
+
+    <!-- Arrets restants -->
+    <g font-family="Poppins, sans-serif" font-size="12" font-weight="600" fill="#386B6D" text-anchor="middle">
+      <circle cx="305" cy="500" r="14" fill="#ffffff" stroke="#A1C4C0" stroke-width="2.5"/>
+      <text x="305" y="505">4</text>
+      <circle cx="245" cy="612" r="14" fill="#ffffff" stroke="#A1C4C0" stroke-width="2.5"/>
+      <text x="245" y="617">5</text>
+      <circle cx="160" cy="706" r="14" fill="#ffffff" stroke="#A1C4C0" stroke-width="2.5"/>
+      <text x="160" y="711">6</text>
+    </g>
+  </svg>
+
+  <!-- En-tete flottant -->
+  <div style="position: absolute; top: 16px; left: 16px; right: 16px; display: flex; align-items: center; gap: 10px;">
+    <div style="width: 44px; height: 44px; border-radius: 999px; background: #ffffff; box-shadow: 0 4px 14px rgba(56,107,109,.16); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#386B6D" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+    </div>
+    <div style="flex-grow: 1; height: 44px; border-radius: 999px; background: #ffffff; box-shadow: 0 4px 14px rgba(56,107,109,.16); display: flex; align-items: center; justify-content: space-between; padding: 0 8px 0 18px;">
+      <span style="font-size: 15px; font-weight: 600;">Tournée Besançon</span>
+      <span style="height: 30px; padding: 0 12px; border-radius: 999px; background: #DCE9E7; display: flex; align-items: center; font-size: 13px; font-weight: 600; color: #386B6D;">3 / 8</span>
+    </div>
+  </div>
+
+  <!-- Bandeau distance restante -->
+  <div style="position: absolute; top: 76px; left: 16px; display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 15px; border-radius: 999px; background: #386B6D; color: #ffffff; box-shadow: 0 4px 14px rgba(56,107,109,.22);">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A1C4C0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+    <span style="font-size: 13px; font-weight: 500;">18 km restants · environ 47 min</span>
+  </div>
+
+  <!-- Fiche de l'arret courant, en bas -->
+  <div class="monte" style="position: absolute; left: 12px; right: 12px; bottom: 12px; background: #ffffff; border-radius: 30px; padding: 20px; box-shadow: 0 -6px 34px rgba(56,107,109,.16); display: flex; flex-direction: column; gap: 15px;">
+
+    <div style="width: 42px; height: 4px; border-radius: 999px; background: #E0EAE8; align-self: center;"></div>
+
+    <div style="display: flex; gap: 13px; align-items: flex-start;">
+      <div style="width: 42px; height: 42px; border-radius: 999px; background: #EF9177; color: #ffffff; font-size: 17px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">3</div>
+      <div style="display: flex; flex-direction: column; gap: 3px;">
+        <div style="font-size: 17px; font-weight: 600; line-height: 1.3; text-wrap: pretty;">SSIAD de la Haute Vallée</div>
+        <div style="font-size: 13.5px; color: #7C989A; line-height: 1.4;">2 place de l'Hôtel de Ville<br>39300 Champagnole</div>
+      </div>
+    </div>
+
+    <div style="display: flex; gap: 8px;">
+      <span style="height: 30px; padding: 0 13px; border-radius: 999px; background: #EDF4F2; display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500; color: #5C8285;">
+        <span style="width: 7px; height: 7px; border-radius: 999px; background: #A1C4C0;"></span>
+        Champagnole
+      </span>
+      <span style="height: 30px; padding: 0 13px; border-radius: 999px; background: #FBF0EC; display: flex; align-items: center; font-size: 12.5px; font-weight: 500; color: #C02B0A;">9 articles</span>
+    </div>
+
+    <div style="display: flex; gap: 10px;">
+      <div style="width: 56px; height: 52px; border-radius: 999px; background: #ffffff; border: 2px solid #DCE9E7; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#386B6D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.2a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2Z"/></svg>
+      </div>
+      <div style="flex-grow: 1; height: 52px; border-radius: 999px; background: #EF9177; display: flex; align-items: center; justify-content: center; gap: 9px; font-size: 16px; font-weight: 600; color: #ffffff; box-shadow: 0 7px 18px rgba(239,145,119,.4);">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
+        Y aller
+      </div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

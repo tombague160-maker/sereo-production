@@ -1,0 +1,238 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap">
+  <style>
+    body {
+      margin: 0;
+      font-family: "Poppins", "Segoe UI", system-ui, sans-serif;
+      background: #FBF7F5;
+      color: #386B6D;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: #C02B0A; } a:hover { color: #9c2208; }
+
+    @keyframes seroMonte {
+      from { opacity: 0; transform: translateY(18px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .monte { animation: seroMonte .55s cubic-bezier(.22,1,.36,1) both; }
+    .d1 { animation-delay: .06s; } .d2 { animation-delay: .12s; }
+    .d3 { animation-delay: .18s; } .d4 { animation-delay: .24s; }
+    .d5 { animation-delay: .32s; } .d6 { animation-delay: .38s; }
+    @media (prefers-reduced-motion: reduce) { .monte { animation: none; } }
+  </style>
+</helmet>
+
+<div style="width: 1440px; height: 900px; display: flex; background: #FBF7F5; overflow: hidden;">
+
+  <!-- Barre laterale -->
+  <div style="width: 258px; background: #386B6D; border-radius: 0 36px 36px 0; padding: 26px 18px; display: flex; flex-direction: column; gap: 26px; flex-shrink: 0;">
+
+    <!-- Marque : minuscules arrondies + le sourire sous le o, comme le logo -->
+    <div style="padding: 0 8px;">
+      <svg width="130" height="46" viewBox="0 0 130 46">
+        <text x="0" y="30" font-family="Poppins, sans-serif" font-size="30" font-weight="700" fill="#EF9177" letter-spacing="-.5">séréo</text>
+        <path d="M86 36 C 92 42, 102 42, 108 35" fill="none" stroke="#EF9177" stroke-width="4" stroke-linecap="round"/>
+      </svg>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      <div style="height: 46px; border-radius: 999px; background: #EF9177; display: flex; align-items: center; gap: 12px; padding: 0 16px;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+        <span style="font-size: 14.5px; font-weight: 600; color: #ffffff;">Tableau de bord</span>
+      </div>
+      <div style="height: 46px; border-radius: 999px; display: flex; align-items: center; gap: 12px; padding: 0 16px;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A1C4C0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M8 10h8M8 14h5"/></svg>
+        <span style="font-size: 14.5px; font-weight: 500; color: #D6E5E3;">Commandes</span>
+      </div>
+      <div style="height: 46px; border-radius: 999px; display: flex; align-items: center; gap: 12px; padding: 0 16px;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A1C4C0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4.3 9 5.2v10L7.5 14.3Z"/><path d="M16.5 9.5 7.5 4.3 3 6.9v10l4.5 2.6"/></svg>
+        <span style="font-size: 14.5px; font-weight: 500; color: #D6E5E3;">Préparation</span>
+      </div>
+      <div style="height: 46px; border-radius: 999px; display: flex; align-items: center; gap: 12px; padding: 0 16px;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A1C4C0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 17h4V5H2v12h3M20 17h2v-6l-3-4h-5v10h2"/><circle cx="7.5" cy="17.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg>
+        <span style="font-size: 14.5px; font-weight: 500; color: #D6E5E3;">Livraison</span>
+      </div>
+      <div style="height: 46px; border-radius: 999px; display: flex; align-items: center; gap: 12px; padding: 0 16px;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A1C4C0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 8 12 3 4 8v8l8 5 8-5Z"/><path d="M4 8l8 5 8-5M12 13v8"/></svg>
+        <span style="font-size: 14.5px; font-weight: 500; color: #D6E5E3;">Stock</span>
+      </div>
+      <div style="height: 46px; border-radius: 999px; display: flex; align-items: center; gap: 12px; padding: 0 16px;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A1C4C0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 20v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="3.5"/><path d="M21 20v-2a4 4 0 0 0-3-3.9"/></svg>
+        <span style="font-size: 14.5px; font-weight: 500; color: #D6E5E3;">Clients</span>
+      </div>
+    </div>
+
+    <div style="flex-grow: 1;"></div>
+
+    <div style="height: 46px; border-radius: 999px; background: rgba(161,196,192,.16); display: flex; align-items: center; gap: 12px; padding: 0 16px;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A1C4C0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-3-1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0-1.2-2.9h-.2a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.2-3l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 2.9-1.2V2a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 3 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0 1.2 2.9h.2a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
+      <span style="font-size: 14.5px; font-weight: 500; color: #D6E5E3;">Réglages</span>
+    </div>
+  </div>
+
+  <!-- Contenu -->
+  <div style="flex-grow: 1; padding: 30px 36px; display: flex; flex-direction: column; gap: 22px; min-width: 0;">
+
+    <!-- En-tete -->
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 24px;">
+      <div style="display: flex; flex-direction: column; gap: 3px;">
+        <div style="font-size: 26px; font-weight: 600; letter-spacing: -.015em;">Bonjour Tom</div>
+        <div style="font-size: 14.5px; color: #7C989A;">Mercredi 2 septembre — 5 commandes et 1 tournée au programme</div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 11px;">
+        <div style="width: 300px; height: 46px; border-radius: 999px; background: #ffffff; border: 1.5px solid #EDE4E1; display: flex; align-items: center; gap: 10px; padding: 0 18px;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#B3C6C5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+          <span style="font-size: 14px; color: #B3C6C5;">Chercher un client, un produit…</span>
+        </div>
+        <div style="height: 46px; padding: 0 22px; border-radius: 999px; background: #EF9177; display: flex; align-items: center; gap: 9px; color: #ffffff; font-size: 14.5px; font-weight: 600; box-shadow: 0 6px 18px rgba(239,145,119,.34);">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+          Importer
+        </div>
+      </div>
+    </div>
+
+    <!-- Indicateurs : peu, gros, lisibles -->
+    <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px;">
+
+      <div class="monte d1" style="background: #ffffff; border-radius: 26px; padding: 20px 22px; box-shadow: 0 6px 20px rgba(56,107,109,.07); display: flex; flex-direction: column; gap: 10px;">
+        <div style="width: 44px; height: 44px; border-radius: 999px; background: #FBF0EC; display: flex; align-items: center; justify-content: center;">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#EF9177" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M8 10h8M8 14h5"/></svg>
+        </div>
+        <div style="font-size: 34px; font-weight: 700; line-height: 1;">5</div>
+        <div style="font-size: 13.5px; color: #7C989A;">commandes à préparer</div>
+      </div>
+
+      <div class="monte d2" style="background: #ffffff; border-radius: 26px; padding: 20px 22px; box-shadow: 0 6px 20px rgba(56,107,109,.07); display: flex; flex-direction: column; gap: 10px;">
+        <div style="width: 44px; height: 44px; border-radius: 999px; background: #E2EFEB; display: flex; align-items: center; justify-content: center;">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#386B6D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 17h4V5H2v12h3M20 17h2v-6l-3-4h-5v10h2"/><circle cx="7.5" cy="17.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg>
+        </div>
+        <div style="font-size: 34px; font-weight: 700; line-height: 1;">8</div>
+        <div style="font-size: 13.5px; color: #7C989A;">arrêts sur la tournée</div>
+      </div>
+
+      <div class="monte d3" style="background: #ffffff; border-radius: 26px; padding: 20px 22px; box-shadow: 0 6px 20px rgba(56,107,109,.07); display: flex; flex-direction: column; gap: 10px;">
+        <div style="width: 44px; height: 44px; border-radius: 999px; background: #FBEAE6; display: flex; align-items: center; justify-content: center;">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#C02B0A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v5"/><path d="M12 17h.01"/><circle cx="12" cy="12" r="9"/></svg>
+        </div>
+        <div style="font-size: 34px; font-weight: 700; line-height: 1; color: #C02B0A;">3</div>
+        <div style="font-size: 13.5px; color: #7C989A;">ruptures de stock</div>
+      </div>
+
+      <div class="monte d4" style="background: #ffffff; border-radius: 26px; padding: 20px 22px; box-shadow: 0 6px 20px rgba(56,107,109,.07); display: flex; flex-direction: column; gap: 10px;">
+        <div style="width: 44px; height: 44px; border-radius: 999px; background: #F3EEF7; display: flex; align-items: center; justify-content: center;">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#8FA8A6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 8 12 3 4 8v8l8 5 8-5Z"/><path d="M4 8l8 5 8-5M12 13v8"/></svg>
+        </div>
+        <div style="font-size: 34px; font-weight: 700; line-height: 1;">20</div>
+        <div style="font-size: 13.5px; color: #7C989A;">références en stock</div>
+      </div>
+    </div>
+
+    <!-- Deux colonnes -->
+    <div style="display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 18px; flex-grow: 1; min-height: 0;">
+
+      <!-- A preparer -->
+      <div class="monte d5" style="background: #ffffff; border-radius: 28px; padding: 24px 26px; box-shadow: 0 6px 20px rgba(56,107,109,.07); display: flex; flex-direction: column; gap: 16px; min-height: 0;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div style="font-size: 17px; font-weight: 600;">À préparer aujourd'hui</div>
+          <span style="font-size: 13.5px; color: #EF9177; font-weight: 600;">Tout voir</span>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 11px;">
+          <div style="display: flex; align-items: center; gap: 13px;">
+            <span style="width: 11px; height: 11px; border-radius: 999px; background: #EF9177; box-shadow: 0 0 0 3.5px #FBF0EC; flex-shrink: 0;"></span>
+            <div style="flex-grow: 1; min-width: 0;">
+              <div style="font-size: 14.5px; font-weight: 500;">Pharmacie Centrale de la Gare</div>
+              <div style="font-size: 12.5px; color: #7C989A;">Champagnole · 43 articles</div>
+            </div>
+            <span style="height: 28px; padding: 0 12px; border-radius: 999px; background: #FBF0EC; color: #C02B0A; display: flex; align-items: center; font-size: 12px; font-weight: 600;">En cours</span>
+          </div>
+
+          <div style="height: 1px; background: #F2EBE9;"></div>
+
+          <div style="display: flex; align-items: center; gap: 13px;">
+            <span style="width: 11px; height: 11px; border-radius: 999px; background: #C02B0A; box-shadow: 0 0 0 3.5px #FBEAE6; flex-shrink: 0;"></span>
+            <div style="flex-grow: 1; min-width: 0;">
+              <div style="font-size: 14.5px; font-weight: 500;">EHPAD Les Tilleuls du Val de Loue</div>
+              <div style="font-size: 12.5px; color: #C02B0A;">Il manque 2 articles</div>
+            </div>
+            <span style="height: 28px; padding: 0 12px; border-radius: 999px; background: #FBEAE6; color: #C02B0A; display: flex; align-items: center; font-size: 12px; font-weight: 600;">Bloquée</span>
+          </div>
+
+          <div style="height: 1px; background: #F2EBE9;"></div>
+
+          <div style="display: flex; align-items: center; gap: 13px;">
+            <span style="width: 11px; height: 11px; border-radius: 999px; background: #386B6D; box-shadow: 0 0 0 3.5px #E2EFEB; flex-shrink: 0;"></span>
+            <div style="flex-grow: 1; min-width: 0;">
+              <div style="font-size: 14.5px; font-weight: 500;">EHPAD Résidence Bellevue</div>
+              <div style="font-size: 12.5px; color: #7C989A;">Dole · 5 articles</div>
+            </div>
+            <span style="height: 28px; padding: 0 12px; border-radius: 999px; background: #DCE9E7; color: #386B6D; display: flex; align-items: center; font-size: 12px; font-weight: 600;">Prête</span>
+          </div>
+
+          <div style="height: 1px; background: #F2EBE9;"></div>
+
+          <div style="display: flex; align-items: center; gap: 13px;">
+            <span style="width: 11px; height: 11px; border-radius: 999px; background: #386B6D; box-shadow: 0 0 0 3.5px #E2EFEB; flex-shrink: 0;"></span>
+            <div style="flex-grow: 1; min-width: 0;">
+              <div style="font-size: 14.5px; font-weight: 500;">SSIAD de la Haute Vallée</div>
+              <div style="font-size: 12.5px; color: #7C989A;">Champagnole · 9 articles</div>
+            </div>
+            <span style="height: 28px; padding: 0 12px; border-radius: 999px; background: #DCE9E7; color: #386B6D; display: flex; align-items: center; font-size: 12px; font-weight: 600;">Prête</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tournee du jour -->
+      <div class="monte d6" style="background: #386B6D; border-radius: 28px; padding: 24px 26px; display: flex; flex-direction: column; gap: 16px; color: #ffffff; position: relative; overflow: hidden;">
+
+        <!-- Grande forme organique en fond, comme sur le site -->
+        <svg width="260" height="260" viewBox="0 0 260 260" style="position: absolute; right: -70px; bottom: -80px; opacity: .16;">
+          <path d="M130 10 C 200 10, 250 60, 250 130 C 250 200, 200 250, 130 250 C 60 250, 10 200, 10 130 C 10 60, 60 10, 130 10 Z" fill="#A1C4C0"/>
+        </svg>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; position: relative;">
+          <div style="font-size: 17px; font-weight: 600;">Tournée du jour</div>
+          <span style="height: 28px; padding: 0 12px; border-radius: 999px; background: rgba(161,196,192,.24); display: flex; align-items: center; font-size: 12px; font-weight: 600; color: #ffffff;">En cours</span>
+        </div>
+
+        <div style="display: flex; align-items: baseline; gap: 9px; position: relative;">
+          <span style="font-size: 42px; font-weight: 700; line-height: 1;">3</span>
+          <span style="font-size: 16px; color: #A1C4C0;">arrêts sur 8</span>
+        </div>
+
+        <div style="height: 9px; border-radius: 999px; background: rgba(255,255,255,.18); overflow: hidden; position: relative;">
+          <div style="width: 37%; height: 100%; border-radius: 999px; background: #EF9177;"></div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 9px; position: relative; margin-top: 2px;">
+          <div style="display: flex; align-items: center; gap: 9px; font-size: 13.5px;">
+            <span style="width: 7px; height: 7px; border-radius: 999px; background: #A1C4C0;"></span>
+            <span style="color: #D6E5E3;">Prochain : SSIAD de la Haute Vallée</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 9px; font-size: 13.5px;">
+            <span style="width: 7px; height: 7px; border-radius: 999px; background: #A1C4C0;"></span>
+            <span style="color: #D6E5E3;">18 km restants · environ 47 min</span>
+          </div>
+        </div>
+
+        <div style="flex-grow: 1;"></div>
+
+        <div style="height: 48px; border-radius: 999px; background: #EF9177; display: flex; align-items: center; justify-content: center; gap: 9px; font-size: 15px; font-weight: 600; position: relative;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+          Ouvrir la carte
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
