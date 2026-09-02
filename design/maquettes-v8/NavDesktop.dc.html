@@ -9,6 +9,7 @@
 <helmet>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap">
   <style>
+    *, *::before, *::after { box-sizing: border-box; }
     body {
       margin: 0;
       font-family: "Poppins", "Segoe UI", system-ui, sans-serif;
@@ -16,7 +17,7 @@
       color: #ffffff;
       -webkit-font-smoothing: antialiased;
     }
-    a { color: #EF9177; } a:hover { color: #d97a5f; }
+    a { color: #386B6D; } a:hover { color: #2A5254; }
 
     @keyframes seroGlisse {
       from { opacity: 0; transform: translateX(-10px); }
@@ -40,22 +41,22 @@
   <!-- Recherche -->
   <div style="height: 42px; border-radius: 999px; background: rgba(161,196,192,.16); display: flex; align-items: center; gap: 10px; padding: 0 16px;">
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#A1C4C0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
-    <span style="font-size: 13.5px; color: #A1C4C0;">Rechercher</span>
+    <span style="font-size: 13.5px; color: #D6E5E3;">Rechercher</span>
   </div>
 
-  <!-- Menu : six entrees de premier niveau, pas davantage -->
+  <!-- Menu : sept entrees de premier niveau -->
   <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1; min-height: 0;">
 
-    <div class="glisse" style="height: 44px; border-radius: 999px; background: #EF9177; display: flex; align-items: center; gap: 12px; padding: 0 16px;">
-      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
-      <span style="font-size: 14.5px; font-weight: 600;">Tableau de bord</span>
+    <div class="glisse" style="height: 44px; border-radius: 999px; background: #ffffff; display: flex; align-items: center; gap: 12px; padding: 0 16px;">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#386B6D" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+      <span style="font-size: 14.5px; font-weight: 700; color: #386B6D;">Tableau de bord</span>
     </div>
 
     <!-- Section deployee : on ne montre les sous-entrees que de la section ouverte -->
     <div class="glisse" style="height: 44px; border-radius: 999px; display: flex; align-items: center; gap: 12px; padding: 0 16px;">
       <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#A1C4C0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M8 10h8M8 14h5"/></svg>
       <span style="font-size: 14.5px; font-weight: 500; color: #D6E5E3; flex-grow: 1;">Commandes</span>
-      <span style="height: 22px; min-width: 22px; padding: 0 7px; border-radius: 999px; background: #EF9177; display: flex; align-items: center; justify-content: center; font-size: 11.5px; font-weight: 700;">5</span>
+      <span style="height: 22px; min-width: 22px; padding: 0 7px; border-radius: 999px; background: #ffffff; color: #386B6D; display: flex; align-items: center; justify-content: center; font-size: 11.5px; font-weight: 700;">5</span>
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#A1C4C0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
     </div>
 
@@ -66,15 +67,15 @@
       </div>
       <div class="glisse" style="height: 36px; border-radius: 999px; display: flex; align-items: center; gap: 11px; padding: 0 16px;">
         <span style="width: 7px; height: 7px; border-radius: 999px; background: rgba(161,196,192,.55); flex-shrink: 0;"></span>
-        <span style="font-size: 13.5px; color: #C3D8D6;">Bons de commande</span>
+        <span style="font-size: 13.5px; color: #D6E5E3;">Bons de commande</span>
       </div>
       <div class="glisse" style="height: 36px; border-radius: 999px; display: flex; align-items: center; gap: 11px; padding: 0 16px;">
         <span style="width: 7px; height: 7px; border-radius: 999px; background: rgba(161,196,192,.55); flex-shrink: 0;"></span>
-        <span style="font-size: 13.5px; color: #C3D8D6;">Planifiées</span>
+        <span style="font-size: 13.5px; color: #D6E5E3;">Planifiées</span>
       </div>
       <div class="glisse" style="height: 36px; border-radius: 999px; display: flex; align-items: center; gap: 11px; padding: 0 16px;">
         <span style="width: 7px; height: 7px; border-radius: 999px; background: rgba(161,196,192,.55); flex-shrink: 0;"></span>
-        <span style="font-size: 13.5px; color: #C3D8D6;">Livrées</span>
+        <span style="font-size: 13.5px; color: #D6E5E3;">Livrées</span>
       </div>
     </div>
 
@@ -94,7 +95,7 @@
     <div class="glisse" style="height: 44px; border-radius: 999px; display: flex; align-items: center; gap: 12px; padding: 0 16px;">
       <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#A1C4C0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 8 12 3 4 8v8l8 5 8-5Z"/><path d="M4 8l8 5 8-5M12 13v8"/></svg>
       <span style="font-size: 14.5px; font-weight: 500; color: #D6E5E3; flex-grow: 1;">Stock</span>
-      <span style="height: 22px; min-width: 22px; padding: 0 7px; border-radius: 999px; background: #C02B0A; display: flex; align-items: center; justify-content: center; font-size: 11.5px; font-weight: 700;">3</span>
+      <span style="height: 22px; min-width: 22px; padding: 0 7px; border-radius: 999px; background: #ffffff; color: #C02B0A; display: flex; align-items: center; justify-content: center; font-size: 11.5px; font-weight: 700;">3</span>
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#A1C4C0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
     </div>
 
@@ -106,24 +107,24 @@
 
     <div class="glisse" style="height: 44px; border-radius: 999px; display: flex; align-items: center; gap: 12px; padding: 0 16px;">
       <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#A1C4C0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
-      <span style="font-size: 14.5px; font-weight: 500; color: #D6E5E3; flex-grow: 1;">Analyse</span>
+      <span style="font-size: 14.5px; font-weight: 500; color: #D6E5E3; flex-grow: 1;">Statistiques</span>
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#A1C4C0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
     </div>
   </div>
 
   <!-- Compte connecte : nouveau depuis la v1.22.0 -->
   <div style="border-radius: 24px; background: rgba(161,196,192,.14); padding: 14px 16px; display: flex; align-items: center; gap: 12px;">
-    <div style="width: 38px; height: 38px; border-radius: 999px; background: #EF9177; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700; color: #ffffff; flex-shrink: 0;">T</div>
+    <div style="width: 38px; height: 38px; border-radius: 999px; background: #ffffff; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700; color: #386B6D; flex-shrink: 0;">T</div>
     <div style="flex-grow: 1; min-width: 0;">
       <div style="font-size: 14px; font-weight: 600;">Tom</div>
-      <div style="font-size: 12px; color: #A1C4C0;">Administrateur</div>
+      <div style="font-size: 12px; color: #D6E5E3;">Administrateur</div>
     </div>
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#A1C4C0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-3-1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0-1.2-2.9h-.2a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.2-3l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 2.9-1.2V2a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 3 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0 1.2 2.9h.2a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
   </div>
 
   <div style="display: flex; align-items: center; justify-content: space-between; padding: 0 8px;">
-    <span style="font-size: 11.5px; color: #7FA3A4;">Version 1.22.0</span>
-    <span style="height: 24px; padding: 0 10px; border-radius: 999px; background: rgba(161,196,192,.16); display: flex; align-items: center; font-size: 11.5px; color: #A1C4C0;">À jour</span>
+    <span style="font-size: 11.5px; color: #D6E5E3;">Version 1.22.0</span>
+    <span style="height: 24px; padding: 0 10px; border-radius: 999px; background: rgba(161,196,192,.16); display: flex; align-items: center; font-size: 11.5px; color: #D6E5E3;">À jour</span>
   </div>
 
 </div>
