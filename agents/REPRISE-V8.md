@@ -1,12 +1,49 @@
 # Reprise du chantier V8 — dossier de passation
 
-**Dernière mise à jour : 26 août 2026.**
+**Dernière mise à jour : 16 septembre 2026** — la section 0 résume ce qui a
+changé depuis le 26 août.
 Ce document existe pour qu'un assistant qui n'a jamais vu ce projet puisse
 reprendre exactement où le précédent s'est arrêté, sans rien redécouvrir et
 sans rien re-décider.
 
 Lis-le **en entier** avant de toucher au code. Il t'évitera plusieurs heures
 d'investigation et au moins trois bugs déjà rencontrés.
+
+---
+
+## 0. Ce qui a changé depuis le 26 août (mise à jour du 16 septembre 2026)
+
+- **Six planches de maquettes** livrées le 2 septembre (`design/maquettes-v8/`,
+  commits `83d2809` et `7891448`) : cockpit livreur, carte, préparation, deux
+  navigations, tableau de bord. Charte relevée sur groupe-sereo.fr — vert
+  `#386B6D`, orange `#EF9177` **en accent seulement** (2,34:1 avec du blanc),
+  Poppins. Mode clair uniquement. Canvas publié :
+  https://claude.ai/artifact/UCCU1Bx9zBPZf1Vhffyt5J
+- **Tom a tranché le 16/09** (détail en §5) : CA = commandes livrées ;
+  fréquence d'abonnement au choix ; départ de tournée = GPS ou adresse
+  recherchée, pas d'entrepôt fixe ; arrivée = adresse ou retour au départ ;
+  heure de départ = l'instant de « Démarrer ». Il demande un design **clair et
+  sombre, vert et orange**, « le plus intuitif possible », avec le skill
+  apple-design d'Emil Kowalski.
+- **PR 96 (brouillon, Tom, 16/09)** : branche `feat/abonnements-pilotage-tournees`
+  partie de `main`, un commit de 2 763 lignes — abonnements (table SQLite,
+  `lib/subscriptions.js`), tableau de bord CA livré, tournée IGN + OSRM.
+  **Cinq fichiers en conflit avec cette branche** (mesuré par `git merge-tree`) :
+  `server.js`, `style.css`, `service-worker.js`, `package.json`, `.env.example`.
+  Recommandation : livrer la V8 telle quelle, puis rebaser la PR 96 dessus.
+- **Brief Claude Design prêt** : `agents/PROMPT-CLAUDE-DESIGN.md` (à coller),
+  `design/DESIGN.md` (charte au format design system), captures PNG des
+  planches par `node design/maquettes-v8/capturer.js`.
+- **Claude Design ne laisse pas choisir le modèle** (Opus 4.7). Fable 5.1 ne
+  dessine que via `/design` dans Claude Code — c'est ce qui a produit les
+  planches du 2 septembre.
+- **Corrections à ce dossier** : le §10 était faux (GitHub Actions tourne) ;
+  le §2 disait l'arbre propre alors que `data/` porte 17 fichiers non suivis,
+  dont deux Excel, sur un dépôt **public** ; le pré-cache désaligné concerne
+  trois URL, pas une (§8) ; le §11 gagne un piège git.
+- **Feuille de route** : https://claude.ai/artifact/ARDPsebcvn5gkWTFX6GJL4 —
+  elle est bien sur ce compte. Le 28/08, une liste d'artifacts tronquée avait
+  fait conclure le contraire.
 
 ---
 
@@ -35,14 +72,18 @@ respectivement ~7 960 et ~5 150 lignes. Cible tes lectures avec `grep`.
 
 ```
 Dépôt      : https://github.com/tombague160-maker/sereo-production
-Branche    : feat/v8-phase1-comptes  (poussée, à jour)
+Branche    : feat/v8-phase1-comptes  (poussée, à jour — mais invisible à `git branch -r`, voir §11)
 Base       : main, tag v1.22.0, déployée et confirmée en production
-Arbre      : propre, rien en cours
+Arbre      : 17 fichiers non suivis dans data/ (résidus d'audit, à ignorer ou supprimer)
 ```
 
-**Quatre commits accumulés, non livrés :**
+**Huit commits accumulés, non livrés :**
 
 ```
+7891448  design(v8): contraste, cibles tactiles et coherence des maquettes
+83d2809  design(v8): six planches de maquettes dans la charte relevee sur le site
+980e036  docs(v8): prompt de reprise pret a coller dans une nouvelle conversation
+656b556  docs(v8): dossier de passation pour reprendre le chantier
 0db2ac4  feat(geocodage): declenchement automatique apres import, coupable par variable
 93d341d  feat(geocodage): geocodage automatique des adresses via la BAN
 75c173c  feat(comptes): ecran d'administration des comptes dans les Parametres
@@ -97,34 +138,43 @@ Tom a tranché ces points. Les remettre en cause lui ferait perdre du temps.
 | Claude Design | Intervient en **phase 3**, avant la refonte des écrans — pas à la fin | 26/08 |
 | Carte | Objectif « hyper complet » : optimisation réelle, trafic temps réel, distances depuis l'entrepôt, règle de fin de trajet | 26/08 |
 | Applications natives | Objectif à terme : APK Android + iOS, avec notifications. Via Capacitor, qui réutilise la SPA existante | 26/08 |
+| Chiffre d'affaires | Le tableau de bord compte **les commandes livrées uniquement** | 16/09 |
+| Fréquence d'abonnement | **Au choix de Tom** : 7 / 10 / 14 / 15 / 21 / 28 jours, mensuel, ou personnalisé — plusieurs choix proposés, il sélectionne | 16/09 |
+| Départ de tournée | **Pas d'entrepôt fixe.** Position GPS du téléphone, ou ville / adresse recherchée | 16/09 |
+| Arrivée de tournée | Adresse choisie, ou « Retour au point de départ » | 16/09 |
+| Heure de départ | L'instant où l'on appuie sur « Démarrer la tournée » | 16/09 |
+| Direction visuelle | **Clair et sombre**, vert et orange, « le plus intuitif possible », principes du skill apple-design | 16/09 |
 
 ---
 
 ## 6. Questions ouvertes — à poser à Tom, pas à décider seul
 
-1. **L'entrepôt.** Quelle est l'adresse de départ des tournées ? Le modèle de
-   données n'a **aucune** notion d'entrepôt aujourd'hui : `optimizeOrders`
-   démarre sur une commande arbitraire. Bloquant pour la phase 5.
-2. **Fin de tournée.** Le livreur rentre-t-il à l'entrepôt, ou finit-il chez le
-   dernier client ? Ça change l'algorithme (boucle fermée contre chemin ouvert)
-   et le kilométrage annoncé.
-3. **Heure de départ.** Le trafic temps réel n'a aucun sens sans elle : celui de
-   7 h n'est pas celui de 17 h.
+Les trois questions du 26 août (entrepôt, fin de tournée, heure de départ) sont
+**tranchées** depuis le 16/09 — voir §5. Il en reste trois, posées à Tom dans
+le brief Claude Design :
+
+1. **Les quatre destinations mobiles.** Tableau de bord · Préparation ·
+   Tournée · Abonnements ? Le reste derrière « Plus ».
+2. **Intervalle strict ou jour ancré.** « Tous les 15 jours » décale le jour de
+   la semaine ; « un jeudi sur deux » ne le fait pas. Le modèle de la PR 96 est
+   l'intervalle. L'interface doit montrer les prochaines dates calculées.
+3. **Ordre de fusion** de la branche V8 et de la PR 96 (voir §0). Décision de
+   Tom et Thomas, pas de l'assistant.
 
 ---
 
 ## 7. Feuille de route
 
-Publiée comme Artifact sur le compte de Tom. **Elle doit être republiée après
-chaque incrément, sans qu'il ait à le demander** — c'est une consigne explicite
-de sa part.
+Publiée comme Artifact : https://claude.ai/artifact/ARDPsebcvn5gkWTFX6GJL4
+**Elle doit être republiée après chaque incrément, sans qu'on ait à le
+demander** — c'est une consigne explicite de Tom.
 
 ```
 Phase 0  Fondations                          TERMINÉE, en production
-Phase 1  Comptes et rôles                    quasi terminée, sur la branche
-Phase 2  Géocodage et entrepôt               back fait ; UI en attente des maquettes
-Phase 3  Maquettes Claude Design             ← PROCHAINE ÉTAPE
-Phase 4  Refonte des écrans                  après les maquettes
+Phase 1  Comptes et rôles                    sur la branche
+Phase 2  Géocodage et départ de tournée      back fait ; questions tranchées le 16/09
+Phase 3  Maquettes                           ← EN COURS : 6 planches faites (02/09) ; passage Claude Design clair + sombre à faire
+Phase 4  Refonte des écrans + abonnements    après les maquettes ; PR 96 à rebaser d'abord
 Phase 5  Cartographie et trafic réel
 Phase 6  Applications natives (Capacitor)
 ```
@@ -138,6 +188,10 @@ Phase 6  Applications natives (Capacitor)
 - Pré-cache du service worker désaligné → voir §8
 - `formatImportStats` reste dans `app.js` (seule fonction de sa famille à lire
   l'état global)
+- Poppins à auto-héberger dans `public/fonts/` (`font-src 'self'`) → phase 4
+- Rebasage de la PR 96 sur la V8 (cinq conflits, voir §0) → avant tout tag
+- `data/` : 17 fichiers non suivis à ignorer ou supprimer → phase 1
+- `test/corruption.test.js` vu binaire par git → `.gitattributes`, phase 1 (§8)
 
 ---
 
@@ -169,7 +223,8 @@ Tous ont été constatés dans **ce** code, pas supposés.
   est expirée, `cache.addAll` réussit et met du HTML de login sous les clés
   `/js/app.js` et `/css/style.css`. À traiter.
 - **Le pré-cache est désaligné** : le worker cache `/js/app.js` mais la page
-  demande `/js/app.js?v=…`. L'API Cache compare l'URL complète. **Ne PAS
+  demande `/js/app.js?v=…`. Vérifié le 28/08 : **trois** URL sont concernées
+  (`app.js`, `style.css`, `sereo-logo.svg`). L'API Cache compare l'URL complète. **Ne PAS
   ajouter `ignoreSearch`** : ça ferait resservir du code périmé après
   déploiement, et mélangerait les réponses de `/api/imports/archives?type=…`.
 
@@ -209,6 +264,10 @@ Tous ont été constatés dans **ce** code, pas supposés.
 - **La suite e2e est fragile** : 10 workers en parallèle sur un seul serveur et
   une seule base SQLite, dont un test qui écrit des réglages sans les restaurer.
   Observé une fois, non reproduit sur cinq exécutions. Cause de fond réelle.
+- **`test/corruption.test.js` est vu binaire par git.** Il contient un octet
+  nul (l'en-tête « SQLite format 3 » qu'il fabrique, ligne 102), donc aucun
+  diff n'en est jamais affiché — ni en PR, ni dans `git log -p`. Un
+  `.gitattributes` avec `*.js diff` rétablit la revue sans toucher au test.
 
 ---
 
@@ -266,11 +325,12 @@ alternatives écartées et les pièges évités. Conserver ce niveau.
 
 ## 10. Infrastructure — état réel
 
-- **GitHub Actions ne tourne plus** sur ce dépôt. Dernier run le 23 juillet
-  2026. Ni la CI ni `release-please` ne se déclenchent. À faire vérifier par
-  Tom : minutes épuisées, facturation, ou Actions désactivé.
-- **Conséquence** : les tags doivent être posés à la main, en bumpant
-  `package.json` **et** `.release-please-manifest.json` dans le même commit.
+- **GitHub Actions tourne.** Vérifié le 28/08 puis le 16/09 : les deux
+  workflows sont `active`, `release-please` a produit la 1.22.0 le 26/08 et la
+  CI a validé la PR 96 le 16/09. L'affirmation contraire du 26 août venait
+  d'une liste de runs tronquée. **Ne pas poser de tag à la main** : le cycle
+  normal (merge sur `main` → PR de release → tag) fonctionne, et un tag manuel
+  par-dessus produirait deux bumps de version.
 - **Substitut à la CI** : construire l'image Docker et démarrer réellement le
   conteneur. C'est plus complet que la CI, qui ne charge jamais le front.
 - **Un tag `vX.Y.Z` déclenche l'auto-déploiement OMV sous 15 minutes.** Ne
@@ -294,7 +354,12 @@ Playwright   : chromium installé
 **Piège shell rencontré plusieurs fois :** les heredocs Bash mangent les
 doubles antislashs. Pour écrire `\u0300` dans un fichier depuis un script,
 construire l'antislash avec `chr(92)` en Python, ou utiliser l'outil d'écriture
-de fichier plutôt que le shell.
+de fichier plutôt que le shell. Reproduit le 16/09 même avec `<<'EOF'`.
+
+**Piège git :** `remote.origin.fetch` vaut `+refs/heads/main:refs/remotes/origin/main`.
+`git fetch` ne ramène donc que `main`, et `git branch -r` ne montre jamais une
+branche de travail, même poussée. Vérifier avec `git ls-remote --heads origin`,
+et récupérer une PR par `git fetch origin pull/N/head:refs/remotes/origin/pr-N`.
 
 Lancer l'app en local :
 

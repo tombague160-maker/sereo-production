@@ -35,3 +35,7 @@ data/shots*/
 # sont versionnees, pas le produit.
 design/maquettes-v8/*.html
 !design/maquettes-v8/*.dc.html
+
+# Captures PNG des planches, produites par design/maquettes-v8/capturer.js.
+# Produit derive : se regenere en une commande, jamais dans le depot.
+design/maquettes-v8/captures/
