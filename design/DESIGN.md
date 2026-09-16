@@ -124,11 +124,19 @@ Trois niveaux, pas plus : fond → surface (cartes) → surface haute (barres, s
 Les barres sont translucides et le contenu défile dessous ; un dégradé de fondu remplace le trait de séparation.
 Jamais deux surfaces translucides claires superposées. Sous `prefers-reduced-transparency`, tout devient opaque.
 
+**Une forme décorative ne passe jamais sous du texte.** Ronds pastel floutés, halos, taches
+de couleur : ils vivent derrière les cartes et les en-têtes opaques, jamais derrière un texte
+posé à même le fond de page. Mesuré à l'écran le 16 septembre sur l'export de Claude Design :
+`#A1C4C0` à 30 % sur le fond compose `#DFE7E4`, où le texte secondaire tombe à **4,07:1** au
+lieu de 4,81. Le piège est qu'aucune relecture de code ne le voit — la couleur *déclarée* reste
+juste, seule la couleur *affichée* change. Si une forme doit atteindre une zone de texte, c'est
+le texte qui prend une surface opaque, pas la forme qui s'éclaircit.
+
 ## 7. À faire / à ne pas faire
 
 **Faire** : hiérarchie par taille et espace · un seul set d'icônes linéaires (style Lucide, 20/24 px, trait 2) · libellés directs (« Tournée », « Abonnements », « Préparation ») · confirmer seulement l'irréversible · état vide qui dit quoi faire · animations 200–350 ms, ressort amorti (pas de rebond sauf après un geste), toutes coupées sous `prefers-reduced-motion`.
 
-**Ne pas faire** : texte sur fond orange · gris neutres (tout gris est teinté vert) · dégradés lourds, néons, ombres épaisses · plus de quatre informations par ligne · icônes sans libellé dans la navigation · anglais (« Home », « Dashboard », « Settings ») · texte dans les images · un composant qui existe en deux versions.
+**Ne pas faire** : texte sur fond orange · gris neutres (tout gris est teinté vert) · dégradés lourds, néons, ombres épaisses · plus de quatre informations par ligne · icônes sans libellé dans la navigation · anglais (« Home », « Dashboard », « Settings ») · texte dans les images · un composant qui existe en deux versions · une forme décorative sous du texte.
 
 ## 8. Comportement responsive
 
@@ -150,6 +158,18 @@ ici**. Ils ne changent pas la charte : ils disent ce que la refonte doit défair
 | 15 onglets pour 6 catégories | oui | `mainTabs` en compte 15, dont 5 listes de commandes filtrées différemment |
 | Du texte vivant dans les SVG de marque | oui | les 3 fichiers portent `<text font-family="Segoe UI, Arial">` — à vectoriser |
 | `--color-text-soft` sous le seuil | **non, affirmation fausse** | `#5e6d6d` sur `#FBF7F5` donne **5,08:1**, au-dessus de 4,5. Rien à corriger |
+
+### Écarts entre les écrans dessinés et le code — relevés le 16/09 sur l'export 3
+
+Ce ne sont pas des dettes : ce sont des promesses faites par une maquette et que le
+code ne tient pas encore, ou des comportements que le code tient déjà et que la
+maquette oublie. Les deux coûtent cher si personne ne les nomme avant le chiffrage.
+
+| Écart | Sens | Mesure exacte |
+|---|---|---|
+| L'écran de connexion n'a pas d'état bloqué | le code le fait, l'écran l'oublie | `server.js` bloque après **5 tentatives** ratées dans une fenêtre glissante de **15 min**, pour **15 s** (`AUTH_RATE_LIMIT_*`). La page actuelle affiche les tentatives restantes, puis un décompte vivant avec les champs désactivés (`renderLoginPage`, l. 1502-1526). Le mot « tentative » n'apparaît nulle part dans l'export |
+| La file d'attente hors ligne n'existe pas | l'écran le promet, le code ne le fait pas | `service-worker.js` l. 113 : tout ce qui n'est pas un GET same-origin est laissé passer tel quel. Aucun écouteur `sync`, aucun magasin de reprise, et `app.js` n'écoute ni `online` ni `offline` pour ses **32 écritures réseau**. La *lecture* hors ligne, elle, est réelle : network-first à 3 s puis cache, sur tout `/api/` sauf `status`, `version`, `me`, `comptes` |
+| Le thème par défaut | écart mineur, assumé | le code force `light` au départ (« pendant la phase de test, on n'active pas le mode sombre auto ») ; la maquette met « Système ». Le choix par appareil, lui, est exactement ce que fait `app.js` : `localStorage` seul, la valeur en base est délibérément ignorée |
 
 ## 10. Guide pour l'agent
 
