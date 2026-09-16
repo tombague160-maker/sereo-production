@@ -28,9 +28,10 @@ au soleil, souvent d'une main. Rien de décoratif qui ne serve la lecture.
 | Vert clair | `#DDEBE9` | Fond de badge froid. Texte en `#2A5254` | 7,04:1 |
 | Fond | `#FBF7F5` | Fond de page | — |
 | Surface | `#FFFFFF` | Cartes, panneaux, pilule de navigation active | — |
-| Surface basse | `#F3EFEC` | Champs, pistes de progression | — |
+| Surface basse | `#F5F1EE` | Champs, pistes de progression | le texte secondaire y tient 4,56:1 |
+| Squelette de chargement | `#EDE6E2` | Blocs gris qui remplacent le texte pendant le chargement. Jamais de texte dessus | — |
 | Texte | `#386B6D` | Texte courant (le vert profond est aussi la couleur du texte, comme sur le site) | 5,95:1 sur blanc |
-| Texte secondaire | `#4F7477` | Sous-titres, métadonnées. Remplace six gris-teal non conformes | 5,05:1 sur blanc |
+| Texte secondaire | `#4F7477` | Sous-titres, métadonnées. Remplace six gris-teal non conformes | 5,13:1 sur blanc · 4,81 sur fond · 4,56 sur surface basse |
 | Texte secondaire sur vert | `#D6E5E3` | Sur fond `#386B6D` | 4,63:1 |
 | Alerte | `#C02B0A` | Texte et icônes d'alerte uniquement. Jamais couleur de lien, jamais pour un simple compteur | — |
 
@@ -92,7 +93,15 @@ Un composant ne connaît que les rôles.
 - **Badge de statut** : pilule 24 px, fond **pêche claire `#F7E4E0` ou vert clair `#DDEBE9`**, texte **`#2A5254`** (7,04:1). Ni pêche `#EDC8C3` ni vert d'eau `#A1C4C0` en fond de badge : le texte n'y tiendrait que 3,91:1 et 3,20:1, insuffisant à 12,5 px.
   Statuts de commande : Importée · À vérifier · En préparation · Préparation terminée · Prêt livraison · En livraison · Livrée.
   Statuts d'arrêt : Prêt · En livraison · Livré · Absent · Problème · À reprogrammer.
-- **Champs** : hauteur 48 px, rayon 16 px, fond surface basse, libellé au-dessus.
+- **Champs** : hauteur 48 px, rayon 18 px, fond surface basse, libellé au-dessus. Erreur de saisie annoncée sous le champ, à la frappe et non à l'envoi, avec l'icône d'alerte et le mot.
+
+**Pourquoi la surface basse a changé de valeur.** Elle valait `#F3EFEC` jusqu'au
+16/09. Le texte secondaire n'y tenait que **4,48:1**, sous le seuil — défaut
+relevé en dessinant les champs, pas en relisant la charte. Assombrir le
+secondaire était le réflexe, mais il tombe alors à 1,06:1 du principal, soit la
+même couleur à l'œil : la hiérarchie du texte disparaissait pour sauver un
+contraste. C'est donc la surface qui s'éclaircit, à `#F5F1EE` — 4,56:1 pour le
+secondaire, et elle reste visible sur le blanc comme sur le fond.
 - **Sélecteur de fréquence** (abonnements) : pilules « 7 j · 10 j · 14 j · 15 j · 21 j · 28 j · Mensuel · Autre… » + aperçu des trois prochaines dates calculées.
 - **Barre basse mobile** : 4 destinations + « Plus », items ≥ 44 px, translucide (`backdrop-filter: blur(20px) saturate(180%)`), contenu qui défile dessous.
 - **Barre latérale desktop** : 258 px, fond `#386B6D`, angle droit arrondi 36 px, item actif = pilule blanche.
