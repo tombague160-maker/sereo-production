@@ -21,7 +21,7 @@ au soleil, souvent d'une main. Rien de décoratif qui ne serve la lecture.
 |---|---|---|---|
 | Principal | `#386B6D` | Actions principales, titres, navigation active, corps des marqueurs | blanc dessus **6,01:1** |
 | Principal appuyé | `#2A5254` | Survol, texte sur fond vert d'eau | — |
-| Accent | `#EF9177` | **Jamais un fond de texte.** Barres de progression, halo de l'arrêt en cours, points d'état, logo | blanc dessus 2,34:1 → interdit |
+| Accent | `#EF9177` | **Ni un fond de texte, ni du texte.** C'est une forme : barre de progression, halo, point d'état. Seule exception, le logotype, exempté par WCAG 1.4.3 | sur blanc 2,34:1 · sur vert 2,57:1 → interdit dans les deux sens |
 | Vert d'eau | `#A1C4C0` | Surfaces secondaires et icônes inactives sur fond vert. Pas de texte : 3,20:1 avec le vert profond | — |
 | Pêche | `#EDC8C3` | Fonds doux et formes organiques **uniquement**. Pas de badge : le vert profond n'y donne que 3,91:1 | — |
 | Pêche claire | `#F7E4E0` | Fond de badge tiède. Texte en `#2A5254` | 7,04:1 |
@@ -66,6 +66,18 @@ texte courant, 3:1 sur le gros texte et les icônes.
 
 Règle des deux modes : mêmes rôles, mêmes noms de tokens, valeurs différentes.
 Un composant ne connaît que les rôles.
+
+**Une couche translucide sur le vert crée une couleur que personne n'a déclarée.**
+Une pilule ou un champ en `rgba(255,255,255,.12 … .20)` posé sur `#386B6D` compose
+`#507D7E` à `#5F888A`. Le blanc y tombe de 6,01 à **4,58 … 3,86:1**, le secondaire
+sur vert de 4,63 à **3,53 … 2,97:1**. Mesuré au pixel le 16 septembre sur dix
+planches, et retrouvé à l'unité près par le calcul alpha — deux chemins
+indépendants, même réponse.
+
+**On teinte donc en sombre, jamais en clair.** La surface secondaire d'un en-tête
+vert est `#2A5254`, opaque, déjà dans la palette : blanc dessus **8,63:1**,
+secondaire dessus **6,65:1**. Une surface opaque n'a pas de couleur composée à
+calculer — c'est la moitié de l'intérêt.
 
 ## 3. Typographie
 
@@ -124,7 +136,9 @@ Trois niveaux, pas plus : fond → surface (cartes) → surface haute (barres, s
 Les barres sont translucides et le contenu défile dessous ; un dégradé de fondu remplace le trait de séparation.
 Jamais deux surfaces translucides claires superposées. Sous `prefers-reduced-transparency`, tout devient opaque.
 
-**Une forme décorative ne passe sous du texte que si la couleur composée tient le seuil.**
+**Aucune couche translucide ne passe sous du texte sans que la couleur composée
+soit mesurée.** Ronds flous, halos, pilules de filtre, fonds de champ : la forme
+de la couche n'a aucune importance, seule compte la valeur qu'elle produit.
 Ronds pastel, halos, taches : la question n'est pas leur présence mais la valeur qu'ils
 produisent une fois composés. Deux mesures du 16 septembre :
 
@@ -133,6 +147,14 @@ produisent une fois composés. Deux mesures du 16 septembre :
 - un halo blanc à 5–7 % sur le vert principal compose `#427274` à `#467577` : le secondaire sur
   vert y tombe à **3,97–4,16:1** au lieu de 4,63. Écart d'un cheveu, et pourtant sous le seuil,
   parce que ce couple-là n'a que 0,13 de marge.
+
+**Et la mesure se prend sous les glyphes, pas ailleurs.** Quatre instruments ont
+menti avant de dire vrai : masquer le texte par `visibility` efface aussi le fond
+propre du bouton ; le pixel isolé le plus sombre attrape les bords anticrénelés ;
+`elementFromPoint` rend `null` hors de la fenêtre et écarte alors tout en silence ;
+et « quelque chose devant » ne veut pas dire « caché », puisqu'un voile à 5 % est
+justement le défaut cherché. Ce qui marche : deux photos de la planche, la seconde
+en `color: transparent`, et le pire fond porté par au moins 2 % des pixels de glyphe.
 
 Aucune relecture de code ne voit ni l'un ni l'autre : la couleur *déclarée* reste juste, seule
 la couleur *affichée* change. **Et la mesure ne se prend pas au centre de la ligne** — une forme
@@ -147,7 +169,7 @@ et la marque orange sur l'en-tête vert (2,28:1 sous halo) n'est pas à corriger
 
 **Faire** : hiérarchie par taille et espace · un seul set d'icônes linéaires (style Lucide, 20/24 px, trait 2) · libellés directs (« Tournée », « Abonnements », « Préparation ») · confirmer seulement l'irréversible · état vide qui dit quoi faire · animations 200–350 ms, ressort amorti (pas de rebond sauf après un geste), toutes coupées sous `prefers-reduced-motion`.
 
-**Ne pas faire** : texte sur fond orange · gris neutres (tout gris est teinté vert) · dégradés lourds, néons, ombres épaisses · plus de quatre informations par ligne · icônes sans libellé dans la navigation · anglais (« Home », « Dashboard », « Settings ») · texte dans les images · un composant qui existe en deux versions · une forme décorative sous du texte sans avoir mesuré la couleur composée.
+**Ne pas faire** : texte orange · texte sur fond orange · gris neutres (tout gris est teinté vert) · dégradés lourds, néons, ombres épaisses · plus de quatre informations par ligne · icônes sans libellé dans la navigation · anglais (« Home », « Dashboard », « Settings ») · texte dans les images · un composant qui existe en deux versions · une forme décorative sous du texte sans avoir mesuré la couleur composée.
 
 ## 8. Comportement responsive
 
@@ -182,6 +204,8 @@ maquette oublie. Les deux coûtent cher si personne ne les nomme avant le chiffr
 | La file d'attente hors ligne n'existe pas | l'écran le promet, le code ne le fait pas | `service-worker.js` l. 113 : tout ce qui n'est pas un GET same-origin est laissé passer tel quel. Aucun écouteur `sync`, aucun magasin de reprise, et `app.js` n'écoute ni `online` ni `offline` pour ses **32 écritures réseau**. La *lecture* hors ligne, elle, est réelle : network-first à 3 s puis cache, sur tout `/api/` sauf `status`, `version`, `me`, `comptes` |
 | Le thème par défaut | écart mineur, assumé | le code force `light` au départ (« pendant la phase de test, on n'active pas le mode sombre auto ») ; la maquette met « Système ». Le choix par appareil, lui, est exactement ce que fait `app.js` : `localStorage` seul, la valeur en base est délibérément ignorée |
 | Le blocage se compte par adresse IP, pas par personne | à dire à l'écran | `authRateLimitState` est une `Map` indexée par `getClientIp(req)` (`server.js` l. 348-404), `trust proxy` à 1. Cinq échecs derrière une même connexion — le wifi de l'entrepôt, un NAT d'opérateur — bloquent tout le monde. Un écran qui annonce « 5 essais ratés » accuse quelqu'un qui n'a peut-être rien tapé |
+| Le sur-titre était orange sur blanc | l'écran l'inventait, la charte ne l'interdisait pas | « ARRÊT EN COURS » en `#EF9177` 12 px sur `#FFFFFF` vaut **2,34:1**. La charte interdisait l'orange comme *fond* de texte, pas comme texte : le trou est comblé. Les mots passent en principal, le point rond à côté garde l'orange |
+| Les pilules de filtre sur en-tête vert | jamais mesuré par personne | `rgba(255,255,255,.16)` sur `#386B6D` compose `#588284` : blanc **4,25:1**, texte indicatif des champs de recherche **3,27:1**. Dix planches, présent depuis le premier export |
 
 ## 10. Guide pour l'agent
 
