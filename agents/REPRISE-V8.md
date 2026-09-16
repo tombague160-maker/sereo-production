@@ -172,6 +172,13 @@ Publiée comme Artifact : https://claude.ai/artifact/ARDPsebcvn5gkWTFX6GJL4
 **Elle doit être republiée après chaque incrément, sans qu'on ait à le
 demander** — c'est une consigne explicite de Tom.
 
+**Sa source est versionnée ici : `agents/feuille-de-route.html`.** Le 16/09,
+en cours de session, l'accès aux Artifacts a basculé sur un autre compte :
+l'Artifact et le canvas des maquettes sont devenus « introuvables » sans avoir
+été supprimés, et la dernière republication a échoué. Règle : modifier le
+fichier du dépôt, puis republier **depuis le compte propriétaire** avec l'URL
+ci-dessus. Ne jamais republier sans URL, ça crée un doublon qui divergera.
+
 ```
 Phase 0  Fondations                          TERMINÉE, en production
 Phase 1  Comptes et rôles                    sur la branche
