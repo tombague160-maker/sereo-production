@@ -2,11 +2,12 @@
 // Sans bump, l'ancienne version reste servie depuis le cache indefiniment —
 // notamment manifest.webmanifest, dont une version perimee casse l'installation
 // sur l'ecran d'accueil sans aucun message d'erreur.
-const CACHE_NAME = "sereo-shell-20260826-esm";
+const CACHE_NAME = "sereo-shell-20260916-operations-v2";
 const API_CACHE_NAME = "sereo-api-20260514";
 const APP_SHELL = [
   "/css/style.css",
   "/js/app.js",
+  "/js/operations.js",
   "/js/anti-fart.js",
   // Modules ES importes par app.js. Ils DOIVENT figurer ici : un import non
   // pre-cache fait echouer le chargement complet du module en mode hors ligne,
@@ -31,7 +32,7 @@ const APP_SHELL = [
 // /api/version : ne PAS cacher cote SW, sinon apres un auto-deploy le chip
 // version reste sur l'ancienne valeur tant que le SW sert le cache.
 // Le serveur envoie deja Cache-Control: no-store pour la couche HTTP.
-const API_CACHE_EXCLUDED = ["/api/storage/status", "/api/version"];
+const API_CACHE_EXCLUDED = ["/api/storage/status", "/api/version", "/api/operations", "/api/subscriptions", "/api/geocode"];
 
 // Network-first avec timeout puis fallback cache pour les GET /api/*.
 // Cible : reseau ok -> donnees fraiches, reseau lent/coupe -> derniere version connue.
