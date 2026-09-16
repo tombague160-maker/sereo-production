@@ -156,12 +156,17 @@ Les trois questions du 26 août (entrepôt, fin de tournée, heure de départ) s
 **tranchées** depuis le 16/09 — voir §5. Il en reste trois, posées à Tom dans
 le brief Claude Design :
 
-1. **Les quatre destinations mobiles.** Tableau de bord · Préparation ·
-   Tournée · Abonnements ? Le reste derrière « Plus ».
-2. **Intervalle strict ou jour ancré.** « Tous les 15 jours » décale le jour de
-   la semaine ; « un jeudi sur deux » ne le fait pas. Le modèle de la PR 96 est
-   l'intervalle. L'interface doit montrer les prochaines dates calculées.
-3. **Ordre de fusion** de la branche V8 et de la PR 96 (voir §0). Décision de
+1. **Les quatre destinations mobiles.** Proposition de Claude Design, 16/09 :
+   Tableau de bord · Préparation · Tournée · Abonnements ; dans « Plus » :
+   Commandes, Stock, Clients, Analyse, Paramètres. **En attente de Tom.**
+2. **Intervalle strict ou jour ancré.** Proposition, 16/09 : garder
+   l'intervalle strict et rendre la dérive visible par un aperçu des trois
+   prochaines dates avec leur jour. Le mode « un jeudi sur deux » viendrait
+   plus tard, jamais comme défaut caché. **En attente de Tom.**
+3. **Mode sombre.** Proposition, 16/09 : suivre le système, avec bascule
+   manuelle dans les Paramètres. Pas de bascule automatique au crépuscule :
+   l'écran ne doit pas changer en pleine tournée. **En attente de Tom.**
+4. **Ordre de fusion** de la branche V8 et de la PR 96 (voir §0). Décision de
    Tom et Thomas, pas de l'assistant.
 
 ---
