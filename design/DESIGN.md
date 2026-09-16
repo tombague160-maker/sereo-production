@@ -19,7 +19,7 @@ au soleil, souvent d'une main. Rien de décoratif qui ne serve la lecture.
 
 | Rôle | Valeur | Usage | Contraste mesuré |
 |---|---|---|---|
-| Principal | `#386B6D` | Actions principales, titres, navigation active, corps des marqueurs | blanc dessus 5,95:1 |
+| Principal | `#386B6D` | Actions principales, titres, navigation active, corps des marqueurs | blanc dessus **6,01:1** |
 | Principal appuyé | `#2A5254` | Survol, texte sur fond vert d'eau | — |
 | Accent | `#EF9177` | **Jamais un fond de texte.** Barres de progression, halo de l'arrêt en cours, points d'état, logo | blanc dessus 2,34:1 → interdit |
 | Vert d'eau | `#A1C4C0` | Surfaces secondaires et icônes inactives sur fond vert. Pas de texte : 3,20:1 avec le vert profond | — |
@@ -134,6 +134,7 @@ ici**. Ils ne changent pas la charte : ils disent ce que la refonte doit défair
 
 | Constat | Vérifié | Mesure exacte |
 |---|---|---|
+| Un arrêt en « problème » n'enregistre aucune raison | oui | `createStop` (server.js:5539) porte un champ `notes`, mais il recopie les notes de la commande. Le statut `probleme` existe sans motif. Un champ neuf est à créer |
 | Trois rayons de carte concurrents | oui, et pire qu'annoncé | `--radius-card` vaut 8, 22 **et** 28 px dans `style.css` |
 | Trois oranges pour un seul rôle | oui | `#f18c79` (14×), `#f47a5a` (3×), `#ef8f77` dans `sereo-mark.svg`, `sereo-sidebar-bg.svg`, `favicon.svg` et `generate-icons.js` |
 | Générations de tokens empilées | oui | `--color-pastel-` 95 déclarations, `--palette-` 186, `--neo-` 121 |
