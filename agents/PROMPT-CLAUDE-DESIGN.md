@@ -20,7 +20,7 @@ grand écran.
 ## Public
 
 - **Tom**, gérant-livreur. Le matin il prépare les commandes à l'entrepôt, l'après-midi il livre des EHPAD, SSIAD, cliniques et pharmacies sur trois secteurs : Besançon, Champagnole, Dole. Sur la route il a le téléphone d'une main, parfois au soleil, parfois avec des gants.
-- Une petite équipe (bureau, préparateur, livreur) partage l'outil. **Tout le monde voit tout** ; seule l'administration des comptes est réservée.
+- Une petite équipe (bureau, préparateur, livreur) partage l'outil, **avec un seul compte pour l'instant** ; les comptes par personne existent déjà pour plus tard. **Tout le monde voit tout** ; seule l'administration des comptes est réservée.
 - Pas de formation : l'écran doit s'expliquer seul. Tout est en français, sans anglicisme.
 
 ## Ce que fait l'application

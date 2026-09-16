@@ -34,9 +34,11 @@ d'investigation et au moins trois bugs déjà rencontrés.
 - **Brief Claude Design prêt** : `agents/PROMPT-CLAUDE-DESIGN.md` (à coller),
   `design/DESIGN.md` (charte au format design system), captures PNG des
   planches par `node design/maquettes-v8/capturer.js`.
-- **Claude Design ne laisse pas choisir le modèle** (Opus 4.7). Fable 5.1 ne
-  dessine que via `/design` dans Claude Code — c'est ce qui a produit les
-  planches du 2 septembre.
+- **Claude Design prend la phase 3, et seulement elle.** Fable 5.1 y est
+  sélectionnable (vérifié par Thomas le 16/09 ; la doc de lancement disait
+  Opus 4.7 sans sélecteur). Le code, les tests, la fusion de la PR 96, la
+  carte et les apps natives restent dans le dépôt, avec Claude Code. L'export
+  de Claude Design est un point de départ pour la phase 4, pas la phase 4.
 - **Corrections à ce dossier** : le §10 était faux (GitHub Actions tourne) ;
   le §2 disait l'arbre propre alors que `data/` porte 17 fichiers non suivis,
   dont deux Excel, sur un dépôt **public** ; le pré-cache désaligné concerne
@@ -144,6 +146,7 @@ Tom a tranché ces points. Les remettre en cause lui ferait perdre du temps.
 | Arrivée de tournée | Adresse choisie, ou « Retour au point de départ » | 16/09 |
 | Heure de départ | L'instant où l'on appuie sur « Démarrer la tournée » | 16/09 |
 | Direction visuelle | **Clair et sombre**, vert et orange, « le plus intuitif possible », principes du skill apple-design | 16/09 |
+| Comptes | **Un seul compte utilisé pour l'instant.** Les comptes par personne existent (v1.22.0) et attendent le besoin réel, les notifications | 16/09 |
 
 ---
 
