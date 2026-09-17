@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.24.0](https://github.com/tombague160-maker/sereo-production/compare/v1.23.0...v1.24.0) (2026-09-17)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **tournees:** prevenir quand la date d'un secteur tombe un dimanche ou un ferie ([5b1ad26](https://github.com/tombague160-maker/sereo-production/commit/5b1ad26c0d5df25fc708390b2d2d928ac13fb16c))
+
 ## [1.23.0](https://github.com/tombague160-maker/sereo-production/compare/v1.22.0...v1.23.0) (2026-09-17)
 
 
