@@ -3138,8 +3138,8 @@ label {
 .version-modal-close {
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   padding: 0;
   border: 1px solid var(--border);
   border-radius: 50%;
@@ -7700,4 +7700,40 @@ html[data-color-scheme="light"] body,
   --v8-avertissement: #FFD0AA;
   --v8-avertissement-fond: #775841;
   --v8-alerte: #F85E3C;
+}
+
+/* ============================================================================
+ * Cibles tactiles : le plancher de 44 px sur mobile.
+ *
+ * La regle existait deja (@media max-width 640px, .button.secondary.compact a
+ * 44 px), mais une regle scopee :root[data-color-scheme="light"] ecrite PLUS
+ * LOIN la ramenait a 38. Mesure du 17/09 sur l'application : 48 cibles entre
+ * 24 et 44 px en 390 px de large, toutes des .compact et le bouton de
+ * fermeture de la fiche version.
+ *
+ * Ce bloc est place en FIN de feuille a dessein : a specificite egale, c'est
+ * l'ordre qui tranche, et un plancher de taille ne doit dependre d'aucun
+ * theme. 24 px reste le plancher LEGAL (WCAG 2.2 AA, 2.5.8), tenu partout ;
+ * 44 px est notre charte, et il ne vaut que la ou le doigt sert.
+ * ========================================================================== */
+@media (max-width: 640px) {
+  /* `:root[data-color-scheme]` en tete, et ce n'est pas decoratif : la regle
+     concurrente s'ecrit `:root[data-color-scheme="light"] .button.secondary
+     .compact`, soit (0,5,0). Sans ce prefixe, la notre plafonne a (0,3,0) et
+     perd -- une @media n'ajoute AUCUNE specificite. Premier essai : 48 cibles
+     sous 44 px, corrigees a 20. A specificite EGALE, c'est l'ordre qui
+     tranche, et ce bloc est le dernier de la feuille. */
+  :root[data-color-scheme] .button,
+  :root[data-color-scheme] .button.compact,
+  :root[data-color-scheme] .button.secondary.compact,
+  :root[data-color-scheme] .compact,
+  :root[data-color-scheme] .version-modal-close,
+  :root[data-color-scheme] .mobile-tab {
+    min-height: 44px;
+  }
+
+  :root[data-color-scheme] .version-modal-close,
+  :root[data-color-scheme] .mobile-tab {
+    min-width: 44px;
+  }
 }
