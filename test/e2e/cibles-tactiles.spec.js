@@ -97,10 +97,24 @@ async function releverCibles(page) {
   });
 }
 
-for (const [nom, largeur, hauteur] of [["desktop", 1440, 900], ["mobile", 390, 844]]) {
+// Le profil "mobile" doit EMULER UN DOIGT, pas seulement une fenetre etroite.
+//
+// Sans `hasTouch`/`isMobile`, le navigateur declare `pointer: fine` -- une
+// souris -- et toute regle bornee en `@media (pointer: coarse)` reste INERTE.
+// Mesure du 17/09 : les boutons de zoom Leaflet rendaient 30x30 dans le test
+// alors que la regle qui les porte a 44 px existe, est correcte, et s'applique
+// bien sur un vrai telephone. Un profil incomplet n'invente pas un defaut au
+// hasard : il invente exactement ceux que le code traite ailleurs.
+const PROFILS = [
+  { nom: "desktop", viewport: { width: 1440, height: 900 }, hasTouch: false, isMobile: false },
+  { nom: "mobile", viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 3 }
+];
+
+for (const profil of PROFILS) {
+  const nom = profil.nom;
   test(`les cibles tactiles tiennent le plancher WCAG en ${nom}`, async ({ browser }) => {
     test.setTimeout(300000);
-    const ctx = await browser.newContext({ viewport: { width: largeur, height: hauteur } });
+    const ctx = await browser.newContext(profil);
     const page = await ctx.newPage();
     await page.goto("/", { waitUntil: "networkidle" });
     await page.addStyleTag({ content: "*, *::before, *::after { transition: none !important; animation: none !important; }" });
@@ -117,6 +131,13 @@ for (const [nom, largeur, hauteur] of [["desktop", 1440, 900], ["mobile", 390, 8
     for (const onglet of onglets) {
       await page.evaluate(id => { location.hash = "#" + id; }, onglet);
       await page.waitForTimeout(400);
+      // La carte pose ses controles APRES coup : sans cette attente, ils
+      // etaient mesures ou non selon la charge de la machine, et la dette
+      // affichait 2 ou 0 d'une execution a l'autre.
+      if (await page.locator(".leaflet-container").count()) {
+        await page.locator(".leaflet-control-zoom-in").first()
+          .waitFor({ state: "visible", timeout: 8000 }).catch(() => {});
+      }
       for (const c of await releverCibles(page)) {
         total++;
         const petit = Math.min(c.largeur, c.hauteur);
@@ -126,7 +147,12 @@ for (const [nom, largeur, hauteur] of [["desktop", 1440, 900], ["mobile", 390, 8
       }
     }
 
-    console.log(`\n[${nom}] ${onglets.length} onglets, ${total} cibles mesurees`);
+    // La SORTIE prouve quel profil a ete mesure. Une procedure dans les gestes
+    // se relit ; une preuve dans le resultat ne se contourne pas.
+    const pointeur = await page.evaluate(() => matchMedia("(pointer: coarse)").matches ? "coarse" : "fine");
+    expect(pointeur, "le profil " + nom + " doit declarer le bon type de pointeur")
+      .toBe(profil.hasTouch ? "coarse" : "fine");
+    console.log(`\n[${nom}] pointer:${pointeur} ${onglets.length} onglets, ${total} cibles mesurees`);
     console.log(`  sous ${PLANCHER_LEGAL}px (WCAG 2.2 AA) : ${sousLeSeuilLegal.length}`);
     for (const l of [...new Set(sousLeSeuilLegal)].slice(0, 25)) console.log("    " + l);
     if (nom === "mobile") {
