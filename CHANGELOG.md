@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.25.1](https://github.com/tombague160-maker/sereo-production/compare/v1.25.0...v1.25.1) (2026-09-17)
+
+
+### 📚 Documentation
+
+* **v8:** phase 4, marches 1 et 2 closes ([0d811eb](https://github.com/tombague160-maker/sereo-production/commit/0d811ebf929ca09c13590cfaf4bf056cdb75e178))
+* **v8:** phase 4, marches 1 et 2 closes, les trois suivantes nommees ([295cefa](https://github.com/tombague160-maker/sereo-production/commit/295cefa7b3a454761aab2cf7a370b1d6576649a9))
+
 ## [1.25.0](https://github.com/tombague160-maker/sereo-production/compare/v1.24.1...v1.25.0) (2026-09-17)
 
 
