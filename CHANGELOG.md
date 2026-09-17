@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.26.0](https://github.com/tombague160-maker/sereo-production/compare/v1.25.1...v1.26.0) (2026-09-17)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **v8:** mesurer les cibles tactiles sur L'APPLICATION, et lever la reserve ([9ff2999](https://github.com/tombague160-maker/sereo-production/commit/9ff29993d814d7a235d9a1cbd1ca611298945e6c))
+* **v8:** phase 4, marche 3b -- zero couleur litterale, et le role que la charte oubliait ([c304105](https://github.com/tombague160-maker/sereo-production/commit/c3041052c1c53c5caae37ef21bde8d41f4813ce1))
+
 ## [1.25.1](https://github.com/tombague160-maker/sereo-production/compare/v1.25.0...v1.25.1) (2026-09-17)
 
 
