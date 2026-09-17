@@ -92,7 +92,9 @@ const CORRESPONDANCE = {
   "Texte sur principal": "--v8-texte-sur-principal",
   "Texte secondaire sur vert": "--v8-texte-secondaire-sur-principal",
   "Texte secondaire sur principal": "--v8-texte-secondaire-sur-principal",
-  "Alerte": "--v8-alerte"
+  "Alerte": "--v8-alerte",
+  "Avertissement": "--v8-avertissement",
+  "Fond d'avertissement": "--v8-avertissement-fond"
 };
 
 // --- Tests -----------------------------------------------------------------
@@ -104,10 +106,10 @@ test("jetons — la charte est lisible et porte bien ses deux palettes", () => {
   assert.equal(charteSombre.get("Principal"), "#93CBC9");
 });
 
-test("jetons — le CSS porte 17 jetons, dans chacun des trois blocs", () => {
-  assert.equal(cssClair.size, 17, `clair : ${[...cssClair.keys()].join(", ")}`);
-  assert.equal(cssSombre.size, 17, `sombre : ${[...cssSombre.keys()].join(", ")}`);
-  assert.equal(cssSombreMedia.size, 17, `sombre @media : ${[...cssSombreMedia.keys()].join(", ")}`);
+test("jetons — le CSS porte 19 jetons, dans chacun des trois blocs", () => {
+  assert.equal(cssClair.size, 19, `clair : ${[...cssClair.keys()].join(", ")}`);
+  assert.equal(cssSombre.size, 19, `sombre : ${[...cssSombre.keys()].join(", ")}`);
+  assert.equal(cssSombreMedia.size, 19, `sombre @media : ${[...cssSombreMedia.keys()].join(", ")}`);
 });
 
 test("jetons — les deux blocs sombres sont identiques (regle des 3 blocs)", () => {
@@ -151,6 +153,10 @@ const PAIRES = {
     ["--v8-principal-appuye", "--v8-vert-clair", 4.5],
     ["--v8-alerte", "--v8-surface", 4.5],
     ["--v8-alerte", "--v8-fond", 4.5],
+    ["--v8-avertissement", "--v8-surface", 4.5],
+    ["--v8-avertissement", "--v8-fond", 4.5],
+    ["--v8-avertissement", "--v8-surface-basse", 4.5],
+    ["--v8-avertissement", "--v8-avertissement-fond", 4.5],
     ["--v8-principal", "--v8-surface", 3.0]          // icone / forme
   ],
   sombre: [
@@ -169,6 +175,10 @@ const PAIRES = {
     ["--v8-alerte", "--v8-fond", 4.5],
     ["--v8-alerte", "--v8-surface", 4.5],
     ["--v8-alerte", "--v8-surface-haute", 4.5],
+    ["--v8-avertissement", "--v8-fond", 4.5],
+    ["--v8-avertissement", "--v8-surface", 4.5],
+    ["--v8-avertissement", "--v8-surface-haute", 4.5],
+    ["--v8-avertissement", "--v8-avertissement-fond", 4.5],
     ["--v8-principal", "--v8-fond", 3.0],
     ["--v8-accent", "--v8-fond", 3.0]
   ]
@@ -194,6 +204,26 @@ test("jetons — les INTERDICTIONS de la charte sont fondees", () => {
   assert.ok(accent < 3, `l'accent sur blanc donne ${accent.toFixed(2)} : l'interdiction n'aurait plus d'objet`);
   const peche = contraste(cssClair.get("--v8-principal"), cssClair.get("--v8-peche"));
   assert.ok(peche < 4.5, `principal sur peche donne ${peche.toFixed(2)} : "pas de badge" n'aurait plus d'objet`);
+});
+
+test("jetons — les trois signaux sont INDISCERNABLES, et c'est mesure", () => {
+  // La charte interdit de faire voyager un signal par la couleur seule. Ce
+  // test verifie que l'interdiction reste FONDEE : si un jour les trois se
+  // distinguaient nettement, la regle deviendrait du bruit. Tant qu'une paire
+  // est sous 1,6 dans chaque mode, elle tient.
+  //
+  // Le detail compte : ce n'est pas la MEME paire selon le mode. Le sombre
+  // confond l'accent avec les deux autres ; le clair confond l'avertissement
+  // avec l'alerte -- les deux signaux qu'on a le plus besoin de distinguer,
+  // et l'ecart y est le pire du tableau (1,07).
+  for (const [mode, jetons] of [["clair", cssClair], ["sombre", cssSombre]]) {
+    const paires = [["accent", "alerte"], ["accent", "avertissement"], ["alerte", "avertissement"]]
+      .map(([a, b]) => contraste(jetons.get("--v8-" + a), jetons.get("--v8-" + b)));
+    const pire = Math.min(...paires);
+    assert.ok(pire < 1.6,
+      mode + " : la paire la plus proche vaut " + pire.toFixed(2)
+      + " — au-dessus de 1,6, la regle \"jamais par la couleur seule\" perdrait son fondement");
+  }
 });
 
 test("jetons — la marge de 0,13 annoncee sur le secondaire-sur-vert est REELLE", () => {

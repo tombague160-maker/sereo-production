@@ -33,14 +33,29 @@ au soleil, souvent d'une main. Rien de décoratif qui ne serve la lecture.
 | Texte | `#386B6D` | Texte courant (le vert profond est aussi la couleur du texte, comme sur le site) | **6,01:1** sur blanc — c'est le principal, donc exactement sa valeur. La charte a longtemps écrit 5,95 ici et 6,01 trois lignes plus haut, pour la même paire. Corrigé le 17/09 par recalcul |
 | Texte secondaire | `#4F7477` | Sous-titres, métadonnées. Remplace six gris-teal non conformes | 5,13:1 sur blanc · 4,81 sur fond · 4,56 sur surface basse |
 | Texte secondaire sur vert | `#D6E5E3` | Sur fond `#386B6D`. **0,13 de marge : rien ne se pose dessous** | 4,63:1 |
+| Avertissement | `#9A5A18` | Texte et icônes d'avertissement — un problème qui n'empêche pas d'agir. Ajouté le 17/09 : l'app portait ce rôle (`.pill-warning`, `.button.warning`, `.status-warning`) sans que la charte le nomme | 5,46 surface · 5,12 fond · 4,86 surface basse |
+| Fond d'avertissement | `#FFF1D8` | Fond de badge tiède propre à l'avertissement. **La pêche claire ne suffit pas** : `#9A5A18` n'y donne que 4,45 | 4,89:1 |
 | Alerte | `#C02B0A` | Texte et icônes d'alerte uniquement. Jamais couleur de lien, jamais pour un simple compteur | — |
 
-**Règle d'alerte, valable dans les deux modes.** Une alerte ne voyage **jamais
-par la couleur seule** : elle porte toujours une icône ou un mot. L'accent
-`#EF9177` et le rouge d'alerte partagent la même famille de teinte (10° contre
-4°), et en mode sombre l'écart entre eux tombe à 1,5:1 — indiscernable à l'œil.
-Un point rouge et un point orange côte à côte ne se distinguent pas ; « Bloquée »
-écrit à côté, si.
+**Règle des trois signaux, valable dans les deux modes.** Accent, avertissement
+et alerte ne voyagent **jamais par la couleur seule** : chacun porte toujours
+une icône ou un mot. Ce n'est pas une précaution, c'est une conséquence
+mesurée — la matrice complète, recalculée le 17/09 :
+
+| Paire | Clair | Sombre |
+|---|---|---|
+| accent / alerte | 2,50 | **1,55** |
+| accent / avertissement | 2,33 | **1,44** |
+| alerte / avertissement | **1,07** | 2,23 |
+
+**Chaque mode a une paire sous 1,6, et ce n'est pas la même.** Le sombre confond
+l'accent avec les deux autres ; le clair confond l'avertissement avec l'alerte —
+précisément les deux signaux qu'on a le plus besoin de distinguer, et l'écart y
+est le pire du tableau, 1,07. La charte ne notait que le cas sombre, ce qui
+laissait croire à un défaut du mode sombre. C'est structurel : les trois
+signaux partagent la même famille de teinte, par construction de la marque.
+Un point rouge et un point orange côte à côte ne se distinguent pas ;
+« Bloquée » écrit à côté, si.
 | Succès | `#386B6D` + coche | Le vert principal sert de succès ; pas de second vert | — |
 
 ### Mode sombre
@@ -69,6 +84,8 @@ Chaque contraste ci-dessous est recalculé par `test/jetons-v8.test.js`.
 | Texte secondaire | `#A8C4BE` | **9,94** fond · **8,82** surface · **7,67** surface haute |
 | Texte sur principal | `#0D1518` | **10,22** |
 | Texte secondaire sur principal | `#0D1518` | même valeur : sur `#93CBC9`, le sombre est le seul texte qui tienne |
+| Avertissement | `#FFD0AA` | **13,06** fond · **11,59** surface · **12,19** surface basse |
+| Fond d'avertissement | `#775841` | Le plus **clair** qui tienne 4,5 sous `#FFD0AA` (**4,56**) : il reste un badge, pas un trou noir |
 | Alerte | `#F85E3C` | Le rouge d'alerte, teinte gardée (11°), éclairci jusqu'à tenir 4,5 sur la surface la plus dure : **5,85** fond · **5,19** surface · **4,52** surface haute. `#C02B0A` ne donne que 3,16 sur le fond sombre |
 
 ## 3. Typographie

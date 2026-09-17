@@ -810,7 +810,7 @@ button {
 }
 
 .primary:hover {
-  background: #e96d50;
+  background: var(--v8-principal-appuye);
 }
 
 .secondary {
@@ -821,7 +821,7 @@ button {
 
 .secondary:hover {
   background: var(--v8-vert-clair);
-  border-color: #9ed5ca;
+  border-color: var(--v8-vert-eau);
 }
 
 .ok {
@@ -858,7 +858,7 @@ button {
 
 .warning:hover {
   background: var(--warning);
-  color: #4f2e12;
+  color: var(--v8-avertissement);
 }
 
 .ghost {
@@ -1231,7 +1231,7 @@ label {
 }
 
 .blue-dot {
-  background: #9ed5ca;
+  background: var(--v8-vert-eau);
 }
 
 .pill {
@@ -1841,7 +1841,7 @@ label {
   padding: 6px 9px;
   border-radius: var(--radius);
   background: var(--v8-peche-claire);
-  color: #94422f;
+  color: var(--v8-alerte);
   font-weight: 800;
 }
 
@@ -1882,7 +1882,7 @@ label {
 }
 
 .active-stop {
-  border-color: #9ed5ca;
+  border-color: var(--v8-vert-eau);
   box-shadow: 0 0 0 3px rgba(207, 233, 225, 0.72);
 }
 
@@ -3138,8 +3138,8 @@ label {
 .version-modal-close {
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   padding: 0;
   border: 1px solid var(--border);
   border-radius: 50%;
@@ -3435,7 +3435,7 @@ label {
 }
 .bdc-pill-danger {
   background: rgba(239, 68, 68, 0.12);
-  color: #b91c1c;
+  color: var(--v8-alerte);
   border-color: rgba(239, 68, 68, 0.3);
 }
 .bdc-pill-neutral {
@@ -4018,7 +4018,7 @@ label {
 }
 
 .danger-list li {
-  color: #c54a36;
+  color: var(--v8-alerte);
 }
 
 .preserve-list li {
@@ -4149,7 +4149,7 @@ label {
   align-items: flex-start;
   gap: 12px;
   padding: 14px 18px;
-  background: #c54a36;
+  background: var(--v8-alerte);
   color: var(--v8-surface);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
 }
@@ -4361,7 +4361,7 @@ html[data-color-scheme="light"] body {
   align-items: center;
   gap: 9px;
   min-width: 0;
-  color: #98a2b7;
+  color: var(--v8-texte-secondaire);
   font-weight: 700;
 }
 
@@ -4406,7 +4406,7 @@ html[data-color-scheme="light"] body {
 
 :root[data-color-scheme="light"] .sidebar-search input::placeholder,
 :root[data-color-scheme="light"] .topbar-search input::placeholder {
-  color: #98a2b7;
+  color: var(--v8-texte-secondaire);
 }
 
 :root[data-color-scheme="light"] .nav {
@@ -4420,7 +4420,7 @@ html[data-color-scheme="light"] body {
   padding: 6px 9px;
   border-color: transparent;
   background: transparent;
-  color: #5f687d;
+  color: var(--v8-texte-secondaire);
   box-shadow: none;
   backdrop-filter: none;
   font-size: 0.89rem;
@@ -4448,7 +4448,7 @@ html[data-color-scheme="light"] body {
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: #8c95a8;
+  color: var(--v8-texte-secondaire);
 }
 
 :root[data-color-scheme="light"] .tab.active .tab-icon,
@@ -4503,12 +4503,12 @@ html[data-color-scheme="light"] body {
 }
 
 :root[data-color-scheme="light"] .topbar p {
-  color: #98a2b7;
+  color: var(--v8-texte-secondaire);
   font-size: 0.88rem;
 }
 
 :root[data-color-scheme="light"] .eyebrow {
-  color: #8c95a8;
+  color: var(--v8-texte-secondaire);
   font-size: 0.72rem;
   letter-spacing: 0;
   text-transform: none;
@@ -4588,12 +4588,12 @@ html[data-color-scheme="light"] body {
 }
 
 :root[data-color-scheme="light"] .card strong {
-  color: #172728;
+  color: var(--v8-texte);
   font-size: 2rem;
 }
 
 :root[data-color-scheme="light"] .card span {
-  color: #8c95a8;
+  color: var(--v8-texte-secondaire);
   font-size: 0.86rem;
 }
 
@@ -4683,13 +4683,13 @@ html[data-color-scheme="light"] body {
 
 :root[data-color-scheme="light"] .danger:hover,
 :root[data-color-scheme="light"] .button.danger:hover {
-  background: #8e3f35;
-  border-color: #8e3f35;
+  background: var(--v8-alerte);
+  border-color: var(--v8-alerte);
 }
 
 :root[data-color-scheme="light"] .warning {
   background: var(--v8-peche-claire);
-  color: #7d4037;
+  color: var(--v8-avertissement);
   border-color: var(--v8-peche);
 }
 
@@ -4701,7 +4701,7 @@ html[data-color-scheme="light"] body {
 
 :root[data-color-scheme="light"] .ghost {
   background: var(--v8-peche-claire);
-  color: #7d4037;
+  color: var(--v8-avertissement);
   border-color: var(--v8-peche);
 }
 
@@ -4726,12 +4726,12 @@ html[data-color-scheme="light"] body {
 }
 
 :root[data-color-scheme="light"] label {
-  color: #586176;
+  color: var(--v8-texte-secondaire);
   font-size: 0.89rem;
 }
 
 :root[data-color-scheme="light"] .muted {
-  color: #8c95a8;
+  color: var(--v8-texte-secondaire);
 }
 
 :root[data-color-scheme="light"] .status-chip,
@@ -4757,14 +4757,14 @@ html[data-color-scheme="light"] body {
 :root[data-color-scheme="light"] .pill-warning,
 :root[data-color-scheme="light"] .status-warning {
   background: var(--v8-peche-claire);
-  color: #7d4037;
+  color: var(--v8-avertissement);
   border-color: var(--v8-peche);
 }
 
 :root[data-color-scheme="light"] .pill-danger,
 :root[data-color-scheme="light"] .status-danger {
   background: var(--v8-peche-claire);
-  color: #8e3f35;
+  color: var(--v8-alerte);
   border-color: var(--v8-peche);
 }
 
@@ -4782,7 +4782,7 @@ html[data-color-scheme="light"] body {
 
 :root[data-color-scheme="light"] .workflow-card strong,
 :root[data-color-scheme="light"] .stat-tile strong {
-  color: #172728;
+  color: var(--v8-texte);
 }
 
 :root[data-color-scheme="light"] .summary-item,
@@ -4879,7 +4879,7 @@ html[data-color-scheme="light"] body {
 
 :root[data-color-scheme="light"] th {
   background: var(--v8-fond);
-  color: #586176;
+  color: var(--v8-texte-secondaire);
 }
 
 :root[data-color-scheme="light"] .mobile-tabbar,
@@ -4890,11 +4890,11 @@ html[data-color-scheme="light"] body {
 }
 
 :root[data-color-scheme="light"] .mobile-tab {
-  color: #5f687d;
+  color: var(--v8-texte-secondaire);
 }
 
 :root[data-color-scheme="light"] .mobile-tab .icon {
-  color: #8c95a8;
+  color: var(--v8-texte-secondaire);
 }
 
 :root[data-color-scheme="light"] .mobile-tab.active,
@@ -5546,7 +5546,7 @@ html[data-color-scheme="light"] body,
 
 :root[data-color-scheme="light"] .sidebar-search input::placeholder,
 :root[data-color-scheme="light"] .topbar-search input::placeholder {
-  color: #9aa4b6;
+  color: var(--v8-texte-secondaire);
 }
 
 :root[data-color-scheme="light"] .nav {
@@ -5561,7 +5561,7 @@ html[data-color-scheme="light"] body,
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
-  color: #616b7c;
+  color: var(--v8-texte-secondaire);
   box-shadow: none;
   font-size: 0.9rem;
   font-weight: 820;
@@ -5586,7 +5586,7 @@ html[data-color-scheme="light"] body,
   border: 0;
   border-radius: 9px;
   background: transparent;
-  color: #8e96a7;
+  color: var(--v8-texte-secondaire);
 }
 
 :root[data-color-scheme="light"] .tab:hover .tab-icon,
@@ -5642,7 +5642,7 @@ html[data-color-scheme="light"] body,
 }
 
 :root[data-color-scheme="light"] .topbar p {
-  color: #9aa4b6;
+  color: var(--v8-texte-secondaire);
 }
 
 :root[data-color-scheme="light"] .topbar-actions {
@@ -5780,7 +5780,7 @@ html[data-color-scheme="light"] body,
 
 :root[data-color-scheme="light"] .card strong {
   margin-top: 24px;
-  color: #0f172a;
+  color: var(--v8-texte);
   font-size: clamp(2rem, 2.35vw, 2.5rem);
   font-weight: 950;
   line-height: 0.95;
@@ -5788,7 +5788,7 @@ html[data-color-scheme="light"] body,
 
 :root[data-color-scheme="light"] .card-label,
 :root[data-color-scheme="light"] .card span:not(.card-icon) {
-  color: #99a1b3;
+  color: var(--v8-texte-secondaire);
   font-size: 0.92rem;
   font-weight: 760;
 }
@@ -5915,8 +5915,8 @@ html[data-color-scheme="light"] body,
 }
 
 :root[data-color-scheme="light"] .button.danger:hover {
-  background: #8f4038;
-  border-color: #8f4038;
+  background: var(--v8-alerte);
+  border-color: var(--v8-alerte);
 }
 
 :root[data-color-scheme="light"] .compact,
@@ -6763,7 +6763,7 @@ html[data-color-scheme="light"] body,
   grid-area: value;
   align-self: start;
   margin: 6px 0 0;
-  color: #0c1820;
+  color: var(--v8-texte);
   font-size: clamp(2rem, 2.45vw, 2.85rem);
   font-weight: 950;
 }
@@ -6854,7 +6854,7 @@ html[data-color-scheme="light"] body,
 :root[data-color-scheme="light"] .button.warning {
   background: var(--v8-peche-claire);
   border-color: var(--v8-peche);
-  color: #8f463a;
+  color: var(--v8-avertissement);
 }
 
 :root[data-color-scheme="light"] .button.danger {
@@ -6873,7 +6873,7 @@ html[data-color-scheme="light"] body,
 :root[data-color-scheme="light"] .bdc-search input[type="search"] {
   border-color: var(--v8-vert-clair);
   border-radius: 14px;
-  background: #fbfdfc;
+  background: var(--v8-surface);
 }
 
 :root[data-color-scheme="light"] .pill-ok {
@@ -6883,7 +6883,7 @@ html[data-color-scheme="light"] body,
 
 :root[data-color-scheme="light"] .pill-warning {
   background: var(--v8-peche-claire);
-  color: #8f463a;
+  color: var(--v8-avertissement);
 }
 
 :root[data-color-scheme="light"] .pill-danger {
@@ -7648,6 +7648,8 @@ html[data-color-scheme="light"] body,
   --v8-texte-secondaire-sur-principal: #D6E5E3;  /* 4,63 — 0,13 de marge, RIEN ne se pose dessous */
 
   /* — Etats — */
+  --v8-avertissement: #9A5A18;        /* texte et icones d'avertissement. 5,46 surface · 5,12 fond · 4,86 surface basse */
+  --v8-avertissement-fond: #FFF1D8;   /* fond de badge tiede propre a l'avertissement : 4,89. La peche claire n'y suffit pas (4,45) */
   --v8-alerte: #C02B0A;               /* texte et icones d'alerte seulement. Voyage TOUJOURS avec un mot ou une icone */
 }
 
@@ -7672,6 +7674,8 @@ html[data-color-scheme="light"] body,
     --v8-texte-secondaire: #A8C4BE;     /* 9,94 fond · 8,82 surface · 7,67 surface haute */
     --v8-texte-sur-principal: #0D1518;
     --v8-texte-secondaire-sur-principal: #0D1518;
+    --v8-avertissement: #FFD0AA;        /* 13,06 fond · 11,59 surface · 12,19 surface basse */
+    --v8-avertissement-fond: #775841;   /* le plus CLAIR qui tienne 4,5 : il reste un badge, pas un trou noir */
     --v8-alerte: #F85E3C;               /* le rouge d'alerte, teinte gardee (11 deg), eclairci jusqu'a tenir 4,5 sur la surface la plus dure : 5,85 fond · 5,19 surface · 4,52 haute */
   }
 }
@@ -7693,5 +7697,43 @@ html[data-color-scheme="light"] body,
   --v8-texte-secondaire: #A8C4BE;
   --v8-texte-sur-principal: #0D1518;
   --v8-texte-secondaire-sur-principal: #0D1518;
+  --v8-avertissement: #FFD0AA;
+  --v8-avertissement-fond: #775841;
   --v8-alerte: #F85E3C;
+}
+
+/* ============================================================================
+ * Cibles tactiles : le plancher de 44 px sur mobile.
+ *
+ * La regle existait deja (@media max-width 640px, .button.secondary.compact a
+ * 44 px), mais une regle scopee :root[data-color-scheme="light"] ecrite PLUS
+ * LOIN la ramenait a 38. Mesure du 17/09 sur l'application : 48 cibles entre
+ * 24 et 44 px en 390 px de large, toutes des .compact et le bouton de
+ * fermeture de la fiche version.
+ *
+ * Ce bloc est place en FIN de feuille a dessein : a specificite egale, c'est
+ * l'ordre qui tranche, et un plancher de taille ne doit dependre d'aucun
+ * theme. 24 px reste le plancher LEGAL (WCAG 2.2 AA, 2.5.8), tenu partout ;
+ * 44 px est notre charte, et il ne vaut que la ou le doigt sert.
+ * ========================================================================== */
+@media (max-width: 640px) {
+  /* `:root[data-color-scheme]` en tete, et ce n'est pas decoratif : la regle
+     concurrente s'ecrit `:root[data-color-scheme="light"] .button.secondary
+     .compact`, soit (0,5,0). Sans ce prefixe, la notre plafonne a (0,3,0) et
+     perd -- une @media n'ajoute AUCUNE specificite. Premier essai : 48 cibles
+     sous 44 px, corrigees a 20. A specificite EGALE, c'est l'ordre qui
+     tranche, et ce bloc est le dernier de la feuille. */
+  :root[data-color-scheme] .button,
+  :root[data-color-scheme] .button.compact,
+  :root[data-color-scheme] .button.secondary.compact,
+  :root[data-color-scheme] .compact,
+  :root[data-color-scheme] .version-modal-close,
+  :root[data-color-scheme] .mobile-tab {
+    min-height: 44px;
+  }
+
+  :root[data-color-scheme] .version-modal-close,
+  :root[data-color-scheme] .mobile-tab {
+    min-width: 44px;
+  }
 }

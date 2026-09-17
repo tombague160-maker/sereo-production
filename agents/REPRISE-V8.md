@@ -211,8 +211,12 @@ Phase 4  Refonte des écrans + abonnements    ← EN COURS depuis le 17/09.
            Marche 2 ✅ la bascule : themes.js pointe sur les jetons, l'écran est V8. 1164 textes mesurés sous glyphes, 0 défaut (v1.25.0)
            Marche 3 ✅ les 3 generations retirees : 80 definitions et 381 usages de --color-/--palette-/--neo- supprimes,
                        themes.js ne porte plus une seule couleur, plus aucun style inline. 1164 textes remesures, 0 defaut
-           Marche 3b ⬜ les 259 hex litteraux restants dans des regles de composant (hors ombres et degrades)
-           Marche 4 ⬜ les écrans des 49 planches : barre basse mobile 4 + Plus, cibles 44 px, états vides, chargement
+           Marche 3b ✅ zero couleur litterale en propriete de couleur (41 -> 0). Role AVERTISSEMENT ajoute a la charte,
+                       qu'elle ne nommait pas alors que l'app le portait. Matrice des trois signaux mesuree
+           Marche 3c ✅ CIBLES TACTILES mesurees sur L'APPLICATION (jamais faites ici : les 531 de l'export
+                       etaient celles de la MAQUETTE). 496 cibles, 0 sous le plancher legal WCAG de 24 px,
+                       dette de charte 48 -> 0. Reserve levee.
+           Marche 4 ⬜ les écrans des 49 planches : barre basse mobile 4 + Plus, états vides, chargement
            Marche 5 ⬜ les 7 inventions de la planche 15, chacune avec son travail serveur
            PR 96 (brouillon) à rebaser par son auteur : 5 fichiers en conflit mesurés, et main a bougé de 4 versions
 Phase 5  Cartographie et trafic réel
