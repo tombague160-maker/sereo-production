@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.26.1](https://github.com/tombague160-maker/sereo-production/compare/v1.26.0...v1.26.1) (2026-09-17)
+
+
+### 🐛 Corrections de bugs
+
+* **tests:** le profil "mobile" n'emulait pas un doigt, et un checkout rendait le garde rouge ([bd9ec0a](https://github.com/tombague160-maker/sereo-production/commit/bd9ec0aee9fc4b01ca2d1818c2050f57d57a98b3))
+
 ## [1.26.0](https://github.com/tombague160-maker/sereo-production/compare/v1.25.1...v1.26.0) (2026-09-17)
 
 
