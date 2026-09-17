@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.24.1](https://github.com/tombague160-maker/sereo-production/compare/v1.24.0...v1.24.1) (2026-09-17)
+
+
+### 🐛 Corrections de bugs
+
+* **theme:** suivre le systeme par defaut, et reparer le mode "Auto" ([e4086b6](https://github.com/tombague160-maker/sereo-production/commit/e4086b665d04871d34541eee91e0ad878416eef1))
+
 ## [1.24.0](https://github.com/tombague160-maker/sereo-production/compare/v1.23.0...v1.24.0) (2026-09-17)
 
 
