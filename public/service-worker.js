@@ -2,7 +2,7 @@
 // Sans bump, l'ancienne version reste servie depuis le cache indefiniment —
 // notamment manifest.webmanifest, dont une version perimee casse l'installation
 // sur l'ecran d'accueil sans aucun message d'erreur.
-const CACHE_NAME = "sereo-shell-20260917-palette-unique";
+const CACHE_NAME = "sereo-shell-20260917-sombre-suit-le-systeme";
 const API_CACHE_NAME = "sereo-api-20260514";
 const APP_SHELL = [
   "/css/style.css",
