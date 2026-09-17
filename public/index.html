@@ -163,7 +163,7 @@
         <section class="nav-section" data-nav-section data-nav-section-id="commandes">
           <button class="nav-section-toggle" type="button" data-action="toggle-nav-section" data-nav-section-target="commandes" aria-expanded="false">
             <span class="nav-section-label">Commandes</span>
-            <span class="nav-section-count">5</span>
+            <span class="nav-section-count">6</span>
           </button>
           <div class="nav-section-items">
             <button id="tab-commande-client" class="tab" type="button" role="tab" aria-selected="false" aria-controls="commande-client" data-tab="commande-client">
@@ -174,6 +174,7 @@
               <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-clipboard-list"></use></svg></span>
               <span>Commandes du jour</span>
             </button>
+            <button id="tab-abonnements" class="tab" type="button" role="tab" aria-selected="false" aria-controls="abonnements" data-tab="abonnements"><span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-bell"></use></svg></span><span>Abonnements</span></button>
             <button id="tab-commandes-planifiees" class="tab" type="button" role="tab" aria-selected="false" aria-controls="commandes-planifiees" data-tab="commandes-planifiees">
               <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-bell"></use></svg></span>
               <span>Commandes planifiées</span>
@@ -318,6 +319,7 @@
           <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-clipboard-list"></use></svg></span>
           <span class="more-sheet-label">Commandes du jour</span>
         </button>
+        <button class="more-sheet-item" type="button" role="menuitem" data-tab="abonnements" data-action="more-menu-pick"><span class="more-sheet-label">Abonnements</span></button>
         <button class="more-sheet-item" type="button" role="menuitem" data-tab="commandes-planifiees" data-action="more-menu-pick">
           <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-bell"></use></svg></span>
           <span class="more-sheet-label">Commandes planifiées</span>
@@ -354,7 +356,7 @@
         <div>
           <p class="eyebrow">Tableau de bord local</p>
           <h2 id="pageTitle">Tableau de bord</h2>
-          <p id="pageSubtitle">Vue rapide du stock, des préparations et des livraisons.</p>
+          <p id="pageSubtitle">Chiffre d’affaires livré, abonnements et opérations du jour.</p>
         </div>
 
         <label class="topbar-search" for="globalNavigationSearch">
@@ -364,7 +366,7 @@
 
         <div class="topbar-actions">
           <span id="syncStatus" class="status-chip" aria-live="polite">Prêt</span>
-          <button id="refreshButton" class="button secondary" type="button" data-action="refresh">
+          <button id="refreshButton" aria-label="Actualiser" class="button secondary" type="button" data-action="refresh">
             <svg class="icon button-icon" aria-hidden="true"><use href="#icon-rotate-ccw"></use></svg>
             <span>Actualiser</span>
           </button>
@@ -372,6 +374,19 @@
       </header>
 
       <section id="journee" class="page active" role="tabpanel" aria-labelledby="tab-journee">
+        <div class="op-welcome"><div><span class="op-eyebrow">SÉRÉO · VOTRE ACTIVITÉ</span><h2>Une journée bien organisée.</h2><p class="muted">Vos ventes, vos clients, vos prochaines livraisons.</p></div><div class="op-toolbar"><span id="opUpdated" class="muted" role="status" title="Actualisation automatique toutes les 60 secondes">Chargement…</span><button class="button secondary" type="button" data-op="refresh-operations">Actualiser</button></div></div>
+        <div class="op-section-title"><div><h3>Vue d’ensemble</h3><p class="muted">Chiffre d’affaires des commandes livrées, selon les montants enregistrés.</p></div><label class="op-period">Période<select id="revenueMonth" aria-label="Mois du chiffre d’affaires"></select></label></div>
+        <div class="op-kpis">
+          <article class="op-kpi op-kpi-featured"><span>Chiffre d’affaires livré</span><strong id="opRevenue">—</strong><small id="opDelivered">Commandes livrées</small></article>
+          <article class="op-kpi"><span>Panier moyen</span><strong id="opBasket">—</strong><small>Sur la période sélectionnée</small></article>
+          <article class="op-kpi"><span>Abonnements actifs</span><strong id="opSubscriptions">—</strong><a href="#abonnements">Voir mes abonnements ↗</a></article>
+          <article class="op-kpi"><span>Échéances à préparer</span><strong id="opDue">—</strong><small>Rappels arrivés à échéance</small></article>
+        </div>
+        <p id="revenueCaveat" class="muted op-caveat"></p>
+        <div class="op-dashboard-grid"><section class="panel"><div class="panel-heading"><h3>Votre activité sur 6 mois</h3><span class="op-tag">CA livré</span></div><div id="revenueChart" class="revenue-chart" aria-label="Chiffre d’affaires des six derniers mois"></div></section><section class="panel"><div class="panel-heading"><h3>À votre attention</h3><a href="#recommande">Voir le stock ↗</a></div><div id="opAlerts"></div></section></div>
+        <section class="panel"><div class="panel-heading"><div><span class="op-eyebrow">LES 7 PROCHAINS JOURS & LES RETARDS</span><h3>Vos livraisons récurrentes</h3></div><a href="#abonnements" id="opWeekCount">Voir le calendrier ↗</a></div><div id="dashboardSubscriptions"></div></section>
+        <div class="op-dashboard-grid"><section class="panel"><div class="panel-heading"><h3>À préparer <span id="dashboardPreparingCount" class="op-tag">0</span></h3><a href="#preparation">Tout voir ↗</a></div><div id="dashboardPreparing"></div></section><section class="panel"><div class="panel-heading"><h3>À livrer <span id="dashboardDeliveringCount" class="op-tag">0</span></h3><a href="#livreur">Ouvrir la tournée ↗</a></div><div id="dashboardDelivering"></div></section></div>
+        <details class="op-details"><summary>Stock et suivi détaillé</summary>
         <div class="cards dashboard-cards">
           <article class="card blue">
             <span class="card-icon" aria-hidden="true"><svg class="icon"><use href="#icon-rotate-ccw"></use></svg></span>
@@ -445,6 +460,7 @@
           </div>
         </div>
 
+        </details>
         <div class="panel visual-panel">
           <div class="panel-heading">
             <div>
@@ -785,6 +801,19 @@
         </div>
       </section>
 
+      <section id="abonnements" class="page" role="tabpanel" aria-labelledby="tab-abonnements">
+        <div class="op-welcome"><div><span class="op-eyebrow">CLIENTS & RÉCURRENCE</span><h2>Le bon rythme, pour chaque client.</h2><p class="muted">Planifiez les produits et retrouvez chaque livraison au bon moment.</p></div><button class="button primary" type="button" data-op="new-sub">+ Nouvel abonnement</button></div>
+        <section class="panel"><div class="panel-heading"><h3>Calendrier des livraisons</h3><div class="quick-actions"><button class="button secondary" type="button" data-op="week-prev" aria-label="Semaine précédente">←</button><button class="button secondary" type="button" data-op="week-today">Cette semaine</button><button class="button secondary" type="button" data-op="week-next" aria-label="Semaine suivante">→</button></div></div><p id="subscriptionWeekLabel" class="muted"></p><div id="subscriptionCalendar" class="subscription-calendar"></div><p class="muted">Prévisions des 90 prochains jours. Les rappels apparaissent dans l’application ; aucun message n’est envoyé au client.</p></section>
+        <section class="panel"><div class="panel-heading"><h3>Rappels à traiter</h3><span class="muted">Une seule commande par échéance</span></div><div id="subscriptionReminders"></div></section>
+        <div class="op-section-title"><h3>Mes abonnements</h3><label>Rechercher<input id="subscriptionSearch" type="search" placeholder="Client ou produit…"></label></div><div id="subscriptionList" class="subscription-list"></div>
+      </section>
+      <dialog id="subscriptionDialog" class="subscription-dialog" aria-labelledby="subDialogTitle"><form id="subscriptionForm"><div class="panel-heading"><h2 id="subDialogTitle">Nouvel abonnement</h2><button class="button secondary" type="button" data-op="close-sub" aria-label="Fermer">✕</button></div>
+        <label>Client<select id="subClient" required></select></label>
+        <div id="subNewClient" class="op-form-grid" hidden><label>Nom<input id="subLastName" data-required></label><label>Prénom<input id="subFirstName"></label><label>Adresse<input id="subAddress" data-required></label><label>Code postal<input id="subPostal" inputmode="numeric"></label><label>Ville<input id="subCity" data-required></label><label>Téléphone<input id="subPhone" type="tel"></label></div>
+        <h3>Son panier habituel</h3><div id="subProducts"></div><button class="button secondary" type="button" data-op="add-line">+ Ajouter un produit</button>
+        <h3>Son rythme de livraison</h3><div class="op-form-grid"><label>Première livraison<input id="subStart" type="date" required></label><label>Fréquence<select id="subFrequency"><option value="7">Chaque semaine · même jour</option><option value="14">Toutes les 2 semaines · même jour</option><option value="10">Tous les 10 jours</option><option value="15">Tous les 15 jours</option><option value="21">Toutes les 3 semaines · même jour</option><option value="28">Toutes les 4 semaines · même jour</option><option value="monthly">Tous les mois · même date</option><option value="custom">Nombre de jours personnalisé</option></select></label><label id="subCustomWrap" hidden>Nombre de jours<input id="subCustom" type="number" min="1" max="366" value="10"></label><label>Rappel avant livraison (jours)<input id="subReminder" type="number" min="0" max="60" required value="7"></label><label>Statut<select id="subStatus"><option value="active">Actif</option><option value="paused">En pause</option><option value="cancelled">Arrêté</option></select></label></div>
+        <p id="subScheduleHint" class="muted"></p><label>Notes de livraison<textarea id="subNotes" rows="2" maxlength="2000" placeholder="Digicode, consignes, horaire préféré…"></textarea></label><p class="muted">Les modifications s’appliquent aux prochaines échéances. Les commandes déjà créées restent à gérer dans Commandes planifiées.</p><p id="subError" class="op-error" role="alert"></p><div class="op-dialog-footer"><button class="button secondary" type="button" data-op="close-sub">Annuler</button><button id="subSave" class="button primary" type="submit">Enregistrer l’abonnement</button></div>
+      </form></dialog>
       <section id="livreur" class="page" role="tabpanel" aria-labelledby="tab-livreur">
         <div class="driver-page">
           <div class="panel driver-hero">
@@ -796,6 +825,8 @@
               <span id="routeProgress" class="status-chip">Aucune tournée</span>
             </div>
 
+            <div class="route-planner"><div class="route-step"><span class="op-step-number">1</span><div><label>Votre départ<input id="departureQuery" placeholder="Adresse ou ville de départ"></label><div class="quick-actions"><button class="button secondary" type="button" data-op="search-departure">Rechercher</button><button class="button primary" type="button" data-op="locate">Me localiser</button></div><select id="departureResults" aria-label="Confirmer le départ" hidden></select></div></div><div class="route-step"><span class="op-step-number">2</span><div><label>Votre arrivée<input id="arrivalQuery" placeholder="Adresse ou ville d’arrivée"></label><button class="button secondary" type="button" data-op="search-arrival">Rechercher</button><select id="arrivalResults" aria-label="Confirmer l’arrivée" hidden></select><label class="op-check"><input id="returnToStart" type="checkbox"> Retour au point de départ</label></div></div></div>
+            <p id="routeLocationStatus" class="muted" role="status">Choisissez le départ et l’arrivée, puis les clients ci-dessous. Le calcul utilise les routes, sans trafic en temps réel.</p>
             <div class="delivery-filters">
               <label>
                 Date
@@ -848,7 +879,7 @@
             <div class="big-actions">
               <button id="callClientButton" class="button primary" type="button" data-action="call-current-client">Appeler</button>
               <button id="mapsButton" class="button secondary" type="button" data-action="open-maps">Google Maps</button>
-              <button id="markDeliveredButton" class="button ok" type="button" data-action="mark-delivered">Valider</button>
+              <button id="markDeliveredButton" class="button ok" type="button" data-action="mark-delivered">Livré</button>
               <button id="markAbsentButton" class="button danger" type="button" data-action="mark-absent">Absent</button>
               <button id="markProblemButton" class="button warning" type="button" data-action="mark-problem">Problème</button>
               <button id="markRescheduleButton" class="button secondary" type="button" data-action="mark-reschedule">À reprogrammer</button>
@@ -860,7 +891,7 @@
           <div class="panel">
             <div class="panel-heading">
               <h3>Ordre de tournée</h3>
-              <span id="routeMetrics" class="muted">Distance estimée indisponible.</span>
+              <span id="routeMetrics" class="muted">Distance estimée indisponible.</span><button class="button secondary" type="button" data-op="recalculate-route">Recalculer le tracé</button>
             </div>
             <div id="routeStopsList" class="route-stops"></div>
           </div>
@@ -868,7 +899,7 @@
           <div class="panel">
             <div class="panel-heading">
               <h3>Carte tournée</h3>
-              <span class="muted">Points avec coordonnées</span>
+              <span class="muted">Trajet routier · départ → clients → arrivée</span>
             </div>
             <div class="map-shell">
               <div id="map" aria-label="Carte de la tournée"></div>

@@ -1,3 +1,4 @@
+import { initOperations, renderOperations, getRoutePoints } from "./operations.js";
 // Sereo — point d'entree du front.
 //
 // Charge comme module ES (<script type="module"> dans index.html). Les
@@ -126,6 +127,7 @@ document.addEventListener("DOMContentLoaded", () => {
   updateMetaThemeColor();
   watchSystemColorScheme();
   bindUi();
+  initOperations({apiFetch, loadData, notify, recalculateRoute});
   bindVersionModal();
   bindBonsCommandeUi();
   initMap();
@@ -665,6 +667,8 @@ async function loadData() {
   // Apres : chaque endpoint a son sort. Si le stock timeout, on garde la prep,
   // les clients, etc. Le user voit "Stock indisponible" sans tout perdre.
   const endpoints = [
+    { key: "operations", path: "/api/operations", fallback: null },
+    { key: "subscriptions", path: "/api/subscriptions", fallback: {items:[],occurrences:[],today:getTodayDateInput()} },
     { key: "clients", path: "/api/clients", fallback: [] },
     { key: "stock", path: "/api/stock", fallback: [] },
     { key: "ventes", path: "/api/ventes", fallback: [] },
@@ -732,6 +736,7 @@ async function loadData() {
   route = activeRoute ? activeRoute.stops : (currentIndex >= 0 ? route : [...clients]);
 
   renderAll();
+  renderOperations({operations:data.operations,subscriptions:data.subscriptions,crmClients,stock,orders});
 
   if (failed.length === 0) {
     setStatus("À jour");
@@ -1550,10 +1555,10 @@ function renderStatistics() {
   const kpis = document.getElementById("statsKpis");
   if (!kpis || !statistics) return;
   const items = [
-    { label: "CA jour", value: formatMoney(statistics.today?.revenue), hint: `${statistics.today?.orders || 0} commande(s)`, tone: "success" },
-    { label: "CA semaine", value: formatMoney(statistics.week?.revenue), hint: formatEvolution(statistics.week?.evolution), tone: getEvolutionTone(statistics.week?.evolution) },
-    { label: "CA mois", value: formatMoney(statistics.month?.revenue), hint: `${statistics.month?.orders || 0} commande(s) - ${formatEvolution(statistics.month?.evolution)}`, tone: getEvolutionTone(statistics.month?.evolution) },
-    { label: "Panier moyen", value: formatMoney(statistics.averageBasket), hint: "Moyenne globale", tone: "info" },
+    { label: "CA livré du jour", value: formatMoney(statistics.today?.revenue), hint: `${statistics.today?.orders || 0} commande(s)`, tone: "success" },
+    { label: "CA livré de la semaine", value: formatMoney(statistics.week?.revenue), hint: formatEvolution(statistics.week?.evolution), tone: getEvolutionTone(statistics.week?.evolution) },
+    { label: "CA livré du mois", value: formatMoney(statistics.month?.revenue), hint: `${statistics.month?.orders || 0} commande(s) - ${formatEvolution(statistics.month?.evolution)}`, tone: getEvolutionTone(statistics.month?.evolution) },
+    { label: "Panier moyen", value: formatMoney(statistics.averageBasket), hint: "Commandes livrées, toutes périodes", tone: "info" },
     { label: "Nouveaux clients", value: statistics.newClientsMonth || 0, hint: "Ce mois-ci", tone: "warning" },
     { label: "Prospects convertis", value: statistics.convertedProspectsMonth || 0, hint: "Ce mois-ci", tone: "success" }
   ];
@@ -3885,12 +3890,15 @@ async function createDeliveryRoute() {
     return;
   }
 
+  const points = getRoutePoints();
   activeRoute = await apiFetch("/api/routes", {
     method: "POST",
+    timeoutMs: 90000,
     headers: {
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
+      ...points,
       sector: deliveryFilter.sector,
       city: deliveryFilter.city,
       deliveryDate: deliveryFilter.date,
@@ -3911,6 +3919,7 @@ async function startActiveRoute() {
     return;
   }
 
+  if (activeRoute.departure && !activeRoute.geometry) await recalculateRoute();
   activeRoute = await apiFetch(`/api/routes/${encodeURIComponent(activeRoute.id)}/start`, {
     method: "POST"
   });
@@ -3954,8 +3963,8 @@ function renderRoute() {
         <span class="pill ${getStopPill(stop.status)}">${escapeHtml(formatStopStatus(stop.status))}</span>
       </button>
       <div class="route-stop-actions">
-        <button class="button secondary compact" type="button" data-action="move-stop-up" data-stop-id="${escapeAttribute(stop.id)}" ${index === 0 ? "disabled" : ""}>↑</button>
-        <button class="button secondary compact" type="button" data-action="move-stop-down" data-stop-id="${escapeAttribute(stop.id)}" ${index === activeRoute.stops.length - 1 ? "disabled" : ""}>↓</button>
+        <button class="button secondary compact" type="button" data-action="move-stop-up" data-stop-id="${escapeAttribute(stop.id)}" ${index === 0 || activeRoute.status !== "prete" ? "disabled" : ""}>↑</button>
+        <button class="button secondary compact" type="button" data-action="move-stop-down" data-stop-id="${escapeAttribute(stop.id)}" ${index === activeRoute.stops.length - 1 || activeRoute.status !== "prete" ? "disabled" : ""}>↓</button>
       </div>
     `;
     list.appendChild(row);
@@ -4037,6 +4046,7 @@ function showRouteCompleted(routeData) {
   container.innerHTML = `
     <div class="route-complete">
       <strong>Tournée terminée</strong>
+      ${routeData.arrival ? `<p><a class="button primary" href="https://www.google.com/maps/dir/?api=1&destination=${routeData.arrival.lat},${routeData.arrival.lng}" target="_blank" rel="noopener noreferrer">Rejoindre l’arrivée : ${escapeHtml(routeData.arrival.label || "point choisi")}</a></p>` : ""}
       <p>${escapeHtml(delivered)} livré(s), ${escapeHtml(absent)} absent(s), ${escapeHtml(problems)} problème(s)</p>
       <div class="quick-actions">
         <button class="button primary" type="button" data-action="go-tab" data-target-tab="journee">Retour accueil</button>
@@ -4413,8 +4423,16 @@ function renderMap() {
   const mapEmpty = document.getElementById("mapEmpty");
   if (mapEmpty) mapEmpty.hidden = points.length > 0;
 
-  if (points.length > 1) {
+  if (activeRoute?.geometry?.coordinates) {
+    const roadPoints = activeRoute.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+    routeLine = L.polyline(roadPoints, {color: "#2b7062", weight: 5, opacity: 0.85}).addTo(map);
+    for (const [point, label] of [[activeRoute.departure, "Départ"], [activeRoute.arrival, "Arrivée"]]) {
+      if (point) markers.push(L.marker([point.lat, point.lng]).addTo(map).bindPopup(`${label} : ${escapeHtml(point.label || "Point choisi")}`));
+    }
+    map.fitBounds(routeLine.getBounds(), {padding:[30,30]});
+  } else if (points.length > 1) {
     routeLine = L.polyline(points, {
+      dashArray: "6 8",
       color: "#2563eb",
       weight: 4,
       opacity: 0.75
@@ -4912,7 +4930,7 @@ function formatRouteMetrics(routeData) {
     ? "durée inconnue"
     : `${routeData.estimatedDuration} min`;
 
-  return `${stops} arrêt(s) · ${distance} · ${duration}`;
+  return `${stops} arrêt(s) · ${distance} · ${duration} · ${routeData.routingMode === "road" ? "trajet routier, hors trafic" : "tracé à recalculer"}`;
 }
 
 function formatSectorLabel(value) {
@@ -5161,3 +5179,17 @@ window.Sereo = {
   loadData,
   showTab
 };
+
+async function recalculateRoute() {
+  if (!activeRoute) throw new Error("Crée une tournée avant de recalculer.");
+  activeRoute = await apiFetch(`/api/routes/${encodeURIComponent(activeRoute.id)}/recalculate`, {method:"POST",timeoutMs:90000,headers:{"Content-Type":"application/json"},body:JSON.stringify({fixedOrder: true})});
+  await loadData();
+  notify("Tracé routier recalculé.", "success");
+}
+// Actualise uniquement la vue d'accueil, sans interrompre une saisie ou une tournée.
+let operationsRefreshing = false;
+setInterval(async () => {
+  if (document.hidden || !document.getElementById("journee")?.classList.contains("active") || document.querySelector("dialog[open]") || operationsRefreshing) return;
+  operationsRefreshing = true;
+  try { await loadData(); } finally { operationsRefreshing = false; }
+}, 60000);

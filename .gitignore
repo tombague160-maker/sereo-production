@@ -2,10 +2,19 @@ node_modules/
 
 audit/
 
-data/db.json
-data/*.sqlite
-data/*.sqlite-shm
-data/*.sqlite-wal
+# data/ : TOUT est ignore, et les exceptions sont explicites.
+#
+# Ce bloc listait des fichiers precis (db.json, *.sqlite, backups/*). Le dossier
+# contient aussi, non suivis, des exports metier reels -- stock.xlsx,
+# ventes.xlsx, des journaux, des captures. Un seul `git add -A` les mettait en
+# index, et ce depot est PUBLIC. C'est arrive le 18/09 : 17 fichiers stages,
+# dont les deux classeurs clients, rattrapes avant le commit.
+#
+# Ignorer le DOSSIER et ouvrir des exceptions nommees inverse le defaut : un
+# fichier neuf depose la est invisible a git jusqu'a ce que quelqu'un decide
+# explicitement le contraire. Le sens de la garde compte plus que sa longueur.
+data/*
+!data/backups/
 data/backups/*
 !data/backups/.gitkeep
 

@@ -18,6 +18,7 @@
 const { test, expect } = require("@playwright/test");
 
 const TABS = [
+  { id: "abonnements", label: "Abonnements" },
   { id: "journee", label: "Tableau de bord" },
   { id: "commande-client", label: "Commande client" },
   { id: "commandes-jour", label: "Commandes du jour" },

@@ -2,11 +2,12 @@
 // Sans bump, l'ancienne version reste servie depuis le cache indefiniment —
 // notamment manifest.webmanifest, dont une version perimee casse l'installation
 // sur l'ecran d'accueil sans aucun message d'erreur.
-const CACHE_NAME = "sereo-shell-20260917-v8-cibles";
+const CACHE_NAME = "sereo-shell-20260918-v8-operations";
 const API_CACHE_NAME = "sereo-api-20260514";
 const APP_SHELL = [
   "/css/style.css",
   "/js/app.js",
+  "/js/operations.js",
   "/js/anti-fart.js",
   // Modules ES importes par app.js. Ils DOIVENT figurer ici : un import non
   // pre-cache fait echouer le chargement complet du module en mode hors ligne,
@@ -37,11 +38,18 @@ const APP_SHELL = [
 // strategie network-first resservirait une identite ou une liste de comptes
 // perimee apres un changement de role ou une deconnexion — panne discrete et
 // difficile a diagnostiquer.
+//
+// UNION des deux listes lors de la reprise de la PR 96 : retirer une
+// exclusion posee par l un ou l autre remettrait en cache un endpoint que
+// quelqu un a explicitement exclu, et la panne serait discrete.
 const API_CACHE_EXCLUDED = [
   "/api/storage/status",
   "/api/version",
   "/api/me",
-  "/api/comptes"
+  "/api/comptes",
+  "/api/operations",
+  "/api/subscriptions",
+  "/api/geocode"
 ];
 
 // Network-first avec timeout puis fallback cache pour les GET /api/*.

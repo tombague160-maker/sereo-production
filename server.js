@@ -1,3 +1,4 @@
+const routing = require("./lib/routing");
 const express = require("express");
 const multer = require("multer");
 const readXlsxFile = require("read-excel-file/node");
@@ -447,7 +448,7 @@ function securityHeaders(req, res, next) {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Referrer-Policy", "no-referrer");
-  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(self)");
   res.setHeader(
     "Content-Security-Policy",
     [
@@ -2222,6 +2223,7 @@ function defaultDb() {
     commandes: [],
     routes: [],
     relances: [],
+    subscriptions: [],
     deliverySectors: defaultDeliverySectors(),
     stockMovements: [],
     importsArchives: [],
@@ -2558,6 +2560,7 @@ function normalizeDb(db) {
   db.historique = Array.isArray(db.historique) ? db.historique : [];
   db.commandes = Array.isArray(db.commandes) ? db.commandes : [];
   db.routes = Array.isArray(db.routes) ? db.routes : [];
+  db.subscriptions = Array.isArray(db.subscriptions) ? db.subscriptions : [];
   db.relances = Array.isArray(db.relances) ? db.relances.map(normalizeCrmReminder) : [];
   db.deliverySectors = Array.isArray(db.deliverySectors) ? db.deliverySectors.map(normalizeDeliverySector) : defaultDeliverySectors();
   if (!db.deliverySectors.length) db.deliverySectors = defaultDeliverySectors().map(normalizeDeliverySector);
@@ -4379,6 +4382,9 @@ function normalizeOrder(order) {
     stockReleaseReason: order.stockReleaseReason || null,
     routeId: order.routeId || null,
     importedAsLivre: order.importedAsLivre || false,
+    deliveredAt: order.deliveredAt || "",
+    subscriptionId: order.subscriptionId || "",
+    subscriptionDate: order.subscriptionDate || "",
     source: clean(order.source || order.orderSource || order.sourceExcel),
     orderType: clean(order.orderType || order.typeCommande || order.type || (order.source === "commande_planifiee" ? "planifiee" : "immediate")),
     parentOrderId: clean(order.parentOrderId || order.commandeOrigineId || order.sourceOrderId),
@@ -4452,6 +4458,7 @@ function setOrderStatus(order, status) {
     throw badRequest(`Transition non autorisee : ${order.status} -> ${status}`);
   }
 
+  if (status === "livre" && order.status !== "livre") order.deliveredAt = new Date().toISOString();
   order.status = status;
   order.preparationStatus = inferPreparationStatus(status);
   order.deliveryStatus = inferDeliveryStatus(status);
@@ -5307,17 +5314,17 @@ function computeStatistics(db, now = new Date()) {
   const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const prevMonthEnd = monthStart;
 
-  const commercialStatuses = new Set(["commande_client_validee", "stock_a_verifier", "en_preparation", "pret_livraison", "en_livraison", "livre"]);
+  const commercialStatuses = new Set(["livre"]);
   const importedSalesIndex = buildImportedSalesIndex(db.ventes);
   const salesOrders = db.commandes
     .filter(order => commercialStatuses.has(order.status))
     .map(order => {
-      const _date = orderDate(order);
+      const _date = normalizeDateInput(order.deliveredAt) || order.deliveryDate || orderDate(order);
       const explicitTotal = getOrderTotal(order);
       return {
         ...order,
         _date,
-        _total: explicitTotal || getImportedOrderTotal(importedSalesIndex, order, _date)
+        _total: explicitTotal || getImportedOrderTotal(importedSalesIndex, order, orderDate(order))
       };
     })
     .filter(order => order._date);
@@ -5348,7 +5355,7 @@ function computeStatistics(db, now = new Date()) {
         line.total,
         line.ttc,
         line.ht,
-        getImportedProductTotal(importedSalesIndex, order, order._date, line)
+        getImportedProductTotal(importedSalesIndex, order, orderDate(order), line)
       )
         || Math.max(0, number(line.quantite, 0)) * Math.max(0, number(line.prixUnitaire, 0));
       productMap.set(key, current);
@@ -5578,7 +5585,17 @@ function createRoute(db, options = {}) {
     throw badRequest("Aucune commande prete selectionnee pour la tournee");
   }
 
-  const optimizedOrders = optimizeOrders(orders);
+  if (options.plan && orders.some(order => db.routes.some(route => ["prete", "en_livraison"].includes(route.status) && route.stops.some(stop => String(stop.orderId) === String(order.id))))) {
+    throw badRequest("Une commande sélectionnée appartient déjà à une tournée active.");
+  }
+  const optimizedOrders = options.plan ? options.plan.ordered.map(item => {
+    const original = orders.find(order => String(order.id) === String(item.id));
+    if (!original) throw badRequest("La sélection a changé. Recalcule la tournée.");
+    if (["address", "city", "postalCode", "status", "clientId"].some(key => original[key] !== item[key])) throw badRequest("Une adresse ou une commande a changé pendant le calcul. Recommence.");
+    original.lat = item.lat; original.lng = item.lng;
+    return original;
+  }) : optimizeOrders(orders);
+  if (optimizedOrders.length !== orders.length) throw badRequest("La sélection a changé. Recalcule la tournée.");
   const routeId = `route-${crypto.randomUUID()}`;
   const now = new Date().toISOString();
   // v1.17.1 : passer settings.tournee pour vitesse + duree d'arret calibrables.
@@ -5595,8 +5612,13 @@ function createRoute(db, options = {}) {
     selectedOrderIds: optimizedOrders.map(order => order.id),
     stops: optimizedOrders.map((order, index) => createStop(routeId, order, index)),
     status: "prete",
-    totalDistance: metrics.totalDistance,
-    estimatedDuration: metrics.estimatedDuration,
+    departure: options.plan?.departure || null,
+    arrival: options.plan?.arrival || null,
+    geometry: options.plan?.geometry || null,
+    routingMode: options.plan?.routingMode || "estimate",
+    calculatedAt: options.plan?.calculatedAt || null,
+    totalDistance: options.plan?.totalDistance ?? metrics.totalDistance,
+    estimatedDuration: options.plan?.estimatedDuration ?? metrics.estimatedDuration,
     createdAt: now,
     startedAt: null,
     completedAt: null
@@ -5707,11 +5729,14 @@ function startRoute(db, routeId) {
   const route = db.routes.find(item => String(item.id) === String(routeId));
   if (!route) throw notFound("Tournee introuvable");
 
+  if (route.status === "terminee") throw badRequest("Cette tournée est terminée.");
+  if (route.status === "en_livraison") return route;
   const now = new Date().toISOString();
   route.status = "en_livraison";
   route.startedAt = route.startedAt || now;
 
   route.stops.forEach(stop => {
+    if (["livre", "absent", "probleme", "a_reprogrammer"].includes(stop.status)) return;
     stop.status = "en_livraison";
     const order = findOrder(db, stop.orderId);
     setOrderStatus(order, "en_livraison");
@@ -5810,6 +5835,11 @@ function reorderRouteStops(db, routeId, stopIds) {
     throw badRequest("Ordre de tournee invalide");
   }
 
+  if (route.status !== "prete") throw badRequest("Le réordonnancement est possible avant le départ uniquement.");
+  route.geometry = null;
+  route.totalDistance = null;
+  route.estimatedDuration = null;
+  route.routingMode = "manual";
   route.stops = reordered.map((stop, index) => ({
     ...stop,
     orderIndex: index + 1
@@ -6296,6 +6326,7 @@ app.delete("/api/crm/clients/:id", async (req, res) => {
       const db = readDb();
       const client = findClient(db, req.params.id);
       if (!client) throw notFound("Client introuvable");
+      if (db.subscriptions.some(sub => String(sub.clientId) === String(client.id) && sub.status !== "cancelled")) throw badRequest("Arrête les abonnements de ce client avant d’archiver sa fiche.");
       client.crmArchived = true;
       client.updatedAt = new Date().toISOString();
       addHistory(db, "CRM", `${client.nom} : fiche archivee`, { clientId: client.id });
@@ -7198,6 +7229,7 @@ app.post("/api/orders/purge", async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
       const db = readDb();
+      if (db.subscriptions.length) throw badRequest("La purge est désactivée en présence d’abonnements pour préserver les fiches clients et leurs échéances.");
       const purgedCounts = {
         commandes: db.commandes.length,
         clients: db.clients.length,
@@ -7559,13 +7591,23 @@ app.post("/api/orders/:id/release-stock", async (req, res) => {
 
 app.post("/api/routes", async (req, res) => {
   try {
+    let plan = null;
+    if (req.body.departure || req.body.arrival) {
+      if (!Array.isArray(req.body.orderIds) || !req.body.orderIds.length) throw badRequest("Sélectionne les commandes de la tournée.");
+      const snapshot = readDb();
+      const ids = new Set((req.body.orderIds || []).map(String));
+      const selected = getDeliverableOrders(snapshot, req.body).filter(o => ids.has(String(o.id)) && ["pret_livraison", "a_reprogrammer"].includes(o.status));
+      if (selected.length !== ids.size) throw badRequest("Certaines commandes ne sont plus prêtes.");
+      plan = await routing.roadPlan(selected, req.body.departure, req.body.arrival, snapshot.settings.tournee.stopDurationMin);
+    }
     const route = await withWriteLock(async () => {
       const db = readDb();
       const r = createRoute(db, {
         sector: req.body.sector,
         city: req.body.city,
         deliveryDate: req.body.deliveryDate,
-        orderIds: req.body.orderIds
+        orderIds: req.body.orderIds,
+        plan
       });
 
       addHistory(db, "Tournee", `${r.stops.length} arret(s) ajoutes a la tournee ${r.sector}`, {
@@ -7798,6 +7840,12 @@ app.post("/api/optimize-route", async (req, res) => {
   } catch (error) {
     handleRouteError(error, res, "Erreur optimisation tournee");
   }
+});
+
+require("./lib/operations-api").registerOperations(app, {
+  readDb, writeDb, withWriteLock, badRequest, notFound, handleRouteError, findClient,
+  buildCustomerOrderLines, createPlannedOrder, addHistory, getOrderTotal,
+  buildImportedSalesIndex, getImportedOrderTotal, normalizeDateInput
 });
 
 // --- API des comptes utilisateurs (V8 phase 1) -----------------------------
