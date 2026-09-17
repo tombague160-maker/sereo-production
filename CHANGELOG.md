@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.25.0](https://github.com/tombague160-maker/sereo-production/compare/v1.24.1...v1.25.0) (2026-09-17)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **v8:** phase 4, marche 1 -- le socle de jetons, et la palette sombre completee ([1623ab4](https://github.com/tombague160-maker/sereo-production/commit/1623ab4200a65d1da492acd03778e61944fe30ee))
+* **v8:** phase 4, marche 2 -- l'application parle V8, et 1164 textes le prouvent ([a1ea65a](https://github.com/tombague160-maker/sereo-production/commit/a1ea65a5de2e88e4ab2944a30b80421c9f3eb60e))
+
 ## [1.24.1](https://github.com/tombague160-maker/sereo-production/compare/v1.24.0...v1.24.1) (2026-09-17)
 
 
