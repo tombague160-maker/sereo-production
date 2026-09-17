@@ -90,7 +90,9 @@ let activeBrandImage = "/brand/sereo-logo.svg";
 // Persistance par appareil dans localStorage. Synchro DB optionnelle (multi-device).
 // Defaut "light" : pendant la phase de test, on n'active pas le mode sombre auto.
 // L'utilisateur peut basculer via Parametres > Mode d'affichage.
-let activeColorScheme = "light";
+// Defaut "auto" : on suit le systeme tant que personne n'a choisi.
+// Doit rester en accord avec anti-fart.js, qui tranche AVANT le rendu.
+let activeColorScheme = "auto";
 
 // V8 phase 1 : identite connectee et liste des comptes.
 // `moi` reste null tant que /api/me n'a pas repondu ; renderComptes s'en
@@ -113,7 +115,7 @@ if ("scrollRestoration" in history) {
 document.addEventListener("DOMContentLoaded", () => {
   // Resolution synchrone du mode (avant tout render) :
   // - localStorage "dark"|"light"|"auto" -> on respecte le choix utilisateur
-  // - sinon defaut "light" (set en haut du fichier)
+  // - sinon defaut "auto" : on suit le systeme (decision Tom, 17/09)
   try {
     const stored = localStorage.getItem(COLOR_SCHEME_STORAGE_KEY);
     if (VALID_COLOR_SCHEMES.includes(stored)) activeColorScheme = stored;
@@ -3040,12 +3042,18 @@ async function loadAppearance() {
 
     // Mode de couleur : strictement par-device via localStorage.
     // On NE lit PAS la valeur DB pour eviter qu'un device adopte le choix
-    // d'un autre device. Si localStorage est vide, on retombe sur "light".
-    let scheme = "light";
+    // d'un autre device. Si localStorage est vide, on suit le SYSTEME.
+    //
+    // Ce defaut est ecrit a QUATRE endroits qui doivent rester d'accord :
+    // anti-fart.js (avant le rendu), la valeur initiale d'activeColorScheme,
+    // le repli d'applyColorScheme, et ici. Le 17/09, corriger les deux
+    // premiers n'a RIEN change a l'ecran : les deux autres reposaient "light"
+    // juste apres. Un defaut eparpille ne se corrige pas en un seul endroit.
+    let scheme = "auto";
     try {
       const stored = localStorage.getItem(COLOR_SCHEME_STORAGE_KEY);
       if (VALID_COLOR_SCHEMES.includes(stored)) scheme = stored;
-    } catch { /* localStorage indispo : on garde le defaut "light" */ }
+    } catch { /* localStorage indispo : on suit le systeme */ }
     applyColorScheme(scheme, { persist: false });
 
     applyTheme(appearance.themeId || "sereo", { persist: false });
@@ -3109,16 +3117,23 @@ function updateMetaThemeColor() {
 // - notifyUser : affiche un toast de confirmation
 function applyColorScheme(scheme, options = {}) {
   const { persist = true, notifyUser = false } = options;
-  // Defaut "light" si valeur invalide (le mode auto reste choisissable explicitement).
-  const next = VALID_COLOR_SCHEMES.includes(scheme) ? scheme : "light";
+  // Repli sur "auto" -- et non "light" -- si la valeur est invalide : depuis le
+  // 17/09 le defaut du produit est de suivre le systeme, et un repli disant
+  // "light" reintroduirait l'ancien comportement par la porte de derriere,
+  // dans le seul cas ou personne ne regarde.
+  const next = VALID_COLOR_SCHEMES.includes(scheme) ? scheme : "auto";
   activeColorScheme = next;
 
   const root = document.documentElement;
-  if (next === "auto") {
-    delete root.dataset.colorScheme;
-  } else {
-    root.dataset.colorScheme = next;
-  }
+  // On POSE toujours l'attribut, MEME en "auto". Avant le 17/09 on l'effacait
+  // pour laisser @media (prefers-color-scheme) decider : plus propre en
+  // apparence, faux en pratique. Sans attribut, la page retombe sur le bloc
+  // :root de base, qui porte une palette PLUS ANCIENNE que le bloc
+  // :root[data-color-scheme="light"]. Mesure sur OS clair : "Auto" rendait
+  // --bg #fafaf8 et --text #102a2f, "Clair" rendait #eff3f1 et #183233.
+  // activeColorScheme garde "auto" -- c'est le CHOIX de l'utilisateur ; seul
+  // l'attribut porte le mode RESOLU.
+  root.dataset.colorScheme = next === "auto" ? getEffectiveColorScheme() : next;
 
   // Re-applique les variables du theme actif avec la bonne palette (light/dark)
   const theme = getActiveTheme();
@@ -3149,6 +3164,9 @@ function watchSystemColorScheme() {
   const mq = window.matchMedia("(prefers-color-scheme: dark)");
   const handler = () => {
     if (activeColorScheme === "auto") {
+      // L'attribut resolu doit suivre le systeme, sinon la page garde la
+      // palette de l'ancien mode alors que les variables, elles, changent.
+      document.documentElement.dataset.colorScheme = getEffectiveColorScheme();
       const theme = getActiveTheme();
       applyThemeVariables(theme);
       updateMetaThemeColor();

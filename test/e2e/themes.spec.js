@@ -88,10 +88,16 @@ test.describe("Parite des variables de theme", () => {
     // Verification prealable : les deux etats sont bien ceux qu'on croit.
     // Sans cela, un test qui compare deux fois le mode clair passerait toujours.
     expect(forced.attribute, "le sombre force doit poser data-color-scheme=dark").toBe("dark");
+    // 17/09 : l'attribut n'est plus EFFACE en mode auto, il est RESOLU. Ce test
+    // continue pourtant de distinguer les deux blocs, et c'est ce qui compte :
+    //   "sombre force"   = OS clair  + attribut dark -> SEUL :root[data-color-scheme="dark"]
+    //   "sombre systeme" = OS sombre + attribut dark -> le @media s'applique EN PLUS
+    // Les deux etats n'ont donc pas le meme contexte de media query, et une
+    // divergence du bloc @media reste visible. Ce n'est pas une tautologie.
     expect(
       systemic.attribute,
-      "en mode auto l'attribut doit etre retire pour laisser agir le @media"
-    ).toBeNull();
+      "en mode auto l'attribut doit etre resolu a dark"
+    ).toBe("dark");
     expect(
       Object.keys(forced.variables).length,
       "aucune variable de theme lue : le CSS n'a pas charge"
@@ -151,5 +157,82 @@ test.describe("Parite des variables de theme", () => {
     expect(dark.variables["--text"], "--text doit differer entre clair et sombre").not.toBe(
       light.variables["--text"]
     );
+  });
+
+  // -------------------------------------------------------------------------
+  // Le MIROIR CLAIR du test de parite ci-dessus.
+  //
+  // Son absence a laisse vivre un defaut mesurable : sur un OS CLAIR, choisir
+  // "Auto" ne donnait PAS la meme chose que choisir "Clair".
+  //
+  //     "Auto"  -> --bg #fafaf8   --text #102a2f
+  //     "Clair" -> --bg #eff3f1   --text #183233
+  //
+  // Parce que "auto" effacait data-color-scheme, et que sans cet attribut la
+  // page retombe sur le bloc :root de base, plus ancien que le bloc
+  // :root[data-color-scheme="light"]. En SOMBRE les deux blocs sont
+  // identiques, donc le seul test qui existait ne pouvait pas le voir.
+  // -------------------------------------------------------------------------
+
+  test("le clair force et le clair systeme produisent des variables identiques", async ({
+    browser
+  }) => {
+    const force = await readThemeVariables(browser, "dark", "light");
+    const systeme = await readThemeVariables(browser, "light", "auto");
+
+    // Prealable : les deux etats sont bien ceux qu'on croit. Sans cela, un test
+    // qui compare deux fois le meme etat passerait toujours.
+    expect(force.attribute, "le clair force doit poser data-color-scheme=light").toBe("light");
+    expect(systeme.attribute, "le clair systeme doit RESOUDRE l'attribut a light").toBe("light");
+
+    const ecarts = diffVariables(force.variables, systeme.variables, "clair force", "clair systeme");
+    expect(ecarts, `variables divergentes : ${ecarts.join(" | ")}`).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------------
+  // Le defaut, quand PERSONNE n'a rien choisi.
+  //
+  // Decision de Tom, 17/09 : le mode sombre est une preference personnelle, et
+  // le defaut suit le systeme. Avant cette date, anti-fart.js posait "light" en
+  // dur des qu'aucune preference n'etait stockee -- un utilisateur dont l'OS
+  // etait en sombre voyait quand meme du clair, sans jamais l'avoir demande.
+  //
+  // Ces deux tests se tiennent l'un l'autre : chacun est le contre-temoin de
+  // l'autre. Un defaut cable en dur, dans un sens ou dans l'autre, en casse
+  // exactement un des deux.
+  // -------------------------------------------------------------------------
+
+  /** Charge l'app SANS rien mettre dans localStorage : l'etat d'un premier acces. */
+  async function lirePremierAcces(browser, osScheme) {
+    const context = await browser.newContext({ colorScheme: osScheme });
+    const page = await context.newPage();
+    await page.goto("/", { waitUntil: "networkidle" });
+    const resultat = await page.evaluate(() => ({
+      attribut: document.documentElement.dataset.colorScheme || null,
+      stocke: (() => {
+        try { return localStorage.getItem("sereo:colorScheme"); } catch { return "indisponible"; }
+      })(),
+      bg: getComputedStyle(document.documentElement).getPropertyValue("--bg").trim()
+    }));
+    await context.close();
+    return resultat;
+  }
+
+  test("premier acces depuis un OS SOMBRE : on suit le systeme", async ({ browser }) => {
+    const vu = await lirePremierAcces(browser, "dark");
+    const sombreForce = await readThemeVariables(browser, "light", "dark");
+
+    expect(vu.stocke, "prerequis : rien ne doit etre stocke").toBeNull();
+    expect(vu.attribut, "l'attribut doit etre RESOLU a dark").toBe("dark");
+    expect(vu.bg, "le fond doit etre celui du mode sombre").toBe(sombreForce.variables["--bg"]);
+  });
+
+  test("premier acces depuis un OS CLAIR : on reste en clair", async ({ browser }) => {
+    const vu = await lirePremierAcces(browser, "light");
+    const clairForce = await readThemeVariables(browser, "light", "light");
+
+    expect(vu.stocke, "prerequis : rien ne doit etre stocke").toBeNull();
+    expect(vu.attribut, "l'attribut doit etre RESOLU a light").toBe("light");
+    expect(vu.bg, "le fond doit etre celui du mode clair").toBe(clairForce.variables["--bg"]);
   });
 });
