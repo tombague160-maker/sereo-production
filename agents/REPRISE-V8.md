@@ -203,10 +203,11 @@ ci-dessus. Ne jamais republier sans URL, ça crée un doublon qui divergera.
 
 ```
 Phase 0  Fondations                          TERMINÉE, en production
-Phase 1  Comptes et rôles                    sur la branche
-Phase 2  Géocodage et départ de tournée      back fait ; questions tranchées le 16/09
-Phase 3  Maquettes                           ← EN COURS : 6 planches faites (02/09) ; passage Claude Design clair + sombre à faire
-Phase 4  Refonte des écrans + abonnements    après les maquettes ; PR 96 à rebaser d'abord
+Phase 1  Comptes et rôles                    ✅ fusionnée sur main le 17/09 (PR #97, v1.23.0)
+Phase 2  Géocodage et départ de tournée      ✅ back fait ; questions tranchées le 16/09 ; alerte dimanche/férié le 17/09 (v1.24.0)
+Phase 3  Maquettes                           ✅ CLOSE le 17/09 : 49 planches, quatre axes mesurés, planche 15 de passation
+Phase 4  Refonte des écrans + abonnements    ← EN COURS depuis le 17/09. Marche 1 : le socle de jetons (141 couleurs → 30).
+                                             PR 96 (brouillon) à rebaser par son auteur : 5 fichiers en conflit mesurés
 Phase 5  Cartographie et trafic réel
 Phase 6  Applications natives (Capacitor)
 ```

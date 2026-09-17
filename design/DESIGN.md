@@ -30,7 +30,7 @@ au soleil, souvent d'une main. Rien de décoratif qui ne serve la lecture.
 | Surface | `#FFFFFF` | Cartes, panneaux, pilule de navigation active | — |
 | Surface basse | `#F5F1EE` | Champs, pistes de progression | le texte secondaire y tient 4,56:1 |
 | Squelette de chargement | `#EDE6E2` | Blocs gris qui remplacent le texte pendant le chargement. Jamais de texte dessus | — |
-| Texte | `#386B6D` | Texte courant (le vert profond est aussi la couleur du texte, comme sur le site) | 5,95:1 sur blanc |
+| Texte | `#386B6D` | Texte courant (le vert profond est aussi la couleur du texte, comme sur le site) | **6,01:1** sur blanc — c'est le principal, donc exactement sa valeur. La charte a longtemps écrit 5,95 ici et 6,01 trois lignes plus haut, pour la même paire. Corrigé le 17/09 par recalcul |
 | Texte secondaire | `#4F7477` | Sous-titres, métadonnées. Remplace six gris-teal non conformes | 5,13:1 sur blanc · 4,81 sur fond · 4,56 sur surface basse |
 | Texte secondaire sur vert | `#D6E5E3` | Sur fond `#386B6D`. **0,13 de marge : rien ne se pose dessous** | 4,63:1 |
 | Alerte | `#C02B0A` | Texte et icônes d'alerte uniquement. Jamais couleur de lien, jamais pour un simple compteur | — |
@@ -45,39 +45,31 @@ Un point rouge et un point orange côte à côte ne se distinguent pas ; « Bloq
 
 ### Mode sombre
 
-Points de départ pris dans `themes.js` (palette « Séréo premium », jeu sombre)
-et dans la feuille de route. À recalibrer par mesure ; exiger 4,5:1 sur le
-texte courant, 3:1 sur le gros texte et les icônes.
+Neuf valeurs prises dans `themes.js` (palette « Séréo premium », jeu sombre) et
+dans la feuille de route ; **sept complétées par mesure le 17/09**, en partant
+des valeurs sombres que l'app portait déjà, pour garder la continuité. Seuils :
+4,5:1 sur le texte courant, 3:1 sur le gros texte, les icônes et les formes.
+Chaque contraste ci-dessous est recalculé par `test/jetons-v8.test.js`.
 
-| Rôle | Valeur | Note |
+| Rôle | Valeur | Contraste mesuré |
 |---|---|---|
+| Principal | `#93CBC9` | Le vert profond éclairci ; texte sombre `#0D1518` dessus **10,22** |
+| Principal appuyé | `#B9E1DF` | **13,10** sur le fond. Continuité avec `--color-brand-teal-dark` sombre |
+| Accent | `#F5A08F` | Orange désaturé et éclairci ; reste une forme. **9,06** sur le fond. **1,55** avec l'alerte : indiscernables sans mot |
 | Fond | `#0D1518` | Teinté vert, pas gris neutre |
 | Surface | `#132224` | Cartes |
-| Surface haute | `#182E31` | Barres, sheets, éléments survolés |
-| Texte | `#E6F2EE` | |
-| Texte secondaire | `#A8C4BE` | |
-| Principal | `#93CBC9` | Le vert profond éclairci ; texte sombre `#0D1518` dessus |
-| Accent | `#F5A08F` | Orange désaturé et éclairci ; reste un accent, jamais un fond de texte |
-| Vert d'eau sombre | `#243F42` | Surfaces secondaires |
-| Pêche sombre | `#3B2724` | Fonds doux |
-| Alerte | `#F2635A` | 5,23:1 sur surface, 5,90:1 sur le fond. Écart avec l'accent 1,54:1 — le meilleur possible sans passer sous 4,5:1, d'où la règle d'alerte ci-dessus. `#FF9478` était écarté : 1,06:1 avec l'accent, soit la même couleur |
-| Pêche claire sombre | `#3A2A28` | Fond de badge tiède |
-| Vert clair sombre | `#1D3B3C` | Fond de badge froid |
-
-Règle des deux modes : mêmes rôles, mêmes noms de tokens, valeurs différentes.
-Un composant ne connaît que les rôles.
-
-**Une couche translucide sur le vert crée une couleur que personne n'a déclarée.**
-Une pilule ou un champ en `rgba(255,255,255,.12 … .20)` posé sur `#386B6D` compose
-`#507D7E` à `#5F888A`. Le blanc y tombe de 6,01 à **4,58 … 3,86:1**, le secondaire
-sur vert de 4,63 à **3,53 … 2,97:1**. Mesuré au pixel le 16 septembre sur dix
-planches, et retrouvé à l'unité près par le calcul alpha — deux chemins
-indépendants, même réponse.
-
-**On teinte donc en sombre, jamais en clair.** La surface secondaire d'un en-tête
-vert est `#2A5254`, opaque, déjà dans la palette : blanc dessus **8,63:1**,
-secondaire dessus **6,65:1**. Une surface opaque n'a pas de couleur composée à
-calculer — c'est la moitié de l'intérêt.
+| Surface haute | `#182E31` | Barres, sheets, éléments survolés. Texte **12,42**, secondaire **7,67** |
+| Surface basse | `#101D20` | Champs. Texte **15,02**, secondaire **9,28** |
+| Squelette de chargement | `#1C3033` | Jamais de texte dessus |
+| Vert d'eau sombre | `#243F42` | Surfaces secondaires. Texte dessus **9,81** |
+| Pêche sombre | `#3B2724` | Fonds doux. Texte dessus **12,19** |
+| Pêche claire | `#4A302B` | Fond de badge tiède. Texte **10,46** |
+| Vert clair | `#172B2D` | Fond de badge froid. Texte **12,89**, secondaire **7,96** |
+| Texte | `#E6F2EE` | **16,09** fond · **14,27** surface · **12,42** surface haute |
+| Texte secondaire | `#A8C4BE` | **9,94** fond · **8,82** surface · **7,67** surface haute |
+| Texte sur principal | `#0D1518` | **10,22** |
+| Texte secondaire sur principal | `#0D1518` | même valeur : sur `#93CBC9`, le sombre est le seul texte qui tienne |
+| Alerte | `#F85E3C` | Le rouge d'alerte, teinte gardée (11°), éclairci jusqu'à tenir 4,5 sur la surface la plus dure : **5,85** fond · **5,19** surface · **4,52** surface haute. `#C02B0A` ne donne que 3,16 sur le fond sombre |
 
 ## 3. Typographie
 
