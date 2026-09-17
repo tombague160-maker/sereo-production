@@ -1,0 +1,34 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html", "title": "Cockpit livreur", "x": 0, "y": 0, "w": 390, "h": 844 },
+    { "file": "Carte.dc.html", "title": "Carte de tournée", "x": 490, "y": 0, "w": 390, "h": 844 },
+    { "file": "Preparation.dc.html", "title": "Préparation", "x": 980, "y": 0, "w": 390, "h": 844 },
+    { "file": "NavMobile.dc.html", "title": "Navigation mobile", "x": 1470, "y": 0, "w": 390, "h": 844 },
+    { "file": "TableauDeBord.dc.html", "title": "Tableau de bord", "x": 0, "y": 1020, "w": 1440, "h": 900 },
+    { "file": "NavDesktop.dc.html", "title": "Navigation desktop", "x": 1560, "y": 1020, "w": 340, "h": 900 }
+  ],
+  "annotations": [
+    {
+      "id": "note-mobile",
+      "x": 0,
+      "y": -190,
+      "w": 880,
+      "text": "SUR LE TÉLÉPHONE — le terrain\n\nCockpit livreur : aujourd'hui cette page fait 5,3 écrans de défilement. Ici, tout tient sur un seul, et les trois gestes du quotidien sont en bas, sous le pouce.\n\nÀ me dire : les bons boutons sont-ils en bas ? Faut-il « Absent » et « Problème » aussi gros que « Livraison validée » ?"
+    },
+    {
+      "id": "note-prep",
+      "x": 980,
+      "y": -190,
+      "w": 880,
+      "text": "Préparation : aujourd'hui 19,3 écrans de défilement. Ici, une ligne compacte par commande — client, secteur, nombre d'articles, état — et cinq tiennent d'un coup.\n\nÀ me dire : qu'est-ce qui te manque sur ces lignes, et qu'est-ce qui ne te sert jamais ?\n\nNavigation : quatre destinations en bas, tout le reste derrière « Plus ». Est-ce les quatre bonnes ?"
+    },
+    {
+      "id": "note-desktop",
+      "x": 0,
+      "y": 880,
+      "w": 880,
+      "text": "SUR L'ORDINATEUR — le bureau\n\nCouleurs relevées directement sur groupe-sereo.fr : teal #386B6D, orange #EF9177, vert d'eau #A1C4C0, et la police Poppins. L'application actuelle avait dérivé de cette charte — ces maquettes la recalent.\n\nÀ me dire : trop chargé, ou pas assez ? Quels chiffres regardes-tu vraiment en arrivant le matin ?"
+    }
+  ],
+  "launch": { "view": "canvas" }
+}

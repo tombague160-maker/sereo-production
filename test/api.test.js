@@ -12,6 +12,11 @@ const sqlitePath = path.join(tmpRoot, "data", "sereo.sqlite");
 const uploadDir = path.join(tmpRoot, "imports");
 const backupDir = path.join(tmpRoot, "data", "backups");
 
+// Aucun test ne doit appeler une API externe : lent, dependant du reseau, et
+// impoli envers un service public gratuit. Le geocodage automatique declenche
+// par les imports est donc coupe ici. geocodage.test.js teste le geocodage
+// lui-meme, contre un faux serveur local.
+process.env.SEREO_GEOCODAGE_AUTO = "0";
 process.env.SEREO_STORAGE = "sqlite";
 process.env.SEREO_DB_PATH = dbPath;
 process.env.SEREO_SQLITE_PATH = sqlitePath;
@@ -167,15 +172,15 @@ test("appearance settings persist on the server", async () => {
   const saved = await requestJson("/api/settings/appearance", {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ themeId: "menthe", brandImage: "/brand/sereo-logo.svg" })
+    body: JSON.stringify({ themeId: "noir", brandImage: "/brand/sereo-logo.svg" })
   });
 
   assert.equal(saved.res.status, 200);
-  assert.equal(saved.body.themeId, "menthe");
+  assert.equal(saved.body.themeId, "noir");
 
   const loaded = await requestJson("/api/settings/appearance");
   assert.equal(loaded.res.status, 200);
-  assert.equal(loaded.body.themeId, "menthe");
+  assert.equal(loaded.body.themeId, "noir");
   assert.equal(loaded.body.brandImage, "/brand/sereo-logo.svg");
 });
 
@@ -2615,17 +2620,22 @@ test("PATCH /api/settings/appearance preserve colorScheme quand non fourni", asy
     body: JSON.stringify({ colorScheme: "dark" })
   });
 
-  // 2. On change uniquement le themeId, sans toucher colorScheme
+  // 2. On change uniquement le themeId, sans toucher colorScheme.
+  //    themeId est vestigial depuis le 2026-09-17 (une seule palette) : le
+  //    serveur le stocke tel quel, le client replie tout identifiant inconnu
+  //    sur "sereo". On garde le champ, et on le teste avec "noir", parce que
+  //    des reglages deja enregistres portent cette valeur. C'est exactement
+  //    le cas que la migration doit absorber.
   await requestJson("/api/settings/appearance", {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ themeId: "menthe" })
+    body: JSON.stringify({ themeId: "noir" })
   });
 
   // 3. colorScheme=dark doit etre preserve
   const { body } = await requestJson("/api/settings/appearance");
   assert.equal(body.colorScheme, "dark");
-  assert.equal(body.themeId, "menthe");
+  assert.equal(body.themeId, "noir");
 });
 
 // =============================================================================

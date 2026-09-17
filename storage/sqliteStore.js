@@ -186,6 +186,70 @@ function createSqliteStore(options) {
         .run(String(isoDate), String(id));
     },
 
+    // --- Cache de geocodage (V8 phase 2) --------------------------------
+
+    getGeocodage(cle) {
+      const row = database
+        .prepare("SELECT * FROM geocodages WHERE cle = ?")
+        .get(String(cle));
+      return row ? toGeocodage(row) : null;
+    },
+
+    saveGeocodage(entree) {
+      database
+        .prepare(
+          `INSERT INTO geocodages
+             (cle, requete, lat, lng, score, libelle, type, statut, source, mis_a_jour_le)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(cle) DO UPDATE SET
+             requete = excluded.requete,
+             lat = excluded.lat,
+             lng = excluded.lng,
+             score = excluded.score,
+             libelle = excluded.libelle,
+             type = excluded.type,
+             statut = excluded.statut,
+             source = excluded.source,
+             mis_a_jour_le = excluded.mis_a_jour_le`
+        )
+        .run(
+          String(entree.cle),
+          String(entree.requete || ""),
+          entree.lat === null || entree.lat === undefined ? null : Number(entree.lat),
+          entree.lng === null || entree.lng === undefined ? null : Number(entree.lng),
+          entree.score === null || entree.score === undefined ? null : Number(entree.score),
+          entree.libelle ? String(entree.libelle) : null,
+          entree.type ? String(entree.type) : null,
+          String(entree.statut),
+          String(entree.source || "ban"),
+          String(entree.misAJourLe || new Date().toISOString())
+        );
+    },
+
+    listGeocodages(statut = null) {
+      const rows = statut
+        ? database
+            .prepare("SELECT * FROM geocodages WHERE statut = ? ORDER BY mis_a_jour_le DESC")
+            .all(String(statut))
+        : database.prepare("SELECT * FROM geocodages ORDER BY mis_a_jour_le DESC").all();
+      return rows.map(toGeocodage);
+    },
+
+    /** Compte par statut, pour l'indicateur d'avancement du geocodage. */
+    countGeocodagesParStatut() {
+      return database
+        .prepare("SELECT statut, COUNT(*) AS n FROM geocodages GROUP BY statut")
+        .all()
+        .reduce((acc, row) => {
+          acc[row.statut] = row.n;
+          return acc;
+        }, {});
+    },
+
+    deleteGeocodage(cle) {
+      return database.prepare("DELETE FROM geocodages WHERE cle = ?").run(String(cle)).changes > 0;
+    },
+
     sqlitePath
   };
 }
@@ -360,6 +424,31 @@ function migrateSchema(database) {
     --
     -- identifiant est COLLATE NOCASE : "Tom" et "tom" sont le meme compte, ce
     -- qui evite qu'un doublon a la casse pres cree deux acces distincts.
+    -- V8 phase 2 : cache de geocodage.
+    --
+    -- Hors de readDb/writeDb, pour DEUX raisons distinctes et cumulatives :
+    --   1. persistDatabase fait un DELETE puis une reinsertion complete de
+    --      toutes les tables qu'il connait, a chaque ecriture ;
+    --   2. mergeImportedClients reconstruit entierement db.clients a chaque
+    --      import de ventes et ne reprend de l'ancien client que statut, lat,
+    --      lng, notes et priority. Un champ de metadonnees pose sur le client
+    --      serait donc efface a chaque import, en silence.
+    --
+    -- La cle est l'adresse normalisee : la meme adresse n'est jamais interrogee
+    -- deux fois, meme si elle est partagee par plusieurs clients.
+    CREATE TABLE IF NOT EXISTS geocodages (
+      cle TEXT PRIMARY KEY,
+      requete TEXT NOT NULL,
+      lat REAL,
+      lng REAL,
+      score REAL,
+      libelle TEXT,
+      type TEXT,
+      statut TEXT NOT NULL,
+      source TEXT NOT NULL,
+      mis_a_jour_le TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS utilisateurs (
       id TEXT PRIMARY KEY,
       identifiant TEXT NOT NULL COLLATE NOCASE UNIQUE,
@@ -852,5 +941,21 @@ function toPublicUser(row) {
     actif: Boolean(row.actif),
     creeLe: row.cree_le,
     derniereConnexion: row.derniere_connexion || null
+  };
+}
+
+/** Projette une ligne `geocodages` vers la forme utilisee par le serveur. */
+function toGeocodage(row) {
+  return {
+    cle: row.cle,
+    requete: row.requete,
+    lat: row.lat === null ? null : Number(row.lat),
+    lng: row.lng === null ? null : Number(row.lng),
+    score: row.score === null ? null : Number(row.score),
+    libelle: row.libelle || null,
+    type: row.type || null,
+    statut: row.statut,
+    source: row.source,
+    misAJourLe: row.mis_a_jour_le
   };
 }

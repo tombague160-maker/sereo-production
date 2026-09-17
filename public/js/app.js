@@ -26,10 +26,16 @@ import {
   DEFAULT_BRAND_IMAGE_DARK,
   DEFAULT_BRAND_CACHE_VERSION,
   MAX_BRAND_IMAGE_SIZE,
-  pastelThemes,
   applicationThemes
 } from "./config/themes.js";
 import { mainTabs, MOBILE_OVERFLOW_TABS, titles } from "./config/tabs.js";
+import {
+  gabaritTableauComptes,
+  gabaritAccesRefuse,
+  gabaritAuthDesactivee,
+  optionsRoles,
+  libelleRole
+} from "./domains/comptes.js";
 
 let map;
 let clients = [];
@@ -86,6 +92,15 @@ let activeBrandImage = "/brand/sereo-logo.svg";
 // L'utilisateur peut basculer via Parametres > Mode d'affichage.
 let activeColorScheme = "light";
 
+// V8 phase 1 : identite connectee et liste des comptes.
+// `moi` reste null tant que /api/me n'a pas repondu ; renderComptes s'en
+// sert pour ne PAS appeler /api/comptes quand l'utilisateur n'est pas
+// administrateur — un 403 y serait journalise en erreur console et ferait
+// echouer le parcours e2e des 15 onglets, dont la liste d'erreurs tolerees
+// est volontairement vide.
+let moi = null;
+let comptes = [];
+
 
 if ("scrollRestoration" in history) {
   history.scrollRestoration = "manual";
@@ -93,8 +108,6 @@ if ("scrollRestoration" in history) {
 
 
 
-Object.keys(pastelThemes).forEach(themeId => delete pastelThemes[themeId]);
-Object.assign(pastelThemes, applicationThemes);
 
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -118,6 +131,7 @@ document.addEventListener("DOMContentLoaded", () => {
   showTab(getInitialTab(), { updateHash: false });
   loadAppearance();
   loadVersionInfo();
+  loadMoi();
   loadData();
   checkStorageRecovery();
 });
@@ -349,6 +363,19 @@ function bindUi() {
     runAction(event.submitter, "Validation...", () => submitCustomerOrder(event.currentTarget));
   });
 
+  document.getElementById("compteForm")?.addEventListener("submit", event => {
+    event.preventDefault();
+    runAction(event.submitter, "Création...", () => creerCompte(event.currentTarget));
+  });
+
+  // Le changement de role passe par un <select>, qui emet "change" et non
+  // "click" : le listener delegue des [data-action] ne le verrait jamais.
+  document.addEventListener("change", event => {
+    const select = event.target.closest('[data-action="changer-role-compte"]');
+    if (!select) return;
+    runAction(null, null, () => changerRoleCompte(select.dataset.compteId, select.value));
+  });
+
   document.getElementById("customerClientSelect")?.addEventListener("change", event => {
     fillCustomerFormFromClient(event.target.value);
   });
@@ -437,8 +464,6 @@ function bindUi() {
       showTab(actionButton.dataset.tab);
       closeMoreMenu();
     }
-    if (action === "select-theme") applyTheme(actionButton.dataset.themeId, { notifyUser: true });
-    if (action === "reset-theme") applyTheme("sereo", { notifyUser: true });
     if (action === "select-color-scheme") applyColorScheme(actionButton.dataset.colorScheme, { notifyUser: true });
     if (action === "reset-brand-image") resetBrandImage();
     if (action === "start-preparation") runAction(actionButton, "Démarrage...", () => startPreparation(actionButton.dataset.orderId));
@@ -481,6 +506,15 @@ function bindUi() {
     if (action === "export-planned-orders") downloadOrdersExport("planned");
     if (action === "export-all-orders") downloadOrdersExport("all");
     if (action === "delete-delivery-sector") runAction(actionButton, "Suppression...", () => deleteDeliverySector(actionButton.dataset.sectorId));
+    if (action === "basculer-compte") {
+      runAction(actionButton, "...", () => basculerCompte(actionButton.dataset.compteId, actionButton.dataset.compteActif !== "1"));
+    }
+    if (action === "changer-mot-de-passe-compte") {
+      runAction(actionButton, "...", () => changerMotDePasseCompte(actionButton.dataset.compteId, actionButton.dataset.compteIdentifiant));
+    }
+    if (action === "supprimer-compte") {
+      runAction(actionButton, "Suppression...", () => supprimerCompte(actionButton.dataset.compteId, actionButton.dataset.compteIdentifiant));
+    }
   });
 
   document.addEventListener("change", event => {
@@ -757,6 +791,7 @@ function renderAll() {
   renderClients();
   renderSettings();
   renderImportsArchives();
+  renderComptes();
   renderMap();
   updateRouteProgress();
 }
@@ -3034,11 +3069,12 @@ function getEffectiveColorScheme() {
 }
 
 function getActiveTheme() {
-  return pastelThemes[activeThemeId] || pastelThemes.sereo;
+  return applicationThemes[activeThemeId] || applicationThemes.sereo;
 }
 
-function isVisuallyDarkTheme(theme = getActiveTheme()) {
-  return theme.id === "noir" || getEffectiveColorScheme() === "dark";
+// Le theme "Noir" ayant ete retire, seul le mode clair/sombre decide.
+function isVisuallyDarkTheme() {
+  return getEffectiveColorScheme() === "dark";
 }
 
 // Applique les variables d'un theme en respectant le mode actif (clair / sombre).
@@ -3106,7 +3142,6 @@ function applyColorScheme(scheme, options = {}) {
   }
 
   renderColorSchemeToggle();
-  renderThemePalettes();
 }
 
 // Re-evalue le mode si l'OS change de prefers-color-scheme et qu'on est en "auto"
@@ -3118,7 +3153,6 @@ function watchSystemColorScheme() {
       applyThemeVariables(theme);
       updateMetaThemeColor();
       applyBrandImage(activeBrandImage);
-      renderThemePalettes();
     }
   };
   if (mq.addEventListener) mq.addEventListener("change", handler);
@@ -3127,7 +3161,7 @@ function watchSystemColorScheme() {
 
 function applyTheme(themeId, options = {}) {
   const { persist = true, notifyUser = false } = options;
-  const theme = pastelThemes[themeId] || pastelThemes.sereo;
+  const theme = applicationThemes[themeId] || applicationThemes.sereo;
 
   activeThemeId = theme.id;
   applyThemeVariables(theme);
@@ -3144,7 +3178,6 @@ function applyTheme(themeId, options = {}) {
     notify(`Thème "${theme.name}" appliqué.`, "success");
   }
 
-  renderThemePalettes();
 }
 
 // Met a jour les boutons Auto/Clair/Sombre pour refleter le mode actif.
@@ -3155,33 +3188,6 @@ function renderColorSchemeToggle() {
     const isActive = btn.dataset.colorScheme === activeColorScheme;
     btn.setAttribute("aria-pressed", isActive ? "true" : "false");
   });
-}
-
-function renderThemePalettes() {
-  const container = document.getElementById("themePaletteList");
-  if (!container) return;
-
-  container.innerHTML = Object.values(pastelThemes).map(theme => {
-    const isActive = theme.id === activeThemeId;
-    const preview = theme.preview || {};
-    return `
-      <button class="theme-card ${isActive ? "active" : ""}" type="button" data-action="select-theme" data-theme-id="${escapeAttribute(theme.id)}" aria-pressed="${isActive ? "true" : "false"}">
-        <span class="theme-card-header">
-          <span class="theme-card-title">${escapeHtml(theme.name)}</span>
-          <span class="theme-card-status">${isActive ? "Actif" : "Appliquer"}</span>
-        </span>
-        <span class="theme-card-hint">${escapeHtml(theme.hint)}</span>
-        <span class="theme-card-preview" aria-hidden="true" style="--preview-bg:${escapeAttribute(preview.bg || theme.swatches[0])};--preview-sidebar:${escapeAttribute(preview.sidebar || theme.swatches[0])};--preview-card:${escapeAttribute(preview.card || "#ffffff")};--preview-accent:${escapeAttribute(preview.accent || theme.swatches[1] || theme.swatches[0])}">
-          <i></i>
-          <b></b>
-          <em></em>
-        </span>
-        <span class="theme-card-swatches" aria-hidden="true">
-          ${theme.swatches.map(color => `<i style="--swatch:${escapeAttribute(color)}"></i>`).join("")}
-        </span>
-      </button>
-    `;
-  }).join("");
 }
 
 function handleBrandImageImport(input) {
@@ -3387,7 +3393,6 @@ async function runDiagnosticSuspiciousDates() {
 }
 
 function renderSettings() {
-  renderThemePalettes();
   updateBrandImageStatus();
   renderTourneeSettings();
 
@@ -3437,6 +3442,128 @@ async function deleteDeliverySector(sectorId) {
   await apiFetch(`/api/delivery-sectors/${encodeURIComponent(sectorId)}`, { method: "DELETE" });
   await loadData();
   notify("Secteur supprimé.", "success");
+}
+
+// --- Comptes utilisateurs (V8 phase 1) -------------------------------------
+
+/**
+ * Charge l'identite connectee.
+ *
+ * Volontairement HORS du tableau d'endpoints de loadData : un echec y serait
+ * absorbe en degradation partielle et afficherait "Sections indisponibles"
+ * a tout le monde. Ici un echec doit rester silencieux et laisser le bloc
+ * comptes dans son etat de chargement.
+ */
+async function loadMoi() {
+  try {
+    moi = await apiFetch("/api/me");
+  } catch {
+    // Session expiree : apiFetch a deja redirige vers /login. Tout autre echec
+    // laisse `moi` a null, et renderComptes n'affiche simplement rien.
+    moi = null;
+  }
+  renderComptes();
+}
+
+/**
+ * Rend le bloc des comptes.
+ *
+ * Le garde-fou central est de N'APPELER /api/comptes QUE si l'utilisateur est
+ * administrateur. L'endpoint repond 403 sinon, ce que le navigateur journalise
+ * en erreur console — et le parcours e2e des 15 onglets echoue a la moindre
+ * erreur console, sa liste de tolerance etant volontairement vide.
+ */
+async function renderComptes() {
+  const container = document.getElementById("comptesList");
+  const form = document.getElementById("compteForm");
+  if (!container) return;
+
+  // /api/me n'a pas encore repondu : on laisse le message de chargement.
+  if (!moi) return;
+
+  if (!moi.administration) {
+    container.innerHTML = gabaritAccesRefuse(moi.roleLibelle || libelleRole(moi.role));
+    if (form) form.hidden = true;
+    return;
+  }
+
+  const select = document.getElementById("compteFormRole");
+  if (select && !select.options.length) select.innerHTML = optionsRoles("livreur");
+  if (form) form.hidden = false;
+
+  try {
+    comptes = await apiFetch("/api/comptes");
+  } catch (error) {
+    container.innerHTML = `<p class="muted">Comptes indisponibles : ${escapeHtml(error.message)}</p>`;
+    return;
+  }
+
+  const entete = moi.source === "desactivee"
+    ? gabaritAuthDesactivee()
+    : "";
+
+  container.innerHTML = entete + gabaritTableauComptes(comptes, { identifiantCourant: moi.identifiant });
+}
+
+async function creerCompte(form) {
+  const donnees = new FormData(form);
+  await apiFetch("/api/comptes", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      identifiant: donnees.get("identifiant"),
+      motDePasse: donnees.get("motDePasse"),
+      role: donnees.get("role")
+    })
+  });
+
+  form.reset();
+  const select = document.getElementById("compteFormRole");
+  if (select) select.innerHTML = optionsRoles("livreur");
+
+  await renderComptes();
+  notify("Compte créé.", "success");
+}
+
+async function basculerCompte(id, actif) {
+  await apiFetch(`/api/comptes/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ actif })
+  });
+  await renderComptes();
+  notify(actif ? "Compte réactivé." : "Compte désactivé.", "success");
+}
+
+async function changerRoleCompte(id, role) {
+  await apiFetch(`/api/comptes/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ role })
+  });
+  await renderComptes();
+  notify(`Rôle changé en « ${libelleRole(role)} ».`, "success");
+}
+
+async function changerMotDePasseCompte(id, identifiant) {
+  const motDePasse = window.prompt(`Nouveau mot de passe pour « ${identifiant} » (10 caractères minimum)`);
+  // Annulation explicite : on ne touche a rien.
+  if (motDePasse === null) return;
+
+  await apiFetch(`/api/comptes/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ motDePasse })
+  });
+  notify("Mot de passe changé.", "success");
+}
+
+async function supprimerCompte(id, identifiant) {
+  if (!window.confirm(`Supprimer définitivement le compte « ${identifiant} » ?`)) return;
+
+  await apiFetch(`/api/comptes/${encodeURIComponent(id)}`, { method: "DELETE" });
+  await renderComptes();
+  notify("Compte supprimé.", "success");
 }
 
 // v1.12.0 : historique des fichiers Excel importes (archives auto).

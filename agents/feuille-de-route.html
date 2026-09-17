@@ -1,0 +1,1140 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1"><style>:root{color-scheme:light}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}</style></head><body>
+<title>Refonte Séréo V8</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<style>
+:root {
+  --ground: #faf9f6;
+  --surface: #ffffff;
+  --surface-sunk: #f2f6f4;
+  --ink: #102a2f;
+  --ink-soft: #43605f;
+  --ink-mute: #7a8d8e;
+  --teal: #0e6b63;
+  --teal-deep: #0f3d3d;
+  --mint: #cfe9e1;
+  --mint-wash: #eaf4f0;
+  --coral: #d1503a;
+  --coral-wash: #fdeee9;
+  --rule: #dde9e4;
+  --rule-soft: #e9f0ed;
+  --shadow: 0 1px 2px rgba(15, 61, 61, .05), 0 12px 28px rgba(15, 61, 61, .05);
+
+  --font-display: "Archivo", "Segoe UI", Arial, sans-serif;
+  --font-body: "Inter", "Segoe UI", Arial, sans-serif;
+  --font-data: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #0d2124;
+    --surface: #132f31;
+    --surface-sunk: #102a2c;
+    --ink: #e6f2ee;
+    --ink-soft: #a8c4be;
+    --ink-mute: #7d9a95;
+    --teal: #63c3b3;
+    --teal-deep: #cfe9e1;
+    --mint: #1d4a48;
+    --mint-wash: #17393b;
+    --coral: #ff9478;
+    --coral-wash: #35201d;
+    --rule: #21474a;
+    --rule-soft: #1a3b3d;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 12px 28px rgba(0, 0, 0, .28);
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground: #0d2124;
+  --surface: #132f31;
+  --surface-sunk: #102a2c;
+  --ink: #e6f2ee;
+  --ink-soft: #a8c4be;
+  --ink-mute: #7d9a95;
+  --teal: #63c3b3;
+  --teal-deep: #cfe9e1;
+  --mint: #1d4a48;
+  --mint-wash: #17393b;
+  --coral: #ff9478;
+  --coral-wash: #35201d;
+  --rule: #21474a;
+  --rule-soft: #1a3b3d;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 12px 28px rgba(0, 0, 0, .28);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.6;
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  max-width: 1020px;
+  margin: 0 auto;
+  padding: 0 28px 120px;
+}
+
+.col { max-width: 660px; }
+
+h1, h2, h3 {
+  font-family: var(--font-display);
+  text-wrap: balance;
+  margin: 0;
+}
+
+.eyebrow {
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--teal);
+  margin: 0;
+}
+
+/* ---------- en-tete ---------- */
+
+.masthead {
+  border-bottom: 1px solid var(--rule);
+  padding: 72px 0 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.masthead h1 {
+  font-size: clamp(38px, 6vw, 62px);
+  font-weight: 700;
+  letter-spacing: -.03em;
+  line-height: 1.02;
+}
+
+.masthead .lede {
+  font-size: 18px;
+  color: var(--ink-soft);
+  max-width: 620px;
+  margin: 0;
+}
+
+.stamp-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.stamp {
+  font-family: var(--font-data);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 4px;
+  background: var(--mint-wash);
+  color: var(--teal);
+  border: 1px solid var(--rule);
+}
+
+.stamp.live { background: var(--surface); }
+
+/* ---------- sections ---------- */
+
+section { padding-top: 72px; }
+
+.sec-head {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 28px;
+}
+
+.sec-head h2 {
+  font-size: clamp(24px, 3.4vw, 32px);
+  font-weight: 600;
+  letter-spacing: -.02em;
+}
+
+.sec-head p {
+  margin: 0;
+  color: var(--ink-soft);
+  max-width: 640px;
+}
+
+p { margin: 0 0 18px; }
+
+a { color: var(--teal); text-underline-offset: 3px; }
+a:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+code {
+  font-family: var(--font-data);
+  font-size: .88em;
+  background: var(--surface-sunk);
+  padding: 2px 5px;
+  border-radius: 3px;
+  color: var(--ink);
+}
+
+/* ---------- tableau de mesures ---------- */
+
+.scroll-x {
+  overflow-x: auto;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  min-width: 520px;
+}
+
+thead th {
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  text-align: left;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface-sunk);
+  white-space: nowrap;
+}
+
+tbody td {
+  padding: 13px 18px;
+  border-bottom: 1px solid var(--rule-soft);
+  vertical-align: middle;
+}
+
+tbody tr:last-child td { border-bottom: 0; }
+
+td.page-name { font-weight: 500; }
+
+td.num {
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* barre de mesure : la longueur EST la donnee */
+.bar-cell { width: 46%; min-width: 190px; }
+
+.bar {
+  height: 9px;
+  border-radius: 5px;
+  background: var(--teal);
+  min-width: 3px;
+}
+
+.bar.critical { background: var(--coral); }
+
+.bar-track {
+  background: var(--surface-sunk);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+/* ---------- verrous ---------- */
+
+.locks {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.lock {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--coral);
+  border-radius: 8px;
+  padding: 20px 22px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lock h3 {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+
+.lock p {
+  margin: 0;
+  font-size: 14.5px;
+  color: var(--ink-soft);
+}
+
+.lock .where {
+  font-family: var(--font-data);
+  font-size: 11.5px;
+  color: var(--ink-mute);
+  margin: 0;
+}
+
+/* ---------- phases ---------- */
+
+.phases {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-top: 1px solid var(--rule);
+}
+
+.phase {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 24px;
+  padding: 30px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.phase-index {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--teal);
+  padding-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.phase-effort {
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-mute);
+}
+
+.phase-body { display: flex; flex-direction: column; gap: 12px; }
+
+.phase h3 {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -.015em;
+}
+
+.phase > .phase-body > p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 15px;
+}
+
+.phase ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 14.5px;
+  color: var(--ink-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.phase ul li::marker { color: var(--teal); }
+
+/* Etat d'avancement porte par la puce elle-meme : fait / deplace ailleurs. */
+.phase ul li.done { color: var(--ink-mute); }
+.phase ul li.done::marker { content: "✓  "; color: var(--teal); }
+.phase ul li.moved::marker { content: "→  "; color: var(--coral); }
+.phase ul li.moved { color: var(--ink); }
+
+/* ---------- reports ---------- */
+
+.carry {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.carry-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 18px;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--rule-soft);
+  align-items: start;
+}
+
+.carry-item:last-child { border-bottom: 0; }
+
+.carry-item h3 {
+  font-size: 15.5px;
+  font-weight: 600;
+  margin: 0;
+  grid-column: 1;
+}
+
+.carry-item p {
+  margin: 0;
+  grid-column: 1;
+  font-size: 14.5px;
+  color: var(--ink-soft);
+}
+
+.carry-target {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  font-family: var(--font-data);
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: var(--mint-wash);
+  color: var(--teal);
+  border: 1px solid var(--rule);
+  white-space: nowrap;
+}
+
+@media (max-width: 620px) {
+  .carry-item { grid-template-columns: 1fr; }
+  .carry-target { grid-column: 1; grid-row: auto; justify-self: start; }
+}
+
+.unlocks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+  margin-top: 2px;
+}
+
+.unlocks .label {
+  font-family: var(--font-data);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+.chip {
+  font-family: var(--font-data);
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: 4px;
+  background: var(--mint-wash);
+  color: var(--teal);
+  border: 1px solid var(--rule);
+}
+
+.chip.target {
+  background: var(--surface);
+  color: var(--ink-soft);
+}
+
+.metric-goal {
+  font-family: var(--font-data);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--mint-wash);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 9px 13px;
+  align-self: flex-start;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- decisions ---------- */
+
+.decisions {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.decision {
+  padding: 20px 22px;
+  border-bottom: 1px solid var(--rule-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.decision:last-child { border-bottom: 0; }
+
+.decision h3 {
+  font-size: 15.5px;
+  font-weight: 600;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.decision .cost {
+  font-family: var(--font-data);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--coral);
+  letter-spacing: 0;
+}
+
+.decision p {
+  margin: 0;
+  font-size: 14.5px;
+  color: var(--ink-soft);
+}
+
+/* ---------- garde-fous ---------- */
+
+.keeps {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+}
+
+.keep {
+  background: var(--surface-sunk);
+  border-radius: 8px;
+  padding: 16px 18px;
+  font-size: 14px;
+  color: var(--ink-soft);
+  border: 1px solid var(--rule-soft);
+}
+
+.keep strong {
+  display: block;
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 14.5px;
+  margin-bottom: 3px;
+}
+
+footer {
+  margin-top: 80px;
+  padding-top: 26px;
+  border-top: 1px solid var(--rule);
+  font-family: var(--font-data);
+  font-size: 12px;
+  color: var(--ink-mute);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+}
+
+@media (max-width: 620px) {
+  .wrap { padding: 0 20px 80px; }
+  .masthead { padding-top: 48px; }
+  .phase { grid-template-columns: 1fr; gap: 12px; }
+  .phase-index { flex-direction: row; gap: 12px; align-items: baseline; padding-top: 0; }
+  section { padding-top: 56px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">Feuille de route technique</p>
+    <h1>Refonte Séréo V8</h1>
+    <p class="lede">
+      De la SPA web actuelle vers une application multi-support avec cartographie
+      réelle, comptes utilisateurs et notifications natives. Sept phases,
+      ordonnées par dépendance technique — pas par envie.
+    </p>
+    <div class="stamp-row">
+      <span class="stamp live">Livré · v1.22.0</span>
+      <span class="stamp">Phase 0 terminée</span>
+      <span class="stamp">Phase 1 sur la branche</span>
+      <span class="stamp">Phase 2 serveur fait</span>
+      <span class="stamp">Phase 3 en cours</span>
+      <span class="stamp">335 tests · 13 e2e</span>
+    </div>
+  </header>
+
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">01 — Diagnostic</p>
+      <h2>Le problème n'est pas le style, c'est la densité</h2>
+      <p>
+        Hauteur réelle de chaque page mesurée sur l'app en v1.21.0, en nombre
+        d'écrans à faire défiler. Mobile à 390 × 844, desktop à 1440 × 900.
+      </p>
+    </div>
+
+    <div class="col">
+      <p>
+        La charte pastel teal/menthe fonctionne. Ce qui ne fonctionne pas, c'est
+        que chaque page est une pile verticale de panneaux, sans hiérarchie entre
+        ce qui compte maintenant et ce qui compte plus tard. Sur la page
+        Préparation, le magasinier fait défiler dix-neuf écrans pour voir sa
+        journée.
+      </p>
+    </div>
+
+    <div class="scroll-x">
+      <table>
+        <caption class="visually-hidden" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);">Hauteur des pages en nombre d'écrans</caption>
+        <thead>
+          <tr>
+            <th scope="col">Page</th>
+            <th scope="col">Support</th>
+            <th scope="col">Écrans à défiler</th>
+            <th scope="col">Pixels</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="page-name">Préparation</td>
+            <td class="num">mobile</td>
+            <td class="bar-cell"><div class="bar-track"><div class="bar critical" style="width:100%"></div></div></td>
+            <td class="num">19,3 × &nbsp;<span style="color:var(--ink-mute)">16 326 px</span></td>
+          </tr>
+          <tr>
+            <td class="page-name">Préparation</td>
+            <td class="num">desktop</td>
+            <td class="bar-cell"><div class="bar-track"><div class="bar critical" style="width:68%"></div></div></td>
+            <td class="num">13,2 × &nbsp;<span style="color:var(--ink-mute)">11 899 px</span></td>
+          </tr>
+          <tr>
+            <td class="page-name">Commande client</td>
+            <td class="num">mobile</td>
+            <td class="bar-cell"><div class="bar-track"><div class="bar" style="width:40%"></div></div></td>
+            <td class="num">7,7 × &nbsp;<span style="color:var(--ink-mute)">6 482 px</span></td>
+          </tr>
+          <tr>
+            <td class="page-name">CRM</td>
+            <td class="num">mobile</td>
+            <td class="bar-cell"><div class="bar-track"><div class="bar" style="width:36%"></div></div></td>
+            <td class="num">7,0 × &nbsp;<span style="color:var(--ink-mute)">5 876 px</span></td>
+          </tr>
+          <tr>
+            <td class="page-name">Paramètres</td>
+            <td class="num">mobile</td>
+            <td class="bar-cell"><div class="bar-track"><div class="bar" style="width:36%"></div></div></td>
+            <td class="num">6,9 × &nbsp;<span style="color:var(--ink-mute)">5 834 px</span></td>
+          </tr>
+          <tr>
+            <td class="page-name">Livraison</td>
+            <td class="num">mobile</td>
+            <td class="bar-cell"><div class="bar-track"><div class="bar critical" style="width:27%"></div></div></td>
+            <td class="num">5,3 × &nbsp;<span style="color:var(--ink-mute)">4 512 px</span></td>
+          </tr>
+          <tr>
+            <td class="page-name">Livraison</td>
+            <td class="num">desktop</td>
+            <td class="bar-cell"><div class="bar-track"><div class="bar critical" style="width:19%"></div></div></td>
+            <td class="num">3,6 × &nbsp;<span style="color:var(--ink-mute)">3 272 px</span></td>
+          </tr>
+          <tr>
+            <td class="page-name">Tableau de bord</td>
+            <td class="num">mobile</td>
+            <td class="bar-cell"><div class="bar-track"><div class="bar" style="width:17%"></div></div></td>
+            <td class="num">3,3 × &nbsp;<span style="color:var(--ink-mute)">2 790 px</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">02 — Verrous</p>
+      <h2>Trois blocages, tous levés depuis</h2>
+      <p>
+        État du 26 août, gardé pour comprendre l'ordre des phases. Les icônes
+        et les comptes sont en production depuis la 1.22.0, le géocodage
+        attend sur la branche.
+      </p>
+    </div>
+
+    <div class="locks">
+      <article class="lock">
+        <h3>Aucun géocodage <span class="stamp" style="font-size:11px;margin-left:6px;vertical-align:middle">Levé · sur la branche</span></h3>
+        <p>
+          Les coordonnées s'ajoutent uniquement à la main, client par client, via
+          un endpoint dédié. Résultat mesuré : zéro client sur dix est
+          géolocalisé. La carte affiche la Bourgogne vide.
+        </p>
+        <p class="where">server.js — PATCH /api/clients/:id/coordinates</p>
+      </article>
+
+      <article class="lock">
+        <h3>Un seul compte pour tout le monde <span class="stamp" style="font-size:11px;margin-left:6px;vertical-align:middle">Levé · v1.22.0</span></h3>
+        <p>
+          L'authentification repose sur un couple identifiant/mot de passe unique
+          en variables d'environnement. Pas de table utilisateurs, pas de rôles.
+          Sans identité par personne, aucune notification ne peut être adressée.
+        </p>
+        <p class="where">SEREO_AUTH_USER · SEREO_AUTH_PASSWORD</p>
+      </article>
+
+      <article class="lock">
+        <h3>Icônes d'application absentes <span class="stamp" style="font-size:11px;margin-left:6px;vertical-align:middle">Levé · v1.22.0</span></h3>
+        <p>
+          Le manifeste ne déclare qu'une icône SVG. Android et iOS attendent des
+          PNG en 192, 512 et 1024. L'app s'installe donc mal sur l'écran
+          d'accueil — avant même de parler de store.
+        </p>
+        <p class="where">public/manifest.webmanifest</p>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">03 — Séquence</p>
+      <h2>Sept phases, dans cet ordre</h2>
+      <p>
+        L'ordre est contraint : les comptes conditionnent les notifications, le
+        géocodage conditionne la carte, le découpage en modules conditionne
+        l'empaquetage natif. Chaque phase indique ce qu'elle débloque.
+      </p>
+    </div>
+
+    <div class="phases">
+
+      <article class="phase">
+        <div class="phase-index">
+          Phase 0
+          <span class="phase-effort">1–2 sem.</span>
+        </div>
+        <div class="phase-body">
+          <h3>Assainir les fondations</h3>
+          <p>
+            Rien de visible pour l'utilisateur, tout pour la suite. Le fichier
+            app.js fait 5 653 lignes et le CSS 8 025 — la documentation en annonce
+            respectivement 2 800 et rien. On remet les compteurs à zéro.
+          </p>
+          <ul>
+            <li class="done">Jeu d'icônes complet, usages <code>any</code> et <code>maskable</code> séparés, balises iOS</li>
+            <li class="done">Découpage de <code>app.js</code> en modules ES natifs, sans bundler — 5 653 → 4 986 lignes</li>
+            <li class="done">Filet e2e : parcours des 15 onglets, parité des thèmes</li>
+            <li class="done">Mise à jour de <code>CLAUDE.md</code> avec les tailles réelles</li>
+            <li class="moved">Découpage du CSS en couches → <strong>reporté en phase 4</strong>, voir ci-dessous</li>
+          </ul>
+          <div class="unlocks">
+            <span class="label">Débloque</span>
+            <span class="chip">Installation sur écran d'accueil</span>
+            <span class="chip">Empaquetage natif</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="phase">
+        <div class="phase-index">
+          Phase 1
+          <span class="phase-effort">2–3 sem.</span>
+        </div>
+        <div class="phase-body">
+          <h3>Comptes et rôles</h3>
+          <p>
+            Passage d'un mot de passe partagé à de vraies identités. C'est le
+            prérequis dur des notifications : sans savoir quel appareil appartient
+            à qui, on ne peut prévenir personne.
+          </p>
+          <ul>
+            <li class="done">Table utilisateurs, hachage scrypt via <code>node:crypto</code> — aucune dépendance ajoutée</li>
+            <li class="done">Rôles admin, bureau, préparateur, livreur, avec garde-fou du dernier administrateur</li>
+            <li class="done">Connexion par compte, sans casser l'authentification par variables d'environnement</li>
+            <li class="done">Révocation immédiate : désactiver un compte coupe la session en cours</li>
+            <li class="done">Décision : tout le monde voit tout. La séparation reste écrite et testée, derrière un interrupteur</li>
+            <li class="done">Écran d'administration des comptes, et API correspondante</li>
+            <li class="done">Décision du 16/09 : <strong>un seul compte reste utilisé pour l'instant</strong>. Les comptes par personne existent et attendent le besoin réel — les notifications de la phase 6</li>
+            <li>Refus côté serveur pour l'administration des comptes</li>
+            <li>Table appareils, pour rattacher les jetons de notification</li>
+            <li>Reprises de la phase 0 : découpage par domaine, fragilité e2e, pré-cache désaligné</li>
+          </ul>
+          <div class="unlocks">
+            <span class="label">Débloque</span>
+            <span class="chip">Notifications ciblées</span>
+            <span class="chip">Traçabilité des actions</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="phase">
+        <div class="phase-index">
+          Phase 2
+          <span class="phase-effort">1–2 sem.</span>
+        </div>
+        <div class="phase-body">
+          <h3>Géocodage et entrepôt</h3>
+          <p>
+            La carte se remplit enfin. Le serveur interroge l'API Adresse de
+            l'État — gratuite, sans clé, conçue pour les adresses françaises — et
+            met le résultat en cache dans SQLite. On ne géocode jamais deux fois
+            le même client.
+          </p>
+          <ul>
+            <li class="done">Géocodage automatique déclenché à l'import, en tâche de fond</li>
+            <li class="done">Cache en base, hors du cycle de réécriture qui l'aurait effacé à chaque import</li>
+            <li class="done">Seuil de confiance mesuré sur l'API réelle, pas deviné</li>
+            <li class="moved">Écran de reprise des adresses ambiguës — après les maquettes, pour ne pas le dessiner deux fois</li>
+            <li class="done">Point de départ — tranché par Tom le 16/09 : pas d'entrepôt fixe. La tournée part de la position GPS du téléphone, ou d'une ville / adresse recherchée</li>
+            <li class="done">Fin de tournée — tranché par Tom le 16/09 : une adresse d'arrivée choisie, ou « Retour au point de départ »</li>
+            <li class="moved">Écrans départ / arrivée : livrés en version provisoire dans la PR 96 de Tom (branche partie de <code>main</code>) — à redessiner en phase 3, à recoder en phase 4</li>
+          </ul>
+          <div class="unlocks">
+            <span class="label">Débloque</span>
+            <span class="chip">Carte utilisable</span>
+            <span class="chip">Distances réelles</span>
+            <span class="chip">Optimisation</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="phase">
+        <div class="phase-index">
+          Phase 3
+          <span class="phase-effort">3–5 jours</span>
+        </div>
+        <div class="phase-body">
+          <h3>Maquettes</h3>
+          <p>
+            Six planches dans un canvas que tu manipules toi-même avant qu'on
+            écrive une ligne de code : cockpit livreur, écran carte, préparation,
+            tableau de bord, navigation mobile, navigation desktop. Tu tranches la
+            direction sur des écrans concrets.
+          </p>
+          <ul>
+            <li class="done">Six planches livrées le 2 septembre dans la charte relevée sur groupe-sereo.fr — vert <code>#386B6D</code>, orange <code>#EF9177</code> en accent seulement, Poppins — contrastes et cibles tactiles corrigés sur 77 paires mesurées. Sources dans <code>design/maquettes-v8/</code></li>
+            <li>Passage dans Claude Design, demandé par Tom le 16/09 : versions claire <strong>et</strong> sombre, vert et orange, principes du skill apple-design. Brief prêt dans <code>agents/PROMPT-CLAUDE-DESIGN.md</code>, charte dans <code>design/DESIGN.md</code>, planches en PNG par <code>design/maquettes-v8/capturer.js</code></li>
+            <li>Nouveaux écrans à dessiner : Tableau de bord (CA des commandes livrées, panier moyen, alertes, abonnements de la semaine), Abonnements, Tournée en quatre étapes</li>
+            <li>Trois questions posées à Tom dans le brief : les quatre destinations mobiles, intervalle strict ou jour ancré pour les abonnements, rôle du mode sombre</li>
+          </ul>
+          <div class="unlocks">
+            <span class="label">Débloque</span>
+            <span class="chip">Toute la phase 4</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="phase">
+        <div class="phase-index">
+          Phase 4
+          <span class="phase-effort">6–10 sem.</span>
+        </div>
+        <div class="phase-body">
+          <h3>Refonte des écrans</h3>
+          <p>
+            Le gros du chantier visible, découpé en quatre livraisons
+            indépendantes pour que rien ne reste cassé entre deux.
+          </p>
+          <ul>
+            <li><strong>4a — Cockpit livreur.</strong> Carte plein écran, arrêt courant en surimpression, actions au pouce</li>
+            <li><strong>4b — Préparation.</strong> La page à dix-neuf écrans</li>
+            <li><strong>4c — Tableau de bord et navigation</strong></li>
+            <li><strong>4d — CRM, stock, paramètres</strong></li>
+            <li><strong>4e — Restructuration du CSS en couches</strong>, reportée de la phase 0 : à faire pendant la réécriture, pas avant</li>
+            <li><strong>4f — Abonnements et pilotage.</strong> Périmètre ajouté par Tom le 16/09. Serveur et interface provisoire livrés en brouillon (PR 96, un commit de 2 763 lignes parti de <code>main</code>) : table <code>abonnements</code>, fréquences 7 / 10 / 14 / 15 / 21 / 28 jours, mensuelle ou personnalisée, calendrier à 90 jours, tournée avec départ géolocalisé et moteur OSRM. À rebaser sur la branche V8 — cinq fichiers en conflit mesurés : <code>server.js</code>, <code>style.css</code>, <code>service-worker.js</code>, <code>package.json</code>, <code>.env.example</code> — puis à recoder sur les maquettes</li>
+            <li><strong>4g — Poppins auto-hébergée.</strong> La charte impose Poppins et la CSP impose <code>font-src 'self'</code> : les fichiers woff2 entrent dans <code>public/fonts/</code>, jamais Google Fonts en production</li>
+          </ul>
+          <div class="metric-goal">
+            Livraison 5,3 → 1 écran &nbsp;·&nbsp; Préparation 19,3 → 3 écrans
+          </div>
+        </div>
+      </article>
+
+      <article class="phase">
+        <div class="phase-index">
+          Phase 5
+          <span class="phase-effort">3–4 sem.</span>
+        </div>
+        <div class="phase-body">
+          <h3>Cartographie et trafic réel</h3>
+          <p>
+            Aujourd'hui la tournée se calcule par plus proche voisin sur des
+            distances à vol d'oiseau, et se dessine en traits droits. On remplace
+            les trois à la fois.
+          </p>
+          <ul>
+            <li>Optimisation par solveur réel, avec fenêtres horaires et capacité du véhicule</li>
+            <li>Distances et durées routières, pas géodésiques</li>
+            <li>Trafic temps réel — heure de départ tranchée par Tom le 16/09 : c'est l'instant où il appuie sur « Démarrer la tournée »</li>
+            <li>Moteur routier : la PR 96 branche le serveur OSRM public — sans garantie de disponibilité, cinquante commandes au plus, pas de trafic. À héberger ou à remplacer avant un usage quotidien</li>
+            <li>Tracé routier sur la carte, à la place des segments droits</li>
+            <li>Clé d'API strictement côté serveur, plafond de quota journalier</li>
+          </ul>
+          <div class="unlocks">
+            <span class="label">Gain attendu</span>
+            <span class="chip target">15 à 25 % de kilomètres en moins</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="phase">
+        <div class="phase-index">
+          Phase 6
+          <span class="phase-effort">3–5 sem.</span>
+        </div>
+        <div class="phase-body">
+          <h3>Applications natives</h3>
+          <p>
+            Capacitor emballe l'application web existante dans un projet Android
+            et un projet iOS. Le code de la SPA est réutilisé tel quel — pas de
+            réécriture, contrairement à un passage par React Native ou Flutter qui
+            repartirait de zéro sur un ERP en production.
+          </p>
+          <ul>
+            <li>Notifications push natives sur les deux plateformes</li>
+            <li>Géolocalisation en arrière-plan, pour suivre la tournée écran éteint</li>
+            <li>Windows et macOS restent servis par l'installation web — aucun développement supplémentaire</li>
+          </ul>
+          <div class="unlocks">
+            <span class="label">Dépend de</span>
+            <span class="chip">Phase 0</span>
+            <span class="chip">Phase 1</span>
+          </div>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">04 — Reports</p>
+      <h2>Reporté, pas abandonné</h2>
+      <p>
+        Ce qui a été volontairement décalé, ou découvert en cours de route, avec
+        la phase où ça retombe. Rien ne sort de cette liste sans être fait.
+      </p>
+    </div>
+
+    <div class="carry">
+      <article class="carry-item">
+        <h3>Restructuration du CSS en couches</h3>
+        <p>
+          Annoncée en phase 0, décalée. <code>@layer</code> modifie la résolution
+          de spécificité — une règle non&#8209;layerée bat une règle layerée quelle
+          que soit sa spécificité — donc une migration partielle de 8 025 lignes
+          inverserait la cascade par endroits, en premier lieu sur les thèmes.
+          Et ce CSS est réécrit en phase 4 : le restructurer avant, c'est le
+          faire deux fois.
+        </p>
+        <span class="carry-target">Phase 4e</span>
+      </article>
+
+      <article class="carry-item">
+        <h3>Découpage de app.js par domaine métier</h3>
+        <p>
+          La phase 0 n'a sorti que les symboles sans couplage à l'état global.
+          Le reste — stock, commandes, préparation, tournée, CRM — exige d'abord
+          un store partagé, ESM interdisant de réassigner un binding importé.
+          <code>app.js</code> pèse encore 4 986 lignes.
+        </p>
+        <span class="carry-target">Phase 1</span>
+      </article>
+
+      <article class="carry-item">
+        <h3>Fragilité de la suite e2e</h3>
+        <p>
+          Observée une fois puis non reproduite sur cinq exécutions. La cause de
+          fond est réelle et antérieure : dix workers en parallèle sur un seul
+          serveur et une seule base SQLite, dont un test qui écrit des réglages
+          sans les restaurer. La CI la masque avec deux tentatives.
+        </p>
+        <span class="carry-target">Phase 1</span>
+      </article>
+
+      <article class="carry-item">
+        <h3>Pré-cache du service worker désaligné</h3>
+        <p>
+          Le worker pré-cache <code>/js/app.js</code>, mais la page demande
+          <code>/js/app.js?v=…</code>. L'API Cache compare l'URL complète, requête
+          comprise : l'entrée pré-cachée n'est donc jamais servie pour ce fichier.
+          Sans conséquence en usage normal, mais le tout premier chargement hors
+          ligne après installation peut échouer. Vérifié le 28 août : trois
+          entrées sont concernées, pas une — <code>app.js</code>,
+          <code>style.css</code> et le logo, tous demandés avec un
+          <code>?v=</code>.
+        </p>
+        <span class="carry-target">Phase 1</span>
+      </article>
+
+      <article class="carry-item">
+        <h3>Un test invisible en revue</h3>
+        <p>
+          <code>test/corruption.test.js</code> contient un octet nul — l'en-tête
+          « SQLite format 3 » qu'il fabrique se termine ainsi — donc git le
+          classe binaire et n'en montre jamais le diff, ni en PR ni dans
+          <code>git log -p</code>. Un <code>.gitattributes</code> avec
+          <code>*.js diff</code> rétablit la revue sans toucher au test.
+        </p>
+        <span class="carry-target">Phase 1</span>
+      </article>
+
+      <article class="carry-item">
+        <h3>Dix-sept fichiers non suivis dans data/</h3>
+        <p>
+          Résidus de sessions d'audit, dont deux Excel d'import et des archives,
+          non couverts par <code>.gitignore</code> — sur un dépôt public. Un
+          <code>git add -A</code> les publierait. À ignorer ou supprimer.
+        </p>
+        <span class="carry-target">Phase 1</span>
+      </article>
+
+      <article class="carry-item">
+        <h3>Deux résidus mineurs</h3>
+        <p>
+          <code>formatImportStats</code> reste dans <code>app.js</code> — seule
+          fonction de sa famille à lire l'état global, elle partira avec le
+          domaine stock. Et <code>--body-gradient-stop-mid</code> est déclarée en
+          double dans le bloc sombre : redondance vérifiée inoffensive, à nettoyer
+          au passage.
+        </p>
+        <span class="carry-target">Phases 1 et 4</span>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">05 — Arbitrages</p>
+      <h2>Ce qu'il faudra décider, et ce que ça coûte</h2>
+      <p>
+        Trois points engagent de l'argent ou du matériel et n'ont rien de
+        bloquant avant la phase 5. Deux autres, ajoutés le 16 septembre, se
+        règlent avant la phase 4.
+      </p>
+    </div>
+
+    <div class="decisions">
+      <article class="decision">
+        <h3>Publier sur l'App Store <span class="cost">99 $ / an + un Mac</span></h3>
+        <p>
+          Compiler une application iOS impose macOS et Xcode — il n'existe aucun
+          contournement. Trois voies : acheter un Mac mini, louer un runner macOS
+          en intégration continue, ou renoncer au store et distribuer en interne.
+          Pour une poignée d'utilisateurs internes, la distribution directe suffit
+          et évite la validation Apple.
+        </p>
+      </article>
+
+      <article class="decision">
+        <h3>Publier sur Google Play <span class="cost">25 $ une fois</span></h3>
+        <p>
+          Optionnel. Un fichier APK s'installe directement sur les téléphones de
+          l'équipe sans passer par le store, ce qui est parfaitement adapté à un
+          outil interne et supprime le délai de validation à chaque mise à jour.
+        </p>
+      </article>
+
+      <article class="decision">
+        <h3>Optimisation de tournée avec trafic <span class="cost">≈ 0 € au volume actuel</span></h3>
+        <p>
+          L'API d'optimisation de Google se facture au nombre de livraisons
+          traitées, avec mille unités offertes chaque mois. À dix-huit commandes
+          par jour, l'usage reste sous le seuil gratuit. Le vrai risque n'est pas
+          le prix normal mais une boucle bugguée : un plafond de quota journalier
+          côté console règle la question. Le tarif reste à confirmer sur la grille
+          en vigueur au moment du branchement.
+        </p>
+      </article>
+
+      <article class="decision">
+        <h3>Ordre de fusion des deux branches <span class="cost">0 € · quelques heures</span></h3>
+        <p>
+          La branche V8 (comptes, géocodage, maquettes — huit commits) et la
+          PR 96 de Tom (abonnements, tournées — un commit) sont parties toutes
+          deux de <code>main</code> et se marchent dessus dans cinq fichiers.
+          Recommandation : livrer d'abord la V8 telle quelle, puis rebaser la
+          PR 96 dessus. L'inverse obligerait à réécrire huit commits pour en
+          épargner un.
+        </p>
+      </article>
+
+      <article class="decision">
+        <h3>Qui fait quoi : Claude Design dessine, Claude Code construit <span class="cost">0 €</span></h3>
+        <p>
+          Claude Design prend la phase 3 et seulement elle : design system,
+          écrans, prototype cliquable, avec le modèle choisi dans son sélecteur
+          (Fable 5.1 y est disponible, vérifié par Thomas le 16/09 — la doc de
+          lancement disait Opus 4.7). Le serveur, SQLite, les tests, la fusion
+          de la PR 96, la carte et les applications natives se font dans le
+          dépôt, avec Claude Code. L'export de Claude Design vers Claude Code
+          est un point de départ pour la phase 4, pas la phase 4.
+        </p>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">06 — Garde-fous</p>
+      <h2>Ce qui ne bouge pas</h2>
+      <p>
+        La refonte touche l'interface et la carte. Elle ne remet pas en cause ce
+        qui marche déjà.
+      </p>
+    </div>
+
+    <div class="keeps">
+      <div class="keep">
+        <strong>Vanilla, sans bundler</strong>
+        Les modules ES natifs donnent la modularité d'un framework sans étape de
+        compilation — donc aucun build à réparer un dimanche soir.
+      </div>
+      <div class="keep">
+        <strong>SQLite comme source de vérité</strong>
+        Via le module natif de Node. Le schéma s'étend, il ne se remplace pas.
+      </div>
+      <div class="keep">
+        <strong>Politique de sécurité stricte</strong>
+        Aucun script en ligne, aucun appel externe depuis le navigateur. Tous les
+        appels aux API de cartographie passent par le serveur.
+      </div>
+      <div class="keep">
+        <strong>Le cycle de publication</strong>
+        Commits conventionnels, versions automatiques, déploiement sur étiquette.
+        Une phase égale une demande de fusion.
+      </div>
+      <div class="keep">
+        <strong>Le fonctionnement hors ligne</strong>
+        Le cache de l'application est déjà solide : réseau d'abord, repli sur les
+        dernières données connues au bout de trois secondes. On l'étend, on ne le
+        refait pas.
+      </div>
+      <div class="keep">
+        <strong>Tout en français</strong>
+        Interface, messages, commits. Y compris le nouveau code.
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>Séréo V7 → V8</span>
+    <span>Base v1.21.0</span>
+    <span>Mesures relevées le 26 août 2026 · mis à jour le 16 septembre 2026</span>
+    <span>Durées indicatives, à réviser après la phase 3</span>
+  </footer>
+
+</div>
+
+</body></html>

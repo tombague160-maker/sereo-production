@@ -191,8 +191,19 @@ Voir `.env.example` pour la liste complète. Les principales :
 - **`Math.max(0, ...)` et non `Math.max(1, ...)`** sur les quantités produit (PR antérieure). Une qty 0 est légitime (erreur métier signalée), ne pas la forcer à 1.
 - **`pull_policy: build` + auto-update** : le `docker compose up --force-recreate` doit être lancé avec `--no-build` côté sereo-updater, sinon il tente de re-build le context host depuis le container. Configuration côté OMV (Tom.yml).
 
+## Chantier en cours : refonte V8
+
+Une refonte complète de l'interface, de la carte et un passage à des
+applications natives est en cours depuis le 26/08/2026.
+
+**Avant toute intervention, lire `agents/REPRISE-V8.md`.** Ce fichier contient
+l'état exact du chantier, les décisions déjà prises par Tom (à ne pas rouvrir),
+les questions ouvertes, le protocole de vérification attendu, et une liste de
+pièges constatés dans ce code — chacun ayant coûté du temps à découvrir.
+
 ## Fichiers de référence
 
+- `agents/REPRISE-V8.md` : **dossier de passation du chantier V8**. À lire en premier.
 - `AGENTS.md` : instructions courtes pour agents IA (ancien, à compléter par ce CLAUDE.md).
 - `CONTRIBUTING.md` : workflow Git détaillé avec exemples Conventional Commits.
 - `DEPLOYMENT.md` : déploiement prod, variables d'env, vérification persistance.

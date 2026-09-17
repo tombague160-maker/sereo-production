@@ -365,15 +365,7 @@ select:disabled {
   display: none;
 }
 
-.panel,
-.item,
-.order-card,
-.delivery-card,
-.route-stop,
-.settings-block,
-.theme-card,
-.history-cell,
-.stock-line {
+.panel,.item,.order-card,.delivery-card,.route-stop,.settings-block,.history-cell,.stock-line {
   min-width: 0;
 }
 
@@ -465,10 +457,10 @@ select:disabled {
   width: 100%;
   min-height: 50px;
   padding: 9px 10px;
-  border: 1px solid rgba(244, 122, 90, 0.2);
+  border: 1px solid rgba(40, 90, 91, 0.16);
   border-radius: var(--radius);
   background: var(--tab-bg);
-  color: var(--color-pastel-orange-strong);
+  color: var(--color-brand-teal-dark);
   box-shadow: var(--shadow-tiny);
   cursor: pointer;
   text-align: left;
@@ -487,15 +479,40 @@ select:disabled {
 
 .tab:hover {
   background: var(--tab-bg-hover);
-  border-color: rgba(244, 122, 90, 0.3);
+  border-color: rgba(40, 90, 91, 0.28);
   color: var(--color-brand-teal-dark);
 }
 
+/* Onglet actif. Le fond etait un degrade orange clair -> orange pastel portant
+   du texte orange : 3,81:1 au debut du degrade, 1,95:1 a la fin, contre 4,5
+   exiges. Deux corrections, pas une :
+     - le fond devient OPAQUE (var(--surface)), ce qui supprime le composite ;
+     - le libelle passe en teal : 7,77:1 en clair, 11,50:1 en sombre.
+   L'orange n'est pas perdu, il change de role : il devient la BARRE ci-dessous,
+   c'est-a-dire une forme. La charte l'interdit comme texte et comme fond de
+   texte, jamais comme forme. */
 .tab.active {
-  background: linear-gradient(135deg, var(--color-pastel-orange-light) 0%, var(--color-pastel-orange) 100%);
-  color: var(--color-pastel-orange-strong);
-  border-color: rgba(244, 122, 90, 0.38);
-  box-shadow: 0 14px 26px rgba(244, 122, 90, 0.18);
+  position: relative;
+  background: var(--surface);
+  color: var(--color-brand-teal-dark);
+  border-color: rgba(40, 90, 91, 0.32);
+  box-shadow: 0 14px 26px rgba(40, 90, 91, 0.14);
+}
+
+/* La barre d'accent. Elle ne porte aucun sens a elle seule : l'onglet actif est
+   deja signale par son fond opaque, sa bordure et aria-selected. Redondante,
+   elle releve de l'exemption WCAG 1.4.11 sur le non-texte decoratif. On prend
+   quand meme la variante -strong, seule lisible dans les deux modes. */
+.tab.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 58%;
+  transform: translateY(-50%);
+  border-radius: 0 3px 3px 0;
+  background: var(--color-pastel-orange-strong);
 }
 
 .tab-icon {
@@ -505,7 +522,7 @@ select:disabled {
   height: 30px;
   border-radius: 7px;
   background: rgba(255, 196, 163, 0.46);
-  color: var(--color-pastel-orange-strong);
+  color: var(--color-brand-teal-dark);
   font-size: 20px;
   font-weight: 800;
 }
@@ -517,7 +534,7 @@ select:disabled {
 
 .tab.active .tab-icon {
   background: rgba(255, 255, 255, 0.72);
-  color: var(--color-pastel-orange-strong);
+  color: var(--color-brand-teal-dark);
 }
 
 /* Sidebar-visual : decoration de fond masquee. Le SVG sereo-sidebar-bg.svg
@@ -2142,37 +2159,6 @@ label {
   background: var(--swatch);
 }
 
-.theme-palette-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.theme-card {
-  display: grid;
-  gap: 7px;
-  min-height: 118px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  color: var(--text);
-  text-align: left;
-  box-shadow: var(--shadow-tiny);
-  transition: var(--color-transition), box-shadow 200ms ease;
-}
-
-.theme-card:hover {
-  border-color: var(--border-strong);
-  background: var(--color-surface-tint);
-}
-
-.theme-card.active {
-  border-color: var(--color-pastel-orange-strong);
-  background: linear-gradient(135deg, var(--color-pastel-orange-light), var(--surface));
-  box-shadow: 0 0 0 3px var(--color-pastel-orange-light);
-}
-
 /* Toggle Mode d'affichage : 3 boutons (Auto / Clair / Sombre) */
 .color-scheme-toggle {
   display: grid;
@@ -2230,36 +2216,6 @@ label {
 @media (max-width: 520px) {
   .color-scheme-toggle { grid-template-columns: 1fr; }
   .color-scheme-option { min-height: 72px; flex-direction: row; text-align: left; }
-}
-
-.theme-card-title,
-.theme-card-hint {
-  display: block;
-}
-
-.theme-card-title {
-  color: var(--color-brand-teal-dark);
-  font-weight: 900;
-}
-
-.theme-card-hint {
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.3;
-}
-
-.theme-card-swatches {
-  display: flex;
-  gap: 6px;
-  margin-top: auto;
-}
-
-.theme-card-swatches i {
-  width: 24px;
-  height: 24px;
-  border: 1px solid rgba(15, 61, 61, 0.12);
-  border-radius: 50%;
-  background: var(--swatch);
 }
 
 .file-control {
@@ -2725,10 +2681,6 @@ label {
 
   .history-grid {
     grid-template-columns: 140px 110px minmax(0, 1fr);
-  }
-
-  .theme-palette-grid {
-    grid-template-columns: 1fr;
   }
 
   .toast-region {
@@ -4592,27 +4544,7 @@ html[data-color-scheme="light"] body {
   gap: 9px;
 }
 
-:root[data-color-scheme="light"] .panel,
-:root[data-color-scheme="light"] .card,
-:root[data-color-scheme="light"] .item,
-:root[data-color-scheme="light"] .order-card,
-:root[data-color-scheme="light"] .delivery-card,
-:root[data-color-scheme="light"] .route-stop,
-:root[data-color-scheme="light"] .settings-block,
-:root[data-color-scheme="light"] .theme-card,
-:root[data-color-scheme="light"] .history-cell,
-:root[data-color-scheme="light"] .stock-line,
-:root[data-color-scheme="light"] .workflow-card,
-:root[data-color-scheme="light"] .summary-item,
-:root[data-color-scheme="light"] .upload-card,
-:root[data-color-scheme="light"] .empty-state,
-:root[data-color-scheme="light"] .crm-card,
-:root[data-color-scheme="light"] .product-card,
-:root[data-color-scheme="light"] .stat-tile,
-:root[data-color-scheme="light"] .today-order-card,
-:root[data-color-scheme="light"] .planned-order-card,
-:root[data-color-scheme="light"] .current-client-box,
-:root[data-color-scheme="light"] .current-driver-card {
+:root[data-color-scheme="light"] .panel,:root[data-color-scheme="light"] .card,:root[data-color-scheme="light"] .item,:root[data-color-scheme="light"] .order-card,:root[data-color-scheme="light"] .delivery-card,:root[data-color-scheme="light"] .route-stop,:root[data-color-scheme="light"] .settings-block,:root[data-color-scheme="light"] .history-cell,:root[data-color-scheme="light"] .stock-line,:root[data-color-scheme="light"] .workflow-card,:root[data-color-scheme="light"] .summary-item,:root[data-color-scheme="light"] .upload-card,:root[data-color-scheme="light"] .empty-state,:root[data-color-scheme="light"] .crm-card,:root[data-color-scheme="light"] .product-card,:root[data-color-scheme="light"] .stat-tile,:root[data-color-scheme="light"] .today-order-card,:root[data-color-scheme="light"] .planned-order-card,:root[data-color-scheme="light"] .current-client-box,:root[data-color-scheme="light"] .current-driver-card {
   background: #ffffff;
   border-color: var(--border);
   border-radius: 8px;
@@ -5200,33 +5132,7 @@ html[data-color-scheme="light"] body {
   gap: 18px;
 }
 
-:root[data-color-scheme="light"] .panel,
-:root[data-color-scheme="light"] .card,
-:root[data-color-scheme="light"] .item,
-:root[data-color-scheme="light"] .order-card,
-:root[data-color-scheme="light"] .delivery-card,
-:root[data-color-scheme="light"] .route-stop,
-:root[data-color-scheme="light"] .settings-block,
-:root[data-color-scheme="light"] .theme-card,
-:root[data-color-scheme="light"] .history-cell,
-:root[data-color-scheme="light"] .stock-line,
-:root[data-color-scheme="light"] .workflow-card,
-:root[data-color-scheme="light"] .summary-item,
-:root[data-color-scheme="light"] .upload-card,
-:root[data-color-scheme="light"] .empty-state,
-:root[data-color-scheme="light"] .crm-card,
-:root[data-color-scheme="light"] .product-card,
-:root[data-color-scheme="light"] .stat-tile,
-:root[data-color-scheme="light"] .today-order-card,
-:root[data-color-scheme="light"] .planned-order-card,
-:root[data-color-scheme="light"] .current-client-box,
-:root[data-color-scheme="light"] .current-driver-card,
-:root[data-color-scheme="light"] .bdc-card,
-:root[data-color-scheme="light"] .bdc-detail-card,
-:root[data-color-scheme="light"] .imports-archives-table-wrap,
-:root[data-color-scheme="light"] .app-loader-panel,
-:root[data-color-scheme="light"] .more-sheet-panel,
-:root[data-color-scheme="light"] .version-modal {
+:root[data-color-scheme="light"] .panel,:root[data-color-scheme="light"] .card,:root[data-color-scheme="light"] .item,:root[data-color-scheme="light"] .order-card,:root[data-color-scheme="light"] .delivery-card,:root[data-color-scheme="light"] .route-stop,:root[data-color-scheme="light"] .settings-block,:root[data-color-scheme="light"] .history-cell,:root[data-color-scheme="light"] .stock-line,:root[data-color-scheme="light"] .workflow-card,:root[data-color-scheme="light"] .summary-item,:root[data-color-scheme="light"] .upload-card,:root[data-color-scheme="light"] .empty-state,:root[data-color-scheme="light"] .crm-card,:root[data-color-scheme="light"] .product-card,:root[data-color-scheme="light"] .stat-tile,:root[data-color-scheme="light"] .today-order-card,:root[data-color-scheme="light"] .planned-order-card,:root[data-color-scheme="light"] .current-client-box,:root[data-color-scheme="light"] .current-driver-card,:root[data-color-scheme="light"] .bdc-card,:root[data-color-scheme="light"] .bdc-detail-card,:root[data-color-scheme="light"] .imports-archives-table-wrap,:root[data-color-scheme="light"] .app-loader-panel,:root[data-color-scheme="light"] .more-sheet-panel,:root[data-color-scheme="light"] .version-modal {
   border-color: rgba(228, 221, 218, 0.76);
   border-radius: var(--radius);
   box-shadow: var(--shadow-card);
@@ -5839,32 +5745,7 @@ html[data-color-scheme="light"] body,
   grid-column: 1 / -1;
 }
 
-:root[data-color-scheme="light"] .panel,
-:root[data-color-scheme="light"] .card,
-:root[data-color-scheme="light"] .item,
-:root[data-color-scheme="light"] .order-card,
-:root[data-color-scheme="light"] .delivery-card,
-:root[data-color-scheme="light"] .route-stop,
-:root[data-color-scheme="light"] .settings-block,
-:root[data-color-scheme="light"] .theme-card,
-:root[data-color-scheme="light"] .history-cell,
-:root[data-color-scheme="light"] .stock-line,
-:root[data-color-scheme="light"] .workflow-card,
-:root[data-color-scheme="light"] .summary-item,
-:root[data-color-scheme="light"] .upload-card,
-:root[data-color-scheme="light"] .empty-state,
-:root[data-color-scheme="light"] .crm-card,
-:root[data-color-scheme="light"] .product-card,
-:root[data-color-scheme="light"] .stat-tile,
-:root[data-color-scheme="light"] .today-order-card,
-:root[data-color-scheme="light"] .planned-order-card,
-:root[data-color-scheme="light"] .current-client-box,
-:root[data-color-scheme="light"] .current-driver-card,
-:root[data-color-scheme="light"] .bdc-card,
-:root[data-color-scheme="light"] .bdc-detail-card,
-:root[data-color-scheme="light"] .imports-archives-table-wrap,
-:root[data-color-scheme="light"] .app-loader-panel,
-:root[data-color-scheme="light"] .more-sheet-panel {
+:root[data-color-scheme="light"] .panel,:root[data-color-scheme="light"] .card,:root[data-color-scheme="light"] .item,:root[data-color-scheme="light"] .order-card,:root[data-color-scheme="light"] .delivery-card,:root[data-color-scheme="light"] .route-stop,:root[data-color-scheme="light"] .settings-block,:root[data-color-scheme="light"] .history-cell,:root[data-color-scheme="light"] .stock-line,:root[data-color-scheme="light"] .workflow-card,:root[data-color-scheme="light"] .summary-item,:root[data-color-scheme="light"] .upload-card,:root[data-color-scheme="light"] .empty-state,:root[data-color-scheme="light"] .crm-card,:root[data-color-scheme="light"] .product-card,:root[data-color-scheme="light"] .stat-tile,:root[data-color-scheme="light"] .today-order-card,:root[data-color-scheme="light"] .planned-order-card,:root[data-color-scheme="light"] .current-client-box,:root[data-color-scheme="light"] .current-driver-card,:root[data-color-scheme="light"] .bdc-card,:root[data-color-scheme="light"] .bdc-detail-card,:root[data-color-scheme="light"] .imports-archives-table-wrap,:root[data-color-scheme="light"] .app-loader-panel,:root[data-color-scheme="light"] .more-sheet-panel {
   border: 1px solid rgba(231, 226, 223, 0.86);
   border-radius: var(--radius);
   background: #ffffff;
@@ -5973,15 +5854,7 @@ html[data-color-scheme="light"] body,
   --card-accent-strong: var(--palette-teal);
 }
 
-:root[data-color-scheme="light"] .card:hover,
-:root[data-color-scheme="light"] .workflow-card:hover,
-:root[data-color-scheme="light"] .crm-card:hover,
-:root[data-color-scheme="light"] .product-card:hover,
-:root[data-color-scheme="light"] .today-order-card:hover,
-:root[data-color-scheme="light"] .delivery-card:hover,
-:root[data-color-scheme="light"] .bdc-card:hover,
-:root[data-color-scheme="light"] .stat-tile:hover,
-:root[data-color-scheme="light"] .theme-card:hover {
+:root[data-color-scheme="light"] .card:hover,:root[data-color-scheme="light"] .workflow-card:hover,:root[data-color-scheme="light"] .crm-card:hover,:root[data-color-scheme="light"] .product-card:hover,:root[data-color-scheme="light"] .today-order-card:hover,:root[data-color-scheme="light"] .delivery-card:hover,:root[data-color-scheme="light"] .bdc-card:hover,:root[data-color-scheme="light"] .stat-tile:hover {
   transform: translateY(-3px);
   box-shadow: var(--shadow-card-hover);
 }
@@ -6865,32 +6738,7 @@ html[data-color-scheme="light"] body,
   grid-column: 1 / -1;
 }
 
-:root[data-color-scheme="light"] .panel,
-:root[data-color-scheme="light"] .card,
-:root[data-color-scheme="light"] .item,
-:root[data-color-scheme="light"] .order-card,
-:root[data-color-scheme="light"] .delivery-card,
-:root[data-color-scheme="light"] .route-stop,
-:root[data-color-scheme="light"] .settings-block,
-:root[data-color-scheme="light"] .theme-card,
-:root[data-color-scheme="light"] .history-cell,
-:root[data-color-scheme="light"] .stock-line,
-:root[data-color-scheme="light"] .workflow-card,
-:root[data-color-scheme="light"] .summary-item,
-:root[data-color-scheme="light"] .upload-card,
-:root[data-color-scheme="light"] .empty-state,
-:root[data-color-scheme="light"] .crm-card,
-:root[data-color-scheme="light"] .product-card,
-:root[data-color-scheme="light"] .stat-tile,
-:root[data-color-scheme="light"] .today-order-card,
-:root[data-color-scheme="light"] .planned-order-card,
-:root[data-color-scheme="light"] .current-client-box,
-:root[data-color-scheme="light"] .current-driver-card,
-:root[data-color-scheme="light"] .bdc-card,
-:root[data-color-scheme="light"] .bdc-detail-card,
-:root[data-color-scheme="light"] .imports-archives-table-wrap,
-:root[data-color-scheme="light"] .more-sheet-panel,
-:root[data-color-scheme="light"] .app-loader-panel {
+:root[data-color-scheme="light"] .panel,:root[data-color-scheme="light"] .card,:root[data-color-scheme="light"] .item,:root[data-color-scheme="light"] .order-card,:root[data-color-scheme="light"] .delivery-card,:root[data-color-scheme="light"] .route-stop,:root[data-color-scheme="light"] .settings-block,:root[data-color-scheme="light"] .history-cell,:root[data-color-scheme="light"] .stock-line,:root[data-color-scheme="light"] .workflow-card,:root[data-color-scheme="light"] .summary-item,:root[data-color-scheme="light"] .upload-card,:root[data-color-scheme="light"] .empty-state,:root[data-color-scheme="light"] .crm-card,:root[data-color-scheme="light"] .product-card,:root[data-color-scheme="light"] .stat-tile,:root[data-color-scheme="light"] .today-order-card,:root[data-color-scheme="light"] .planned-order-card,:root[data-color-scheme="light"] .current-client-box,:root[data-color-scheme="light"] .current-driver-card,:root[data-color-scheme="light"] .bdc-card,:root[data-color-scheme="light"] .bdc-detail-card,:root[data-color-scheme="light"] .imports-archives-table-wrap,:root[data-color-scheme="light"] .more-sheet-panel,:root[data-color-scheme="light"] .app-loader-panel {
   border: 1px solid rgba(223, 231, 227, 0.95);
   border-radius: var(--radius);
   background: var(--neo-card);
@@ -7276,329 +7124,6 @@ html[data-color-scheme="light"] body,
     width: 100%;
   }
 }
-/* Application theme selector 2026-07-02 */
-.theme-palette-grid {
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 12px;
-}
-
-.theme-card {
-  position: relative;
-  min-height: 172px;
-  padding: 14px;
-  border-radius: 18px;
-  overflow: hidden;
-}
-
-.theme-card-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.theme-card-status {
-  display: inline-grid;
-  min-height: 26px;
-  padding: 5px 9px;
-  place-items: center;
-  border-radius: 999px;
-  background: var(--neo-aqua-soft, var(--color-pastel-green-light));
-  color: var(--neo-teal-dark, var(--color-brand-teal-dark));
-  font-size: 0.72rem;
-  font-weight: 950;
-}
-
-.theme-card.active .theme-card-status {
-  background: var(--neo-teal, var(--color-brand-teal));
-  color: #ffffff;
-}
-
-.theme-card-preview {
-  display: grid;
-  grid-template-columns: 38% 1fr;
-  grid-template-rows: 1fr 1fr;
-  gap: 6px;
-  min-height: 58px;
-  padding: 7px;
-  border: 1px solid rgba(15, 61, 61, 0.1);
-  border-radius: 14px;
-  background: var(--preview-bg);
-}
-
-.theme-card-preview i,
-.theme-card-preview b,
-.theme-card-preview em {
-  display: block;
-  border-radius: 10px;
-}
-
-.theme-card-preview i {
-  grid-row: 1 / -1;
-  background: var(--preview-sidebar);
-}
-
-.theme-card-preview b {
-  background: var(--preview-card);
-  box-shadow: 0 8px 18px rgba(15, 61, 61, 0.08);
-}
-
-.theme-card-preview em {
-  background: var(--preview-accent);
-}
-
-.theme-card-swatches {
-  gap: 7px;
-}
-
-.theme-card-swatches i {
-  width: 22px;
-  height: 22px;
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.7);
-}
-
-:root[data-app-theme="noir"] {
-  color-scheme: dark;
-  --bg: var(--neo-bg);
-  --surface: var(--neo-card);
-  --surface-soft: #11161a;
-  --surface-alt: #101819;
-  --border: var(--neo-line);
-  --border-strong: #43505a;
-  --text: var(--neo-text);
-  --text-soft: #d6dde0;
-  --muted: var(--neo-muted);
-  --brand-primary: var(--neo-teal);
-  --brand-primary-dark: var(--neo-teal-dark);
-  --brand-secondary: var(--neo-coral);
-  --brand-secondary-soft: var(--neo-coral-soft);
-  --shadow: 0 18px 42px rgba(0, 0, 0, 0.46);
-  --shadow-card: 0 20px 48px rgba(0, 0, 0, 0.5);
-}
-
-html[data-app-theme="noir"],
-html[data-app-theme="noir"] body,
-:root[data-app-theme="noir"] body {
-  background: var(--neo-bg) !important;
-  color: var(--neo-text);
-}
-
-:root[data-app-theme="noir"] .app {
-  background:
-    linear-gradient(90deg, var(--neo-sidebar) 0, var(--neo-sidebar) 276px, transparent 276px),
-    var(--neo-bg);
-}
-
-:root[data-app-theme="noir"] .content {
-  background: var(--neo-page);
-  color: var(--neo-text);
-}
-
-:root[data-app-theme="noir"] .topbar {
-  background: linear-gradient(135deg, #050607, #171b1f 62%, #24302e);
-  color: var(--neo-text);
-}
-
-:root[data-app-theme="noir"] .topbar::after {
-  opacity: 0.18;
-}
-
-:root[data-app-theme="noir"] .panel,
-:root[data-app-theme="noir"] .card,
-:root[data-app-theme="noir"] .item,
-:root[data-app-theme="noir"] .settings-block,
-:root[data-app-theme="noir"] .theme-card,
-:root[data-app-theme="noir"] .color-scheme-option,
-:root[data-app-theme="noir"] .crm-card,
-:root[data-app-theme="noir"] .product-card,
-:root[data-app-theme="noir"] .today-order-card,
-:root[data-app-theme="noir"] .planned-order-card,
-:root[data-app-theme="noir"] .delivery-card,
-:root[data-app-theme="noir"] .route-stop,
-:root[data-app-theme="noir"] .bdc-card,
-:root[data-app-theme="noir"] .bdc-detail-card,
-:root[data-app-theme="noir"] .more-sheet-panel,
-:root[data-app-theme="noir"] .imports-archives-table-wrap {
-  border-color: var(--neo-line);
-  background: var(--neo-card);
-  color: var(--neo-text);
-}
-
-:root[data-app-theme="noir"] .card {
-  background: linear-gradient(180deg, #1b2024, #14181c);
-}
-
-:root[data-app-theme="noir"] input,
-:root[data-app-theme="noir"] select,
-:root[data-app-theme="noir"] textarea {
-  border-color: var(--neo-line);
-  background: #11161a;
-  color: var(--neo-text);
-}
-
-:root[data-app-theme="noir"] .button.secondary,
-:root[data-app-theme="noir"] .button.ghost,
-:root[data-app-theme="noir"] .bdc-status-filter,
-:root[data-app-theme="noir"] .bdc-view-btn {
-  background: #11161a;
-  border-color: #3a454d;
-  color: var(--neo-text);
-}
-
-:root[data-app-theme="noir"] .muted,
-:root[data-app-theme="noir"] .theme-card-hint,
-:root[data-app-theme="noir"] .color-scheme-hint {
-  color: var(--neo-muted);
-}
-
-:root[data-app-theme="noir"] .mobile-tabbar {
-  background: rgba(17, 22, 26, 0.96);
-  border-color: var(--neo-line);
-}
-
-:root[data-app-theme="blanc"] {
-  color-scheme: light;
-  --bg: var(--neo-bg);
-  --surface: var(--neo-card);
-  --surface-soft: #f8fafc;
-  --surface-alt: #f3f4f6;
-  --border: var(--neo-line);
-  --border-strong: #cbd5e1;
-  --text: var(--neo-text);
-  --text-soft: #374151;
-  --muted: var(--neo-muted);
-  --brand-primary: #111827;
-  --brand-primary-dark: #020617;
-  --brand-secondary: #6b7280;
-  --brand-secondary-soft: #f3f4f6;
-}
-
-html[data-app-theme="blanc"],
-html[data-app-theme="blanc"] body,
-:root[data-app-theme="blanc"] body {
-  background: #ffffff !important;
-  color: #111827;
-}
-
-:root[data-app-theme="blanc"] .app {
-  background:
-    linear-gradient(90deg, #ffffff 0, #ffffff 276px, transparent 276px),
-    #ffffff;
-}
-
-:root[data-app-theme="blanc"] .sidebar {
-  background: #ffffff;
-  border-right: 1px solid #e5e7eb;
-  box-shadow: 12px 0 34px rgba(17, 24, 39, 0.08);
-}
-
-:root[data-app-theme="blanc"] .brand-logo {
-  border: 1px solid #e5e7eb;
-  box-shadow: 0 12px 26px rgba(17, 24, 39, 0.08);
-}
-
-:root[data-app-theme="blanc"] .sidebar-search {
-  background: #f8fafc;
-  border-color: #e5e7eb;
-  color: #374151;
-}
-
-:root[data-app-theme="blanc"] .sidebar-search input {
-  color: #111827;
-}
-
-:root[data-app-theme="blanc"] .sidebar-search input::placeholder {
-  color: #6b7280;
-}
-
-:root[data-app-theme="blanc"] .nav-section {
-  background: #ffffff;
-  border-color: #e5e7eb;
-  box-shadow: none;
-}
-
-:root[data-app-theme="blanc"] .nav-section:hover,
-:root[data-app-theme="blanc"] .nav-section.has-active-tab {
-  background: #f8fafc;
-  border-color: #d1d5db;
-}
-
-:root[data-app-theme="blanc"] .nav-section-toggle,
-:root[data-app-theme="blanc"] .tab,
-:root[data-app-theme="blanc"] .sidebar-settings {
-  color: #4b5563;
-}
-
-:root[data-app-theme="blanc"] .nav-section-count,
-:root[data-app-theme="blanc"] .tab-icon {
-  background: #f3f4f6;
-  color: #4b5563;
-}
-
-:root[data-app-theme="blanc"] .tab:hover,
-:root[data-app-theme="blanc"] .sidebar-settings:hover {
-  background: #f3f4f6;
-  color: #111827;
-}
-
-:root[data-app-theme="blanc"] .tab.active {
-  background: #111827;
-  border-color: #111827;
-  color: #ffffff;
-  box-shadow: 0 14px 28px rgba(17, 24, 39, 0.18);
-}
-
-:root[data-app-theme="blanc"] .tab.active .tab-icon {
-  background: rgba(255, 255, 255, 0.16);
-  color: #ffffff;
-}
-
-:root[data-app-theme="blanc"] .content {
-  background: #ffffff;
-}
-
-:root[data-app-theme="blanc"] .topbar {
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  color: #111827;
-  box-shadow: 0 18px 38px rgba(17, 24, 39, 0.08);
-}
-
-:root[data-app-theme="blanc"] .topbar::after {
-  opacity: 0.16;
-}
-
-:root[data-app-theme="blanc"] .topbar h2,
-:root[data-app-theme="blanc"] .topbar p,
-:root[data-app-theme="blanc"] .topbar .eyebrow {
-  color: #111827;
-}
-
-:root[data-app-theme="blanc"] .button.primary,
-:root[data-app-theme="blanc"] .button.ok {
-  background: #111827;
-  border-color: #111827;
-  color: #ffffff;
-}
-
-:root[data-app-theme="blanc"] .button.secondary,
-:root[data-app-theme="blanc"] .button.ghost,
-:root[data-app-theme="blanc"] .bdc-status-filter,
-:root[data-app-theme="blanc"] .bdc-view-btn {
-  background: #ffffff;
-  border-color: #d1d5db;
-  color: #111827;
-}
-
-:root[data-app-theme="blanc"] .panel,
-:root[data-app-theme="blanc"] .card,
-:root[data-app-theme="blanc"] .item,
-:root[data-app-theme="blanc"] .settings-block,
-:root[data-app-theme="blanc"] .theme-card,
-:root[data-app-theme="blanc"] .color-scheme-option {
-  border-color: #e5e7eb;
-  background: #ffffff;
-}
 
 /* Final module visibility override 2026-07-01.
    This block must stay last so category modules and the mobile "Plus" sheet
@@ -7829,13 +7354,6 @@ html[data-app-theme="blanc"] body,
     gap: 10px;
   }
 
-  /* --- Parametres : apercus de theme en 2 colonnes --- */
-  :root[data-color-scheme] .theme-palette-grid,
-  :root:not([data-color-scheme]) .theme-palette-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-  }
-
   /* --- Mode d'affichage : garder Auto/Clair/Sombre sur 3 colonnes
      compactes plutot que 3 grosses lignes --- */
   :root[data-color-scheme] .color-scheme-toggle,
@@ -8022,4 +7540,101 @@ html[data-app-theme="blanc"] body,
 }
 @media (max-width: 560px) {
   .prep-toolbar { grid-template-columns: 1fr; }
+}
+
+/* --- Comptes utilisateurs (V8 phase 1) -----------------------------------
+ *
+ * Le tableau reutilise volontairement .imports-archives-table-wrap et
+ * .imports-archives-table : ces classes portent deja leurs surcharges de mode
+ * clair et de theme sombre, que des classes neuves n'auraient pas. On n'ajoute
+ * ici que ce qui leur manque, en n'employant que des variables semantiques
+ * definies dans les trois blocs :root — donc valides dans les deux themes sans
+ * declaration supplementaire.
+ */
+.comptes-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.compte-role {
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  max-width: 160px;
+}
+
+.comptes-form {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+/* Sur mobile, les trois boutons d'action tiennent mal sur une ligne de tableau
+ * deja etroite : on les laisse s'empiler plutot que de rogner les libelles. */
+@media (max-width: 640px) {
+  .comptes-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .compte-role {
+    max-width: none;
+    width: 100%;
+  }
+}
+
+/* Pleine largeur a TOUTES les tailles, et pas seulement au-dela de 1400px.
+ *
+ * La regle `.settings-grid > .settings-block { grid-column: 1 / -1 }` n'existe
+ * que dans @media (min-width: 1400px). En dessous, la grille passe a deux
+ * colonnes et un tableau a cinq colonnes se retrouve dans ~470px : les
+ * libelles de boutons se cassent lettre par lettre et le selecteur de role est
+ * tronque. On cible ce bloc precisement plutot que tous les .settings-block,
+ * pour ne pas modifier la mise en page des blocs existants au passage.
+ *
+ * (Le tableau de l'historique des imports souffre du meme probleme entre 1024
+ * et 1399px — a traiter separement, ce n'est pas le sujet de ce lot.) */
+.settings-grid > #comptesBlock {
+  grid-column: 1 / -1;
+}
+
+/* ============================================================================
+ * Accordeon de la barre laterale : le repli ne depend d'AUCUN theme.
+ *
+ * Les quatre regles qui gouvernaient le repli etaient toutes ecrites sous
+ * `:root[data-color-scheme="light"]`. En mode sombre aucune ne s'appliquait,
+ * et le bouton de section ne repliait rien. Mesure au clic sur la section
+ * "Commandes", fenetre 1440x900 :
+ *
+ *            avant clic                apres clic
+ *   clair    display:none, h=0         display:grid, h=248   -> fonctionne
+ *   sombre   display:block, h=250      display:block, h=250  -> INERTE
+ *
+ * Le defaut ne se voyait pas comme un defaut : la classe `.open` et
+ * `aria-expanded` changeaient bien. Seul l'AFFICHAGE ne suivait pas. Pire,
+ * `aria-expanded="false"` annoncait alors un contenu replie a un lecteur
+ * d'ecran pendant que ce contenu etait visible : l'etat accessible mentait.
+ *
+ * Le repli est une propriete STRUCTURELLE du composant, pas une decision de
+ * palette. Ces deux regles sont donc sans portee de theme. Elles sont ajoutees
+ * plutot que substituees aux quatre existantes : en mode clair les regles
+ * scopees restent plus specifiques et disent deja la meme chose, de sorte que
+ * rien ne change la ou tout marchait deja.
+ * ========================================================================== */
+.nav-section .nav-section-items {
+  display: grid;
+}
+
+.nav-section:not(.open) .nav-section-items {
+  display: none;
 }
