@@ -7638,3 +7638,19 @@ html[data-color-scheme="light"] body,
 .nav-section:not(.open) .nav-section-items {
   display: none;
 }
+
+/* Avertissement porte par un secteur dont la prochaine date tombe un dimanche
+   ou un ferie. La date n'est PAS deplacee (decision de Tom, 17/09) : ce bloc
+   est la seule trace du probleme, il doit donc se voir.
+   Contraste mesure de .pill-warning, 13px/800, seuil 4,5:1 : clair 4,89:1
+   (#9a5a18 sur #fff1d8), sombre 7,75:1 (#ffd0aa sur le compose #433b35). */
+.sector-alerte {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 6px 0 0;
+  color: var(--text-soft);
+  font-size: 13px;
+  line-height: 1.35;
+}

@@ -4842,6 +4842,96 @@ function findDeliverySectorConfig(db, sectorOrCity) {
   }) || null;
 }
 
+// ---------------------------------------------------------------------------
+// Dates non ouvrees.
+//
+// Decision de Tom, 17/09 : quand la date d'un secteur tombe un dimanche ou un
+// jour ferie, on NE DEPLACE PAS la date -- on PREVIENT. Le choix reste humain.
+// Ces fonctions ne servent donc qu'a l'affichage : nextSectorDeliveryDate
+// n'est pas modifiee, et aucune donnee enregistree ne change.
+//
+// Pourquoi un calcul plutot qu'une table : les jours feries francais sont
+// entierement derivables. Sept sont a date fixe ; les quatre autres dependent
+// de Paques. Une table devrait etre reconduite chaque annee, et une table
+// perimee se trompe en silence -- exactement le genre de panne qu'on ne voit
+// qu'une fois la tournee partie.
+
+/** Dimanche de Paques (comput gregorien, algorithme de Meeus/Jones/Butcher). */
+function dimancheDePaques(annee) {
+  const a = annee % 19;
+  const b = Math.floor(annee / 100);
+  const c = annee % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const mois = Math.floor((h + l - 7 * m + 114) / 31);
+  const jour = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(annee, mois - 1, jour);
+}
+
+/**
+ * Jours feries francais (metropole) d'une annee, indexes par date YYYY-MM-DD.
+ * L'Alsace-Moselle en compte deux de plus ; Sereo livre dans le Jura, donc on
+ * s'en tient a la metropole. A etendre le jour ou un secteur y passe.
+ */
+function joursFeriesFrance(annee) {
+  const paques = dimancheDePaques(annee);
+  const depuisPaques = (jours, nom) => {
+    const date = new Date(paques.getFullYear(), paques.getMonth(), paques.getDate() + jours);
+    return [toYmd(date), nom];
+  };
+  const fixe = (mois, jour, nom) => [toYmd(new Date(annee, mois - 1, jour)), nom];
+
+  return new Map([
+    fixe(1, 1, "Jour de l'an"),
+    depuisPaques(1, "Lundi de Paques"),
+    fixe(5, 1, "Fete du Travail"),
+    fixe(5, 8, "Victoire 1945"),
+    depuisPaques(39, "Ascension"),
+    depuisPaques(50, "Lundi de Pentecote"),
+    fixe(7, 14, "Fete nationale"),
+    fixe(8, 15, "Assomption"),
+    fixe(11, 1, "Toussaint"),
+    fixe(11, 11, "Armistice 1918"),
+    fixe(12, 25, "Noel")
+  ]);
+}
+
+/**
+ * Dit pourquoi une date n'est pas ouvree, ou null si elle l'est.
+ * Un ferie qui tombe un dimanche est signale comme ferie : c'est l'information
+ * la plus utile, et elle contient l'autre.
+ */
+function alerteDateNonOuvree(ymd) {
+  if (typeof ymd !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return null;
+  const [annee, mois, jour] = ymd.split("-").map(Number);
+  const date = new Date(annee, mois - 1, jour);
+  // Une date inexistante (31 fevrier) deborde sur le mois suivant : on refuse.
+  if (date.getMonth() !== mois - 1 || date.getDate() !== jour) return null;
+
+  const ferie = joursFeriesFrance(annee).get(ymd);
+  if (ferie) return { type: "ferie", libelle: ferie };
+  if (date.getDay() === 0) return { type: "dimanche", libelle: "dimanche" };
+  return null;
+}
+
+/**
+ * Rabattement silencieux du jour du mois : un secteur regle le 31 tombe le 28
+ * en fevrier. On ne l'interdit pas -- la politique n'est pas tranchee -- mais
+ * on rend la date REELLEMENT retenue, pour qu'elle cesse d'etre une surprise.
+ */
+function jourDuMoisRabattu(jourVoulu, ymd) {
+  if (typeof ymd !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return false;
+  const jourRetenu = Number(ymd.split("-")[2]);
+  return Number.isFinite(jourVoulu) && jourVoulu > jourRetenu;
+}
+
 function nextSectorDeliveryDate(sectorConfig, fromDate = new Date()) {
   const sourceDay = Math.max(1, Math.min(31, Math.round(number(sectorConfig?.jourMois, 1))));
   const base = startOfLocalDay(fromDate);
@@ -4864,6 +4954,21 @@ function nextSectorDeliveryDate(sectorConfig, fromDate = new Date()) {
   }
 
   return toYmd(candidate);
+}
+
+/**
+ * Ajoute a un secteur sa prochaine date et l'eventuelle raison de prevenir.
+ * RIEN n'est enregistre : ces champs sont calcules a la lecture. La date
+ * elle-meme n'est pas deplacee -- c'est la decision de Tom du 17/09.
+ */
+function decorerSecteurPourAffichage(secteur) {
+  const prochaineDate = nextSectorDeliveryDate(secteur);
+  return {
+    ...secteur,
+    prochaineDate,
+    alerte: alerteDateNonOuvree(prochaineDate),
+    jourRabattu: jourDuMoisRabattu(Number(secteur?.jourMois), prochaineDate)
+  };
 }
 
 function resolvePlannedDeliveryDate(db, client, payload = {}) {
@@ -6381,7 +6486,7 @@ app.get("/api/sectors", (req, res) => {
 
 app.get("/api/delivery-sectors", (req, res) => {
   const db = readDb();
-  res.json(db.deliverySectors || []);
+  res.json((db.deliverySectors || []).map(decorerSecteurPourAffichage));
 });
 
 app.post("/api/delivery-sectors", async (req, res) => {
@@ -7876,6 +7981,12 @@ if (require.main === module) {
 
 module.exports = {
   app,
+  dimancheDePaques,
+  joursFeriesFrance,
+  alerteDateNonOuvree,
+  jourDuMoisRabattu,
+  nextSectorDeliveryDate,
+  decorerSecteurPourAffichage,
   startServer,
   closeStorage,
   defaultDb,
