@@ -29,7 +29,7 @@
   --color-surface-tint: #f5fbf8;
   --color-text: #102a2f;
   --color-text-soft: #4f686b;
-  --color-muted: #7a8d8e;
+  --color-muted: var(--v8-texte-secondaire);   /* etait #7a8d8e : 3,33 sur le fond */
 
   /* Tokens generiques */
   --radius-card: 8px;
@@ -155,7 +155,7 @@
     --color-surface-tint: #15202b;
     --color-text: #e8eef0;
     --color-text-soft: #a8b8bc;
-    --color-muted: #7d8c90;
+    --color-muted: var(--v8-texte-secondaire);   /* etait #7d8c90 : 4,08 a 4,45 sur les surfaces sombres, sous le seuil */
 
     --shadow-soft: 0 16px 36px rgba(0, 0, 0, 0.5);
     --shadow-tiny: 0 8px 18px rgba(0, 0, 0, 0.4);
@@ -228,7 +228,7 @@
   --color-surface-tint: #15202b;
   --color-text: #e8eef0;
   --color-text-soft: #a8b8bc;
-  --color-muted: #7d8c90;
+  --color-muted: var(--v8-texte-secondaire);
 
   --shadow-soft: 0 16px 36px rgba(0, 0, 0, 0.5);
   --shadow-tiny: 0 8px 18px rgba(0, 0, 0, 0.4);
@@ -828,8 +828,11 @@ button {
 }
 
 .primary {
-  background: var(--color-pastel-orange-strong);
-  color: var(--white);
+  /* Le texte sur principal est un JETON, pas du blanc en dur : en sombre le
+     principal est clair (#93CBC9) et le texte doit etre sombre. Blanc en dur
+     donnait 1,41 sur #B9E1DF. */
+  background: var(--v8-principal);
+  color: var(--v8-texte-sur-principal);
   box-shadow: 0 10px 20px rgba(244, 122, 90, 0.18);
 }
 
@@ -849,8 +852,10 @@ button {
 }
 
 .ok {
-  background: linear-gradient(135deg, var(--success), var(--success-dark));
-  color: var(--white);
+  /* Charte : le succes est le vert PRINCIPAL, il n'y a pas de second vert.
+     L'ancien degrade --success (#58c89a en sombre) portait du blanc a 1,63. */
+  background: var(--v8-principal);
+  color: var(--v8-texte-sur-principal);
   border-color: rgba(23, 109, 81, 0.35);
   box-shadow: 0 10px 20px rgba(39, 153, 111, 0.18);
 }
@@ -920,8 +925,11 @@ label {
   min-height: 34px;
   padding: 6px 10px;
   border-radius: 999px;
-  background: #edf8f4;
-  color: var(--color-brand-teal);
+  /* Fond de badge froid de la charte, sensible au mode ; texte en principal
+     appuye : 7,04 en clair. L'ancien #edf8f4 en dur restait CLAIR en sombre,
+     et le texte teal clair y donnait 1,63. */
+  background: var(--v8-vert-clair);
+  color: var(--v8-principal-appuye);
   border: 1px solid rgba(14, 107, 99, 0.12);
   font-size: 14px;
   font-weight: 800;
@@ -1056,9 +1064,11 @@ label {
 }
 
 .active-filter {
-  background: var(--color-pastel-orange-strong);
-  color: var(--white);
-  border-color: var(--color-pastel-orange-strong);
+  /* Filtre actif = principal + texte-sur-principal, comme tout etat actif.
+     Le blanc en dur tombait a 1,41 en sombre sur le principal appuye clair. */
+  background: var(--v8-principal);
+  color: var(--v8-texte-sur-principal);
+  border-color: var(--v8-principal);
 }
 
 .delivery-date-inline {
@@ -1642,7 +1652,7 @@ label {
 
 .stat-tile small,
 .stat-tile span {
-  color: var(--muted);
+  color: var(--v8-texte);   /* le secondaire donnait 4,45 sur le fond de tuile, hors des trois surfaces que la charte lui garantit */
   font-weight: 800;
 }
 
@@ -1699,7 +1709,9 @@ label {
 
 .bar-item small {
   font-size: 11px;
-  color: var(--muted);
+  /* Le secondaire donnait 4,45 sur le fond de graphique, hors des trois
+     surfaces que la charte lui garantit. A 11 px, on prend le texte courant. */
+  color: var(--v8-texte);
   text-align: center;
 }
 
@@ -1934,6 +1946,19 @@ label {
 /* En mode sombre, on inverse les couleurs des tuiles OSM pour un rendu lisible
    la nuit / interieur faible lumiere. Filtre applique seulement aux tuiles, pas
    aux markers (preserves) ni controles (preserves via :not). */
+/* L'attribution OSM n'avait aucun style a nous : en sombre, le lien bleu de
+   leaflet.css tombait a 3,14 sur un fond grise. Jetons V8, sensibles au mode :
+   principal sur surface, 6,01 en clair, 9,4 en sombre. */
+.leaflet-container .leaflet-control-attribution {
+  /* .leaflet-container en tete : leaflet.css ecrit son selecteur ainsi, et une
+     regle moins specifique ne le battrait pas, meme placee apres. */
+  background: var(--v8-surface);
+  color: var(--v8-texte-secondaire);
+}
+.leaflet-container .leaflet-control-attribution a {
+  color: var(--v8-principal);
+}
+
 .leaflet-tile-pane {
   filter: var(--leaflet-tile-filter, none);
 }
@@ -3658,8 +3683,10 @@ label {
 }
 
 .bdc-view-toggle .bdc-view-btn.active-filter {
-  background: var(--color-pastel-orange);
-  color: var(--text-strong, #fff);
+  /* Etait l'accent sous du blanc (2,04 en sombre). L'accent n'est jamais un
+     fond de texte : principal + texte-sur-principal. */
+  background: var(--v8-principal);
+  color: var(--v8-texte-sur-principal);
 }
 
 .bdc-export-btn {
@@ -6386,15 +6413,20 @@ html[data-color-scheme="light"] body,
   padding: 0 7px;
   place-items: center;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
-  color: rgba(255, 255, 255, 0.82);
+  /* Pastille SOMBRE sous du blanc PLEIN. L'ancienne (blanc 14 % sous blanc
+     82 %) composait #5D8485 sous un texte lui-meme delave : 4,11, sous le
+     seuil. Assombrir la pastille plutot que l'eclaircir : ~7,3. */
+  background: rgba(0, 0, 0, 0.16);
+  color: var(--v8-texte-sur-principal);
   font-size: 0.72rem;
   font-weight: 900;
 }
 
 :root[data-color-scheme="light"] .nav-section.has-active-tab .nav-section-count {
-  background: var(--neo-coral);
-  color: #ffffff;
+  /* Etait orange avec du blanc : 2,34. La charte interdit l'orange sous du
+     texte. Pilule surface + principal, comme la navigation active : 6,01. */
+  background: var(--v8-surface);
+  color: var(--v8-principal);
 }
 
 :root[data-color-scheme="light"] .nav-section-items {
@@ -6701,9 +6733,11 @@ html[data-color-scheme="light"] body,
 
 :root[data-color-scheme="light"] .topbar-actions .button.secondary {
   min-height: 46px;
-  background: var(--neo-coral);
-  border-color: var(--neo-coral);
-  color: #ffffff;
+  /* Etait orange avec du blanc : 2,34, interdit par la charte. Surface +
+     principal, comme "A jour" a cote : 6,01. */
+  background: var(--v8-surface);
+  border-color: var(--v8-surface);
+  color: var(--v8-principal);
   box-shadow: 0 16px 30px rgba(143, 70, 58, 0.26);
 }
 
