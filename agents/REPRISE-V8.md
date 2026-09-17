@@ -156,16 +156,33 @@ Les trois questions du 26 août (entrepôt, fin de tournée, heure de départ) s
 **tranchées** depuis le 16/09 — voir §5. Il en reste trois, posées à Tom dans
 le brief Claude Design :
 
-1. **Les quatre destinations mobiles.** Proposition de Claude Design, 16/09 :
-   Tableau de bord · Préparation · Tournée · Abonnements ; dans « Plus » :
-   Commandes, Stock, Clients, Analyse, Paramètres. **En attente de Tom.**
-2. **Intervalle strict ou jour ancré.** Proposition, 16/09 : garder
-   l'intervalle strict et rendre la dérive visible par un aperçu des trois
-   prochaines dates avec leur jour. Le mode « un jeudi sur deux » viendrait
-   plus tard, jamais comme défaut caché. **En attente de Tom.**
-3. **Mode sombre.** Proposition, 16/09 : suivre le système, avec bascule
-   manuelle dans les Paramètres. Pas de bascule automatique au crépuscule :
-   l'écran ne doit pas changer en pleine tournée. **En attente de Tom.**
+1. ~~**Les quatre destinations mobiles.**~~ **TRANCHÉ par Tom le 17/09** :
+   la proposition est retenue telle quelle — barre basse `Tableau de bord ·
+   Préparation · Tournée · Abonnements`, et dans « Plus » : Commandes, Stock,
+   Clients, Analyse, Paramètres. **Avec la réserve mesurée** : le cinquième
+   item fait 35 px de large parce qu'il est dimensionné par son libellé, et
+   « Plus » est court. Il doit être élargi à 44 px quelle que soit la
+   répartition retenue.
+2. ~~**Intervalle strict ou jour ancré.**~~ **La question était mal posée, et
+   Tom a tranché la vraie.** Le code ne fait ni intervalle ni jour de semaine :
+   il porte `jour_mois INTEGER` **par secteur** (vraie colonne SQLite,
+   `sqliteStore.js` l. 389), en fréquence mensuelle — Champagnole le 5, Dole
+   le 15, Besançon le 25. `nextSectorDeliveryDate` (`server.js` l. 4845) rend
+   la prochaine occurrence de ce jour **sans jamais sauter un week-end ni un
+   férié**, et rabat silencieusement le 31 sur le dernier jour du mois.
+   **Décision de Tom, 17/09 : on ne déplace pas la date, on PRÉVIENT** — quand
+   la date tombe un dimanche ou un jour férié, l'écran le dit. Le choix reste
+   à l'humain.
+   ⚠️ *Le sort d'un secteur réglé « le 31 » (autorisé ou refusé à la saisie)
+   n'a pas été tranché. En attendant, le même avertissement montre la date
+   réellement retenue, ce qui n'engage aucune politique.*
+3. ~~**Mode sombre.**~~ **TRANCHÉ par Tom le 17/09 : c'est une PRÉFÉRENCE
+   PERSONNELLE**, pas un mode du soir. Conséquence directe : **aucune bascule
+   automatique**, ni au crépuscule ni ailleurs — l'écran ne change jamais tout
+   seul en pleine tournée. On suit le système par défaut, avec bascule manuelle
+   dans les Paramètres.
+   ⚠️ *Écart à solder : le code force `light` au démarrage (« pendant la phase
+   de test »), là où la décision dit « suivre le système ».*
 4. **Ordre de fusion** de la branche V8 et de la PR 96 (voir §0). Décision de
    Tom et Thomas, pas de l'assistant.
 

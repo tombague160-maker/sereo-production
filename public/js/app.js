@@ -3392,6 +3392,34 @@ async function runDiagnosticSuspiciousDates() {
   }
 }
 
+// Le jour du mois d'un secteur tombe parfois un dimanche ou un jour ferie.
+// Decision de Tom, 17/09 : on ne deplace pas la date, on PREVIENT -- le choix
+// reste humain. Les champs `prochaineDate`, `alerte` et `jourRabattu` sont
+// calcules par le serveur a la lecture (GET /api/delivery-sectors) ; rien
+// n'est enregistre, et la date planifiee n'est pas modifiee.
+function formatDateSeule(ymd) {
+  if (!ymd) return "";
+  // Midi plutot que minuit : evite qu'un fuseau negatif recule d'un jour.
+  const date = new Date(`${ymd}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return ymd;
+  return date.toLocaleDateString("fr-FR", { day: "numeric", month: "long" });
+}
+
+function avertissementSecteur(sector) {
+  const parts = [];
+  if (sector.alerte) {
+    const quoi = sector.alerte.type === "ferie"
+      ? `un jour férié (${sector.alerte.libelle})`
+      : "un dimanche";
+    parts.push(`La prochaine, le ${formatDateSeule(sector.prochaineDate)}, tombe ${quoi}.`);
+  }
+  if (sector.jourRabattu) {
+    parts.push(`Le mois est trop court : la livraison est ramenée au ${formatDateSeule(sector.prochaineDate)}.`);
+  }
+  if (!parts.length) return "";
+  return `<p class="sector-alerte"><span class="pill pill-warning">À vérifier</span> ${escapeHtml(parts.join(" "))}</p>`;
+}
+
 function renderSettings() {
   updateBrandImageStatus();
   renderTourneeSettings();
@@ -3411,6 +3439,7 @@ function renderSettings() {
         <div>
           <h4>${escapeHtml(formatSectorLabel(sector.secteur || sector.name))}</h4>
           <p>${escapeHtml(sector.villePrincipale || "-")} - jour ${escapeHtml(sector.jourMois || "-")} - départ ${escapeHtml(sector.pointDepart || "Champagnole")}</p>
+          ${avertissementSecteur(sector)}
         </div>
         <div class="card-actions inline-actions">
           <span class="pill pill-blue">${escapeHtml(sector.frequence || "mensuelle")}</span>
