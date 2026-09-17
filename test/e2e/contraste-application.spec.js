@@ -20,7 +20,9 @@
 // declaree dans la regle de base n'est pas celle qui s'affiche.
 //
 // Garde-fous, chacun paye par un instrument qui a menti :
-//   - plancher de POPULATION (2 % des pixels de glyphe) : ecarte l'anticrenelage
+//   - plancher de POPULATION, relatif ET absolu (2 % des pixels de glyphe, et
+//     au moins 8 pixels) : ecarte l'anticrenelage. Le relatif seul ne suffit
+//     pas -- sur une pastille de 24 px, 2 % vaut moins d'un pixel
 //   - plancher de PORTEE : le test echoue s'il a mesure trop peu de textes
 //   - le seuil suit la TAILLE : 3:1 pour le gros texte (>= 24px, ou >= 18,66px
 //     gras), 4,5:1 sinon
@@ -47,6 +49,13 @@
 const { test, expect } = require("@playwright/test");
 
 const PART_MIN = 0.02;
+// Plancher ABSOLU, en plus du plancher relatif. Sur une pastille ronde de
+// 24 px, un chiffre fait ~40 pixels de glyphe : 2 % vaut moins d'UN pixel, et
+// un seul pixel de bord courbe suffisait a inventer un fond. Symptome : deux
+// executions identiques, meme portee (582 textes), verdicts differents -- 4
+// defauts, puis 0, puis 2. Un ou deux pixels ne sont jamais "le fond sur
+// lequel le texte se pose".
+const PIXELS_MIN = 8;
 const DIFF_MIN = 40;
 const PORTEE_MIN = 120;    // textes par mode en dessous desquels un zero ne vaut rien
 
@@ -114,16 +123,23 @@ async function mesurerElement(page, idx) {
   await el.scrollIntoViewIfNeeded();
   // el.screenshot() ne se trompe jamais de cible ; le contour de l'element
   // est exclu plus bas, dans l'analyse, pas dans la capture.
+  // Deux captures stables : on attend que le rendu se soit pose avant chacune.
+  // Sans cette attente, deux executions identiques rendaient des verdicts
+  // differents a portee EGALE (582 textes, 4 defauts puis 0) -- l'instabilite
+  // la plus dangereuse, parce qu'un vert la masque et qu'un rouge passe pour
+  // un vrai defaut.
+  await el.evaluate(e => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
   const avec = (await el.screenshot()).toString("base64");
   await el.evaluate(e => {
     e.__sauv = [[e, e.style.color]];
     e.querySelectorAll("*").forEach(c => { e.__sauv.push([c, c.style.color]); c.style.color = "transparent"; });
     e.style.color = "transparent";
   });
+  await el.evaluate(e => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
   const sans = (await el.screenshot()).toString("base64");
   await el.evaluate(e => { (e.__sauv || []).forEach(([n, c]) => { n.style.color = c; }); });
 
-  return page.evaluate(async ([a, b, seuil, partMin]) => {
+  return page.evaluate(async ([a, b, seuil, partMin, pixMin]) => {
     const charger = src => new Promise((ok, ko) => {
       const im = new Image(); im.onload = () => ok(im); im.onerror = ko; im.src = "data:image/png;base64," + src;
     });
@@ -152,10 +168,10 @@ async function mesurerElement(page, idx) {
       }
     }
     const fonds = [...compte.entries()]
-      .filter(([, n]) => n / glyphes >= partMin)
+      .filter(([, n]) => n >= pixMin && n / glyphes >= partMin)
       .map(([c]) => c.split(",").map(Number));
     return { glyphes, fonds };
-  }, [avec, sans, DIFF_MIN, PART_MIN]);
+  }, [avec, sans, DIFF_MIN, PART_MIN, PIXELS_MIN]);
 }
 
 for (const mode of ["light", "dark"]) {
@@ -178,7 +194,7 @@ for (const mode of ["light", "dark"]) {
 
     for (const onglet of onglets) {
       await page.evaluate(id => { location.hash = "#" + id; }, onglet);
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(900);
       const feuilles = await relever(page);
 
       for (let i = 0; i < feuilles.length; i++) {
