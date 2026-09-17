@@ -3087,14 +3087,16 @@ function isVisuallyDarkTheme() {
 
 // Applique les variables d'un theme en respectant le mode actif (clair / sombre).
 // Le theme pastel definit ses 7 variables --color-* en 2 versions : `vars` et `darkVars`.
+// Depuis la marche 3 de la phase 4, plus AUCUNE couleur n'est posee en style
+// inline : la feuille lit directement les jetons V8, qui se resolvent
+// eux-memes par mode. Il ne reste que l'identifiant sur :root, pour qu'un
+// selecteur ou un test puisse savoir quel theme est actif.
+//
+// Le nom garde son pluriel a dessein : c'est ici que revenaient 470 lignes de
+// hex, et la fonction reste le point ou l'on remettrait une couche inline si
+// un theme devait un jour en poser. Aujourd'hui, non.
 function applyThemeVariables(theme) {
-  const effective = getEffectiveColorScheme();
-  const variables = effective === "dark" && theme.darkVars ? theme.darkVars : theme.vars;
-  const root = document.documentElement;
-  root.dataset.appTheme = theme.id;
-  Object.entries(variables).forEach(([name, value]) => {
-    root.style.setProperty(name, value);
-  });
+  document.documentElement.dataset.appTheme = theme.id;
 }
 
 // Met a jour la meta theme-color (couleur de la barre OS sur mobile)
