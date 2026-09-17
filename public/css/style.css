@@ -29,7 +29,7 @@
   --color-surface-tint: #f5fbf8;
   --color-text: #102a2f;
   --color-text-soft: #4f686b;
-  --color-muted: #7a8d8e;
+  --color-muted: var(--v8-texte-secondaire);   /* etait #7a8d8e : 3,33 sur le fond */
 
   /* Tokens generiques */
   --radius-card: 8px;
@@ -155,7 +155,7 @@
     --color-surface-tint: #15202b;
     --color-text: #e8eef0;
     --color-text-soft: #a8b8bc;
-    --color-muted: #7d8c90;
+    --color-muted: var(--v8-texte-secondaire);   /* etait #7d8c90 : 4,08 a 4,45 sur les surfaces sombres, sous le seuil */
 
     --shadow-soft: 0 16px 36px rgba(0, 0, 0, 0.5);
     --shadow-tiny: 0 8px 18px rgba(0, 0, 0, 0.4);
@@ -228,7 +228,7 @@
   --color-surface-tint: #15202b;
   --color-text: #e8eef0;
   --color-text-soft: #a8b8bc;
-  --color-muted: #7d8c90;
+  --color-muted: var(--v8-texte-secondaire);
 
   --shadow-soft: 0 16px 36px rgba(0, 0, 0, 0.5);
   --shadow-tiny: 0 8px 18px rgba(0, 0, 0, 0.4);
@@ -828,8 +828,11 @@ button {
 }
 
 .primary {
-  background: var(--color-pastel-orange-strong);
-  color: var(--white);
+  /* Le texte sur principal est un JETON, pas du blanc en dur : en sombre le
+     principal est clair (#93CBC9) et le texte doit etre sombre. Blanc en dur
+     donnait 1,41 sur #B9E1DF. */
+  background: var(--v8-principal);
+  color: var(--v8-texte-sur-principal);
   box-shadow: 0 10px 20px rgba(244, 122, 90, 0.18);
 }
 
@@ -849,8 +852,10 @@ button {
 }
 
 .ok {
-  background: linear-gradient(135deg, var(--success), var(--success-dark));
-  color: var(--white);
+  /* Charte : le succes est le vert PRINCIPAL, il n'y a pas de second vert.
+     L'ancien degrade --success (#58c89a en sombre) portait du blanc a 1,63. */
+  background: var(--v8-principal);
+  color: var(--v8-texte-sur-principal);
   border-color: rgba(23, 109, 81, 0.35);
   box-shadow: 0 10px 20px rgba(39, 153, 111, 0.18);
 }
@@ -920,8 +925,11 @@ label {
   min-height: 34px;
   padding: 6px 10px;
   border-radius: 999px;
-  background: #edf8f4;
-  color: var(--color-brand-teal);
+  /* Fond de badge froid de la charte, sensible au mode ; texte en principal
+     appuye : 7,04 en clair. L'ancien #edf8f4 en dur restait CLAIR en sombre,
+     et le texte teal clair y donnait 1,63. */
+  background: var(--v8-vert-clair);
+  color: var(--v8-principal-appuye);
   border: 1px solid rgba(14, 107, 99, 0.12);
   font-size: 14px;
   font-weight: 800;
@@ -1056,9 +1064,11 @@ label {
 }
 
 .active-filter {
-  background: var(--color-pastel-orange-strong);
-  color: var(--white);
-  border-color: var(--color-pastel-orange-strong);
+  /* Filtre actif = principal + texte-sur-principal, comme tout etat actif.
+     Le blanc en dur tombait a 1,41 en sombre sur le principal appuye clair. */
+  background: var(--v8-principal);
+  color: var(--v8-texte-sur-principal);
+  border-color: var(--v8-principal);
 }
 
 .delivery-date-inline {
@@ -1642,7 +1652,7 @@ label {
 
 .stat-tile small,
 .stat-tile span {
-  color: var(--muted);
+  color: var(--v8-texte);   /* le secondaire donnait 4,45 sur le fond de tuile, hors des trois surfaces que la charte lui garantit */
   font-weight: 800;
 }
 
@@ -1699,7 +1709,9 @@ label {
 
 .bar-item small {
   font-size: 11px;
-  color: var(--muted);
+  /* Le secondaire donnait 4,45 sur le fond de graphique, hors des trois
+     surfaces que la charte lui garantit. A 11 px, on prend le texte courant. */
+  color: var(--v8-texte);
   text-align: center;
 }
 
@@ -1934,6 +1946,19 @@ label {
 /* En mode sombre, on inverse les couleurs des tuiles OSM pour un rendu lisible
    la nuit / interieur faible lumiere. Filtre applique seulement aux tuiles, pas
    aux markers (preserves) ni controles (preserves via :not). */
+/* L'attribution OSM n'avait aucun style a nous : en sombre, le lien bleu de
+   leaflet.css tombait a 3,14 sur un fond grise. Jetons V8, sensibles au mode :
+   principal sur surface, 6,01 en clair, 9,4 en sombre. */
+.leaflet-container .leaflet-control-attribution {
+  /* .leaflet-container en tete : leaflet.css ecrit son selecteur ainsi, et une
+     regle moins specifique ne le battrait pas, meme placee apres. */
+  background: var(--v8-surface);
+  color: var(--v8-texte-secondaire);
+}
+.leaflet-container .leaflet-control-attribution a {
+  color: var(--v8-principal);
+}
+
 .leaflet-tile-pane {
   filter: var(--leaflet-tile-filter, none);
 }
@@ -3658,8 +3683,10 @@ label {
 }
 
 .bdc-view-toggle .bdc-view-btn.active-filter {
-  background: var(--color-pastel-orange);
-  color: var(--text-strong, #fff);
+  /* Etait l'accent sous du blanc (2,04 en sombre). L'accent n'est jamais un
+     fond de texte : principal + texte-sur-principal. */
+  background: var(--v8-principal);
+  color: var(--v8-texte-sur-principal);
 }
 
 .bdc-export-btn {
@@ -6386,15 +6413,20 @@ html[data-color-scheme="light"] body,
   padding: 0 7px;
   place-items: center;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
-  color: rgba(255, 255, 255, 0.82);
+  /* Pastille SOMBRE sous du blanc PLEIN. L'ancienne (blanc 14 % sous blanc
+     82 %) composait #5D8485 sous un texte lui-meme delave : 4,11, sous le
+     seuil. Assombrir la pastille plutot que l'eclaircir : ~7,3. */
+  background: rgba(0, 0, 0, 0.16);
+  color: var(--v8-texte-sur-principal);
   font-size: 0.72rem;
   font-weight: 900;
 }
 
 :root[data-color-scheme="light"] .nav-section.has-active-tab .nav-section-count {
-  background: var(--neo-coral);
-  color: #ffffff;
+  /* Etait orange avec du blanc : 2,34. La charte interdit l'orange sous du
+     texte. Pilule surface + principal, comme la navigation active : 6,01. */
+  background: var(--v8-surface);
+  color: var(--v8-principal);
 }
 
 :root[data-color-scheme="light"] .nav-section-items {
@@ -6701,9 +6733,11 @@ html[data-color-scheme="light"] body,
 
 :root[data-color-scheme="light"] .topbar-actions .button.secondary {
   min-height: 46px;
-  background: var(--neo-coral);
-  border-color: var(--neo-coral);
-  color: #ffffff;
+  /* Etait orange avec du blanc : 2,34, interdit par la charte. Surface +
+     principal, comme "A jour" a cote : 6,01. */
+  background: var(--v8-surface);
+  border-color: var(--v8-surface);
+  color: var(--v8-principal);
   box-shadow: 0 16px 30px rgba(143, 70, 58, 0.26);
 }
 
@@ -7653,4 +7687,93 @@ html[data-color-scheme="light"] body,
   color: var(--text-soft);
   font-size: 13px;
   line-height: 1.35;
+}
+
+/* ============================================================================
+ * JETONS V8 — le socle de la phase 4
+ *
+ * Une seule couche, 16 roles en clair et 16 en sombre, tires de la charte
+ * design/DESIGN.md §2. Les trois generations empilees (--color-, --palette-,
+ * --neo-) et les 141 couleurs litterales de cette feuille ont vocation a etre
+ * REMPLACEES par ces jetons, marche par marche. Tant qu'un composant n'est pas
+ * porte, il garde ses anciennes valeurs : ce bloc est ADDITIF et ne change
+ * rien a l'ecran par lui-meme.
+ *
+ * Chaque contraste cite ici est RECALCULE par test/jetons-v8.test.js, qui lit
+ * la charte ET cette feuille, et echoue si l'une des deux derive. La charte
+ * reste la source ; ce bloc en est la copie executable.
+ *
+ * Nommage en francais, prefixe --v8-, pour qu'un grep distingue d'un coup
+ * l'ancien du nouveau pendant la migration.
+ * ========================================================================== */
+:root {
+  /* — Marque et actions — */
+  --v8-principal: #386B6D;            /* actions, titres, navigation active, corps des marqueurs. Blanc dessus : 6,01 */
+  --v8-principal-appuye: #2A5254;     /* survol ; texte sur vert d'eau / peche claire / vert clair : 7,04 */
+  --v8-accent: #EF9177;               /* FORME uniquement : barre, halo, point d'etat. Jamais texte, jamais fond de texte (2,34 sur blanc) */
+
+  /* — Surfaces — */
+  --v8-fond: #FBF7F5;                 /* fond de page */
+  --v8-surface: #FFFFFF;              /* cartes, panneaux, pilule de navigation active */
+  --v8-surface-haute: #FFFFFF;        /* barres, sheets, survol : en clair, la meme surface elevee par l'ombre */
+  --v8-surface-basse: #F5F1EE;        /* champs, pistes de progression. Le secondaire y tient 4,56 */
+  --v8-squelette: #EDE6E2;            /* blocs de chargement. Jamais de texte dessus */
+  --v8-vert-eau: #A1C4C0;             /* surfaces secondaires, icones inactives sur vert. Pas de texte : 3,20 avec le principal */
+  --v8-peche: #EDC8C3;                /* fonds doux et formes organiques. Pas de badge : 3,91 */
+  --v8-peche-claire: #F7E4E0;         /* fond de badge tiede, texte en principal-appuye */
+  --v8-vert-clair: #DDEBE9;           /* fond de badge froid, texte en principal-appuye */
+
+  /* — Texte — */
+  --v8-texte: #386B6D;                /* texte courant : le vert profond est aussi la couleur du texte. 6,01 sur blanc */
+  --v8-texte-secondaire: #4F7477;     /* sous-titres, metadonnees. 5,13 blanc · 4,81 fond · 4,56 surface basse */
+  --v8-texte-sur-principal: #FFFFFF;
+  --v8-texte-secondaire-sur-principal: #D6E5E3;  /* 4,63 — 0,13 de marge, RIEN ne se pose dessous */
+
+  /* — Etats — */
+  --v8-alerte: #C02B0A;               /* texte et icones d'alerte seulement. Voyage TOUJOURS avec un mot ou une icone */
+}
+
+/* Mode sombre : 9 valeurs de la charte, 7 completees par mesure le 17/09.
+ * Ecrit dans les DEUX blocs sombres, comme le reste de la feuille (voir
+ * CLAUDE.md, "garder les 3 synchronises" ; themes.spec.js le verifie). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) {
+    --v8-principal: #93CBC9;            /* le vert profond eclairci. Texte sombre dessus : 10,22 */
+    --v8-principal-appuye: #B9E1DF;     /* 13,10 sur le fond */
+    --v8-accent: #F5A08F;               /* forme uniquement. 9,06 sur le fond, 1,55 avec l'alerte : indiscernables SANS mot */
+    --v8-fond: #0D1518;                 /* teinte vert, pas gris neutre */
+    --v8-surface: #132224;
+    --v8-surface-haute: #182E31;        /* barres, sheets, survol ; texte 12,42, secondaire 7,67 */
+    --v8-surface-basse: #101D20;        /* champs ; texte 15,02, secondaire 9,28 */
+    --v8-squelette: #1C3033;
+    --v8-vert-eau: #243F42;             /* texte dessus : 9,81 */
+    --v8-peche: #3B2724;                /* texte dessus : 12,19 */
+    --v8-peche-claire: #4A302B;         /* badge tiede ; texte 10,46 */
+    --v8-vert-clair: #172B2D;           /* badge froid ; texte 12,89 */
+    --v8-texte: #E6F2EE;                /* 16,09 fond · 14,27 surface · 12,42 surface haute */
+    --v8-texte-secondaire: #A8C4BE;     /* 9,94 fond · 8,82 surface · 7,67 surface haute */
+    --v8-texte-sur-principal: #0D1518;
+    --v8-texte-secondaire-sur-principal: #0D1518;
+    --v8-alerte: #F85E3C;               /* le rouge d'alerte, teinte gardee (11 deg), eclairci jusqu'a tenir 4,5 sur la surface la plus dure : 5,85 fond · 5,19 surface · 4,52 haute */
+  }
+}
+
+:root[data-color-scheme="dark"] {
+  --v8-principal: #93CBC9;
+  --v8-principal-appuye: #B9E1DF;
+  --v8-accent: #F5A08F;
+  --v8-fond: #0D1518;
+  --v8-surface: #132224;
+  --v8-surface-haute: #182E31;
+  --v8-surface-basse: #101D20;
+  --v8-squelette: #1C3033;
+  --v8-vert-eau: #243F42;
+  --v8-peche: #3B2724;
+  --v8-peche-claire: #4A302B;
+  --v8-vert-clair: #172B2D;
+  --v8-texte: #E6F2EE;
+  --v8-texte-secondaire: #A8C4BE;
+  --v8-texte-sur-principal: #0D1518;
+  --v8-texte-secondaire-sur-principal: #0D1518;
+  --v8-alerte: #F85E3C;
 }

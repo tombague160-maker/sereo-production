@@ -57,7 +57,7 @@
   try {
     var meta = document.querySelector('meta[name="theme-color"]');
     if (meta) {
-      meta.setAttribute("content", resolved === "dark" ? "#0d1518" : "#cfe9e1");
+      meta.setAttribute("content", resolved === "dark" ? "#0D1518" : "#FBF7F5");
     }
   } catch (e) {
     /* DOM pas pret : ignore */

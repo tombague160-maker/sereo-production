@@ -3101,7 +3101,8 @@ function applyThemeVariables(theme) {
 // pour refleter le mode actif. Utilise la couleur de fond.
 function updateMetaThemeColor() {
   const theme = getActiveTheme();
-  const color = theme.metaColor || (getEffectiveColorScheme() === "dark" ? "#0d1518" : "#f7f7f6");
+  // Couleur de la barre du navigateur : le FOND de la charte V8, dans chaque mode.
+  const color = theme.metaColor || (getEffectiveColorScheme() === "dark" ? "#0D1518" : "#FBF7F5");
   // On force une seule meta sans media query (override les 2 du HTML)
   let tag = document.querySelector('meta[name="theme-color"]:not([media])');
   if (!tag) {
