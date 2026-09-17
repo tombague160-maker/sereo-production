@@ -26,7 +26,6 @@ import {
   DEFAULT_BRAND_IMAGE_DARK,
   DEFAULT_BRAND_CACHE_VERSION,
   MAX_BRAND_IMAGE_SIZE,
-  pastelThemes,
   applicationThemes
 } from "./config/themes.js";
 import { mainTabs, MOBILE_OVERFLOW_TABS, titles } from "./config/tabs.js";
@@ -109,8 +108,6 @@ if ("scrollRestoration" in history) {
 
 
 
-Object.keys(pastelThemes).forEach(themeId => delete pastelThemes[themeId]);
-Object.assign(pastelThemes, applicationThemes);
 
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -467,8 +464,6 @@ function bindUi() {
       showTab(actionButton.dataset.tab);
       closeMoreMenu();
     }
-    if (action === "select-theme") applyTheme(actionButton.dataset.themeId, { notifyUser: true });
-    if (action === "reset-theme") applyTheme("sereo", { notifyUser: true });
     if (action === "select-color-scheme") applyColorScheme(actionButton.dataset.colorScheme, { notifyUser: true });
     if (action === "reset-brand-image") resetBrandImage();
     if (action === "start-preparation") runAction(actionButton, "Démarrage...", () => startPreparation(actionButton.dataset.orderId));
@@ -3074,11 +3069,12 @@ function getEffectiveColorScheme() {
 }
 
 function getActiveTheme() {
-  return pastelThemes[activeThemeId] || pastelThemes.sereo;
+  return applicationThemes[activeThemeId] || applicationThemes.sereo;
 }
 
-function isVisuallyDarkTheme(theme = getActiveTheme()) {
-  return theme.id === "noir" || getEffectiveColorScheme() === "dark";
+// Le theme "Noir" ayant ete retire, seul le mode clair/sombre decide.
+function isVisuallyDarkTheme() {
+  return getEffectiveColorScheme() === "dark";
 }
 
 // Applique les variables d'un theme en respectant le mode actif (clair / sombre).
@@ -3146,7 +3142,6 @@ function applyColorScheme(scheme, options = {}) {
   }
 
   renderColorSchemeToggle();
-  renderThemePalettes();
 }
 
 // Re-evalue le mode si l'OS change de prefers-color-scheme et qu'on est en "auto"
@@ -3158,7 +3153,6 @@ function watchSystemColorScheme() {
       applyThemeVariables(theme);
       updateMetaThemeColor();
       applyBrandImage(activeBrandImage);
-      renderThemePalettes();
     }
   };
   if (mq.addEventListener) mq.addEventListener("change", handler);
@@ -3167,7 +3161,7 @@ function watchSystemColorScheme() {
 
 function applyTheme(themeId, options = {}) {
   const { persist = true, notifyUser = false } = options;
-  const theme = pastelThemes[themeId] || pastelThemes.sereo;
+  const theme = applicationThemes[themeId] || applicationThemes.sereo;
 
   activeThemeId = theme.id;
   applyThemeVariables(theme);
@@ -3184,7 +3178,6 @@ function applyTheme(themeId, options = {}) {
     notify(`Thème "${theme.name}" appliqué.`, "success");
   }
 
-  renderThemePalettes();
 }
 
 // Met a jour les boutons Auto/Clair/Sombre pour refleter le mode actif.
@@ -3195,33 +3188,6 @@ function renderColorSchemeToggle() {
     const isActive = btn.dataset.colorScheme === activeColorScheme;
     btn.setAttribute("aria-pressed", isActive ? "true" : "false");
   });
-}
-
-function renderThemePalettes() {
-  const container = document.getElementById("themePaletteList");
-  if (!container) return;
-
-  container.innerHTML = Object.values(pastelThemes).map(theme => {
-    const isActive = theme.id === activeThemeId;
-    const preview = theme.preview || {};
-    return `
-      <button class="theme-card ${isActive ? "active" : ""}" type="button" data-action="select-theme" data-theme-id="${escapeAttribute(theme.id)}" aria-pressed="${isActive ? "true" : "false"}">
-        <span class="theme-card-header">
-          <span class="theme-card-title">${escapeHtml(theme.name)}</span>
-          <span class="theme-card-status">${isActive ? "Actif" : "Appliquer"}</span>
-        </span>
-        <span class="theme-card-hint">${escapeHtml(theme.hint)}</span>
-        <span class="theme-card-preview" aria-hidden="true" style="--preview-bg:${escapeAttribute(preview.bg || theme.swatches[0])};--preview-sidebar:${escapeAttribute(preview.sidebar || theme.swatches[0])};--preview-card:${escapeAttribute(preview.card || "#ffffff")};--preview-accent:${escapeAttribute(preview.accent || theme.swatches[1] || theme.swatches[0])}">
-          <i></i>
-          <b></b>
-          <em></em>
-        </span>
-        <span class="theme-card-swatches" aria-hidden="true">
-          ${theme.swatches.map(color => `<i style="--swatch:${escapeAttribute(color)}"></i>`).join("")}
-        </span>
-      </button>
-    `;
-  }).join("");
 }
 
 function handleBrandImageImport(input) {
@@ -3427,7 +3393,6 @@ async function runDiagnosticSuspiciousDates() {
 }
 
 function renderSettings() {
-  renderThemePalettes();
   updateBrandImageStatus();
   renderTourneeSettings();
 

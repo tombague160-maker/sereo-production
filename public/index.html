@@ -58,7 +58,7 @@
 
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="stylesheet" href="/vendor/leaflet/leaflet.css" />
-  <link rel="stylesheet" href="/css/style.css?v=20260702-themes" />
+  <link rel="stylesheet" href="/css/style.css?v=20260917-palette-unique" />
 </head>
 
 <body>
@@ -1034,7 +1034,7 @@
           <div class="panel">
             <div class="panel-heading">
               <h3>Personnalisation de l'interface</h3>
-              <span class="muted">Thème de l'application</span>
+              <span class="muted">Mode d'affichage et logo</span>
             </div>
             <div class="brand-preview">
               <img id="brandPreviewImage" src="/brand/sereo-logo.svg?v=20260701" alt="Logo SEREO" data-brand-preview />
@@ -1061,15 +1061,6 @@
                     <span class="color-scheme-hint">Repos visuel, soir</span>
                   </button>
                 </div>
-              </div>
-
-              <div class="settings-block">
-                <div>
-                  <h4>Thème de l'application</h4>
-                  <p class="muted">Choisis un style visuel. Le thème s'applique immédiatement et reste sauvegardé.</p>
-                </div>
-                <div id="themePaletteList" class="theme-palette-grid" aria-label="Thèmes de l'application"></div>
-                <button class="button secondary compact" type="button" data-action="reset-theme">Revenir au thème Vert</button>
               </div>
 
               <div class="settings-block">
@@ -1310,6 +1301,6 @@
        Leaflet reste un script classique et s'execute avant : `L` est defini
        au moment ou le module tourne.
        La CSP `script-src 'self'` couvre les modules sans modification. -->
-  <script type="module" src="/js/app.js?v=20260826-esm"></script>
+  <script type="module" src="/js/app.js?v=20260917-palette-unique"></script>
 </body>
 </html>
