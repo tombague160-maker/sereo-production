@@ -1,4 +1,4 @@
-# CI Sereo : valide les PRs (npm run check + npm test) avant qu'elles soient mergeables.
+# CI Sereo : valide les PRs (npm run check + npm test + les e2e) avant merge.
 #
 # Sans ce workflow, un commit cassé pouvait passer en main, etre tagge par
 # release-please et auto-deploye par sereo-updater 15 min plus tard.
@@ -34,3 +34,53 @@ jobs:
 
       - name: Run tests (node --test)
         run: npm test
+
+  # Les e2e tournent dans un job SEPARE, et c'est delibere : ils demarrent un
+  # vrai serveur et pilotent un navigateur, donc ils echouent pour des raisons
+  # que les tests unitaires ne connaissent pas. Melanges, un e2e instable
+  # rendrait illisible le signal des 348 unitaires. Separes, on voit lequel
+  # des deux parle.
+  #
+  # Sans ce job, les tests de non-regression visuels n'auraient jamais tourne
+  # ailleurs que sur le poste de celui qui les a ecrits -- c'est-a-dire nulle
+  # part. Deux d'entre eux gardent des defauts mesures et corriges le 17/09 :
+  # l'onglet actif illisible en mode sombre (4,42:1) et l'accordeon de la barre
+  # laterale qui ne repliait rien en sombre.
+  e2e:
+    name: Tests e2e (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Seul Chromium : c'est le seul projet declare dans playwright.config.js.
+      # --with-deps installe les bibliotheques systeme que le navigateur exige
+      # sur un runner nu.
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # Le serveur de test est demarre par playwright.config.js (webServer),
+      # sur le port 3100, avec l'auth desactivee et une base SQLite dediee.
+      - name: Run e2e (playwright)
+        run: npm run test:e2e
+
+      # En cas d'echec, la trace du premier reessai et les captures permettent
+      # de comprendre sans rejouer localement.
+      - name: Upload traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
