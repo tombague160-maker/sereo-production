@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.23.0](https://github.com/tombague160-maker/sereo-production/compare/v1.22.0...v1.23.0) (2026-09-17)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **comptes:** API d'administration des comptes et endpoint /api/me ([8887159](https://github.com/tombague160-maker/sereo-production/commit/8887159ae37e98d55e6bdc92fa7b81ca274c3fb9))
+* **comptes:** ecran d'administration des comptes dans les Parametres ([75c173c](https://github.com/tombague160-maker/sereo-production/commit/75c173c4b2f15b7ea24133943c8009afdeb652ea))
+* **geocodage:** declenchement automatique apres import, coupable par variable ([0db2ac4](https://github.com/tombague160-maker/sereo-production/commit/0db2ac43eb88942eaacfa47a8a47ee2951329970))
+* **geocodage:** geocodage automatique des adresses via la Base Adresse Nationale ([93d341d](https://github.com/tombague160-maker/sereo-production/commit/93d341d06d56d1158747cf1130c7b199f9bb338d))
+* **ui:** une seule palette, et les deux defauts que sa mesure a reveles ([706713c](https://github.com/tombague160-maker/sereo-production/commit/706713c095c59ec2b6d2822f53330b2c0bd75659))
+
+
+### 📚 Documentation
+
+* **design:** clore l'axe des icones, et enregistrer le piege de la cascade ([be84a6b](https://github.com/tombague160-maker/sereo-production/commit/be84a6be6666a4dfe66a6fc9d5b3f2e5f68eb393))
+* **v8:** brief Claude Design, charte DESIGN.md et mise a jour de la passation ([7fc6990](https://github.com/tombague160-maker/sereo-production/commit/7fc6990b6977415209b09b8edb4206cd7c531a0b))
+* **v8:** dossier de passation pour reprendre le chantier ([656b556](https://github.com/tombague160-maker/sereo-production/commit/656b5562f271d85819c8b845997a2175e860e7f4))
+* **v8:** Fable 5.1 est bien selectionnable dans Claude Design, un seul compte pour l'instant ([d7ff858](https://github.com/tombague160-maker/sereo-production/commit/d7ff858345d2ec89d5b4114e863f980b8232858d))
+* **v8:** prompt de reprise pret a coller dans une nouvelle conversation ([980e036](https://github.com/tombague160-maker/sereo-production/commit/980e036c55ca8dbe90cfe233afc0789be1832bcf))
+* **v8:** prompt de suite en un seul bloc, avec points de controle ([1f8814d](https://github.com/tombague160-maker/sereo-production/commit/1f8814d58a1022ac9994af275598978f230d7198))
+* **v8:** versionner la source de la feuille de route, comme les maquettes ([c758291](https://github.com/tombague160-maker/sereo-production/commit/c758291196ea02b68959f0af0e972bf9348f73f4))
+
 ## [1.22.0](https://github.com/tombague160-maker/sereo-production/compare/v1.21.0...v1.22.0) (2026-08-26)
 
 
