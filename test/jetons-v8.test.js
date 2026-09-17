@@ -15,8 +15,23 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const racine = path.join(__dirname, "..");
-const charte = fs.readFileSync(path.join(racine, "design", "DESIGN.md"), "utf8");
-const css = fs.readFileSync(path.join(racine, "public", "css", "style.css"), "utf8");
+// Fins de ligne NORMALISEES a la lecture.
+//
+// Git convertit en CRLF a la sortie de branche sur Windows. Un marqueur ecrit
+// avec un saut de ligne simple ne mord alors plus, et ce test echoue au
+// CHARGEMENT du module -- avant meme d annoncer un cas. Il a rendu
+// "0 pass, 1 fail" apres un simple git checkout, sans qu une ligne de CSS ait
+// bouge : le fichier n avait pas change, sa REPRESENTATION si.
+//
+// Les retours chariot sont retires par String.fromCharCode(13) et non par une
+// sequence d echappement : ce fichier a ete casse deux fois par des scripts ou
+// l echappement se perdait en route, produisant un motif qui ne correspondait
+// a rien. Une constante nommee ne peut pas se perdre.
+const CR = String.fromCharCode(13);
+const lire = fichier => fs.readFileSync(fichier, "utf8").split(CR).join("");
+
+const charte = lire(path.join(racine, "design", "DESIGN.md"));
+const css = lire(path.join(racine, "public", "css", "style.css"));
 
 // --- WCAG ------------------------------------------------------------------
 
