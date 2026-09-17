@@ -209,7 +209,43 @@ maquette oublie. Les deux coûtent cher si personne ne les nomme avant le chiffr
 | Les cibles tactiles n'ont jamais été mesurées | axe neuf, ouvert le 16/09 | **41 contrôles sous le seuil** sur l'export 6. Deux familles : les liens texte nus (20-21 px de haut — « Catalogue », « Tout cocher », « Ajouter », « Tous les abonnements ») qui ratent même le plancher WCAG 2.2 AA de 24 px ; et les contrôles à 32-36 px (bouton d'effacement, « Commander », sélecteurs de tri, « Annuler » du toast) qui ratent notre 44. Le « Plus » de la barre basse fait **35 px de large** sur dix écrans : l'item est dimensionné par son libellé, et « Plus » est court |
 | `cursor` est une propriété **héritée** | piège de mesure | Juger chaque élément qui rend `cursor: pointer` compte chaque mot d'une ligne cliquable : 557 faux défauts au lieu de 41. On ne juge que l'élément le plus extérieur dont le parent ne porte pas le pointeur |
 | Les 48 planches, mesurées | **quatre axes, trois clos** | contraste : **1983 textes**, 0 défaut réel *(12 logotypes exemptés WCAG 1.4.3, 1 ligne à 3 % des glyphes sous la résolution)* · cibles tactiles : **531**, 0 sous le seuil · texte coupé ou débordant : **2192 textes**, 0 · couleurs : 28, aucune intruse |
-| ⛔ Le contraste des ICÔNES n'est PAS mesuré | axe ouvert, et il faut le dire | L'instrument retient **574 icônes** et n'en mesure que **35** — les 539 autres rendent zéro pixel de différence quand on les masque, et je n'ai pas trouvé pourquoi. J'ai cru au défilement de la capture : **testé, réfuté**. Un zéro rendu sur 6 % d'un ensemble ne vaut rien. Les 8 icônes *seules* mesurées passent 3:1 ; ça ne dit rien des autres |
+| ~~Le contraste des ICÔNES~~ — **clos le 17/09** | fermé par l'arithmétique, pas par le rendu | Mon instrument photographique plafonnait à 35 icônes sur 574 ; l'axe a été fermé par le calcul, depuis les couleurs déclarées de chaque SVG, en exemptant (WCAG 1.4.11) toute icône **doublée d'un mot**. Dix classes soumises passent, de **4,56** à **10,22**. **Deux tombaient**, et ce sont des *contours de composant* — donc invisibles à une sonde à glyphes, faute de glyphe dessous : le marqueur « à venir » (`#A1C4C0` sur carte, **1,62:1**) et les cases non cochées (`#A1C4C0` sur fond **1,77:1** ; `#243F42` sur `#0D1518` en sombre **1,64:1**). Corrigées en `#386B6D` / `#4F7477` et `#A8C4BE`, **13 occurrences**. Contre-épreuve : la luminance du fond de carte, déduite d'un seul de ces chiffres, prédit l'autre à **0,004** près |
+
+### ⛔ Le piège qui a produit un chiffre faux — mesuré le 17/09 dans le code
+
+**Une charte se vérifie sur des pixels rendus, jamais sur des couleurs déclarées.**
+J'ai lu `color: var(--color-pastel-orange-strong)` dans la règle `.tab`, composé à
+la main les couches translucides au-dessus, et annoncé **1,36:1** sur la barre de
+navigation. C'était faux. Le navigateur a montré **neuf règles** en concurrence sur
+`.tab.active`, empilées par trois refontes successives ; la gagnante, scopée
+`:root[data-color-scheme="light"]`, rendait déjà **7,77:1**.
+
+| | Ce que disait l'arithmétique | Ce que rendait l'écran |
+|---|---|---|
+| Onglet actif, clair | 1,95:1 ❌ | **7,77:1** ✅ |
+| Onglet actif, sombre | 3,74:1 ❌ | **4,42:1** ❌ *(défaut réel, mais marginal)* |
+
+Chaque règle prise isolément est juste. C'est l'**empilement** qui décide, et aucune
+relecture ne le voit : il faut demander au moteur `el.matches(sel)` sur chaque règle
+de chaque feuille, ou photographier. Corollaire pour la phase 4 :
+
+> **Un ratio calculé depuis le CSS est un indice. Seul un ratio lu sous les glyphes
+> est une mesure.** Les deux se trompent dans des directions opposées — l'arithmétique
+> rate la cascade, la sonde rate ce qui n'a pas de glyphe (contours, cases vides,
+> marqueurs). **Il faut les deux, et elles ne se remplacent pas.**
+
+### Deux défauts soldés dans le code le 17/09
+
+| Défaut | Mesure | Remède |
+|---|---|---|
+| Onglet actif illisible en mode sombre | **4,42:1** — orange `#f5a08f` sur un dégradé orange sombre | Fond rendu **opaque** (`var(--surface)`, plus aucun composite) et libellé en teal : **11,50:1**. L'orange n'est pas perdu, il devient la **barre** d'onglet actif — une forme, ce que la charte a toujours autorisé |
+| L'accordéon de la barre latérale ne repliait rien en mode sombre | au clic : clair 248 px → 0 ✅ · sombre 250 px → **250** ❌ | Les quatre règles de repli étaient toutes préfixées `:root[data-color-scheme="light"]`. Le repli est **structurel**, pas thématique : deux règles sans portée de thème ont été ajoutées. Le cas grave n'était pas visuel — `aria-expanded="false"` annonçait un repli qui n'avait pas eu lieu |
+
+**Et les palettes sont tombées de 5 à 1.** Cinq combinaisons palette × mode sur huit
+écrivaient du texte de navigation sous 4,5:1 d'après leurs couleurs déclarées. Tenir
+dix palettes conformes coûtait dix fois la mesure, pour un choix que personne n'avait
+demandé. Le seul axe d'apparence restant est **clair / sombre**, et il est désormais
+couvert par deux tests e2e qui échouent l'un et l'autre si le défaut revient.
 
 ## 10. Guide pour l'agent
 
