@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.28.0](https://github.com/tombague160-maker/sereo-production/compare/v1.27.0...v1.28.0) (2026-09-18)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **v8:** phase 4, marche 4b -- le squelette de chargement que la charte prevoyait ([2ecc672](https://github.com/tombague160-maker/sereo-production/commit/2ecc672ca560e2eef61f75b39d70260b48e73469))
+
 ## [1.27.0](https://github.com/tombague160-maker/sereo-production/compare/v1.26.2...v1.27.0) (2026-09-18)
 
 
