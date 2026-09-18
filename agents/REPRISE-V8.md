@@ -222,7 +222,11 @@ Phase 4  Refonte des écrans + abonnements    ← EN COURS depuis le 17/09.
              4b ✅ SQUELETTE DE CHARGEMENT : le jeton --v8-squelette de la charte n'était branché nulle part.
                     13 zones, silhouettes liste et colonnes. 6 tests e2e, vérifiés mordants
              4c ✅ ÉTATS VIDES : 8 chaînes ré-accentuées, 7 offrent désormais leur action. 5 tests, vérifiés mordants
-             4d ⬜ mise en page des listes selon les planches
+             4d ✅ BADGES à 24 px (charte) : 12 mesurés à 29-33, tous décoratifs donc réductibles sans toucher une cible.
+                    2 tests e2e, dont « un statut ne voyage jamais par la couleur seule »
+             4e ⬜ HAUTEUR DES LIGNES DE LISTE (charte : 64-72 px) — NON VALIDÉE : les listes sont vides dans
+                    l'environnement de test, POST /api/clients n'existe pas (les clients viennent des imports Excel).
+                    Deux lignes mesurées sur quinze onglets, à 83 px. Il faut un import de données pour trancher
            Marche 5 ⬜ les 7 inventions de la planche 15, chacune avec son travail serveur
            PR 96 (brouillon) à rebaser par son auteur : 5 fichiers en conflit mesurés, et main a bougé de 4 versions
 Phase 5  Cartographie et trafic réel

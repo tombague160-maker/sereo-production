@@ -8618,3 +8618,28 @@ html[data-color-scheme="light"] body,
   min-height: 44px;   /* notre charte, y compris sur desktop : c'est une action isolee */
   text-decoration: none;
 }
+
+/* ============================================================================
+ * Badges de statut : 24 px, comme la charte le dit.
+ *
+ * Mesure du 18/09 sur les 15 onglets : 12 badges, tous a 29 ou 33 px la ou la
+ * charte prescrit une pilule de 24. `.pill` portait min-height 28,
+ * `.status-chip` 34.
+ *
+ * Verifie AVANT de reduire : les douze sont DECORATIFS -- aucun n'est un
+ * bouton, un lien, ni un descendant de l'un des deux, et aucun ne calcule
+ * cursor:pointer. Les rabaisser ne touche donc aucune cible tactile. Si un
+ * badge devenait cliquable un jour, il sortirait de cette regle par son
+ * balisage, et le balayage des cibles le dirait.
+ *
+ * Le padding vertical descend avec la hauteur : le garder a 6 px annulerait la
+ * reduction, min-height n'etant qu'un plancher.
+ * ========================================================================== */
+:root[data-color-scheme] .pill,
+:root[data-color-scheme] .status-chip,
+.pill,
+.status-chip {
+  min-height: 24px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
