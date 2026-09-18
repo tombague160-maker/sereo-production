@@ -72,11 +72,31 @@ export function squelette(lignes = 3, forme = "liste") {
   `;
 }
 
-export function emptyState(title, message) {
+/**
+ * Etat vide, avec une action facultative.
+ *
+ * Mesure du 18/09 : 13 des 20 etats vides NOMMAIENT une action -- "Importe le
+ * stock", "Cree une fiche", "Importe les dossiers du jour" -- sans l'offrir.
+ * Le message disait quoi faire, et laissait l'utilisateur chercher ou.
+ *
+ * L'action est FACULTATIVE, et le troisieme argument garde l'appel a deux
+ * arguments valide : les sept etats vides qui ne menent nulle part ("Les
+ * ajustements manuels apparaitront ici") n'ont rien a offrir, et leur mettre
+ * un bouton vers un endroit quelconque serait pire que rien.
+ *
+ * @param {string} title
+ * @param {string} message
+ * @param {{libelle: string, onglet: string}} [action]  destination, par ancre
+ */
+export function emptyState(title, message, action) {
+  const bouton = action
+    ? `<a class="button primary empty-state-action" href="#${escapeAttribute(action.onglet)}">${escapeHtml(action.libelle)}</a>`
+    : "";
   return `
     <div class="empty-state">
       <h4>${escapeHtml(title)}</h4>
       <p>${escapeHtml(message)}</p>
+      ${bouton}
     </div>
   `;
 }
