@@ -109,7 +109,9 @@ const CORRESPONDANCE = {
   "Texte secondaire sur principal": "--v8-texte-secondaire-sur-principal",
   "Alerte": "--v8-alerte",
   "Avertissement": "--v8-avertissement",
-  "Fond d'avertissement": "--v8-avertissement-fond"
+  "Fond d'avertissement": "--v8-avertissement-fond",
+  "Anneau de focus": "--v8-focus",
+  "Second ton du focus": "--v8-focus-halo"
 };
 
 // --- Tests -----------------------------------------------------------------
@@ -121,10 +123,13 @@ test("jetons — la charte est lisible et porte bien ses deux palettes", () => {
   assert.equal(charteSombre.get("Principal"), "#93CBC9");
 });
 
-test("jetons — le CSS porte 19 jetons, dans chacun des trois blocs", () => {
-  assert.equal(cssClair.size, 19, `clair : ${[...cssClair.keys()].join(", ")}`);
-  assert.equal(cssSombre.size, 19, `sombre : ${[...cssSombre.keys()].join(", ")}`);
-  assert.equal(cssSombreMedia.size, 19, `sombre @media : ${[...cssSombreMedia.keys()].join(", ")}`);
+// 21 depuis le 18/09 : l'anneau de focus clavier et son second ton. Le compte
+// est EXACT et non un minimum -- un jeton ajoute sans etre porte a la charte
+// doit faire tomber ce cas, c'est toute sa raison d'etre.
+test("jetons — le CSS porte 21 jetons, dans chacun des trois blocs", () => {
+  assert.equal(cssClair.size, 21, `clair : ${[...cssClair.keys()].join(", ")}`);
+  assert.equal(cssSombre.size, 21, `sombre : ${[...cssSombre.keys()].join(", ")}`);
+  assert.equal(cssSombreMedia.size, 21, `sombre @media : ${[...cssSombreMedia.keys()].join(", ")}`);
 });
 
 test("jetons — les deux blocs sombres sont identiques (regle des 3 blocs)", () => {

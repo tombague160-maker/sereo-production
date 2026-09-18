@@ -4732,7 +4732,9 @@ html[data-color-scheme="light"] body {
 :root[data-color-scheme="light"] textarea:focus-visible,
 :root[data-color-scheme="light"] button:focus-visible,
 :root[data-color-scheme="light"] .client-button:focus-visible {
-  outline: 3px solid #0e6b63;
+  /* Le jeton, et non une couleur en dur : #0e6b63 rendait 1,19 sur le vert
+     de la barre laterale, mesure sur les pixels au focus. */
+  outline: 3px solid var(--v8-focus);
   outline-offset: 2px;
   border-color: rgba(59, 115, 116, 0.5);
 }
@@ -5470,7 +5472,24 @@ html[data-color-scheme="light"] body {
   --shadow-card-hover: 0 30px 66px rgba(40, 90, 91, 0.16);
   --shadow-soft: 0 18px 38px rgba(40, 90, 91, 0.08);
   --shadow-tiny: 0 10px 24px rgba(40, 90, 91, 0.06);
-  --focus-ring: 0 0 0 4px rgba(168, 201, 200, 0.34);
+  /* Deux tons OPAQUES, et non un halo a 34 % d'alpha.
+   *
+   * Ce jeton n'est consomme que par `:focus` et `:focus-within` -- donc
+   * aussi au CLIC. J'ai d'abord cru qu'il ne portait pas l'indicateur
+   * clavier, et j'ai voulu le rendre a sa valeur d'origine.
+   *
+   * MESURE : c'est faux. Sur deux controles, l'anneau `:focus-visible` ne
+   * se peint pas et c'est CE halo qui reste le seul indicateur visible au
+   * clavier. Rendu translucide, le banc tombe -- 2 defauts.
+   *
+   * ⛔ Et voici pourquoi je l'ai cru : ma mutation ne remplacait QU'UNE des
+   *    deux declarations de ce jeton. L'autre fournissait encore l'anneau,
+   *    le banc restait vert, et j'en ai conclu que le changement n'etait
+   *    distingue par personne. Une mutation qui ne change qu'une
+   *    declaration sur N equivalentes ne mute pas la REGLE : elle mesure
+   *    la redondance. Un faux negatif de harnais coute ce que coute un
+   *    faux vert -- il m'a fait revoquer un remede justifie. */
+  --focus-ring: 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus);
 }
 
 html[data-color-scheme="light"],
@@ -6444,7 +6463,7 @@ html[data-color-scheme="light"] body,
   --shadow: 0 16px 36px rgba(26, 69, 70, 0.11);
   --shadow-card: 0 18px 42px rgba(26, 69, 70, 0.12);
   --shadow-card-hover: 0 24px 58px rgba(26, 69, 70, 0.18);
-  --focus-ring: 0 0 0 4px rgba(168, 201, 200, 0.36);
+  --focus-ring: 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus);
   --bg: var(--v8-fond);
   --surface: var(--v8-surface);
   --surface-soft: #f6f8f7;
@@ -7701,7 +7720,9 @@ html[data-color-scheme="light"] body,
   /* — Etats — */
   --v8-avertissement: #9A5A18;        /* texte et icones d'avertissement. 5,46 surface · 5,12 fond · 4,86 surface basse */
   --v8-avertissement-fond: #FFF1D8;   /* fond de badge tiede propre a l'avertissement : 4,89. La peche claire n'y suffit pas (4,45) */
-  --v8-alerte: #C02B0A;               /* texte et icones d'alerte seulement. Voyage TOUJOURS avec un mot ou une icone */
+  --v8-alerte: #C02B0A;
+  --v8-focus: #0D1518;          /* anneau de focus : 18,46 sur blanc, 3,07 au pire (sur le principal) */
+  --v8-focus-halo: #FFFFFF;     /* le second ton. 18,46 avec l'anneau, QUEL QUE SOIT le fond derriere */               /* texte et icones d'alerte seulement. Voyage TOUJOURS avec un mot ou une icone */
 }
 
 /* Mode sombre : 9 valeurs de la charte, 7 completees par mesure le 17/09.
@@ -7727,7 +7748,9 @@ html[data-color-scheme="light"] body,
     --v8-texte-secondaire-sur-principal: #0D1518;
     --v8-avertissement: #FFD0AA;        /* 13,06 fond · 11,59 surface · 12,19 surface basse */
     --v8-avertissement-fond: #775841;   /* le plus CLAIR qui tienne 4,5 : il reste un badge, pas un trou noir */
-    --v8-alerte: #F85E3C;               /* le rouge d'alerte, teinte gardee (11 deg), eclairci jusqu'a tenir 4,5 sur la surface la plus dure : 5,85 fond · 5,19 surface · 4,52 haute */
+    --v8-alerte: #F85E3C;
+    --v8-focus: #E6F2EE;
+    --v8-focus-halo: #0D1518;               /* le rouge d'alerte, teinte gardee (11 deg), eclairci jusqu'a tenir 4,5 sur la surface la plus dure : 5,85 fond · 5,19 surface · 4,52 haute */
   }
 }
 
@@ -7751,6 +7774,8 @@ html[data-color-scheme="light"] body,
   --v8-avertissement: #FFD0AA;
   --v8-avertissement-fond: #775841;
   --v8-alerte: #F85E3C;
+  --v8-focus: #E6F2EE;
+  --v8-focus-halo: #0D1518;
 }
 
 /* ============================================================================
@@ -8881,4 +8906,94 @@ textarea::placeholder {
   color: var(--v8-avertissement);
   font-size: 0.85rem;
   font-weight: 600;
+}
+
+/* --- L'ANNEAU DE FOCUS CLAVIER ----------------------------------------------
+ *
+ * LE DEFAUT, MESURE LE 18/09 SUR LES PIXELS. Cette feuille portait VINGT-DEUX
+ * regles `:focus-visible`, avec six traitements differents. Trois d'entre elles
+ * posaient `outline: none` accompagne d'un halo `rgba(244,122,90,0.25)` -- le
+ * motif exact qu'un correctif anterieur pretendait avoir supprime. Il l'avait
+ * supprime a UN seul endroit.
+ *
+ * Releve du banc, mode clair, sur 14 controles :
+ *     5 controles SANS AUCUN indicateur visible
+ *     6 anneaux sous le seuil, entre 1,14 et 1,19
+ * Mode sombre : 14 juges, 0 defaut. L'asymetrie etait ecrite dans le
+ * commentaire d'origine -- « bien visible sur fond SOMBRE » -- et personne n'a
+ * lu ca comme l'aveu que le clair n'avait pas ete mesure.
+ *
+ * ⛔ ET LE COMMENTAIRE CITAIT LE CRITERE. « WCAG 2.4.11/1.4.11 >= 3:1 » etait
+ *    ecrit au-dessus d'une regle qui rendait 2,40. Citer un critere suffit a ce
+ *    que personne ne le remesure.
+ *
+ * POURQUOI DEUX TONS, ET NON UNE COULEUR MIEUX CHOISIE. Balayage de l'espace
+ * des couleurs contre les surfaces reelles :
+ *     mode clair  : 31 couleurs seulement tiennent 3:1 sur les cinq surfaces,
+ *                   toutes quasi noires
+ *     mode sombre : AUCUNE couleur unique ne tient -- il y a toujours une
+ *                   surface ou elle tombe
+ * Un ton unique est donc IMPOSSIBLE, ce n'est pas une preference. Deux tons
+ * opposes contrastent ENTRE EUX a 18,46 quelle que soit la page derriere :
+ * l'indicateur reste percevable sans enumerer tous les fonds possibles.
+ *
+ * PREFIXE ET FIN DE FEUILLE, pour les deux raisons a la fois : il faut battre
+ * les `outline: none` scopes par theme (0,2,0 et plus), et l'ordre tranche les
+ * egalites. La specificite seule ne suffisait pas, l'ordre seul non plus. */
+:root[data-color-scheme] :focus-visible {
+  outline: 3px solid var(--v8-focus);
+  outline-offset: 2px;
+  /* ⛔ PAS de `box-shadow` ici, et c'est mesure : cette feuille pose des ombres
+   * PORTEES decoratives sur la plupart des controles. Un halo en box-shadow les
+   * remplace ou s'y fait remplacer -- au relevé, le mien n'etait tout
+   * simplement JAMAIS rendu. Le second ton passe par `--focus-ring`, sur les
+   * elements qui n'ont pas d'ombre decorative. */
+}
+
+/* Les trois regles qui posaient `outline: none` + un halo a 25 % d'alpha. On ne
+ * les supprime pas -- leur ombre portee sert au SURVOL -- on redonne l'anneau. */
+:root[data-color-scheme] .bdc-card:focus-visible,
+:root[data-color-scheme] .bdc-table tbody tr:focus-visible,
+:root[data-color-scheme] .commandes-livrees-card:focus-visible {
+  outline: 3px solid var(--v8-focus);
+  outline-offset: 2px;
+}
+
+/* --- LA BARRE LATERALE : l'anneau y prend le ton CLAIR ----------------------
+ *
+ * Mesure du 18/09, sur les pixels : l'anneau sombre rend 2,44 sur le vert de la
+ * barre. Ma premiere estimation disait 3,07 -- elle testait contre les JETONS
+ * (#386B6D) et non contre le vert REELLEMENT RENDU, qui est plus sombre
+ * (rgb(47,91,93)) parce que le degrade decoratif l'assombrit vers le bas.
+ * Une fenetre de valeurs plausibles n'est pas la valeur.
+ *
+ * Sur ce vert, c'est le ton CLAIR qui porte : blanc y rend 7,17.
+ * Et le halo en ombre portee est necessaire ICI : cinq `.nav-section-toggle`
+ * ne rendaient AUCUN pixel d'indicateur sans lui. */
+:root[data-color-scheme] .sidebar :focus-visible {
+  outline: 3px solid var(--v8-focus-halo);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--v8-focus);
+}
+
+/* --- L'ACCORDEON DECOUPE L'ANNEAU ------------------------------------------
+ *
+ * CAUSE MESUREE le 18/09, en demandant au navigateur plutot qu'en raisonnant :
+ *     outline      : rgb(255,255,255) solid 3px, offset 2px   <- bien calcule
+ *     .nav-section : overflow = hidden                        <- et il decoupe
+ *
+ * Le conteneur de l'accordeon a `overflow: hidden` -- necessaire au repli -- et
+ * l'anneau dessine a 2 px A L'EXTERIEUR du bouton tombe donc hors du cadre. Le
+ * banc voyait ZERO pixel d'indicateur sur cinq entetes de section : pas un
+ * anneau faible, un anneau INEXISTANT a l'ecran alors que le style etait juste.
+ *
+ * ⭐ C'est la raison pour laquelle ce banc photographie au lieu de lire les
+ *    declarations : `getComputedStyle` disait « blanc, 3 px » sur un element ou
+ *    rien n'etait peint.
+ *
+ * Un decalage NEGATIF dessine l'anneau A L'INTERIEUR : plus rien a decouper.
+ * Blanc sur le vert de la barre : 7,17. */
+:root[data-color-scheme] .nav-section :focus-visible {
+  outline: 3px solid var(--v8-focus-halo);
+  outline-offset: -3px;
 }

@@ -36,6 +36,8 @@ au soleil, souvent d'une main. Rien de décoratif qui ne serve la lecture.
 | Avertissement | `#9A5A18` | Texte et icônes d'avertissement — un problème qui n'empêche pas d'agir. Ajouté le 17/09 : l'app portait ce rôle (`.pill-warning`, `.button.warning`, `.status-warning`) sans que la charte le nomme | 5,46 surface · 5,12 fond · 4,86 surface basse |
 | Fond d'avertissement | `#FFF1D8` | Fond de badge tiède propre à l'avertissement. **La pêche claire ne suffit pas** : `#9A5A18` n'y donne que 4,45 | 4,89:1 |
 | Alerte | `#C02B0A` | Texte et icônes d'alerte uniquement. Jamais couleur de lien, jamais pour un simple compteur | — |
+| Anneau de focus | `#0D1518` | L'indicateur de focus **clavier**. 18,46 sur blanc · 2,44 au pire, sur le vert le plus sombre de la barre latérale — d'où le second ton | — |
+| Second ton du focus | `#FFFFFF` | Le compagnon de l'anneau. **18,46 avec lui, quel que soit le fond derrière** — c'est ce qui rend l'indicateur percevable sans avoir à énumérer les surfaces | — |
 
 **Règle des trois signaux, valable dans les deux modes.** Accent, avertissement
 et alerte ne voyagent **jamais par la couleur seule** : chacun porte toujours
@@ -87,6 +89,8 @@ Chaque contraste ci-dessous est recalculé par `test/jetons-v8.test.js`.
 | Avertissement | `#FFD0AA` | **13,06** fond · **11,59** surface · **12,19** surface basse |
 | Fond d'avertissement | `#775841` | Le plus **clair** qui tienne 4,5 sous `#FFD0AA` (**4,56**) : il reste un badge, pas un trou noir |
 | Alerte | `#F85E3C` | Le rouge d'alerte, teinte gardée (11°), éclairci jusqu'à tenir 4,5 sur la surface la plus dure : **5,85** fond · **5,19** surface · **4,52** surface haute. `#C02B0A` ne donne que 3,16 sur le fond sombre |
+| Anneau de focus | `#E6F2EE` | 14,27 sur la surface, 16,09 sur le fond |
+| Second ton du focus | `#0D1518` | Les deux tons s'échangent entre les modes |
 
 ## 3. Typographie
 
@@ -586,6 +590,74 @@ compensé de marges négatives : la cible grandit, la mise en page ne bouge pas.
 
 *La page est saine. Le banc existe pour qu'elle le reste — parce que rien d'autre
 ne la regarde.*
+
+### L'anneau de focus clavier — et un commentaire qui a tenu lieu de mesure
+
+**Le défaut.** La feuille portait vingt-deux règles `:focus-visible`, avec **six
+traitements différents**. Relevé du banc en mode clair, sur 14 contrôles :
+
+```
+5 controles SANS AUCUN indicateur visible
+6 anneaux sous le seuil, entre 1,14 et 1,19
+```
+
+Le mode sombre, lui, passait — 14 jugés, 0 défaut.
+
+> ⛔ **Et le commentaire du code citait le critère.**
+> *« Focus clavier OPAQUE (WCAG 2.4.11/1.4.11 >= 3:1) […] bien visible sur fond
+> sombre »* — écrit au-dessus d'une règle qui rendait **2,40**. La phrase
+> contenait même l'aveu : *« sur fond **sombre** »*. Personne n'a lu ça comme
+> « le clair n'a pas été mesuré », parce que **citer un critère suffit à ce que
+> personne ne le remesure**.
+
+#### Pourquoi deux tons, et non une couleur mieux choisie
+
+Balayage de l'espace des couleurs contre les surfaces réelles :
+
+| | résultat |
+|---|---|
+| mode clair | **31** couleurs seulement tiennent 3:1 sur les cinq surfaces — toutes quasi noires |
+| mode sombre | **aucune** couleur unique ne tient : il y a toujours une surface où elle tombe |
+
+> Un ton unique est donc **impossible**, ce n'est pas une préférence. Deux tons
+> opposés contrastent **entre eux à 18,46**, quelle que soit la page derrière :
+> l'indicateur reste percevable **sans avoir à énumérer les fonds possibles**.
+
+#### Trois causes distinctes, trois remèdes
+
+**① Une couleur en dur battait le jeton.** `outline: 3px solid #0e6b63` rendait
+**1,19** sur le vert de la barre. Remplacé par `var(--v8-focus)` **à la source**,
+et non par une surenchère de spécificité.
+
+**② `overflow: hidden` DÉCOUPAIT l'anneau.** Cinq entêtes de section ne rendaient
+**aucun pixel** d'indicateur — alors que `getComputedStyle` annonçait
+« blanc, 3 px ». Le conteneur de l'accordéon a `overflow: hidden`, nécessaire au
+repli, et l'anneau dessiné à 2 px *à l'extérieur* tombait hors cadre. Remède : un
+**décalage négatif**, l'anneau se dessine à l'intérieur.
+
+> ⭐ C'est la raison pour laquelle ce banc **photographie** au lieu de lire les
+> déclarations : le style était juste et **rien n'était peint**.
+
+**③ Un halo à 34 % d'alpha** portait seul l'indicateur pour deux contrôles.
+Rendu opaque, en deux tons.
+
+#### ⚠ Un faux négatif de harnais, et il m'a fait révoquer un remède juste
+
+La mutation de ③ a d'abord **survécu**, et j'en ai conclu que le changement
+n'était distingué par personne — donc qu'il ne devait pas avoir lieu. Je l'ai
+révoqué. La révocation, elle, a fait tomber **deux cas**.
+
+Cause : le jeton `--focus-ring` est déclaré **deux fois**, et ma mutation n'en
+remplaçait **qu'une** (`str.replace(v, n, 1)`). L'autre continuait de fournir un
+anneau.
+
+> ⛔ **Une mutation qui ne change qu'UNE déclaration sur N équivalentes ne mute
+> pas la RÈGLE : elle mesure la redondance.** Un faux négatif de harnais coûte
+> exactement ce que coûte un faux vert — ici, il a failli faire supprimer une
+> correction nécessaire au nom de la rigueur.
+
+*Après : 14 contrôles jugés, **0 sans indicateur, 0 défaut**, dans les deux modes.
+Trois mutations, trois tuées — 6, 5 et 2 défauts respectivement.*
 
 ## 10. Guide pour l'agent
 
