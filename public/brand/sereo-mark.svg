@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
   <title id="title">Séréo</title>
-  <rect width="128" height="128" rx="26" fill="#ef8f77"/>
+  <rect width="128" height="128" rx="26" fill="#EF9177"/>
   <g fill="#f3b09f" opacity=".72">
     <circle cx="46" cy="58" r="37"/>
     <circle cx="106" cy="58" r="37"/>

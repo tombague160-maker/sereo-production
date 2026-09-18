@@ -426,9 +426,14 @@ button:focus-visible,
 input:focus-visible,
 select:focus-visible,
 .client-button:focus-visible {
-  /* Focus clavier OPAQUE (WCAG 2.4.11/1.4.11 >= 3:1) : l'alpha 0.36 rendait
-     l'anneau quasi invisible. Orange plein, bien visible sur fond sombre. */
-  outline: 3px solid #f47a5a;
+  /* ⛔ CETTE REGLE NE PEINT PLUS RIEN, et c'est voulu. Elle posait
+     `outline: 3px solid #f47a5a` sous un commentaire qui citait
+     « WCAG 2.4.11/1.4.11 >= 3:1 » -- alors que la mesure du 18/09 donnait 2,40
+     sur un champ et 1,85 sur le vert de la barre. Citer un critere avait suffi
+     a ce que personne ne le remesure pendant des mois.
+     L'anneau vit desormais en fin de feuille, sur `--v8-focus`, et
+     `test/e2e/focus-clavier.spec.js` le mesure sur les pixels. On garde le
+     decalage, qui reste juste. */
   outline-offset: 2px;
 }
 
@@ -5557,8 +5562,8 @@ html[data-color-scheme="light"] body {
   --border-strong: #d8cfcb;
   --brand-primary: #3b7374;
   --brand-primary-dark: #285a5b;
-  --brand-secondary: #f18c79;
-  --brand-secondary-soft: #fde2dc;
+  --brand-secondary: var(--v8-accent);
+  --brand-secondary-soft: var(--v8-peche-claire);
   --success-soft: #edf6f5;
   --success: #3b7374;
   --success-dark: #285a5b;
@@ -5566,6 +5571,14 @@ html[data-color-scheme="light"] body {
   --info: #3b7374;
   --info-dark: #285a5b;
   --warning-soft: #fbefed;
+  /* ⛔ NON BRANCHE, DELIBEREMENT -- et ce n'est pas un oubli.
+     `--warning` est declare CINQ fois avec CINQ valeurs : #f1a447,
+     #ed9d72 (x2), var(--v8-accent), et celle-ci. Deux sont des AMBRES,
+     pas le corail : ce n'est pas « un troisieme orange », c'est une
+     famille qui a derive. Et la charte porte un role AVERTISSEMENT
+     dedie (--v8-avertissement / --v8-avertissement-fond) : y brancher
+     --warning changerait un fond orange en creme pale, et tout texte
+     pose dessus serait a remesurer. Lot a part. */
   --warning: #f18c79;
   --warning-dark: #8f463a;
   --danger-soft: #fde2dc;

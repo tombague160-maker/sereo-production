@@ -199,7 +199,7 @@ ici**. Ils ne changent pas la charte : ils disent ce que la refonte doit défair
 |---|---|---|
 | ~~Un arrêt en « problème » n'enregistre aucune raison~~ — **soldé le 18/09** | oui dans l'effet, **non dans la cause** | La charte disait « un champ neuf est à créer ». **Faux : `stop.problemReason` existait.** Le défaut réel était ailleurs, et il tenait en trois points — détail plus bas |
 | ~~Trois rayons de carte concurrents~~ — **soldé le 18/09** | oui, et **encore pire qu'annoncé** | `--radius-card` valait 8, 22 **et** 28 px — et surtout **22 en clair, 8 en sombre**, les deux déclarations gagnantes étant scopées `light`. Détail plus bas |
-| Trois oranges pour un seul rôle | oui | `#f18c79` (14×), `#f47a5a` (3×), `#ef8f77` dans `sereo-mark.svg`, `sereo-sidebar-bg.svg`, `favicon.svg` et `generate-icons.js` |
+| ~~Trois oranges pour un seul rôle~~ — **soldé le 18/09, sauf `--warning`** | oui | Distance sRGB à `--v8-accent` : `#ef8f77` **2**, `#f18c79` **6** — imperceptibles ; `#f47a5a` **37** — visiblement autre. Les marques, le favicon et le générateur d'icônes prennent l'accent ; `--warning` est **laissé exprès**, détail plus bas |
 | ~~Générations de tokens empilées~~ — **soldé le 18/09** | oui à l'époque | Était : `--color-pastel-` 95, `--palette-` 186, `--neo-` 121. **Remesuré le 18/09 : zéro déclaration des trois.** Seules trois lignes de commentaire les nommaient encore, dont une périmée — corrigées |
 | 15 onglets pour 6 catégories | oui | `mainTabs` en compte 15, dont 5 listes de commandes filtrées différemment |
 | Du texte vivant dans les SVG de marque | oui | les 3 fichiers portent `<text font-family="Segoe UI, Arial">` — à vectoriser |
@@ -743,6 +743,64 @@ différent** sur Mac, Linux et Android — donc sur la plupart des téléphones.
 *Bancs : `typographie.spec.js` (2 cas) et `texte-coupe.spec.js` (2 cas, 1 130
 textes jugés). Trois mutations, trois tuées — 6 coupures, 5 coupures, et la
 police absente.*
+
+### Les trois oranges — soldés le 18/09, sauf un, et il est nommé
+
+Mesure préalable, distance euclidienne en sRGB contre `--v8-accent` (`#EF9177`) :
+
+| | distance | verdict |
+|---|---|---|
+| `#ef8f77` | **2** | imperceptible |
+| `#f18c79` | **6** | imperceptible |
+| `#f47a5a` | **37** | **visiblement autre** |
+
+*Deux sont un pur nettoyage sans risque visuel. La troisième demandait d'être
+regardée cas par cas — et elle l'a été.*
+
+**`#ef8f77`** — marque, fond de barre latérale, favicon, générateur d'icônes :
+quatre fichiers, passés à l'accent.
+
+**`#f47a5a`** — deux endroits, deux sorts différents :
+- la règle de focus qui le posait **ne peignait plus rien** depuis le lot
+  précédent (elle pèse (0,1,1) contre (0,2,1)). Elle est retirée **avec son
+  commentaire**, qui citait *« WCAG 2.4.11/1.4.11 >= 3:1 »* au-dessus d'une valeur
+  qui rendait **2,40**. ⛔ *Une ligne morte qui affirme le contraire de la mesure
+  est pire qu'une ligne absente : on la croit.*
+- sur la page de connexion, il colorait les icônes de `.brand-features`, qui sont
+  **doublées d'un mot** — donc exemptées de 1.4.11. Passé à l'accent.
+
+#### ⛔ `--warning` reste tel quel, et ce n'est pas un oubli
+
+| | |
+|---|---|
+| déclarations | **cinq** |
+| valeurs distinctes | **cinq** : `#f1a447`, `#ed9d72` (×2), `var(--v8-accent)`, `#f18c79` |
+
+Deux d'entre elles sont des **ambres**, pas le corail. Ce n'est donc pas
+« un troisième orange » : c'est une **famille entière qui a dérivé**.
+
+> Et le brancher sur `--v8-accent` serait **sémantiquement faux** : la charte
+> porte un rôle **avertissement** dédié (`--v8-avertissement` `#9A5A18` texte,
+> `--v8-avertissement-fond` `#FFF1D8` fond). Y brancher `--warning` changerait un
+> fond orange en crème pâle — visible — et **tout texte posé dessus serait à
+> remesurer**. C'est un lot à part, avec sa propre mesure.
+
+*Nommé dans le code, à l'endroit exact, plutôt que fait à moitié.*
+
+#### ⚠ Un piège de rédaction, payé une fois
+
+Le bloc CSS de la page de connexion vit dans un **littéral de gabarit
+JavaScript**. Un **backtick** dans un commentaire CSS y **termine la chaîne** :
+la première rédaction a produit un
+`SyntaxError: missing ) after argument list` **à deux cents lignes de là**.
+*Le message n'accuse pas l'endroit fautif.*
+
+#### ⚪ Ce qui reste, mesuré et non promis
+
+**26 couleurs littérales dans des propriétés** de `style.css` (contre 190 dans
+des déclarations de jetons, qui sont légitimes — c'est là que les couleurs
+vivent). Les plus nombreuses : `#ffffff` ×14 en `background`. **Aucun garde ne
+le vérifie aujourd'hui.** Chiffre posé ici pour qui reprendra.
 
 ## 10. Guide pour l'agent
 

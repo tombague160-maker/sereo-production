@@ -25,7 +25,7 @@ const OUT_DIR = path.join(__dirname, "..", "public", "icons");
 // Palette de la marque, reprise telle quelle de public/favicon.svg.
 const TEAL = "#356f70";
 const MINT = "#a8cbc7";
-const CORAL = "#ef8f77";
+const CORAL = "#EF9177";
 
 // Le motif seul, exprime dans un carre de 64x64. Les cercles depassent
 // volontairement a droite : ils sont rognes par le clip, c'est le dessin.

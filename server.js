@@ -1602,7 +1602,14 @@ function renderLoginPage(req, res) {
       --pastel-green-light: #e8f4ef;
       --pastel-orange: #ffc4a3;
       --pastel-orange-light: #fff0e8;
-      --pastel-orange-strong: #f47a5a;
+      /* L'accent de la charte. Cet orange-ci etait a distance sRGB 37 --
+         VISIBLEMENT autre -- et c'etait le seul des trois dans ce cas.
+         Son unique usage est la couleur des icones de .brand-features, qui
+         sont DOUBLEES D'UN MOT : exemptees de WCAG 1.4.11.
+         ⛔ AUCUN BACKTICK ICI : ce bloc vit dans un litteral de gabarit
+            JavaScript, et un backtick y TERMINE la chaine. Premiere redaction :
+            "SyntaxError: missing ) after argument list", a 200 lignes de la. */
+      --pastel-orange-strong: #EF9177;
       --pastel-orange-glow: rgba(244, 122, 90, 0.22);
       --surface: #ffffff;
       --surface-soft: #fbfefd;
