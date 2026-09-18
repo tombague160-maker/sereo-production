@@ -21,7 +21,7 @@
 //     mesures, pour qu'un "0 defaut" sur un seul onglet ne puisse pas passer
 //     pour un succes.
 
-const { test, expect } = require("@playwright/test");
+const { test, expect } = require("./tuiles");
 
 const SEUIL = 4.5;       // WCAG AA, texte normal
 const PART_MIN = 0.02;   // part minimale des glyphes portee par un fond
@@ -74,6 +74,25 @@ async function fondsSousGlyphes(page, avecB64, sansB64) {
   }, [avecB64, sansB64, DIFF_MIN]);
 }
 
+/**
+ * Rend [r, g, b, a] -- l'ALPHA COMPTE. `couleur.match(/\d+/g).slice(0, 3)`
+ * decoupait `rgba(255,255,255,0.72)` en (255,255,255) et SURESTIMAIT le
+ * contraste : ce blanc-la vaut 3,45 sur le vert du champ de recherche, pas
+ * 4,25. Mesure du 18/09, 45 defauts reels rendus invisibles par ce seul
+ * `slice`.
+ */
+function avecAlpha(chaine) {
+  const n = (chaine.match(/[\d.]+/g) || []).map(Number);
+  if (n.length < 3) return null;
+  return [n[0], n[1], n[2], n.length >= 4 ? n[3] : 1];
+}
+
+/** Compose un devant translucide sur un fond OPAQUE (celui lu sous les glyphes). */
+function composerSurFond([r, g, b, a], fond) {
+  if (a >= 1) return [r, g, b];
+  return [0, 1, 2].map(i => Math.round(a * [r, g, b][i] + (1 - a) * fond[i]));
+}
+
 for (const mode of ["light", "dark"]) {
   test(`le texte des onglets tient ${SEUIL}:1 en mode ${mode}`, async ({ browser }) => {
     const context = await browser.newContext({
@@ -123,10 +142,12 @@ for (const mode of ["light", "dark"]) {
       const { glyphes, fonds } = await fondsSousGlyphes(page, avec, sans);
       if (!glyphes) continue;   // onglet sans libelle visible
 
-      const texte = couleur.match(/\d+/g).slice(0, 3).map(Number);
+      const texte = avecAlpha(couleur);
+      if (!texte) continue;
       for (const { couleur: fond, n } of fonds) {
         if (n / glyphes < PART_MIN) continue;
-        const ratio = contraste(texte, fond.split(",").map(Number));
+        const rgbFond = fond.split(",").map(Number);
+        const ratio = contraste(composerSurFond(texte, rgbFond), rgbFond);
         if (ratio < SEUIL) {
           defauts.push(`${libelle} : ${ratio.toFixed(2)}:1 (${couleur} sur rgb(${fond}))`);
         }

@@ -654,7 +654,14 @@ function initMap() {
     zoomControl: true
   }).setView([46.9511, 4.9027], 10);
 
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  // Sans le motif `{s}` : la politique d'usage d'OpenStreetMap deconseille
+  // explicitement les sous-domaines a.b.c, herites de HTTP/1.1 et inutiles
+  // depuis HTTP/2. Mesure du 18/09 : le serveur rendait des tuiles 403
+  // "Access blocked -- App is not following the tile usage policy".
+  // ⚠ Ceci ne prouve PAS que le blocage vienne de la, ni qu'il soit leve.
+  // Le fournisseur de tuiles pour la PRODUCTION est un arbitrage ouvert,
+  // note dans la charte.
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
     attribution: "&copy; OpenStreetMap"
   }).addTo(map);

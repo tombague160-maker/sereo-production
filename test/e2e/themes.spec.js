@@ -19,7 +19,7 @@
 // proprietes personnalisees reellement calculees sur :root. Toute variable
 // ajoutee au theme est donc couverte automatiquement.
 
-const { test, expect } = require("@playwright/test");
+const { test, expect } = require("./tuiles");
 
 /**
  * Charge l'app dans un etat de theme donne et retourne toutes les proprietes

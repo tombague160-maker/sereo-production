@@ -455,7 +455,13 @@ function securityHeaders(req, res, next) {
       "default-src 'self'",
       "script-src 'self'",
       "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: https://*.tile.openstreetmap.org",
+      // Les DEUX formes, et c'est necessaire : un joker CSP `*.exemple.org`
+      // ne couvre PAS `exemple.org` lui-meme. En retirant le sous-domaine {s}
+      // de l'URL des tuiles (deconseille par la politique d'usage d'OSM), le
+      // nouvel hote `tile.openstreetmap.org` tombait hors de cette liste et
+      // toutes les tuiles etaient refusees par la CSP -- une carte vide, sans
+      // qu'aucune erreur ne remonte a l'application.
+      "img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org",
       "connect-src 'self'",
       "font-src 'self' data:",
       "object-src 'none'",

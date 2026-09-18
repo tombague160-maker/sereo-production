@@ -1,4 +1,4 @@
-const { test, expect } = require("@playwright/test");
+const { test, expect } = require("./tuiles");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs"),
   os = require("node:os"),

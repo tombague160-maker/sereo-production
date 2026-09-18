@@ -20,7 +20,7 @@
 // POST /api/clients rend 404. Un curseur, lui, ecrit toujours. Le choix n'est
 // pas cosmetique -- un banc bati sur une liste vide ne mesurerait rien.
 
-const { test, expect } = require("@playwright/test");
+const { test, expect } = require("./tuiles");
 
 const ONGLET_REGLAGES = "parametres";
 const DEBOUNCE_MS = 500;

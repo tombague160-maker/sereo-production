@@ -19,7 +19,7 @@
 // Le cas le plus grave n'est pas cosmetique : `aria-expanded="false"` sur un
 // contenu visible annonce a un lecteur d'ecran un repli qui n'a pas eu lieu.
 
-const { test, expect } = require("@playwright/test");
+const { test, expect } = require("./tuiles");
 
 /** Lit l'etat annonce et l'affichage reel d'une section de navigation. */
 async function lireSection(page, id) {

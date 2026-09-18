@@ -20,7 +20,7 @@
 // avertissement ont une paire sous 1,6 dans CHAQUE mode. Un point rouge et un
 // point orange cote a cote ne se distinguent pas ; "Bloquee" ecrit a cote, si.
 
-const { test, expect } = require("@playwright/test");
+const { test, expect } = require("./tuiles");
 
 const HAUTEUR_MIN = 24;   // charte
 const HAUTEUR_MAX = 28;   // tolerance : padding et hauteur de ligne

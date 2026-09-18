@@ -30,7 +30,7 @@
 // Un controle espace de 24 px de ses voisins beneficie aussi d'une exception
 // dans la norme ; on ne s'en sert pas, elle est trop facile a invoquer a tort.
 
-const { test, expect } = require("@playwright/test");
+const { test, expect } = require("./tuiles");
 
 const PLANCHER_LEGAL = 24;   // WCAG 2.2 AA
 const OBJECTIF_CHARTE = 44;  // notre charte
