@@ -8783,3 +8783,102 @@ textarea::placeholder {
 :root[data-color-scheme] .op-kpi {
   border-radius: var(--radius-card);
 }
+
+/* --- LE MOTIF D'UN ARRET EN ECHEC ------------------------------------------
+ * Vu au telephone, souvent d'une main, parfois sous la pluie : les choix sont
+ * des cibles pleine largeur a 48 px, au-dessus des 44 de la charte. */
+.motif-dialog {
+  width: min(420px, calc(100vw - 32px));
+  padding: 20px;
+  border: 1px solid var(--v8-vert-eau);
+  border-radius: var(--radius-card);
+  background: var(--v8-surface);
+  color: var(--v8-texte);
+}
+
+.motif-dialog::backdrop {
+  background: rgba(13, 21, 24, 0.55);
+}
+
+.motif-dialog h3 {
+  margin: 0 0 4px;
+}
+
+.motif-liste {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.motif-choix {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 10px 14px;
+  border: 1px solid var(--v8-vert-eau);
+  border-radius: 14px;
+  background: var(--v8-surface-basse);
+  color: var(--v8-texte);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.motif-choix[aria-checked="true"] {
+  border-color: var(--v8-principal);
+  background: var(--v8-vert-clair);
+  font-weight: 650;
+}
+
+/* Un choix retenu ne se signale JAMAIS par la seule couleur : la matrice des
+ * trois signaux montre qu'une paire passe sous 1,6 dans chaque mode. Une coche
+ * porte le sens, la couleur ne fait que l'appuyer. */
+.motif-choix::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--v8-texte-secondaire);
+  border-radius: 50%;
+}
+
+.motif-choix[aria-checked="true"]::before {
+  border-color: var(--v8-principal);
+  background:
+    linear-gradient(var(--v8-principal), var(--v8-principal)) content-box;
+  padding: 3px;
+}
+
+.motif-commentaire {
+  display: grid;
+  gap: 6px;
+  color: var(--v8-texte-secondaire);
+}
+
+.motif-commentaire input {
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid var(--v8-vert-eau);
+  border-radius: 14px;
+  background: var(--v8-surface-basse);
+  color: var(--v8-texte);
+  font: inherit;
+}
+
+.motif-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+/* La cause, la ou l'arret se lit. Sans cela le champ serait ecrit et lu par
+ * personne -- exactement l'etat d'ou l'on sort. */
+.route-stop-motif {
+  display: block;
+  margin-top: 2px;
+  color: var(--v8-avertissement);
+  font-size: 0.85rem;
+  font-weight: 600;
+}

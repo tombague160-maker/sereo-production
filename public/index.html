@@ -1292,6 +1292,25 @@
     </div>
   </div>
 
+  <!-- Le motif d'un arret en echec. `<dialog>` natif, comme #subscriptionDialog :
+       il piege le focus, se ferme a Echap et rend l'arriere-plan inerte, trois
+       comportements qu'il faudrait sinon reecrire a la main et mal. -->
+  <dialog id="motifProblemeDialog" class="motif-dialog" aria-labelledby="motifTitre">
+    <form method="dialog" id="motifForm">
+      <h3 id="motifTitre">Que s'est-il passé ?</h3>
+      <p class="muted" id="motifSousTitre">Cette raison sera archivée avec la tournée.</p>
+      <div id="motifListe" class="motif-liste" role="radiogroup" aria-labelledby="motifTitre"></div>
+      <label class="motif-commentaire">Précision (facultatif)
+        <input id="motifCommentaire" type="text" maxlength="120" autocomplete="off"
+               placeholder="Ce que le livreur a constaté" />
+      </label>
+      <div class="motif-actions">
+        <button class="button secondary" type="button" data-action="motif-annuler">Annuler</button>
+        <button class="button primary" type="button" data-action="motif-valider">Enregistrer</button>
+      </div>
+    </form>
+  </dialog>
+
   <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
 
   <!-- Modal version : affiche les nouveautes de la release courante en clair.
