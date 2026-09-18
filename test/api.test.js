@@ -398,7 +398,7 @@ test("CRM creates a prospect and schedules a relance", async () => {
   assert.equal(list.body.length, 1);
 });
 
-test("customer order joins preparation flow and feeds statistics", async () => {
+test("customer order joins preparation flow without counting undelivered revenue", async () => {
   seedDb({
     ...defaultDb(),
     stock: [{ id: "p1", code: "A1", nom: "Produit A", quantite: 20, tarif: 12 }]
@@ -439,7 +439,7 @@ test("customer order joins preparation flow and feeds statistics", async () => {
 
   const stats = await requestJson("/api/statistics");
   assert.equal(stats.res.status, 200);
-  assert.ok(stats.body.month.revenue >= 24);
+  assert.equal(stats.body.month.revenue, 0);
 });
 
 test("import ventes feeds statistics from TTC/HT amounts", async () => {

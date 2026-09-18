@@ -4,18 +4,19 @@
 // s'y refere pour rejeter une ancre inconnue. MOBILE_OVERFLOW_TABS liste ce qui
 // bascule dans le menu "Plus" sur mobile, la barre basse ne tenant que 4 items.
 
-export const mainTabs = new Set(["journee", "stock", "crm", "commande-client", "commandes-jour", "commandes-planifiees", "relances", "statistiques", "exports", "preparation", "bons-commande", "livreur", "recommande", "commandes-livrees", "parametres"]);
+export const mainTabs = new Set(["abonnements", "journee", "stock", "crm", "commande-client", "commandes-jour", "commandes-planifiees", "relances", "statistiques", "exports", "preparation", "bons-commande", "livreur", "recommande", "commandes-livrees", "parametres"]);
 
 // Tabs accessibles uniquement via le menu "Plus" de la mobile-tabbar (overflow
 // car > 5 destinations). Quand l'utilisateur navigue vers l'une d'elles, le
 // bouton "Plus" recoit la classe `.active` pour montrer visuellement qu'on est
 // dans ce groupe.
-export const MOBILE_OVERFLOW_TABS = new Set(["bons-commande", "crm", "commande-client", "commandes-jour", "commandes-planifiees", "relances", "statistiques", "exports", "recommande", "commandes-livrees", "parametres"]);
+export const MOBILE_OVERFLOW_TABS = new Set(["abonnements", "bons-commande", "crm", "commande-client", "commandes-jour", "commandes-planifiees", "relances", "statistiques", "exports", "recommande", "commandes-livrees", "parametres"]);
 
 export const titles = {
+  abonnements: {title: "Abonnements", subtitle: "Les produits de vos clients, livrés au bon rythme."},
   journee: {
     title: "Tableau de bord",
-    subtitle: "Vue rapide du stock, des préparations et des livraisons."
+    subtitle: "Chiffre d’affaires livré, abonnements et opérations du jour."
   },
   import: {
     title: "Import du jour",

@@ -122,3 +122,7 @@ Voir [`DEPLOYMENT.md`](DEPLOYMENT.md) pour les détails opérationnels.
 ## Licence
 
 Application propriétaire — usage interne. Code source visible sur GitHub à des fins de transparence et de contribution restreinte.
+
+## Abonnements et nouveau tableau de bord
+
+Le suivi des abonnements, le CA des commandes livrées et le calcul routier avec départ/arrivée sont décrits dans [le guide d’utilisation et d’exploitation](docs/ABONNEMENTS_ET_TOURNEES.md).

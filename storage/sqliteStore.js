@@ -72,6 +72,7 @@ function createSqliteStore(options) {
         historique: readPayloads(database, "historique"),
         commandes: readPayloads(database, "commandes"),
         routes: readPayloads(database, "routes"),
+        subscriptions: readPayloads(database, "abonnements"),
         relances: readPayloads(database, "relances_crm"),
         deliverySectors: readPayloads(database, "secteurs_livraison"),
         stockMovements: readPayloads(database, "mouvements_stock"),
@@ -363,6 +364,8 @@ function migrateSchema(database) {
       sort_order INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS abonnements (id TEXT PRIMARY KEY, payload TEXT NOT NULL, sort_order INTEGER NOT NULL);
+
     CREATE TABLE IF NOT EXISTS routes (
       id TEXT PRIMARY KEY,
       statut TEXT,
@@ -534,6 +537,7 @@ function persistDatabase(database, db) {
       "livraisons",
       "routes",
       "relances_crm",
+      "abonnements",
       "secteurs_livraison",
       "commandes",
       "clients",
@@ -549,6 +553,7 @@ function persistDatabase(database, db) {
     insertOrders(database, db.commandes || []);
     insertOrderLines(database, db.commandes || []);
     insertRoutes(database, db.routes || []);
+    insertSimplePayloads(database, "abonnements", db.subscriptions || []);
     insertCrmReminders(database, db.relances || []);
     insertDeliverySectors(database, db.deliverySectors || []);
     insertDeliveries(database, db);
