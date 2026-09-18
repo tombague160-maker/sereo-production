@@ -210,7 +210,7 @@ maquette oublie. Les deux coûtent cher si personne ne les nomme avant le chiffr
 | Écart | Sens | Mesure exacte |
 |---|---|---|
 | ~~L'écran de connexion n'a pas d'état bloqué~~ — **réglé le 16/09, planches 9c et 9d** | le code le fait, l'écran le montre | `server.js` bloque après **5 tentatives** ratées dans une fenêtre glissante de **15 min**, pour **15 s** (`AUTH_RATE_LIMIT_*`). La page actuelle affiche les tentatives restantes, puis un décompte vivant avec les champs désactivés (`renderLoginPage`, l. 1502-1526). Le mot « tentative » n'apparaît nulle part dans l'export |
-| La file d'attente hors ligne n'existe pas | l'écran le promet, le code ne le fait pas | `service-worker.js` l. 113 : tout ce qui n'est pas un GET same-origin est laissé passer tel quel. Aucun écouteur `sync`, aucun magasin de reprise, et `app.js` n'écoute ni `online` ni `offline` pour ses **32 écritures réseau**. La *lecture* hors ligne, elle, est réelle : network-first à 3 s puis cache, sur tout `/api/` sauf `status`, `version`, `me`, `comptes` |
+| ~~La file d'attente hors ligne n'existe pas~~ — **soldée le 18/09, v1.31.0** | l'écran le promettait, le code ne le faisait pas | `service-worker.js` l. 113 : tout ce qui n'est pas un GET same-origin est laissé passer tel quel. Aucun écouteur `sync`, aucun magasin de reprise, et `app.js` n'écoute ni `online` ni `offline` pour ses **32 écritures réseau**. La *lecture* hors ligne, elle, est réelle : network-first à 3 s puis cache, sur tout `/api/` sauf `status`, `version`, `me`, `comptes` |
 | Le thème par défaut | écart mineur, assumé | le code force `light` au départ (« pendant la phase de test, on n'active pas le mode sombre auto ») ; la maquette met « Système ». Le choix par appareil, lui, est exactement ce que fait `app.js` : `localStorage` seul, la valeur en base est délibérément ignorée |
 | Le blocage se compte par adresse IP, pas par personne | à dire à l'écran | `authRateLimitState` est une `Map` indexée par `getClientIp(req)` (`server.js` l. 348-404), `trust proxy` à 1. Cinq échecs derrière une même connexion — le wifi de l'entrepôt, un NAT d'opérateur — bloquent tout le monde. Un écran qui annonce « 5 essais ratés » accuse quelqu'un qui n'a peut-être rien tapé |
 | Le sur-titre était orange sur blanc | l'écran l'inventait, la charte ne l'interdisait pas | « ARRÊT EN COURS » en `#EF9177` 12 px sur `#FFFFFF` vaut **2,34:1**. La charte interdisait l'orange comme *fond* de texte, pas comme texte : le trou est comblé. Les mots passent en principal, le point rond à côté garde l'orange |
@@ -255,6 +255,66 @@ de chaque feuille, ou photographier. Corollaire pour la phase 4 :
 dix palettes conformes coûtait dix fois la mesure, pour un choix que personne n'avait
 demandé. Le seul axe d'apparence restant est **clair / sombre**, et il est désormais
 couvert par deux tests e2e qui échouent l'un et l'autre si le défaut revient.
+
+### La file d'attente hors ligne — construite le 18/09, et ce qu'elle a révélé
+
+La promesse de la planche 15 est tenue : une écriture faite sans réseau est
+conservée dans `indexedDB` et repart à la reconnexion. Trois décisions portent tout
+le mécanisme, et chacune a été prise **contre** une première version plus simple qui
+était fausse.
+
+**`navigator.onLine` n'est fiable que dans un sens, et c'est celui-là qu'on utilise.**
+La spécification garantit que `false` signifie « certainement hors ligne » : aucune
+interface réseau, donc la requête n'est **jamais partie**. `true` ne promet rien
+(portail captif, wifi sans internet). On ne met donc en file que ce dont on *sait*
+que le réseau ne l'a pas emporté. Un **délai dépassé**, lui, peut parfaitement
+signifier que le serveur a reçu et traité la demande : le rejouer dupliquerait une
+écriture non idempotente. C'est la seule raison pour laquelle la file peut se passer
+d'une clé d'idempotence côté serveur — **si cette garde tombe un jour, il en faut une.**
+
+**« Le réseau n'a pas répondu » et « le serveur a refusé » ne demandent pas le même
+geste.** Un 4xx retire l'écriture : le serveur a jugé, insister ferait une file qui ne
+se vide jamais. Un échec réseau la garde. C'est cette distinction qui impose d'envoyer
+le rejeu avec `fetch` **nu** et non avec `apiFetch` — `apiFetch` lève sur toute
+réponse non-ok, si bien qu'un refus lui arriverait sous forme d'exception, donc serait
+pris pour une panne, donc conservé pour toujours.
+
+**Un échec arrête la file, il ne la saute pas.** Deux écritures sur la même commande
+— « en préparation » puis « livrée » — rejouées à l'envers laisseraient la commande
+dans un état **antérieur à la réalité**. Corollaire non évident : le compteur
+d'essais ne compte **que** les 5xx. Il existe pour arrêter une entrée empoisonnée, et
+seule une *réponse* peut indiquer un empoisonnement ; ma première version comptait
+aussi les échecs réseau, si bien que cinq reconnexions ratées bloquaient
+définitivement une écriture parfaitement valide.
+
+Les envois de **fichiers** restent refusés hors ligne, délibérément : rejouer un
+import Excel trois heures plus tard, sur un stock qui a bougé, ferait plus de dégâts
+que de refuser tout de suite.
+
+| Mesuré le 18/09 | Avant | Après |
+|---|---|---|
+| Écriture faite hors ligne | perdue, toast rouge | conservée, rejouée à la reconnexion |
+| Écouteurs `online` / `offline` | 0 | 2 |
+| Ce que voit l'utilisateur | « Erreur : Failed to fetch » | « Hors ligne — enregistré, sera envoyé à la reconnexion », et un compteur dans la puce d'état |
+| Bancs | — | **10 unitaires + 8 e2e**, 13 mutations distinguées |
+
+### ⛔ Ce que la file a révélé, et qui n'est pas à moi de trancher
+
+En essayant de recharger l'onglet hors ligne, le banc a rendu
+`ERR_INTERNET_DISCONNECTED`. Cause mesurée : `service-worker.js` l. 126,
+`if (request.mode === "navigate") return;` — **les navigations ne sont pas mises en
+cache**, et le commentaire dit pourquoi : « auth-sensible ».
+
+> **L'application ne peut pas être ROUVERTE hors ligne.** « La lecture hors ligne
+> fonctionne » n'est vrai que pour un onglet **déjà ouvert**. Un livreur qui ferme
+> l'application en zone blanche ne peut plus la rouvrir avant d'avoir du réseau.
+
+Mettre la coquille HTML en cache réglerait le problème en trois lignes, et c'est le
+patron habituel d'une PWA. Mais cela revient à servir l'interface authentifiée à
+quelqu'un qui n'est plus connecté — les données, elles, resteraient inaccessibles
+(les appels `/api/` rendent 401 et renvoient vers `/login`). **C'est un arbitrage de
+sécurité, donc il revient à Thomas, pas à moi.** La file d'attente fonctionne sans
+lui : elle se vide au retour du réseau dans l'onglet ouvert, et au démarrage suivant.
 
 ## 10. Guide pour l'agent
 
