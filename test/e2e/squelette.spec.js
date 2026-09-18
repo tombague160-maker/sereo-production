@@ -20,7 +20,7 @@
 //      termine depuis longtemps. Le premier jet posait les blocs sans jamais
 //      les retirer -- onze zones l'ont porte a vie avant que la mesure le dise.
 
-const { test, expect } = require("@playwright/test");
+const { test, expect } = require("./tuiles");
 
 const LENTEUR_MS = 2500;
 

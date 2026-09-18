@@ -2,7 +2,7 @@
 // Couvre les golden paths critiques. Si un de ces tests casse en CI,
 // alerte avant deploiement.
 
-const { test, expect } = require("@playwright/test");
+const { test, expect } = require("./tuiles");
 
 test.describe("Sereo smoke tests", () => {
   test("page d'accueil charge le tableau de bord", async ({ page }) => {

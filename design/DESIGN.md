@@ -214,7 +214,7 @@ maquette oublie. Les deux coûtent cher si personne ne les nomme avant le chiffr
 | Le thème par défaut | écart mineur, assumé | le code force `light` au départ (« pendant la phase de test, on n'active pas le mode sombre auto ») ; la maquette met « Système ». Le choix par appareil, lui, est exactement ce que fait `app.js` : `localStorage` seul, la valeur en base est délibérément ignorée |
 | Le blocage se compte par adresse IP, pas par personne | à dire à l'écran | `authRateLimitState` est une `Map` indexée par `getClientIp(req)` (`server.js` l. 348-404), `trust proxy` à 1. Cinq échecs derrière une même connexion — le wifi de l'entrepôt, un NAT d'opérateur — bloquent tout le monde. Un écran qui annonce « 5 essais ratés » accuse quelqu'un qui n'a peut-être rien tapé |
 | Le sur-titre était orange sur blanc | l'écran l'inventait, la charte ne l'interdisait pas | « ARRÊT EN COURS » en `#EF9177` 12 px sur `#FFFFFF` vaut **2,34:1**. La charte interdisait l'orange comme *fond* de texte, pas comme texte : le trou est comblé. Les mots passent en principal, le point rond à côté garde l'orange |
-| Les pilules de filtre sur en-tête vert | jamais mesuré par personne | `rgba(255,255,255,.16)` sur `#386B6D` compose `#588284` : blanc **4,25:1**, texte indicatif des champs de recherche **3,27:1**. Dix planches, présent depuis le premier export |
+| ~~Les pilules de filtre sur en-tête vert~~ — **mesuré et soldé le 18/09** | jamais mesuré par personne, et pour une raison d'instrument | `rgba(255,255,255,.16)` sur `#386B6D` compose `#588284` : blanc **4,25:1**, texte indicatif des champs de recherche **3,27:1**. Dix planches, présent depuis le premier export |
 | Les cibles tactiles n'ont jamais été mesurées | axe neuf, ouvert le 16/09 | **41 contrôles sous le seuil** sur l'export 6. Deux familles : les liens texte nus (20-21 px de haut — « Catalogue », « Tout cocher », « Ajouter », « Tous les abonnements ») qui ratent même le plancher WCAG 2.2 AA de 24 px ; et les contrôles à 32-36 px (bouton d'effacement, « Commander », sélecteurs de tri, « Annuler » du toast) qui ratent notre 44. Le « Plus » de la barre basse fait **35 px de large** sur dix écrans : l'item est dimensionné par son libellé, et « Plus » est court |
 | `cursor` est une propriété **héritée** | piège de mesure | Juger chaque élément qui rend `cursor: pointer` compte chaque mot d'une ligne cliquable : 557 faux défauts au lieu de 41. On ne juge que l'élément le plus extérieur dont le parent ne porte pas le pointeur |
 | Les 48 planches, mesurées | **quatre axes, trois clos** | contraste : **1983 textes**, 0 défaut réel *(12 logotypes exemptés WCAG 1.4.3, 1 ligne à 3 % des glyphes sous la résolution)* · cibles tactiles : **531**, 0 sous le seuil · texte coupé ou débordant : **2192 textes**, 0 · couleurs : 28, aucune intruse |
@@ -315,6 +315,94 @@ quelqu'un qui n'est plus connecté — les données, elles, resteraient inaccess
 (les appels `/api/` rendent 401 et renvoient vers `/login`). **C'est un arbitrage de
 sécurité, donc il revient à Thomas, pas à moi.** La file d'attente fonctionne sans
 lui : elle se vide au retour du réseau dans l'onglet ouvert, et au démarrage suivant.
+
+### Trois cécités de l'instrument de contraste — fermées le 18/09
+
+Le banc annonçait **1 275 textes, 0 défaut**. Il ne mentait pas ; sa **portée**
+était plus étroite que son titre, de trois façons indépendantes. Chacune rendait
+un zéro qui rassure.
+
+**① Les champs de saisie n'étaient pas jugés.** La sélection gardait les éléments
+portant un *nœud texte enfant* — or un `<input>` n'en a jamais. Le texte indicatif
+(`::placeholder`), la valeur saisie et le libellé d'un `<select>` étaient donc hors
+champ. Et la cécité était double pour l'indication : `::placeholder` porte sa
+**propre** déclaration de couleur, si bien que `el.style.color = "transparent"` ne
+l'efface pas — ses glyphes seraient apparus identiques dans les deux
+photographies, donc comptés à zéro. *Mesure* : **40 textes indicatifs à 3,56:1 en
+mode sombre**, cause unique — les trois déclarations `::placeholder` de la feuille
+étaient toutes préfixées `:root[data-color-scheme="light"]`, et le navigateur
+posait son défaut à lui, `#757575`. *La même forme que le défaut de l'accordéon :
+une règle juste, scopée à un seul mode.*
+
+**② L'alpha était jeté.** `couleur.match(/\d+/g).slice(0, 3)` transformait
+`rgba(255,255,255,0.72)` en blanc pur et **surévaluait** le contraste. *Mesure* :
+**215 textes translucides sur le vert de la barre latérale, dont 175 sous le
+seuil**, de 3,45 à 4,49. La charte l'avait pressenti sur les maquettes (« 3,27 —
+jamais mesuré par personne ») ; c'est le même défaut, au même endroit.
+
+*Contre-épreuve, par une méthode qui ne partage pas l'hypothèse* : au lieu de
+composer la couleur déclarée, lire la couleur **rendue** des glyphes dans la
+photographie. Les deux s'accordent à **0,13** près, et le rendu est toujours le
+plus sévère des deux.
+
+> **Il n'y a pas de place pour un blanc atténué sur ce vert**, et c'est mesuré :
+> blanc pur **4,99** · blanc à 0,94 **4,63** · blanc à 0,90 **4,39** · `#D6E5E3`
+> (le jeton « secondaire sur principal ») **3,85** — il avait été calculé pour
+> `#386B6D`, or le champ *éclaircit* ce vert. Entre le blanc et le seuil il reste
+> **0,49**. La hiérarchie passe donc par la taille et la graisse, plus par
+> l'opacité. ⛔ **Rien de plus sombre que le blanc ne peut se poser sur la barre
+> latérale.**
+
+**③ Un texte recouvert était compté comme « rien à juger ».** Un élément que
+personne ne voit ne produit aucune différence entre les deux photographies : zéro
+glyphe, donc `return` muet, donc rangé avec les cas sans texte. *Mesure* : le
+message « Aucun client avec coordonnées. » était **peint sous la carte** dans les
+deux modes — Leaflet pose ses panneaux à z-index 200 et plus, `.map-empty` était
+en `z-index: auto`. Cet état vide n'a jamais été vu par personne. Le contrôle
+d'occlusion en amont ne l'attrapait pas : il interroge `elementFromPoint`, en
+coordonnées de **fenêtre**, sur un élément qui peut être mille pixels plus bas.
+
+> **Zéro glyphe n'est pas une conformité.** Le banc compte désormais les textes
+> *mis en page mais invisibles* et échoue s'il y en a un.
+
+| Après | clair | sombre |
+|---|---|---|
+| textes de l'application | 627, **0 défaut**, 0 invisible | 649, **0 défaut**, 0 invisible |
+| textes des champs | 83, **0 défaut** | 53, **0 défaut** |
+| cibles tactiles | 332 (fine) | 234 (coarse), 0 sous 24 px |
+
+### ⛔ Les bancs martelaient OpenStreetMap, et mesuraient son message d'erreur
+
+En photographiant l'onglet livreur, les tuiles reçues n'étaient pas des cartes.
+C'étaient des images d'erreur **HTTP 403** :
+
+> *« Access blocked — App is not following the tile usage policy of
+> OpenStreetMap's volunteer-run servers : osm.wiki/Blocked »*
+
+Deux conséquences, et les deux comptent. **Le banc mesurait autre chose que
+Séréo** — les fonds lus sous les glyphes au-dessus de la carte étaient le
+graphique d'erreur d'OSM, en gris 78 à 209, inversé en sombre par
+`--leaflet-tile-filter`. Et **chaque exécution frappait un service bénévole** :
+quinze onglets, deux modes, une dizaine de bancs, à chaque fois. Le blocage n'est
+pas un accident, c'est la réponse normale d'OSM à ce comportement.
+
+Les bancs servent désormais une tuile plate, locale, et `tuiles-bloquees.spec.js`
+échoue si une seule demande s'échappe. Le `{s}` de l'URL (sous-domaines `a.b.c`,
+hérités de HTTP/1.1, **explicitement déconseillés** par la politique d'usage
+d'OSM) a été retiré — ce qui a immédiatement révélé que la CSP du serveur
+n'autorisait que `https://*.tile.openstreetmap.org`, **et un joker CSP ne couvre
+pas le domaine nu**. Les deux hôtes y figurent maintenant.
+
+> **Ce que je ne sais pas, et que je n'affirme pas :** si la PRODUCTION est
+> bloquée elle aussi. Je n'ai aucune mesure depuis l'hébergeur. Ce qui est
+> certain, c'est que la machine de développement l'est.
+>
+> **Arbitrage ouvert, pour Thomas :** le fournisseur de tuiles. OSM demande aux
+> usages soutenus de passer par un fournisseur dédié. Retirer le `{s}` va dans le
+> sens de leur politique mais **ne prouve pas** que le blocage soit levé. Les
+> options sont : vérifier depuis la production, souscrire un fournisseur de
+> tuiles, ou héberger les siennes. C'est un choix de coût et de dépendance, donc
+> le sien.
 
 ## 10. Guide pour l'agent
 

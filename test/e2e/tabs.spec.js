@@ -15,7 +15,7 @@
 // une fonction non exportee se voit immediatement ici, alors qu'elle serait
 // invisible dans un `node --check`.
 
-const { test, expect } = require("@playwright/test");
+const { test, expect } = require("./tuiles");
 
 const TABS = [
   { id: "abonnements", label: "Abonnements" },

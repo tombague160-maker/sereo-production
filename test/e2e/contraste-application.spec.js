@@ -41,7 +41,7 @@
 //   - OCCLUSION : un element recouvert n'est pas mesure.
 //   - Le logotype est exempte (WCAG 1.4.3).
 
-const { test, expect } = require("@playwright/test");
+const { test, expect } = require("./tuiles");
 
 const PART_MIN = 0.02;
 const PIXELS_MIN = 8;
@@ -108,6 +108,25 @@ async function relever(page) {
     }
     return feuilles;
   }, MARGE);
+}
+
+/**
+ * Rend [r, g, b, a] -- l'ALPHA COMPTE. `couleur.match(/\d+/g).slice(0, 3)`
+ * decoupait `rgba(255,255,255,0.72)` en (255,255,255) et SURESTIMAIT le
+ * contraste : ce blanc-la vaut 3,45 sur le vert du champ de recherche, pas
+ * 4,25. Mesure du 18/09, 45 defauts reels rendus invisibles par ce seul
+ * `slice`.
+ */
+function avecAlpha(chaine) {
+  const n = (chaine.match(/[\d.]+/g) || []).map(Number);
+  if (n.length < 3) return null;
+  return [n[0], n[1], n[2], n.length >= 4 ? n[3] : 1];
+}
+
+/** Compose un devant translucide sur un fond OPAQUE (celui lu sous les glyphes). */
+function composerSurFond([r, g, b, a], fond) {
+  if (a >= 1) return [r, g, b];
+  return [0, 1, 2].map(i => Math.round(a * [r, g, b][i] + (1 - a) * fond[i]));
 }
 
 /** Rend tout le texte transparent, et retourne de quoi le restaurer. */
@@ -184,6 +203,7 @@ for (const mode of ["light", "dark"]) {
     expect(onglets.length, "aucun onglet trouve").toBeGreaterThan(5);
 
     const defauts = [];
+    const invisibles = [];
     let totalMesure = 0;
 
     for (const onglet of onglets) {
@@ -209,13 +229,31 @@ for (const mode of ["light", "dark"]) {
       const mesures = await mesurerRegions(page, avec, sans, feuilles);
       feuilles.forEach((f, i) => {
         const m = mesures[i];
-        if (!m.glyphes || !m.fonds.length) return;
+        // ZERO GLYPHE N'EST PAS UNE CONFORMITE.
+        //
+        // L'element a passe tous les filtres de mise en page : il a du texte, il
+        // n'est ni `display:none`, ni `visibility:hidden`, ni transparent, et sa
+        // boite a une surface. S'il ne produit malgre tout AUCUNE difference
+        // entre la photographie avec texte et celle sans, c'est que personne ne
+        // le voit -- il est RECOUVERT, ou de la couleur exacte de son fond. Les
+        // deux sont des defauts.
+        //
+        // Mesure du 18/09 : c'est exactement ce qui cachait `.map-empty`, peint
+        // sous les panneaux Leaflet (z-index 200+ contre `auto`). Un harnais de
+        // mutation a retire son z-index sans qu'aucun banc ne bronche -- parce
+        // que ce `return` muet le rangeait avec les cas sans texte.
+        //
+        // Le controle d'occlusion en amont ne l'attrape pas : il interroge
+        // `elementFromPoint`, en coordonnees de FENETRE, alors que l'element
+        // peut etre mille pixels plus bas. Ici on lit la page entiere.
+        if (!m.glyphes || !m.fonds.length) { invisibles.push(f); return; }
         totalMesure++;
-        const txt = f.couleur.match(/\d+/g).slice(0, 3).map(Number);
+        const txt = avecAlpha(f.couleur);
+        if (!txt) return;
         const gros = f.taille >= 24 || (f.taille >= 18.66 && f.gras);
         const seuil = gros ? 3 : 4.5;
         for (const fond of m.fonds) {
-          const r = contraste(txt, fond);
+          const r = contraste(composerSurFond(txt, fond), fond);
           if (r < seuil) {
             defauts.push("[" + mode + "/" + onglet + "] " + r.toFixed(2) + ":1 < " + seuil
               + '  "' + f.texte + '"  ' + f.chemin + "  " + f.couleur
@@ -225,10 +263,23 @@ for (const mode of ["light", "dark"]) {
       });
     }
 
-    console.log("\n[" + mode + "] " + onglets.length + " onglets, " + totalMesure + " textes mesures, " + defauts.length + " defaut(s)");
+    console.log("\n[" + mode + "] " + onglets.length + " onglets, " + totalMesure + " textes mesures, "
+      + defauts.length + " defaut(s), " + invisibles.length + " texte(s) INVISIBLE(S)");
+    for (const f of invisibles.slice(0, 12)) {
+      console.log("  invisible : \"" + f.texte + "\"  " + f.chemin);
+    }
     for (const d of [...new Set(defauts)].slice(0, 40)) console.log("  " + d);
 
     expect(totalMesure, "portee insuffisante").toBeGreaterThanOrEqual(PORTEE_MIN);
+
+    // Un texte pose, mis en page, et que PERSONNE NE VOIT. Zero au 18/09 :
+    // l'assertion porte donc sur un etat mesure, pas sur un espoir. C'est elle
+    // qui attrape un element recouvert -- le `.map-empty` peint sous les
+    // panneaux Leaflet avait echappe a tout le reste, parce qu'un element
+    // recouvert ne produit aucun glyphe et se rangeait, muet, avec les cas sans
+    // texte.
+    expect(invisibles.map(f => f.chemin + " : \u00ab " + f.texte + " \u00bb"),
+      "texte(s) presents dans la page mais qui n'apparaissent nulle part").toEqual([]);
     expect([...new Set(defauts)], "textes sous leur seuil").toEqual([]);
     await ctx.close();
   });

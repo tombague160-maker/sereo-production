@@ -1936,8 +1936,18 @@ label {
   filter: var(--leaflet-tile-filter, none);
 }
 
+/* Mesure du 18/09, capture a l'appui : ce message etait PEINT SOUS la carte,
+ * dans les deux modes. Leaflet pose ses panneaux a z-index 200 et plus ;
+ * `.map-empty` etait en `z-index: auto`, donc dessous. L'etat vide de la carte
+ * n'a jamais ete vu par personne.
+ *
+ * Il avait echappe au releve de contraste pour la meme raison : recouvert, il ne
+ * produisait AUCUNE difference entre la photographie avec texte et celle sans,
+ * donc zero glyphe, donc "non juge" -- et un non-juge se lit comme un conforme
+ * quand on ne le compte pas a part. */
 .map-empty {
   position: absolute;
+  z-index: 1000;   /* au-dessus des panneaux Leaflet (200 a 700) */
   inset: auto 16px 16px 16px;
   padding: 12px;
   border-radius: var(--radius);
@@ -6306,7 +6316,15 @@ html[data-color-scheme="light"] body,
   padding: 10px 12px;
   border: 0;
   background: transparent;
-  color: rgba(255, 255, 255, 0.86);
+  /* Mesure du 18/09 : 4,28 au HAUT du degrade de la barre laterale (4,35
+   * compose, 4,22 lu sur les pixels rendus -- deux methodes qui ne partagent
+   * pas leur hypothese et s'accordent a 0,13). L'instrument avait annonce
+   * "blanc pur" pendant des mois parce qu'il faisait
+   * `couleur.match(/\d+/g).slice(0, 3)` et jetait l'alpha.
+   *
+   * 12,48 px en 900 : ce n'est PAS du grand texte au sens WCAG (il faut 18,66
+   * px en gras), donc le seuil est 4,5 et non 3. */
+  color: var(--v8-texte-sur-principal);
   font: inherit;
   font-size: 0.78rem;
   font-weight: 900;
@@ -6497,8 +6515,28 @@ html[data-color-scheme="light"] body,
   color: var(--v8-surface);
 }
 
+/* Mesure du 18/09 : ce blanc a 72 % rend 3,45:1 sur le vert du champ, qui est
+ * lu SOUS les glyphes a rgb(74,119,121). Le defaut avait survecu parce que
+ * l'instrument lisait `rgba(255,255,255,0.72)` comme du BLANC PUR et annoncait
+ * 4,25 -- il ignorait l'alpha au lieu de composer sur le fond mesure. La charte
+ * l'avait pourtant pressenti sur les maquettes ("3,27 -- jamais mesure par
+ * personne") ; c'est le meme defaut, au meme endroit.
+ *
+ * IL N'Y A PAS DE PLACE POUR UN BLANC ATTENUE ICI, et c'est mesure :
+ *   blanc pur                        4,99
+ *   blanc a 0,94                     4,63
+ *   blanc a 0,90                     4,39  <- deja sous le seuil
+ *   #D6E5E3 (secondaire sur vert)    3,85  <- calcule pour #386B6D, mais le
+ *                                            champ ECLAIRCIT ce vert
+ * Entre le blanc et le seuil il reste 0,49. Toute attenuation visible tombe.
+ * On prend donc le blanc du texte saisi -- meme jeton, ligne au-dessus : la
+ * distinction entre indication et valeur ne passe plus par la couleur, elle
+ * passe par le fait que l'une disparait quand on tape.
+ *
+ * ⛔ RIEN de plus sombre que le blanc ne peut se poser sur ce champ. */
 :root[data-color-scheme="light"] .sidebar-search input::placeholder {
-  color: rgba(255, 255, 255, 0.72);
+  color: var(--v8-surface);
+  opacity: 1;
 }
 
 :root[data-color-scheme="light"] .sidebar-search:focus-within {
@@ -6518,7 +6556,16 @@ html[data-color-scheme="light"] body,
   border: 1px solid transparent;
   border-radius: 14px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.76);
+  /* Mesure du 18/09 : 3,92 au plus clair du degrade. Les <span> des items de
+   * navigation HERITENT de cette couleur -- 183 des 215 mesures viennent de
+   * cette seule ligne.
+   *
+   * LA HIERARCHIE NE PEUT PLUS PASSER PAR L'OPACITE, et c'est mesure : sur le
+   * vert le plus clair de la barre, le blanc PUR ne vaut que 5,03. Entre lui et
+   * le seuil il reste 0,5 ; 0,86 tombe deja a 4,28. Elle passe donc par la
+   * TAILLE et la GRAISSE, ce que ces regles font deja (0,78 rem / 900 pour les
+   * intitules de section, 0,92 rem / 850 pour les items). */
+  color: var(--v8-texte-sur-principal);
   font-size: 0.92rem;
   font-weight: 850;
 }
@@ -8642,4 +8689,36 @@ html[data-color-scheme="light"] body,
   min-height: 24px;
   padding-top: 2px;
   padding-bottom: 2px;
+}
+
+/* --- TEXTE INDICATIF DES CHAMPS ---------------------------------------------
+ *
+ * Mesure du 18/09, mode SOMBRE, 15 onglets : 40 textes indicatifs a 3,56:1.
+ * Cause unique : les trois declarations `::placeholder` de cette feuille sont
+ * TOUTES prefixees `:root[data-color-scheme="light"]`. En sombre aucune ne
+ * s'applique, et le navigateur pose son defaut a lui -- #757575 -- sur la
+ * surface #132224.
+ *
+ * C'est exactement la forme du defaut de l'accordeon : une regle juste, scopee
+ * a un seul mode. Un texte indicatif n'est pas thematique, il est SECONDAIRE.
+ *
+ * POURQUOI CE DEFAUT A SURVECU A 1275 MESURES. Le banc de contraste ne juge un
+ * element que s'il porte un NOEUD TEXTE enfant. Un <input> n'en a jamais. Et
+ * meme selectionne, `el.style.color = "transparent"` n'efface pas un
+ * `::placeholder`, qui porte sa propre couleur : les glyphes auraient paru
+ * identiques dans les deux photographies, donc comptes a zero.
+ * `test/e2e/contraste-champs.spec.js` ferme cette famille.
+ *
+ * NON SCOPE, DELIBEREMENT. La regle blanche de la barre laterale en clair
+ * (`.sidebar-search` sur le vert) reste : elle pese (0,2,3) contre (0,0,2) ici,
+ * elle gagne donc en clair, et ne s'applique pas en sombre. On n'outrepasse
+ * rien, on comble.
+ *
+ *   clair  #4F7477 sur #F5F1EE (champ)   4,56
+ *   sombre #A8C4BE sur #132224 (surface) 8,82
+ */
+input::placeholder,
+textarea::placeholder {
+  color: var(--v8-texte-secondaire);
+  opacity: 1; /* Firefox pose 0,54 par defaut et rendrait la mesure fausse */
 }
