@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.26.2](https://github.com/tombague160-maker/sereo-production/compare/v1.26.1...v1.26.2) (2026-09-18)
+
+
+### ⚡ Optimisations
+
+* **tests:** le balayage de contraste passe d'une heure a quatre minutes ([18df0c5](https://github.com/tombague160-maker/sereo-production/commit/18df0c5e91f1fc60ea47e33e8d61d0adc00a34cd))
+
 ## [1.26.1](https://github.com/tombague160-maker/sereo-production/compare/v1.26.0...v1.26.1) (2026-09-17)
 
 
