@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.31.0](https://github.com/tombague160-maker/sereo-production/compare/v1.30.0...v1.31.0) (2026-09-18)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **v8:** le motif d'un arret en echec, et une ligne de la charte qui etait fausse ([a778cc7](https://github.com/tombague160-maker/sereo-production/commit/a778cc736219e97373556e5876f6476cc6433d36))
+* **v8:** phase 5 -- la file d'attente hors ligne, et ce qu'elle a revele ([be97c51](https://github.com/tombague160-maker/sereo-production/commit/be97c514f83d0df5211bfc4ffb2234df9f721f6f))
+
+
+### 🐛 Corrections de bugs
+
+* **v8:** la page de connexion, le seul ecran que rien ne regardait ([b7a5124](https://github.com/tombague160-maker/sereo-production/commit/b7a51248ef38912e4fb433df20e4c80aa5d45343))
+* **v8:** les grands rayons, et la QUATRIEME regle scopee a un seul mode ([0f36eda](https://github.com/tombague160-maker/sereo-production/commit/0f36edacac94f2403f1b8ef1e8974ef0f49bb352))
+* **v8:** trois cecites de l'instrument de contraste, et les defauts qu'elles cachaient ([bea02a8](https://github.com/tombague160-maker/sereo-production/commit/bea02a843c11df925d3cd588694c4593abbd72a2))
+
 ## [1.30.0](https://github.com/tombague160-maker/sereo-production/compare/v1.29.0...v1.30.0) (2026-09-18)
 
 
