@@ -131,7 +131,9 @@
  *  2) override utilisateur explicite (data-color-scheme="dark")
  *
  * On surcharge UNIQUEMENT les variables semantiques pour preserver l'identite
- * du theme pastel actif (les --color-pastel-* viennent de pastelThemes).
+ * du theme pastel actif. PERIME, corrige le 18/09 : `pastelThemes` a disparu
+ * avec la reduction de themes.js a un seul theme, et les --color-pastel-* ne
+ * sont plus declares nulle part. Cette ligne a survecu a ce qu elle decrivait.
  * ========================================================================== */
 @media (prefers-color-scheme: dark) {
   :root:not([data-color-scheme="light"]) {
@@ -7658,8 +7660,10 @@ html[data-color-scheme="light"] body,
  * JETONS V8 — le socle de la phase 4
  *
  * Une seule couche, 16 roles en clair et 16 en sombre, tires de la charte
- * design/DESIGN.md §2. Les trois generations empilees (--color-, --palette-,
- * --neo-) et les 141 couleurs litterales de cette feuille ont vocation a etre
+ * design/DESIGN.md. Les trois generations empilees (--color-pastel-, --palette-,
+ * --neo-) ont ete RETIREES le 18/09 : il n en reste aucune declaration, seules
+ * ces lignes de commentaire les nomment encore. Les couleurs litterales de cette
+ * feuille avaient vocation a etre
  * REMPLACEES par ces jetons, marche par marche. Tant qu'un composant n'est pas
  * porte, il garde ses anciennes valeurs : ce bloc est ADDITIF et ne change
  * rien a l'ecran par lui-meme.
@@ -7923,7 +7927,11 @@ html[data-color-scheme="light"] body,
 #journee > .panel,
 #journee .op-dashboard-grid > .panel,
 #abonnements > .panel {
-  border-radius: 18px;
+  /* Le jeton, et non 18px en dur. Ce selecteur porte un ID : il pese (1,1,1) et
+   * bat mecaniquement le bloc de rayons en fin de feuille, qui plafonne a
+   * (0,2,1). Surencherir en specificite aurait masque le probleme ; c'est ICI
+   * que la valeur en dur etait la deviation. */
+  border-radius: var(--radius-card);
   box-shadow: none;
   margin-top: 20px;
   padding: 24px;
@@ -8721,4 +8729,57 @@ input::placeholder,
 textarea::placeholder {
   color: var(--v8-texte-secondaire);
   opacity: 1; /* Firefox pose 0,54 par defaut et rendrait la mesure fausse */
+}
+
+/* --- LES GRANDS RAYONS ------------------------------------------------------
+ *
+ * Charte §4 : « Cartes : rayon 24 px (mobile) a 36 px (desktop) ». Le guide de
+ * l'agent range « grands rayons » parmi les cinq mots du vocabulaire de V8, au
+ * meme titre que les pilules et le sourire de la marque.
+ *
+ * TROIS MESURES DU 18/09.
+ *
+ *   1. `var(--radius-card)` n'apparaissait QU'UNE FOIS dans toute la feuille.
+ *      La chaine --radius-card -> --radius -> .card existait, mais QUATRE
+ *      redefinitions directes de --radius la coupaient.
+ *
+ *   2. Tout rendait en dessous de la charte : desktop 22 (.card) et 18 (.panel,
+ *      .op-kpi) ; mobile 16 (.card, .panel) et 14 (.op-kpi).
+ *
+ *   3. LE JETON VALAIT 22 px EN CLAIR ET 8 px EN SOMBRE. Les deux declarations
+ *      qui gagnaient etaient prefixees `:root[data-color-scheme="light"]` ; en
+ *      sombre, plus rien ne s'appliquait et le jeton retombait sur le `8px` de
+ *      `:root`. Huit cartes du tableau de bord passaient d'arrondies a presque
+ *      carrees selon le mode.
+ *
+ * QUATRIEME OCCURRENCE DE LA MEME FORME, apres les onglets, l'accordeon et les
+ * textes indicatifs : une regle juste, scopee a un seul mode. Un rayon n'est pas
+ * une propriete thematique.
+ *
+ * NON SCOPE ET EN FIN DE FEUILLE, pour les deux raisons a la fois :
+ * `:root[data-color-scheme]` pese autant que `:root[data-color-scheme="light"]`
+ * (0,1,1) mais s'applique aux DEUX modes, et l'ordre tranche l'egalite. La
+ * specificite seule ne suffisait pas, l'ordre seul non plus.
+ *
+ * Le « 24 a 36 » de la charte est lu comme un palier a 921 px, breakpoint deja
+ * present dans cette feuille, et non comme une interpolation fluide -- un palier
+ * se mesure, une interpolation se discute. */
+:root[data-color-scheme] {
+  --radius-card: 24px;
+  --radius: var(--radius-card);
+}
+
+@media (min-width: 921px) {
+  :root[data-color-scheme] {
+    --radius-card: 36px;
+  }
+}
+
+/* Les surfaces que la charte appelle des CARTES suivent le jeton. Les elements
+ * IMBRIQUES dans l'une d'elles gardent le leur, plus petit : une carte dans une
+ * carte n'est pas une carte de plus. */
+:root[data-color-scheme] .card,
+:root[data-color-scheme] .panel,
+:root[data-color-scheme] .op-kpi {
+  border-radius: var(--radius-card);
 }

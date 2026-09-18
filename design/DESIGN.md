@@ -194,7 +194,7 @@ ici**. Ils ne changent pas la charte : ils disent ce que la refonte doit défair
 | Constat | Vérifié | Mesure exacte |
 |---|---|---|
 | Un arrêt en « problème » n'enregistre aucune raison | oui | `createStop` (server.js:5539) porte un champ `notes`, mais il recopie les notes de la commande. Le statut `probleme` existe sans motif. Un champ neuf est à créer |
-| Trois rayons de carte concurrents | oui, et pire qu'annoncé | `--radius-card` vaut 8, 22 **et** 28 px dans `style.css` |
+| ~~Trois rayons de carte concurrents~~ — **soldé le 18/09** | oui, et **encore pire qu'annoncé** | `--radius-card` valait 8, 22 **et** 28 px — et surtout **22 en clair, 8 en sombre**, les deux déclarations gagnantes étant scopées `light`. Détail plus bas |
 | Trois oranges pour un seul rôle | oui | `#f18c79` (14×), `#f47a5a` (3×), `#ef8f77` dans `sereo-mark.svg`, `sereo-sidebar-bg.svg`, `favicon.svg` et `generate-icons.js` |
 | Générations de tokens empilées | oui | `--color-pastel-` 95 déclarations, `--palette-` 186, `--neo-` 121 |
 | 15 onglets pour 6 catégories | oui | `mainTabs` en compte 15, dont 5 listes de commandes filtrées différemment |
@@ -403,6 +403,73 @@ pas le domaine nu**. Les deux hôtes y figurent maintenant.
 > options sont : vérifier depuis la production, souscrire un fournisseur de
 > tuiles, ou héberger les siennes. C'est un choix de coût et de dépendance, donc
 > le sien.
+
+### Les grands rayons — mesurés et posés le 18/09
+
+« Grands rayons » est l'un des cinq mots du vocabulaire de V8 (§10), au même titre
+que les pilules et le sourire de la marque. Le §4 le chiffre : **24 px en mobile,
+36 px en desktop**. Trois mesures, et la troisième est un défaut *visible*.
+
+**① Le jeton ne servait presque à rien.** `var(--radius-card)` n'apparaissait
+**qu'une fois** dans toute la feuille. La chaîne `--radius-card` → `--radius` →
+`.card` existait, mais **quatre** redéfinitions directes de `--radius` la
+coupaient.
+
+**② Tout rendait en dessous de la charte.**
+
+| | avant, desktop | avant, mobile | charte |
+|---|---|---|---|
+| `.card` | 22 px | 16 px | **36 / 24** |
+| `.panel` | 18 px | 16 px | 36 / 24 |
+| `.op-kpi` | 18 px | 14 px | 36 / 24 |
+
+**③ Le jeton valait 22 px en clair et 8 px en sombre.** Les deux déclarations qui
+gagnaient étaient préfixées `:root[data-color-scheme="light"]` ; en sombre plus
+rien ne s'appliquait et le jeton retombait sur le `8px` de `:root`. **Huit cartes
+du tableau de bord passaient d'arrondies à presque carrées selon le mode.**
+
+> ⚠ **Quatrième occurrence de la même forme**, après les onglets, l'accordéon et
+> les textes indicatifs : *une règle juste, scopée à un seul mode*. Ni un repli,
+> ni un rayon, ni un texte indicatif n'est une propriété thématique. Quand une
+> règle porte `[data-color-scheme="light"]`, la question à poser est : **« et en
+> sombre, qui s'applique ? »** — la réponse est souvent « personne ».
+
+Le correctif est un bloc **non scopé**, en fin de feuille :
+`:root[data-color-scheme]` pèse autant que `:root[data-color-scheme="light"]`
+(0,1,1) mais s'applique aux **deux** modes, et l'ordre tranche l'égalité. *La
+spécificité seule ne suffisait pas, l'ordre seul non plus.*
+
+Un seul écart a résisté : `#journee > .panel` porte un **ID**, donc (1,1,1), et
+battait mécaniquement le bloc à (0,2,1). Surenchérir en spécificité aurait masqué
+le problème — c'est là que le `18px` en dur était la déviation, et c'est là qu'il
+a été remplacé par le jeton.
+
+Le « 24 à 36 » est lu comme un **palier à 921 px** (breakpoint déjà présent dans la
+feuille) et non comme une interpolation fluide : *un palier se mesure, une
+interpolation se discute.* `test/e2e/rayons.spec.js` échoue si une carte s'en
+écarte de plus d'1 px, **et si le jeton diffère entre les deux modes** — la
+seconde assertion n'est pas redondante : deux modes peuvent être justes par deux
+chemins différents, et le prochain qui touche à l'un casse l'autre.
+
+*Après : 20 cartes, 0 hors charte, dans les deux modes et les deux vues.*
+
+### ⬜ Ce que la charte demande et que le code ne fait pas encore — la typographie
+
+Mesure du 18/09, et c'est le plus large des écarts restants.
+
+Le §3 dit : « **Poppins** 400 / 500 / 600 / 700 […] en production la police est
+auto-hébergée (`font-src 'self'`) ». Le code déclare
+`font-family: Inter, "Segoe UI", Arial` et **ne charge aucune police** : zéro
+fichier `.woff`/`.ttf` dans le dépôt, zéro `@font-face`, zéro lien Google Fonts.
+Ni Poppins ni Inter n'étant installées sur une machine ordinaire, **tout
+s'affiche dans la police système**.
+
+La CSP est déjà prête (`font-src 'self' data:`) : c'est le contenu qui manque.
+
+> ⚠ **Ce n'est pas un détail cosmétique.** Les hauteurs de ligne, les hauteurs de
+> rangée (64–72 px), les troncatures et la couverture des glyphes ont **toutes**
+> été mesurées dans une police qui n'est pas la bonne. Poser Poppins **déplacera
+> ces mesures**, et il faudra les refaire — pas les relire.
 
 ## 10. Guide pour l'agent
 
