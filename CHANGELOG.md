@@ -1,6 +1,11 @@
 # Changelog
 
-## [1.26.3](https://github.com/tombague160-maker/sereo-production/compare/v1.26.2...v1.26.3) (2026-09-18)
+## [1.27.0](https://github.com/tombague160-maker/sereo-production/compare/v1.26.2...v1.27.0) (2026-09-18)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **v8:** phase 4, marche 4a -- la barre basse mobile applique la decision de Tom ([b16d980](https://github.com/tombague160-maker/sereo-production/commit/b16d9804440b3b942d60f717f258f9ae4381fc9f))
 
 
 ### 📚 Documentation
