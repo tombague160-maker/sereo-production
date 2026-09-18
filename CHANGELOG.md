@@ -3,6 +3,12 @@
 ## [1.26.2](https://github.com/tombague160-maker/sereo-production/compare/v1.26.1...v1.26.2) (2026-09-18)
 
 
+### ✨ Fonctionnalités
+
+* tableau de bord simplifié, abonnements et tournées routières ([7d93ceb](https://github.com/tombague160-maker/sereo-production/commit/7d93ceb)) — travail de @tombague160-maker, PR #96, repris sur `main` 56 commits plus tard et porté sur les jetons V8 (PR #113). Chiffre d'affaires livré et panier moyen sur le mois choisi ; abonnements avec calendrier hebdomadaire, pause/reprise et création idempotente d'une commande planifiée par échéance ; tournée avec départ géolocalisé, matrice de temps OSRM et tracé routier.
+
+  *Ajouté à la main : release-please n'a pas retenu ce `feat:` parce qu'il est arrivé par un commit de fusion, et la 1.26.2 ne créditait que l'optimisation des tests. Le code était bien livré ; c'est le journal qui sous-déclarait.*
+
 ### ⚡ Optimisations
 
 * **tests:** le balayage de contraste passe d'une heure a quatre minutes ([18df0c5](https://github.com/tombague160-maker/sereo-production/commit/18df0c5e91f1fc60ea47e33e8d61d0adc00a34cd))
