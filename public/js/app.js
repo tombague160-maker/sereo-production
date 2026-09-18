@@ -489,9 +489,9 @@ function bindUi() {
     if (action === "purge-orders") purgeOrdersHandler(actionButton);
     if (action === "diagnostic-suspicious-dates") runAction(actionButton, "Scan...", runDiagnosticSuspiciousDates);
     if (action === "mark-delivered") runAction(actionButton, "Envoi...", () => updateCurrentDeliveryStatus("livre"));
-    if (action === "mark-absent") runAction(actionButton, "Envoi...", () => updateCurrentDeliveryStatus("absent"));
-    if (action === "mark-problem") runAction(actionButton, "Envoi...", () => updateCurrentDeliveryStatus("probleme"));
-    if (action === "mark-reschedule") runAction(actionButton, "Envoi...", () => updateCurrentDeliveryStatus("a_reprogrammer"));
+    if (action === "mark-absent") runAction(actionButton, "Envoi...", () => marquerArret("absent"));
+    if (action === "mark-problem") runAction(actionButton, "Envoi...", () => marquerArret("probleme"));
+    if (action === "mark-reschedule") runAction(actionButton, "Envoi...", () => marquerArret("a_reprogrammer"));
     if (action === "replan-current-stop") runAction(actionButton, "Planification...", replanCurrentStop);
     if (action === "next-client") nextClient();
     if (action === "open-maps") openGoogleMaps();
@@ -4025,6 +4025,9 @@ function renderRoute() {
         <strong>${index + 1}. ${escapeHtml(stop.clientName)}</strong>
         <span>${escapeHtml(formatStopAddress(stop))}</span>
         <span class="pill ${getStopPill(stop.status)}">${escapeHtml(formatStopStatus(stop.status))}</span>
+        ${stop.problemReason
+          ? `<span class="route-stop-motif">${escapeHtml(stop.problemReason)}</span>`
+          : ""}
       </button>
       <div class="route-stop-actions">
         <button class="button secondary compact" type="button" data-action="move-stop-up" data-stop-id="${escapeAttribute(stop.id)}" ${index === 0 || activeRoute.status !== "prete" ? "disabled" : ""}>↑</button>
@@ -4121,7 +4124,126 @@ function showRouteCompleted(routeData) {
   updateDriverActionButtons(null);
 }
 
-async function updateCurrentDeliveryStatus(status) {
+// --- LE MOTIF D'UN ARRET EN ECHEC -------------------------------------------
+//
+// Ce que la mesure du 18/09 a montre, et que la charte disait de travers.
+// `stop.problemReason` EXISTAIT cote serveur. Mais il etait ecrit a un seul
+// endroit, LU NULLE PART, et ce qu'il enregistrait n'etait pas une raison :
+// faute de notes envoyees, il retombait sur `stop.notes`, c'est-a-dire sur les
+// INSTRUCTIONS DE LIVRAISON de la commande, recopiees a la creation de l'arret.
+// Marquer un probleme sur une commande portant « code portail 1234 »
+// enregistrait « code portail 1234 » comme cause du probleme.
+//
+// Le livreur, lui, n'avait aucun moyen de dire quoi que ce soit : ce fichier
+// envoyait `{ status }` et rien d'autre.
+
+const STATUTS_DEMANDANT_UN_MOTIF = new Set(["absent", "probleme", "a_reprogrammer"]);
+
+let motifsProbleme = null;
+
+/**
+ * La liste vient du SERVEUR, jamais d'une copie locale. Deux listes derivent, et
+ * l'ecart ne se verrait qu'au premier refus -- sur le telephone d'un livreur,
+ * au pire moment.
+ */
+async function chargerMotifsProbleme() {
+  if (motifsProbleme) return motifsProbleme;
+  const data = await apiFetch("/api/delivery-problems");
+  motifsProbleme = Array.isArray(data?.motifs) ? data.motifs : [];
+  return motifsProbleme;
+}
+
+/**
+ * Demande un motif au livreur. Rend `{ cle, commentaire }`, ou `null` s'il
+ * renonce -- et renoncer ANNULE le changement de statut. C'est deliberé : un
+ * arret marque en echec sans raison est exactement ce qu'on vient de corriger.
+ */
+function demanderMotif(status, motifs) {
+  const dialogue = document.getElementById("motifProblemeDialog");
+  const liste = document.getElementById("motifListe");
+  const champ = document.getElementById("motifCommentaire");
+  if (!dialogue || !liste || !champ || typeof dialogue.showModal !== "function") {
+    // Pas de dialogue utilisable : on laisse passer SANS motif plutot que de
+    // bloquer le livreur. Le serveur accepte, et l'etiquette generique dira
+    // honnetement que personne n'a explique.
+    return Promise.resolve(null);
+  }
+
+  const admis = motifs.filter(m => m.statutsAdmis.includes(status));
+  let choisi = "";
+  champ.value = "";
+  liste.innerHTML = "";
+  for (const m of admis) {
+    const bouton = document.createElement("button");
+    bouton.type = "button";
+    bouton.className = "motif-choix";
+    bouton.setAttribute("role", "radio");
+    bouton.setAttribute("aria-checked", "false");
+    bouton.dataset.motifCle = m.cle;
+    bouton.textContent = m.libelle;
+    liste.appendChild(bouton);
+  }
+
+  const sousTitre = document.getElementById("motifSousTitre");
+  if (sousTitre) sousTitre.textContent = `Statut : ${formatStopStatus(status)}. Cette raison sera archivée avec la tournée.`;
+
+  return new Promise(resolve => {
+    const surClic = evenement => {
+      const choix = evenement.target.closest("[data-motif-cle]");
+      if (choix) {
+        choisi = choix.dataset.motifCle;
+        liste.querySelectorAll("[data-motif-cle]").forEach(b =>
+          b.setAttribute("aria-checked", String(b === choix)));
+        return;
+      }
+      const action = evenement.target.closest("[data-action]")?.dataset.action;
+      if (action === "motif-annuler") terminer(null);
+      if (action === "motif-valider") {
+        if (!choisi) {
+          notify("Choisis une raison, ou annule.", "warning");
+          return;
+        }
+        terminer({ cle: choisi, commentaire: champ.value.trim() });
+      }
+    };
+    // Echap ferme le `<dialog>` natif : c'est une ANNULATION, pas une validation
+    // muette. Sans cet ecouteur, la promesse resterait pendante pour toujours et
+    // le bouton du livreur resterait desactive par runAction().
+    const surFermeture = () => terminer(null);
+
+    function terminer(valeur) {
+      dialogue.removeEventListener("click", surClic);
+      dialogue.removeEventListener("close", surFermeture);
+      if (dialogue.open) dialogue.close();
+      resolve(valeur);
+    }
+
+    dialogue.addEventListener("click", surClic);
+    dialogue.addEventListener("close", surFermeture);
+    dialogue.showModal();
+  });
+}
+
+/** Le geste complet : demander la raison, puis envoyer. */
+async function marquerArret(status) {
+  let motif = null;
+  if (STATUTS_DEMANDANT_UN_MOTIF.has(status)) {
+    let motifs = [];
+    try {
+      motifs = await chargerMotifsProbleme();
+    } catch {
+      // Le serveur ne repond pas : on n'empeche pas le livreur d'avancer.
+      motifs = [];
+    }
+    if (motifs.length) {
+      motif = await demanderMotif(status, motifs);
+      if (motif === null) return;   // il a renonce : le statut ne change pas
+    }
+  }
+  await updateCurrentDeliveryStatus(status, motif);
+}
+
+async function updateCurrentDeliveryStatus(status, motif = null) {
   if (activeRoute) {
     const stop = activeRoute.stops[activeStopIndex];
     if (!stop) {
@@ -4134,7 +4256,7 @@ async function updateCurrentDeliveryStatus(status) {
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ status })
+      body: JSON.stringify({ status, motif })
     });
 
     activeRoute = result.route;

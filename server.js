@@ -231,6 +231,59 @@ function isValidOrderStatusTransition(fromStatus, toStatus) {
 }
 const ROUTE_STATUSES = new Set(["brouillon", "prete", "en_livraison", "terminee"]);
 const STOP_STATUSES = new Set(["pret_livraison", "en_livraison", "livre", "absent", "probleme", "a_reprogrammer"]);
+
+// --- LE MOTIF D'UN ARRET EN ECHEC -------------------------------------------
+//
+// LA CHARTE SE TROMPAIT (§9) : elle annonce qu'aucune raison n'est enregistree
+// et qu'« un champ neuf est a creer ». Le champ `stop.problemReason` EXISTAIT.
+// Mesure du 18/09, et le vrai defaut tient en trois points :
+//
+//   1. IL N'ETAIT LU NULLE PART. Une ecriture dans server.js, zero lecture --
+//      ni serveur, ni client, ni HTML. Un mecanisme soigne et branche sur
+//      personne : on le trouve en cherchant, donc on conclut qu'il marche.
+//
+//   2. LE LIVREUR NE POUVAIT RIEN SAISIR. Le client envoyait `{ status }` et
+//      rien d'autre. Aucun ecran ne demandait de raison.
+//
+//   3. CE QU'IL ENREGISTRAIT N'ETAIT PAS UNE RAISON. Faute de notes envoyees,
+//      `stop.notes` gardait ce que createStop y avait mis : LES INSTRUCTIONS DE
+//      LIVRAISON DE LA COMMANDE. Marquer un probleme sur une commande portant
+//      « code portail 1234 » enregistrait « code portail 1234 » comme cause.
+//
+// POURQUOI UNE LISTE FERMEE PLUTOT QUE DU TEXTE LIBRE SEUL. Un champ libre se
+// remplit de « rien », « rappeler », « cf tel » -- et le releve devient
+// inexploitable au moment meme ou on en aurait besoin (relances, recommandes).
+// Un motif nomme se compte ; un commentaire, non. Le texte libre reste, mais
+// EN PLUS d'un motif, jamais a sa place.
+//
+// POURQUOI CES SEPT-LA. Ils viennent du terrain de cette tournee -- EHPAD,
+// SSIAD, cliniques -- et non d'une liste generique de messagerie. C'est un
+// choix de vocabulaire metier : il se change en une ligne si Tom en veut
+// d'autres, et rien d'autre dans le code ne depend de ces libelles.
+const MOTIFS_PROBLEME = new Map([
+  ["absent", { libelle: "Personne sur place", statutsAdmis: ["absent", "probleme", "a_reprogrammer"] }],
+  ["adresse", { libelle: "Adresse introuvable", statutsAdmis: ["probleme", "a_reprogrammer"] }],
+  ["acces", { libelle: "Accès impossible (portail, code, étage)", statutsAdmis: ["probleme", "a_reprogrammer"] }],
+  ["ferme", { libelle: "Établissement fermé", statutsAdmis: ["absent", "probleme", "a_reprogrammer"] }],
+  ["refus", { libelle: "Commande refusée", statutsAdmis: ["probleme", "a_reprogrammer"] }],
+  ["produit", { libelle: "Produit manquant ou abîmé", statutsAdmis: ["probleme", "a_reprogrammer"] }],
+  ["autre", { libelle: "Autre", statutsAdmis: ["absent", "probleme", "a_reprogrammer"] }]
+]);
+
+/** Les statuts d'arret qui exigent qu'on dise POURQUOI. */
+const STATUTS_EN_ECHEC = new Set(["absent", "probleme", "a_reprogrammer"]);
+
+/**
+ * Compose ce qui sera archive comme cause. Le motif porte le sens, le
+ * commentaire libre porte le detail -- dans cet ordre, parce que c'est le motif
+ * qui se compte.
+ */
+function composerMotif(cle, commentaire) {
+  const motif = MOTIFS_PROBLEME.get(cle);
+  if (!motif) return "";
+  const detail = clean(commentaire || "");
+  return detail ? `${motif.libelle} — ${detail}` : motif.libelle;
+}
 const CORE_SECTORS = ["Besancon", "Champagnole", "Dole"];
 const CRM_STATUSES = new Set(["prospect", "client_actif", "client_a_relancer", "client_inactif"]);
 const RELANCE_STATUSES = new Set(["a_faire", "fait", "reporte", "annule"]);
@@ -5754,9 +5807,30 @@ function startRoute(db, routeId) {
   return route;
 }
 
-function updateRouteStop(db, routeId, stopId, status, notes = "") {
+/**
+ * @param {string} notes  instruction de livraison, telle qu'elle vient de la
+ *                        commande. Elle ne dit RIEN de la cause d'un echec.
+ * @param {object} motif  { cle, commentaire } -- ce que le LIVREUR a dit.
+ *
+ * Les deux restent separes pour de bon. Les confondre est precisement le defaut
+ * qu'on corrige : passer le motif dans `notes` ecraserait l'instruction de
+ * livraison de la commande, et la perdrait pour la prochaine tournee.
+ */
+function updateRouteStop(db, routeId, stopId, status, notes = "", motif = null) {
   if (!STOP_STATUSES.has(status)) {
     throw badRequest("Statut arret invalide");
+  }
+
+  // Un motif inconnu est REFUSE, il n'est pas ignore en silence : une liste
+  // qu'on declare sans la consulter ne sert a rien, et un client qui envoie
+  // n'importe quoi doit l'apprendre tout de suite.
+  const cleMotif = motif && typeof motif === "object" ? String(motif.cle || "") : "";
+  if (cleMotif) {
+    const connu = MOTIFS_PROBLEME.get(cleMotif);
+    if (!connu) throw badRequest("Motif de probleme inconnu");
+    if (!connu.statutsAdmis.includes(status)) {
+      throw badRequest(`Le motif "${connu.libelle}" ne s'applique pas au statut "${status}"`);
+    }
   }
 
   const route = db.routes.find(item => String(item.id) === String(routeId));
@@ -5793,8 +5867,15 @@ function updateRouteStop(db, routeId, stopId, status, notes = "") {
 
   if (["livre", "absent", "probleme", "a_reprogrammer"].includes(status)) {
     stop.deliveredAt = stop.deliveredAt || now;
-    if (["absent", "probleme", "a_reprogrammer"].includes(status)) {
-      stop.problemReason = stop.notes || formatStopProblem(status);
+    if (STATUTS_EN_ECHEC.has(status)) {
+      // NE JAMAIS retomber sur stop.notes : ce sont les instructions de
+      // livraison de la commande, recopiees par createStop. C'etait le defaut.
+      // Sans motif, on garde l'etiquette generique -- honnete, et reconnaissable
+      // comme "personne n'a dit pourquoi".
+      stop.problemReason = cleMotif
+        ? composerMotif(cleMotif, motif.commentaire)
+        : formatStopProblem(status);
+      stop.problemReasonKey = cleMotif || "";
     }
   }
 
@@ -7649,13 +7730,28 @@ app.post("/api/routes/:id/start", async (req, res) => {
   }
 });
 
+// La liste des motifs vient du SERVEUR. La dupliquer dans le client ferait deux
+// verites qui derivent : le client proposerait un motif que le serveur refuse,
+// et l'ecart ne se verrait qu'au premier refus, sur le telephone d'un livreur.
+app.get("/api/delivery-problems", (req, res) => {
+  res.json({
+    motifs: [...MOTIFS_PROBLEME.entries()].map(([cle, m]) => ({
+      cle, libelle: m.libelle, statutsAdmis: m.statutsAdmis
+    }))
+  });
+});
+
 app.patch("/api/routes/:routeId/stops/:stopId", async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
       const db = readDb();
-      const r = updateRouteStop(db, req.params.routeId, req.params.stopId, req.body.status, req.body.notes);
+      const r = updateRouteStop(db, req.params.routeId, req.params.stopId,
+        req.body.status, req.body.notes, req.body.motif);
 
-      addHistory(db, "Livraison", `${r.stop.clientName} : ${r.stop.status}`, {
+      // La cause DANS le libelle : l'historique est le seul endroit ou une
+      // tournee passee se relit, et un statut sans sa cause n'y apprend rien.
+      const cause = r.stop.problemReason ? ` — ${r.stop.problemReason}` : "";
+      addHistory(db, "Livraison", `${r.stop.clientName} : ${r.stop.status}${cause}`, {
         routeId: r.route.id,
         stopId: r.stop.id,
         orderId: r.order.id

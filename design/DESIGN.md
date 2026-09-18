@@ -193,7 +193,7 @@ ici**. Ils ne changent pas la charte : ils disent ce que la refonte doit défair
 
 | Constat | Vérifié | Mesure exacte |
 |---|---|---|
-| Un arrêt en « problème » n'enregistre aucune raison | oui | `createStop` (server.js:5539) porte un champ `notes`, mais il recopie les notes de la commande. Le statut `probleme` existe sans motif. Un champ neuf est à créer |
+| ~~Un arrêt en « problème » n'enregistre aucune raison~~ — **soldé le 18/09** | oui dans l'effet, **non dans la cause** | La charte disait « un champ neuf est à créer ». **Faux : `stop.problemReason` existait.** Le défaut réel était ailleurs, et il tenait en trois points — détail plus bas |
 | ~~Trois rayons de carte concurrents~~ — **soldé le 18/09** | oui, et **encore pire qu'annoncé** | `--radius-card` valait 8, 22 **et** 28 px — et surtout **22 en clair, 8 en sombre**, les deux déclarations gagnantes étant scopées `light`. Détail plus bas |
 | Trois oranges pour un seul rôle | oui | `#f18c79` (14×), `#f47a5a` (3×), `#ef8f77` dans `sereo-mark.svg`, `sereo-sidebar-bg.svg`, `favicon.svg` et `generate-icons.js` |
 | Générations de tokens empilées | oui | `--color-pastel-` 95 déclarations, `--palette-` 186, `--neo-` 121 |
@@ -470,6 +470,84 @@ La CSP est déjà prête (`font-src 'self' data:`) : c'est le contenu qui manque
 > rangée (64–72 px), les troncatures et la couverture des glyphes ont **toutes**
 > été mesurées dans une police qui n'est pas la bonne. Poser Poppins **déplacera
 > ces mesures**, et il faudra les refaire — pas les relire.
+
+### Le motif d'un arrêt en échec — et une ligne de cette charte qui était fausse
+
+**La charte se trompait, et c'est la mesure qui l'a dit.** Le §9 annonçait « un
+arrêt en "problème" n'enregistre aucune raison […] un champ neuf est à créer ».
+Le champ `stop.problemReason` **existait**. La conclusion était juste, la cause ne
+l'était pas — et c'est la cause qui dit quoi faire.
+
+Le défaut réel tenait en trois points, tous mesurés le 18/09 :
+
+**① Il était écrit une fois et lu nulle part.** Une seule écriture dans
+`server.js`, **zéro** lecture — ni serveur, ni client, ni HTML. *Un mécanisme
+soigné et branché sur personne est plus trompeur qu'un mécanisme absent : on le
+trouve en cherchant, donc on conclut qu'il marche.*
+
+**② Le livreur ne pouvait rien dire.** `updateCurrentDeliveryStatus` envoyait
+`{ status }` et rien d'autre. Aucun écran ne demandait de raison.
+
+**③ Ce qu'il enregistrait n'était pas une raison.** Faute de notes envoyées, il
+retombait sur `stop.notes` — c'est-à-dire sur les **instructions de livraison de
+la commande**, recopiées par `createStop`. Marquer un problème sur une commande
+portant « Code portail 1234 » archivait « Code portail 1234 » **comme cause du
+problème**.
+
+#### Ce qui a été posé
+
+Les deux champs sont séparés pour de bon : `notes` reste l'instruction de
+livraison et **survit** (elle sert à la prochaine tournée), `problemReason` ne se
+remplit **que** de ce que le livreur a dit. Une clé `problemReasonKey` est
+archivée à part : *c'est elle qui se compte, pas la phrase.*
+
+| Motif | s'applique à |
+|---|---|
+| Personne sur place | absent · problème · à reprogrammer |
+| Adresse introuvable | problème · à reprogrammer |
+| Accès impossible (portail, code, étage) | problème · à reprogrammer |
+| Établissement fermé | absent · problème · à reprogrammer |
+| Commande refusée | problème · à reprogrammer |
+| Produit manquant ou abîmé | problème · à reprogrammer |
+| Autre | absent · problème · à reprogrammer |
+
+> **Pourquoi une liste fermée plutôt qu'un champ libre seul.** Un champ libre se
+> remplit de « rien », « rappeler », « cf tel » — et le relevé devient
+> inexploitable au moment même où on en aurait besoin (relances, recommandes).
+> **Un motif nommé se compte ; un commentaire, non.** Le texte libre reste, mais
+> *en plus* d'un motif, jamais à sa place.
+>
+> **Ces sept-là sont un choix de vocabulaire métier, pas une vérité.** Ils
+> viennent du terrain de cette tournée — EHPAD, SSIAD, cliniques — et non d'une
+> liste générique. Ils se changent en une ligne : rien d'autre dans le code ne
+> dépend de ces libellés. **À revoir avec Tom.**
+
+Un motif inconnu, ou qui ne va pas avec le statut (« Commande refusée » sur un
+« absent » : il n'y avait personne pour refuser), est **refusé en 400** et ne
+laisse aucun effet de bord. La liste est servie par `GET /api/delivery-problems`
+et jamais recopiée dans le client : *deux listes dérivent, et l'écart ne se
+verrait qu'au premier refus, sur le téléphone d'un livreur.*
+
+Et la cause voyage dans l'**historique** : c'est le seul endroit où une tournée
+passée se relit, et un statut sans sa cause n'y apprend rien.
+
+#### Une interface neuve échappait à tous les balayages
+
+Le dialogue du motif est un `<dialog>` : **fermé**, il n'a ni surface ni glyphe.
+Les balayages de contraste et de cibles tactiles parcourent les quinze onglets et
+ne l'auraient **jamais** jugé — la même forme de défaut que celles fermées plus
+haut, un zéro qui ne distingue rien. `test/e2e/motif-dialogue.spec.js` l'ouvre et
+lui applique les mêmes seuils : **4,5:1**, **44 px**, un état qui ne voyage jamais
+par la seule couleur, et *il rend la main* (un modal qui ne se ferme pas rend
+l'arrière-plan inerte pour de bon).
+
+> ⚠ **Règle générale à retenir pour la phase 4 :** toute interface qui n'est pas
+> visible à l'état de repos — dialogue, feuille, menu, infobulle — **est hors de
+> portée des balayages** et a besoin de son propre banc. Sinon elle naît non
+> conforme et personne ne le voit.
+
+*Bancs : 9 au niveau de l'API (vrai serveur, base ensemencée), 6 sur la source du
+client, 5 sur le dialogue ouvert. **7 mutations, 7 tuées par le cas prévu.***
 
 ## 10. Guide pour l'agent
 
