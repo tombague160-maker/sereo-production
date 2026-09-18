@@ -1,0 +1,48 @@
+# Fins de ligne et diffs.
+#
+# POURQUOI CE FICHIER EXISTE. Le depot est travaille sous Windows : git convertit
+# en CRLF a la sortie, et les bancs qui LISENT LEUR PROPRE SOURCE le paient. Un
+# cas mesure le 18/09 : `test/jetons-v8.test.js` echouait AU CHARGEMENT DU MODULE
+# apres un simple `git checkout` -- 0 reussite, 1 echec, sans annoncer un seul
+# cas. Un rouge qui n'accuse rien de precis coute plus cher qu'un rouge franc.
+#
+# La parade en dur (`String.fromCharCode(13)`) reste dans les bancs concernes :
+# elle protege meme si ce fichier disparait, et elle survit a une copie hors du
+# depot. Ce fichier, lui, evite que le probleme se pose.
+
+# Par defaut : normalise en LF dans le depot, laisse git decider a la sortie.
+* text=auto
+
+# Sources et donnees : LF des deux cotes, sans exception. Ce sont les fichiers
+# que les bancs relisent et dont ils comparent les octets.
+*.js    text eol=lf diff
+*.mjs   text eol=lf diff
+*.cjs   text eol=lf diff
+*.json  text eol=lf
+*.css   text eol=lf diff=css
+*.html  text eol=lf diff=html
+*.md    text eol=lf
+*.svg   text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+
+# Scripts de shell : un CRLF dans un `#!` rend « bad interpreter », un message
+# qui accuse l'interpreteur et non la fin de ligne.
+*.sh    text eol=lf
+
+# Binaires : jamais touches, jamais diffes en texte.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.webp  binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+*.xlsx  binary
+*.sqlite binary
+
+# Genere : exclu des statistiques de langage et replie dans les diffs de revue.
+public/lib/**    linguist-vendored
+design/export-v8/*.html  linguist-generated
