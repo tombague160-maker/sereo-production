@@ -1113,7 +1113,7 @@ function renderCrm() {
   renderClientSelects();
 
   if (!list.length) {
-    container.innerHTML = emptyState("Aucun contact", "Cree une fiche ou modifie les filtres.");
+    container.innerHTML = emptyState("Aucun contact", "Crée une fiche ou modifie les filtres.");
     return;
   }
 
@@ -1283,7 +1283,7 @@ function renderCustomerCatalog() {
   });
   if (count) count.textContent = `${products.length} produit${products.length > 1 ? "s" : ""}`;
   if (!products.length) {
-    container.innerHTML = emptyState("Aucun produit", "Importe le stock ou modifie la recherche.");
+    container.innerHTML = emptyState("Aucun produit", "Importe le stock ou modifie la recherche.", { libelle: "Importer le stock", onglet: "journee" });
     return;
   }
   container.innerHTML = products.map(product => {
@@ -1293,7 +1293,7 @@ function renderCustomerCatalog() {
       <article class="product-card">
         <div>
           <h4>${escapeHtml(getProductName(product))}</h4>
-          <p>${escapeHtml(product.code || product.sku || "Sans reference")}</p>
+          <p>${escapeHtml(product.code || product.sku || "Sans référence")}</p>
           <span class="muted">Stock ${quantity === null ? "?" : escapeHtml(quantity)} - ${formatMoney(getProductPrice(product))}</span>
         </div>
         <div class="product-stepper">
@@ -1474,7 +1474,7 @@ function renderTodayOrders() {
   const container = document.getElementById("todayOrdersList");
   if (!container) return;
   if (!todayCustomerOrders.length) {
-    container.innerHTML = emptyState("Aucune commande client", "Les commandes validees chez les clients apparaitront ici.");
+    container.innerHTML = emptyState("Aucune commande client", "Les commandes validées chez les clients apparaîtront ici.");
     return;
   }
   container.innerHTML = todayCustomerOrders.map(order => `
@@ -1506,7 +1506,7 @@ async function sendTodayOrdersToPreparation() {
   });
   todayOrdersSelection.clear();
   await loadData();
-  notify("Commandes envoyees en preparation.", "success");
+  notify("Commandes envoyées en préparation.", "success");
 }
 
 function renderPlannedOrders() {
@@ -1518,7 +1518,7 @@ function renderPlannedOrders() {
   if (summary) summary.textContent = `${active.length} planifiée${active.length > 1 ? "s" : ""}`;
 
   if (!plannedOrders.length) {
-    container.innerHTML = emptyState("Aucune commande planifiée", "Crée une commande planifiée depuis l'onglet Commande client.");
+    container.innerHTML = emptyState("Aucune commande planifiée", "Crée une commande planifiée depuis l'onglet Commande client.", { libelle: "Commande client", onglet: "commande-client" });
     return;
   }
 
@@ -1670,7 +1670,7 @@ function renderRankList(id, rows, mode) {
   const container = document.getElementById(id);
   if (!container) return;
   if (!rows.length) {
-    container.innerHTML = emptyState("Aucune donnee", "Les ventes validees alimenteront ce graphique.");
+    container.innerHTML = emptyState("Aucune donnée", "Les ventes validées alimenteront ce graphique.");
     return;
   }
   const max = Math.max(1, ...rows.map(row => Number(mode === "total" ? row.total : row.quantity) || 0));
@@ -1692,7 +1692,7 @@ function renderStock() {
   renderStockFilterOptions();
 
   if (!stock.length) {
-    container.innerHTML = emptyState("Aucun stock chargé", "Importe un fichier stock pour initialiser le catalogue.");
+    container.innerHTML = emptyState("Aucun stock chargé", "Importe un fichier stock pour initialiser le catalogue.", { libelle: "Importer le stock", onglet: "journee" });
     return;
   }
 
@@ -1908,7 +1908,7 @@ function renderPreparation() {
   container.innerHTML = "";
 
   if (!orders.length) {
-    container.innerHTML = emptyState("Aucune commande à préparer", "Importe les dossiers du jour pour générer la préparation.");
+    container.innerHTML = emptyState("Aucune commande à préparer", "Importe les dossiers du jour pour générer la préparation.", { libelle: "Importer les dossiers", onglet: "journee" });
     return;
   }
 
@@ -2165,7 +2165,7 @@ function renderProduits() {
   container.innerHTML = "";
 
   if (!stock.length) {
-    container.innerHTML = emptyState("Aucun produit", "Importe un fichier stock pour afficher les produits.");
+    container.innerHTML = emptyState("Aucun produit", "Importe un fichier stock pour afficher les produits.", { libelle: "Importer le stock", onglet: "journee" });
     return;
   }
 
@@ -2181,7 +2181,7 @@ function renderVentes() {
   container.innerHTML = "";
 
   if (!ventes.length) {
-    container.innerHTML = emptyState("Aucune vente", "Importe les dossiers du jour pour alimenter cette vue.");
+    container.innerHTML = emptyState("Aucune vente", "Importe les dossiers du jour pour alimenter cette vue.", { libelle: "Importer les dossiers", onglet: "journee" });
     return;
   }
 
@@ -2768,7 +2768,7 @@ function openBdcDetail(orderId) {
   // ERP v1.11.0 : empreinte vide -> texte clair "Creation manuelle" au lieu de —
   const hash = order.excelRowHash
     ? `<code class="bdc-detail-hash" title="Empreinte SHA-256 pour anti-doublon a l'import">${escapeHtml(order.excelRowHash)}</code>`
-    : `<span class="muted" title="Ce bon a ete cree manuellement, pas via un import Excel">Création manuelle</span>`;
+    : `<span class="muted" title="Ce bon a été créé manuellement, pas via un import Excel">Création manuelle</span>`;
 
   // Date livraison : si identique a la date commande, afficher discretement
   const sameDates = order.deliveryDate && order.dateCommande &&
@@ -4190,7 +4190,7 @@ function renderClients() {
   container.innerHTML = "";
 
   if (!clients.length) {
-    container.innerHTML = emptyState("Aucun client", "Importe les dossiers du jour pour générer la tournée.");
+    container.innerHTML = emptyState("Aucun client", "Importe les dossiers du jour pour générer la tournée.", { libelle: "Importer les dossiers", onglet: "journee" });
     return;
   }
 
@@ -4907,7 +4907,7 @@ function formatOrderStatus(status) {
     planifiee: "Planifiée",
     a_confirmer: "À confirmer",
     annulee: "Annulée",
-    commande_client_validee: "Commande client validee",
+    commande_client_validee: "Commande client validée",
     importe: "Importé",
     stock_a_verifier: "Stock à vérifier",
     en_preparation: "En préparation",

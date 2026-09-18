@@ -8589,3 +8589,32 @@ html[data-color-scheme="light"] body,
   from { background-position: -240px 0; }
   to { background-position: calc(100% + 240px) 0; }
 }
+
+/* ============================================================================
+ * L'action d'un etat vide.
+ *
+ * Mesure du 18/09 : 13 des 20 etats vides NOMMAIENT une action -- "Importe le
+ * stock", "Cree une fiche" -- sans l'offrir. Le message disait quoi faire et
+ * laissait chercher ou. Sept d'entre eux menaient a une destination sans
+ * ambiguite ; ils portent desormais un bouton.
+ *
+ * Les six autres n'en ont pas, et c'est voulu : "modifie la recherche" ou
+ * "les ajustements apparaitront ici" ne menent nulle part. Un bouton vers un
+ * endroit quelconque serait pire que rien -- il promettrait une sortie.
+ * ========================================================================== */
+/* Le bouton ne porte PAS la classe .compact, et c'est le vrai correctif.
+     Il l'a portee d'abord, et rendait alors 38 px : la regle
+     `:root[data-color-scheme="light"] .compact` impose cette hauteur, et deux
+     tentatives successives sur la specificite n'y ont rien change -- mesure,
+     pas suppose. Un bouton d'etat vide n'est pas un bouton de barre d'outils ;
+     retirer la classe qui ne le decrit pas vaut mieux que surencherir sur
+     elle. Le prefixe :root reste, pour tenir devant les regles scopees. */
+:root[data-color-scheme] .empty-state-action,
+.empty-state-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 12px;
+  min-height: 44px;   /* notre charte, y compris sur desktop : c'est une action isolee */
+  text-decoration: none;
+}
