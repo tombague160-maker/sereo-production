@@ -2022,6 +2022,18 @@ function renderLoginPage(req, res) {
       letter-spacing: 0.02em;
     }
     .footer-hint a {
+      /* Mesure du 18/09 : ce lien faisait 16 px de haut. Sous le plancher LEGAL
+         de 24 px (WCAG 2.5.8) et tres loin des 44 de la charte. Il avait tenu
+         parce que la page de connexion n'etait balayee par AUCUN banc : le
+         serveur des tests e2e tourne sans authentification, si bien que /login
+         y repond 200 en servant l'APPLICATION.
+         Les marges negatives compensent le rembourrage : la cible grandit, la
+         mise en page ne bouge pas. */
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+      padding: 0 10px;
+      margin: -12px -10px;
       color: var(--brand-teal);
       text-decoration: none;
       font-weight: 600;

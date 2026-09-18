@@ -23,8 +23,20 @@ module.exports = defineConfig({
     // Ajouter firefox/webkit/mobile selon besoin
   ],
 
-  // Lance un serveur Sereo dedie pendant les tests
-  webServer: {
+  // DEUX serveurs, et le second n'est pas un luxe.
+  //
+  // Le premier tourne SANS authentification, parce que les quinze onglets ne
+  // sont accessibles qu'ainsi. Mais cela rend `/login` INATTEIGNABLE : mesure du
+  // 18/09, `GET /login` y repond 200 et sert l'APPLICATION. Une sonde pointee
+  // dessus mesurait donc l'app en croyant mesurer la page de connexion -- un
+  // controle negatif de la deuxieme cause, « je ne vois pas », et il ne se
+  // signalait que parce qu'on imprimait l'URL finale.
+  //
+  // La page de connexion est le PREMIER ecran, elle porte ~300 lignes de CSS
+  // inline dans server.js, hors du systeme de jetons v8, et elle echappait a
+  // TOUS les balayages. Le second serveur, avec l'authentification activee,
+  // existe pour elle seule.
+  webServer: [{
     command: "node server.js",
     port: 3100,
     timeout: 30 * 1000,
@@ -39,5 +51,21 @@ module.exports = defineConfig({
       SEREO_SQLITE_PATH: "./data/sereo-e2e.sqlite",
       SEREO_SKIP_RELEASE_FETCH: "1"
     }
-  }
+  }, {
+    // Le serveur AUTHENTIFIE, reserve a `contraste-login.spec.js`.
+    command: "node server.js",
+    port: 3101,
+    timeout: 30 * 1000,
+    reuseExistingServer: !process.env.CI,
+    env: {
+      PORT: "3101",
+      SEREO_HOST: "127.0.0.1",
+      // Un identifiant jetable, local, et qui n'ouvre rien : la base de ce
+      // serveur est un fichier dedie, vide, detruit avec le reste.
+      SEREO_AUTH_USER: "banc",
+      SEREO_AUTH_PASSWORD: "banc-e2e-local-sans-valeur",
+      SEREO_SQLITE_PATH: "./data/sereo-e2e-login.sqlite",
+      SEREO_SKIP_RELEASE_FETCH: "1"
+    }
+  }]
 });
