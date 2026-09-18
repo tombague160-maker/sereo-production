@@ -4879,6 +4879,9 @@ function setStatus(message) {
   element.textContent = texte;
 }
 
+/** Charte §4 : « Toast : bas d'ecran, 4 s, une action possible (Annuler) ». */
+const TOAST_DUREE_MS = 4000;
+
 function notify(message, type = "info") {
   const region = document.getElementById("toastRegion");
   if (!region) return;
@@ -4907,12 +4910,18 @@ function notify(message, type = "info") {
   region.appendChild(toast);
 
   // Les erreurs restent affichees jusqu'au clic utilisateur (lecture sans pression).
-  // Les autres types (info / success / warning) disparaissent apres 3.5s.
+  // C'est un ECART DELIBERE a la charte, et dans le bon sens : elle dit 4 s pour
+  // un toast, sans distinguer les types. Faire disparaitre une erreur toute
+  // seule ferait perdre l'information a qui regardait ailleurs.
+  //
+  // Les autres types (info / success / warning) : 4 s, la valeur de la charte.
+  // Le code disait 3500 -- un ecart de 0,5 s que personne n'avait mesure parce
+  // que personne ne chronometrait un toast.
   if (type !== "error") {
     setTimeout(() => {
       toast.classList.add("toast-out");
       setTimeout(() => toast.remove(), 250);
-    }, 3500);
+    }, TOAST_DUREE_MS);
   }
 }
 
