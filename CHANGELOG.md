@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.0](https://github.com/tombague160-maker/sereo-production/compare/v1.28.0...v1.29.0) (2026-09-18)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **v8:** phase 4, marche 4c -- les etats vides offrent leur sortie, et retrouvent leurs accents ([bedf102](https://github.com/tombague160-maker/sereo-production/commit/bedf10259c624dd449b63416076341374c708700))
+
 ## [1.28.0](https://github.com/tombague160-maker/sereo-production/compare/v1.27.0...v1.28.0) (2026-09-18)
 
 
