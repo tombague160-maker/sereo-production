@@ -216,7 +216,10 @@ Phase 4  Refonte des écrans + abonnements    ← EN COURS depuis le 17/09.
            Marche 3c ✅ CIBLES TACTILES mesurees sur L'APPLICATION (jamais faites ici : les 531 de l'export
                        etaient celles de la MAQUETTE). 496 cibles, 0 sous le plancher legal WCAG de 24 px,
                        dette de charte 48 -> 0. Reserve levee.
-           Marche 4 ⬜ les écrans des 49 planches : barre basse mobile 4 + Plus, états vides, chargement
+           Marche 4 ← EN COURS
+             4a ✅ barre basse mobile : Tableau de bord · Préparation · Tournée · Abonnements (+ Plus), décision de Tom du 17/09.
+                    MOBILE_OVERFLOW_TABS est désormais DÉRIVÉE, les deux listes ne peuvent plus se contredire. 5 tests figent la décision
+             4b ⬜ les autres écrans des 49 planches : états vides, chargement, mise en page des listes
            Marche 5 ⬜ les 7 inventions de la planche 15, chacune avec son travail serveur
            PR 96 (brouillon) à rebaser par son auteur : 5 fichiers en conflit mesurés, et main a bougé de 4 versions
 Phase 5  Cartographie et trafic réel

@@ -10,7 +10,19 @@ export const mainTabs = new Set(["abonnements", "journee", "stock", "crm", "comm
 // car > 5 destinations). Quand l'utilisateur navigue vers l'une d'elles, le
 // bouton "Plus" recoit la classe `.active` pour montrer visuellement qu'on est
 // dans ce groupe.
-export const MOBILE_OVERFLOW_TABS = new Set(["abonnements", "bons-commande", "crm", "commande-client", "commandes-jour", "commandes-planifiees", "relances", "statistiques", "exports", "recommande", "commandes-livrees", "parametres"]);
+// Les DESTINATIONS de la barre basse, tranchees par Tom le 17/09 :
+//   Tableau de bord · Preparation · Tournee · Abonnements   (+ "Plus")
+//
+// Cette liste est le COMPLEMENT de celle-la, et rien d'autre. La tenir a la
+// main invitait a la desynchroniser : "abonnements" y figurait alors qu'il
+// venait d'entrer dans la barre, et "stock" en sortait alors qu'il en etait
+// parti. Elle est donc DERIVEE -- un onglet deplace dans la barre basse suit
+// tout seul, et les deux ne peuvent plus dire le contraire l'une de l'autre.
+export const MOBILE_MAIN_TABS = ["journee", "preparation", "livreur", "abonnements"];
+
+export const MOBILE_OVERFLOW_TABS = new Set(
+  [...mainTabs].filter(onglet => !MOBILE_MAIN_TABS.includes(onglet))
+);
 
 export const titles = {
   abonnements: {title: "Abonnements", subtitle: "Les produits de vos clients, livrés au bon rythme."},
