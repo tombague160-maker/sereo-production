@@ -1,3 +1,112 @@
+/* --- LA POLICE DE LA CHARTE, AUTO-HEBERGEE ----------------------------------
+ *
+ * Charte §3 : « Famille : **Poppins** 400 / 500 / 600 / 700. Repli
+ * `"Segoe UI", system-ui, sans-serif`. En production la police est
+ * auto-hebergee (`font-src 'self'`) : pas de Google Fonts. »
+ *
+ * ETAT AVANT, mesure le 18/09 : `font-family: Inter, "Segoe UI", Arial` et
+ * AUCUNE police chargee -- zero fichier, zero @font-face, zero lien distant.
+ * Ni Poppins ni Inter n'etant installees sur une machine ordinaire, TOUT
+ * s'affichait dans la police systeme. La charte decrivait un ecran que
+ * personne n'avait jamais vu.
+ *
+ * ⛔ CE N'ETAIT PAS COSMETIQUE. Hauteurs de ligne, hauteurs de rangee (64-72
+ *    px), troncatures et couverture des glyphes avaient TOUTES ete mesurees
+ *    dans une police qui n'etait pas la bonne. Poser celle-ci DEPLACE ces
+ *    mesures -- c'est pour cela qu'elle arrive apres les bancs, et non avant.
+ *
+ * LICENCE : SIL Open Font License 1.1, jointe dans `public/fonts/OFL.txt`. La
+ * redistribution est expressement permise A CONDITION de joindre la licence.
+ * Sans elle, publier ces fichiers serait une infraction, pas un detail.
+ *
+ * ALPHABETS : `latin` et `latin-ext` seulement. Le devanagari pese autant que
+ * les deux reunis et aucun caractere de l'application n'y tombe -- le francais
+ * tient entierement dans `latin`, « oe » (U+0153) et guillemets compris.
+ * 76 Ko au total, licence incluse.
+ *
+ * `font-display: swap` : le texte s'affiche tout de suite dans le repli, puis
+ * bascule. Un livreur en zone blanche lit sa tournee sans attendre une police.
+ */
+/* latin-ext */
+@font-face {
+  font-family: "Poppins";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/poppins-400-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* latin */
+@font-face {
+  font-family: "Poppins";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/poppins-400-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* latin-ext */
+@font-face {
+  font-family: "Poppins";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/poppins-500-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* latin */
+@font-face {
+  font-family: "Poppins";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/poppins-500-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* latin-ext */
+@font-face {
+  font-family: "Poppins";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/poppins-600-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* latin */
+@font-face {
+  font-family: "Poppins";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/poppins-600-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* latin-ext */
+@font-face {
+  font-family: "Poppins";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/poppins-700-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* latin */
+@font-face {
+  font-family: "Poppins";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/poppins-700-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 /* ============================================================================
  * Mode CLAIR (par defaut)
  *
@@ -293,7 +402,7 @@ body {
     radial-gradient(circle at 98% 0%, var(--body-gradient-2), transparent 30%),
     linear-gradient(180deg, var(--body-gradient-stop-start) 0%, var(--body-gradient-stop-mid) 42%, var(--body-gradient-stop-end) 100%);
   color: var(--text);
-  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  font-family: "Poppins", "Segoe UI", system-ui, sans-serif;
   font-size: 16px;
   line-height: 1.45;
   letter-spacing: 0;
@@ -5500,7 +5609,7 @@ html[data-color-scheme="light"] body,
 
 :root[data-color-scheme="light"] body {
   color: var(--text);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: "Poppins", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 :root[data-color-scheme="light"] .app {
@@ -8996,4 +9105,55 @@ textarea::placeholder {
 :root[data-color-scheme] .nav-section :focus-visible {
   outline: 3px solid var(--v8-focus-halo);
   outline-offset: -3px;
+}
+
+/* --- CE QUE POPPINS A DEPLACE, ET QUI EST REPARE ICI ------------------------
+ *
+ * Poser la police de la charte rend le texte **18 % plus large** sur
+ * l'echantillon de reference. La mise en page, elle, avait ete reglee sur la
+ * police SYSTEME -- celle qui rendait tant que rien n'etait charge.
+ *
+ * MESURE D'ATTRIBUTION, faite AVANT de corriger quoi que ce soit :
+ *     sans Poppins : desktop 0 coupure, mobile 0 coupure   (734 et 396 juges)
+ *     avec Poppins : desktop 6 coupures, mobile 5
+ * Le lot n'a donc pas REVELE ces coupures, il les a CAUSEES. La distinction
+ * compte : reveler se documente, causer se repare.
+ *
+ * ⛔ UNE HYPOTHESE ECARTEE PAR LA MESURE, avant de toucher 55 lignes.
+ *    La feuille declare des graisses hors charte -- 650, 750, 800, 850, 900,
+ *    950. J'ai cru qu'elles etaient SYNTHETISEES par le navigateur, donc plus
+ *    larges, donc coupables. Mesure sur « Commandes planifiees » a 16 px :
+ *        400 -> 187,11    500 -> 188,84    600 -> 190,31
+ *        650 a 950 -> 192,05 px, TOUTES IDENTIQUES
+ *    Aucune synthese : au-dela de 600, tout retombe sur la face 700. Ces
+ *    graisses restent une non-conformite a la charte (§3 n'en declare que
+ *    quatre) mais elles ne coupent RIEN. Elles ne sont pas touchees ici.
+ */
+
+/* ① LE LIBELLE DE NAVIGATION. Mesure : 169 px de contenu dans une boite de
+ *    156. La charte §3 le chiffre -- « Metadonnees et libelles de navigation :
+ *    13-14,5 px, 500 » -- et le code etait a 14,08 px en graisse 850. On
+ *    revient a la charte, sur les DEUX axes, et ca tient :
+ *        169 x (13 / 14,08) x (188,84 / 192,05) = 153,4 < 156 */
+:root[data-color-scheme] .tab > span:not(.tab-icon),
+:root[data-color-scheme] .sidebar-settings > span:last-child {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* ② LE RESUME DU TABLEAU DE BORD, en vue etroite. A 390 px, la grille a deux
+ *    colonnes donne 141 px par carte, dont 105 px utiles -- et « Commandes »
+ *    seul, a 16 px, en demande 108. Ce n'est pas un mot a couper : c'est une
+ *    colonne de trop. Une seule colonne rend ~294 px utiles.
+ *    Le seuil est a 430 px et non a 390 : la mesure vaut pour tout ce qui est
+ *    plus etroit, pas seulement pour la taille que je teste. */
+@media (max-width: 430px) {
+  /* Le meme prefixe que la regle concurrente, et pour la meme raison qu'ailleurs
+     dans cette feuille : `:root[data-color-scheme] .summary-grid` pese (0,2,0),
+     une classe nue (0,1,0) perd. Les deux formes sont reprises -- celle d avant
+     que anti-fart.js ne pose l attribut, et celle d apres. */
+  :root[data-color-scheme] .summary-grid,
+  :root:not([data-color-scheme]) .summary-grid {
+    grid-template-columns: 1fr;
+  }
 }
