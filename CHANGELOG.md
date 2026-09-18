@@ -1,5 +1,146 @@
 # Changelog
 
+## [1.28.0](https://github.com/tombague160-maker/sereo-production/compare/v1.27.0...v1.28.0) (2026-09-18)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **audit:** lot P1 + revue adverse - M1 date stricte, M2 qty import, M6 Haversine, T1 SW notif, T4 timeout, M3 ellipsis ([#76](https://github.com/tombague160-maker/sereo-production/issues/76)) ([90187bc](https://github.com/tombague160-maker/sereo-production/commit/90187bc2c0daf6240696ecef4e3495bd1a4bfbfa))
+* cache offline + UX (api SWR, redirect 401, fermeture toasts) ([e4427b8](https://github.com/tombague160-maker/sereo-production/commit/e4427b85ce7d7088bc8a385cca3e4424d9b1572d))
+* **comptes:** API d'administration des comptes et endpoint /api/me ([8887159](https://github.com/tombague160-maker/sereo-production/commit/8887159ae37e98d55e6bdc92fa7b81ca274c3fb9))
+* **comptes:** ecran d'administration des comptes dans les Parametres ([75c173c](https://github.com/tombague160-maker/sereo-production/commit/75c173c4b2f15b7ea24133943c8009afdeb652ea))
+* **concurrency:** verrou applicatif + integrite stock + backup post-recovery ([#79](https://github.com/tombague160-maker/sereo-production/issues/79)) ([c8f35c5](https://github.com/tombague160-maker/sereo-production/commit/c8f35c5d01f07806315bb2c7fe5d357d4ea832f7))
+* finalise SEREO V7 CRM, themes et workflow livraison ([#92](https://github.com/tombague160-maker/sereo-production/issues/92)) ([897b2ba](https://github.com/tombague160-maker/sereo-production/commit/897b2ba1385975d8eba965e4c0207c2d390ce005))
+* **geocodage:** declenchement automatique apres import, coupable par variable ([0db2ac4](https://github.com/tombague160-maker/sereo-production/commit/0db2ac43eb88942eaacfa47a8a47ee2951329970))
+* **geocodage:** geocodage automatique des adresses via la Base Adresse Nationale ([93d341d](https://github.com/tombague160-maker/sereo-production/commit/93d341d06d56d1158747cf1130c7b199f9bb338d))
+* **hardening:** sprint 1 audit (XSS fix, auth secret, spinner, dark contrast, focus trap, indexes, README, CLAUDE.md) ([#63](https://github.com/tombague160-maker/sereo-production/issues/63)) ([e2a938c](https://github.com/tombague160-maker/sereo-production/commit/e2a938c824f9eef05b6ed6af330fc687077dbf30))
+* **imports:** archivage auto des Excel + bouton purge bons de commande ([#59](https://github.com/tombague160-maker/sereo-production/issues/59)) ([e6b20da](https://github.com/tombague160-maker/sereo-production/commit/e6b20da4574625b8a5b6d7250d6fba894e7c65b6))
+* **login:** refonte plus luxe/pro - couleurs brand sereo animees subtilement ([7aac506](https://github.com/tombague160-maker/sereo-production/commit/7aac50622a10bd12f50a1daf20145f68c931bef7))
+* **login:** refonte plus luxe/pro - couleurs brand sereo animees subtilement ([d3a11af](https://github.com/tombague160-maker/sereo-production/commit/d3a11af149535a87bb383bd54dede71fda35e94f))
+* **login:** refonte split-screen desktop (pattern B2B SaaS 2026) ([562c2c0](https://github.com/tombague160-maker/sereo-production/commit/562c2c0b18ee79dba676dbd2b4ce401a94e4eaca))
+* **login:** refonte split-screen desktop (pattern B2B SaaS 2026) ([868c1e3](https://github.com/tombague160-maker/sereo-production/commit/868c1e33a9be25972447efb03c4669656680e2f2))
+* **orders:** refonte ERP des bons de commande (Phase 1+2 - modele + import) ([#49](https://github.com/tombague160-maker/sereo-production/issues/49)) ([19e9aeb](https://github.com/tombague160-maker/sereo-production/commit/19e9aeb92d5e97ded8c6920d0984a23c9333f99d))
+* prépare l'app pour la mise en production ([29ade00](https://github.com/tombague160-maker/sereo-production/commit/29ade003cad6ed6d6a76e22f8d0ab64da723b2d4))
+* **qa:** sprint 3 - Playwright E2E + a11y polish + schema doc ([#66](https://github.com/tombague160-maker/sereo-production/issues/66)) ([77c17e9](https://github.com/tombague160-maker/sereo-production/commit/77c17e90a87d48c236799a8cb42a619013762632))
+* **security:** rate limit /login + CI test workflow + session HMAC robuste ([9f14e41](https://github.com/tombague160-maker/sereo-production/commit/9f14e41e321f91057bc7e95c4576d02d45befd3d))
+* **security:** rate limit /login + CI test workflow + session HMAC robuste ([fbe9d56](https://github.com/tombague160-maker/sereo-production/commit/fbe9d5670aac5e4273103858b9231d65f6c81559))
+* simplifier le pilotage et ajouter les abonnements et trajets routiers ([7d93ceb](https://github.com/tombague160-maker/sereo-production/commit/7d93ceb059a9b15d721df2365ebea7412df52b5d))
+* **storage:** recovery automatique sur corruption SQLite (B3) + alerte perte de donnees ([#75](https://github.com/tombague160-maker/sereo-production/issues/75)) ([8a397a9](https://github.com/tombague160-maker/sereo-production/commit/8a397a9a274c5900e1947584d703b8846f5ae4f6))
+* **theme:** mode sombre complet avec toggle Auto/Clair/Sombre par device ([ebbeaed](https://github.com/tombague160-maker/sereo-production/commit/ebbeaed993291140846377928d370d70797ea5b9))
+* **theme:** mode sombre complet avec toggle Auto/Clair/Sombre par device ([9ac7f12](https://github.com/tombague160-maker/sereo-production/commit/9ac7f12f41cbbe3ed8252a0ad0382c0a8f60135b))
+* **tournee:** calibrage vitesse/arret + diagnostic dates suspectes ([#77](https://github.com/tombague160-maker/sereo-production/issues/77)) ([905812d](https://github.com/tombague160-maker/sereo-production/commit/905812d8c8abffc99f29bac29da4021d4e35a622))
+* **tournees:** prevenir quand la date d'un secteur tombe un dimanche ou un ferie ([5b1ad26](https://github.com/tombague160-maker/sereo-production/commit/5b1ad26c0d5df25fc708390b2d2d928ac13fb16c))
+* **ui:** coherence Commandes livrees + filtre A completer + edition profil + vue tableau + export CSV ([#57](https://github.com/tombague160-maker/sereo-production/issues/57)) ([d7c4bc4](https://github.com/tombague160-maker/sereo-production/commit/d7c4bc4595f18cbc149b1aefa73061b672b7bdde))
+* **ui:** nouvelle page "Bons de commande" avec filtres + modal detail (Phase 3 ERP) ([#53](https://github.com/tombague160-maker/sereo-production/issues/53)) ([9435a33](https://github.com/tombague160-maker/sereo-production/commit/9435a33d00cae801ea472eaf9faf5f2897df476d))
+* **ui:** page Parametres en grille 3 colonnes sur grand ecran + secteurs en 2 sous-colonnes ([#70](https://github.com/tombague160-maker/sereo-production/issues/70)) ([29e3af6](https://github.com/tombague160-maker/sereo-production/commit/29e3af6eaa9bb80a2c93bae2662c03b04a83dbbd))
+* **ui:** refonte mobile app-like + densité + cohérence dark + a11y ([#94](https://github.com/tombague160-maker/sereo-production/issues/94)) ([b9c8d93](https://github.com/tombague160-maker/sereo-production/commit/b9c8d9322eb377d0a6ffdefed68569a4660b6a6a))
+* **ui:** une seule palette, et les deux defauts que sa mesure a reveles ([706713c](https://github.com/tombague160-maker/sereo-production/commit/706713c095c59ec2b6d2822f53330b2c0bd75659))
+* **ui:** version chip + modal "Quoi de neuf ?" + refonte login ([afe2a2b](https://github.com/tombague160-maker/sereo-production/commit/afe2a2b55715b2ded32856625d7be5a9d6be2c5b))
+* **ui:** version chip + modal release notes + refonte login + fix singulier ([5286675](https://github.com/tombague160-maker/sereo-production/commit/5286675bc85474b03995c00afe154aea1cf7045d))
+* **v8:** fondations du chantier V8 — icônes PWA, modules ES, comptes utilisateurs ([#95](https://github.com/tombague160-maker/sereo-production/issues/95)) ([fa57f04](https://github.com/tombague160-maker/sereo-production/commit/fa57f044d675d3ed4f612d9bd6354a72a68a79d9))
+* **v8:** mesurer les cibles tactiles sur L'APPLICATION, et lever la reserve ([9ff2999](https://github.com/tombague160-maker/sereo-production/commit/9ff29993d814d7a235d9a1cbd1ca611298945e6c))
+* **v8:** phase 4, marche 1 -- le socle de jetons, et la palette sombre completee ([1623ab4](https://github.com/tombague160-maker/sereo-production/commit/1623ab4200a65d1da492acd03778e61944fe30ee))
+* **v8:** phase 4, marche 2 -- l'application parle V8, et 1164 textes le prouvent ([a1ea65a](https://github.com/tombague160-maker/sereo-production/commit/a1ea65a5de2e88e4ab2944a30b80421c9f3eb60e))
+* **v8:** phase 4, marche 3 -- les trois generations de jetons sont retirees ([3309d4d](https://github.com/tombague160-maker/sereo-production/commit/3309d4d52acb52a86360f57e92e915a94ab52050))
+* **v8:** phase 4, marche 3b -- zero couleur litterale, et le role que la charte oubliait ([c304105](https://github.com/tombague160-maker/sereo-production/commit/c3041052c1c53c5caae37ef21bde8d41f4813ce1))
+* **v8:** phase 4, marche 4a -- la barre basse mobile applique la decision de Tom ([b16d980](https://github.com/tombague160-maker/sereo-production/commit/b16d9804440b3b942d60f717f258f9ae4381fc9f))
+* **workflow:** state machine pour les transitions de status de commande ([5880b84](https://github.com/tombague160-maker/sereo-production/commit/5880b84cee5768c54c6f9888a61ea1846224c1b1))
+* **workflow:** state machine pour les transitions de status de commande ([919b3d2](https://github.com/tombague160-maker/sereo-production/commit/919b3d2bff8ee1fad1963afd81faa0ea5ff9c77c))
+
+
+### 🐛 Corrections de bugs
+
+* **auth:** rate-limit Basic auth + durcissement cookie/redirect (Lot 1 — P0 audit) ([#82](https://github.com/tombague160-maker/sereo-production/issues/82)) ([a14b1d6](https://github.com/tombague160-maker/sereo-production/commit/a14b1d6417f33abdc2b750e8eb2bdd1bbadf6ac4))
+* **backups:** re-arme les backups apres fresh_empty + expose la sante backup (Lot 3a — P0 audit) ([#84](https://github.com/tombague160-maker/sereo-production/issues/84)) ([157a18e](https://github.com/tombague160-maker/sereo-production/commit/157a18e113320ac174fc80171502b6a30b587354))
+* **build:** retirer @playwright/test des devDependencies (build Docker echouait) ([#68](https://github.com/tombague160-maker/sereo-production/issues/68)) ([b921197](https://github.com/tombague160-maker/sereo-production/commit/b921197590e3c9a15cc70fbbdb0a8bc4c365be1e))
+* corrections issues de l'audit v1.1.0 ([4b9ee71](https://github.com/tombague160-maker/sereo-production/commit/4b9ee717e4f7095d961ac05b13e6f41dc501dac7))
+* **dates:** stoppe la mutation en masse des dateCommande vers today (Lot 2 — P0 audit) ([#83](https://github.com/tombague160-maker/sereo-production/issues/83)) ([d5640e2](https://github.com/tombague160-maker/sereo-production/commit/d5640e25d337ac58dc4d2816eb80bb572242f6f5))
+* deduplique les produits dans les imports Excel et les recommandations ([b187339](https://github.com/tombague160-maker/sereo-production/commit/b187339c895868bee18214adcfab40057c9ed7bd))
+* deduplique les produits lors des imports Excel et dans les recommandations ([5feb0ba](https://github.com/tombague160-maker/sereo-production/commit/5feb0ba8139fc5215e331065160c9ec1967bc0d5))
+* **docker:** retire --mount=type=cache pour compat builder legacy (sereo-updater) ([c76bd68](https://github.com/tombague160-maker/sereo-production/commit/c76bd6861ea7e54d1612f58c1f928c6f2d68f614))
+* **docker:** retire --mount=type=cache pour compat builder legacy (sereo-updater) ([08e2d0e](https://github.com/tombague160-maker/sereo-production/commit/08e2d0edf64168cb34b3afaad6c3352b292a7aaa))
+* **import:** MERGE stock préserve coût/tarif/statut quand la colonne Excel manque (Lot 4b) ([#87](https://github.com/tombague160-maker/sereo-production/issues/87)) ([aa2fd79](https://github.com/tombague160-maker/sereo-production/commit/aa2fd79cbdf57b82fc090366de91f5a75c425003))
+* **import:** preserver les ajustements manuels du stock lors d'un re-import Excel ([#46](https://github.com/tombague160-maker/sereo-production/issues/46)) ([e0ebe36](https://github.com/tombague160-maker/sereo-production/commit/e0ebe36b2f9fde723fa238e98287a1f90378d548))
+* **import:** respecte statut facture, anti-doublon client, qty 0, vue commandes livrees ([6b01ab9](https://github.com/tombague160-maker/sereo-production/commit/6b01ab94b248fd32567142a40a5e40ebd0da85fd))
+* **import:** respecte statut facture, anti-doublon client, qty 0, vue commandes livrees ([2711a4b](https://github.com/tombague160-maker/sereo-production/commit/2711a4be4138bb53e49f8c77226b51dc40674920))
+* **login:** proportions mobile + autofill jaune navigateur ([09eaab7](https://github.com/tombague160-maker/sereo-production/commit/09eaab7ca873adde59a551365a1eeba8a15b4078))
+* **login:** proportions mobile + autofill jaune navigateur ([700c3da](https://github.com/tombague160-maker/sereo-production/commit/700c3dadcdee78d4649fd72b9ef0cbc31db49937))
+* **mobile:** tabbar 6 tabs cassait sur telephone, refonte 5 max + menu Plus ([#44](https://github.com/tombague160-maker/sereo-production/issues/44)) ([9891066](https://github.com/tombague160-maker/sereo-production/commit/989106632ab31a366f66c550518105e3687a8db4))
+* **release:** restaure la version 1.19.0 sur main (manifest + package.json) ([#81](https://github.com/tombague160-maker/sereo-production/issues/81)) ([14fb956](https://github.com/tombague160-maker/sereo-production/commit/14fb956170666826f573974cc24e41aefbdf2b40))
+* **sqlite:** migration v1.9.0 cassee en prod - CREATE INDEX avant ALTER TABLE ([#51](https://github.com/tombague160-maker/sereo-production/issues/51)) ([3327435](https://github.com/tombague160-maker/sereo-production/commit/3327435a8f45b5fcd6d89d5678adbc362dfb6149))
+* **stock:** purge libère les réservations de stock (Lot 5) ([#89](https://github.com/tombague160-maker/sereo-production/issues/89)) ([5a72737](https://github.com/tombague160-maker/sereo-production/commit/5a72737452e956289c5ea263abbcccd8726457d3))
+* **tests:** le profil "mobile" n'emulait pas un doigt, et un checkout rendait le garde rouge ([bd9ec0a](https://github.com/tombague160-maker/sereo-production/commit/bd9ec0aee9fc4b01ca2d1818c2050f57d57a98b3))
+* **theme:** boutons et badges danger lisibles en dark mode ([e4aa473](https://github.com/tombague160-maker/sereo-production/commit/e4aa473f7385e80edbe238399cf0ace57315f167))
+* **theme:** boutons et badges danger lisibles en dark mode ([29969c6](https://github.com/tombague160-maker/sereo-production/commit/29969c68139d7a5add5320efaee88d685135d56f))
+* **theme:** chrome dark mode (sidebar, topbar, tab, inputs) ([56c59fd](https://github.com/tombague160-maker/sereo-production/commit/56c59fdfae3ff503fd982d349587f2218dc12838))
+* **theme:** chrome de l'app (sidebar, topbar, tab) adaptes au mode sombre ([a3cb247](https://github.com/tombague160-maker/sereo-production/commit/a3cb24741d79cac10c78da7f64b6dff9e93ac2db))
+* **theme:** corrige fonds blancs hardcodes invisibles en mode sombre ([3c10fce](https://github.com/tombague160-maker/sereo-production/commit/3c10fceb7bf37f1fd6268739667757f30449f69c))
+* **theme:** corrige fonds blancs hardcodes invisibles en mode sombre ([86911f9](https://github.com/tombague160-maker/sereo-production/commit/86911f963ff3f0e331621ccfe08af3e2d4d4d9ec))
+* **theme:** defaut "light" au lieu de "auto" pendant la phase de test ([0d3de7d](https://github.com/tombague160-maker/sereo-production/commit/0d3de7d138994b1f3aba1f8242bb4ffea966ef47))
+* **theme:** defaut light au lieu de auto pendant la phase de test ([fc8f69c](https://github.com/tombague160-maker/sereo-production/commit/fc8f69ca8d3c71080a8258ea4d64fc6de1f6ba46))
+* **theme:** externalise le script anti-FART (CSP bloquait inline) ([b1641a4](https://github.com/tombague160-maker/sereo-production/commit/b1641a4bb5f17c0ab8dfa98392357876c835ccab))
+* **theme:** externalise le script anti-FART pour contourner la CSP ([3fb84b5](https://github.com/tombague160-maker/sereo-production/commit/3fb84b5cc6da026c0708456437823a1c70fcea54))
+* **theme:** mode d'affichage strictement par device ([37adac0](https://github.com/tombague160-maker/sereo-production/commit/37adac02511a3dd455d2a23c09e8ad37955e614f))
+* **theme:** mode d'affichage strictement par device (plus de sync entre appareils) ([2575a7a](https://github.com/tombague160-maker/sereo-production/commit/2575a7ad524ebacb23d69aa937d55593bfa26b48))
+* **theme:** renforce l'anti-FART (body bg + meta theme-color initial) ([7f82579](https://github.com/tombague160-maker/sereo-production/commit/7f8257914998325930d2760aeb08999c40a512fc))
+* **theme:** renforce l'anti-FART (body bg + meta theme-color initial) ([864ff0f](https://github.com/tombague160-maker/sereo-production/commit/864ff0f64efed7c994713705243ff43dca40bcae))
+* **theme:** suivre le systeme par defaut, et reparer le mode "Auto" ([e4086b6](https://github.com/tombague160-maker/sereo-production/commit/e4086b665d04871d34541eee91e0ad878416eef1))
+* **theme:** supprime le flash de mode sombre au reload ([33f4af3](https://github.com/tombague160-maker/sereo-production/commit/33f4af35a18c013e06815ff48f8e80addacab305))
+* **theme:** supprime le flash de mode sombre au reload (FART) ([9a8d262](https://github.com/tombague160-maker/sereo-production/commit/9a8d26228216a70aff7e148922332b21218a02fb))
+* **tournee:** reorderRouteStops rejette les stopIds dupliqués (Lot 6) ([#90](https://github.com/tombague160-maker/sereo-production/issues/90)) ([08a7e94](https://github.com/tombague160-maker/sereo-production/commit/08a7e94f1eb1093ab2df77667b799fe3d60f5a1c))
+* **ui:** masque la decoration sidebar grise + remplace l'icone parametres ([e9aa943](https://github.com/tombague160-maker/sereo-production/commit/e9aa94399d4aae3827dbc39b8f5f7eb3500f0087))
+* **ui:** masque la sidebar-visual grise + nouvelle icone parametres ([b15f336](https://github.com/tombague160-maker/sereo-production/commit/b15f336e5cacaa8cff2666fe4d2e35d62663fe0e))
+* **ui:** modal detail bon de commande sans fond + lisibilite cartes ([#55](https://github.com/tombague160-maker/sereo-production/issues/55)) ([a25afba](https://github.com/tombague160-maker/sereo-production/commit/a25afba11239d3f219d6b13bd8204dd043147c19))
+* **ui:** Parametres v1.15 - Historique + Zone danger en pleine largeur sous les 3 panels ([#72](https://github.com/tombague160-maker/sereo-production/issues/72)) ([6f27675](https://github.com/tombague160-maker/sereo-production/commit/6f27675b05a412ee0c3f151fe54c65173341681e))
+* **version:** /api/version pas mis en cache (HTTP + Service Worker) ([98deaad](https://github.com/tombague160-maker/sereo-production/commit/98deaad885517d606b62647f82c33d4fabd30046))
+* **version:** /api/version pas mis en cache (HTTP + Service Worker) ([0bfc0c5](https://github.com/tombague160-maker/sereo-production/commit/0bfc0c5bf1299673c143956fe92ecbc6219cb763))
+
+
+### ⚡ Optimisations
+
+* chantier 2 audit 2026-06-04 + fix version v1.15.0 figee (v1.19.0) ([#80](https://github.com/tombague160-maker/sereo-production/issues/80)) ([7ca6f0d](https://github.com/tombague160-maker/sereo-production/commit/7ca6f0d6e2d5de427dddd801e072ff16ab51983f))
+* **core:** sprint 2 - syncWorkflow hors readDb + N+1 stats + test stress 5000 lignes + ADR 0001 ([#64](https://github.com/tombague160-maker/sereo-production/issues/64)) ([a903b65](https://github.com/tombague160-maker/sereo-production/commit/a903b65c0e10988d3614578441be8bc5172f4c04))
+* **tests:** le balayage de contraste passe d'une heure a quatre minutes ([18df0c5](https://github.com/tombague160-maker/sereo-production/commit/18df0c5e91f1fc60ea47e33e8d61d0adc00a34cd))
+
+
+### ♻️ Refactorisation
+
+* **theme:** consolide 17 variables -&gt; 9 + ajoute CLAUDE.md ([ec1d68f](https://github.com/tombague160-maker/sereo-production/commit/ec1d68f38c9b79301d756419743c0f9cf3914353))
+* **theme:** consolide les variables de gradient/overlay (17 -&gt; 9) ([2a362ea](https://github.com/tombague160-maker/sereo-production/commit/2a362ea634a356fbafaa70db655a302749cff092))
+
+
+### 📚 Documentation
+
+* **agents:** ajoute agent de maintenance ([12c3b20](https://github.com/tombague160-maker/sereo-production/commit/12c3b208365102120dfbf996ed934ff7affce094))
+* ajoute CLAUDE.md pour orienter les futurs agents IA ([aeb36f5](https://github.com/tombague160-maker/sereo-production/commit/aeb36f556718743c215c976cede095e9da55d2e0))
+* **audit:** audit ultra-complet 2026-06-04 (12 lentilles, 160 findings) ([#78](https://github.com/tombague160-maker/sereo-production/issues/78)) ([4c16501](https://github.com/tombague160-maker/sereo-production/commit/4c16501e3bdc35531ab3d26a867d9079289b8343))
+* **audit:** rapport complet 20 mai 2026 (5 axes, plan en 3 sprints) ([#61](https://github.com/tombague160-maker/sereo-production/issues/61)) ([b55c9ff](https://github.com/tombague160-maker/sereo-production/commit/b55c9ff9077eb38fa05bb63204a016ba3e5c0798))
+* **audit:** rapport complet 25 mai 2026 (10 axes parallels) ([#73](https://github.com/tombague160-maker/sereo-production/issues/73)) ([55eff4e](https://github.com/tombague160-maker/sereo-production/commit/55eff4e92754ee877aa55f0d2e45db007cf3d532))
+* **changelog:** crediter la PR 96 dans la 1.26.2 ([26c4f8f](https://github.com/tombague160-maker/sereo-production/commit/26c4f8fa8d17b9f644a9c2221f6ebc9577c98c33))
+* **changelog:** crediter la PR 96 dans la 1.26.2 ([51544c7](https://github.com/tombague160-maker/sereo-production/commit/51544c781d83c2f5d995b42d94bd2ce5f81ad39a))
+* **design:** clore l'axe des icones, et enregistrer le piege de la cascade ([be84a6b](https://github.com/tombague160-maker/sereo-production/commit/be84a6be6666a4dfe66a6fc9d5b3f2e5f68eb393))
+* **env:** documente les nouvelles variables auth (session secret + rate limit) ([fff1b4a](https://github.com/tombague160-maker/sereo-production/commit/fff1b4a508c5a05e70aedd51937f7976f5169c27))
+* **v8:** brief Claude Design, charte DESIGN.md et mise a jour de la passation ([7fc6990](https://github.com/tombague160-maker/sereo-production/commit/7fc6990b6977415209b09b8edb4206cd7c531a0b))
+* **v8:** dossier de passation pour reprendre le chantier ([656b556](https://github.com/tombague160-maker/sereo-production/commit/656b5562f271d85819c8b845997a2175e860e7f4))
+* **v8:** Fable 5.1 est bien selectionnable dans Claude Design, un seul compte pour l'instant ([d7ff858](https://github.com/tombague160-maker/sereo-production/commit/d7ff858345d2ec89d5b4114e863f980b8232858d))
+* **v8:** phase 4, marches 1 et 2 closes ([0d811eb](https://github.com/tombague160-maker/sereo-production/commit/0d811ebf929ca09c13590cfaf4bf056cdb75e178))
+* **v8:** phase 4, marches 1 et 2 closes, les trois suivantes nommees ([295cefa](https://github.com/tombague160-maker/sereo-production/commit/295cefa7b3a454761aab2cf7a370b1d6576649a9))
+* **v8:** prompt de reprise pret a coller dans une nouvelle conversation ([980e036](https://github.com/tombague160-maker/sereo-production/commit/980e036c55ca8dbe90cfe233afc0789be1832bcf))
+* **v8:** prompt de suite en un seul bloc, avec points de controle ([1f8814d](https://github.com/tombague160-maker/sereo-production/commit/1f8814d58a1022ac9994af275598978f230d7198))
+* **v8:** versionner la source de la feuille de route, comme les maquettes ([c758291](https://github.com/tombague160-maker/sereo-production/commit/c758291196ea02b68959f0af0e972bf9348f73f4))
+
+
+### 💄 Style / UI
+
+* **a11y:** ajoute h1 cache pour la navigation lecteurs d'ecran ([4c4c871](https://github.com/tombague160-maker/sereo-production/commit/4c4c871f6b0d1b47c043ede78168b70dde6b993e))
+
+
+### 🧪 Tests
+
+* ajoute 14 tests (CSP guard + import sequentiel + multi-stops routes) ([d73fc59](https://github.com/tombague160-maker/sereo-production/commit/d73fc59bb8afddf2829b87136eecd44e97bc4b64))
+* ajoute 14 tests (CSP guard + import sequentiel + multi-stops routes) ([12b5fca](https://github.com/tombague160-maker/sereo-production/commit/12b5fca98cee61fb69dc530a8de2d9089caec605))
+* **import:** tests de non-regression pour les modifs manuelles vs re-imports ([#48](https://github.com/tombague160-maker/sereo-production/issues/48)) ([a0e8c78](https://github.com/tombague160-maker/sereo-production/commit/a0e8c78956c669b6be742593afa16cbab471e9ad))
+
 ## [1.27.0](https://github.com/tombague160-maker/sereo-production/compare/v1.26.2...v1.27.0) (2026-09-18)
 
 
