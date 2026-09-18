@@ -125,7 +125,9 @@ export function initOperations(api) {
       if (action === "refresh-operations") await context.loadData();
       if (action === "recalculate-route") await context.recalculateRoute();
     } catch (error) {
-      context.notify(error.message, "error");
+      // `enFile` : l'ecriture est hors ligne, conservee, et partira. Le dire en
+      // rouge annoncerait une perte de donnee qui n'a pas eu lieu.
+      context.notify(error.message, error?.enFile ? "warning" : "error");
     } finally {
       el.disabled = false;
       related.forEach((button) => (button.disabled = false));

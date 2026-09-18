@@ -7,6 +7,7 @@ import { initOperations, renderOperations, getRoutePoints } from "./operations.j
 // rendu, qui seront decoupes par domaine dans les increments suivants.
 
 import { escapeHtml, escapeAttribute, cssEscape, emptyState, squelette } from "./utils/dom.js";
+import { mettreEnAttente, compterFile, rejouer } from "./utils/file-attente.js";
 import {
   normalizeTextKey,
   normalizePhoneNumber,
@@ -132,6 +133,7 @@ document.addEventListener("DOMContentLoaded", () => {
   bindBonsCommandeUi();
   initMap();
   registerServiceWorker();
+  brancherFileHorsLigne();
   showTab(getInitialTab(), { updateHash: false });
   loadAppearance();
   loadVersionInfo();
@@ -3248,7 +3250,7 @@ function applyTheme(themeId, options = {}) {
       .then(() => {
         if (notifyUser) notify(`Thème "${theme.name}" appliqué.`, "success");
       })
-      .catch(error => notify(error.message, "error"));
+      .catch(error => notifyEchec(error));
   } else if (notifyUser) {
     notify(`Thème "${theme.name}" appliqué.`, "success");
   }
@@ -3294,7 +3296,7 @@ function handleBrandImageImport(input) {
       applyBrandImage(dataUrl);
       notify("Photo de l'application mise à jour.", "success");
     } catch (error) {
-      notify(error.message, "error");
+      notifyEchec(error);
     }
 
     input.value = "";
@@ -3314,7 +3316,7 @@ async function resetBrandImage() {
     if (input) input.value = "";
     notify("Logo séréo restauré.", "success");
   } catch (error) {
-    notify(error.message, "error");
+    notifyEchec(error);
   }
 }
 
@@ -3400,7 +3402,13 @@ async function renderTourneeSettings() {
           });
           if (status) status.textContent = "Enregistré ✓";
         } catch (error) {
-          if (status) status.textContent = `Erreur : ${error.message || "réseau"}`;
+          // Une mise en file n'est pas une erreur : la prefixer de "Erreur :"
+          // dirait exactement le contraire de ce qui vient de se passer.
+          if (status) {
+            status.textContent = error?.enFile
+              ? error.message
+              : `Erreur : ${error.message || "réseau"}`;
+          }
         } finally {
           tourneeSaveTimer = null;
         }
@@ -4550,6 +4558,12 @@ async function apiFetch(url, options = {}) {
     res = await fetch(url, { ...options, signal });
   } catch (err) {
     clearTimeout(timer);
+    // L'ecriture est-elle recuperable ? Voir estDefinitivementHorsLigne().
+    if (await tenterMiseEnFile(url, options)) {
+      const attente = new Error("Hors ligne — enregistré, sera envoyé à la reconnexion.");
+      attente.enFile = true;
+      throw attente;
+    }
     if (err && (err.name === "AbortError" || err.code === "ABORT_ERR")) {
       // Si c'est l'appelant qui a abort (pas le timeout), on re-throw l'erreur
       // originale pour preserver la semantique. Sinon notre message "timeout".
@@ -4606,7 +4620,7 @@ async function runAction(control, busyText, action) {
 
     await action();
   } catch (error) {
-    notify(error.message || "Action impossible.", "error");
+    notifyEchec(error);
   } finally {
     if (control) {
       control.disabled = false;
@@ -4615,9 +4629,125 @@ async function runAction(control, busyText, action) {
   }
 }
 
+// --- ECRITURES HORS LIGNE ----------------------------------------------------
+//
+// Mesure du 18/09, avant ce bloc : 32 ecritures reseau dans ce fichier, ZERO
+// ecouteur "online"/"offline", ZERO ecouteur "sync" dans le service worker. La
+// LECTURE hors ligne existait (network-first puis cache) ; l'ECRITURE etait
+// perdue. Un livreur en zone blanche qui validait une livraison la perdait.
+
+const METHODES_FILABLES = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+/**
+ * `navigator.onLine` n'est fiable que dans UN SENS, et c'est celui-la qu'on
+ * utilise : la spec garantit que `false` signifie "certainement hors ligne" --
+ * aucune interface reseau, donc la requete N'EST JAMAIS PARTIE. `true` ne
+ * promet rien (portail captif, wifi sans internet), on ne s'en sert donc pas
+ * pour conclure l'inverse.
+ *
+ * Cette asymetrie est exactement ce qu'il faut ici. Un TIMEOUT, lui, peut
+ * parfaitement signifier que le serveur a RECU et TRAITE la demande : rejouer
+ * une ecriture non idempotente apres un timeout la dupliquerait. On ne met donc
+ * en file QUE ce dont on sait que le reseau ne l'a pas emporte.
+ */
+function estDefinitivementHorsLigne() {
+  return typeof navigator !== "undefined" && navigator.onLine === false;
+}
+
+/** Met l'ecriture en file si elle est recuperable. Rend true si c'est fait. */
+async function tenterMiseEnFile(url, options) {
+  if (!estDefinitivementHorsLigne()) return false;
+  const methode = String(options.method || "GET").toUpperCase();
+  if (!METHODES_FILABLES.has(methode)) return false;
+  // Un envoi de fichier ne se differe pas : rejouer un import Excel trois
+  // heures plus tard, sur un stock qui a bouge, ferait plus de degats que de
+  // refuser tout de suite.
+  if (options.body instanceof FormData) return false;
+  try {
+    await mettreEnAttente(url, { ...options, method: methode });
+    await rafraichirEtatFile();
+    return true;
+  } catch {
+    // indexedDB indisponible (navigation privee, quota) : on ne fait pas
+    // semblant. L'appelant recoit l'erreur reseau d'origine, comme avant.
+    return false;
+  }
+}
+
+let ecrituresEnAttente = 0;
+
+/** Relit le nombre d'ecritures en attente et le porte a l'ecran. */
+async function rafraichirEtatFile() {
+  try {
+    ecrituresEnAttente = await compterFile();
+  } catch {
+    ecrituresEnAttente = 0;
+  }
+  setStatus(dernierStatut);
+}
+
+/**
+ * Vide la file. On envoie avec `fetch` NU, jamais avec apiFetch : apiFetch
+ * remettrait en file ce qu'il vient d'en sortir, et la file se rechargerait
+ * elle-meme a chaque tentative.
+ */
+async function viderLaFile() {
+  if (ecrituresEnAttente === 0) return;
+  const bilan = await rejouer((u, o) => fetch(u, { ...o, credentials: "same-origin" }));
+  await rafraichirEtatFile();
+
+  if (bilan.envoyees > 0) {
+    notify(bilan.envoyees === 1
+      ? "1 modification envoyée au serveur."
+      : `${bilan.envoyees} modifications envoyées au serveur.`, "success");
+    loadData();
+  }
+  if (bilan.refusees > 0) {
+    notify(bilan.refusees === 1
+      ? "1 modification a été refusée par le serveur et abandonnée."
+      : `${bilan.refusees} modifications ont été refusées par le serveur et abandonnées.`, "warning");
+  }
+  if (bilan.bloquee) {
+    notify("Des modifications ne passent pas. Elles sont conservées, mais plus renvoyées.", "warning");
+  }
+}
+
+function brancherFileHorsLigne() {
+  window.addEventListener("online", () => { viderLaFile(); });
+  window.addEventListener("offline", () => { setStatus(dernierStatut); });
+  // A l'ouverture : l'onglet a pu etre ferme avec des ecritures en attente.
+  // C'est le prix de ne pas utiliser Background Sync, absent d'iOS Safari --
+  // une solution qui ne marche pas sur la moitie du parc n'en est pas une.
+  rafraichirEtatFile().then(() => { if (navigator.onLine) viderLaFile(); });
+}
+
+/**
+ * Une ecriture mise en file n'est PAS une erreur : la donnee est conservee et
+ * partira. L'annoncer en rouge dirait le contraire de ce qui s'est passe.
+ */
+function notifyEchec(error, repli = "Action impossible.") {
+  notify(error?.message || repli, error?.enFile ? "warning" : "error");
+}
+
+let dernierStatut = "Prêt";
+
+/**
+ * UN SEUL ecrivain pour #syncStatus. loadData() y ecrit "À jour" / "Erreur" ; le
+ * nombre d'ecritures en attente doit survivre a ces ecritures-la, sinon un
+ * simple rafraichissement effacerait la seule trace que des donnees ne sont pas
+ * encore parties. On memorise donc le dernier statut et on recompose.
+ */
 function setStatus(message) {
+  dernierStatut = message;
   const element = document.getElementById("syncStatus");
-  if (element) element.textContent = message;
+  if (!element) return;
+  let texte = message;
+  if (ecrituresEnAttente > 0) {
+    texte = `${message} · ${ecrituresEnAttente} en attente`;
+  } else if (estDefinitivementHorsLigne()) {
+    texte = `${message} · hors ligne`;
+  }
+  element.textContent = texte;
 }
 
 function notify(message, type = "info") {
