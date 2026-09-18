@@ -200,7 +200,7 @@ ici**. Ils ne changent pas la charte : ils disent ce que la refonte doit défair
 | ~~Un arrêt en « problème » n'enregistre aucune raison~~ — **soldé le 18/09** | oui dans l'effet, **non dans la cause** | La charte disait « un champ neuf est à créer ». **Faux : `stop.problemReason` existait.** Le défaut réel était ailleurs, et il tenait en trois points — détail plus bas |
 | ~~Trois rayons de carte concurrents~~ — **soldé le 18/09** | oui, et **encore pire qu'annoncé** | `--radius-card` valait 8, 22 **et** 28 px — et surtout **22 en clair, 8 en sombre**, les deux déclarations gagnantes étant scopées `light`. Détail plus bas |
 | Trois oranges pour un seul rôle | oui | `#f18c79` (14×), `#f47a5a` (3×), `#ef8f77` dans `sereo-mark.svg`, `sereo-sidebar-bg.svg`, `favicon.svg` et `generate-icons.js` |
-| Générations de tokens empilées | oui | `--color-pastel-` 95 déclarations, `--palette-` 186, `--neo-` 121 |
+| ~~Générations de tokens empilées~~ — **soldé le 18/09** | oui à l'époque | Était : `--color-pastel-` 95, `--palette-` 186, `--neo-` 121. **Remesuré le 18/09 : zéro déclaration des trois.** Seules trois lignes de commentaire les nommaient encore, dont une périmée — corrigées |
 | 15 onglets pour 6 catégories | oui | `mainTabs` en compte 15, dont 5 listes de commandes filtrées différemment |
 | Du texte vivant dans les SVG de marque | oui | les 3 fichiers portent `<text font-family="Segoe UI, Arial">` — à vectoriser |
 | `--color-text-soft` sous le seuil | **non, affirmation fausse** | `#5e6d6d` sur `#FBF7F5` donne **5,08:1**, au-dessus de 4,5. Rien à corriger |
@@ -658,6 +658,91 @@ anneau.
 
 *Après : 14 contrôles jugés, **0 sans indicateur, 0 défaut**, dans les deux modes.
 Trois mutations, trois tuées — 6, 5 et 2 défauts respectivement.*
+
+### La police de la charte, posée le 18/09 — et les onze textes qu'elle a coupés
+
+Le §3 prescrit **Poppins**, auto-hébergée. Le code déclarait
+`font-family: Inter, "Segoe UI", Arial` et **ne chargeait aucune police** : zéro
+fichier, zéro `@font-face`, zéro lien distant. Ni Poppins ni Inter n'étant
+installées sur une machine ordinaire, **tout s'affichait dans la police
+système**. *La charte décrivait un écran que personne n'avait jamais vu.*
+
+| | |
+|---|---|
+| ce qui est posé | 4 graisses × 2 alphabets (`latin`, `latin-ext`), **76 Ko** licence comprise |
+| licence | SIL OFL 1.1, jointe dans `public/fonts/OFL.txt` — la redistribution l'exige |
+| chargement | `font-display: swap` : le texte s'affiche tout de suite dans le repli, puis bascule |
+
+#### ⛔ Deux témoins évidents qui ne valaient rien
+
+**`document.fonts.check("400 16px Poppins")` rend `true`** sur une page où
+**zéro** face Poppins est enregistrée. Mesuré avant tout ajout.
+
+**Comparer la largeur de `"Poppins"` au repli déclaré** ne vaut rien non plus :
+sans la police, le navigateur résout « Poppins » vers **sa** police par défaut,
+qui n'est pas `"Segoe UI", system-ui`. Les largeurs différaient déjà — 863,8
+contre 915,61 — et ce témoin **passait au vert sur une page sans police**.
+
+> ⭐ **Le témoin sain : comparer à une famille GARANTIE ABSENTE.** Les deux
+> retombent alors sur exactement la même police par défaut. Largeurs égales →
+> non chargée ; différentes → elle rend vraiment. C'est la seule construction où
+> le vert ne peut pas venir d'ailleurs.
+
+#### Ce que la police a déplacé — causé, et non révélé
+
+Poppins rend **18 % plus large** que ce qui rendait avant. Mesure d'attribution,
+faite **avant** de corriger quoi que ce soit :
+
+| | desktop | mobile |
+|---|---|---|
+| sans Poppins | **0** coupure | **0** coupure |
+| avec Poppins | **6** | **5** |
+
+> La distinction compte : **révéler se documente, causer se répare.** Ces onze
+> coupures sont à ce lot.
+
+**① Le libellé de navigation** demandait 169 px dans une boîte de 156. La charte
+le chiffre pourtant — *« 13-14,5 px, 500 »* — et le code était à **14,08 px en
+graisse 850**. Revenir à la charte sur les deux axes suffit :
+`169 × (13/14,08) × (188,84/192,05) = 153,4 < 156`.
+
+**② Le résumé du tableau de bord**, à 390 px : deux colonnes → 141 px par carte,
+105 utiles — et « Commandes » **seul** en demande 108. *Ce n'est pas un mot à
+couper, c'est une colonne de trop.* Une seule colonne sous 430 px.
+
+#### ⛔ Une hypothèse écartée par la mesure, avant de toucher 55 lignes
+
+La feuille déclare des graisses **hors charte** : 650, 750, 760, 800, 820, 850,
+880, 900, 920, 930, 950 — **55 déclarations**. J'ai cru qu'elles étaient
+*synthétisées* par le navigateur, donc plus larges, donc coupables :
+
+```
+400 -> 187,11    500 -> 188,84    600 -> 190,31
+650 a 950 -> 192,05 px, TOUTES IDENTIQUES
+```
+
+**Aucune synthèse.** Au-delà de 600, tout retombe sur la face 700. Ces graisses
+restent une non-conformité au §3 — qui n'en déclare que quatre — mais elles ne
+coupent **rien**, et elles n'ont pas été touchées. *Cinquante-cinq lignes non
+modifiées parce qu'une mesure a contredit une intuition plausible.*
+
+#### ⚠ Ce que la police ne corrigera PAS, et il faut le savoir
+
+Les SVG de marque portent du **texte vivant** (`font-family="Segoe UI, Arial"`,
+et `"Arial Black"` pour la barre latérale). Mesuré : sans Segoe UI, le mot-marque
+« SEREO » passe de **231,1 à 279,5 px** (+21 %), et le « s » de la marque de
+22,2 à 28,1 (+27 %). Pas de débordement du `viewBox`, mais un dessin **visiblement
+différent** sur Mac, Linux et Android — donc sur la plupart des téléphones.
+
+> ⛔ **Auto-héberger Poppins n'y change rien**, et c'est mesuré : ces SVG sont
+> chargés en `<img src>` et en `url()` CSS. Dans ce mode un SVG **ne peut charger
+> aucune ressource externe**, `@font-face` compris. La seule issue reste la
+> **vectorisation** (texte → tracés), qui demande un outil de fontes absent de
+> cette machine. *Écrit ici pour épargner la tentative au suivant.*
+
+*Bancs : `typographie.spec.js` (2 cas) et `texte-coupe.spec.js` (2 cas, 1 130
+textes jugés). Trois mutations, trois tuées — 6 coupures, 5 coupures, et la
+police absente.*
 
 ## 10. Guide pour l'agent
 
