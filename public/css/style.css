@@ -8500,3 +8500,92 @@ html[data-color-scheme="light"] body,
     margin: -4px -8px;
   }
 }
+
+/* ============================================================================
+ * Squelette de chargement.
+ *
+ * La charte prevoyait le jeton --v8-squelette ; il n'etait branche nulle part.
+ * Mesure du 18/09, API ralentie a 2,5 s : les panneaux du tableau de bord
+ * restaient des boites BLANCHES VIDES pendant tout le chargement -- rien ne
+ * distinguait "ca charge" de "c'est vide" ou de "c'est casse".
+ *
+ * Regle de la charte : JAMAIS DE TEXTE DESSUS. Ces blocs n'annoncent rien, ils
+ * occupent la place de ce qui vient. Consequence utile : ils ne portent aucun
+ * glyphe, donc le balayage de contraste ne les juge pas et n'a pas a les
+ * exempter -- une exemption de plus serait une porte de plus.
+ * ========================================================================== */
+.squelette {
+  display: grid;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.squelette-bloc {
+  display: block;
+  width: var(--squelette-part, 100%);
+  height: 14px;
+  border-radius: 7px;
+  background: var(--v8-squelette);
+}
+
+/* Une carte occupe une silhouette plus haute qu'une ligne de liste. */
+.squelette-carte .squelette-bloc { height: 20px; }
+.squelette-carte .squelette-bloc:first-child { height: 28px; }
+
+/* Silhouette de graphique : des barres qui montent depuis le bas. Le conteneur
+   herite de la hauteur du graphique reel, sinon le panneau se contracte puis se
+   detend a l'arrivee des donnees -- un saut de mise en page que le squelette
+   est precisement cense eviter. */
+.squelette-colonnes {
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;   /* sans quoi les colonnes se dimensionnent sur leur contenu, et il n'y en a pas */
+  align-items: end;
+  height: 100%;
+  gap: 18px;
+}
+
+/* Le squelette est pose DANS un conteneur flex (.revenue-chart) : sans flex:1
+   il n'occupe que sa largeur intrinseque -- mesure : 90 px au lieu de 556. */
+.revenue-chart > .squelette-colonnes {
+  flex: 1;
+}
+
+.squelette-colonnes .squelette-bloc {
+  width: 100%;
+  height: var(--squelette-haut, 60%);
+  border-radius: 8px 8px 4px 4px;
+}
+
+/* Le balayage lumineux dit que quelque chose TRAVAILLE. Sans lui, un squelette
+   immobile se confond avec un contenu gris reellement charge. */
+@media (prefers-reduced-motion: no-preference) {
+  .squelette-bloc {
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.45) 50%,
+      transparent 100%
+    );
+    background-size: 240px 100%;
+    background-repeat: no-repeat;
+    animation: squelette-balayage 1.4s ease-in-out infinite;
+  }
+}
+
+/* En mode sombre, un voile BLANC sur un bloc sombre ne se voit pas. On eclaire
+   moins et on inverse la logique : c'est le meme geste, pas la meme valeur. */
+@media (prefers-reduced-motion: no-preference) {
+  :root[data-color-scheme="dark"] .squelette-bloc {
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.10) 50%,
+      transparent 100%
+    );
+  }
+}
+
+@keyframes squelette-balayage {
+  from { background-position: -240px 0; }
+  to { background-position: calc(100% + 240px) 0; }
+}

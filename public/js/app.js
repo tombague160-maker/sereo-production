@@ -6,7 +6,7 @@ import { initOperations, renderOperations, getRoutePoints } from "./operations.j
 // ./utils/ et ./config/ ; ce fichier conserve l'etat de l'application et le
 // rendu, qui seront decoupes par domaine dans les increments suivants.
 
-import { escapeHtml, escapeAttribute, cssEscape, emptyState } from "./utils/dom.js";
+import { escapeHtml, escapeAttribute, cssEscape, emptyState, squelette } from "./utils/dom.js";
 import {
   normalizeTextKey,
   normalizePhoneNumber,
@@ -658,8 +658,49 @@ function initMap() {
   }).addTo(map);
 }
 
+/**
+ * Pose un squelette dans les zones qui restent VIDES pendant le chargement.
+ *
+ * Mesure du 18/09, API ralentie a 2,5 s : ces conteneurs etaient des boites
+ * blanches vides, sans rien qui distingue "ca charge" de "c'est vide" ou de
+ * "c'est casse". Un squelette occupe la place de ce qui vient ; il n'annonce
+ * rien et ne porte aucun texte (regle de la charte).
+ *
+ * On ne le pose QUE sur un conteneur deja vide : au rafraichissement, l'ancien
+ * contenu reste lisible pendant que le neuf arrive, ce qui vaut mieux qu'un
+ * scintillement gris sur des donnees qu'on avait deja.
+ */
+function poserSquelettes() {
+  const zones = [
+    ["dashboardPreparing", 3], ["dashboardDelivering", 3], ["dashboardSubscriptions", 3],
+    ["crmList", 4], ["stockList", 5], ["todayOrdersList", 4], ["plannedOrdersList", 4],
+    ["relanceList", 3], ["exportsList", 3], ["historiqueList", 3], ["stockMovementList", 4],
+    // Ajoutes apres mesure : la premiere liste avait ete ecrite de memoire, et
+    // le graphique du tableau de bord -- le plus grand vide de l'ecran, 556x184
+    // -- n'y figurait pas. On ne devine pas quels conteneurs sont vides, on les
+    // releve dans la page pendant que l'API est ralentie.
+    ["revenueChart", 6], ["opAlerts", 3]
+  ];
+  for (const [id, lignes] of zones) {
+    const zone = document.getElementById(id);
+    if (!zone || zone.children.length) continue;
+    zone.setAttribute("aria-busy", "true");
+    zone.innerHTML = squelette(lignes, id === "revenueChart" ? "colonnes" : "liste");
+  }
+}
+
+/** Retire les squelettes restants : une zone qui n'a pas ete remplie l'est par
+ *  son propre rendu, mais une zone en erreur garderait des blocs gris a vie. */
+function retirerSquelettes() {
+  for (const zone of document.querySelectorAll('[aria-busy="true"]')) {
+    zone.removeAttribute("aria-busy");
+    if (zone.querySelector(".squelette")) zone.innerHTML = "";
+  }
+}
+
 async function loadData() {
   setStatus("Chargement...");
+  poserSquelettes();
 
   // Chantier 2 (audit 2026-06-04) : Promise.allSettled au lieu de Promise.all.
   // Avant : si UN seul endpoint timeout (30s), tout etait wipe (clients=[],
@@ -755,6 +796,14 @@ async function loadData() {
     const friendly = failed.map(k => labels[k] || k).join(", ");
     notify(`Sections indisponibles : ${friendly}. Le reste est à jour.`, "warning");
   }
+
+  // TOUJOURS, quel que soit le sort des endpoints. Les zones remplies par leur
+  // propre rendu ont deja remplace leur squelette, mais elles gardent
+  // aria-busy="true" -- et une zone qui annonce "je charge" a vie ment a un
+  // lecteur d'ecran. Celles dont l'endpoint a echoue garderaient en plus des
+  // blocs gris : un squelette qui ne finit jamais promet quelque chose qui
+  // n'arrive pas.
+  retirerSquelettes();
 }
 
 function refreshActiveRoute() {
