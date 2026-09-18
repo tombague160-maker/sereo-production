@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.30.0](https://github.com/tombague160-maker/sereo-production/compare/v1.29.0...v1.30.0) (2026-09-18)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **v8:** phase 4, marche 4d -- les badges de statut a 24 px, comme la charte le dit ([5c38f04](https://github.com/tombague160-maker/sereo-production/commit/5c38f0429c6cfb0a79aff5d360799da621131198))
+
 ## [1.29.0](https://github.com/tombague160-maker/sereo-production/compare/v1.28.0...v1.29.0) (2026-09-18)
 
 
