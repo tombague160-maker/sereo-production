@@ -549,6 +549,44 @@ l'arrière-plan inerte pour de bon).
 *Bancs : 9 au niveau de l'API (vrai serveur, base ensemencée), 6 sur la source du
 client, 5 sur le dialogue ouvert. **7 mutations, 7 tuées par le cas prévu.***
 
+### La page de connexion — le seul écran que rien ne regardait
+
+Elle est le **premier** écran, elle porte environ 300 lignes de CSS *inline dans
+`server.js`*, hors du système de jetons v8, et **aucun balayage ne l'avait jamais
+vue** — ni contraste, ni cibles tactiles, ni rayons.
+
+**Pourquoi elle était hors de portée, et comment la première sonde a menti.** Le
+serveur des bancs e2e tourne *sans authentification* — c'est la seule façon
+d'atteindre les quinze onglets. Mais alors `GET /login` répond **200 en servant
+l'application**. Une sonde pointée dessus a donc mesuré l'app en croyant mesurer
+la connexion, et elle n'a été prise que parce qu'on imprimait l'**URL finale** :
+
+```
+LOGIN light statut=200 url=http://127.0.0.1:3100/     <- pas /login
+```
+
+> **Un contrôle négatif a trois causes** : ce n'est pas là · je ne vois pas ·
+> **je regarde ailleurs**. Ici c'était la troisième, et le `200` la rendait
+> rassurante. Le banc exige désormais l'URL finale **et** la présence d'un champ
+> de mot de passe avant de juger quoi que ce soit.
+
+La configuration Playwright déclare maintenant **deux serveurs** : celui sans
+authentification pour l'application, et un second, authentifié, qui existe pour
+cette page seule.
+
+| Mesuré le 18/09 | résultat |
+|---|---|
+| contraste, clair et sombre | 13 zones, 11 jugées, **0 défaut** |
+| 2 zones non jugées | un champ vide, et un élément déclaré transparent — *rien à mesurer*, et non *du texte invisible* |
+| cibles tactiles | **1 défaut** : le lien de version faisait **16 px** de haut |
+
+Ce lien (`<a>` vers les releases GitHub) passait sous le plancher **légal** de
+24 px, pas seulement sous nos 44. Il tient désormais 44 px par un rembourrage
+compensé de marges négatives : la cible grandit, la mise en page ne bouge pas.
+
+*La page est saine. Le banc existe pour qu'elle le reste — parce que rien d'autre
+ne la regarde.*
+
 ## 10. Guide pour l'agent
 
 - Toujours produire les deux modes (clair et sombre) avec les mêmes tokens ; lister les contrastes calculés.
