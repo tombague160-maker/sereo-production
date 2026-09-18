@@ -219,7 +219,9 @@ Phase 4  Refonte des écrans + abonnements    ← EN COURS depuis le 17/09.
            Marche 4 ← EN COURS
              4a ✅ barre basse mobile : Tableau de bord · Préparation · Tournée · Abonnements (+ Plus), décision de Tom du 17/09.
                     MOBILE_OVERFLOW_TABS est désormais DÉRIVÉE, les deux listes ne peuvent plus se contredire. 5 tests figent la décision
-             4b ⬜ les autres écrans des 49 planches : états vides, chargement, mise en page des listes
+             4b ✅ SQUELETTE DE CHARGEMENT : le jeton --v8-squelette de la charte n'était branché nulle part.
+                    13 zones, silhouettes liste et colonnes. 6 tests e2e, vérifiés mordants
+             4c ⬜ les autres écrans des 49 planches : états vides enrichis, mise en page des listes
            Marche 5 ⬜ les 7 inventions de la planche 15, chacune avec son travail serveur
            PR 96 (brouillon) à rebaser par son auteur : 5 fichiers en conflit mesurés, et main a bougé de 4 versions
 Phase 5  Cartographie et trafic réel
