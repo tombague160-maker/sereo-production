@@ -802,6 +802,68 @@ des déclarations de jetons, qui sont légitimes — c'est là que les couleurs
 vivent). Les plus nombreuses : `#ffffff` ×14 en `background`. **Aucun garde ne
 le vérifie aujourd'hui.** Chiffre posé ici pour qui reprendra.
 
+### La FORME du §4, posée le 18/09 — l'interface ressemble enfin à ce qui a été décidé
+
+Jusqu'ici les bancs tenaient la **qualité** : contraste, cibles, focus, coupures,
+police. Aucun ne tenait la **forme**. Une interface peut être parfaitement
+conforme et ne pas ressembler au dessin. C'était l'état, et la mesure le disait :
+
+| composant | charte | mesuré avant |
+|---|---|---|
+| Boutons | pilules, 48 mobile / 44 desktop | **rayon 9 px**, 44 partout |
+| Champs | 48 px, rayon 18 | 46 px, rayon 14 |
+| Barre latérale | **258 px**, angle droit **36** | **276 px**, angle **0** |
+| Sheets | 28 px | 36 et 24 |
+| Barre basse | `blur(20px) saturate(180%)` | `blur(6px) saturate(110%)` |
+
+*Après : 7 cas sur 7, dans les deux vues.*
+
+#### ⛔ Trois erreurs de ma part, toutes prises par la mesure
+
+**① Une variable d'état sans remise à zéro.** Pour relever les planchers de
+bouton à l'intérieur des `@media` étroites, j'ai suivi le `max-width` avec une
+variable… jamais réinitialisée à la fermeture du bloc. **Quatorze règles
+relevées, dont neuf hors media** — des boutons desktop poussés à 48 là où la
+charte dit 44, et **aucun banc ne pouvait le voir** : ils ne vérifient qu'un
+plancher. Refait avec un vrai comptage d'accolades.
+
+> *Une variable d'état sans sa remise à zéro est un `if` toujours vrai.*
+
+**② Une règle posée sans son `@media`.** J'ai écrit `width: 258px` sur la barre
+latérale **sans condition**. En mobile elle est passée de 390 px (pleine largeur)
+à 258, laissant **132 px au contenu**. Le mot était pourtant dans la ligne de la
+charte : « barre latérale **desktop** ». *Je ne l'avais pas lu.*
+
+**③ Un préalable deviné au lieu d'être mesuré.** Le banc exigeait `> 2` champs
+mesurés ; en mobile l'enveloppe de recherche de la barre latérale est masquée et
+il n'en reste que **2**. Un préalable trop haut transforme une mesure juste en
+faux rouge.
+
+#### Ce que la cascade a encore appris
+
+Huit règles se disputaient la hauteur d'un bouton, dont
+`@media (max-width: 700px) […] #refreshButton` — un **sélecteur d'ID**, (1,3,1).
+Le banc a rendu la **liste complète** des règles qui touchent l'élément, avec
+leur valeur ; il a suffi d'aligner la spécificité **exactement** sur les deux qui
+gagnaient.
+
+> ⭐ **`@media` n'ajoute aucune spécificité.** C'est écrit dans cette charte
+> depuis le 17/09, et c'est la **cinquième fois** que ça décide d'un correctif.
+
+#### Le libellé de navigation passe à la ligne, et c'était le seul levier restant
+
+Rétrécir la barre à 258 px a coupé « Commandes planifiées » de **15 px**. Les
+trois autres leviers étaient fermés, et c'est mesuré : la taille était déjà au
+**bas** de la fourchette (13 px sur 13–14,5), la graisse déjà à **500**, et
+`-0,02 em` sur 20 caractères ne rend que **5,2 px** sur les 15 manquants.
+
+Restait l'ellipse ou le retour à la ligne. *L'ellipse perd de l'information en
+silence ; le retour à la ligne n'en perd aucune*, et le « 64–72 px » de la charte
+vise les **lignes de liste**, pas les items de navigation.
+
+*Bancs : `charte-composants.spec.js`, 7 cas. Trois mutations, trois tuées.
+405 unitaires + 75 e2e.*
+
 ## 10. Guide pour l'agent
 
 - Toujours produire les deux modes (clair et sombre) avec les mêmes tokens ; lister les contrastes calculés.

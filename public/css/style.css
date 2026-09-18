@@ -4259,7 +4259,7 @@ label {
 @media (max-width: 720px) {
   .bdc-status-filter,
   .button.secondary.compact {
-    min-height: 44px;
+    min-height: 48px;
     padding: 10px 14px;
   }
 }
@@ -4748,7 +4748,7 @@ html[data-color-scheme="light"] body {
 }
 
 :root[data-color-scheme="light"] .button {
-  min-height: 40px;
+  min-height: 44px;
   gap: 8px;
   padding: 10px 14px;
   border-radius: 8px;
@@ -5146,7 +5146,7 @@ html[data-color-scheme="light"] body {
   }
 
   :root[data-color-scheme="light"] .button {
-    min-height: 42px;
+    min-height: 48px;
   }
 }
 
@@ -5353,7 +5353,7 @@ html[data-color-scheme="light"] body {
 :root[data-color-scheme="light"] .compact,
 :root[data-color-scheme="light"] .button.secondary.compact,
 :root[data-color-scheme="light"] .bdc-status-filter {
-  min-height: 38px;
+  min-height: 44px;
   padding: 8px 12px;
   border-radius: 9px;
 }
@@ -5543,7 +5543,7 @@ html[data-color-scheme="light"] body {
   }
 
   :root[data-color-scheme="light"] .button {
-    min-height: 44px;
+    min-height: 48px;
   }
 }
 
@@ -6075,7 +6075,7 @@ html[data-color-scheme="light"] body,
 :root[data-color-scheme="light"] .compact,
 :root[data-color-scheme="light"] .button.compact,
 :root[data-color-scheme="light"] .button.secondary.compact {
-  min-height: 38px;
+  min-height: 44px;
   padding: 8px 12px;
   border-radius: 8px;
   font-size: 0.84rem;
@@ -6840,7 +6840,7 @@ html[data-color-scheme="light"] body,
 }
 
 :root[data-color-scheme="light"] .topbar-actions .button.secondary {
-  min-height: 46px;
+  min-height: 44px;
   /* Etait orange avec du blanc : 2,34, interdit par la charte. Surface +
      principal, comme "A jour" a cote : 6,01. */
   background: var(--v8-surface);
@@ -7523,7 +7523,7 @@ html[data-color-scheme="light"] body,
      Bat les overrides light `.compact{min-height:38px}`. --- */
   :root[data-color-scheme] .button.compact,
   :root:not([data-color-scheme]) .button.compact {
-    min-height: 44px;
+    min-height: 48px;
   }
 
   /* --- Graphe "Ventes par jour" : 14 barres tenaient 384px dans une carte
@@ -7927,7 +7927,7 @@ html[data-color-scheme="light"] body,
   :root[data-color-scheme] .compact,
   :root[data-color-scheme] .version-modal-close,
   :root[data-color-scheme] .mobile-tab {
-    min-height: 44px;
+    min-height: 48px;
   }
 
   :root[data-color-scheme] .version-modal-close,
@@ -9169,4 +9169,169 @@ textarea::placeholder {
   :root:not([data-color-scheme]) .summary-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* ===========================================================================
+ * §4 DE LA CHARTE -- LA FORME DES COMPOSANTS
+ *
+ * Les autres blocs de cette feuille tiennent la QUALITE : contraste, cibles,
+ * focus, coupures. Celui-ci tient la FORME -- ce que la charte DESSINE. Une
+ * interface peut etre parfaitement conforme et ne pas ressembler a ce qui a
+ * ete decide. Mesure du 18/09, avant ce bloc :
+ *
+ *     boutons       rayon 9 px          charte : pilule
+ *     champs        46 px / rayon 14    charte : 48 / 18
+ *     barre lat.    276 px / angle 0    charte : 258 / 36
+ *     sheets        36 et 24            charte : 28
+ *     barre basse   blur(6px)           charte : blur(20px) saturate(180%)
+ *
+ * PREFIXE ET FIN DE FEUILLE, pour la raison etablie plus haut : les regles
+ * scopees par theme montent a (0,2,0) et plus, une classe nue perd. La
+ * specificite seule ne suffit pas, l'ordre seul non plus.
+ * =========================================================================== */
+
+/* ① LES BOUTONS SONT DES PILULES. `999px` n'est pas une valeur, c'est une
+ *    facon d'ecrire « au maximum » : le navigateur plafonne a la moitie de la
+ *    plus petite dimension. Le banc mesure donc « rayon >= hauteur / 2 », qui
+ *    est la definition geometrique d'une pilule et se verifie. */
+:root[data-color-scheme] .button,
+:root:not([data-color-scheme]) .button {
+  border-radius: 999px;
+  min-height: 44px;
+}
+
+/* 48 px sous le pouce -- charte : « hauteur 48 px mobile / 44 px desktop ».
+ * Le seuil est celui de la barre basse, la ou l'interface devient tactile. */
+@media (max-width: 920px) {
+  :root[data-color-scheme] .button,
+  :root:not([data-color-scheme]) .button {
+    min-height: 48px;
+  }
+}
+
+/* ② LES CHAMPS : 48 px de haut, rayon 18. Les enveloppes de recherche portent
+ *    la meme forme -- c'est ELLES que l'on voit, l'input qu'elles contiennent
+ *    n'a ni bordure ni fond. */
+:root[data-color-scheme] input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+:root[data-color-scheme] select,
+:root[data-color-scheme] .topbar-search,
+:root[data-color-scheme] .sidebar-search {
+  min-height: 48px;
+  border-radius: 18px;
+}
+
+/* Un `textarea` est multiligne : sa HAUTEUR appartient au contenu, pas au
+ * composant. Il garde le rayon et rien d'autre. */
+:root[data-color-scheme] textarea {
+  border-radius: 18px;
+}
+
+/* L'input a l'interieur d'une enveloppe ne doit PAS reprendre les 48 px : il
+ * gonflerait l'enveloppe a 96. Il n'a aucune decoration, il ne se voit pas. */
+:root[data-color-scheme] .topbar-search input,
+:root[data-color-scheme] .sidebar-search input {
+  min-height: 0;
+  border-radius: 0;
+}
+
+/* ③ LA BARRE LATERALE : 258 px, angle droit arrondi a 36.
+ *    ⛔ SOUS @media (min-width: 921px), ET C EST UNE REGRESSION QUE J AI
+ *       CAUSEE PUIS MESUREE. Sans le media, la regle s appliquait AUSSI en
+ *       mobile : la barre y passait de 390 px (pleine largeur) a 258, laissant
+ *       132 px au contenu. La charte dit "barre laterale DESKTOP" -- le mot
+ *       etait dans la ligne, je ne l avais pas lu. */
+@media (min-width: 921px) {
+  :root[data-color-scheme] .sidebar {
+    width: 258px;
+    flex: 0 0 258px;
+    border-top-right-radius: 36px;
+    border-bottom-right-radius: 36px;
+  }
+}
+
+/* ④ LES SHEETS ET MODALES : 28 px. */
+:root[data-color-scheme] .version-modal-card,
+:root[data-color-scheme] .motif-dialog,
+:root[data-color-scheme] .subscription-dialog,
+:root[data-color-scheme] .sheet {
+  border-radius: 28px;
+}
+
+/* ⑤ LA BARRE BASSE, translucide pour de bon. A 6 px de flou on ne voyait pas
+ *    ce qui defile dessous -- or c'est precisement ce que la charte demande. */
+:root[data-color-scheme] .mobile-tabbar {
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+/* Les deux derniers ecarts, et ils viennent de regles HERITEES scopees par
+ * theme qui montent a (0,3,0) -- au-dessus de mon bloc a (0,2,0). On aligne le
+ * selecteur EXACTEMENT sur le leur plutot que de surencherir a l aveugle :
+ *     :root[data-color-scheme="light"] .topbar-actions .button   min-height 46
+ *     :root[data-color-scheme="light"] .topbar-search            hauteur 50
+ * Mesure : le bouton d actualisation rendait 46 en desktop et 44 en mobile,
+ * l enveloppe de recherche 50 au lieu de 48. */
+:root[data-color-scheme] .topbar-actions .button,
+:root:not([data-color-scheme]) .topbar-actions .button {
+  min-height: 44px;
+}
+
+@media (max-width: 920px) {
+  :root[data-color-scheme] .topbar-actions .button,
+  :root:not([data-color-scheme]) .topbar-actions .button {
+    min-height: 48px;
+  }
+}
+
+/* `height` et non `min-height` : l enveloppe rendait 50 malgre un min-height
+ * de 48, parce que son contenu la poussait. La charte fixe la hauteur du
+ * composant, pas un plancher. */
+:root[data-color-scheme] .topbar-search,
+:root[data-color-scheme] .sidebar-search,
+:root:not([data-color-scheme]) .topbar-search,
+:root:not([data-color-scheme]) .sidebar-search {
+  height: 48px;
+}
+
+/* Les quatre derniers boutons courts, et leurs adversaires NOMMES. Le banc a
+ * donne la liste complete des regles qui les touchent ; deux gagnaient :
+ *     @media (max-width: 640px) :root[data-color-scheme] .button.secondary  (0,3,0)
+ *     @media (max-width: 700px) ... .topbar-actions #refreshButton          (1,3,1)
+ * On aligne la specificite EXACTEMENT sur chacune, et l ordre tranche. Une
+ * regle @media ne pese rien de plus qu une autre : c est ecrit dans la charte,
+ * et c est la cinquieme fois aujourd hui que ca decide. */
+@media (max-width: 920px) {
+  :root[data-color-scheme] .button.secondary,
+  :root[data-color-scheme] .button.compact,
+  :root[data-color-scheme] .button.primary,
+  :root:not([data-color-scheme]) .button.secondary,
+  :root:not([data-color-scheme]) .button.compact {
+    min-height: 48px;
+  }
+
+  :root[data-color-scheme] .topbar .topbar-actions #refreshButton,
+  :root:not([data-color-scheme]) .topbar .topbar-actions #refreshButton {
+    min-height: 48px;
+  }
+}
+
+/* LE LIBELLE DE NAVIGATION PASSE A LA LIGNE.
+ *
+ * Mesure : « Commandes planifiees » demande 15 px de plus que la barre ne lui
+ * en donne, depuis qu elle est passee de 276 a 258 px -- la largeur de la
+ * charte. Les trois autres leviers sont fermes, et c est mesure :
+ *     taille    deja a 13 px, le BAS de la fourchette de la charte (13-14,5)
+ *     graisse   deja a 500, ce que la charte prescrit
+ *     chasse    -0,02 em sur 20 caracteres ne rend que 5,2 px sur les 15
+ *
+ * Reste l ellipse ou le retour a la ligne. L ellipse perd de l information en
+ * silence ; le retour a la ligne n en perd aucune, et la charte ne fixe aucune
+ * hauteur pour ces items (le 64-72 px vise les LIGNES DE LISTE).
+ * On garde une cible d au moins 44 px : un item sur deux lignes grandit, il ne
+ * retrecit jamais. */
+:root[data-color-scheme] .tab > span:not(.tab-icon),
+:root:not([data-color-scheme]) .tab > span:not(.tab-icon) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.2;
 }
