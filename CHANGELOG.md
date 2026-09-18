@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.26.3](https://github.com/tombague160-maker/sereo-production/compare/v1.26.2...v1.26.3) (2026-09-18)
+
+
+### 📚 Documentation
+
+* **changelog:** crediter la PR 96 dans la 1.26.2 ([26c4f8f](https://github.com/tombague160-maker/sereo-production/commit/26c4f8fa8d17b9f644a9c2221f6ebc9577c98c33))
+* **changelog:** crediter la PR 96 dans la 1.26.2 ([51544c7](https://github.com/tombague160-maker/sereo-production/commit/51544c781d83c2f5d995b42d94bd2ce5f81ad39a))
+
 ## [1.26.2](https://github.com/tombague160-maker/sereo-production/compare/v1.26.1...v1.26.2) (2026-09-18)
 
 
