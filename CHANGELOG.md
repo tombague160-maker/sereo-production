@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.32.0](https://github.com/tombague160-maker/sereo-production/compare/v1.31.0...v1.32.0) (2026-09-19)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **v8:** la FORME du §4 -- l'interface ressemble enfin a ce qui a ete decide ([353c304](https://github.com/tombague160-maker/sereo-production/commit/353c3042483b3e15b052c1cecda0601fa77b47fb))
+* **v8:** la police de la charte, posee -- et les onze textes qu'elle a coupes ([22a12dd](https://github.com/tombague160-maker/sereo-production/commit/22a12ddc39c99677e947b95a205f0232293da771))
+* **v8:** le toast a 4 s et les pilules de filtre en pilules -- le §4 est tenu ([4089771](https://github.com/tombague160-maker/sereo-production/commit/408977109e936840f9d6b2bba60713536949b47b))
+
+
+### 🐛 Corrections de bugs
+
+* **v8:** l'anneau de focus clavier, et un commentaire qui a tenu lieu de mesure ([41124ab](https://github.com/tombague160-maker/sereo-production/commit/41124ab0d81fd52c0dc73ad73e199099e358f94f))
+* **v8:** les trois oranges pour un seul role -- soldes, sauf un, et il est nomme ([a27b613](https://github.com/tombague160-maker/sereo-production/commit/a27b61361621f232b12f82664a9b19b9175e67e8))
+
 ## [1.31.0](https://github.com/tombague160-maker/sereo-production/compare/v1.30.0...v1.31.0) (2026-09-18)
 
 
