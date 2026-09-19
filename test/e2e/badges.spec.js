@@ -27,10 +27,13 @@ const HAUTEUR_MAX = 28;   // tolerance : padding et hauteur de ligne
 
 /** Parcourt tous les onglets et releve les badges de chacun. */
 async function releverBadges(page) {
-  await page.evaluate(() =>
-    document.querySelectorAll(".sidebar .nav-section").forEach(s => s.classList.add("open")));
+  // La barre laterale n'a plus de section depliable : ses huit entrees
+  // sont toujours visibles, il n'y a plus rien a ouvrir avant de mesurer.
+  // La liste des ecrans se prend a SA SOURCE, pas aux boutons de la barre.
+  // Depuis que huit entrees ouvrent seize ecrans, compter les boutons ne
+  // parcourait plus que la moitie de l'application -- sans rien dire.
   const onglets = await page.evaluate(() =>
-    [...document.querySelectorAll(".tab[data-tab]")].map(t => t.dataset.tab));
+    import("/js/config/tabs.js").then(m => [...m.mainTabs]));
 
   const tous = [];
   for (const onglet of onglets) {

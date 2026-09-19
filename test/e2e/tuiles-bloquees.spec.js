@@ -29,8 +29,8 @@ test("tuiles — chaque demande de tuile est servie LOCALEMENT", async ({ browse
   });
 
   await page.goto("/", { waitUntil: "networkidle" });
-  await page.evaluate(() =>
-    document.querySelectorAll(".sidebar .nav-section").forEach(s => s.classList.add("open")));
+  // La barre laterale n'a plus de section depliable : ses huit entrees
+  // sont toujours visibles, il n'y a plus rien a ouvrir avant de mesurer.
   await page.evaluate(() => { location.hash = "#livreur"; });
   await page.waitForTimeout(4000);
 
@@ -54,8 +54,8 @@ test("tuiles — la carte affiche bien les tuiles servies localement", async ({ 
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
   await page.goto("/", { waitUntil: "networkidle" });
-  await page.evaluate(() =>
-    document.querySelectorAll(".sidebar .nav-section").forEach(s => s.classList.add("open")));
+  // La barre laterale n'a plus de section depliable : ses huit entrees
+  // sont toujours visibles, il n'y a plus rien a ouvrir avant de mesurer.
   await page.evaluate(() => { location.hash = "#livreur"; });
   await page.waitForTimeout(4000);
 

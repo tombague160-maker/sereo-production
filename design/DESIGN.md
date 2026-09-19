@@ -6,6 +6,17 @@ groupe-sereo.fr et des six planches du 2 septembre 2026
 (`design/maquettes-v8/`), dont les contrastes ont été mesurés. Elles font
 autorité sur les couleurs de `public/js/config/themes.js`, qui avaient dérivé.
 
+> ⚠️ **Deux corpus de planches, et le plus petit avait fait autorité.**
+> `design/maquettes-v8/` contient **six** planches ; l'export Claude Design
+> `design/export-v8/sereo-v8-export-2026-09-17-passation.html` en contient
+> **quarante-neuf**, dont les **quatorze écrans desktop** et une planche de
+> passation. Tout ce qui a été implémenté jusqu'au 19/09 l'a été d'après les
+> six — c'est pourquoi l'application ne ressemblait pas aux planches. Devant
+> un désaccord entre les deux corpus, **c'est l'export qui tranche**, et
+> devant un désaccord entre une planche et le composant qu'elle importe,
+> **c'est le composant** : il est partagé par les douze écrans desktop, la
+> copie inline d'une planche ne l'est pas.
+
 ## 1. Thème visuel et atmosphère
 
 Outil de terrain premium, pas un tableau de bord SaaS. Calme, arrondi, chaud.
@@ -1191,6 +1202,115 @@ Et deux fois de suite, le **filtre du harnais** citait des valeurs périmées
 mais autre cause » sur des mutations tuées pour exactement la bonne. *Un filtre
 de harnais se périme avec la valeur qu'il cite — le relire fait partie du
 verdict.*
+
+### La barre latérale, posée le 19/09 — et le corpus de planches qu'on avait ignoré
+
+Thomas a mis une capture de l'application à côté de l'export Claude Design et
+posé la question juste : *« ça ne ressemble pas vraiment à ce que l'on avait
+décidé comme planches »*. Il avait raison, et la cause n'était pas un retard
+d'exécution : **on implémentait depuis le mauvais corpus**. Six planches
+(`maquettes-v8/`) au lieu de quarante-neuf (`export-v8/`).
+
+**Ce que l'export dit, et qui se mesure sans rien interpréter.** Un élément
+repliable ne peut pas exister sans `aria-expanded` : la question « y a-t-il un
+dépliant dans les planches ? » se tranche donc par un comptage, pas par une
+lecture de maquette.
+
+| | `aria-expanded` | `nav-section` |
+|---|---|---|
+| Les 49 planches de l'export | **0** | **0** |
+| L'application, avant ce lot | 8 | 55 |
+
+La planche de passation l'écrit en toutes lettres : *« **Nav desktop à huit
+entrées**, sans dépliant sous Commandes : les cinq listes fusionnent en une.
+Paramètres par l'engrenage. »*
+
+**La source exacte.** Le composant « Barre latérale » a été extrait du
+manifeste gzip de l'export, pas relevé à l'œil : c'est lui que les **douze**
+planches desktop importent, et il déclare `actif ∈ {Tableau de bord,
+Commandes, Préparation, Tournée, Abonnements, Stock, Clients, Analyse}`.
+Toutes les valeurs posées dans `style.css` en sont copiées — 258 px de large,
+coins `0 36px 36px 0`, entrées de 48 px en pilule, champ de 44 px, bloc compte
+de rayon 24, et les deux jeux de couleurs `CLAIR` / `SOMBRE`.
+
+**Contrastes recalculés sur ces deux jeux : 23 cas sur 24 tiennent leur
+seuil.** Le vingt-quatrième est le mot-marque, `#EF9177` sur `#386B6D` =
+**2,57:1**, sous les 3:1 du texte large. Ce n'est pas un manquement : WCAG 2.1
+SC 1.4.3 exempte nommément *« le texte qui fait partie d'un logo ou d'un nom
+de marque »*. L'exemption est écrite dans la feuille **et** dans le banc, avec
+son chiffre, pour qu'un futur audit sache qu'elle a été mesurée et non subie.
+En sombre le même couple donne 6,99:1.
+
+**Huit entrées pour seize écrans.** Le risque que crée la fusion est précis :
+un écran qui existe encore mais que plus rien n'ouvre. Les écrans qu'une
+entrée absorbe reparaissent en **pilules** sous le titre de page, et
+`GROUPES_NAV` (dans `config/tabs.js`, auprès de `mainTabs`) vérifie **au
+chargement du module** qu'aucun onglet n'est orphelin ni inventé. Le banc
+`tabs.spec.js` suit la chaîne entière — cliquer les huit entrées, cliquer
+chaque pilule qu'elles font apparaître, exiger que l'union couvre les seize.
+
+**Trois choses que ce lot a apprises, et qui valent au-delà de lui.**
+
+1. **Un garde textuel accuse sa propre prose.** Trois fois de suite, un
+   `assert` du genre `"nav-section" not in fichier` s'est déclenché sur le
+   *commentaire* qui expliquait la suppression. Un garde doit mesurer la forme
+   appelable (`X(`), la structure, le sélecteur — jamais le mot.
+
+2. **Un préambule qui prépare le vide ne dit rien.** Neuf bancs ouvraient
+   l'accordéon avant de mesurer. La ligne a continué de s'exécuter sans rien
+   trouver. Pire : cinq bancs se donnaient leur liste d'écrans en comptant les
+   **boutons** de la barre. Tant qu'il y avait un bouton par écran, cela
+   revenait au même ; depuis la planche, ils ne parcouraient plus que **huit
+   écrans sur seize**, en silence. La liste se prend désormais à sa source,
+   `mainTabs`. La couverture de `contraste-application` est passée de 8 à
+   **16 écrans, 648 textes en clair et 670 en sombre**.
+
+3. **Une purge hérite de ce que les règles supprimées gardaient.** La feuille
+   portait 728 surcharges `data-color-scheme="light"`, la barre y ayant été
+   redéfinie **quatre fois**. Ajouter une cinquième couche aurait reproduit la
+   cause : 121 règles ont été supprimées et 19 allégées, soit −21,5 ko. Mais
+   l'une d'elles masquait `.sidebar-visual`, et le décor orange est revenu à
+   l'écran — **qu'aucun banc n'a vu**, l'élément portant `aria-hidden` et ne
+   contenant aucun texte. Il a été retiré du balisage : un élément dont la
+   seule raison d'être est d'être invisible n'en a pas.
+
+**Ce que la couverture retrouvée a révélé, et qui n'était pas de ce lot.**
+
+- `.item-header` : `justify-content: space-between` ne dit pas *qui* cède la
+  place. La colonne de texte s'écrasait à **80 px** sous des actions
+  incompressibles ; dans Paramètres, « Champagnole » débordait de 39 px et se
+  posait sur la pilule voisine, où le banc de contraste lisait 1,41:1 sur un
+  fond qui n'était pas le sien. **Mesuré sur l'arbre d'avant le lot
+  (`c9ad1ce`) : 39 px, boîte de 80 px** — le défaut préexistait, il était
+  seulement hors de portée des bancs.
+
+- **Deux défauts de l'instrument de contraste, tous deux dans le sens de
+  l'alarme.** ① `color: transparent` s'applique **en fondu** sur les éléments
+  qui déclarent une transition : à l'instant de la capture « sans texte », le
+  bouton mesuré gardait **89,8 % d'opacité**, et le texte figurait donc dans
+  les deux images. ② Le banc échantillonnait la boîte de l'**élément** : pour
+  un bouton en pilule, les coins de cette boîte tombent hors de la forme
+  peinte et laissent voir la carte. **17 pixels du coin supérieur gauche, soit
+  2,8 % des pixels retenus** — au-dessus du seuil de population écrit contre
+  ce cas — suffisaient à faire conclure *1,05:1* sur un texte qui tient
+  largement son seuil. Corrigé en figeant les transitions et en
+  échantillonnant la boîte du **texte** (un `Range` sur le contenu), ce que
+  l'en-tête du banc promettait déjà de mesurer. Un faux positif coûte plus
+  cher qu'un faux négatif : il a la forme exacte d'un vrai défaut et pousse à
+  « corriger » du code sain.
+
+**Un écart assumé avec la planche, et un seul.** La ligne de version y est un
+texte de 24 px ; ici c'est un **bouton** — il ouvre les nouveautés. Une cible
+cliquable doit mesurer 44 px (WCAG 2.5.5), d'où la hauteur minimale.
+
+**Ce qui n'est pas branché, et qui est nommé plutôt que deviné.** La planche
+montre une pastille sur *Abonnements*. Le compte correspondant vit dans le
+module Operations et n'est pas lisible depuis `renderStats` : la pastille
+reste absente. Un nombre faux coûte plus cher qu'un nombre absent.
+
+**Reste à faire :** les quatorze écrans desktop de l'export (6a, 6b, 13a–f,
+14a–f). Le tableau de bord 6a vient en premier, et il n'a pas de `topbar` —
+celle qui existe aujourd'hui appartient à ce lot-là, pas à celui-ci.
 
 ## 10. Guide pour l'agent
 

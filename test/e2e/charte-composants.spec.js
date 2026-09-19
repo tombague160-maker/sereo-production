@@ -29,6 +29,13 @@ const CHARTE = {
   boutonHauteur: { desktop: 44, mobile: 48 },
   champHauteur: 48,
   champRayon: 18,
+  // La recherche de la barre laterale n'est pas un champ de formulaire : le
+  // composant « Barre laterale » de l'export lui donne 44 px et un rayon de
+  // pilule, comme au bouton qu'elle jouxte. Mesure : 44 px tient le plancher
+  // tactile de 44 ; c'est une FORME distincte, pas une derogation a la regle
+  // des 48, et elle est donc ecrite comme une regle.
+  champPiluleHauteur: 44,
+  champPiluleRayon: 999,
   sidebarLargeur: 258,
   sidebarAngle: 36,
   sheetRayon: 28,
@@ -44,8 +51,8 @@ async function ouvrir(browser, vue) {
   await page.addStyleTag({
     content: "*, *::before, *::after { transition: none !important; animation: none !important; }"
   });
-  await page.evaluate(() =>
-    document.querySelectorAll(".sidebar .nav-section").forEach(s => s.classList.add("open")));
+  // La barre laterale n'a plus de section depliable : ses huit entrees
+  // sont toujours visibles, il n'y a plus rien a ouvrir avant de mesurer.
   await page.waitForTimeout(700);
   return { ctx, page };
 }
@@ -113,7 +120,8 @@ for (const vue of ["desktop", "mobile"]) {
           nom: (cible.id || cible.name || String(cible.className).trim().split(/\s+/)[0] || cible.tagName),
           h: Math.round(b.height),
           rayon: Math.round(parseFloat(cs.borderTopLeftRadius) || 0),
-          multi: cible.tagName === "TEXTAREA"
+          multi: cible.tagName === "TEXTAREA",
+          pilule: cible.classList.contains("sidebar-search")
         });
       }
       return out;
@@ -127,10 +135,12 @@ for (const vue of ["desktop", "mobile"]) {
 
     // Un `textarea` est multiligne : sa hauteur est un choix de contenu, pas de
     // composant. Il garde le rayon, pas la hauteur.
-    const mauvaiseHauteur = r.filter(c => !c.multi && Math.abs(c.h - CHARTE.champHauteur) > TOL)
-      .map(c => `${c.nom} : ${c.h}px au lieu de ${CHARTE.champHauteur}`);
-    const mauvaisRayon = r.filter(c => Math.abs(c.rayon - CHARTE.champRayon) > TOL)
-      .map(c => `${c.nom} : rayon ${c.rayon} au lieu de ${CHARTE.champRayon}`);
+    const attenduH = c => (c.pilule ? CHARTE.champPiluleHauteur : CHARTE.champHauteur);
+    const attenduR = c => (c.pilule ? CHARTE.champPiluleRayon : CHARTE.champRayon);
+    const mauvaiseHauteur = r.filter(c => !c.multi && Math.abs(c.h - attenduH(c)) > TOL)
+      .map(c => `${c.nom} : ${c.h}px au lieu de ${attenduH(c)}`);
+    const mauvaisRayon = r.filter(c => Math.abs(c.rayon - attenduR(c)) > TOL)
+      .map(c => `${c.nom} : rayon ${c.rayon} au lieu de ${attenduR(c)}`);
 
     console.log(`[forme/${vue}] ${r.length} champ(s), ${new Set(mauvaiseHauteur).size} hauteur(s), `
       + `${new Set(mauvaisRayon).size} rayon(s) hors charte`);

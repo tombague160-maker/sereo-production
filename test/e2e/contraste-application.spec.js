@@ -68,6 +68,21 @@ async function relever(page) {
   // PASSEE, pas refermee -- une page.evaluate ne capture rien de la portee du
   // test, et une reference oubliee echoue a l'execution, pas a la lecture.
   return page.evaluate(marge => {
+    /** Le rectangle des LIGNES DE TEXTE d'un element, en coordonnees page. */
+    const boiteDuTexte = (el, secours) => {
+      const plage = document.createRange();
+      plage.selectNodeContents(el);
+      const rects = [...plage.getClientRects()].filter(b => b.width > 0 && b.height > 0);
+      const b = rects.length
+        ? rects.reduce((acc, r) => ({
+            left: Math.min(acc.left, r.left), top: Math.min(acc.top, r.top),
+            right: Math.max(acc.right, r.right), bottom: Math.max(acc.bottom, r.bottom)
+          }), { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity })
+        : null;
+      const f = b ? { left: b.left, top: b.top, width: b.right - b.left, height: b.bottom - b.top } : secours;
+      return { x: f.left + scrollX, y: f.top + scrollY, w: f.width, h: f.height };
+    };
+
     const feuilles = [];
     const marche = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
     let el;
@@ -77,7 +92,13 @@ async function relever(page) {
       if (!texte) continue;
       const cs = getComputedStyle(el);
       if (cs.visibility === "hidden" || cs.display === "none" || parseFloat(cs.opacity) === 0) continue;
-      if (el.closest(".brand-logo, .brand-preview, [data-brand-preview]")) continue;
+      // Le mot-marque « sereo » de la barre laterale. Mesure : #EF9177 sur
+      // #386B6D = 2,57:1, sous les 3:1 du texte large -- et c'est conforme.
+      // WCAG 2.1 SC 1.4.3 exempte nommement « le texte qui fait partie d'un
+      // logo ou d'un nom de marque ». L'exemption est ECRITE ici, avec son
+      // chiffre, pour qu'un futur lecteur sache qu'elle a ete mesuree et non
+      // subie. En mode sombre le meme couple donne 6,99:1.
+      if (el.closest(".marque, .brand-preview, [data-brand-preview]")) continue;
       if (el.closest("[disabled], [aria-disabled='true'], .is-disabled, .disabled")) continue;
       let opaque = true, p = el;
       while (p && p !== document.body) {
@@ -100,7 +121,19 @@ async function relever(page) {
         chemin: (el.className && typeof el.className === "string")
           ? "." + el.className.trim().split(/\s+/).join(".")
           : el.tagName.toLowerCase(),
-        x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height,
+        // ON MESURE LA BOITE DU TEXTE, PAS CELLE DE L'ELEMENT.
+        //
+        // La boite d'un element contient son remplissage, sa bordure et,
+        // s'il est arrondi, des COINS qui ne sont pas peints par lui : on y
+        // lit le fond du dessous. Mesure du 19/09 sur un bouton-pilule de
+        // Parametres : 17 pixels du coin superieur gauche, soit 2,8 % des
+        // pixels retenus -- au-dessus du seuil de population cense justement
+        // ecarter ce cas -- et un verdict de 1,05:1 sur un texte qui tient
+        // largement son seuil.
+        //
+        // Un Range sur le contenu rend les rectangles des LIGNES de texte.
+        // C'est ce que l'en-tete de ce fichier promet de mesurer.
+        ...boiteDuTexte(el, r),
         couleur: cs.color,
         taille: parseFloat(cs.fontSize),
         gras: parseInt(cs.fontWeight, 10) >= 700
@@ -130,6 +163,31 @@ function composerSurFond([r, g, b, a], fond) {
 }
 
 /** Rend tout le texte transparent, et retourne de quoi le restaurer. */
+/**
+ * Fige transitions et animations pendant les captures.
+ *
+ * Sans cela, `color: transparent` s'applique EN FONDU sur les elements qui
+ * declarent une transition, et la capture « sans texte » attrape le milieu du
+ * fondu : le texte est alors present dans les deux images, et la couleur lue
+ * « sous les glyphes » est le texte lui-meme. Mesure du 19/09 sur le bouton
+ * Supprimer de Parametres : 89,8 % d'opacite restante a l'instant de la
+ * capture. On fige plutot que d'attendre -- une attente est un nombre devine.
+ */
+async function figerTransitions(page) {
+  await page.evaluate(() => {
+    if (document.getElementById("__fige-transitions")) return;
+    const style = document.createElement("style");
+    style.id = "__fige-transitions";
+    style.textContent = "*, *::before, *::after { transition: none !important;"
+      + " animation: none !important; }";
+    document.head.appendChild(style);
+  });
+}
+
+async function degelerTransitions(page) {
+  await page.evaluate(() => document.getElementById("__fige-transitions")?.remove());
+}
+
 async function masquerTexte(page) {
   await page.evaluate(() => {
     window.__sauv = [];
@@ -185,7 +243,14 @@ async function mesurerRegions(page, avec, sans, regions) {
         .map(([c]) => c.split(",").map(Number));
       return { glyphes, fonds };
     });
-  }, [avec, sans, regions, DIFF_MIN, PART_MIN, PIXELS_MIN, MARGE]);
+  // MARGE VAUT ZERO DEPUIS QUE LA REGION EST LA BOITE DU TEXTE.
+  //
+  // Les 2 px servaient a ecarter le contour anticrenele de l'ELEMENT. La boite
+  // du texte n'a ni contour ni coin : il n'y a plus rien a ecarter. Et la marge
+  // y devenait nuisible -- sur « 1 » dans .op-step-number, une boite de quelques
+  // pixels, elle mangeait toute la region et le banc declarait le chiffre
+  // invisible. Une marge calculee pour une boite ne vaut pas pour l'autre.
+  }, [avec, sans, regions, DIFF_MIN, PART_MIN, PIXELS_MIN, 0]);
 }
 
 for (const mode of ["light", "dark"]) {
@@ -196,10 +261,14 @@ for (const mode of ["light", "dark"]) {
     const page = await ctx.newPage();
     await page.goto("/", { waitUntil: "networkidle" });
     await page.addStyleTag({ content: "*, *::before, *::after { transition: none !important; animation: none !important; }" });
-    await page.evaluate(() => document.querySelectorAll(".sidebar .nav-section").forEach(s => s.classList.add("open")));
+    // La barre laterale n'a plus de section depliable : ses huit entrees
+    // sont toujours visibles, il n'y a plus rien a ouvrir avant de mesurer.
 
+    // La liste des ecrans se prend a SA SOURCE, pas aux boutons de la barre.
+    // Depuis que huit entrees ouvrent seize ecrans, compter les boutons ne
+    // parcourait plus que la moitie de l'application -- sans rien dire.
     const onglets = await page.evaluate(() =>
-      [...document.querySelectorAll(".tab[data-tab]")].map(t => t.dataset.tab));
+      import("/js/config/tabs.js").then(m => [...m.mainTabs]));
     expect(onglets.length, "aucun onglet trouve").toBeGreaterThan(5);
 
     const defauts = [];
@@ -221,10 +290,12 @@ for (const mode of ["light", "dark"]) {
       // DEUX captures pour tout l'onglet. L'ordre compte : on photographie
       // d'abord AVEC le texte, puis on masque -- l'inverse laisserait une
       // chance au navigateur de reflow entre le releve et la premiere image.
+      await figerTransitions(page);
       const avec = (await page.screenshot({ fullPage: true })).toString("base64");
       await masquerTexte(page);
       const sans = (await page.screenshot({ fullPage: true })).toString("base64");
       await restaurerTexte(page);
+      await degelerTransitions(page);
 
       const mesures = await mesurerRegions(page, avec, sans, feuilles);
       feuilles.forEach((f, i) => {

@@ -103,19 +103,43 @@ test.describe("Parcours complet des onglets", () => {
     expect(errors, `erreurs console au chargement direct :\n${errors.join("\n")}`).toEqual([]);
   });
 
-  test("la navigation laterale expose bien les 15 onglets", async ({ page }) => {
-    // Garde-fou contre une extraction qui oublierait de recabler un bouton :
-    // le panneau existerait toujours, mais deviendrait inatteignable a la souris.
+  test("aucun ecran n'est orphelin : les huit entrees menent aux seize", async ({ page }) => {
+    // La planche fusionne seize ecrans en huit entrees. Le risque qu'elle cree
+    // est precis : un ecran qui existe encore mais que plus rien n'ouvre.
+    //
+    // L'ancienne version cherchait un declencheur « quelque part dans le DOM ».
+    // Elle serait restee verte sur une barre qui n'ouvre rien, parce qu'un
+    // bouton « go-tab » pose dans une page suffisait a la satisfaire. Ce banc
+    // suit la CHAINE : on clique les huit entrees, on clique chaque pilule
+    // qu'elles font apparaitre, et on exige que l'union couvre les seize.
     await page.goto("/");
+    const entrees = await page.locator(".sidebar .tab[data-groupe]")
+      .evaluateAll(els => els.map(el => el.id));
+    expect(entrees.length, "la barre doit porter huit entrees plates").toBe(8);
 
-    for (const tab of TABS) {
-      const trigger = page.locator(
-        `#tab-${tab.id}, [data-action="go-tab"][data-target-tab="${tab.id}"]`
-      );
-      expect(
-        await trigger.count(),
-        `aucun declencheur de navigation pour ${tab.id}`
-      ).toBeGreaterThan(0);
+    const atteints = new Set();
+    for (const entree of entrees) {
+      await page.locator(`#${entree}`).click();
+      const ouvert = await page.evaluate(() => document.querySelector(".page.active")?.id || null);
+      expect(ouvert, `l'entree ${entree} n'ouvre aucun ecran`).toBeTruthy();
+      atteints.add(ouvert);
+
+      const pilules = await page.locator("#sousOnglets [data-tab]")
+        .evaluateAll(els => els.map(el => el.dataset.tab));
+      for (const onglet of pilules) {
+        await page.locator(`#tab-${onglet}`).click();
+        await expect(page.locator(`#${onglet}`), `${onglet} par sa pilule`).toHaveClass(/active/);
+        atteints.add(onglet);
+      }
     }
+
+    // Parametres quitte la liste : la planche le confie a l'engrenage du bloc
+    // compte. C'est donc par la, et seulement par la, qu'on doit y arriver.
+    await page.locator(".sidebar-compte").click();
+    await expect(page.locator("#parametres")).toHaveClass(/active/);
+    atteints.add("parametres");
+
+    const manquants = TABS.map(tab => tab.id).filter(id => !atteints.has(id));
+    expect(manquants, `ecrans sans aucun chemin depuis la barre : ${manquants}`).toEqual([]);
   });
 });
