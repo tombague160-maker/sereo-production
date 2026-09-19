@@ -885,7 +885,7 @@ toujours*, même en fin de feuille.
 
 | règle | 18/09 | 19/09 |
 |---|---|---|
-| **Ligne de liste 64–72 px** | listes vides, `POST /api/clients` rend 404 | **mesurée** sur un serveur semé — voir ci-dessous. *Pour les arrêts et, depuis le second lot du 19/09, pour les commandes à préparer.* Les abonnements sont encore des cartes |
+| **Ligne de liste 64–72 px** | listes vides, `POST /api/clients` rend 404 | **mesurée** sur un serveur semé — voir ci-dessous. Pour les **trois** listes de la charte : arrêts, commandes à préparer, abonnements |
 | **Marqueur de carte** | aucun marqueur sans client géolocalisé | **mesurée**, même serveur — et un bug de cadrage trouvé au passage |
 | **« repliables plutôt que débordantes »** | un **comportement**, pas une forme | toujours non jugée |
 
@@ -1078,11 +1078,17 @@ détail. *Nommé ici pour que personne ne prenne l'un pour une dérive de l'autr
   pour « à faire ». Le semé porte maintenant un produit à stock zéro — on ne
   sème pas une conclusion, on sème sa cause.
 
-#### Ce que ce lot ne fait PAS
+#### Et les abonnements, le même jour — la troisième liste de la charte
 
-Les **abonnements** restent des cartes à ~9 informations. Même geste à faire :
-une ligne (avatar, nom, ville · fréquence, badge Actif / En pause), un sheet
-pour les faits et les actions.
+Des cartes à ~9 informations (avatar, nom, ville, chip, panier, quatre faits,
+deux boutons) en colonnes de 330 px. Après : **la même ligne** que les commandes
+— disque d'état (actif ✓ · en pause ‖ · arrêté ○), nom, « ville · fréquence »,
+badge — et un sheet pour les quatre faits, le panier, « Modifier » et « Mettre
+en pause / Réactiver ». « Modifier » ferme le sheet avant d'ouvrir l'éditeur :
+jamais deux dialogues empilés. `abonnements-lignes.spec.js`, 3 cas.
+
+*Les trois lignes de liste de la charte (§4 : « commande, abonnement, arrêt »)
+sont tenues et mesurées, sur les mêmes composants.*
 
 ## 10. Guide pour l'agent
 

@@ -128,7 +128,7 @@ document.addEventListener("DOMContentLoaded", () => {
   updateMetaThemeColor();
   watchSystemColorScheme();
   bindUi();
-  initOperations({apiFetch, loadData, notify, recalculateRoute});
+  initOperations({apiFetch, loadData, notify, recalculateRoute, formatSectorLabel});
   bindVersionModal();
   bindBonsCommandeUi();
   initMap();

@@ -1351,6 +1351,16 @@
     <div id="commandeDetailCorps" class="sheet-corps"></div>
   </dialog>
 
+  <!-- Le detail d'un abonnement : la ligne l'ouvre, il porte les faits et les actions. -->
+  <dialog id="abonnementDetailDialog" class="sheet" aria-labelledby="abonnementDetailTitre">
+    <div class="sheet-poignee" aria-hidden="true"></div>
+    <div class="sheet-entete">
+      <h3 id="abonnementDetailTitre">Abonnement</h3>
+      <button class="button secondary compact sheet-fermer" type="button" data-op="close-sub-detail" aria-label="Fermer">✕</button>
+    </div>
+    <div id="abonnementDetailCorps" class="sheet-corps"></div>
+  </dialog>
+
   <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
 
   <!-- Modal version : affiche les nouveautes de la release courante en clair.
