@@ -881,17 +881,100 @@ banc a nommé l'adversaire : `:root[data-color-scheme="light"] .compact` à
 **(0,3,0)**, contre ma règle à (0,2,0) — *la spécificité l'emporte sur l'ordre,
 toujours*, même en fin de feuille.
 
-#### ⚪ Trois règles restent NON MESURABLES ici, et il faut le dire
+#### ⚪ Ce qui restait NON MESURABLE le 18/09 — et ce qu'il en est le 19/09
 
-| règle | pourquoi |
-|---|---|
-| **Ligne de liste 64–72 px** | les listes sont vides : les clients viennent d'imports Excel, et `POST /api/clients` rend 404 |
-| **Marqueur de carte** | aucun marqueur ne se dessine sans client géolocalisé |
-| **« repliables plutôt que débordantes »** | c'est un **comportement**, pas une forme ; aucune mesure ne dit aujourd'hui si la rangée déborde |
+| règle | 18/09 | 19/09 |
+|---|---|---|
+| **Ligne de liste 64–72 px** | listes vides, `POST /api/clients` rend 404 | **mesurée** sur un serveur semé — voir ci-dessous. *Pour les arrêts.* Les commandes et les abonnements sont encore des cartes |
+| **Marqueur de carte** | aucun marqueur sans client géolocalisé | **mesurée**, même serveur — et un bug de cadrage trouvé au passage |
+| **« repliables plutôt que débordantes »** | un **comportement**, pas une forme | toujours non jugée |
 
-*Ce ne sont pas des conformités : ce sont des **non-jugés**. Les compter comme
-tenues serait exactement le zéro qui rassure que cette charte poursuit depuis
-deux jours.*
+*Un non-jugé n'est pas une conformité. Il en reste un.*
+
+### Le marqueur et la ligne d'arrêt, posés le 19/09 — deux règles qu'on ne pouvait pas juger à vide
+
+Les deux règles étaient **non jugées** faute de données : rien ne se dessine
+sans client géolocalisé. Le banc lève désormais son propre serveur, semé de six
+clients autour de Besançon et d'une tournée en cours qui porte les états
+d'arrêt (`test/e2e/serveur-seme.js`). *Rien n'écrit dans l'application réelle.*
+
+| composant | charte / planche | mesuré avant | après |
+|---|---|---|---|
+| Ligne d'arrêt, desktop | 64–72 px | **126–151 px** | 64 ×6 |
+| Ligne d'arrêt, mobile | 64–72 px | **184–209 px** | 64 (titre sur une ligne), 75 (sur deux) |
+| Informations par ligne | quatre au plus | 3 à 4, plus deux boutons | quatre, exactement |
+| Marqueur | corps vert, numéro blanc, halo orange | **`circleMarker` rayon 9, quatre couleurs V7, sans numéro** | trois états de la planche + un |
+| Tracé | orange (planche) | `#2b7062` plein / `#2563eb` pointillé | accent 4,5 px / principal pointillé |
+| Badge d'arrêt « prêt » | **« Prêt »** (§4, statuts d'arrêt) | « Prêt livraison » | « Prêt » |
+
+#### D'où venaient les 120 px de trop
+
+Deux boutons **↑ ↓ de 60 px rendus désactivés** sur chaque ligne d'une tournée
+en cours — on ne réordonne plus une tournée démarrée, mais les boutons restaient
+là, morts. Et une pilule étirée sur toute la largeur. Les flèches ne sont plus
+rendues que quand la tournée se réordonne (statut « prête »), en boutons de
+44 px.
+
+#### La planche dit plus que la phrase de la charte
+
+« Corps vert, numéro blanc, halo orange » comprime trois états de `Carte.png` :
+**fait** (coche blanche sur vert), **en cours** (numéro blanc sur vert, anneau
+orange 3,5 px, halo qui bat), **à venir** (numéro vert sur blanc, contour). Le
+contour « à venir » est en **principal**, pas en vert d'eau comme sur la
+planche : la charte l'avait corrigé le 17/09 (1,62:1 sur le fond de carte) et
+la planche, elle, n'a pas été reprise. *Deux sources, une règle : celle qui a été
+mesurée l'emporte.*
+
+Un **quatrième état** n'est sur aucune des deux : l'arrêt **en échec** (absent,
+problème). Je l'ai pris sur la planche `Preparation.png` — disque pêche claire,
+point d'exclamation en alerte, la ligne « Bloquée ». C'est une **interprétation**,
+et elle est nommée comme telle.
+
+Le même composant `.marqueur` sert la carte et la ligne : le disque d'état à
+gauche de la ligne **est** le marqueur. Anneau et halo sont deux couches d'une
+`box-shadow` — peinte sous le fond, sans pseudo-élément ni contexte d'empilement
+à négocier. La coche est en bordures tournées : Poppins n'a pas de U+2713 et le
+glyphe de repli changeait selon l'appareil.
+
+#### Un bug trouvé par la mesure, pas par une plainte
+
+Les premiers marqueurs mesurés étaient à **±100 000 px** du cadre. `fitBounds`
+tournait au chargement des données, pendant que l'onglet était masqué —
+conteneur de 0 × 0, zoom poussé à 19 sur un centre arbitraire. Et
+`invalidateSize()`, appelé à l'ouverture de l'onglet, rend sa taille à la carte
+mais **ne recadre pas**. Reproduit dans les deux chemins (arrivée directe sur
+`#livreur`, bascule depuis l'accueil). **La carte du livreur ne montrait jamais
+la tournée.** `renderMap` refuse maintenant un conteneur sans taille, et
+l'ouverture de l'onglet redessine. Le banc tient les deux chemins.
+
+> *Un mécanisme appelé au bon moment sur un objet qui n'a pas encore de taille
+> produit un résultat plausible et faux. Personne ne l'avait signalé : une
+> carte vide ressemble à une carte sans données.*
+
+#### Ce que le banc tolère, et le dit
+
+Un titre sur **deux lignes** fait 75 px en mobile, hors des 64–72. La planche
+elle-même fait 88 px dans ce cas. Le banc l'accepte jusqu'à 96 et **compte ces
+lignes à part** au lieu de les déclarer conformes : 5 titres sur 6 passent à
+deux lignes à 390 px — c'est le nom des clients, pas la ligne.
+
+La ligne de détail est « ville · n articles », comme la planche, et non
+l'adresse complète coupée par une ellipse dès le premier mot de trop.
+L'adresse vit dans le panneau de l'arrêt en cours et dans la bulle du
+marqueur. La ville reprend sa cédille à l'affichage (`formatSectorLabel`) : le
+serveur la canonise **sans** — c'est une clé de secteur, pas un libellé.
+
+*Banc : `carte-et-lignes.spec.js`, 6 cas. Quatre mutations (cadrage, tracé,
+bloc CSS de la ligne, anneau de l'arrêt en cours), quatre tuées pour la bonne
+cause. 405 unitaires.*
+
+#### ⛔ Ce que ce lot ne fait PAS
+
+La ligne de liste est tenue pour les **arrêts**. Les **commandes** (préparation :
+colonnes de cartes à ~12 informations et 4 boutons ; bons de commande : cartes
+et tableau) et les **abonnements** (cartes à ~9 informations) restent des cartes.
+Les passer en lignes déplace leurs actions dans un détail : c'est un redessin,
+pas un réglage, et il vient après.
 
 ## 10. Guide pour l'agent
 
