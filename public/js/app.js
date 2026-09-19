@@ -334,8 +334,11 @@ function bindUi() {
     }, 200);
   });
 
-  document.getElementById("preparationSectorFilter")?.addEventListener("change", event => {
-    preparationFilter.sector = event.target.value;
+  // Charte §4 : « Pilules de filtre (secteurs, statuts) » -- planche Preparation.png.
+  document.getElementById("preparationSectorPills")?.addEventListener("click", event => {
+    const pilule = event.target.closest("[data-sector]");
+    if (!pilule) return;
+    preparationFilter.sector = pilule.dataset.sector;
     renderPreparation();
   });
 
@@ -472,6 +475,8 @@ function bindUi() {
     }
     if (action === "select-color-scheme") applyColorScheme(actionButton.dataset.colorScheme, { notifyUser: true });
     if (action === "reset-brand-image") resetBrandImage();
+    if (action === "open-commande-detail") openCommandeDetail(actionButton.dataset.orderId);
+    if (action === "close-commande-detail") closeCommandeDetail();
     if (action === "start-preparation") runAction(actionButton, "Démarrage...", () => startPreparation(actionButton.dataset.orderId));
     if (action === "finish-preparation") runAction(actionButton, "Validation...", () => finishPreparation(actionButton.dataset.orderId));
     if (action === "open-order-maps") openOrderMaps(actionButton.dataset.orderId);
@@ -1902,13 +1907,14 @@ function matchesPreparationFilter(order) {
 }
 
 function renderPreparationFilterOptions() {
-  const select = document.getElementById("preparationSectorFilter");
-  if (!select) return;
+  const conteneur = document.getElementById("preparationSectorPills");
+  if (!conteneur) return;
   const sectors = Array.from(new Set(orders.map(order => order.sector).filter(Boolean))).sort();
+  if (preparationFilter.sector !== "all" && !sectors.includes(preparationFilter.sector)) preparationFilter.sector = "all";
   const current = preparationFilter.sector;
-  select.innerHTML = `<option value="all">Tous les secteurs</option>`
-    + sectors.map(s => `<option value="${escapeAttribute(s)}"${s === current ? " selected" : ""}>${escapeHtml(s)}</option>`).join("");
-  if (current !== "all" && !sectors.includes(current)) preparationFilter.sector = "all";
+  const pilule = (valeur, libelle) =>
+    `<button class="button secondary compact filtre-pilule${valeur === current ? " active-filter" : ""}" type="button" data-sector="${escapeAttribute(valeur)}" aria-pressed="${valeur === current}">${escapeHtml(libelle)}</button>`;
+  conteneur.innerHTML = pilule("all", "Tous") + sectors.map(sector => pilule(sector, formatSectorLabel(sector))).join("");
 }
 
 function renderPreparation() {
@@ -1956,25 +1962,82 @@ function renderPreparation() {
     return;
   }
 
+  // Planche Preparation.png : UNE LIGNE PAR COMMANDE. Les quatre colonnes
+  // deviennent quatre sections empilees ; une section vide ne s'affiche pas
+  // (avant : quatre « Rien ici », un par colonne).
   groups.forEach(group => {
-    const column = document.createElement("section");
-    column.className = "order-column";
-    column.innerHTML = `
-      <div class="order-column-header">
-        <h4>${escapeHtml(group.title)}</h4>
-        <span class="status-chip">${group.orders.length}</span>
-        <p>${escapeHtml(group.hint)}</p>
-      </div>
+    if (!group.orders.length) return;
+    const section = document.createElement("section");
+    section.className = "commandes-groupe";
+    section.innerHTML = `
+      <h4 class="commandes-groupe-titre">${escapeHtml(group.title)} <span class="status-chip">${group.orders.length}</span></h4>
     `;
-
-    if (!group.orders.length) {
-      column.innerHTML += emptyState("Rien ici", "Cette colonne se remplira automatiquement.");
-    } else {
-      group.orders.forEach(order => column.appendChild(createPreparationCard(order)));
-    }
-
-    container.appendChild(column);
+    group.orders.forEach(order => section.appendChild(createPreparationRow(order)));
+    container.appendChild(section);
   });
+}
+
+/**
+ * L'etape de preparation d'une commande, avec le mot de la planche :
+ * A faire · En cours · Prete · Bloquee. Ce sont les mots de l'ETAPE, pas
+ * ceux du statut (Importee, Pret livraison...) qui restent dans le detail.
+ */
+function etapeDePreparation(order) {
+  if (order.status === "pret_livraison") return { cle: "prete", mot: "Prête" };
+  if (order.status === "en_preparation") return { cle: "en-cours", mot: "En cours" };
+  if (["importe", "stock_a_verifier"].includes(order.status) && !order.canPrepare) return { cle: "bloquee", mot: "Bloquée" };
+  return { cle: "a-faire", mot: "À faire" };
+}
+
+/** Ce qui manque, en un mot, pour une commande bloquee -- comme « Il manque 2 articles ». */
+function detailDeBlocage(order) {
+  const manquants = (order.stockLines || []).filter(ligne => ligne.status !== "ok").length;
+  if (manquants === 1) return "Il manque 1 article";
+  if (manquants > 1) return `Il manque ${manquants} articles`;
+  return formatStockStatus(order.stockStatus) || "Stock à vérifier";
+}
+
+function createPreparationRow(order) {
+  const etape = etapeDePreparation(order);
+  const lignes = (order.products || []).length;
+  const articles = lignes === 1 ? "1 article" : `${lignes} articles`;
+  const ville = order.city ? formatSectorLabel(order.city) : (order.sector ? formatSectorLabel(order.sector) : "");
+  // Quatre informations : l'etat (disque), le nom, le detail, le badge. Pour
+  // une commande bloquee, le manque REMPLACE le detail, comme sur la planche.
+  const detail = etape.cle === "bloquee"
+    ? `<span class="commande-ligne-alerte">${escapeHtml(detailDeBlocage(order))}</span>`
+    : `<span>${escapeHtml([ville, articles].filter(Boolean).join(" · "))}</span>`;
+  const row = document.createElement("article");
+  row.className = `commande-ligne commande-ligne--${etape.cle}`;
+  row.innerHTML = `
+    <button class="commande-ligne-main" type="button" data-action="open-commande-detail" data-order-id="${escapeAttribute(order.id)}" aria-label="Ouvrir ${escapeAttribute(order.clientName)}, ${escapeAttribute(etape.mot)}">
+      <span class="etat-commande etat-commande--${etape.cle}" aria-hidden="true"></span>
+      <span class="commande-ligne-corps">
+        <strong>${escapeHtml(order.clientName)}</strong>
+        ${detail}
+      </span>
+      <span class="pill ${getOrderPill(order.status)}">${escapeHtml(etape.mot)}</span>
+    </button>
+  `;
+  return row;
+}
+
+/** Le detail d'une commande, en sheet : l'adresse, la date, le stock, et les actions. */
+function openCommandeDetail(orderId) {
+  const dialogue = document.getElementById("commandeDetailDialog");
+  const corps = document.getElementById("commandeDetailCorps");
+  const order = orders.find(item => String(item.id) === String(orderId));
+  if (!dialogue || !corps || !order || typeof dialogue.showModal !== "function") return;
+  corps.innerHTML = "";
+  corps.appendChild(createPreparationCard(order));
+  const titre = document.getElementById("commandeDetailTitre");
+  if (titre) titre.textContent = order.clientName;
+  dialogue.showModal();
+}
+
+function closeCommandeDetail() {
+  const dialogue = document.getElementById("commandeDetailDialog");
+  if (dialogue && dialogue.open) dialogue.close();
 }
 
 function renderPreparationStats() {
@@ -1997,22 +2060,28 @@ function renderPreparationStats() {
     }
   }
 
+  // Planche Preparation.png : un seul resume, un anneau a la part des pretes.
+  const total = counts.imported + counts.preparing + counts.ready;
+  const restantes = counts.imported + counts.preparing;
+  const articles = orders
+    .filter(order => ["importe", "stock_a_verifier", "en_preparation", "pret_livraison"].includes(order.status))
+    .reduce((somme, order) => somme + getOrderProductCount(order), 0);
+  const part = total ? counts.ready / total : 0;
+  const rayon = 24, circonference = 2 * Math.PI * rayon;
   container.innerHTML = `
-    <article class="workflow-card">
-      <span>À analyser</span>
-      <strong>${counts.imported}</strong>
-    </article>
-    <article class="workflow-card">
-      <span>En préparation</span>
-      <strong>${counts.preparing}</strong>
-    </article>
-    <article class="workflow-card">
-      <span>Prêtes livraison</span>
-      <strong>${counts.ready}</strong>
-    </article>
-    <article class="workflow-card danger-card">
-      <span>Bloquées</span>
-      <strong>${counts.blocked}</strong>
+    <article class="preparation-resume">
+      <span class="preparation-anneau" role="img" aria-label="${counts.ready} sur ${total} prêtes">
+        <svg width="60" height="60" viewBox="0 0 60 60" aria-hidden="true">
+          <circle cx="30" cy="30" r="${rayon}" fill="none" stroke="var(--v8-peche-claire)" stroke-width="7"/>
+          <circle cx="30" cy="30" r="${rayon}" fill="none" stroke="var(--v8-accent)" stroke-width="7" stroke-linecap="round"
+            stroke-dasharray="${(circonference * part).toFixed(1)} ${circonference.toFixed(1)}" transform="rotate(-90 30 30)"/>
+        </svg>
+        <strong aria-hidden="true">${counts.ready}</strong>
+      </span>
+      <div>
+        <strong>${counts.ready} commande${counts.ready > 1 ? "s" : ""} prête${counts.ready > 1 ? "s" : ""}</strong>
+        <span>${restantes} restante${restantes > 1 ? "s" : ""} · ${articles} article${articles > 1 ? "s" : ""} au total${counts.blocked ? ` · ${counts.blocked} bloquée${counts.blocked > 1 ? "s" : ""}` : ""}</span>
+      </div>
     </article>
   `;
 }
@@ -2026,14 +2095,14 @@ function createPreparationCard(order) {
 
   article.innerHTML = `
     <div class="item-header">
-      <div>
-        <h4>${escapeHtml(order.clientName)}</h4>
-        <p>${escapeHtml(formatOrderAddress(order))}</p>
-      </div>
+      <p class="arret-adresse">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+        <span>${escapeHtml(formatOrderAddress(order))}</span>
+      </p>
       <span class="pill ${getOrderPill(order.status)}">${escapeHtml(formatOrderStatus(order.status))}</span>
     </div>
     <div class="order-meta">
-      <span>Secteur : ${escapeHtml(order.sector || "-")}</span>
+      <span>Secteur : ${escapeHtml(order.sector ? formatSectorLabel(order.sector) : "-")}</span>
       <span>Produits : ${escapeHtml(getOrderProductCount(order))}</span>
       <span>Stock : ${escapeHtml(formatStockStatus(order.stockStatus))}</span>
       <span>Livraison : ${escapeHtml(order.deliveryDate ? formatDeliveryDate(order.deliveryDate) : "à dater")}</span>
@@ -2046,7 +2115,7 @@ function createPreparationCard(order) {
     <div class="card-actions">
       <button class="button primary" type="button" data-action="start-preparation" data-order-id="${escapeAttribute(order.id)}" ${canStart ? "" : "disabled"}>Passer en préparation</button>
       <button class="button ok" type="button" data-action="finish-preparation" data-order-id="${escapeAttribute(order.id)}" ${canFinish ? "" : "disabled"}>Préparation terminée</button>
-      <button class="button secondary" type="button" data-action="open-order-maps" data-order-id="${escapeAttribute(order.id)}">Google Maps</button>
+      <button class="button secondary" type="button" data-action="open-order-maps" data-order-id="${escapeAttribute(order.id)}">Itinéraire</button>
     </div>
   `;
 
@@ -2054,6 +2123,7 @@ function createPreparationCard(order) {
 }
 
 async function startPreparation(orderId) {
+  closeCommandeDetail();
   await apiFetch(`/api/orders/${encodeURIComponent(orderId)}/start-preparation`, {
     method: "POST"
   });
@@ -2062,6 +2132,7 @@ async function startPreparation(orderId) {
 }
 
 async function finishPreparation(orderId) {
+  closeCommandeDetail();
   const deliveryDate = document.querySelector(`[data-delivery-date-input="${cssEscape(orderId)}"]`)?.value || getTodayDateInput();
 
   await apiFetch(`/api/orders/${encodeURIComponent(orderId)}/finish-preparation`, {
@@ -5207,7 +5278,9 @@ function formatAddress(client) {
 }
 
 function formatOrderAddress(order) {
-  return `${order.address || ""} ${order.postalCode || ""} ${order.city || ""}`.trim() || "Adresse non renseignée";
+  // La ville reprend sa cedille a l'affichage : le serveur la canonise sans.
+  const ville = order.city ? formatSectorLabel(order.city) : "";
+  return `${order.address || ""} ${order.postalCode || ""} ${ville}`.trim() || "Adresse non renseignée";
 }
 
 /** « Besancon · 4 articles » : la ligne de detail d'un arret, comme sur la planche. */

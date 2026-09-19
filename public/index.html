@@ -783,19 +783,13 @@
               <h3>Préparation des commandes</h3>
               <p class="muted">Les commandes terminées passent automatiquement en mode livraison.</p>
             </div>
-            <div class="legend">
-              <span><i class="dot green-dot"></i> Préparable</span>
-              <span><i class="dot orange-dot"></i> À vérifier</span>
-              <span><i class="dot red-dot"></i> Bloqué</span>
-            </div>
           </div>
 
           <div class="prep-toolbar">
             <input id="preparationSearch" type="search" placeholder="Rechercher un client ou un numéro" autocomplete="off" aria-label="Rechercher une commande à préparer" />
-            <select id="preparationSectorFilter" aria-label="Filtrer par secteur">
-              <option value="all">Tous les secteurs</option>
-            </select>
           </div>
+          <!-- Charte §4, pilules de filtre (secteurs) : rendues par renderPreparationFilterOptions. -->
+          <div id="preparationSectorPills" class="filtre-pilules" role="group" aria-label="Filtrer par secteur"></div>
 
           <div id="preparationList" class="order-board"></div>
         </div>
@@ -1343,6 +1337,18 @@
         <button class="button primary" type="button" data-action="motif-valider">Enregistrer</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- Le detail d'une commande a preparer (planche Preparation.png : la ligne
+       ouvre le detail, qui porte les actions). Charte §4, sheet : coins 28 px,
+       poignee, fond surface haute. <dialog> natif comme #motifProblemeDialog. -->
+  <dialog id="commandeDetailDialog" class="sheet" aria-labelledby="commandeDetailTitre">
+    <div class="sheet-poignee" aria-hidden="true"></div>
+    <div class="sheet-entete">
+      <h3 id="commandeDetailTitre">Commande</h3>
+      <button class="button secondary compact sheet-fermer" type="button" data-action="close-commande-detail" aria-label="Fermer">✕</button>
+    </div>
+    <div id="commandeDetailCorps" class="sheet-corps"></div>
   </dialog>
 
   <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>

@@ -10025,3 +10025,366 @@ textarea::placeholder {
 :root:not([data-color-scheme]) .panel p.arret-articles-titre {
   color: var(--v8-principal-appuye);
 }
+
+/* UNE LIGNE PAR COMMANDE -- planche Preparation.png, posee le 19/09.
+ *
+ * Charte §4, ligne de liste : 64-72 px, quatre informations, un point de
+ * couleur + un mot. Planche : disque d'etat a gauche, nom, « ville · n
+ * articles », badge a droite. La ligne OUVRE le detail (un sheet), qui porte
+ * ce que la carte portait : adresse, date, stock, et les actions.
+ *
+ * Mesure du 19/09, avant : quatre colonnes de cartes a ~12 informations et
+ * quatre commandes chacune (date, trois boutons), quatre « Rien ici » pour
+ * les colonnes vides, un <select> de secteur la ou la charte dit pilules. */
+#preparationList.order-board {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+}
+
+.commandes-groupe {
+  display: grid;
+  gap: 10px;
+}
+
+.commandes-groupe-titre {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 2px 4px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--v8-texte-secondaire);
+}
+
+.commande-ligne {
+  display: flex;
+  align-items: center;
+  min-height: 64px;
+  border-radius: var(--radius-card);
+  background: var(--v8-surface);
+  box-shadow: 0 1px 2px rgba(15, 61, 61, 0.05), 0 12px 28px rgba(15, 61, 61, 0.05);
+}
+
+.commande-ligne-main {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  min-height: 64px;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: var(--radius-card);
+  background: transparent;
+  color: var(--v8-texte);
+  text-align: left;
+  cursor: pointer;
+}
+
+.commande-ligne-corps {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 2px;
+  min-width: 0;
+}
+
+.commande-ligne-corps > strong {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+
+.commande-ligne-corps > span {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--v8-texte-secondaire);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commande-ligne-corps > .commande-ligne-alerte {
+  color: var(--v8-alerte);
+}
+
+:root[data-color-scheme] .commande-ligne-main .pill,
+:root:not([data-color-scheme]) .commande-ligne-main .pill {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* Le disque d'etat : le point de couleur de la charte, en 40 px comme sur la
+ * planche. Quatre glyphes dessines en CSS, sans police. */
+.etat-commande {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--v8-vert-clair);
+  color: var(--v8-principal);
+}
+
+.etat-commande::before {
+  content: "";
+  box-sizing: border-box;
+}
+
+.etat-commande--a-faire::before {
+  width: 15px;
+  height: 15px;
+  border: 2.5px solid currentColor;
+  border-radius: 50%;
+}
+
+.etat-commande--prete::before {
+  width: 7px;
+  height: 13px;
+  border: solid currentColor;
+  border-width: 0 2.5px 2.5px 0;
+  transform: translateY(-2px) rotate(45deg);
+}
+
+.etat-commande--en-cours {
+  background: var(--v8-peche-claire);
+  color: var(--v8-accent);
+}
+
+.etat-commande--en-cours::before {
+  width: 17px;
+  height: 17px;
+  border: 2.5px solid currentColor;
+  border-radius: 50%;
+}
+
+.etat-commande--en-cours::after {
+  content: "";
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.etat-commande--bloquee {
+  background: var(--v8-peche-claire);
+  color: var(--v8-alerte);
+}
+
+.etat-commande--bloquee::before {
+  content: "!";
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* Les pilules de secteur : la regle des pilules de filtre (PR 137), a la
+ * meme specificite (0,4,0) que son adversaire .compact. */
+.filtre-pilules {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+:root[data-color-scheme] .button.compact.filtre-pilule,
+:root:not([data-color-scheme]) .button.compact.filtre-pilule {
+  border-radius: 999px;
+}
+
+.prep-toolbar {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* Le resume : « 2 commandes pretes · 3 restantes · 68 articles au total ». */
+.workflow-grid:has(.preparation-resume) {
+  display: block;
+  margin-bottom: 16px;
+}
+
+.preparation-resume {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  border-radius: var(--radius-card);
+  background: var(--v8-surface);
+  box-shadow: 0 1px 2px rgba(15, 61, 61, 0.05), 0 12px 28px rgba(15, 61, 61, 0.05);
+}
+
+.preparation-anneau {
+  flex: 0 0 auto;
+}
+
+.preparation-resume div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.preparation-resume strong {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--v8-texte);
+}
+
+.preparation-resume span {
+  font-size: 14px;
+  color: var(--v8-texte-secondaire);
+}
+
+/* LE SHEET -- charte §4 : « coins 28 px, poignee, fond surface haute ; scrim
+ * uniquement pour le bloquant ». Un <dialog> natif : en bas de l'ecran sur
+ * mobile, centre sur grand ecran. */
+.sheet {
+  width: min(560px, 100vw);
+  max-height: 88vh;
+  margin: auto auto 0;
+  padding: 10px 20px 24px;
+  border: 0;
+  border-radius: 28px 28px 0 0;
+  background: var(--v8-surface-haute);
+  color: var(--v8-texte);
+  box-shadow: 0 -10px 40px rgba(15, 61, 61, 0.18);
+}
+
+.sheet::backdrop {
+  background: rgba(13, 21, 24, 0.45);
+}
+
+.sheet-poignee {
+  width: 44px;
+  height: 5px;
+  margin: 0 auto 12px;
+  border-radius: 999px;
+  background: var(--v8-vert-clair);
+}
+
+.sheet-entete {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.sheet-entete h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--v8-texte);
+}
+
+.sheet-fermer {
+  flex: 0 0 auto;
+  width: 44px;
+  min-width: 44px;
+  padding: 0;
+}
+
+/* La carte de detail perd son cadre : le sheet est deja un cadre. */
+:root[data-color-scheme] .sheet-corps .order-card,
+:root:not([data-color-scheme]) .sheet-corps .order-card {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+
+.sheet-corps .item-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+.sheet-corps .card-actions {
+  display: grid;
+  gap: 10px;
+}
+
+@media (min-width: 921px) {
+  .sheet {
+    margin: auto;
+    border-radius: 28px;
+  }
+
+  .sheet-poignee {
+    display: none;
+  }
+}
+
+/* Sous 560 px, `:root[data-color-scheme="light"] .button { width: 100% }`
+ * (0,3,0) etire tout bouton. Une pilule de filtre n'est pas un bouton de
+ * formulaire : elle garde sa largeur, a (0,4,0). */
+:root[data-color-scheme] .filtre-pilules .button.compact.filtre-pilule,
+:root:not([data-color-scheme]) .filtre-pilules .button.compact.filtre-pilule {
+  width: auto;
+  flex: 0 0 auto;
+}
+
+:root[data-color-scheme] .sheet-entete .button.compact.sheet-fermer,
+:root:not([data-color-scheme]) .sheet-entete .button.compact.sheet-fermer {
+  width: 44px;
+  min-width: 44px;
+  flex: 0 0 auto;
+}
+
+:root[data-color-scheme] .sheet-entete .button.compact.sheet-fermer,
+:root:not([data-color-scheme]) .sheet-entete .button.compact.sheet-fermer {
+  border-radius: 999px;
+}
+
+/* Le bloc des grands rayons pose deja `:root[data-color-scheme] .sheet`
+ * a 28 px sur les quatre coins (0,3,0). En mobile le sheet colle au bas de
+ * l'ecran : coins bas droits, a la meme specificite, apres. */
+:root[data-color-scheme] .sheet,
+:root:not([data-color-scheme]) .sheet {
+  border-radius: 28px 28px 0 0;
+}
+
+@media (min-width: 921px) {
+  :root[data-color-scheme] .sheet,
+  :root:not([data-color-scheme]) .sheet {
+    border-radius: 28px;
+  }
+}
+
+/* Le chiffre de l'anneau est en HTML, pas en <text> SVG : il herite de la
+ * police, et l'instrument de contraste (qui masque par `color`) le voit. */
+.preparation-anneau {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+}
+
+.preparation-anneau svg {
+  position: absolute;
+  inset: 0;
+}
+
+.preparation-anneau strong {
+  position: relative;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--v8-principal);
+}
