@@ -885,7 +885,7 @@ toujours*, même en fin de feuille.
 
 | règle | 18/09 | 19/09 |
 |---|---|---|
-| **Ligne de liste 64–72 px** | listes vides, `POST /api/clients` rend 404 | **mesurée** sur un serveur semé — voir ci-dessous. *Pour les arrêts.* Les commandes et les abonnements sont encore des cartes |
+| **Ligne de liste 64–72 px** | listes vides, `POST /api/clients` rend 404 | **mesurée** sur un serveur semé — voir ci-dessous. *Pour les arrêts et, depuis le second lot du 19/09, pour les commandes à préparer.* Les abonnements sont encore des cartes |
 | **Marqueur de carte** | aucun marqueur sans client géolocalisé | **mesurée**, même serveur — et un bug de cadrage trouvé au passage |
 | **« repliables plutôt que débordantes »** | un **comportement**, pas une forme | toujours non jugée |
 
@@ -1030,6 +1030,59 @@ Et un troisième, dans le banc : **`offsetParent` ne voit pas un `<details>`
 fermé.** Chrome replie son contenu par `content-visibility: hidden`, et les
 éléments y gardent un `offsetParent`. `checkVisibility()` le voit. Le premier
 rouge accusait le code ; c'était l'instrument.
+
+### Une ligne par commande, posée le 19/09 — la planche `Preparation.png`
+
+Le guide de cette charte range « une ligne par commande » parmi les cinq mots
+du vocabulaire de V8. La préparation était **quatre colonnes de cartes** à
+~12 informations et quatre commandes chacune (date, trois boutons), avec quatre
+« Rien ici » pour les colonnes vides, un `<select>` de secteur là où la charte
+dit pilules, et une légende aux pastilles V7.
+
+| élément | planche | avant | après |
+|---|---|---|---|
+| Une commande | une ligne : disque d'état, nom, « ville · n articles », badge | une carte à ~12 informations et 4 commandes | une ligne de **64 px** (75 si le nom passe à deux lignes), quatre informations |
+| Une bloquée | « Il manque 2 articles » en alerte, à la place du détail | « Stock : insuffisant » parmi 12 lignes | « Il manque 1 article », en alerte, à la place du détail |
+| Les actions | dans le détail, que la ligne ouvre | sur chaque carte | dans un **sheet** (coins 28, poignée, `<dialog>` natif) : adresse, date, stock, trois actions |
+| Secteurs | pilules | `<select>` | pilules 44 / 48, `aria-pressed` |
+| Résumé | anneau + « 2 commandes prêtes · 3 restantes · 68 articles » | quatre tuiles | un anneau à la part des prêtes, une ligne |
+| Colonnes vides | — | quatre « Rien ici » | une section vide ne s'affiche pas |
+
+*Bancs : `preparation-lignes.spec.js`, 5 cas — lignes ×2 vues, sheet mobile
+(Échap, ✕), sheet desktop, et l'action « Passer en préparation » depuis le
+sheet, qui ferme le sheet et change le mot de la ligne. Quatre mutations,
+quatre tuées pour la bonne cause.*
+
+#### Les mots du badge : ceux de l'ÉTAPE, pas ceux du statut
+
+La charte §4 liste les statuts de commande (Importée · À vérifier · En
+préparation · …). La planche écrit sur le badge le mot de l'**étape** de
+préparation : **À faire · En cours · Prête · Bloquée**. Ce sont deux choses :
+« Importée » et « À vérifier » sont toutes deux « À faire » pour qui prépare.
+Le badge de la ligne porte le mot de la planche ; le statut reste dans le
+détail. *Nommé ici pour que personne ne prenne l'un pour une dérive de l'autre.*
+
+#### ⛔ Trois adversaires nommés par la mesure
+
+- **`@media (max-width: 560px) :root[data-color-scheme="light"] .button {
+  width: 100% }`** (0,3,0) étirait chaque pilule de secteur sur toute la
+  largeur, en colonne. Une pilule de filtre n'est pas un bouton de formulaire :
+  `.button.compact.filtre-pilule` à (0,4,0). Le même adversaire étirait le ✕
+  du sheet.
+- **Le bloc des grands rayons posait déjà `:root[data-color-scheme] .sheet`**
+  à 28 px sur les quatre coins — un `.sheet` écrit avant qu'un sheet n'existe.
+  En mobile les coins bas sont droits (il colle à l'écran) : même spécificité,
+  après.
+- **Le serveur recalcule `canPrepare` depuis le stock** : un drapeau semé
+  `canPrepare: false` était écrasé et la commande « bloquée » du banc passait
+  pour « à faire ». Le semé porte maintenant un produit à stock zéro — on ne
+  sème pas une conclusion, on sème sa cause.
+
+#### Ce que ce lot ne fait PAS
+
+Les **abonnements** restent des cartes à ~9 informations. Même geste à faire :
+une ligne (avatar, nom, ville · fréquence, badge Actif / En pause), un sheet
+pour les faits et les actions.
 
 ## 10. Guide pour l'agent
 

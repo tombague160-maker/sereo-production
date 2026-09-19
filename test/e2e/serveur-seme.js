@@ -48,7 +48,9 @@ function jeuDeDonnees() {
     // Pour la vue de préparation : les quatre états d'une commande à préparer.
     commande("o-7", pharma, "en_preparation"),
     commande("o-8", bellevue, "pret_livraison"),
-    commande("o-9", veto, "importe", { canPrepare: false, stockStatus: "insuffisant" }),
+    // Bloquee : un produit dont le stock est a zero. Le serveur recalcule
+    // canPrepare depuis le stock -- un drapeau seme serait ecrase.
+    commande("o-9", veto, "importe", { products: [...PRODUITS.map(p => ({ ...p, quantite: 3 })), { code: "GANTS", nom: "Gants nitrile", prixUnitaire: 8, quantite: 5 }] }),
     commande("o-10", dupont, "importe")
   ];
   const arret = (o, status, extra = {}) => ({
@@ -58,7 +60,8 @@ function jeuDeDonnees() {
   });
   return {
     clients: CLIENTS,
-    stock: PRODUITS.map(p => ({ id: `st-${p.code}`, code: p.code, nom: p.nom, quantite: 100, tarif: p.prixUnitaire })),
+    stock: [...PRODUITS.map(p => ({ id: `st-${p.code}`, code: p.code, nom: p.nom, quantite: 100, tarif: p.prixUnitaire })),
+      { id: "st-GANTS", code: "GANTS", nom: "Gants nitrile", quantite: 0, tarif: 8 }],
     commandes,
     routes: [{
       id: "r-1", status: "en_livraison", deliveryDate: AUJOURDHUI, name: "Tournée Besançon",
