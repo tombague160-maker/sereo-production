@@ -53,6 +53,20 @@ const status = (value) =>
     a_reprogrammer: "À reprogrammer",
     livre: "Livrée",
   })[value] || value;
+/**
+ * L'etat d'une commande vue du tableau de bord, pour le disque de la ligne.
+ * Les mots restent ceux du statut (status()) : ici on ne montre pas l'etape
+ * de preparation, on montre la commande.
+ */
+const etatDeLaCommande = (statut) =>
+  statut === "pret_livraison" || statut === "livre"
+    ? { cle: "prete", pill: "pill-ok" }
+    : statut === "en_preparation" || statut === "en_livraison"
+      ? { cle: "en-cours", pill: "pill-warning" }
+      : statut === "probleme_livraison" || statut === "a_reprogrammer"
+        ? { cle: "bloquee", pill: "pill-danger" }
+        : { cle: "a-faire", pill: "pill-blue" };
+
 /** L'etat d'un abonnement : un disque et un mot. */
 const etatAbonnement = (sub) =>
   sub.status === "active"
@@ -295,7 +309,9 @@ function renderDashboard() {
         .slice(0, 5)
         .map(
           (o) =>
-            `<div class="op-order-row"><div><strong>${h(o.clientName)}</strong><p>${h(products(o.products))}</p></div><span class="status-chip">${h(status(o.status))}</span></div>`,
+            // La meme ligne qu'ailleurs (planche TableauDeBord.png : le
+            // tableau de bord montre les memes lignes que la preparation).
+            `<div class="commande-ligne commande-ligne--tableau"><div class="commande-ligne-main"><span class="etat-commande etat-commande--${etatDeLaCommande(o.status).cle}" aria-hidden="true"></span><span class="commande-ligne-corps"><strong>${h(o.clientName)}</strong><span>${h(products(o.products))}</span></span><span class="pill ${etatDeLaCommande(o.status).pill}">${h(status(o.status))}</span></div></div>`,
         )
         .join("") || empty("Aucune commande pour le moment.");
   }

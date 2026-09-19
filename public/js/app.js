@@ -838,6 +838,46 @@ function refreshActiveRoute() {
   activeStopIndex = 0;
 }
 
+/**
+ * La carte « Tournee du jour » du tableau de bord (planche TableauDeBord.png).
+ * Elle ne montre RIEN quand il n'y a pas de tournee : une carte vide dirait
+ * « c'est casse » la ou la verite est « il n'y en a pas ».
+ */
+function renderTourneeDuJour() {
+  const carte = document.getElementById("dashboardTournee");
+  if (!carte) return;
+  const panneau = document.getElementById("dashboardDeliveringPanel");
+  if (!activeRoute?.stops?.length) {
+    carte.hidden = true;
+    if (panneau) panneau.hidden = false;
+    return;
+  }
+  carte.hidden = false;
+  // Les deux panneaux se partagent une colonne : « A livrer » laisse la place.
+  if (panneau) panneau.hidden = true;
+
+  const total = activeRoute.stops.length;
+  const faits = activeRoute.stops.filter(stop => isStopTerminal(stop.status)).length;
+  const rang = isRouteComplete(activeRoute) ? total : Math.min(activeStopIndex + 1, total);
+  const prochain = activeRoute.stops.find((stop, index) => index >= activeStopIndex && !isStopTerminal(stop.status))
+    || activeRoute.stops.find(stop => !isStopTerminal(stop.status));
+
+  setText("dashboardTourneeStatut", formatRouteStatus(activeRoute.status));
+  setText("dashboardTourneeRang", rang);
+  setText("dashboardTourneeTotal", total > 1 ? `arrêts sur ${total}` : "arrêt");
+  const barre = document.getElementById("dashboardTourneeBarre");
+  if (barre) barre.style.width = `${Math.round((faits / total) * 100)}%`;
+
+  const faitsListe = document.getElementById("dashboardTourneeFaits");
+  if (faitsListe) {
+    const lignes = [
+      prochain ? `Prochain : ${prochain.clientName}` : `${faits} arrêt${faits > 1 ? "s" : ""} terminé${faits > 1 ? "s" : ""}`,
+      formatRouteMetrics(activeRoute)
+    ].filter(Boolean);
+    faitsListe.innerHTML = lignes.map(texte => `<li>${escapeHtml(texte)}</li>`).join("");
+  }
+}
+
 function renderAll() {
   renderStats();
   renderDailySummary();
@@ -868,6 +908,7 @@ function renderAll() {
   renderComptes();
   renderMap();
   updateRouteProgress();
+  renderTourneeDuJour();
 }
 
 async function importFile(type, inputId) {

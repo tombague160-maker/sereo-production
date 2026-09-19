@@ -1090,6 +1090,55 @@ jamais deux dialogues empilés. `abonnements-lignes.spec.js`, 3 cas.
 *Les trois lignes de liste de la charte (§4 : « commande, abonnement, arrêt »)
 sont tenues et mesurées, sur les mêmes composants.*
 
+### Le tableau de bord, posé le 19/09 — la sixième et dernière planche
+
+Deux choses de `TableauDeBord.png` manquaient. La **carte « Tournée du jour »** :
+fond vert, « 3 arrêts sur 8 », la barre, le prochain arrêt, et le seul geste qui
+compte depuis cet écran — *ouvrir la carte*. Et les **listes du tableau de bord**,
+qui étaient des rangées à elles seules alors que la planche y montre **les mêmes
+lignes** que la préparation.
+
+| élément | avant | après |
+|---|---|---|
+| Tournée du jour | *absente* | carte verte : statut, « 3 arrêts sur 6 », barre aux arrêts **terminés**, prochain arrêt, distance |
+| « À livrer » | un panneau toujours là | cède sa colonne à la tournée quand il y en a une ; revient sinon |
+| Listes | `.op-order-row` (nom, produits, chip) | la ligne partagée : disque d'état, nom, produits, badge |
+| Titre | « À préparer » | « À préparer aujourd'hui », le mot de la planche |
+| Sans tournée | — | la carte **ne s'affiche pas** : une carte vide dirait « c'est cassé » là où la vérité est « il n'y en a pas » |
+
+Le bouton « Ouvrir la carte » est **blanc sur le vert** — la charte §4 le dit
+(« sur fond vert = fond blanc texte vert ») — et fait 44 / 48.
+
+*Banc : `tableau-de-bord.spec.js`, 4 cas.*
+
+#### ⛔ Le harnais a trouvé ce que le banc ne distinguait pas
+
+Quatre mutations, et **deux ont d'abord SURVÉCU** :
+
+**① Une mutation qui mesurait une redondance.** J'avais écrit *deux* règles pour
+la même couleur — une sur le `<p>`, une sur ses enfants. Retirer la première ne
+changeait rien : la seconde peignait déjà. *Une mutation qui change une des N
+déclarations équivalentes ne mute pas la règle, elle mesure la redondance.* Les
+deux règles fusionnées en une, la mutation mord.
+
+**② Un banc qui ne pouvait rien distinguer.** La barre suit les arrêts
+**terminés** ; la mutation la faisait suivre le **rang** de l'arrêt courant.
+Dans le semé les deux valaient **3** — même pourcentage, banc vert, mutation
+vivante. Le banc se donne maintenant un semé où les deux diffèrent (4 terminés,
+rang 3 → 67 % et non 50 %).
+
+> *Un banc vert sur une mutation n'accuse pas toujours le banc : il faut
+> d'abord demander si les données pouvaient faire varier le résultat.*
+
+Et un troisième, dans le harnais lui-même : après avoir corrigé le semé, le
+filtre cherchait encore `"50%"`, la valeur d'avant. Il rapportait « tuée mais
+autre cause » sur une mutation tuée pour **exactement** la bonne. *Un filtre de
+harnais se périme avec la valeur qu'il cite.*
+
+#### Les six planches sont posées
+
+`Main` · `Carte` · `Preparation` · `NavMobile` · `NavDesktop` · `TableauDeBord`.
+
 ## 10. Guide pour l'agent
 
 - Toujours produire les deux modes (clair et sombre) avec les mêmes tokens ; lister les contrastes calculés.
