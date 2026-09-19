@@ -9362,3 +9362,215 @@ textarea::placeholder {
 :root:not([data-color-scheme]) .active-filter {
   border-radius: 999px;
 }
+
+/* LE MARQUEUR -- un seul composant pour la carte ET la ligne d'arret.
+ *
+ * Charte §4 : « Marqueur de carte : corps vert #386B6D, numero blanc ;
+ * l'arret en cours garde un halo orange. » La planche Carte.png en dit plus,
+ * et c'est elle qui fait foi : TROIS etats.
+ *   fait     : disque vert, coche blanche, 28 px
+ *   en cours : disque vert, numero blanc, anneau orange 3,5 px + halo qui bat, 34 px
+ *   a venir  : disque blanc, contour vert, numero vert, 28 px
+ * Le contour « a venir » est en PRINCIPAL et non en vert d'eau comme sur la
+ * planche : la charte l'a corrige le 17/09 (1,62:1 sur le fond de carte).
+ * Un quatrieme etat, absent de la planche Carte mais present sur la planche
+ * Preparation (« Bloquee ») : echec = disque peche claire, point d'exclamation
+ * en couleur d'alerte. Il sert aux arrets « absent » et « probleme ».
+ *
+ * Mesure du 19/09, avant : six circleMarker de rayon 9 en QUATRE couleurs V7
+ * (#2f9e44, #d9480f, #f08c00, #2563eb), sans numero, et un trace bleu.
+ *
+ * Anneau et halo sont deux couches d'une meme box-shadow : peinte SOUS le
+ * fond, sans pseudo-element, donc sans contexte d'empilement a negocier.
+ * La coche est dessinee en bordures tournees : elle ne depend d'aucune police
+ * (Poppins n'a pas de U+2713 ; le glyphe de repli changeait selon l'appareil). */
+.marqueur {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--v8-surface);
+  color: var(--v8-principal);
+  box-shadow: inset 0 0 0 2.5px var(--v8-principal);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.marqueur--fait {
+  background: var(--v8-principal);
+  color: var(--v8-texte-sur-principal);
+  box-shadow: none;
+  font-size: 0;
+}
+
+.marqueur--fait::before {
+  content: "";
+  width: 6px;
+  height: 11px;
+  border: solid currentColor;
+  border-width: 0 2.4px 2.4px 0;
+  transform: translateY(-1px) rotate(45deg);
+}
+
+.marqueur--en-cours {
+  width: 34px;
+  height: 34px;
+  background: var(--v8-principal);
+  color: var(--v8-texte-sur-principal);
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow:
+    0 0 0 3.5px var(--v8-accent),
+    0 0 0 8px color-mix(in srgb, var(--v8-accent) 45%, transparent);
+  animation: marqueur-halo 2.2s ease-out infinite;
+}
+
+.marqueur--echec {
+  background: var(--v8-peche-claire);
+  color: var(--v8-alerte);
+  box-shadow: none;
+  font-weight: 700;
+}
+
+.marqueur--echec::before {
+  content: "!";
+}
+
+@keyframes marqueur-halo {
+  0%, 100% {
+    box-shadow:
+      0 0 0 3.5px var(--v8-accent),
+      0 0 0 8px color-mix(in srgb, var(--v8-accent) 45%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 3.5px var(--v8-accent),
+      0 0 0 16px color-mix(in srgb, var(--v8-accent) 0%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marqueur--en-cours {
+    animation: none;
+  }
+}
+
+/* Sur la carte, Leaflet pose le marqueur dans un .leaflet-marker-icon de
+ * 44 x 44 : c'est la zone de toucher (plancher de la charte), le disque de
+ * 28 ou 34 est centre dedans. */
+.leaflet-marker-icon.marqueur-ancre {
+  display: grid;
+  place-items: center;
+  background: none;
+  border: 0;
+}
+
+/* LA LIGNE D'ARRET -- une ligne de 64-72 px, quatre informations.
+ *
+ * Charte §4 : « Ligne de liste (commande, abonnement, arret) : une ligne de
+ * 64-72 px, quatre informations maximum, etat porte par un point de couleur
+ * + un mot. » Planche Preparation.png : disque d'etat a gauche, titre et
+ * ligne de detail au centre, badge a droite.
+ *
+ * Mesure du 19/09, avant : 184-209 px en mobile, 126-151 en desktop. Les
+ * 120 px de trop : deux boutons ↑↓ de 60 px rendus DESACTIVES (la tournee
+ * est en cours, on ne reordonne plus) et une pilule etiree sur la largeur.
+ * Les fleches ne sont plus rendues que quand la tournee se reordonne
+ * (statut « prete »), en boutons d'icone de 44 px.
+ *
+ * Les quatre informations : le marqueur (rang + etat), le nom, la ligne de
+ * detail (adresse -- ou le MOTIF pour un arret en echec, qui la remplace
+ * comme sur la planche : « Il manque 2 articles »), le badge. */
+:root[data-color-scheme] .route-stop,
+:root:not([data-color-scheme]) .route-stop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 64px;
+  padding: 0 12px 0 0;
+  border: 0;
+  border-radius: var(--radius-card);
+  box-shadow: 0 1px 2px rgba(15, 61, 61, 0.05), 0 12px 28px rgba(15, 61, 61, 0.05);
+}
+
+:root[data-color-scheme] .route-stop.active-stop,
+:root:not([data-color-scheme]) .route-stop.active-stop {
+  box-shadow: 0 0 0 2px var(--v8-accent), 0 12px 28px rgba(15, 61, 61, 0.05);
+}
+
+:root[data-color-scheme] .route-stop-main,
+:root:not([data-color-scheme]) .route-stop-main {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  min-height: 64px;
+  padding: 8px 4px 8px 14px;
+  border-radius: var(--radius-card);
+}
+
+.route-stop-corps {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 2px;
+  min-width: 0;
+}
+
+.route-stop-corps > strong {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+
+.route-stop-corps > span {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--v8-texte-secondaire);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-color-scheme] .route-stop-main .pill,
+:root:not([data-color-scheme]) .route-stop-main .pill {
+  flex: 0 0 auto;
+  justify-self: end;
+  white-space: nowrap;
+}
+
+/* Le motif remplace la ligne d'adresse : meme place, couleur d'alerte. */
+:root[data-color-scheme] .route-stop-corps > .route-stop-motif,
+:root:not([data-color-scheme]) .route-stop-corps > .route-stop-motif {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--v8-alerte);
+}
+
+:root[data-color-scheme] .route-stop-actions,
+:root:not([data-color-scheme]) .route-stop-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: 4px;
+  width: auto;
+}
+
+:root[data-color-scheme] .route-stop-actions .button,
+:root:not([data-color-scheme]) .route-stop-actions .button {
+  flex: 0 0 auto;
+  width: 44px;
+  min-width: 44px;
+  padding: 0;
+}
