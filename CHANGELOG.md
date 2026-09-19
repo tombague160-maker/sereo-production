@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.33.0](https://github.com/tombague160-maker/sereo-production/compare/v1.32.0...v1.33.0) (2026-09-19)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **v8:** des pilules de filtre repliables -- le dernier non-juge du §4 ([c9ad1ce](https://github.com/tombague160-maker/sereo-production/commit/c9ad1ce456d38ae8d0133b30d35671d45b743f7a))
+* **v8:** l'ecran du livreur -- la planche Main.png, enfin ([d8dd403](https://github.com/tombague160-maker/sereo-production/commit/d8dd403fbbd9434bbf9c183adb3df9ad23c47229))
+* **v8:** le marqueur de carte et la ligne d'arret -- deux regles enfin jugees ([6fc8bae](https://github.com/tombague160-maker/sereo-production/commit/6fc8bae4f12796ea124a7bd2a3bc55cc5366c396))
+* **v8:** le tableau de bord -- la sixieme et derniere planche ([9bd7d94](https://github.com/tombague160-maker/sereo-production/commit/9bd7d946ad152d9e1b01289ab14bc688c0f27286))
+* **v8:** une ligne par abonnement -- la troisieme liste de la charte ([650c03b](https://github.com/tombague160-maker/sereo-production/commit/650c03bbd5e40841f904713640a418cacf902f62))
+* **v8:** une ligne par commande -- la planche Preparation.png ([4792738](https://github.com/tombague160-maker/sereo-production/commit/47927389bea4e04d154abd1ece8098e78b72543f))
+
+
+### 📚 Documentation
+
+* **charte:** le marqueur et la ligne d'arret -- deux non-juges deviennent des mesures ([db70b0a](https://github.com/tombague160-maker/sereo-production/commit/db70b0a6f0d5524a7dd09076d7c9f041175aa9ca))
+
 ## [1.32.0](https://github.com/tombague160-maker/sereo-production/compare/v1.31.0...v1.32.0) (2026-09-19)
 
 
