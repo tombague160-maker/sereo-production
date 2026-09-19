@@ -596,7 +596,11 @@ function showTab(tabName, options = {}) {
   resetViewportScroll(updateHash);
 
   if (nextTab === "livreur" && map) {
-    setTimeout(() => map.invalidateSize(), 150);
+    // Mesure du 19/09 : la carte etait cadree (fitBounds) au chargement des
+    // donnees, pendant que l'onglet etait masque -- conteneur de 0 x 0, zoom
+    // pousse a 19, marqueurs a 100 000 px du cadre. invalidateSize() rend sa
+    // taille a la carte mais NE RECADRE PAS : il faut redessiner.
+    setTimeout(() => { map.invalidateSize(); renderMap(); }, 150);
   }
 }
 
@@ -4020,19 +4024,31 @@ function renderRoute() {
   activeRoute.stops.forEach((stop, index) => {
     const row = document.createElement("article");
     row.className = `route-stop ${index === activeStopIndex ? "active-stop" : ""}`;
+    // Charte §4, ligne de liste : QUATRE informations. Le marqueur (rang +
+    // etat), le nom, une ligne de detail, le badge. Pour un arret en echec,
+    // le motif REMPLACE l'adresse -- comme « Il manque 2 articles » sur la
+    // planche Preparation -- au lieu de s'ajouter en cinquieme.
+    const detail = stop.problemReason
+      ? `<span class="route-stop-motif">${escapeHtml(stop.problemReason)}</span>`
+      : `<span title="${escapeAttribute(formatStopAddress(stop))}">${escapeHtml(formatStopMeta(stop))}</span>`;
+    // Les fleches ne sont rendues QUE quand la tournee se reordonne encore.
+    // Avant, deux boutons de 60 px etaient rendus desactives sur chaque
+    // ligne d'une tournee en cours : 120 px de vide par arret.
+    const reordonnable = activeRoute.status === "prete";
     row.innerHTML = `
       <button class="route-stop-main" type="button" data-action="select-stop" data-stop-index="${index}">
-        <strong>${index + 1}. ${escapeHtml(stop.clientName)}</strong>
-        <span>${escapeHtml(formatStopAddress(stop))}</span>
+        ${marqueurHtml(stop, index)}
+        <span class="route-stop-corps">
+          <strong>${escapeHtml(stop.clientName)}</strong>
+          ${detail}
+        </span>
         <span class="pill ${getStopPill(stop.status)}">${escapeHtml(formatStopStatus(stop.status))}</span>
-        ${stop.problemReason
-          ? `<span class="route-stop-motif">${escapeHtml(stop.problemReason)}</span>`
-          : ""}
       </button>
+      ${reordonnable ? `
       <div class="route-stop-actions">
-        <button class="button secondary compact" type="button" data-action="move-stop-up" data-stop-id="${escapeAttribute(stop.id)}" ${index === 0 || activeRoute.status !== "prete" ? "disabled" : ""}>↑</button>
-        <button class="button secondary compact" type="button" data-action="move-stop-down" data-stop-id="${escapeAttribute(stop.id)}" ${index === activeRoute.stops.length - 1 || activeRoute.status !== "prete" ? "disabled" : ""}>↓</button>
-      </div>
+        <button class="button secondary compact" type="button" data-action="move-stop-up" data-stop-id="${escapeAttribute(stop.id)}" aria-label="Monter l’arrêt ${index + 1}" ${index === 0 ? "disabled" : ""}>↑</button>
+        <button class="button secondary compact" type="button" data-action="move-stop-down" data-stop-id="${escapeAttribute(stop.id)}" aria-label="Descendre l’arrêt ${index + 1}" ${index === activeRoute.stops.length - 1 ? "disabled" : ""}>↓</button>
+      </div>` : ""}
     `;
     list.appendChild(row);
   });
@@ -4566,6 +4582,10 @@ async function saveCurrentCoordinates() {
 
 function renderMap() {
   if (!map) return;
+  // Un conteneur sans taille (onglet masque) ne se cadre pas : fitBounds y
+  // calcule un zoom absurde. On redessinera a l'ouverture de l'onglet.
+  const taille = map.getSize();
+  if (!taille.x || !taille.y) return;
 
   markers.forEach(marker => map.removeLayer(marker));
   markers = [];
@@ -4583,13 +4603,20 @@ function renderMap() {
 
     if (!coords) return;
 
-    const color = getMapColor(entity.status || entity.statut);
-
-    const marker = L.circleMarker([coords.lat, coords.lng], {
-      radius: 9,
-      color,
-      fillColor: color,
-      fillOpacity: 0.95
+    // Le meme marqueur que dans la ligne d'arret. La zone de toucher fait
+    // 44 x 44 (plancher de la charte) ; le disque de 28 ou 34 est centre dedans.
+    const etat = marqueurEtat(entity, index);
+    const marker = L.marker([coords.lat, coords.lng], {
+      icon: L.divIcon({
+        className: "marqueur-ancre",
+        html: marqueurHtml(entity, index),
+        iconSize: [44, 44],
+        iconAnchor: [22, 22],
+        popupAnchor: [0, -20]
+      }),
+      // L'arret en cours passe devant les autres, puis les arrets a venir,
+      // puis les faits : ce qu'on cherche des yeux est ce qu'on doit toucher.
+      zIndexOffset: etat === "en-cours" ? 1000 : etat === "a-venir" ? 500 : 0
     }).addTo(map);
 
     marker.bindPopup(`
@@ -4611,17 +4638,21 @@ function renderMap() {
 
   if (activeRoute?.geometry?.coordinates) {
     const roadPoints = activeRoute.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
-    routeLine = L.polyline(roadPoints, {color: "#2b7062", weight: 5, opacity: 0.85}).addTo(map);
+    // Planche Carte.png : le trace est en ACCENT, 4,5 px, bouts ronds. Une
+    // forme, pas un texte -- l'orange y est a sa place.
+    routeLine = L.polyline(roadPoints, {color: couleurCharte("--v8-accent", "#EF9177"), weight: 4.5, opacity: 1, lineCap: "round", lineJoin: "round"}).addTo(map);
     for (const [point, label] of [[activeRoute.departure, "Départ"], [activeRoute.arrival, "Arrivée"]]) {
       if (point) markers.push(L.marker([point.lat, point.lng]).addTo(map).bindPopup(`${label} : ${escapeHtml(point.label || "Point choisi")}`));
     }
     map.fitBounds(routeLine.getBounds(), {padding:[30,30]});
   } else if (points.length > 1) {
+    // Sans geometrie routiere : un pointille en PRINCIPAL, pas un bleu V7.
     routeLine = L.polyline(points, {
       dashArray: "6 8",
-      color: "#2563eb",
-      weight: 4,
-      opacity: 0.75
+      color: couleurCharte("--v8-principal", "#386B6D"),
+      weight: 3,
+      opacity: 0.8,
+      lineCap: "round"
     }).addTo(map);
 
     map.fitBounds(routeLine.getBounds(), {
@@ -5105,6 +5136,16 @@ function formatOrderAddress(order) {
   return `${order.address || ""} ${order.postalCode || ""} ${order.city || ""}`.trim() || "Adresse non renseignée";
 }
 
+/** « Besancon · 4 articles » : la ligne de detail d'un arret, comme sur la planche. */
+function formatStopMeta(stop) {
+  const lignes = (stop.products || []).length;
+  const articles = lignes === 0 ? "aucun article" : lignes === 1 ? "1 article" : `${lignes} articles`;
+  // Le serveur canonise la ville SANS cedille (c'est une cle de secteur) ;
+  // formatSectorLabel lui rend son orthographe a l'affichage.
+  const ville = stop.city ? formatSectorLabel(stop.city) : (stop.postalCode || "");
+  return [ville, articles].filter(Boolean).join(" · ");
+}
+
 function formatStopAddress(stop) {
   return `${stop.address || ""} ${stop.postalCode || ""} ${stop.city || ""}`.trim() || "Adresse non renseignée";
 }
@@ -5201,6 +5242,29 @@ function formatStockStatus(status) {
   return labels[status] || "à vérifier";
 }
 
+/**
+ * Le marqueur d'un arret : le meme composant sur la carte et dans la ligne.
+ * Charte §4 + planche Carte.png : fait (coche), en cours (numero + anneau
+ * orange), a venir (numero sur blanc) ; et echec (planche Preparation).
+ * `index` est le rang dans la tournee, affiche a partir de 1.
+ */
+function marqueurEtat(stop, index) {
+  const status = stop.status || stop.statut;
+  if (status === "livre") return "fait";
+  if (["absent", "probleme"].includes(status)) return "echec";
+  if (index === activeStopIndex && activeRoute && !isRouteComplete(activeRoute)) return "en-cours";
+  return "a-venir";
+}
+
+function marqueurHtml(stop, index) {
+  const etat = marqueurEtat(stop, index);
+  // La coche et le « ! » sont dessines en CSS : le numero n'est ecrit que
+  // pour les etats qui le montrent.
+  const contenu = etat === "fait" || etat === "echec" ? "" : String(index + 1);
+  const libelle = etat === "fait" ? "livré" : etat === "echec" ? "en échec" : etat === "en-cours" ? "en cours" : "à venir";
+  return `<span class="marqueur marqueur--${etat}" role="img" aria-label="Arrêt ${index + 1}, ${libelle}">${contenu}</span>`;
+}
+
 function getStopPill(status) {
   if (status === "livre") return "pill-ok";
   if (["absent", "probleme"].includes(status)) return "pill-danger";
@@ -5210,7 +5274,9 @@ function getStopPill(status) {
 
 function formatStopStatus(status) {
   const labels = {
-    pret_livraison: "Prêt livraison",
+    // Charte §4 : « Statuts d'arret : Pret · En livraison · Livre · Absent ·
+    // Probleme · A reprogrammer ». Le badge tient en un mot.
+    pret_livraison: "Prêt",
     en_livraison: "En livraison",
     livre: "Livré",
     absent: "Absent",
@@ -5218,7 +5284,7 @@ function formatStopStatus(status) {
     a_reprogrammer: "À reprogrammer"
   };
 
-  return labels[status] || "Prêt livraison";
+  return labels[status] || "Prêt";
 }
 
 function formatEntityStatus(entity) {
@@ -5256,11 +5322,10 @@ function formatSectorLabel(value) {
   return value || "Sans secteur";
 }
 
-function getMapColor(status) {
-  if (["livree", "livre"].includes(status)) return "#2f9e44";
-  if (["absent", "probleme", "non_livre", "probleme_livraison"].includes(status)) return "#d9480f";
-  if (["en_cours", "en_livraison", "a_reprogrammer"].includes(status)) return "#f08c00";
-  return "#2563eb";
+/** Une couleur de la charte lue dans les tokens CSS, pour ce que Leaflet dessine en SVG. */
+function couleurCharte(token, repli) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(token).trim();
+  return v || repli;
 }
 
 function formatDate(value) {
