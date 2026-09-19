@@ -10441,3 +10441,142 @@ textarea::placeholder {
   font-size: 12px;
   color: var(--v8-texte-secondaire);
 }
+
+/* LE TABLEAU DE BORD -- planche TableauDeBord.png, posee le 19/09.
+ *
+ * Deux choses de la planche manquaient : la carte « Tournee du jour » (fond
+ * vert, « 3 arrets sur 8 », la barre, le prochain arret, et le seul geste qui
+ * compte ici -- ouvrir la carte), et les listes du tableau de bord, qui
+ * etaient des `op-order-row` a elles seules alors que la planche y montre
+ * LES MEMES LIGNES que la preparation. */
+.tournee-du-jour {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  background: var(--v8-principal);
+  color: var(--v8-texte-sur-principal);
+}
+
+:root[data-color-scheme] .panel.tournee-du-jour,
+:root:not([data-color-scheme]) .panel.tournee-du-jour {
+  background: var(--v8-principal);
+  border: 0;
+}
+
+.tournee-du-jour[hidden] {
+  display: none;
+}
+
+:root[data-color-scheme] .tournee-du-jour .panel-heading h3,
+:root:not([data-color-scheme]) .tournee-du-jour .panel-heading h3 {
+  color: var(--v8-texte-sur-principal);
+}
+
+.tournee-du-jour .status-chip {
+  background: color-mix(in srgb, var(--v8-vert-eau) 25%, transparent);
+  color: var(--v8-texte-sur-principal);
+}
+
+.tournee-du-jour-compte {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0;
+  color: inherit;
+}
+
+.tournee-du-jour-compte strong {
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: inherit;
+}
+
+.tournee-du-jour-compte span {
+  font-size: 17px;
+  font-weight: 500;
+  color: inherit;
+}
+
+.tournee-du-jour-faits {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tournee-du-jour-faits li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--v8-texte-secondaire-sur-principal);
+}
+
+.tournee-du-jour-faits li::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* Le bouton blanc sur fond vert : la charte le nomme (« sur fond vert = fond
+ * blanc texte vert »). Il ferme la carte, donc il vient en bas. */
+:root[data-color-scheme] .tournee-du-jour .button.primary,
+:root:not([data-color-scheme]) .tournee-du-jour .button.primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  margin-top: auto;
+  background: var(--v8-surface);
+  color: var(--v8-principal);
+  border: 0;
+  text-decoration: none;
+}
+
+/* Les lignes du tableau de bord : la meme ligne, sans ombre (elles vivent
+ * DANS un panneau, pas sur le fond de page) et separees par un filet. */
+.commande-ligne--tableau {
+  box-shadow: none;
+  background: none;
+  border-radius: 0;
+  border-top: 1px solid var(--border);
+}
+
+.commande-ligne--tableau:first-child {
+  border-top: 0;
+}
+
+.commande-ligne--tableau .commande-ligne-main {
+  padding-left: 0;
+  padding-right: 0;
+  cursor: default;
+}
+
+.commande-ligne--tableau .etat-commande {
+  width: 32px;
+  height: 32px;
+}
+
+/* `:root[data-color-scheme="light"] .panel p` (0,3,1) repeint en texte doux :
+ * illisible sur le fond vert de la carte. Meme specificite, apres. */
+:root[data-color-scheme] .panel p.tournee-du-jour-compte,
+:root[data-color-scheme] .panel p.tournee-du-jour-compte > *,
+:root:not([data-color-scheme]) .panel p.tournee-du-jour-compte,
+:root:not([data-color-scheme]) .panel p.tournee-du-jour-compte > * {
+  color: var(--v8-texte-sur-principal);
+}
+
+/* Le chip d'etat sur le fond vert : 1,44:1 mesure. Fond vert d'eau opaque,
+ * texte vert profond -- la paire que la charte donne pour un badge froid. */
+:root[data-color-scheme] .tournee-du-jour .panel-heading .status-chip,
+:root:not([data-color-scheme]) .tournee-du-jour .panel-heading .status-chip {
+  background: var(--v8-vert-clair);
+  color: var(--v8-principal-appuye);
+}

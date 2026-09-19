@@ -385,7 +385,24 @@
         <p id="revenueCaveat" class="muted op-caveat"></p>
         <div class="op-dashboard-grid"><section class="panel"><div class="panel-heading"><h3>Votre activité sur 6 mois</h3><span class="op-tag">CA livré</span></div><div id="revenueChart" class="revenue-chart" aria-label="Chiffre d’affaires des six derniers mois"></div></section><section class="panel"><div class="panel-heading"><h3>À votre attention</h3><a href="#recommande">Voir le stock ↗</a></div><div id="opAlerts"></div></section></div>
         <section class="panel"><div class="panel-heading"><div><span class="op-eyebrow">LES 7 PROCHAINS JOURS & LES RETARDS</span><h3>Vos livraisons récurrentes</h3></div><a href="#abonnements" id="opWeekCount">Voir le calendrier ↗</a></div><div id="dashboardSubscriptions"></div></section>
-        <div class="op-dashboard-grid"><section class="panel"><div class="panel-heading"><h3>À préparer <span id="dashboardPreparingCount" class="op-tag">0</span></h3><a href="#preparation">Tout voir ↗</a></div><div id="dashboardPreparing"></div></section><section class="panel"><div class="panel-heading"><h3>À livrer <span id="dashboardDeliveringCount" class="op-tag">0</span></h3><a href="#livreur">Ouvrir la tournée ↗</a></div><div id="dashboardDelivering"></div></section></div>
+        <div class="op-dashboard-grid"><section class="panel"><div class="panel-heading"><h3>À préparer aujourd’hui <span id="dashboardPreparingCount" class="op-tag">0</span></h3><a href="#preparation">Tout voir ↗</a></div><div id="dashboardPreparing"></div></section>
+          <!-- La carte « Tournee du jour » (planche TableauDeBord.png) : ou en
+               est la tournee, ce qui vient, et le seul geste qui compte ici --
+               ouvrir la carte. Cachee tant qu'aucune tournee n'existe. -->
+          <section class="panel tournee-du-jour" id="dashboardTournee" hidden>
+            <div class="panel-heading">
+              <h3>Tournée du jour</h3>
+              <span class="status-chip" id="dashboardTourneeStatut">En cours</span>
+            </div>
+            <p class="tournee-du-jour-compte"><strong id="dashboardTourneeRang">0</strong> <span id="dashboardTourneeTotal">arrêts</span></p>
+            <div class="tournee-progression" aria-hidden="true"><div class="tournee-progression-barre" id="dashboardTourneeBarre"></div></div>
+            <ul class="tournee-du-jour-faits" id="dashboardTourneeFaits"></ul>
+            <a class="button primary" href="#livreur" data-action="go-tab" data-target-tab="livreur">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+              Ouvrir la carte
+            </a>
+          </section>
+          <section class="panel" id="dashboardDeliveringPanel"><div class="panel-heading"><h3>À livrer <span id="dashboardDeliveringCount" class="op-tag">0</span></h3><a href="#livreur">Ouvrir la tournée ↗</a></div><div id="dashboardDelivering"></div></section></div>
         <details class="op-details"><summary>Stock et suivi détaillé</summary>
         <div class="cards dashboard-cards">
           <article class="card blue">
