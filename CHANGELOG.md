@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.34.0](https://github.com/tombague160-maker/sereo-production/compare/v1.33.0...v1.34.0) (2026-09-19)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **v8:** la barre laterale des planches -- huit entrees plates ([19fa441](https://github.com/tombague160-maker/sereo-production/commit/19fa441a59222a04a2a6f0141b728dd9e792a3f4))
+* **v8:** la barre latérale des planches — huit entrées plates ([8658c0e](https://github.com/tombague160-maker/sereo-production/commit/8658c0eddce0bbe003d7b1768925fdce3d4505db))
+
 ## [1.33.0](https://github.com/tombague160-maker/sereo-production/compare/v1.32.0...v1.33.0) (2026-09-19)
 
 
