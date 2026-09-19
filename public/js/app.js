@@ -30,7 +30,7 @@ import {
   MAX_BRAND_IMAGE_SIZE,
   applicationThemes
 } from "./config/themes.js";
-import { mainTabs, MOBILE_OVERFLOW_TABS, titles } from "./config/tabs.js";
+import { mainTabs, MOBILE_OVERFLOW_TABS, titles, GROUPES_NAV } from "./config/tabs.js";
 import {
   gabaritTableauComptes,
   gabaritAccesRefuse,
@@ -187,63 +187,99 @@ function setNavigationSearchValue(value, sourceInput = null) {
   });
 }
 
-function setNavigationSectionOpen(section, isOpen) {
-  if (!section) return;
-  section.classList.toggle("open", Boolean(isOpen));
-  section.querySelector(".nav-section-toggle")?.setAttribute("aria-expanded", isOpen ? "true" : "false");
+// --- La navigation a huit entrees ---------------------------------------
+// Il n'y a plus de section depliable : l'accordeon (setNavigationSectionOpen,
+// getNavigationSectionForTab, syncNavigationSections, toggleNavSection) a ete
+// retire parce que les 49 planches de l'export n'en contiennent aucun. Une
+// entree porte un GROUPE ; les ecrans du groupe vivent dans la rangee de
+// pilules sous le titre de page.
+
+function groupeDeLOnglet(nomOnglet) {
+  return Object.keys(GROUPES_NAV).find(groupe => GROUPES_NAV[groupe].includes(nomOnglet)) || null;
 }
 
-function getNavigationSectionForTab(tabName) {
-  return Array.from(document.querySelectorAll(".sidebar .nav-section")).find(section => {
-    return Boolean(section.querySelector(`.tab[data-tab="${tabName}"]`));
-  });
+function libellesDuGroupe(groupe) {
+  return (GROUPES_NAV[groupe] || []).map(onglet => titles[onglet]?.title || "");
 }
 
-function syncNavigationSections(activeTabName = getInitialTab()) {
-  const activeSection = getNavigationSectionForTab(activeTabName);
-  document.querySelectorAll(".sidebar .nav-section").forEach(section => {
-    const isActiveSection = section === activeSection;
-    section.classList.toggle("has-active-tab", isActiveSection);
-    setNavigationSectionOpen(section, isActiveSection);
-  });
-}
-
-function toggleNavSection(sectionId, forceOpen = null) {
-  const section = Array.from(document.querySelectorAll(".sidebar .nav-section")).find(item => {
-    return item.dataset.navSectionId === sectionId;
-  });
-  if (!section) return;
-  const shouldOpen = forceOpen === null ? !section.classList.contains("open") : Boolean(forceOpen);
-  if (shouldOpen) {
-    document.querySelectorAll(".sidebar .nav-section").forEach(item => {
-      if (item !== section) setNavigationSectionOpen(item, false);
-    });
+function renderSousOnglets(nomOnglet) {
+  const rangee = document.getElementById("sousOnglets");
+  if (!rangee) return;
+  const onglets = GROUPES_NAV[groupeDeLOnglet(nomOnglet)] || [];
+  // Un groupe d'un seul ecran n'apprendrait rien : la rangee reste absente
+  // plutot que d'afficher une pilule unique et toujours active.
+  if (onglets.length < 2) {
+    rangee.innerHTML = "";
+    rangee.hidden = true;
+    return;
   }
-  setNavigationSectionOpen(section, shouldOpen);
+  rangee.innerHTML = onglets.map(onglet => {
+    const actif = onglet === nomOnglet;
+    // L'identifiant « tab-<onglet> » vit ICI et nulle part ailleurs : c'est lui
+    // que visent les aria-labelledby des pages. Les entrees de nav portent
+    // « nav-<groupe> », sans quoi les deux le declareraient en double.
+    return `<button id="tab-${onglet}" class="button secondary compact filtre-pilule${actif ? " active-filter" : ""}"`
+      + ` type="button" role="tab" aria-selected="${actif}" aria-controls="${onglet}"`
+      + ` data-tab="${onglet}" data-action="go-tab" data-target-tab="${onglet}">`
+      + `${escapeHtml(titles[onglet]?.title || onglet)}</button>`;
+  }).join("");
+  rangee.hidden = false;
+}
+
+/**
+ * Le bloc compte, en bas de la barre.
+ *
+ * La planche ecrit « Tom / Administrateur ». C'est une donnee de maquette, pas
+ * une valeur : l'identite reelle vient de /api/me. Tant qu'elle n'est pas
+ * arrivee, on n'invente pas de nom.
+ */
+function renderCompteBarreLaterale() {
+  const nom = document.getElementById("sidebarIdentifiant");
+  const role = document.getElementById("sidebarRole");
+  const avatar = document.getElementById("sidebarAvatar");
+  if (!nom || !role || !avatar) return;
+  const identifiant = String(moi?.identifiant || "").trim();
+  nom.textContent = identifiant || "Session locale";
+  role.textContent = moi?.roleLibelle || (moi ? libelleRole(moi.role) : "\u2026");
+  avatar.textContent = (identifiant || "S").charAt(0).toUpperCase();
+}
+
+/**
+ * Les pastilles des entrees de nav.
+ *
+ * Un badge ne remplace pas le nombre : il le REPETE. Il porte donc un
+ * aria-label explicite, faute de quoi un lecteur d'ecran annoncerait
+ * « Commandes 5 » sans dire de quoi.
+ */
+function renderBadgesNav(compteurs) {
+  const poser = (groupe, valeur, alerte = false) => {
+    const badge = document.querySelector(`.nav-badge[data-badge="${groupe}"]`);
+    if (!badge) return;
+    const nombre = Number(valeur) || 0;
+    badge.textContent = nombre > 99 ? "99+" : String(nombre);
+    badge.hidden = nombre === 0;
+    badge.toggleAttribute("data-alerte", Boolean(alerte) && nombre > 0);
+    badge.setAttribute("aria-label", `${nombre} \u00e0 traiter`);
+  };
+  poser("commandes", compteurs.aTraiter);
+  poser("tournee", compteurs.livraisonsDuJour);
+  poser("stock", compteurs.aRecommander, true);
+  // Pas de pastille « Abonnements ». La planche en montre une, mais le compte
+  // correspondant vit dans le module Operations et n'est pas lisible d'ici.
+  // Un nombre faux coute plus cher qu'un nombre absent : elle sera branchee
+  // avec la planche Abonnements, pas devinee maintenant.
 }
 
 function filterNavigation(value) {
   const query = normalizeTextKey(value);
   const isSearching = Boolean(query);
-
-  document.querySelectorAll(".sidebar .nav-section").forEach(section => {
-    const categoryLabel = normalizeTextKey(section.querySelector(".nav-section-label")?.textContent || "");
-    const categoryMatches = isSearching && categoryLabel.includes(query);
-    let hasVisibleTab = false;
-
-    section.querySelectorAll(".tab").forEach(tab => {
-      const label = normalizeTextKey(tab.textContent || "");
-      const isMatch = !isSearching || categoryMatches || label.includes(query);
-      tab.classList.toggle("is-hidden-by-search", isSearching && !isMatch);
-      if (isMatch) hasVisibleTab = true;
-    });
-
-    section.classList.toggle("is-filtering", isSearching);
-    section.classList.toggle("is-hidden-by-search", isSearching && !hasVisibleTab);
-    if (isSearching && hasVisibleTab) setNavigationSectionOpen(section, true);
+  document.querySelectorAll(".sidebar .tab").forEach(entree => {
+    // Une entree repond pour elle ET pour les ecrans qu'elle absorbe : taper
+    // « bons » doit trouver « Bons de commande », qui n'a plus de ligne a soi.
+    const termes = [entree.textContent || "", ...libellesDuGroupe(entree.dataset.groupe)];
+    const trouve = !isSearching || termes.some(terme => normalizeTextKey(terme).includes(query));
+    entree.classList.toggle("is-hidden-by-search", isSearching && !trouve);
   });
-
-  if (!isSearching) syncNavigationSections(getInitialTab());
 }
 
 function navigateToFirstSearchMatch(value) {
@@ -251,14 +287,18 @@ function navigateToFirstSearchMatch(value) {
   if (!query) return;
 
   filterNavigation(value);
-  const sidebarTabs = Array.from(document.querySelectorAll(".sidebar .tab"));
-  const directMatch = sidebarTabs.find(tab => {
-    return normalizeTextKey(tab.textContent || "").includes(query);
+  // On vise d'abord un ECRAN dont le titre correspond : « bons » doit ouvrir
+  // Bons de commande, pas seulement mettre Commandes en evidence. A defaut,
+  // la premiere entree restee visible.
+  const ecran = Object.keys(titles).find(onglet => {
+    return mainTabs.has(onglet) && normalizeTextKey(titles[onglet].title).includes(query);
   });
-  const match = directMatch || sidebarTabs.find(tab => !tab.classList.contains("is-hidden-by-search"));
+  const entree = Array.from(document.querySelectorAll(".sidebar .tab"))
+    .find(tab => !tab.classList.contains("is-hidden-by-search"));
+  const cible = ecran || entree?.dataset.tab;
 
-  if (!match?.dataset.tab) return;
-  showTab(match.dataset.tab);
+  if (!cible) return;
+  showTab(cible);
   setNavigationSearchValue("");
   filterNavigation("");
 }
@@ -461,10 +501,6 @@ function bindUi() {
 
     const action = actionButton.dataset.action;
 
-    if (action === "toggle-nav-section") {
-      toggleNavSection(actionButton.dataset.navSectionTarget);
-      return;
-    }
     if (action === "refresh") runAction(actionButton, "Actualisation...", loadData);
     if (action === "go-tab") showTab(actionButton.dataset.targetTab || "journee");
     if (action === "open-more-menu") openMoreMenu();
@@ -578,12 +614,21 @@ function showTab(tabName, options = {}) {
   const nextTab = titles[tabName] && mainTabs.has(tabName) ? tabName : "journee";
 
   document.querySelectorAll(".page").forEach(page => page.classList.remove("active"));
+  // La rangee de pilules AVANT la boucle : elle cree les elements que la
+  // boucle doit ensuite marquer.
+  renderSousOnglets(nextTab);
+  const groupeActif = groupeDeLOnglet(nextTab);
   document.querySelectorAll("[data-tab]").forEach(tab => {
-    const isActive = tab.dataset.tab === nextTab;
+    // Une entree de nav porte un groupe : elle s'allume pour les cinq ecrans
+    // de Commandes, pas pour le seul qui est ouvert. Tout le reste (pilules,
+    // barre mobile) se compare a l'onglet.
+    const isActive = tab.dataset.groupe ? tab.dataset.groupe === groupeActif : tab.dataset.tab === nextTab;
     tab.classList.toggle("active", isActive);
     tab.setAttribute("aria-selected", isActive ? "true" : "false");
   });
-  syncNavigationSections(nextTab);
+  // Parametres n'a plus de ligne dans la nav : c'est le bloc compte qui le
+  // signale, sinon rien n'indiquerait ou l'on est.
+  document.querySelector(".sidebar-compte")?.classList.toggle("active", nextTab === "parametres");
 
   // Bouton "Plus" : actif si l'utilisateur est sur une destination "overflow"
   const moreBtn = document.getElementById("mobile-tab-more");
@@ -1016,7 +1061,8 @@ function renderStats() {
   const recommendCount = lowStockCount + outStockCount;
 
   setText("statTotal", orderCounts.imported ?? orders.length ?? clients.length);
-  setText("statPreparable", orderCounts.preparable ?? orders.filter(order => ["importe", "stock_a_verifier"].includes(order.status) && order.canPrepare).length);
+  const preparable = orderCounts.preparable ?? orders.filter(order => ["importe", "stock_a_verifier"].includes(order.status) && order.canPrepare).length;
+  setText("statPreparable", preparable);
   setText("statDeliveryToday", deliveryToday);
   setText("statReadyDelivery", orderCounts.readyDelivery ?? orders.filter(order => order.status === "pret_livraison").length);
   setText("statInDelivery", orderCounts.inDelivery ?? orders.filter(order => order.status === "en_livraison").length);
@@ -1028,6 +1074,10 @@ function renderStats() {
   setText("statDelivered", delivered);
   setText("statProblems", problems);
   setText("statAlerts", alerts);
+
+  // Les pastilles de la barre laterale se nourrissent des memes compteurs :
+  // deux sources donneraient deux verites.
+  renderBadgesNav({ aTraiter: preparable, livraisonsDuJour: deliveryToday, aRecommander: recommendCount });
 
   const badge = document.getElementById("alertBadge");
   if (badge) {
@@ -3495,7 +3545,9 @@ function applyBrandImage(src) {
     ? `${defaultSrc}?v=${DEFAULT_BRAND_CACHE_VERSION}`
     : imageSrc;
 
-  document.querySelectorAll(".brand-logo, [data-brand-preview]").forEach(image => {
+  // .brand-logo a disparu avec l'image de la barre laterale : le mot-marque y
+  // est desormais du texte. Seul l'apercu de la page Parametres reste une image.
+  document.querySelectorAll("[data-brand-preview]").forEach(image => {
     image.src = effectiveSrc;
   });
   updateBrandImageStatus(!isDefault);
@@ -3736,6 +3788,7 @@ async function loadMoi() {
     // laisse `moi` a null, et renderComptes n'affiche simplement rien.
     moi = null;
   }
+  renderCompteBarreLaterale();
   renderComptes();
 }
 

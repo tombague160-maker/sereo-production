@@ -28,8 +28,8 @@ const DEBOUNCE_MS = 500;
 /** Ouvre l'application et va sur l'onglet des reglages de tournee. */
 async function ouvrirReglages(page) {
   await page.goto("/", { waitUntil: "networkidle" });
-  await page.evaluate(() =>
-    document.querySelectorAll(".sidebar .nav-section").forEach(s => s.classList.add("open")));
+  // La barre laterale n'a plus de section depliable : ses huit entrees
+  // sont toujours visibles, il n'y a plus rien a ouvrir avant de mesurer.
   await page.evaluate(id => { location.hash = "#" + id; }, ONGLET_REGLAGES);
   await page.waitForTimeout(600);
   const curseur = page.locator("#tourneeSpeedSlider");

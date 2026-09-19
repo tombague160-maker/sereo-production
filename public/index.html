@@ -137,8 +137,14 @@
   <div class="app">
     <h1 class="sr-only">Séréo — gestion locale du stock, des préparations et des livraisons</h1>
     <aside class="sidebar" aria-label="Navigation principale">
-      <div class="brand">
-        <img class="brand-logo" src="/brand/sereo-logo.svg?v=20260701" alt="SEREO" />
+      <!-- Planche « Barre laterale » : le mot-marque est du TEXTE vivant,
+           pas une image. Il suit la taille de police du systeme au lieu de
+           pixeliser, et il solde l'arbitrage « mot-marque SVG ». -->
+      <div class="marque" role="img" aria-label="Séréo">
+        <span class="marque-mot" aria-hidden="true">séréo</span>
+        <svg class="marque-sourire" viewBox="0 0 30 16" fill="none" aria-hidden="true">
+          <path d="M4 4c6 8 16 8 22 0" stroke="currentColor" stroke-width="5" stroke-linecap="round"></path>
+        </svg>
       </div>
 
       <label class="sidebar-search" for="menuSearch">
@@ -146,131 +152,78 @@
         <input id="menuSearch" type="search" placeholder="Rechercher" autocomplete="off" />
       </label>
 
-      <nav class="nav nav-categorized" aria-label="Sections">
-        <section class="nav-section open" data-nav-section data-nav-section-id="accueil">
-          <button class="nav-section-toggle" type="button" data-action="toggle-nav-section" data-nav-section-target="accueil" aria-expanded="true">
-            <span class="nav-section-label">Accueil</span>
-            <span class="nav-section-count">1</span>
-          </button>
-          <div class="nav-section-items">
-            <button id="tab-journee" class="tab active" type="button" role="tab" aria-selected="true" aria-controls="journee" data-tab="journee">
-              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-home"></use></svg></span>
-              <span>Tableau de bord</span>
-            </button>
-          </div>
-        </section>
-
-        <section class="nav-section" data-nav-section data-nav-section-id="commandes">
-          <button class="nav-section-toggle" type="button" data-action="toggle-nav-section" data-nav-section-target="commandes" aria-expanded="false">
-            <span class="nav-section-label">Commandes</span>
-            <span class="nav-section-count">6</span>
-          </button>
-          <div class="nav-section-items">
-            <button id="tab-commande-client" class="tab" type="button" role="tab" aria-selected="false" aria-controls="commande-client" data-tab="commande-client">
-              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-receipt"></use></svg></span>
-              <span>Commande client</span>
-            </button>
-            <button id="tab-commandes-jour" class="tab" type="button" role="tab" aria-selected="false" aria-controls="commandes-jour" data-tab="commandes-jour">
-              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-clipboard-list"></use></svg></span>
-              <span>Commandes du jour</span>
-            </button>
-            <button id="tab-abonnements" class="tab" type="button" role="tab" aria-selected="false" aria-controls="abonnements" data-tab="abonnements"><span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-bell"></use></svg></span><span>Abonnements</span></button>
-            <button id="tab-commandes-planifiees" class="tab" type="button" role="tab" aria-selected="false" aria-controls="commandes-planifiees" data-tab="commandes-planifiees">
-              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-bell"></use></svg></span>
-              <span>Commandes planifiées</span>
-            </button>
-            <button id="tab-bons-commande" class="tab" type="button" role="tab" aria-selected="false" aria-controls="bons-commande" data-tab="bons-commande">
-              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-receipt"></use></svg></span>
-              <span>Bons de commande</span>
-            </button>
-            <button id="tab-commandes-livrees" class="tab" type="button" role="tab" aria-selected="false" aria-controls="commandes-livrees" data-tab="commandes-livrees">
-              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-clipboard-list"></use></svg></span>
-              <span>Commandes livrées</span>
-            </button>
-          </div>
-        </section>
-
-        <section class="nav-section" data-nav-section data-nav-section-id="livraison">
-          <button class="nav-section-toggle" type="button" data-action="toggle-nav-section" data-nav-section-target="livraison" aria-expanded="false">
-            <span class="nav-section-label">Livraison</span>
-            <span class="nav-section-count">2</span>
-          </button>
-          <div class="nav-section-items">
-            <button id="tab-preparation" class="tab" type="button" role="tab" aria-selected="false" aria-controls="preparation" data-tab="preparation">
-              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-clipboard-list"></use></svg></span>
-              <span>Préparation</span>
-            </button>
-            <button id="tab-livreur" class="tab" type="button" role="tab" aria-selected="false" aria-controls="livreur" data-tab="livreur">
-              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-truck"></use></svg></span>
-              <span>Livraison</span>
-            </button>
-          </div>
-        </section>
-
-        <section id="nav-section-stock" class="nav-section" data-nav-section data-nav-section-id="stock">
-          <button class="nav-section-toggle" type="button" data-action="toggle-nav-section" data-nav-section-target="stock" aria-expanded="false">
-            <span class="nav-section-label">Stock</span>
-            <span class="nav-section-count">2</span>
-          </button>
-          <div class="nav-section-items">
-            <button id="tab-stock" class="tab" type="button" role="tab" aria-selected="false" aria-controls="stock" data-tab="stock">
-              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-box"></use></svg></span>
-              <span>Stock / Inventaire</span>
-            </button>
-            <button id="tab-recommande" class="tab" type="button" role="tab" aria-selected="false" aria-controls="recommande" data-tab="recommande">
-              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-star"></use></svg></span>
-              <span>À recommander</span>
-            </button>
-          </div>
-        </section>
-
-        <section class="nav-section" data-nav-section data-nav-section-id="clients">
-          <button class="nav-section-toggle" type="button" data-action="toggle-nav-section" data-nav-section-target="clients" aria-expanded="false">
-            <span class="nav-section-label">Clients</span>
-            <span class="nav-section-count">2</span>
-          </button>
-          <div class="nav-section-items">
-            <button id="tab-crm" class="tab" type="button" role="tab" aria-selected="false" aria-controls="crm" data-tab="crm">
-              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-home"></use></svg></span>
-              <span>CRM</span>
-            </button>
-            <button id="tab-relances" class="tab" type="button" role="tab" aria-selected="false" aria-controls="relances" data-tab="relances">
-              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-bell"></use></svg></span>
-              <span>Rappels</span>
-            </button>
-          </div>
-        </section>
-
-        <section class="nav-section" data-nav-section data-nav-section-id="analyse">
-          <button class="nav-section-toggle" type="button" data-action="toggle-nav-section" data-nav-section-target="analyse" aria-expanded="false">
-            <span class="nav-section-label">Analyse</span>
-            <span class="nav-section-count">2</span>
-          </button>
-          <div class="nav-section-items">
-            <button id="tab-statistiques" class="tab" type="button" role="tab" aria-selected="false" aria-controls="statistiques" data-tab="statistiques">
-              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-star"></use></svg></span>
-              <span>Statistiques</span>
-            </button>
-            <button id="tab-exports" class="tab" type="button" role="tab" aria-selected="false" aria-controls="exports" data-tab="exports">
-              <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-receipt"></use></svg></span>
-              <span>Exports</span>
-            </button>
-          </div>
-        </section>
+      <!-- HUIT entrees plates. Mesure sur les 49 planches de l'export :
+           zero accordeon, zero groupe repliable. Rien ne se deplie ici.
+           Les onglets qu'une entree absorbe reparaissent en pilules. -->
+      <nav class="nav nav-plate" role="tablist" aria-label="Sections">
+        <button id="nav-journee" class="tab active" type="button" role="tab" aria-selected="true" aria-controls="journee" data-tab="journee" data-groupe="journee">
+          <svg class="nav-icone" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          <span class="nav-libelle">Tableau de bord</span>
+          <span class="nav-badge" data-badge="journee" hidden></span>
+        </button>
+        <button id="nav-commandes" class="tab" type="button" role="tab" aria-selected="false" aria-controls="commandes-jour" data-tab="commandes-jour" data-groupe="commandes">
+          <svg class="nav-icone" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 8a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v8a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4zM8 10h8M8 14h5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          <span class="nav-libelle">Commandes</span>
+          <span class="nav-badge" data-badge="commandes" hidden></span>
+        </button>
+        <button id="nav-preparation" class="tab" type="button" role="tab" aria-selected="false" aria-controls="preparation" data-tab="preparation" data-groupe="preparation">
+          <svg class="nav-icone" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 4h9l5 5v11H5zM14 4v5h5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          <span class="nav-libelle">Préparation</span>
+          <span class="nav-badge" data-badge="preparation" hidden></span>
+        </button>
+        <button id="nav-tournee" class="tab" type="button" role="tab" aria-selected="false" aria-controls="livreur" data-tab="livreur" data-groupe="tournee">
+          <svg class="nav-icone" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 7h10v9H3zM13 10h4l3 3v3h-7zM5 18a2 2 0 1 0 4 0 2 2 0 1 0-4 0M15 18a2 2 0 1 0 4 0 2 2 0 1 0-4 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          <span class="nav-libelle">Tournée</span>
+          <span class="nav-badge" data-badge="tournee" hidden></span>
+        </button>
+        <button id="nav-abonnements" class="tab" type="button" role="tab" aria-selected="false" aria-controls="abonnements" data-tab="abonnements" data-groupe="abonnements">
+          <svg class="nav-icone" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 9a5 5 0 0 1 5-5h6l-2-2m6 8a5 5 0 0 1-5 5H8l2 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          <span class="nav-libelle">Abonnements</span>
+          <span class="nav-badge" data-badge="abonnements" hidden></span>
+        </button>
+        <button id="nav-stock" class="tab" type="button" role="tab" aria-selected="false" aria-controls="stock" data-tab="stock" data-groupe="stock">
+          <svg class="nav-icone" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3 3 8v8l9 5 9-5V8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          <span class="nav-libelle">Stock</span>
+          <span class="nav-badge" data-badge="stock" hidden></span>
+        </button>
+        <button id="nav-clients" class="tab" type="button" role="tab" aria-selected="false" aria-controls="crm" data-tab="crm" data-groupe="clients">
+          <svg class="nav-icone" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8.6 8a3.4 3.4 0 1 0 6.8 0 3.4 3.4 0 1 0-6.8 0M5 20c0-3.5 3.1-5.5 7-5.5s7 2 7 5.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          <span class="nav-libelle">Clients</span>
+          <span class="nav-badge" data-badge="clients" hidden></span>
+        </button>
+        <button id="nav-analyse" class="tab" type="button" role="tab" aria-selected="false" aria-controls="statistiques" data-tab="statistiques" data-groupe="analyse">
+          <svg class="nav-icone" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 19V11M12 19V5M19 19v-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          <span class="nav-libelle">Analyse</span>
+          <span class="nav-badge" data-badge="analyse" hidden></span>
+        </button>
       </nav>
 
-      <div class="sidebar-visual" aria-hidden="true">
-        <img src="/brand/sereo-sidebar-bg.svg" alt="" />
-      </div>
+      <!-- Le decor de fond (.sidebar-visual) a ete RETIRE, pas re-masque.
+           Il etait deja cache par une regle CSS ; la purge des regles de la
+           barre l'a emportee, et le blob orange est reapparu a l'ecran. Aucun
+           banc ne l'a vu : il porte aria-hidden et ne contient aucun texte,
+           donc ni le contraste ni le texte coupe ne le regardent. Un element
+           dont la seule raison d'etre est d'etre invisible n'a pas de raison
+           d'etre : la planche ne le montre pas, il quitte le balisage. -->
 
-      <button class="sidebar-settings" type="button" data-action="go-tab" data-target-tab="parametres" aria-label="Paramètres">
-        <span class="tab-icon" aria-hidden="true"><svg class="icon"><use href="#icon-settings"></use></svg></span>
-        <span>Paramètres</span>
+      <!-- Le bloc compte. La planche ecrit « Tom / Administrateur » : c'est
+           une donnee d'illustration, pas une valeur -- elle vient de /api/me.
+           « Parametres par l'engrenage » : la ligne Parametres quitte la nav. -->
+      <button class="sidebar-compte" type="button" data-action="go-tab" data-target-tab="parametres" aria-label="Paramètres et compte">
+        <span class="sidebar-avatar" id="sidebarAvatar" aria-hidden="true"></span>
+        <span class="sidebar-compte-corps">
+          <span class="sidebar-compte-nom" id="sidebarIdentifiant">…</span>
+          <span class="sidebar-compte-role" id="sidebarRole">…</span>
+        </span>
+        <svg class="sidebar-engrenage" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"></circle>
+          <path d="M12 4v2M12 18v2M4 12h2M18 12h2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M17.7 6.3l-1.4 1.4M7.7 16.3l-1.4 1.4" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+        </svg>
       </button>
 
       <button class="sidebar-version" type="button" data-action="open-version-modal" aria-label="Voir la version et les nouveautes" title="Cliquer pour voir les nouveautés">
-        <span class="sidebar-version-label">Version</span>
-        <span class="sidebar-version-value" id="sidebar-version-value">…</span>
+        <span class="sidebar-version-label">Version <span class="sidebar-version-value" id="sidebar-version-value">…</span></span>
+        <span class="sidebar-version-etat" id="sidebarVersionEtat">À jour</span>
       </button>
     </aside>
 
@@ -372,6 +325,12 @@
           </button>
         </div>
       </header>
+
+      <!-- Les onglets qu'une entree de nav absorbe, rendus par app.js pour le
+           SEUL groupe actif. La rangee reste masquee quand le groupe n'a qu'un
+           ecran. Forme : les pilules de filtre de la charte, que la planche
+           donne aux cinq listes de commandes fusionnees. -->
+      <div id="sousOnglets" class="filtre-pilules sous-onglets" role="tablist" aria-label="Vues" hidden></div>
 
       <section id="journee" class="page active" role="tabpanel" aria-labelledby="tab-journee">
         <div class="op-welcome"><div><span class="op-eyebrow">SÉRÉO · VOTRE ACTIVITÉ</span><h2>Une journée bien organisée.</h2><p class="muted">Vos ventes, vos clients, vos prochaines livraisons.</p></div><div class="op-toolbar"><span id="opUpdated" class="muted" role="status" title="Actualisation automatique toutes les 60 secondes">Chargement…</span><button class="button secondary" type="button" data-op="refresh-operations">Actualiser</button></div></div>

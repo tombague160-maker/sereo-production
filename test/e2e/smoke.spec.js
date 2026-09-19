@@ -12,7 +12,9 @@ test.describe("Sereo smoke tests", () => {
 
   test("navigation vers Bons de commande affiche la liste ou empty state", async ({ page }) => {
     await page.goto("/");
-    await page.locator('[data-action="toggle-nav-section"][data-nav-section-target="commandes"]').click();
+    // Le chemin reel de la planche : l'entree Commandes ouvre le groupe, et
+    // les cinq listes qu'elle absorbe apparaissent en pilules sous le titre.
+    await page.locator("#nav-commandes").click();
     await page.locator("#tab-bons-commande").click();
     await expect(page.locator("#bons-commande")).toHaveClass(/active/);
     // Soit on a des cards, soit empty state "Aucune commande"

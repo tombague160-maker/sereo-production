@@ -107,3 +107,40 @@ export const titles = {
     subtitle: "Logo, thème, secteurs et base mobile de l'application."
   }
 };
+
+// Les HUIT entrees de la barre laterale, et les ecrans que chacune absorbe.
+//
+// La planche « Barre laterale » de l'export n'a que huit lignes, sans rien de
+// repliable. L'application en avait seize reparties en six groupes qui se
+// depliaient. Les seize ecrans existent toujours : ceux qu'une entree absorbe
+// se rejoignent par la rangee de pilules sous le titre de page.
+//
+// L'ordre des cles est l'ordre d'affichage ; le PREMIER onglet d'un groupe est
+// celui que l'entree ouvre.
+export const GROUPES_NAV = {
+  journee: ["journee"],
+  commandes: ["commandes-jour", "commande-client", "commandes-planifiees", "bons-commande", "commandes-livrees"],
+  preparation: ["preparation"],
+  tournee: ["livreur"],
+  abonnements: ["abonnements"],
+  stock: ["stock", "recommande"],
+  clients: ["crm", "relances"],
+  analyse: ["statistiques", "exports"]
+};
+
+// « parametres » n'appartient a aucun groupe : la planche le sort de la liste
+// et le confie a l'engrenage du bloc compte. Il reste un onglet valide.
+export const ONGLETS_HORS_NAV = new Set(["parametres"]);
+
+// Deux inventaires qui se contredisent en silence, c'est la panne qu'on ne
+// voit qu'a l'usage : un ecran sans chemin, ou une entree qui ouvre du vide.
+// La verification est donc faite au CHARGEMENT du module, pas dans un banc.
+const ongletsGroupes = Object.values(GROUPES_NAV).flat();
+const attendus = [...mainTabs].filter(onglet => !ONGLETS_HORS_NAV.has(onglet));
+const orphelins = attendus.filter(onglet => !ongletsGroupes.includes(onglet));
+const inconnus = ongletsGroupes.filter(onglet => !mainTabs.has(onglet));
+if (orphelins.length || inconnus.length) {
+  throw new Error(
+    `GROUPES_NAV incoherent -- sans entree : [${orphelins}] ; hors mainTabs : [${inconnus}]`
+  );
+}

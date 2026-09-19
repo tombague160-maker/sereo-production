@@ -106,15 +106,18 @@ for (const mode of ["light", "dark"]) {
     const page = await context.newPage();
     await page.goto("/", { waitUntil: "networkidle" });
 
-    // L'etat replie de l'accordeon n'a aucun rapport avec le contraste, mais il
-    // cache 13 onglets sur 14. On deplie tout avant de mesurer.
-    await page.evaluate(() => {
-      document.querySelectorAll(".sidebar .nav-section").forEach(s => s.classList.add("open"));
-    });
-    await page.waitForFunction(() => (
-      [...document.querySelectorAll(".tab")].filter(t => t.getBoundingClientRect().width > 0).length >= 10
-    ), null, { timeout: 15000 });
+    // La barre est plate : ses entrees sont visibles d'emblee, rien n'est a
+    // deplier. On attend qu'elles soient TOUTES rendues, sans citer combien :
+    // un nombre ecrit ici se perime a la premiere entree ajoutee ou retiree,
+    // et c'est exactement ce qui vient d'arriver au precedent (« au moins 10 »
+    // quand il y en avait 14, puis huit).
+    await page.waitForFunction(() => {
+      const toutes = document.querySelectorAll(".sidebar .tab");
+      return toutes.length > 0
+        && [...toutes].every(t => t.getBoundingClientRect().width > 0);
+    }, null, { timeout: 15000 });
 
+    const declarees = await page.locator(".sidebar .tab").count();
     const onglets = page.locator(".tab:visible");
     const total = await onglets.count();
     const defauts = [];
@@ -155,7 +158,10 @@ for (const mode of ["light", "dark"]) {
     }
 
     // Un zero ne vaut que si l'instrument a reellement balaye l'ensemble.
-    expect(total, "portee de la mesure").toBeGreaterThanOrEqual(10);
+    // La portee se mesure contre ce que la barre DECLARE, pas contre un
+    // nombre recopie : « toutes celles qui existent » ne se perime jamais.
+    expect(declarees, "la barre ne declare aucune entree").toBeGreaterThan(0);
+    expect(total, "portee de la mesure").toBeGreaterThanOrEqual(declarees);
     expect(defauts, `onglets sous ${SEUIL}:1`).toEqual([]);
 
     await context.close();
