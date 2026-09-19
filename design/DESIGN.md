@@ -864,6 +864,35 @@ vise les **lignes de liste**, pas les items de navigation.
 *Bancs : `charte-composants.spec.js`, 7 cas. Trois mutations, trois tuées.
 405 unitaires + 75 e2e.*
 
+### Les deux derniers ecarts mesurables du §4 — et les trois qui ne le sont pas
+
+**Le toast durait 3,5 s** là où la charte dit **4**. Un écart de 0,5 s que
+personne n'avait vu — *personne ne chronomètre un toast*. La durée est désormais
+une constante nommée, `TOAST_DUREE_MS`, donc mesurable depuis un banc.
+
+> ⚠ **L'erreur reste jusqu'au clic, et c'est un écart DÉLIBÉRÉ.** La charte dit
+> 4 s sans distinguer les types ; faire disparaître une erreur toute seule ferait
+> perdre l'information à qui regardait ailleurs. Le banc l'exige dans **ce**
+> sens-là, et refuserait qu'on la rende éphémère.
+
+**Les pilules de filtre avaient des coins carrés.** Hauteur conforme (44 desktop,
+48 mobile), mais **rayon 8** alors que le mot de la charte est « pilules ». Le
+banc a nommé l'adversaire : `:root[data-color-scheme="light"] .compact` à
+**(0,3,0)**, contre ma règle à (0,2,0) — *la spécificité l'emporte sur l'ordre,
+toujours*, même en fin de feuille.
+
+#### ⚪ Trois règles restent NON MESURABLES ici, et il faut le dire
+
+| règle | pourquoi |
+|---|---|
+| **Ligne de liste 64–72 px** | les listes sont vides : les clients viennent d'imports Excel, et `POST /api/clients` rend 404 |
+| **Marqueur de carte** | aucun marqueur ne se dessine sans client géolocalisé |
+| **« repliables plutôt que débordantes »** | c'est un **comportement**, pas une forme ; aucune mesure ne dit aujourd'hui si la rangée déborde |
+
+*Ce ne sont pas des conformités : ce sont des **non-jugés**. Les compter comme
+tenues serait exactement le zéro qui rassure que cette charte poursuit depuis
+deux jours.*
+
 ## 10. Guide pour l'agent
 
 - Toujours produire les deux modes (clair et sombre) avec les mêmes tokens ; lister les contrastes calculés.

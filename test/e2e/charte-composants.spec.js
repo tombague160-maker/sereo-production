@@ -221,3 +221,77 @@ test("charte §4 — la BARRE BASSE est translucide comme la charte le dit", asy
 
   await ctx.close();
 });
+
+test("charte §4 — les PILULES DE FILTRE sont des pilules de 44 px", async ({ browser }) => {
+  // « Pilules de filtre (secteurs, statuts) : hauteur 44 px, repliables plutot
+  // que debordantes. » La hauteur tenait deja ; le RAYON valait 8 -- une regle
+  // plus specifique que le bloc de forme leur imposait un coin carre, alors que
+  // le mot de la charte est « pilules ».
+  //
+  // ⚪ « repliables » n'est PAS juge ici : c'est un comportement, et aucune
+  //    mesure ne dit aujourd'hui si la rangee deborde. Nomme, pas fait a moitie.
+  test.setTimeout(180000);
+  const { ctx, page } = await ouvrir(browser, "desktop");
+  await page.evaluate(() => { location.hash = "#bons-commande"; });
+  await page.waitForTimeout(900);
+
+  const r = await page.evaluate(() =>
+    [...document.querySelectorAll(".bdc-status-filter, .active-filter")]
+      .filter(e => { const b = e.getBoundingClientRect(); return b.width > 10 && b.height > 6; })
+      .map(e => ({
+        nom: e.textContent.trim().slice(0, 16) || e.className,
+        h: Math.round(e.getBoundingClientRect().height),
+        rayon: Math.round(parseFloat(getComputedStyle(e).borderTopLeftRadius) || 0)
+      })));
+
+  expect(r.length, "aucune pilule de filtre mesuree").toBeGreaterThan(3);
+  const carrees = r.filter(p => p.rayon < p.h / 2 - TOL)
+    .map(p => `${p.nom} : rayon ${p.rayon} pour une hauteur de ${p.h}`);
+  const mauvaises = r.filter(p => Math.abs(p.h - 44) > TOL)
+    .map(p => `${p.nom} : ${p.h}px au lieu de 44`);
+
+  console.log(`[forme/desktop] ${r.length} pilule(s) de filtre, ${new Set(carrees).size} non-pilule(s)`);
+  expect([...new Set(carrees)], "des pilules de filtre ont des coins carres").toEqual([]);
+  expect([...new Set(mauvaises)], "hauteur de pilule de filtre hors charte").toEqual([]);
+
+  await ctx.close();
+});
+
+test("charte §4 — le TOAST vit 4 s, en bas de l'ecran", async ({ browser }) => {
+  // « Toast : bas d'ecran, 4 s, une action possible (Annuler). »
+  // Le code disait 3500 ms -- un ecart de 0,5 s que personne n'avait mesure,
+  // parce que personne ne chronometre un toast.
+  //
+  // ⚠ L'ERREUR EST UN ECART DELIBERE : elle reste jusqu'au clic. Faire
+  //    disparaitre une erreur toute seule ferait perdre l'information a qui
+  //    regardait ailleurs. Le banc l'exige donc dans CE sens-la, et refuserait
+  //    qu'on la rende ephemere.
+  test.setTimeout(180000);
+  const { ctx, page } = await ouvrir(browser, "mobile");
+
+  const r = await page.evaluate(() => {
+    const region = document.getElementById("toastRegion");
+    if (!region) return null;
+    const cs = getComputedStyle(region);
+    return {
+      position: cs.position,
+      bas: Math.round(parseFloat(cs.bottom) || 0),
+      haut: cs.top
+    };
+  });
+  expect(r, "aucune region de toast").not.toBeNull();
+  expect(r.position, "la region de toast doit etre fixe").toBe("fixed");
+  expect(r.bas >= 0 && r.bas < 200, `region de toast a ${r.bas}px du bas : ce n'est pas le bas de l'ecran`).toBe(true);
+
+  // La duree se lit dans la source : elle n'est observable autrement qu'en
+  // attendant quatre secondes a chaque execution, ce qui rendrait le banc
+  // lent pour ne rien apprendre de plus.
+  const source = await page.evaluate(() => fetch("/js/app.js").then(x => x.text()));
+  const sansCommentaires = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+  expect(sansCommentaires, "la duree du toast n'est pas celle de la charte")
+    .toMatch(/TOAST_DUREE_MS\s*=\s*4000/);
+  expect(sansCommentaires, "l'erreur doit rester jusqu'au clic : pas de minuterie dessus")
+    .toMatch(/type\s*!==\s*"error"/);
+
+  await ctx.close();
+});

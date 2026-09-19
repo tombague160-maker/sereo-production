@@ -9335,3 +9335,30 @@ textarea::placeholder {
   overflow-wrap: anywhere;
   line-height: 1.2;
 }
+
+/* LES PILULES DE FILTRE SONT DES PILULES.
+ *
+ * Charte §4 : « Pilules de filtre (secteurs, statuts) : hauteur 44 px ».
+ * Mesure du 18/09 : hauteur 44 en desktop et 48 en mobile -- conforme, et
+ * coherent avec la regle des boutons. Mais RAYON 8, alors que le mot de la
+ * charte est « pilules ». Une regle plus specifique que le bloc de forme leur
+ * imposait un coin carre.
+ *
+ * ⚪ « repliables plutot que debordantes » n'est PAS traite ici : c'est un
+ *    comportement, pas une forme, et aucune mesure ne dit aujourd'hui si la
+ *    rangee deborde -- le banc de texte coupe est vert, mais il juge le TEXTE,
+ *    pas la rangee. Nomme dans la charte plutot que fait a moitie. */
+/* La classe .compact est l adversaire, et le banc l a NOMMEE :
+ *     :root[data-color-scheme="light"] .compact -> 8px     (0,3,0)
+ * Ma premiere redaction pesait (0,2,0) et perdait malgre sa place en fin de
+ * feuille -- la specificite l emporte sur l ordre, toujours. On reprend donc
+ * .button.compact pour monter a (0,4,0). */
+:root[data-color-scheme] .button.compact.bdc-status-filter,
+:root[data-color-scheme] .button.compact.active-filter,
+:root[data-color-scheme] .bdc-status-filter,
+:root[data-color-scheme] .active-filter,
+:root:not([data-color-scheme]) .button.compact.bdc-status-filter,
+:root:not([data-color-scheme]) .bdc-status-filter,
+:root:not([data-color-scheme]) .active-filter {
+  border-radius: 999px;
+}
