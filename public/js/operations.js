@@ -53,6 +53,34 @@ const status = (value) =>
     a_reprogrammer: "À reprogrammer",
     livre: "Livrée",
   })[value] || value;
+/** L'etat d'un abonnement : un disque et un mot. */
+const etatAbonnement = (sub) =>
+  sub.status === "active"
+    ? { cle: "actif", mot: "Actif", pill: "pill-ok" }
+    : sub.status === "paused"
+      ? { cle: "pause", mot: "En pause", pill: "pill-warning" }
+      : { cle: "arrete", mot: "Arrêté", pill: "pill-blue" };
+
+/** Le detail d'un abonnement, en sheet : les faits, le panier, les actions. */
+function openSubDetail(id) {
+  const dialogue = document.getElementById("abonnementDetailDialog");
+  const corps = document.getElementById("abonnementDetailCorps");
+  const s = data.subscriptions.items.find((item) => item.id === id);
+  if (!dialogue || !corps || !s || typeof dialogue.showModal !== "function") return;
+  const client = data.crmClients.find((c) => String(c.id) === String(s.clientId));
+  const next = data.subscriptions.occurrences.find((o) => o.subscriptionId === s.id);
+  const etat = etatAbonnement(s);
+  document.getElementById("abonnementDetailTitre").textContent = name(client || {}) || "Client introuvable";
+  // .subscription-card : le dispatcher y desactive les boutons freres pendant une action.
+  corps.innerHTML = `<div class="subscription-card"><p class="arret-adresse"><span>${h(client?.ville || "Adresse à compléter")}</span><span class="pill ${etat.pill}">${h(etat.mot)}</span></p><p class="sub-basket">${h(products(s.products))}</p><div class="sub-facts"><div><small>Fréquence</small><strong>${h(frequency(s))}</strong></div><div><small>Prochaine échéance</small><strong>${h(next ? day(next.date) : "—")}</strong></div><div><small>Rappel</small><strong>${s.reminderDays} jour(s) avant</strong></div><div><small>Panier prévu</small><strong>${h(money(s.products.reduce((sum, p) => sum + p.totalLigne, 0)))}</strong></div></div><div class="card-actions">${button("edit-sub", "Modifier", `data-id="${h(s.id)}"`, "primary")}${button("toggle-sub", s.status === "active" ? "Mettre en pause" : "Réactiver", `data-id="${h(s.id)}"`)}</div></div>`;
+  dialogue.showModal();
+}
+
+function closeSubDetail() {
+  const dialogue = document.getElementById("abonnementDetailDialog");
+  if (dialogue && dialogue.open) dialogue.close();
+}
+
 export function initOperations(api) {
   context = api;
   document.addEventListener("click", async (event) => {
@@ -60,7 +88,10 @@ export function initOperations(api) {
     if (!el) return;
     const action = el.dataset.op;
     if (action === "new-sub") return openEditor();
-    if (action === "edit-sub") return openEditor(el.dataset.id);
+    if (action === "open-sub-detail") return openSubDetail(el.dataset.id);
+    if (action === "close-sub-detail") return closeSubDetail();
+    // L'editeur est un second <dialog> : on ferme le sheet avant de l'ouvrir.
+    if (action === "edit-sub") { closeSubDetail(); return openEditor(el.dataset.id); }
     if (action === "view-order") return;
     if (action === "close-sub")
       return document.getElementById("subscriptionDialog").close();
@@ -89,6 +120,7 @@ export function initOperations(api) {
     related.forEach((button) => (button.disabled = true));
     try {
       if (action === "toggle-sub") {
+        closeSubDetail();
         const sub = data.subscriptions.items.find(
           (s) => s.id === el.dataset.id,
         );
@@ -302,7 +334,12 @@ function renderSubscriptions() {
         const next = data.subscriptions.occurrences.find(
           (o) => o.subscriptionId === s.id,
         );
-        return `<article class="subscription-card"><div class="subscription-top"><span class="op-avatar">${h(name(client || {}).slice(0, 1) || "?")}</span><div><h3>${h(name(client || {}) || "Client introuvable")}</h3><span class="muted">${h(client?.ville || "Adresse à compléter")}</span></div><span class="status-chip">${s.status === "active" ? "Actif" : s.status === "paused" ? "En pause" : "Arrêté"}</span></div><p class="sub-basket">${h(products(s.products))}</p><div class="sub-facts"><div><small>Fréquence</small><strong>${h(frequency(s))}</strong></div><div><small>Prochaine échéance</small><strong>${h(next ? day(next.date) : "—")}</strong></div><div><small>Rappel</small><strong>${s.reminderDays} jour(s) avant</strong></div><div><small>Panier prévu</small><strong>${h(money(s.products.reduce((sum, p) => sum + p.totalLigne, 0)))}</strong></div></div><div class="quick-actions">${button("edit-sub", "Modifier", `data-id="${h(s.id)}"`)}${button("toggle-sub", s.status === "active" ? "Mettre en pause" : "Réactiver", `data-id="${h(s.id)}"`)}</div></article>`;
+        // Charte §4, ligne de liste : quatre informations -- l'etat (disque),
+        // le nom, « ville · frequence », le badge. Le reste (echeance, rappel,
+        // panier, actions) vit dans le sheet que la ligne ouvre.
+        const etat = etatAbonnement(s);
+        const detail = [client?.ville ? context.formatSectorLabel(client.ville) : "", frequency(s)].filter(Boolean).join(" · ");
+        return `<article class="commande-ligne abonnement-ligne"><button class="commande-ligne-main" type="button" data-op="open-sub-detail" data-id="${h(s.id)}" aria-label="Ouvrir ${h(name(client || {}) || "Client introuvable")}, ${h(etat.mot)}"><span class="etat-commande etat-commande--${etat.cle}" aria-hidden="true"></span><span class="commande-ligne-corps"><strong>${h(name(client || {}) || "Client introuvable")}</strong><span>${h(detail || "Adresse à compléter")}</span></span><span class="pill ${etat.pill}">${h(etat.mot)}</span></button></article>`;
       })
       .join("") ||
     empty(

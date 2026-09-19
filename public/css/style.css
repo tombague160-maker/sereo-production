@@ -10388,3 +10388,56 @@ textarea::placeholder {
   font-weight: 700;
   color: var(--v8-principal);
 }
+
+/* UNE LIGNE PAR ABONNEMENT -- la meme ligne que les commandes. Trois etats :
+ * actif (coche), en pause (deux barres), arrete (cercle vide, eteint). */
+#subscriptionList.subscription-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.etat-commande--actif::before {
+  width: 7px;
+  height: 13px;
+  border: solid currentColor;
+  border-width: 0 2.5px 2.5px 0;
+  transform: translateY(-2px) rotate(45deg);
+}
+
+.etat-commande--pause {
+  background: var(--v8-peche-claire);
+  color: var(--v8-alerte);
+}
+
+.etat-commande--pause::before {
+  width: 12px;
+  height: 14px;
+  border: solid currentColor;
+  border-width: 0 3.5px 0 3.5px;
+}
+
+.etat-commande--arrete {
+  background: var(--v8-surface-basse);
+  color: var(--v8-texte-secondaire);
+}
+
+.etat-commande--arrete::before {
+  width: 15px;
+  height: 15px;
+  border: 2.5px solid currentColor;
+  border-radius: 50%;
+}
+
+.sheet-corps .sub-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+  margin: 12px 0;
+}
+
+.sheet-corps .sub-facts small {
+  display: block;
+  font-size: 12px;
+  color: var(--v8-texte-secondaire);
+}

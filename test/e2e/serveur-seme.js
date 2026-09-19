@@ -74,7 +74,15 @@ function jeuDeDonnees() {
         arret(commandes[5], "pret_livraison")
       ]
     }],
-    subscriptions: []
+    // Trois abonnements, un par etat. La forme est celle que lib/operations-api.js ecrit.
+    subscriptions: [
+      { id: "sub-1", clientId: tilleuls.id, status: "active", startDate: AUJOURDHUI, frequency: { unit: "days", interval: 14 }, reminderDays: 2, notes: "",
+        products: [{ stockId: "st-CH-L", code: "CH-L", nom: "Changes taille L", quantite: 4, prixUnitaire: 12, totalLigne: 48 }] },
+      { id: "sub-2", clientId: bellevue.id, status: "paused", startDate: AUJOURDHUI, frequency: { unit: "months", interval: 1 }, reminderDays: 3, notes: "",
+        products: [{ stockId: "st-ALE", code: "ALE", nom: "Alèses", quantite: 10, prixUnitaire: 5, totalLigne: 50 }] },
+      { id: "sub-3", clientId: pharma.id, status: "stopped", startDate: AUJOURDHUI, frequency: { unit: "days", interval: 7 }, reminderDays: 1, notes: "",
+        products: [{ stockId: "st-CH-L", code: "CH-L", nom: "Changes taille L", quantite: 2, prixUnitaire: 12, totalLigne: 24 }] }
+    ]
   };
 }
 

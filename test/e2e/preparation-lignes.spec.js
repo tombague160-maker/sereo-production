@@ -171,7 +171,7 @@ test("la ligne OUVRE un sheet (coins 28, poignee en mobile) qui porte les action
   expect(await page.evaluate(() => document.getElementById("commandeDetailDialog").open), "Echap doit fermer").toBe(false);
   await page.locator("#preparationList .commande-ligne-main").first().click();
   await page.waitForTimeout(200);
-  await page.locator(".sheet-fermer").click();
+  await page.locator("#commandeDetailDialog .sheet-fermer").click();
   await page.waitForTimeout(200);
   expect(await page.evaluate(() => document.getElementById("commandeDetailDialog").open), "✕ doit fermer").toBe(false);
   await ctx.close();

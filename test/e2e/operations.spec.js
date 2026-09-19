@@ -189,28 +189,38 @@ test.describe("Abonnements et pilotage", () => {
       .getByRole("button", { name: "Enregistrer l’abonnement" })
       .click();
     await expect(page.locator("#subscriptionDialog")).not.toBeVisible();
-    await expect(page.locator(".subscription-card")).toContainText(
+    // Depuis le 19/09 (planche Preparation) l'abonnement est une LIGNE ; le
+    // panier, les faits et les actions sont dans le sheet qu'elle ouvre.
+    const ligne = page.locator("#subscriptionList .abonnement-ligne").first();
+    const ouvrirLeSheet = async () => {
+      await ligne.locator(".commande-ligne-main").click();
+      await expect(page.locator("#abonnementDetailDialog")).toBeVisible();
+    };
+    await ouvrirLeSheet();
+    await expect(page.locator("#abonnementDetailDialog .subscription-card")).toContainText(
       "3 × Changes taille L · 2 × Alèses",
     );
-    await expect(page.locator(".subscription-card")).toContainText("46,00");
+    await expect(page.locator("#abonnementDetailDialog .subscription-card")).toContainText("46,00");
     await page.reload();
-    await expect(page.locator(".subscription-card")).toContainText(
-      "Toutes les 2 semaines",
-    );
+    await expect(ligne).toContainText("Toutes les 2 semaines");
+    await ouvrirLeSheet();
     await page.getByRole("button", { name: "Mettre en pause" }).click();
-    await expect(page.locator(".subscription-card")).toContainText("En pause");
+    await expect(page.locator("#abonnementDetailDialog")).not.toBeVisible();
+    await expect(ligne).toContainText("En pause");
     await expect(page.locator("#subscriptionReminders")).toContainText(
       "Tous les rappels sont à jour",
     );
+    await ouvrirLeSheet();
     await page.getByRole("button", { name: "Réactiver" }).click();
+    await expect(ligne).toContainText("Actif");
+    await ouvrirLeSheet();
     await page.getByRole("button", { name: "Modifier", exact: true }).click();
+    await expect(page.locator("#abonnementDetailDialog")).not.toBeVisible();
     await page.locator("#subFrequency").selectOption("10");
     await page
       .getByRole("button", { name: "Enregistrer l’abonnement" })
       .click();
-    await expect(page.locator(".subscription-card")).toContainText(
-      "Tous les 10 jours",
-    );
+    await expect(ligne).toContainText("Tous les 10 jours");
     await page
       .locator("#subscriptionReminders")
       .getByRole("button", { name: "Créer la commande" })
