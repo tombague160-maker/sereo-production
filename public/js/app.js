@@ -475,6 +475,10 @@ function bindUi() {
     }
     if (action === "select-color-scheme") applyColorScheme(actionButton.dataset.colorScheme, { notifyUser: true });
     if (action === "reset-brand-image") resetBrandImage();
+    if (action === "deplier-secteurs") {
+      document.getElementById("preparationSectorPills")?.classList.toggle("filtre-pilules--depliee");
+      ajusterRepliDesSecteurs();
+    }
     if (action === "open-commande-detail") openCommandeDetail(actionButton.dataset.orderId);
     if (action === "close-commande-detail") closeCommandeDetail();
     if (action === "start-preparation") runAction(actionButton, "Démarrage...", () => startPreparation(actionButton.dataset.orderId));
@@ -1955,7 +1959,42 @@ function renderPreparationFilterOptions() {
   const current = preparationFilter.sector;
   const pilule = (valeur, libelle) =>
     `<button class="button secondary compact filtre-pilule${valeur === current ? " active-filter" : ""}" type="button" data-sector="${escapeAttribute(valeur)}" aria-pressed="${valeur === current}">${escapeHtml(libelle)}</button>`;
-  conteneur.innerHTML = pilule("all", "Tous") + sectors.map(sector => pilule(sector, formatSectorLabel(sector))).join("");
+  // Le secteur CHOISI passe en tete, juste apres « Tous » : la rangee se
+  // replie a deux rangs, et un filtre actif relegue au cinquieme rang
+  // disparaitrait -- on ne cache jamais ce que l'utilisateur a choisi.
+  // (Premiere version : une garde qui depliait la rangee. Elle ne servait
+  // jamais -- apres un choix, la rangee etait deja depliee -- et une mutation
+  // l'a montre en survivant.)
+  const ordonnes = current === "all" ? sectors : [current, ...sectors.filter(sector => sector !== current)];
+  conteneur.innerHTML = pilule("all", "Tous") + ordonnes.map(sector => pilule(sector, formatSectorLabel(sector))).join("");
+  ajusterRepliDesSecteurs();
+}
+
+/**
+ * « Pilules de filtre : repliables plutot que debordantes » (charte §4).
+ *
+ * Mesure du 19/09 avec dix secteurs : la rangee prenait CINQ rangs, 272 px
+ * sur un ecran de 844 -- un tiers de l'ecran pour des filtres. Elle ne
+ * debordait pas horizontalement (elle passe a la ligne), mais elle n'etait
+ * pas repliable non plus.
+ *
+ * Le bouton n'apparait QUE si la rangee depasse vraiment son plafond : on le
+ * MESURE dans la page (scrollHeight vs clientHeight), on ne le deduit pas du
+ * nombre de secteurs -- la largeur d'un libelle decide autant que leur compte.
+ */
+function ajusterRepliDesSecteurs() {
+  const conteneur = document.getElementById("preparationSectorPills");
+  const bouton = document.getElementById("preparationSectorPlus");
+  if (!conteneur || !bouton) return;
+  const deplie = conteneur.classList.contains("filtre-pilules--depliee");
+  // On mesure TOUJOURS a l'etat replie : deplie, il n'y a plus rien a voir.
+  conteneur.classList.remove("filtre-pilules--depliee");
+  const depasse = conteneur.scrollHeight - conteneur.clientHeight > 1;
+  conteneur.classList.toggle("filtre-pilules--depliee", deplie);
+  bouton.hidden = !depasse;
+  const ouvert = conteneur.classList.contains("filtre-pilules--depliee");
+  bouton.setAttribute("aria-expanded", String(ouvert));
+  bouton.textContent = ouvert ? "Moins de secteurs" : "Tous les secteurs";
 }
 
 function renderPreparation() {

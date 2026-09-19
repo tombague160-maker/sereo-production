@@ -10580,3 +10580,45 @@ textarea::placeholder {
   background: var(--v8-vert-clair);
   color: var(--v8-principal-appuye);
 }
+
+/* « Pilules de filtre : repliables plutot que debordantes » (charte §4).
+ * Plafond a DEUX rangs ; le bouton ne parait que si la rangee depasse
+ * vraiment -- mesure dans la page, pas deduite du nombre de secteurs. */
+.filtre-pilules-enveloppe {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  margin-bottom: 14px;
+}
+
+.filtre-pilules-enveloppe .filtre-pilules {
+  margin-bottom: 0;
+}
+
+/* 2 rangs = deux hauteurs de pilule + un interligne. */
+.filtre-pilules--repliee {
+  max-height: calc(2 * 44px + 8px);
+  overflow: hidden;
+}
+
+@media (max-width: 920px) {
+  .filtre-pilules--repliee {
+    max-height: calc(2 * 48px + 8px);
+  }
+}
+
+.filtre-pilules--depliee {
+  max-height: none;
+  overflow: visible;
+}
+
+:root[data-color-scheme] .filtre-pilules-enveloppe .button.compact.filtre-pilules-plus,
+:root:not([data-color-scheme]) .filtre-pilules-enveloppe .button.compact.filtre-pilules-plus {
+  width: auto;
+  flex: 0 0 auto;
+  border-radius: 999px;
+}
+
+.filtre-pilules-plus[hidden] {
+  display: none;
+}
