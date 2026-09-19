@@ -9574,3 +9574,454 @@ textarea::placeholder {
   min-width: 44px;
   padding: 0;
 }
+
+/* L'ECRAN DU LIVREUR -- planche Main.png, posee le 19/09.
+ *
+ * Sur la route, un seul ecran compte : l'en-tete dit ou on en est (« 3 sur 8 »,
+ * la barre), la carte de l'arret dit ou on va et quoi decharger, et les trois
+ * gestes du quotidien sont sous le pouce : Livraison validee, Client absent,
+ * Probleme. Le reste (a reprogrammer, planifier la suite, suivant) est replie.
+ *
+ * Mesure du 19/09, avant : la planification (depart, arrivee, filtres, quatre
+ * boutons) occupait le haut de l'ecran ; l'arret en cours arrivait apres deux
+ * panneaux, avec HUIT boutons de meme poids sur deux rangees de quatre, et un
+ * libelle « Google Maps » la ou la planche dit « Itineraire ».
+ *
+ * Le point d'etat est en ACCENT, le mot en PRINCIPAL. La planche ecrivait le
+ * mot en orange ; la charte l'interdit (2,34:1 sur blanc) -- la charte l'emporte
+ * sur la planche, comme pour le contour du marqueur « a venir ». */
+.tournee {
+  display: grid;
+}
+
+.tournee-entete {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 16px;
+  align-items: center;
+  padding: 18px 20px 30px;
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  background: var(--v8-principal);
+  color: var(--v8-texte-sur-principal);
+}
+
+.tournee-titre {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tournee-jour {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--v8-texte-secondaire-sur-principal);
+}
+
+.tournee-nom {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  color: inherit;
+}
+
+.tournee-anneau {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 58px;
+  height: 58px;
+  border-radius: 999px;
+  border: 2px solid var(--v8-vert-eau);
+  background: color-mix(in srgb, var(--v8-vert-eau) 22%, transparent);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.tournee-anneau strong {
+  font-size: 19px;
+  font-weight: 700;
+  color: inherit;
+}
+
+.tournee-anneau small {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--v8-texte-secondaire-sur-principal);
+}
+
+.tournee-progression {
+  grid-column: 1 / -1;
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--v8-texte-sur-principal) 18%, transparent);
+  overflow: hidden;
+}
+
+.tournee-progression-barre {
+  width: 0;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--v8-accent);
+  transition: width 400ms ease;
+}
+
+/* La carte de l'arret chevauche l'en-tete de 14 px, comme sur la planche. */
+:root[data-color-scheme] .tournee .current-driver-card,
+:root:not([data-color-scheme]) .tournee .current-driver-card {
+  margin-top: -14px;
+  padding: 20px;
+  border: 0;
+  border-radius: var(--radius-card);
+  background: var(--v8-surface);
+  box-shadow: 0 10px 30px rgba(56, 107, 109, 0.10);
+}
+
+.tournee-depart {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.tournee-depart p {
+  margin: 0;
+}
+
+:root[data-color-scheme] .tournee .current-client-box,
+:root:not([data-color-scheme]) .tournee .current-client-box {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--v8-texte);
+}
+
+.arret {
+  display: grid;
+  gap: 8px;
+}
+
+.arret-etat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--v8-principal);
+}
+
+.arret-etat-point {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--v8-vert-eau);
+}
+
+.arret-etat--en-cours .arret-etat-point {
+  background: var(--v8-accent);
+  animation: arret-battement 2s ease-in-out infinite;
+}
+
+.arret-etat--fait .arret-etat-point {
+  background: var(--v8-principal);
+}
+
+.arret-etat--echec .arret-etat-point {
+  background: var(--v8-alerte);
+}
+
+@keyframes arret-battement {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.35); opacity: 0.7; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arret-etat--en-cours .arret-etat-point {
+    animation: none;
+  }
+}
+
+.arret-nom {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  color: var(--v8-texte);
+  text-wrap: pretty;
+}
+
+.arret-adresse {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--v8-texte-secondaire);
+}
+
+.arret-adresse svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--v8-vert-eau);
+}
+
+.arret-secondaire {
+  margin: 0;
+  font-size: 13px;
+  color: var(--v8-texte-secondaire);
+}
+
+.arret-articles {
+  display: grid;
+  gap: 9px;
+  margin-top: 6px;
+  padding: 14px 16px;
+  border-radius: 20px;
+  background: var(--v8-peche-claire);
+}
+
+.arret-articles-titre {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--v8-principal-appuye);
+}
+
+.arret-article {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  line-height: 1.3;
+  color: var(--v8-texte);
+}
+
+/* La quantite en disque : le marqueur, plein, sans anneau. */
+.marqueur--plein {
+  background: var(--v8-principal);
+  color: var(--v8-texte-sur-principal);
+  box-shadow: none;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* Les gestes. Hauteurs de la charte (48 mobile / 44 desktop), pas celles de
+ * la planche (56 et 62) : la charte est ce qui a ete mesure et tenu. */
+:root[data-color-scheme] .big-actions.gestes,
+:root:not([data-color-scheme]) .big-actions.gestes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.gestes-rangee {
+  display: flex;
+  gap: 10px;
+}
+
+.gestes-rangee > .button {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+:root[data-color-scheme] .gestes .button,
+:root:not([data-color-scheme]) .gestes .button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+}
+
+:root[data-color-scheme] .gestes .geste-principal,
+:root:not([data-color-scheme]) .gestes .geste-principal {
+  width: 100%;
+  font-size: 17px;
+  box-shadow: 0 8px 22px rgba(56, 107, 109, 0.34);
+}
+
+/* Le troisieme poids de bouton : surface basse, texte secondaire (4,56:1).
+ * Ni contour ni ombre : il est la, il ne reclame rien. */
+:root[data-color-scheme] .button.tertiary,
+:root:not([data-color-scheme]) .button.tertiary {
+  border: 0;
+  background: var(--v8-surface-basse);
+  color: var(--v8-texte-secondaire);
+  font-weight: 500;
+  box-shadow: none;
+}
+
+:root[data-color-scheme] .button.tertiary:hover:not(:disabled),
+:root:not([data-color-scheme]) .button.tertiary:hover:not(:disabled) {
+  background: var(--v8-vert-clair);
+  color: var(--v8-principal-appuye);
+}
+
+/* Les actions repliees : un resume de 44 px (cible de la charte). */
+.gestes-plus summary,
+.route-planning-titre {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--v8-texte-secondaire);
+}
+
+.gestes-plus summary::-webkit-details-marker,
+.route-planning-titre::-webkit-details-marker {
+  display: none;
+}
+
+.gestes-plus summary::before,
+.route-planning-titre::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border: solid currentColor;
+  border-width: 0 2px 2px 0;
+  transform: rotate(-45deg);
+  transition: transform 150ms ease;
+}
+
+.gestes-plus[open] summary::before,
+.route-planning[open] .route-planning-titre::before {
+  transform: rotate(45deg);
+}
+
+.gestes-plus[open] summary {
+  margin-bottom: 10px;
+}
+
+.gestes-plus .gestes-rangee {
+  flex-wrap: wrap;
+}
+
+/* La planification, repliable. Le titre garde son h3 et son sous-titre. */
+.route-planning-titre > span {
+  display: grid;
+  gap: 2px;
+}
+
+.route-planning-titre h3,
+.route-planning-titre p {
+  margin: 0;
+}
+
+.route-planning-titre h3 {
+  color: var(--v8-texte);
+}
+
+.route-planning[open] .route-planning-titre {
+  margin-bottom: 16px;
+}
+
+/* La legende de la carte : les etats du marqueur, en miniature. */
+.marqueur-legende {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  font-size: 13px;
+  color: var(--v8-texte-secondaire);
+}
+
+.marqueur-legende span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.marqueur-legende .marqueur {
+  width: 22px;
+  height: 22px;
+  font-size: 11px;
+}
+
+.marqueur-legende .marqueur--en-cours {
+  box-shadow: 0 0 0 2.5px var(--v8-accent);
+}
+
+.marqueur--calme {
+  animation: none;
+}
+
+/* Une ancienne regle mobile posait `order: -1` sur .current-driver-card pour
+ * la hisser en haut de la page -- l'intention d'alors. Dans la grille
+ * .tournee, elle passait DEVANT l'en-tete. Et `display` de classe ecrase
+ * l'attribut hidden : on le dit explicitement. */
+.tournee .current-driver-card {
+  order: 0;
+}
+
+.tournee[hidden],
+.tournee-depart[hidden] {
+  display: none;
+}
+
+.gestes-plus .gestes-rangee > .button {
+  flex: 1 1 auto;
+  white-space: nowrap;
+}
+
+:root[data-color-scheme] .gestes .geste-principal,
+:root:not([data-color-scheme]) .gestes .geste-principal {
+  line-height: 1.2;
+}
+
+/* Sans tournee, la planification passe en tete : c'est la seule chose a faire. */
+.driver-page.sans-tournee .route-planning {
+  order: -2;
+}
+
+.driver-page.sans-tournee .delivery-candidates-panel {
+  order: -1;
+}
+
+@media (min-width: 921px) {
+  .gestes {
+    max-width: 640px;
+  }
+}
+
+/* 22 px d'icone + 2 x 12 px de marge interne = 46 : au-dessus des 44 de la
+ * charte en desktop. L'icone passe a 18. */
+.gestes .geste-principal svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* `:root[data-color-scheme="light"] .panel p` (0,3,1) peint tout paragraphe
+ * d'un panneau en texte doux. Les paragraphes de la carte de l'arret ont leur
+ * propre couleur : on les pose a (0,3,1), apres. */
+:root[data-color-scheme] .panel p.arret-etat,
+:root:not([data-color-scheme]) .panel p.arret-etat {
+  color: var(--v8-principal);
+}
+
+:root[data-color-scheme] .panel p.arret-adresse,
+:root:not([data-color-scheme]) .panel p.arret-adresse,
+:root[data-color-scheme] .panel p.arret-secondaire,
+:root:not([data-color-scheme]) .panel p.arret-secondaire {
+  color: var(--v8-texte-secondaire);
+}
+
+:root[data-color-scheme] .panel p.arret-articles-titre,
+:root:not([data-color-scheme]) .panel p.arret-articles-titre {
+  color: var(--v8-principal-appuye);
+}

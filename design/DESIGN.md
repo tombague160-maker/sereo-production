@@ -976,6 +976,61 @@ et tableau) et les **abonnements** (cartes à ~9 informations) restent des carte
 Les passer en lignes déplace leurs actions dans un détail : c'est un redessin,
 pas un réglage, et il vient après.
 
+### L'écran du livreur, posé le 19/09 — la planche `Main.png`, enfin
+
+C'est l'écran le plus regardé de l'application, et le seul qui compte sur la
+route. Il n'existait pas : la page « Livraison » commençait par la
+**planification** (départ, arrivée, filtres, quatre boutons), l'arrêt en cours
+arrivait après deux panneaux, avec **huit boutons de même poids** sur deux
+rangées de quatre, et « Google Maps » là où la planche dit « Itinéraire ».
+
+| élément | planche | avant | après |
+|---|---|---|---|
+| Ordre de la page | l'arrêt d'abord | planification, candidats, **puis** l'arrêt | l'arrêt, la liste, la carte, puis la planification **repliée** |
+| En-tête | jour, nom, « 3 sur 8 », barre | un chip « 3/6 - En livraison » | jour, nom de tournée, anneau « 3 sur 6 », barre à la part des arrêts terminés |
+| État de l'arrêt | ● + mot | « Statut : En livraison · Secteur : … » | point en accent + « Arrêt en cours » en principal |
+| Articles | quantité en disque, titre « n articles à décharger » | « 3x Changes taille L » | disque `.marqueur--plein`, boîte pêche claire |
+| Gestes | Appeler · Itinéraire / **Livraison validée** / Client absent · Problème | 8 boutons identiques | trois poids ; le reste derrière « Autres actions » |
+| Légende de carte | — | bleu · orange · vert · rouge (V7) | les quatre états du marqueur |
+
+*Bancs : `ecran-livreur.spec.js`, 4 cas — mobile, desktop, sans tournée,
+et la planification qui ne se referme pas sous les doigts du livreur.*
+
+#### Où la charte l'emporte sur la planche, et où la planche l'emporte
+
+- **Le mot d'état est en principal, pas en orange.** La planche écrit « ARRÊT
+  EN COURS » en accent ; la charte l'interdit en texte (2,34:1 sur blanc). Le
+  point reste en accent — c'est une forme.
+- **Les boutons gardent 48 / 44.** La planche fait « Livraison validée » à
+  62 px et « Appeler » à 56. La charte dit 48 mobile, 44 desktop, et c'est ce
+  que les bancs tiennent depuis le 18/09. Le geste principal se distingue par
+  son poids (plein, ombre portée, 17 px), pas par sa hauteur.
+- **Un troisième poids de bouton**, absent de la charte jusqu'ici : `tertiary`,
+  surface basse + texte secondaire (4,56:1), ni contour ni ombre. C'est ce que
+  la planche dessine pour « Client absent » et « Problème » : présents, sans
+  réclamer.
+- **La planification se replie au changement de statut, jamais autrement.**
+  Un `<details>` que le JS ne touche qu'au passage prête → en livraison. Si le
+  livreur l'ouvre pendant la tournée, un rafraîchissement ne la referme pas —
+  mesuré.
+
+#### ⛔ Deux pièges pris par la mesure
+
+**Une ancienne règle mobile faisait passer la carte devant l'en-tête.**
+`.current-driver-card { order: -1 }` — l'ancienne tentative de hisser l'arrêt
+en haut de page — agissait maintenant *dans* la grille de l'en-tête. L'en-tête
+se rendait à 892 px du haut, sous la carte. Remis à `order: 0`.
+
+**`display` de classe écrase l'attribut `hidden`.** `.tournee-depart { display:
+flex }` rendait « Démarrer la tournée » visible sur une tournée en cours, malgré
+`hidden = true`. Le cas est nommé dans le CSS : `.tournee[hidden],
+.tournee-depart[hidden] { display: none }`.
+
+Et un troisième, dans le banc : **`offsetParent` ne voit pas un `<details>`
+fermé.** Chrome replie son contenu par `content-visibility: hidden`, et les
+éléments y gardent un `offsetParent`. `checkVisibility()` le voit. Le premier
+rouge accusait le code ; c'était l'instrument.
+
 ## 10. Guide pour l'agent
 
 - Toujours produire les deux modes (clair et sombre) avec les mêmes tokens ; lister les contrastes calculés.

@@ -4104,18 +4104,51 @@ function showCurrentStop(stop) {
     return;
   }
 
+  // Planche Main.png : l'etat (un point + un mot), le nom en grand, l'adresse
+  // avec son epingle, puis les articles a decharger avec leur quantite en
+  // disque. Le point est en ACCENT, le mot en principal : la charte interdit
+  // l'accent en texte (2,34:1), la planche l'y mettait -- la charte l'emporte.
+  const index = activeRoute ? activeRoute.stops.indexOf(stop) : -1;
+  const etat = etatDeLArret(stop, index);
+  const lignes = (stop.products || []).length;
+  const articles = lignes ? `
+    <div class="arret-articles">
+      <p class="arret-articles-titre">${lignes === 1 ? "1 article" : `${lignes} articles`} à décharger</p>
+      ${(stop.products || []).map(produit => {
+        const quantite = typeof produit === "object" ? produit.quantite || produit.quantity || 1 : 1;
+        const nom = typeof produit === "object" ? produit.nom || produit.produit || produit.code || "Produit" : produit;
+        return `<div class="arret-article"><span class="marqueur marqueur--plein" aria-hidden="true">${escapeHtml(quantite)}</span><span>${escapeHtml(nom)}</span><span class="sr-only">, quantité ${escapeHtml(quantite)}</span></div>`;
+      }).join("")}
+    </div>` : "";
+
   container.innerHTML = `
-    <div class="current-client-main">
-      <strong>${escapeHtml(stop.clientName)}</strong>
-      <span>${escapeHtml(formatStopAddress(stop))}</span>
-      <span>${escapeHtml(formatPhone(stop.phone))}</span>
-      <span>Statut : ${escapeHtml(formatStopStatus(stop.status))} · Secteur : ${escapeHtml(formatSectorLabel(stop.sector))}${stop.deliveryDate ? ` · ${escapeHtml(formatDeliveryDate(stop.deliveryDate))}` : ""}</span>
+    <div class="current-client-main arret">
+      <p class="arret-etat arret-etat--${etat.classe}"><span class="arret-etat-point" aria-hidden="true"></span>${escapeHtml(etat.mot)}</p>
+      <strong class="arret-nom">${escapeHtml(stop.clientName)}</strong>
+      <p class="arret-adresse">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+        <span>${escapeHtml(formatStopAddress(stop))}</span>
+      </p>
+      ${stop.phone ? `<p class="arret-secondaire">${escapeHtml(formatPhone(stop.phone))}</p>` : ""}
       ${stop.notes ? `<span class="current-client-note">${escapeHtml(stop.notes)}</span>` : ""}
       ${getAddressWarning(stop) ? `<span class="address-warning">${escapeHtml(getAddressWarning(stop))}</span>` : ""}
     </div>
-    ${renderProducts({ produits: stop.products })}
+    ${articles}
   `;
   updateDriverActionButtons(stop);
+}
+
+/**
+ * L'etat d'un arret pour la carte de l'arret en cours : un point et un mot.
+ * Le mot est celui de la charte (statuts d'arret) ; le point prend la
+ * couleur de l'etat du marqueur.
+ */
+function etatDeLArret(stop, index) {
+  const marqueur = marqueurEtat(stop, index);
+  if (marqueur === "en-cours") return { classe: "en-cours", mot: "Arrêt en cours" };
+  if (marqueur === "fait") return { classe: "fait", mot: "Livré" };
+  if (marqueur === "echec") return { classe: "echec", mot: formatStopStatus(stop.status) };
+  return { classe: "a-venir", mot: stop.status === "a_reprogrammer" ? "À reprogrammer" : "Arrêt à venir" };
 }
 
 function showRouteCompleted(routeData) {
@@ -4956,21 +4989,62 @@ function notify(message, type = "info") {
   }
 }
 
+/** Le statut de tournee vu la derniere fois : la planification ne se replie qu'au CHANGEMENT. */
+let dernierStatutDeTournee = null;
+
 function updateRouteProgress() {
   const element = document.getElementById("routeProgress");
   if (!element) return;
+  const bloc = document.getElementById("tourneeActive");
+  const jour = document.getElementById("tourneeJour");
+  const nom = document.getElementById("tourneeNom");
+  const barre = document.getElementById("tourneeProgressionBarre");
+  const depart = document.getElementById("tourneeDepart");
+  const planification = document.getElementById("routePlanning");
+
+  const statut = activeRoute?.stops?.length ? activeRoute.status : null;
+  // Sans tournee, la planification passe en tete de page (ordre CSS).
+  document.querySelector(".driver-page")?.classList.toggle("sans-tournee", !statut);
+  // La planification est ouverte tant qu'aucune tournee ne ROULE. On ne
+  // touche a `open` qu'au changement de statut : rouvrir ce que le livreur
+  // vient de replier, ou l'inverse, serait pire que ne rien faire.
+  if (planification && statut !== dernierStatutDeTournee) {
+    planification.open = statut !== "en_livraison";
+    dernierStatutDeTournee = statut;
+  }
 
   if (activeRoute?.stops?.length) {
-    element.textContent = `${activeStopIndex + 1}/${activeRoute.stops.length} - ${formatRouteStatus(activeRoute.status)}`;
+    const total = activeRoute.stops.length;
+    // « 3 sur 8 » : le rang de l'arret en cours ; une tournee terminee affiche le total.
+    const rang = isRouteComplete(activeRoute) ? total : Math.min(activeStopIndex + 1, total);
+    const faits = activeRoute.stops.filter(stop => isStopTerminal(stop.status)).length;
+    if (bloc) bloc.hidden = false;
+    if (jour) jour.textContent = formatJourDeTournee(activeRoute.deliveryDate);
+    if (nom) nom.textContent = activeRoute.sector && activeRoute.sector !== "Tous"
+      ? `Tournée ${formatSectorLabel(activeRoute.sector)}`
+      : "Tournée du jour";
+    element.innerHTML = `<strong>${escapeHtml(rang)}</strong><small>sur ${escapeHtml(total)}</small>`;
+    element.setAttribute("aria-label", `Arrêt ${rang} sur ${total}, ${faits} terminé${faits > 1 ? "s" : ""}`);
+    if (barre) barre.style.width = `${Math.round((faits / total) * 100)}%`;
+    if (depart) depart.hidden = activeRoute.status !== "prete";
     return;
   }
 
+  if (bloc) bloc.hidden = true;
   if (!route.length || currentIndex < 0) {
     element.textContent = "Aucune tournée";
     return;
   }
 
   element.textContent = `${currentIndex + 1}/${route.length}`;
+}
+
+/** « Mercredi 2 septembre » -- le jour de la tournee, comme sur la planche. */
+function formatJourDeTournee(value) {
+  const date = value ? new Date(`${value}T12:00:00`) : new Date();
+  if (Number.isNaN(date.getTime())) return "";
+  const texte = date.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+  return texte.charAt(0).toUpperCase() + texte.slice(1);
 }
 
 
@@ -5147,7 +5221,9 @@ function formatStopMeta(stop) {
 }
 
 function formatStopAddress(stop) {
-  return `${stop.address || ""} ${stop.postalCode || ""} ${stop.city || ""}`.trim() || "Adresse non renseignée";
+  // La ville reprend sa cedille a l'affichage : le serveur la canonise sans.
+  const ville = stop.city ? formatSectorLabel(stop.city) : "";
+  return `${stop.address || ""} ${stop.postalCode || ""} ${ville}`.trim() || "Adresse non renseignée";
 }
 
 function formatEntityAddress(entity) {
