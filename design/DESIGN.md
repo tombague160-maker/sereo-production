@@ -887,9 +887,9 @@ toujours*, même en fin de feuille.
 |---|---|---|
 | **Ligne de liste 64–72 px** | listes vides, `POST /api/clients` rend 404 | **mesurée** sur un serveur semé — voir ci-dessous. Pour les **trois** listes de la charte : arrêts, commandes à préparer, abonnements |
 | **Marqueur de carte** | aucun marqueur sans client géolocalisé | **mesurée**, même serveur — et un bug de cadrage trouvé au passage |
-| **« repliables plutôt que débordantes »** | un **comportement**, pas une forme | toujours non jugée |
+| **« repliables plutôt que débordantes »** | un **comportement**, pas une forme | **mesurée** le 19/09 — voir ci-dessous |
 
-*Un non-jugé n'est pas une conformité. Il en reste un.*
+*Les trois sont mesurées. Il ne reste aucun non-jugé dans le §4.*
 
 ### Le marqueur et la ligne d'arrêt, posés le 19/09 — deux règles qu'on ne pouvait pas juger à vide
 
@@ -1138,6 +1138,59 @@ harnais se périme avec la valeur qu'il cite.*
 #### Les six planches sont posées
 
 `Main` · `Carte` · `Preparation` · `NavMobile` · `NavDesktop` · `TableauDeBord`.
+
+### « Repliables plutôt que débordantes » — le dernier non-jugé, clos le 19/09
+
+La règle attendait des données : avec trois secteurs, une rangée de pilules ne
+déborde jamais. Avec **dix**, mesure du 19/09 : **cinq rangs, 272 px** sur un
+écran de 844 — *un tiers de l'écran pour des filtres*. Elle ne débordait pas
+horizontalement (elle passe à la ligne), mais elle n'était pas **repliable**
+non plus. C'est exactement ce que le mot de la charte vise.
+
+| état | mobile (390) | desktop (1440) |
+|---|---|---|
+| Replié | **104 px** (2 rangs) | **96 px** (2 rangs) |
+| Déplié (29 pilules) | 608 px | 148 px |
+| Bouton | paraît | paraît |
+| Avec 3 secteurs | *rien ne dépasse* → **pas de bouton** | idem |
+
+Le bouton n'apparaît **que si la rangée dépasse vraiment** : c'est mesuré dans
+la page (`scrollHeight` contre `clientHeight`), jamais déduit du nombre de
+secteurs — la largeur d'un libellé décide autant que leur compte.
+
+Et le secteur **choisi passe en tête**, juste après « Tous » : replié à deux
+rangs, un filtre actif relégué au cinquième rang disparaîtrait. *On ne cache
+jamais ce que l'utilisateur a choisi.*
+
+#### ⛔ Ce que le harnais a trouvé, encore
+
+Quatre mutations, **deux survivantes** au premier tour.
+
+**① Un plafond invisible faute de données.** Retirer le `max-height` de base
+(desktop) ne changeait rien : onze pilules tiennent de toute façon en deux
+rangs à 1440 px. Le banc ne pouvait pas distinguer. Il se donne maintenant
+**vingt-huit** secteurs — assez pour déborder **dans les deux vues**.
+
+> *Un plafond ne se mesure que sur des données qui le touchent.*
+
+**② Une garde qui ne s'exécutait jamais.** J'avais écrit un repli
+« si le filtre actif tombe hors du plafond, déplier ». Après un choix, la
+rangée était **déjà** dépliée : la garde ne servait jamais, et la mutation qui
+l'enlevait survivait. Remplacée par le **tri** — le secteur choisi passe en
+tête. Plus simple, et le banc l'éprouve : choisir le dernier secteur, replier,
+vérifier qu'il est en position 1 et visible.
+
+Au passage, un défaut d'origine pris par la mesure : **`offsetTop` se mesure
+contre l'ancêtre *positionné*, pas contre le conteneur.** Le conteneur étant en
+position statique, la garde lisait un nombre bien plus grand et se déclenchait
+**toujours** — la rangée arrivait dépliée. Les rectangles, eux, sont dans le
+même repère.
+
+Et deux fois de suite, le **filtre du harnais** citait des valeurs périmées
+(`"50%"`, puis `104` là où la vue desktop rend `96`) : il rapportait « tuée
+mais autre cause » sur des mutations tuées pour exactement la bonne. *Un filtre
+de harnais se périme avec la valeur qu'il cite — le relire fait partie du
+verdict.*
 
 ## 10. Guide pour l'agent
 

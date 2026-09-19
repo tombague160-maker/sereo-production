@@ -805,8 +805,15 @@
           <div class="prep-toolbar">
             <input id="preparationSearch" type="search" placeholder="Rechercher un client ou un numéro" autocomplete="off" aria-label="Rechercher une commande à préparer" />
           </div>
-          <!-- Charte §4, pilules de filtre (secteurs) : rendues par renderPreparationFilterOptions. -->
-          <div id="preparationSectorPills" class="filtre-pilules" role="group" aria-label="Filtrer par secteur"></div>
+          <!-- Charte §4, pilules de filtre (secteurs) : rendues par
+               renderPreparationFilterOptions. « Repliables plutot que
+               debordantes » : la rangee est plafonnee a deux rangs et le
+               bouton n'apparait que si elle depasse VRAIMENT -- mesure dans
+               la page, pas devinette sur le nombre de secteurs. -->
+          <div class="filtre-pilules-enveloppe">
+            <div id="preparationSectorPills" class="filtre-pilules filtre-pilules--repliee" role="group" aria-label="Filtrer par secteur"></div>
+            <button id="preparationSectorPlus" class="button secondary compact filtre-pilules-plus" type="button" data-action="deplier-secteurs" aria-expanded="false" aria-controls="preparationSectorPills" hidden>Tous les secteurs</button>
+          </div>
 
           <div id="preparationList" class="order-board"></div>
         </div>

@@ -11,7 +11,7 @@
 // quatre commandes chacune, quatre « Rien ici » pour les colonnes vides, un
 // <select> de secteur, et une legende aux pastilles V7.
 const { test, expect } = require("./tuiles");
-const { demarrer } = require("./serveur-seme");
+const { demarrer, jeuDeDonnees } = require("./serveur-seme");
 
 const VUES = { desktop: { width: 1440, height: 900 }, mobile: { width: 390, height: 844 } };
 const HAUTEUR_PILULE = { desktop: 44, mobile: 48 };
@@ -210,3 +210,115 @@ test("« Passer en preparation » depuis le sheet : le sheet se ferme et la lign
   expect(mot.trim()).toBe("En cours");
   await ctx.close();
 });
+
+// « REPLIABLES PLUTOT QUE DEBORDANTES » -- la derniere regle de la charte §4
+// qui restait NON JUGEE, faute de pouvoir la mesurer a vide.
+//
+// Mesure du 19/09 avec dix secteurs : la rangee prenait CINQ rangs, 272 px sur
+// un ecran de 844 -- un tiers de l'ecran pour des filtres. Elle ne debordait
+// pas horizontalement (elle passe a la ligne), mais elle n'etait pas repliable
+// non plus. Plafond a deux rangs, et un bouton qui ne parait QUE si ca depasse.
+// Assez de secteurs pour que la rangee deborde DANS LES DEUX VUES. A 1440 px,
+// onze pilules tiennent en deux rangs : le plafond y serait invisible, et une
+// mutation qui l'enleve survivrait -- c'est arrive.
+const VILLES = ["Besancon", "Champagnole", "Dole", "Pontarlier", "Morteau",
+  "Salins-les-Bains", "Arbois", "Lons-le-Saunier", "Saint-Claude", "Montbeliard",
+  "Baume-les-Dames", "Ornans", "Quingey", "Maiche", "Valdahon", "Levier",
+  "Nozeroy", "Poligny", "Mouchard", "Villers-le-Lac", "Le Russey", "Amancey",
+  "Rougemont", "Clerval", "Isle-sur-le-Doubs", "Hericourt", "Lure", "Luxeuil"];
+
+/** Une commande par secteur : c'est le nombre de SECTEURS qui fait la rangee. */
+function semeMultiSecteurs() {
+  const seed = jeuDeDonnees();
+  const modele = seed.commandes.find(c => c.status === "importe") || seed.commandes[0];
+  seed.commandes = VILLES.map((ville, i) => ({
+    ...modele, id: `o-sect-${i}`, city: ville, sector: ville, status: "importe"
+  }));
+  seed.routes = [];
+  return seed;
+}
+
+/** Le semé courant n'a que trois secteurs : la rangée n'y dépasse pas. */
+test("le bouton de repli ne PARAÎT PAS quand la rangée ne dépasse pas", async ({ browser }) => {
+  test.setTimeout(180000);
+  const { ctx, page, erreurs } = await ouvrir(browser, "mobile");
+  const r = await page.evaluate(() => {
+    const c = document.getElementById("preparationSectorPills");
+    return { pilules: c.children.length, h: Math.round(c.getBoundingClientRect().height),
+      deborde: c.scrollHeight - c.clientHeight, bouton: !document.getElementById("preparationSectorPlus").checkVisibility() };
+  });
+  expect(erreurs).toEqual([]);
+  console.log(`[repli/sans débordement] ${r.pilules} pilules, ${r.h}px, bouton caché=${r.bouton}`);
+  expect(r.deborde, "avec trois secteurs la rangée ne doit pas dépasser").toBe(0);
+  expect(r.bouton, "un bouton de repli sur une rangée qui tient serait du bruit").toBe(true);
+  await ctx.close();
+});
+
+for (const [vue, attendu] of [["mobile", { plafond: 104 }], ["desktop", { plafond: 96 }]]) {
+  test(`charte §4 — avec dix secteurs, la rangée se REPLIE à deux rangs, en ${vue}`, async ({ browser }) => {
+    test.setTimeout(180000);
+    const nombreux = await demarrer({ port: vue === "mobile" ? 3154 : 3155, seed: semeMultiSecteurs() });
+    try {
+      const ctx = await browser.newContext({ viewport: VUES[vue] });
+      const page = await ctx.newPage();
+      const erreurs = [];
+      page.on("pageerror", e => erreurs.push(e.message));
+      await page.goto(nombreux.base + "/#preparation", { waitUntil: "networkidle" });
+      await page.waitForTimeout(900);
+
+      const lire = () => page.evaluate(() => {
+        const c = document.getElementById("preparationSectorPills");
+        const b = document.getElementById("preparationSectorPlus");
+        const rangs = new Set([...c.children].map(e => Math.round(e.getBoundingClientRect().top))).size;
+        return { pilules: c.children.length, h: Math.round(c.getBoundingClientRect().height), rangs,
+          coupe: c.scrollHeight - c.clientHeight, boutonVisible: b.checkVisibility(),
+          texte: b.textContent.trim(), aria: b.getAttribute("aria-expanded"),
+          hauteurBouton: Math.round(b.getBoundingClientRect().height) };
+      });
+
+      const avant = await lire();
+      expect(erreurs).toEqual([]);
+      console.log(`[repli/${vue}] ${avant.pilules} pilules : ${avant.h}px en ${avant.rangs} rang(s) visible(s), bouton=${avant.boutonVisible} « ${avant.texte} »`);
+      expect(avant.pilules).toBe(VILLES.length + 1);
+      // Le plafond : deux rangs, à la hauteur de pilule de la vue.
+      expect(avant.h).toBe(attendu.plafond);
+      expect(avant.coupe, "la rangée doit être coupée par le plafond").toBeGreaterThan(0);
+      expect(avant.boutonVisible).toBe(true);
+      expect(avant.texte).toBe("Tous les secteurs");
+      expect(avant.aria).toBe("false");
+      expect(avant.hauteurBouton).toBeGreaterThanOrEqual(44 - TOL);
+
+      await page.locator("#preparationSectorPlus").click();
+      await page.waitForTimeout(250);
+      const apres = await lire();
+      console.log(`[repli/${vue}] déplié : ${apres.h}px en ${apres.rangs} rangs`);
+      expect(apres.h, "déplié, la rangée montre tout").toBeGreaterThan(avant.h);
+      expect(apres.coupe, "déplié, plus rien n'est coupé").toBe(0);
+      expect(apres.texte).toBe("Moins de secteurs");
+      expect(apres.aria).toBe("true");
+
+      // Et le contrôle qui compte : on choisit le DERNIER secteur (dernier
+      // rang), puis on REPLIE. S'il restait à sa place, il disparaîtrait.
+      const dernier = (await page.locator("#preparationSectorPills .filtre-pilule").last().textContent()).trim();
+      await page.locator("#preparationSectorPills .filtre-pilule").last().click();
+      await page.waitForTimeout(500);
+      await page.locator("#preparationSectorPlus").click();
+      await page.waitForTimeout(300);
+      const choisi = await page.evaluate(() => {
+        const c = document.getElementById("preparationSectorPills");
+        const a = c.querySelector(".active-filter");
+        return { texte: a.textContent.trim(), rang: [...c.children].indexOf(a),
+          visible: a.getBoundingClientRect().bottom <= c.getBoundingClientRect().bottom + 1,
+          replie: !c.classList.contains("filtre-pilules--depliee") };
+      });
+      console.log(`[repli/${vue}] « ${dernier} » choisi, replié : position ${choisi.rang}, visible=${choisi.visible}`);
+      expect(choisi.texte).toBe(dernier);
+      expect(choisi.replie, "la rangée doit bien s'être repliée").toBe(true);
+      expect(choisi.rang, "le secteur choisi passe en tête, juste après « Tous »").toBe(1);
+      expect(choisi.visible, "le filtre actif ne doit jamais être caché par le repli").toBe(true);
+      await ctx.close();
+    } finally {
+      await nombreux.arreter();
+    }
+  });
+}
