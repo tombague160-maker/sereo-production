@@ -1609,7 +1609,19 @@ l'en-tête), le sheet de détail et ses actions, l'éditeur.
 - la fréquence garde les libellés de l'application (« Toutes les 2 semaines ») plutôt que
   « Tous les 15 j » / « Mensuel » : un seul vocabulaire entre la ligne, le sheet et
   l'éditeur ;
-- entre 921 et 1280 px, l'agenda passe sous le tableau (colonnes fixes de 420 px).
+- entre 921 et **1439 px**, l'agenda passe sous le tableau : au-dessus de 1280, sept colonnes
+  sur douze moins 420 px de colonnes fixes ne laissaient qu'une dizaine de pixels au nom
+  (la planche, à 1440, lui en donne 122).
+
+**L'agenda s'ouvre sur le présent** : d'abord « En retard · N » (échu, sans commande), puis
+« Cette semaine » et la suivante. Le serveur rend aussi les échéances passées depuis le
+début de l'abonnement ; les grouper par semaine ouvrait l'agenda sur les plus anciennes.
+Une échéance dont le rappel est arrivé le dit (« · rappel arrivé ») — la promesse « rappel
+N jours avant » de l'éditeur reste tenue sans le panneau « Rappels à traiter ». Une
+échéance déjà commandée montre le statut de sa commande, qui mène à Commandes.
+
+« En retard » = échue **et sans commande**, partout : le sous-titre de l'écran et
+l'alerte du tableau de bord comptent la même chose.
 
 Le badge « En pause » prend le texte principal appuyé de la planche (**7,04:1**) au lieu
 de l'avertissement (4,45:1, sous le seuil).
