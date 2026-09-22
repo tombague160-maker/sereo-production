@@ -11406,3 +11406,209 @@ textarea::placeholder {
   :root:not([data-color-scheme]) #stock .stk-saisie { background: var(--v8-surface-basse); }
 }
 .stk-tuile-nom { overflow-wrap: anywhere; }
+
+/* ==========================================================================
+   CLIENTS -- planches 13e (clair) / 14e (sombre). Valeurs copiees.
+   Noms neufs (cli-*) : les .crm-* portent une couche de surcharges du mode
+   clair qu'on ne veut pas heriter.
+   ========================================================================== */
+
+.cli-recherche { width: 280px; }
+.ecran-entete .cli-nouveau { display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 24px; }
+:root[data-color-scheme] .ecran-entete .cli-rappels,
+:root:not([data-color-scheme]) .ecran-entete .cli-rappels {
+  height: 44px; padding: 0 20px; border-radius: 999px;
+  border: 1.5px solid var(--v8-principal); background: transparent;
+  color: var(--v8-principal); font-size: 15px; font-weight: 600;
+}
+.cli-rappels-compte { font-variant-numeric: tabular-nums; }
+
+.cli-grille {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: 24px;
+  align-items: start;
+}
+.cli-colonne { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.cli-filtres { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cli-pilules { display: flex; flex-wrap: wrap; gap: 8px; }
+:root[data-color-scheme] #crm .cli-pilule,
+:root:not([data-color-scheme]) #crm .cli-pilule {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 44px; min-height: 0; padding: 0 16px; border: 0; border-radius: 999px;
+  background: var(--v8-surface); color: var(--v8-texte-secondaire);
+  font: inherit; font-size: 14px; font-weight: 500; cursor: pointer;
+}
+#crm .cli-pilule svg { width: 14px; height: 14px; }
+:root[data-color-scheme] #crm .cli-pilule.cli-pilule--active,
+:root:not([data-color-scheme]) #crm .cli-pilule.cli-pilule--active {
+  background: var(--v8-principal); color: var(--v8-texte-sur-principal); font-weight: 600;
+}
+#crm .cli-pilule:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+#crm .cli-statut-filtre { margin-left: auto; }
+:root[data-color-scheme] #crm .cli-statut-filtre,
+:root:not([data-color-scheme]) #crm .cli-statut-filtre { color: var(--v8-principal); font-weight: 500; }
+
+#crm .cli-carte {
+  background: var(--v8-surface);
+  border-radius: 36px;
+  box-shadow: 0 1px 2px rgba(15, 61, 61, 0.05), 0 12px 28px rgba(15, 61, 61, 0.05);
+  min-width: 0;
+}
+:root[data-color-scheme="dark"] #crm .cli-carte { box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 28px rgba(0,0,0,.3); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) #crm .cli-carte { box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 28px rgba(0,0,0,.3); }
+}
+
+/* --- La liste ----------------------------------------------------------- */
+#crm .cli-liste-carte { padding: 8px; max-height: calc(100vh - 220px); overflow-y: auto; }
+.cli-liste { display: flex; flex-direction: column; }
+:root[data-color-scheme] #crm .cli-ligne,
+:root:not([data-color-scheme]) #crm .cli-ligne {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  min-height: 60px; padding: 0 16px; border: 0; border-radius: 22px;
+  background: transparent; color: var(--v8-texte); text-align: left;
+  font: inherit; cursor: pointer;
+}
+#crm .cli-ligne:hover, #crm .cli-ligne.cli-ligne--choisie { background: var(--v8-fond); }
+#crm .cli-ligne:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.cli-ligne-texte { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.cli-nom { font-size: 15px; font-weight: 600; color: var(--v8-texte); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cli-meta {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 500; color: var(--v8-texte-secondaire);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cli-meta svg { width: 13px; height: 13px; flex: none; }
+.cli-alerte { color: var(--v8-alerte); }
+
+.cli-badge {
+  display: inline-flex; align-items: center; gap: 4px; flex: none;
+  height: 24px; padding: 0 12px; border-radius: 999px;
+  font-size: 12.5px; font-weight: 600; white-space: nowrap;
+}
+.cli-badge svg { width: 12px; height: 12px; }
+.cli-badge--froid { background: var(--v8-vert-clair); color: var(--v8-principal-appuye); }
+.cli-badge--tiede { background: var(--v8-peche-claire); color: var(--v8-principal-appuye); }
+.cli-badge--alerte { padding: 0 10px; background: var(--v8-surface); color: var(--v8-alerte); box-shadow: inset 0 0 0 1.5px var(--v8-alerte); }
+:root[data-color-scheme="dark"] .cli-badge--froid,
+:root[data-color-scheme="dark"] .cli-badge--tiede { color: var(--v8-principal); }
+:root[data-color-scheme="dark"] .cli-badge--alerte { background: var(--v8-fond); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) .cli-badge--froid,
+  :root:not([data-color-scheme="light"]) .cli-badge--tiede { color: var(--v8-principal); }
+  :root:not([data-color-scheme="light"]) .cli-badge--alerte { background: var(--v8-fond); }
+}
+.cli-puce { height: 28px; font-size: 13px; }
+
+/* --- La fiche ------------------------------------------------------------ */
+#crm .cli-fiche { padding: 32px; display: flex; flex-direction: column; gap: 24px; }
+.cli-fiche-vide { margin: 0; color: var(--v8-texte-secondaire); }
+.cli-fiche-tete { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+.cli-fiche-identite { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+:root[data-color-scheme] #crm .cli-fiche-nom,
+:root:not([data-color-scheme]) #crm .cli-fiche-nom {
+  margin: 0; font-size: 24px; font-weight: 700; line-height: 1.2; letter-spacing: -0.02em; color: var(--v8-texte);
+  overflow-wrap: anywhere;
+}
+.cli-puces { display: flex; gap: 8px; flex-wrap: wrap; }
+.cli-fiche-gestes { display: flex; gap: 10px; flex: none; }
+:root[data-color-scheme] #crm .cli-appeler,
+:root:not([data-color-scheme]) #crm .cli-appeler {
+  display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 18px;
+  border-radius: 999px; font-size: 14.5px; font-weight: 600; text-decoration: none;
+}
+#crm .cli-appeler svg { width: 16px; height: 16px; }
+:root[data-color-scheme] #crm .cli-bouton-contour,
+:root:not([data-color-scheme]) #crm .cli-bouton-contour {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  height: 44px; min-height: 0; padding: 0 18px; border-radius: 999px;
+  border: 1.5px solid var(--v8-principal); background: transparent; color: var(--v8-principal);
+  font: inherit; font-size: 14.5px; font-weight: 600; cursor: pointer;
+}
+#crm .cli-bouton-contour:focus-visible, #crm .cli-appeler:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.cli-champs { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.cli-champs > div { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cli-libelle { margin: 0; font-size: 13px; font-weight: 500; color: var(--v8-texte-secondaire); }
+.cli-valeur { margin: 0; font-size: 15px; font-weight: 500; line-height: 1.45; color: var(--v8-texte); overflow-wrap: anywhere; }
+.cli-valeur.cli-alerte { color: var(--v8-alerte); }
+.cli-note { margin: 0; font-size: 13.5px; font-weight: 400; color: var(--v8-texte-secondaire); overflow-wrap: anywhere; }
+.cli-notes { display: flex; flex-direction: column; gap: 4px; }
+.cli-statut { display: flex; align-items: center; gap: 12px; }
+:root[data-color-scheme] #crm .cli-statut select,
+:root:not([data-color-scheme]) #crm .cli-statut select {
+  min-height: 44px; height: 44px; padding: 0 16px; border-radius: 999px; font-size: 14px; font-weight: 500;
+}
+
+.cli-abonnement {
+  display: flex; align-items: center; gap: 16px; padding: 20px; border-radius: 24px;
+  background: var(--v8-fond);
+}
+.cli-abonnement-texte { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.cli-abonnement-titre {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 0;
+  font-size: 16px; font-weight: 600; color: var(--v8-texte);
+}
+.cli-abonnement-detail { margin: 0; font-size: 14px; color: var(--v8-texte-secondaire); overflow-wrap: anywhere; }
+:root[data-color-scheme] #crm .cli-abonnement .cli-bouton-contour,
+:root:not([data-color-scheme]) #crm .cli-abonnement .cli-bouton-contour { padding: 0 20px; }
+
+.cli-commandes { display: flex; flex-direction: column; gap: 8px; }
+.cli-commandes-tete { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+:root[data-color-scheme] #crm .cli-commandes-tete h3,
+:root:not([data-color-scheme]) #crm .cli-commandes-tete h3 {
+  margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; color: var(--v8-texte);
+}
+.cli-commandes-liste { display: flex; flex-direction: column; }
+:root[data-color-scheme] #crm .cli-commande,
+:root:not([data-color-scheme]) #crm .cli-commande {
+  display: grid; grid-template-columns: 150px 130px minmax(0, 1fr) 140px; column-gap: 16px; align-items: center;
+  width: 100%; min-height: 52px; padding: 0 16px; border: 0; border-radius: 18px;
+  background: transparent; color: var(--v8-texte); text-align: left; font: inherit; cursor: pointer;
+}
+#crm .cli-commande:hover { background: var(--v8-fond); }
+#crm .cli-commande:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.cli-commande-num { font-size: 14.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cli-commande-date, .cli-commande-articles { font-size: 14px; font-weight: 500; color: var(--v8-texte-secondaire); }
+.cli-commande-statut { display: flex; justify-content: flex-end; }
+:root[data-color-scheme] #crm .cli-autres,
+:root:not([data-color-scheme]) #crm .cli-autres {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 8px;
+  min-height: 44px; padding: 0 12px; border: 0; border-radius: 999px; background: transparent;
+  color: var(--v8-principal); font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer;
+}
+#crm .cli-autres svg { width: 16px; height: 16px; }
+#crm .cli-autres:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* --- Le dialogue ---------------------------------------------------------- */
+.cli-dialogue {
+  width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 32px);
+  padding: 0; border: 0; border-radius: 36px; background: var(--v8-surface); color: var(--v8-texte);
+}
+.cli-dialogue::backdrop { background: rgba(13, 21, 24, 0.45); }
+.cli-formulaire { display: flex; flex-direction: column; gap: 20px; padding: 28px; }
+.cli-dialogue-tete { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.cli-dialogue-tete h2 { margin: 0; font-size: 22px; font-weight: 700; color: var(--v8-texte); }
+.cli-dialogue-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
+@media (max-width: 1180px) {
+  .cli-grille { grid-template-columns: 1fr; }
+  #crm .cli-liste-carte { max-height: 420px; }
+}
+@media (max-width: 920px) {
+  .cli-recherche { width: 100%; flex: 1 1 100%; }
+  #crm .cli-carte { border-radius: 24px; }
+  #crm .cli-fiche { padding: 20px; gap: 20px; }
+  .cli-champs { grid-template-columns: 1fr; }
+  .cli-abonnement { flex-direction: column; align-items: stretch; }
+  :root[data-color-scheme] #crm .cli-commande,
+  :root:not([data-color-scheme]) #crm .cli-commande {
+    grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "num statut" "date articles";
+    row-gap: 2px; padding: 10px 16px;
+  }
+  .cli-commande-num { grid-area: num; }
+  .cli-commande-statut { grid-area: statut; }
+  .cli-commande-date { grid-area: date; }
+  .cli-commande-articles { grid-area: articles; text-align: right; }
+  #crm .cli-statut-filtre { margin-left: 0; }
+}

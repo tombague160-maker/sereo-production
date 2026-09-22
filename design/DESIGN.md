@@ -1536,7 +1536,15 @@ l'idiome de la planche, et nommé) :
 - le sous-titre ne dit pas « trouvées dans le dernier import » : rien ne rattache les
   catégories à un import ;
 - les pas − / + font 36 px au bureau, 44 px au téléphone. Aucune planche mobile pour cet
-  écran : sous 920 px, la ligne devient une carte à trois rangs.
+  écran : sous **1280 px**, la ligne devient une carte à trois rangs, avec « Seuil » et
+  « Stock » écrits devant leur champ (sans en-tête de colonnes, c'étaient deux nombres
+  sans nom). Même chose pour la ligne des Commandes : entre 921 et 1280 px, les colonnes
+  fixes (740 px au Stock, 766 aux Commandes) ne laissaient rien au nom.
+
+« Sous le seuil » veut dire **quantité ≤ seuil**, partout : carte, pastille, écran « À
+recommander » (qui recommande de repasser au-dessus du seuil). Une quantité inconnue
+est « à renseigner », jamais une rupture. « Tout voir » ouvre la liste détaillée sur
+« sous le seuil ». Vider le champ Stock ne met plus le produit à zéro.
 
 ## 10. Guide pour l'agent
 

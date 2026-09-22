@@ -74,8 +74,14 @@ let stockFilter = {
 };
 let crmFilter = {
   query: "",
-  status: "all"
+  status: "all",
+  // Le secteur (planche 13e) : "" = tous, "__abonnes" = les abonnes.
+  secteur: ""
 };
+// Le client dont la fiche est ouverte (planche 13e : une ligne selectionnee).
+let clientChoisi = null;
+// Les abonnements et leurs echeances, pour la fiche client.
+let abonnementsDonnees = { items: [], occurrences: [] };
 let relanceFilter = "today";
 let customerProductFilter = {
   query: "",
@@ -458,6 +464,8 @@ function bindUi() {
     runAction(event.submitter, "Enregistrement...", () => saveCrmClient(event.currentTarget));
   });
 
+  bindClients();
+
   document.getElementById("relanceForm")?.addEventListener("submit", event => {
     event.preventDefault();
     runAction(event.submitter, "Création...", () => saveRelance(event.currentTarget));
@@ -589,6 +597,20 @@ function bindUi() {
     // La planche 6a met « Importer les ventes » en en-tete. Le formulaire
     // d'import, lui, ne bouge pas : le bouton ouvre simplement son selecteur
     // de fichier. Deux chemins vers un seul mecanisme, pas deux mecanismes.
+    if (action === "cli-nouveau") ouvrirDialogueClient();
+    if (action === "cli-modifier") ouvrirDialogueClient(actionButton.dataset.clientId);
+    if (action === "cli-fermer") document.getElementById("cliDialogue")?.close();
+    // « Les N autres » : la liste des commandes, cherchee sur ce client.
+    if (action === "cli-voir-commandes") {
+      showTab("commandes");
+      const champ = document.getElementById("cmdRecherche");
+      if (champ) champ.value = actionButton.dataset.clientNom || "";
+      // Une liste PROPRE, comme une redirection : un filtre laisse d'avant
+      // cacherait les commandes du client.
+      Object.assign(commandesFiltre, { statut: "toutes", recherche: actionButton.dataset.clientNom || "", page: 1,
+        bloquees: false, completer: false, du: "", au: "", secteur: "", jour: "" });
+      renderCommandes();
+    }
     if (action === "importer-stock") {
       const champ = document.getElementById("stockFile");
       if (champ) {
@@ -777,6 +799,7 @@ function showTab(tabName, options = {}) {
   // generique, sans quoi celui-ci l'ecraserait.
   if (nextTab === "commandes") majSousTitreCommandes();
   if (nextTab === "stock") majSousTitreStock();
+  if (nextTab === "crm") majSousTitreClients();
 
   updateCustomerCartBar();
 
@@ -967,6 +990,7 @@ async function loadData() {
   historique = data.historique;
   orders = data.orders;
   crmClients = data.crmClients;
+  abonnementsDonnees = data.subscriptions || { items: [], occurrences: [] };
   crmRelances = data.crmRelances;
   todayCustomerOrders = data.todayCustomerOrders;
   plannedOrders = data.plannedOrders;
@@ -1734,58 +1758,264 @@ function formatMoney(value) {
   return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(value) || 0);
 }
 
+const ICONE_CLI = {
+  abonnes: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 9a5 5 0 0 1 5-5h6l-2-2m6 8a5 5 0 0 1-5 5H8l2 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>',
+  lieu: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path></svg>',
+  tel: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6.5 4h3l2 5-2.5 1.5a11 11 0 0 0 4.5 4.5L15 12.5l5 2v3a2 2 0 0 1-2.2 2A15 15 0 0 1 4.5 6.2 2 2 0 0 1 6.5 4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path></svg>',
+  retard: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5"></circle><path d="M12 8v4m0 3.5v.5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg>',
+  chevron: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m9 6 6 6-6 6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>'
+};
+
+function nomDuClient(client) {
+  return [client.prenom, client.nom].filter(Boolean).join(" ") || client.nom || "Client";
+}
+
+// Le meme predicat que le serveur (adresseGeocodable) : une rue, et un code
+// postal ou une ville. Sans cela, la tournee ne place pas le client.
+function adresseClientACorriger(client) {
+  return !(String(client.rue || "").trim() && (String(client.codePostal || "").trim() || String(client.ville || "").trim()));
+}
+
+// L'abonnement d'un client : l'actif d'abord, sinon celui en pause. Un
+// abonnement arrete ne se montre plus (la planche n'en dessine aucun).
+function abonnementDuClient(clientId) {
+  const siens = (abonnementsDonnees.items || []).filter(s => String(s.clientId) === String(clientId));
+  return siens.find(s => s.status === "active") || siens.find(s => s.status === "paused") || null;
+}
+
+// La prochaine echeance SANS commande : c'est elle que « Creer la commande »
+// produit. En retard si sa date est passee.
+function echeanceAFaire(abonnement) {
+  return (abonnementsDonnees.occurrences || [])
+    .filter(o => o.subscriptionId === abonnement.id && !o.orderId)
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)))[0] || null;
+}
+
+function frequenceLisible(abonnement) {
+  const f = abonnement.frequency || {};
+  const n = Number(f.interval) || 1;
+  if (f.unit === "months") return n === 1 ? "tous les mois" : `tous les ${n} mois`;
+  return n === 1 ? "tous les jours" : (n % 7 === 0 ? (n === 7 ? "toutes les semaines" : `toutes les ${n / 7} semaines`) : `tous les ${n} j`);
+}
+
+function commandesDuClient(clientId) {
+  return (orders || []).filter(o => String(o.clientId) === String(clientId))
+    .sort((a, b) => String(b.dateCommande || "").localeCompare(String(a.dateCommande || "")));
+}
+
+// La derniere LIVRAISON (planche 13e : « livree le 2 sept. »). Les commandes
+// sont deja dans la page : le calcul ne coute rien au serveur.
+function derniereLivraison(clientId) {
+  return commandesDuClient(clientId)
+    .filter(o => o.status === "livre")
+    .map(o => String(o.deliveredAt || o.deliveryDate || "").slice(0, 10))
+    .filter(Boolean)
+    .sort()
+    .pop() || null;
+}
+
+function clientsFiltres() {
+  const query = normalizeTextKey(crmFilter.query);
+  const today = getTodayDateInput();
+  const filtre = crmFilter.status || "all";
+  return crmClients.filter(client => {
+    if (query && !normalizeTextKey([client.nom, client.prenom, client.telephone, client.rue, client.ville, client.email]
+      .join(" ")).includes(query)) return false;
+    if (crmFilter.secteur === "__abonnes") {
+      if (abonnementDuClient(client.id)?.status !== "active") return false;
+    } else if (crmFilter.secteur && String(client.secteur || "") !== crmFilter.secteur) return false;
+    if (filtre === "relance_today") return client.nextReminderDate === today;
+    if (filtre === "relance_late") return Boolean(client.nextReminderDate && client.nextReminderDate < today);
+    if (filtre !== "all") return client.crmStatus === filtre;
+    return true;
+  }).sort((a, b) => nomDuClient(a).localeCompare(nomDuClient(b), "fr"));
+}
+
+// « 47 clients · 6 abonnes · 1 adresse a corriger » (planche 13e).
+function majSousTitreClients() {
+  if (!document.getElementById("crm")?.classList.contains("active")) return;
+  const n = crmClients.length;
+  const abonnes = new Set((abonnementsDonnees.items || []).filter(s => s.status === "active")
+    .map(s => String(s.clientId)).filter(id => crmClients.some(c => String(c.id) === id))).size;
+  const aCorriger = crmClients.filter(adresseClientACorriger).length;
+  const morceaux = [`${n} client${n > 1 ? "s" : ""}`, `${abonnes} abonné${abonnes > 1 ? "s" : ""}`];
+  if (aCorriger) morceaux.push(`${aCorriger} adresse${aCorriger > 1 ? "s" : ""} à corriger`);
+  setText("pageSubtitle", morceaux.join(" · "));
+}
+
 function renderCrm() {
   const container = document.getElementById("crmList");
-  const summary = document.getElementById("crmSummary");
   if (!container) return;
-
-  const today = getTodayDateInput();
-  const query = normalizeTextKey(crmFilter.query);
-  const filter = crmFilter.status || "all";
-  let list = crmClients.slice();
-
-  if (query) {
-    list = list.filter(client => normalizeTextKey([
-      client.nom, client.prenom, client.telephone, client.rue, client.ville, client.email
-    ].join(" ")).includes(query));
-  }
-  if (filter !== "all") {
-    if (filter === "relance_today") list = list.filter(client => client.nextReminderDate === today);
-    else if (filter === "relance_late") list = list.filter(client => client.nextReminderDate && client.nextReminderDate < today);
-    else list = list.filter(client => client.crmStatus === filter);
-  }
-
-  if (summary) summary.textContent = `${list.length} contact${list.length > 1 ? "s" : ""}`;
   renderClientSelects();
 
-  if (!list.length) {
-    container.innerHTML = emptyState("Aucun contact", "Crée une fiche ou modifie les filtres.");
-    return;
+  // Les pilules : Tous, les secteurs trouves chez les clients, Abonnes.
+  const pilules = document.getElementById("cliPilules");
+  if (pilules) {
+    const secteurs = [...new Set(crmClients.map(c => String(c.secteur || "")).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, "fr"));
+    const pilule = (cle, libelle, icone = "") => {
+      const actif = crmFilter.secteur === cle;
+      return `<button class="cli-pilule${actif ? " cli-pilule--active" : ""}" type="button" data-cli-secteur="${escapeAttribute(cle)}" aria-pressed="${actif}">${icone}${escapeHtml(libelle)}</button>`;
+    };
+    pilules.innerHTML = pilule("", "Tous")
+      + secteurs.map(s => pilule(s, formatSectorLabel(s))).join("")
+      + pilule("__abonnes", "Abonnés", ICONE_CLI.abonnes);
   }
 
-  container.innerHTML = list.map(client => `
-    <article class="crm-card">
-      <header class="item-header">
-        <div>
-          <h4>${escapeHtml([client.prenom, client.nom].filter(Boolean).join(" ") || client.nom)}</h4>
-          <p>${escapeHtml([client.rue, client.codePostal, client.ville].filter(Boolean).join(" - ") || "Adresse a completer")}</p>
-        </div>
-        <span class="pill ${crmStatusPill(client.crmStatus)}">${escapeHtml(crmStatusLabel(client.crmStatus))}</span>
-      </header>
-      <div class="crm-meta">
-        <span>${escapeHtml(client.telephone || "Telephone a completer")}</span>
-        <span>${escapeHtml(client.email || "Email non renseigne")}</span>
-        <span>${escapeHtml(client.totalOrders || 0)} commande(s)</span>
-        <span>${formatMoney(client.totalRevenue || 0)}</span>
+  const rappels = (crmRelances || []).filter(r => r.status === "a_faire" && String(r.datePrevue || "") <= getTodayDateInput()).length;
+  setText("cliRappelsCompte", rappels ? ` · ${rappels}` : "");
+  majSousTitreClients();
+
+  const list = clientsFiltres();
+  if (!list.some(c => String(c.id) === String(clientChoisi))) clientChoisi = list[0] ? String(list[0].id) : null;
+
+  if (!list.length) {
+    container.innerHTML = emptyState("Aucun client", crmClients.length
+      ? "Aucun client ne correspond à ce filtre."
+      : "Crée une fiche avec « Nouveau client ».");
+  } else {
+    container.innerHTML = list.map(client => {
+      const choisi = String(client.id) === clientChoisi;
+      const abonnement = abonnementDuClient(client.id);
+      const livraison = derniereLivraison(client.id);
+      const meta = adresseClientACorriger(client)
+        ? `<span class="cli-meta cli-alerte">${ICONE_CLI.lieu}Adresse à corriger${client.ville ? ` · ${escapeHtml(client.ville)}` : ""}</span>`
+        : `<span class="cli-meta">${escapeHtml([client.ville, livraison ? `livrée le ${dateCourte(livraison)}` : ""].filter(Boolean).join(" · ") || "—")}</span>`;
+      const badge = abonnement
+        ? `<span class="cli-badge cli-badge--${abonnement.status === "active" ? "froid" : "tiede"}">${abonnement.status === "active" ? "Abonné" : "En pause"}</span>`
+        : "";
+      return `<button class="cli-ligne${choisi ? " cli-ligne--choisie" : ""}" type="button" role="listitem" data-cli-choisir="${escapeAttribute(client.id)}" aria-current="${choisi ? "true" : "false"}">`
+        + `<span class="cli-ligne-texte"><span class="cli-nom">${escapeHtml(nomDuClient(client))}</span>${meta}</span>${badge}</button>`;
+    }).join("");
+  }
+  renderFicheClient();
+}
+
+function renderFicheClient() {
+  const fiche = document.getElementById("cliFiche");
+  if (!fiche) return;
+  const client = crmClients.find(c => String(c.id) === String(clientChoisi));
+  if (!client) {
+    fiche.innerHTML = `<p class="cli-fiche-vide">Choisis un client dans la liste.</p>`;
+    return;
+  }
+  const abonnement = abonnementDuClient(client.id);
+  const puces = [client.secteur ? formatSectorLabel(client.secteur) : client.ville, abonnement ? (abonnement.status === "active" ? "Abonné" : "En pause") : ""]
+    .filter(Boolean).map((p, i) => `<span class="cli-badge cli-badge--${i === 1 && abonnement?.status !== "active" ? "tiede" : "froid"} cli-puce">${escapeHtml(p)}</span>`).join("");
+  const appeler = client.telephone
+    ? `<a class="button primary cli-appeler" href="tel:${escapeAttribute(String(client.telephone).replace(/[^\d+]/g, ""))}">${ICONE_CLI.tel}<span>Appeler</span></a>`
+    : "";
+  const adresse = adresseClientACorriger(client)
+    ? `<p class="cli-valeur cli-alerte">Adresse à corriger</p><p class="cli-note">${escapeHtml([client.rue, client.codePostal, client.ville].filter(Boolean).join(" ") || "Aucune adresse")}</p>`
+    : `<p class="cli-valeur">${escapeHtml(client.rue)}<br>${escapeHtml([client.codePostal, client.ville].filter(Boolean).join(" "))}</p>`;
+  const contact = `<p class="cli-valeur">${escapeHtml(client.telephone || "Téléphone à compléter")}</p>`
+    + (client.email ? `<p class="cli-note">${escapeHtml(client.email)}</p>` : "");
+
+  let carteAbonnement = "";
+  if (abonnement) {
+    const echeance = echeanceAFaire(abonnement);
+    const enRetard = Boolean(echeance?.overdue);
+    const produits = (abonnement.products || []).map(p => `${p.quantite} ${p.nom || p.designation || p.code || ""}`.trim()).join(", ");
+    const morceaux = [produits, `rappel ${abonnement.reminderDays ?? 0} j`, echeance ? `échéance du ${dateCourte(echeance.date)}` : ""].filter(Boolean);
+    const geste = abonnement.status === "active" && echeance
+      ? `<button class="cli-bouton-contour" type="button" data-op="generate-sub" data-id="${escapeAttribute(abonnement.id)}" data-date="${escapeAttribute(echeance.date)}">Créer la commande</button>`
+      : "";
+    carteAbonnement = `<div class="cli-abonnement subscription-card">
+      <div class="cli-abonnement-texte">
+        <p class="cli-abonnement-titre">Abonnement · ${escapeHtml(frequenceLisible(abonnement))}${enRetard ? `<span class="cli-badge cli-badge--alerte">${ICONE_CLI.retard}En retard</span>` : ""}${abonnement.status !== "active" ? `<span class="cli-badge cli-badge--tiede">En pause</span>` : ""}</p>
+        <p class="cli-abonnement-detail">${escapeHtml(morceaux.join(" · "))}</p>
+      </div>${geste}</div>`;
+  }
+
+  const commandes = commandesDuClient(client.id);
+  const annee = String(new Date().getFullYear());
+  const depuisJanvier = commandes.filter(o => String(o.dateCommande || "").startsWith(annee)).length;
+  const visibles = commandes.slice(0, 4);
+  const reste = commandes.length - visibles.length;
+  const lignesCommandes = visibles.length
+    ? visibles.map(o => `<button class="cli-commande" type="button" data-cli-commande="${escapeAttribute(o.id)}" aria-label="${escapeAttribute(`${o.numero || ""}, ${STATUT_COMMANDE[o.status]?.[0] || o.status || ""}`)}">`
+        + `<span class="cli-commande-num">${escapeHtml(o.numero || "—")}</span>`
+        + `<span class="cli-commande-date">${escapeHtml(dateCourte(o.dateCommande))}</span>`
+        + `<span class="cli-commande-articles">${articlesDe(o)} article${articlesDe(o) > 1 ? "s" : ""}</span>`
+        + `<span class="cli-commande-statut">${badgeDeCommande(o)}</span></button>`).join("")
+    : `<p class="cli-note">Aucune commande.</p>`;
+
+  const extras = [
+    client.nextReminderDate ? `Prochaine relance : ${dateCourte(client.nextReminderDate)}` : "",
+    client.needs ? `Besoins : ${client.needs}` : "",
+    client.preferences ? `Préférés : ${client.preferences}` : "",
+    client.notes || ""
+  ].filter(Boolean);
+
+  fiche.innerHTML = `
+    <header class="cli-fiche-tete">
+      <div class="cli-fiche-identite">
+        <h2 class="cli-fiche-nom">${escapeHtml(nomDuClient(client))}</h2>
+        <div class="cli-puces">${puces}</div>
       </div>
-      <p class="muted">${escapeHtml(client.notes || client.needs || "Aucune note")}</p>
-      <div class="card-actions">
-        <button class="button ok compact" type="button" data-crm-status-client="${escapeAttribute(client.id)}" data-crm-status="client_actif">Client actif</button>
-        <button class="button warning compact" type="button" data-crm-status-client="${escapeAttribute(client.id)}" data-crm-status="client_a_relancer">A relancer</button>
-        <button class="button danger compact" type="button" data-crm-status-client="${escapeAttribute(client.id)}" data-crm-status="client_inactif">Inactif</button>
-      </div>
-    </article>
-  `).join("");
+      <div class="cli-fiche-gestes">${appeler}<button class="cli-bouton-contour" type="button" data-action="cli-modifier" data-client-id="${escapeAttribute(client.id)}">Modifier</button></div>
+    </header>
+    <div class="cli-champs">
+      <div><p class="cli-libelle">Adresse</p>${adresse}</div>
+      <div><p class="cli-libelle">Contact</p>${contact}</div>
+    </div>
+    ${extras.length ? `<div class="cli-notes">${extras.map(e => `<p class="cli-note">${escapeHtml(e)}</p>`).join("")}</div>` : ""}
+    <label class="cli-statut">
+      <span class="cli-libelle">Statut commercial</span>
+      <select data-cli-statut="${escapeAttribute(client.id)}" aria-label="Statut commercial de ${escapeAttribute(nomDuClient(client))}">
+        ${["prospect", "client_actif", "client_a_relancer", "client_inactif"].map(s => `<option value="${s}"${(client.crmStatus || "prospect") === s ? " selected" : ""}>${escapeHtml(crmStatusLabel(s))}</option>`).join("")}
+      </select>
+    </label>
+    ${carteAbonnement}
+    <section class="cli-commandes" aria-label="Commandes du client">
+      <div class="cli-commandes-tete"><h3>Commandes</h3><span class="cli-note">${depuisJanvier} depuis janvier</span></div>
+      <div class="cli-commandes-liste">${lignesCommandes}</div>
+      ${reste > 0 ? `<button class="cli-autres" type="button" data-action="cli-voir-commandes" data-client-nom="${escapeAttribute(nomDuClient(client))}">Les ${reste} autre${reste > 1 ? "s" : ""}${ICONE_CLI.chevron}</button>` : ""}
+    </section>`;
+}
+
+function ouvrirDialogueClient(clientId = null) {
+  const dialogue = document.getElementById("cliDialogue");
+  const form = document.getElementById("crmForm");
+  if (!dialogue || !form || typeof dialogue.showModal !== "function") return;
+  form.reset();
+  const client = clientId ? crmClients.find(c => String(c.id) === String(clientId)) : null;
+  setText("cliDialogueTitre", client ? "Modifier le client" : "Nouveau client");
+  form.elements.id.value = client ? client.id : "";
+  if (client) {
+    const valeurs = { nom: client.nom, prenom: client.prenom, telephone: client.telephone, email: client.email,
+      adresse: client.rue, codePostal: client.codePostal, ville: client.ville, crmStatus: client.crmStatus || "prospect",
+      nextReminderDate: client.nextReminderDate, needs: client.needs, preferences: client.preferences, notes: client.notes };
+    for (const [cle, valeur] of Object.entries(valeurs)) if (form.elements[cle]) form.elements[cle].value = valeur ?? "";
+  }
+  dialogue.showModal();
+  form.elements.nom.focus();
+}
+
+function bindClients() {
+  const ecran = document.getElementById("crm");
+  if (!ecran) return;
+  ecran.addEventListener("click", event => {
+    const pilule = event.target.closest("[data-cli-secteur]");
+    if (pilule) {
+      crmFilter.secteur = pilule.dataset.cliSecteur;
+      renderCrm();
+      return;
+    }
+    const ligne = event.target.closest("[data-cli-choisir]");
+    if (ligne) {
+      clientChoisi = ligne.dataset.cliChoisir;
+      renderCrm();
+      document.querySelector(`[data-cli-choisir="${CSS.escape(clientChoisi)}"]`)?.focus();
+      return;
+    }
+    const commande = event.target.closest("[data-cli-commande]");
+    if (commande) ouvrirDetailCommande(commande.dataset.cliCommande);
+  });
+  ecran.addEventListener("change", event => {
+    const statut = event.target.closest("[data-cli-statut]");
+    if (statut) runAction(statut, "", () => updateCrmClientStatus(statut.dataset.cliStatut, statut.value));
+  });
 }
 
 function renderClientSelects() {
@@ -1803,15 +2033,18 @@ function renderClientSelects() {
 }
 
 async function saveCrmClient(form) {
-  const data = Object.fromEntries(new FormData(form).entries());
-  await apiFetch("/api/crm/clients", {
-    method: "POST",
+  const { id, ...data } = Object.fromEntries(new FormData(form).entries());
+  const cree = await apiFetch(id ? `/api/crm/clients/${encodeURIComponent(id)}` : "/api/crm/clients", {
+    method: id ? "PATCH" : "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data)
   });
   form.reset();
+  document.getElementById("cliDialogue")?.close();
+  // La fiche ouverte est celle qu'on vient d'enregistrer.
+  if (cree?.id) clientChoisi = String(cree.id);
   await loadData();
-  notify("Fiche CRM enregistree.", "success");
+  notify(id ? "Fiche client mise à jour." : "Client enregistré.", "success");
 }
 
 async function updateCrmClientStatus(clientId, status) {

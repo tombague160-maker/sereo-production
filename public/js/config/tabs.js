@@ -57,7 +57,7 @@ export const titles = {
     subtitle: "Ajuste les quantités, contrôle les écarts et repère les produits à surveiller."
   },
   crm: {
-    title: "CRM",
+    title: "Clients",
     subtitle: "Prospects, clients, relances et historique commercial."
   },
   commandes: {
@@ -148,7 +148,10 @@ export const GROUPES_NAV = {
   // « A recommander » est une CARTE de l'ecran Stock (planche 13d) ; la liste
   // detaillee reste un ecran secondaire, atteint par « Tout voir ».
   stock: ["stock"],
-  clients: ["crm", "relances"],
+  // Les rappels ne sont plus un onglet (planche 13e) : le retard d'un
+  // abonnement se lit sur la fiche. La liste des rappels reste un ecran
+  // secondaire, atteint par « Rappels » dans l'en-tete de Clients.
+  clients: ["crm"],
   analyse: ["statistiques", "exports"]
 };
 
@@ -161,7 +164,7 @@ export const ONGLETS_HORS_NAV = new Set(["parametres"]);
 // est. « commande-client » est la saisie d'une commande -- le seul chemin de
 // creation de l'application -- et la planche 13c ne lui donne aucune place :
 // une maquette qui ne dessine pas une fonction ne decide pas de la supprimer.
-export const ECRANS_SECONDAIRES = { "commande-client": "commandes", recommande: "stock" };
+export const ECRANS_SECONDAIRES = { "commande-client": "commandes", recommande: "stock", relances: "clients" };
 
 // Deux inventaires qui se contredisent en silence, c'est la panne qu'on ne
 // voit qu'a l'usage : un ecran sans chemin, ou une entree qui ouvre du vide.

@@ -36,10 +36,15 @@ test.describe("Navigation laterale plate", () => {
 
   test("une entree reste allumee pour tous les ecrans qu'elle absorbe", async ({ page }) => {
     await page.goto("/");
-    // Une entree absorbe plusieurs ecrans (Clients : la fiche et les
-    // relances). Passer de l'un a l'autre ne doit pas l'eteindre.
+    // Une entree absorbe plusieurs ecrans (Analyse : statistiques et
+    // exports). Passer de l'un a l'autre ne doit pas l'eteindre.
+    await page.locator("#nav-analyse").click();
+    await page.locator("#tab-exports").click();
+    await expect(page.locator("#exports")).toHaveClass(/active/);
+    await expect(page.locator("#nav-analyse")).toHaveClass(/active/);
+    // Les rappels sont devenus un ecran SECONDAIRE de Clients (planche 13e).
     await page.locator("#nav-clients").click();
-    await page.locator("#tab-relances").click();
+    await page.locator('#enteteActions [data-target-tab="relances"]').click();
     await expect(page.locator("#relances")).toHaveClass(/active/);
     await expect(page.locator("#nav-clients")).toHaveClass(/active/);
     // « A recommander » est devenu une CARTE du Stock (planche 13d) : son lien
