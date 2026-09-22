@@ -20,8 +20,9 @@ test.beforeAll(async () => {
   const seed = jeuDeDonnees();
   // Un abonnement actif commence il y a dix jours, chaque semaine : deux
   // echeances passees sans commande -- donc « en retard ».
-  const veto = seed.clients.find(c => /V[ée]t/i.test(c.nom)) || seed.clients[4];
-  seed.subscriptions.push({ ...seed.subscriptions[0], id: "sub-retard", clientId: veto.id, status: "active",
+  // Chez le SSIAD : dernier par ordre alphabetique, premier par date -- le
+  // tri « Prochaine livraison » se distingue ainsi du tri par nom.
+  seed.subscriptions.push({ ...seed.subscriptions[0], id: "sub-retard", clientId: "c-ssiad", status: "active",
     startDate: jourDecale(-10), frequency: { unit: "days", interval: 7 } });
   srv = await demarrer({ port: 3165, seed });
 });
