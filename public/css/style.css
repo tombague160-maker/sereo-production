@@ -11776,7 +11776,7 @@ textarea::placeholder {
 }
 /* Entre 921 et 1280 px : l'agenda passe sous le tableau, et le tableau garde
    de la place pour le nom (150 + 150 + 120 de colonnes fixes). */
-@media (min-width: 921px) and (max-width: 1280px) {
+@media (min-width: 921px) and (max-width: 1439px) {
   .abo-colonne, #abonnements .abo-agenda { grid-column: span 12; }
 }
 @media (max-width: 920px) {
@@ -11787,3 +11787,11 @@ textarea::placeholder {
   #abonnements .abo-tableau { padding: 0; background: transparent; box-shadow: none; border-radius: 0; }
   #abonnements #subscriptionList.subscription-list { gap: 10px; }
 }
+
+/* --- Abonnements : la relecture ------------------------------------------- */
+.abo-semaine-titre.abo-alerte { color: var(--v8-alerte); }
+:root[data-color-scheme] #abonnements button.pill.abo-badge--commande,
+:root:not([data-color-scheme]) #abonnements button.pill.abo-badge--commande {
+  min-height: 44px; height: 44px; padding: 0 14px; cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 600;
+}
+#abonnements button.abo-badge--commande:focus-visible { outline: none; box-shadow: var(--focus-ring); }

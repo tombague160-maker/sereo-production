@@ -87,11 +87,17 @@ test("« Arrêté » ne ressemble pas à « Actif »", async ({ page }) => {
   expect(await fond("Arrêté")).not.toBe(await fond("Actif"));
 });
 
-test("« Les 90 jours » : les semaines, le compte, et « Les N semaines suivantes »", async ({ page }) => {
+test("« Les 90 jours » : le retard d'abord, puis CETTE semaine -- pas les plus anciennes", async ({ page }) => {
   await ouvrir(page);
   await expect(page.locator("#aboAgendaCompte")).toHaveText(/^\d+ livraisons?$/);
-  await expect(page.locator("#subscriptionAgenda .abo-semaine")).toHaveCount(2);
-  await expect(page.locator("#subscriptionAgenda .abo-semaine-titre").first()).toHaveText(/^Semaine du \d{1,2} \S+ · \d+$/);
+  // Le retard (J-10, J-3) en tete, puis deux semaines a partir de celle-ci.
+  const titres = await page.locator("#subscriptionAgenda .abo-semaine-titre").allTextContents();
+  expect(titres[0]).toBe("En retard · 2");
+  expect(titres[1]).toMatch(/^Cette semaine · \d+$/);
+  expect(titres).toHaveLength(3);
+  // La livraison du jour (sub-1, commence aujourd'hui) est visible sans deplier,
+  // et son rappel (2 jours avant) est arrive.
+  await expect(page.locator("#subscriptionAgenda .abo-semaine").nth(1)).toContainText("rappel arrivé");
   const plus = page.locator("#aboAgendaPlus");
   await expect(plus).toHaveText(/^Les \d+ semaines? suivantes?$/);
   await plus.click();
@@ -107,6 +113,15 @@ test("une échéance en retard se crée depuis l'agenda", async ({ page }) => {
   await retard.getByRole("button", { name: /^Créer la commande/ }).click();
   await envoi;
   await expect(page.locator("#pageSubtitle")).toHaveText("2 actifs · 1 en pause · 1 échéance en retard");
+  // La commande creee se lit dans l'agenda, et mene a Commandes.
+  await expect(page.locator("#subscriptionAgenda .abo-badge--commande").first()).toBeVisible();
+});
+
+test("le tableau de bord compte le même retard que l'écran Abonnements", async ({ page }) => {
+  // Deux definitions : l'alerte comptait aussi l'echeance DEJA commandee.
+  await page.goto(srv.base + "/", { waitUntil: "networkidle" });
+  await page.waitForTimeout(600);
+  await expect(page.locator("body")).toContainText("1 échéance d’abonnement en retard");
 });
 
 test("la recherche de l'en-tête filtre, et n'apparaît que sur Abonnements", async ({ page }) => {
@@ -135,3 +150,14 @@ test("à 1024 px, le nom du client garde de la place", async ({ page }) => {
   const nom = await lignes(page).first().locator("strong").boundingBox();
   expect(nom.width).toBeGreaterThan(120);
 });
+
+for (const largeur of [1366, 1440]) {
+  test(`à ${largeur} px, le nom du client garde de la place`, async ({ page }) => {
+    // Au-dessus de 1280 le tableau n'avait que 7 colonnes sur 12 : 420 px de
+    // colonnes fixes ne laissaient qu'une dizaine de pixels au nom a 1300.
+    await page.setViewportSize({ width: largeur, height: 900 });
+    await ouvrir(page);
+    const nom = await lignes(page).first().locator("strong").boundingBox();
+    expect(nom.width).toBeGreaterThan(largeur < 1440 ? 120 : 100);
+  });
+}

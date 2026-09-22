@@ -160,6 +160,11 @@ export function initOperations(api) {
           "Commande créée. Confirme-la dans Commandes, filtre « Planifiées », pour la préparer.",
           "success",
         );
+        // Le rendu a detruit le bouton : le focus revient a l'echeance suivante
+        // du meme abonnement, visible, au lieu de tomber sur <body>.
+        const suivant = [...document.querySelectorAll(`[data-op="generate-sub"][data-id="${CSS.escape(el.dataset.id)}"]`)]
+          .find((b) => b.checkVisibility());
+        suivant?.focus();
       }
       if (action === "locate") await locate();
       if (action === "search-departure" || action === "search-arrival")
@@ -375,12 +380,14 @@ function renderDashboard() {
   // cliquable vers l'ecran qui la traite. Une alerte qu'on ne peut pas suivre
   // ne sert qu'a inquieter.
   const alerts = [];
-  const overdue = op.subscriptions.filter((s) => s.overdue).length;
+  // « En retard » = echue ET sans commande, comme l'ecran Abonnements : une
+  // echeance deja commandee n'attend plus rien de l'utilisateur.
+  const overdue = op.subscriptions.filter((s) => s.overdue && !s.orderId).length;
   if (overdue) {
     alerts.push({
       titre: `${overdue} échéance${overdue > 1 ? "s" : ""} d’abonnement en retard`,
       detail: op.subscriptions
-        .filter((s) => s.overdue)
+        .filter((s) => s.overdue && !s.orderId)
         .slice(0, 2)
         .map((s) => s.clientName)
         .join(" · ") || "À preparer au plus vite",
@@ -539,7 +546,7 @@ function renderSubscriptions() {
           ? `<span class="pill abo-badge abo-badge--retard"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5"></circle><path d="M12 8v4m0 3.5v.5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg>En retard</span>`
           : `<span class="pill abo-badge abo-badge--${etat.cle} ${etat.pill}">${h(etat.mot)}</span>`;
         const nomClient = h(name(client || {}) || "Client introuvable");
-        return `<article class="commande-ligne abonnement-ligne abonnement-ligne--${etat.cle}"><button class="commande-ligne-main" type="button" data-op="open-sub-detail" data-id="${h(s.id)}" aria-label="Ouvrir ${nomClient}, ${h(retard ? "en retard" : etat.mot)}"><span class="etat-commande etat-commande--${etat.cle}" aria-hidden="true"></span><span class="commande-ligne-corps"><strong>${nomClient}</strong><span class="abo-detail">${h(detail || "Adresse à compléter")}</span><span class="abo-panier">${h(panier(s.products) || "Panier vide")}</span></span><span class="abo-cellule abo-frequence">${h(frequency(s))}</span><span class="abo-cellule abo-prochaine${retard ? " abo-alerte" : ""}">${prochaine}</span>${badge}</button></article>`;
+        return `<article class="commande-ligne abonnement-ligne abonnement-ligne--${etat.cle}"><button class="commande-ligne-main" type="button" data-op="open-sub-detail" data-id="${h(s.id)}" aria-label="Ouvrir ${nomClient}, ${h(retard ? "en retard" : etat.mot)}, ${h(frequency(s))}${s.status === "active" && next ? `, prochaine livraison ${h(jourCourt(next.date))}` : ""}"><span class="etat-commande etat-commande--${etat.cle}" aria-hidden="true"></span><span class="commande-ligne-corps"><strong>${nomClient}</strong><span class="abo-detail">${h(detail || "Adresse à compléter")}</span><span class="abo-panier">${h(panier(s.products) || "Panier vide")}</span></span><span class="abo-cellule abo-frequence">${h(frequency(s))}</span><span class="abo-cellule abo-prochaine${retard ? " abo-alerte" : ""}">${prochaine}</span>${badge}</button></article>`;
       })
       .join("") ||
     empty(
@@ -551,19 +558,29 @@ function renderSubscriptions() {
   majSousTitreAbonnements();
 }
 
-// « Les 90 jours » : les echeances groupees par semaine (lundi), deux semaines
-// visibles, le reste derriere « Les N semaines suivantes ».
+// « Les 90 jours » : d'abord ce qui est EN RETARD (echu, sans commande), puis
+// les semaines a partir de CELLE-CI -- deux visibles, le reste derriere « Les N
+// semaines suivantes ». Le serveur rend aussi les echeances passees depuis le
+// debut de l'abonnement : les grouper par semaine ouvrait l'agenda sur les
+// plus anciennes (un abonnement reactive apres deux mois ouvrait sur l'ete).
 function renderAgenda() {
   const corps = document.getElementById("subscriptionAgenda");
   if (!corps) return;
+  const today = data.subscriptions.today;
   const occurrences = data.subscriptions.occurrences;
+  const retards = occurrences.filter(enRetard);
+  const aVenir = occurrences.filter((o) => o.date >= today || o.orderId);
   const compte = document.getElementById("aboAgendaCompte");
-  if (compte) compte.textContent = `${occurrences.length} livraison${occurrences.length > 1 ? "s" : ""}`;
-  const semaines = new Map();
-  for (const o of occurrences) {
-    const d = new Date(`${o.date}T12:00:00`);
+  if (compte) compte.textContent = `${aVenir.length} livraison${aVenir.length > 1 ? "s" : ""}`;
+  const lundiDe = (date) => {
+    const d = new Date(`${date}T12:00:00`);
     d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
-    const cle = iso(d);
+    return iso(d);
+  };
+  const cetteSemaine = lundiDe(today);
+  const semaines = new Map();
+  for (const o of aVenir) {
+    const cle = o.date < cetteSemaine ? cetteSemaine : lundiDe(o.date);
     if (!semaines.has(cle)) semaines.set(cle, []);
     semaines.get(cle).push(o);
   }
@@ -573,16 +590,31 @@ function renderAgenda() {
     const j = new Date(`${date}T12:00:00`).getDate();
     return j === 1 ? "1er" : String(j);
   };
-  corps.innerHTML = visibles.length
-    ? visibles.map(([lundi, liste]) => {
-        const titre = new Date(`${lundi}T12:00:00`).toLocaleDateString("fr-FR", { day: "numeric", month: "long" });
-        return `<section class="abo-semaine" aria-label="Semaine du ${h(titre)}"><p class="abo-semaine-titre">Semaine du ${h(titre)} · ${liste.length}</p>${liste.map((o) => {
-          const geste = o.orderId
-            ? `<span class="pill abo-badge abo-badge--commande">${h(status(o.orderStatus))}</span>`
-            : `<button class="abo-creer" type="button" data-op="generate-sub" data-id="${h(o.subscriptionId)}" data-date="${h(o.date)}" aria-label="Créer la commande du ${h(jourCourt(o.date))} pour ${h(o.clientName)}">Créer la commande</button>`;
-          return `<div class="abo-echeance subscription-card${enRetard(o) ? " abo-echeance--retard" : ""}"><span class="abo-jour" title="${h(jourCourt(o.date))}">${numero(o.date)}</span><span class="abo-echeance-texte"><strong>${h(o.clientName)}</strong><span>${h(panier(o.products))}${enRetard(o) ? " · en retard" : ""}</span></span>${geste}</div>`;
-        }).join("")}</section>`;
-      }).join('<div class="abo-separateur" aria-hidden="true"></div>')
+  const jourLong = (date) => {
+    const d = new Date(`${date}T12:00:00`);
+    const mois = d.toLocaleDateString("fr-FR", { month: "long" });
+    return `${d.getDate() === 1 ? "1er" : d.getDate()} ${mois}`;
+  };
+  const ligne = (o) => {
+    const retard = enRetard(o);
+    // Le RAPPEL : l'abonnement promet « rappel N jours avant ». L'echeance
+    // dont le rappel est arrive le dit, sans le panneau d'avant.
+    const rappel = !retard && o.due && !o.orderId;
+    const geste = o.orderId
+      ? `<button class="pill abo-badge abo-badge--commande" type="button" data-action="go-tab" data-target-tab="commandes-planifiees" aria-label="${h(status(o.orderStatus))} : voir dans Commandes">${h(status(o.orderStatus))}</button>`
+      : `<button class="abo-creer" type="button" data-op="generate-sub" data-id="${h(o.subscriptionId)}" data-date="${h(o.date)}" aria-label="Créer la commande du ${h(jourCourt(o.date))} pour ${h(o.clientName)}">Créer la commande</button>`;
+    return `<div class="abo-echeance subscription-card${retard ? " abo-echeance--retard" : ""}"><span class="abo-jour" title="${h(jourCourt(o.date))}">${numero(o.date)}</span><span class="abo-echeance-texte"><strong>${h(o.clientName)}</strong><span>${h(panier(o.products))}${retard ? ` · échue le ${h(jourCourt(o.date).replace(/^\S+ /, ""))}` : rappel ? " · rappel arrivé" : ""}</span></span>${geste}</div>`;
+  };
+  const blocs = [];
+  if (retards.length) {
+    blocs.push(`<section class="abo-semaine abo-semaine--retard" aria-label="En retard"><p class="abo-semaine-titre abo-alerte">En retard · ${retards.length}</p>${retards.map(ligne).join("")}</section>`);
+  }
+  for (const [lundi, liste] of visibles) {
+    const titre = lundi === cetteSemaine ? "Cette semaine" : `Semaine du ${jourLong(lundi)}`;
+    blocs.push(`<section class="abo-semaine" aria-label="${h(titre)}"><p class="abo-semaine-titre">${h(titre)} · ${liste.length}</p>${liste.map(ligne).join("")}</section>`);
+  }
+  corps.innerHTML = blocs.length
+    ? blocs.join('<div class="abo-separateur" aria-hidden="true"></div>')
     : empty("Aucune livraison prévue dans les 90 jours.");
   const plus = document.getElementById("aboAgendaPlus");
   if (plus) {
