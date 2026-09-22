@@ -24,14 +24,15 @@ test.describe("Sereo smoke tests", () => {
     await page.locator("#nav-commandes").click();
     await expect(page.locator("#commandes")).toHaveClass(/active/);
     // Soit on a des cards, soit empty state "Aucune commande"
-    const hasContent = await page.locator("#commandes .cmd-ligne, #commandes .empty-state").first().isVisible({ timeout: 5000 });
-    expect(hasContent).toBe(true);
+    // toBeVisible ATTEND ; isVisible() ne le fait pas (son timeout est ignore)
+    // et faisait une course avec le chargement des donnees.
+    await expect(page.locator("#commandes .cmd-ligne, #commandes .empty-state").first()).toBeVisible({ timeout: 5000 });
   });
 
   test("navigation vers Parametres affiche les sections theme + zone dangereuse", async ({ page }) => {
     await page.goto("/");
     await page.locator('[data-action="go-tab"][data-target-tab="parametres"]').click();
-    await expect(page.getByText("Personnalisation de l'interface", { exact: false })).toBeVisible();
+    await expect(page.locator("#parThemeTitre")).toHaveText("Thème");
     // Zone dangereuse v1.12.0
     await expect(page.getByText("Zone dangereuse", { exact: false })).toBeVisible();
   });

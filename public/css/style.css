@@ -11850,3 +11850,78 @@ textarea::placeholder {
 /* Un titre de page long (« Tournee Saint-Martin-de-Belleville ») se coupe
    proprement au lieu de deborder. */
 .ecran-entete-texte h2 { overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+
+/* ==========================================================================
+   PARAMETRES -- planches 13f (clair) / 14f (sombre). Valeurs copiees.
+   ========================================================================== */
+.par-grille { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 24px; align-items: start; }
+#parametres .par-carte {
+  display: flex; flex-direction: column; gap: 16px; min-width: 0;
+  padding: 28px; border-radius: 36px; background: var(--v8-surface);
+  box-shadow: 0 1px 2px rgba(15, 61, 61, 0.05), 0 12px 28px rgba(15, 61, 61, 0.05);
+}
+:root[data-color-scheme="dark"] #parametres .par-carte { box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 28px rgba(0,0,0,.3); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) #parametres .par-carte { box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 28px rgba(0,0,0,.3); }
+}
+.par-span-4 { grid-column: span 4; }
+.par-span-6 { grid-column: span 6; }
+.par-span-12 { grid-column: span 12; }
+:root[data-color-scheme] #parametres .par-carte h3,
+:root:not([data-color-scheme]) #parametres .par-carte h3 {
+  margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -0.01em; color: var(--v8-texte);
+}
+.par-aide { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--v8-texte-secondaire); }
+
+/* La bascule de theme : une piste, trois segments de 44 px (planche : 40 ;
+   la charte exige 44 pour une cible). */
+.par-segments { display: flex; gap: 6px; padding: 4px; border-radius: 999px; background: var(--v8-fond); }
+:root[data-color-scheme] #parametres .par-segment,
+:root:not([data-color-scheme]) #parametres .par-segment {
+  flex: 1; min-height: 44px; height: 44px; padding: 0 12px; border: 0; border-radius: 999px;
+  background: transparent; color: var(--v8-texte-secondaire); box-shadow: none;
+  font: inherit; font-size: 14px; font-weight: 500; cursor: pointer;
+}
+:root[data-color-scheme] #parametres .par-segment[aria-pressed="true"],
+:root:not([data-color-scheme]) #parametres .par-segment[aria-pressed="true"] {
+  background: var(--v8-principal); color: var(--v8-texte-sur-principal); font-weight: 600;
+}
+#parametres .par-segment:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+.par-pilules { display: flex; flex-wrap: wrap; gap: 8px; }
+.par-pilule {
+  display: inline-flex; align-items: center; height: 40px; padding: 0 16px; border-radius: 999px;
+  background: var(--v8-vert-clair); color: var(--v8-principal-appuye); font-size: 14px; font-weight: 600;
+}
+:root[data-color-scheme="dark"] .par-pilule { color: var(--v8-principal); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) .par-pilule { color: var(--v8-principal); }
+}
+
+.par-details > summary {
+  display: flex; align-items: center; min-height: 44px; cursor: pointer;
+  font-size: 14px; font-weight: 600; color: var(--v8-principal);
+}
+.par-details > summary:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 12px; }
+.par-details[open] > summary { margin-bottom: 12px; }
+.par-logo { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.par-logo img { max-width: 140px; max-height: 64px; object-fit: contain; }
+
+.par-numerotation { display: flex; flex-direction: column; gap: 12px; }
+.par-champ { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 500; color: var(--v8-texte-secondaire); }
+.par-case { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 14px; font-weight: 500; color: var(--v8-texte); }
+.par-case input { width: 20px; height: 20px; accent-color: var(--v8-principal); }
+.par-numerotation .button { align-self: flex-start; }
+
+#parametres .par-danger { box-shadow: inset 0 0 0 1.5px var(--v8-alerte); }
+:root[data-color-scheme] #parametres .par-danger h3,
+:root:not([data-color-scheme]) #parametres .par-danger h3 { color: var(--v8-alerte); }
+
+@media (max-width: 1180px) {
+  .par-span-4 { grid-column: span 6; }
+}
+@media (max-width: 920px) {
+  .par-grille { gap: 16px; }
+  .par-span-4, .par-span-6 { grid-column: span 12; }
+  #parametres .par-carte { padding: 20px; border-radius: 24px; }
+}

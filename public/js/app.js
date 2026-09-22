@@ -470,6 +470,13 @@ function bindUi() {
 
   bindClients();
 
+  const numerotation = document.getElementById("numerotationForm");
+  numerotation?.addEventListener("submit", event => {
+    event.preventDefault();
+    runAction(event.submitter, "Enregistrement...", () => enregistrerNumerotation(numerotation));
+  });
+  numerotation?.addEventListener("input", majExempleNumero);
+
   document.getElementById("relanceForm")?.addEventListener("submit", event => {
     event.preventDefault();
     runAction(event.submitter, "Création...", () => saveRelance(event.currentTarget));
@@ -4714,9 +4721,61 @@ function avertissementSecteur(sector) {
   return `<p class="sector-alerte"><span class="pill pill-warning">À vérifier</span> ${escapeHtml(parts.join(" "))}</p>`;
 }
 
+// Planche 13f : les secteurs en pilules de nom seul. La fiche complete reste
+// derriere « Gerer les secteurs ».
+function renderParSecteursPilules() {
+  const pilules = document.getElementById("parSecteursPilules");
+  if (!pilules) return;
+  const noms = (deliverySectors.length ? deliverySectors : [])
+    .map(s => formatSectorLabel(s.secteur || s.name || ""))
+    .filter(Boolean);
+  pilules.innerHTML = noms.length
+    ? noms.map(nom => `<span class="par-pilule">${escapeHtml(nom)}</span>`).join("")
+    : `<span class="par-aide">Aucun secteur enregistré.</span>`;
+}
+
+// Numerotation des bons (planche 13f) : GET / PATCH /api/settings/order-numbering.
+let numerotationChargee = false;
+function exempleDeNumero(prefix, resetAnnually) {
+  const p = String(prefix || "CMD").toUpperCase();
+  return resetAnnually ? `${p}-${new Date().getFullYear()}-001` : `${p}-0001`;
+}
+function majExempleNumero() {
+  const prefixe = document.getElementById("parPrefixe")?.value || "";
+  const remise = document.getElementById("parRemiseAnnuelle")?.checked;
+  setText("parExemple", exempleDeNumero(prefixe || "CMD", remise));
+}
+async function chargerNumerotation() {
+  if (numerotationChargee) return;
+  numerotationChargee = true;
+  try {
+    const reglage = await apiFetch("/api/settings/order-numbering");
+    const prefixe = document.getElementById("parPrefixe");
+    const remise = document.getElementById("parRemiseAnnuelle");
+    if (prefixe) prefixe.value = reglage.prefix || "CMD";
+    if (remise) remise.checked = reglage.resetAnnually !== false;
+    majExempleNumero();
+  } catch {
+    numerotationChargee = false;
+  }
+}
+async function enregistrerNumerotation(form) {
+  const reglage = await apiFetch("/api/settings/order-numbering", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prefix: form.elements.prefix.value.trim(), resetAnnually: form.elements.resetAnnually.checked })
+  });
+  form.elements.prefix.value = reglage.prefix;
+  form.elements.resetAnnually.checked = reglage.resetAnnually;
+  majExempleNumero();
+  notify("Numérotation enregistrée.", "success");
+}
+
 function renderSettings() {
   updateBrandImageStatus();
   renderTourneeSettings();
+  renderParSecteursPilules();
+  chargerNumerotation();
 
   const sectorsContainer = document.getElementById("settingsSectors");
   if (!sectorsContainer) return;
