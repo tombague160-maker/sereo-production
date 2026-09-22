@@ -177,7 +177,7 @@ test.describe("Abonnements et pilotage", () => {
     await expect(page.locator("#subscriptionList")).toContainText(
       "Crée ton premier abonnement",
     );
-    await page.getByRole("button", { name: "+ Nouvel abonnement" }).click();
+    await page.getByRole("button", { name: "Nouvel abonnement", exact: true }).click();
     await page.locator("#subClient").selectOption("test-client");
     await page.locator(".sub-product").selectOption("test-changes");
     await page.locator(".sub-quantity").fill("3");
@@ -207,8 +207,10 @@ test.describe("Abonnements et pilotage", () => {
     await page.getByRole("button", { name: "Mettre en pause" }).click();
     await expect(page.locator("#abonnementDetailDialog")).not.toBeVisible();
     await expect(ligne).toContainText("En pause");
-    await expect(page.locator("#subscriptionReminders")).toContainText(
-      "Tous les rappels sont à jour",
+    // Planche 13a : « Rappels a traiter » fusionne dans « Les 90 jours ». Un
+    // abonnement en pause n'a plus d'echeance.
+    await expect(page.locator("#subscriptionAgenda")).toContainText(
+      "Aucune livraison prévue dans les 90 jours.",
     );
     await ouvrirLeSheet();
     await page.getByRole("button", { name: "Réactiver" }).click();
@@ -221,18 +223,17 @@ test.describe("Abonnements et pilotage", () => {
       .getByRole("button", { name: "Enregistrer l’abonnement" })
       .click();
     await expect(ligne).toContainText("Tous les 10 jours");
-    await page
-      .locator("#subscriptionReminders")
-      .getByRole("button", { name: "Créer la commande" })
-      .first()
-      .click();
-    await expect(page.locator("#subscriptionReminders")).toContainText(
-      "Tous les rappels sont à jour",
-    );
+    // Chaque echeance des 90 jours porte son geste. Creer la premiere : son
+    // bouton laisse la place au statut de la commande, et une seule commande
+    // existe, meme apres rechargement.
+    const agenda = page.locator("#subscriptionAgenda");
+    const creer = agenda.getByRole("button", { name: /^Créer la commande/ });
+    const avant = await creer.count();
+    expect(avant).toBeGreaterThan(0);
+    await creer.first().click();
+    await expect(creer).toHaveCount(avant - 1);
     await page.reload();
-    await expect(page.locator("#subscriptionReminders")).toContainText(
-      "Tous les rappels sont à jour",
-    );
+    await expect(page.locator("#subscriptionAgenda").getByRole("button", { name: /^Créer la commande/ })).toHaveCount(avant - 1);
     const orders = await (await page.request.get(base + "/api/orders")).json();
     expect(orders.filter((o) => o.subscriptionId)).toHaveLength(1);
     expect(errors).toEqual([]);
@@ -268,7 +269,7 @@ test.describe("Abonnements et pilotage", () => {
         () => document.documentElement.scrollWidth <= window.innerWidth,
       ),
     ).toBe(true);
-    await page.getByRole("button", { name: "+ Nouvel abonnement" }).click();
+    await page.getByRole("button", { name: "Nouvel abonnement", exact: true }).click();
     await expect(page.locator("#subSave")).toBeVisible();
     expect(
       await page

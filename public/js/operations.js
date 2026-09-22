@@ -2,7 +2,6 @@ import { escapeHtml as h } from "./utils/dom.js";
 let context,
   data = {},
   selectedMonth = "",
-  weekOffset = 0,
   editingId = null;
 let departure = null,
   arrival = null;
@@ -112,19 +111,16 @@ export function initOperations(api) {
     if (action === "add-line") return addLine();
     if (action === "remove-line")
       return el.closest(".sub-product-line").remove();
-    if (
-      action === "week-prev" ||
-      action === "week-next" ||
-      action === "week-today"
-    ) {
-      weekOffset =
-        action === "week-today"
-          ? 0
-          : Math.min(
-              12,
-              Math.max(-52, weekOffset + (action === "week-prev" ? -1 : 1)),
-            );
+    if (action === "abo-filtre") {
+      aboFiltre = el.dataset.filtre || "tous";
       renderSubscriptions();
+      document.querySelector(`[data-op="abo-filtre"][data-filtre="${aboFiltre}"]`)?.focus();
+      return;
+    }
+    if (action === "agenda-deplier") {
+      agendaDeplie = !agendaDeplie;
+      renderAgenda();
+      document.getElementById("aboAgendaPlus")?.focus();
       return;
     }
     el.disabled = true;
@@ -185,6 +181,10 @@ export function initOperations(api) {
       selectedMonth = event.target.value;
       renderDashboard();
     });
+  document.getElementById("aboTri")?.addEventListener("change", (event) => {
+    aboTri = event.target.value;
+    renderSubscriptions();
+  });
   document
     .getElementById("subscriptionSearch")
     .addEventListener("input", renderSubscriptions);
@@ -467,56 +467,132 @@ function renderDashboard() {
     alerts.map(ligneAnomalie).join("") ||
     empty("Aucune alerte prioritaire.");
 }
+// Planche 13a : les filtres d'etat, le tri, et l'agenda deplie ou non.
+let aboFiltre = "tous",
+  aboTri = "prochaine",
+  agendaDeplie = false;
+const panier = (lines) =>
+  (lines || []).map((p) => `${p.quantite} ${p.nom}`).join(", ");
+// « Mer. 23 sept. » (planche 13a) ; l'annee si ce n'est pas celle-ci.
+const jourCourt = (value) => {
+  if (!value) return "—";
+  const d = new Date(`${value}T12:00:00`);
+  const autre = d.getFullYear() !== new Date().getFullYear();
+  const t = d.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short", ...(autre ? { year: "numeric" } : {}) });
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
+// La prochaine echeance d'un abonnement ; en retard si elle n'a pas de
+// commande et que sa date est passee.
+const prochaineEcheance = (sub) =>
+  data.subscriptions.occurrences.find((o) => o.subscriptionId === sub.id) || null;
+const enRetard = (o) => Boolean(o && o.overdue && !o.orderId);
+
+/** Le sous-titre de l'ecran : « 6 actifs · 1 en pause · 2 echeances en retard ». */
+export function majSousTitreAbonnements() {
+  if (!data.subscriptions || !document.getElementById("abonnements")?.classList.contains("active")) return;
+  const items = data.subscriptions.items;
+  const actifs = items.filter((s) => s.status === "active").length;
+  const pause = items.filter((s) => s.status === "paused").length;
+  const retard = data.subscriptions.occurrences.filter(enRetard).length;
+  const morceaux = [`${actifs} actif${actifs > 1 ? "s" : ""}`, `${pause} en pause`];
+  if (retard) morceaux.push(`${retard} échéance${retard > 1 ? "s" : ""} en retard`);
+  const sous = document.getElementById("pageSubtitle");
+  if (sous) sous.textContent = morceaux.join(" · ");
+}
+
 function renderSubscriptions() {
   if (!data.subscriptions) return;
-  const query = document
-    .getElementById("subscriptionSearch")
-    .value.toLowerCase();
-  const items = data.subscriptions.items.filter((s) => {
-    const c = data.crmClients.find((c) => String(c.id) === String(s.clientId));
-    return `${name(c || {})} ${products(s.products)}`
-      .toLowerCase()
-      .includes(query);
-  });
+  const query = (document.getElementById("subscriptionSearch")?.value || "").toLowerCase();
+  const pilules = document.getElementById("aboPilules");
+  if (pilules) {
+    pilules.innerHTML = [["tous", "Tous"], ["active", "Actifs"], ["paused", "En pause"]]
+      .map(([cle, mot]) => `<button class="abo-pilule${aboFiltre === cle ? " abo-pilule--active" : ""}" type="button" data-op="abo-filtre" data-filtre="${cle}" aria-pressed="${aboFiltre === cle}">${mot}</button>`)
+      .join("");
+  }
+  const tri = document.getElementById("aboTri");
+  if (tri) tri.value = aboTri;
+  const clientDe = (s) => data.crmClients.find((c) => String(c.id) === String(s.clientId));
+  const items = data.subscriptions.items
+    .filter((s) => aboFiltre === "tous" || s.status === aboFiltre)
+    .filter((s) => `${name(clientDe(s) || {})} ${products(s.products)}`.toLowerCase().includes(query))
+    .sort((a, b) => {
+      if (aboTri === "client") return name(clientDe(a) || {}).localeCompare(name(clientDe(b) || {}), "fr");
+      const da = prochaineEcheance(a)?.date || "9999", db = prochaineEcheance(b)?.date || "9999";
+      return da.localeCompare(db) || name(clientDe(a) || {}).localeCompare(name(clientDe(b) || {}), "fr");
+    });
   document.getElementById("subscriptionList").innerHTML =
     items
       .map((s) => {
-        const client = data.crmClients.find(
-          (c) => String(c.id) === String(s.clientId),
-        );
-        const next = data.subscriptions.occurrences.find(
-          (o) => o.subscriptionId === s.id,
-        );
-        // Charte §4, ligne de liste : quatre informations -- l'etat (disque),
-        // le nom, « ville · frequence », le badge. Le reste (echeance, rappel,
-        // panier, actions) vit dans le sheet que la ligne ouvre.
+        const client = clientDe(s);
+        const next = prochaineEcheance(s);
+        const retard = s.status === "active" && enRetard(next);
+        // Au telephone : la ligne de la charte (disque, nom, « ville ·
+        // frequence », badge). Au bureau (planche 13a) : nom et panier, puis
+        // frequence, prochaine livraison, etat -- le disque et la ville se
+        // retirent (CSS), le panier et les deux cellules apparaissent.
         const etat = etatAbonnement(s);
         const detail = [client?.ville ? context.formatSectorLabel(client.ville) : "", frequency(s)].filter(Boolean).join(" · ");
-        return `<article class="commande-ligne abonnement-ligne"><button class="commande-ligne-main" type="button" data-op="open-sub-detail" data-id="${h(s.id)}" aria-label="Ouvrir ${h(name(client || {}) || "Client introuvable")}, ${h(etat.mot)}"><span class="etat-commande etat-commande--${etat.cle}" aria-hidden="true"></span><span class="commande-ligne-corps"><strong>${h(name(client || {}) || "Client introuvable")}</strong><span>${h(detail || "Adresse à compléter")}</span></span><span class="pill ${etat.pill}">${h(etat.mot)}</span></button></article>`;
+        const prochaine = s.status !== "active" || !next
+          ? "—"
+          : retard ? `Échue le ${h(jourCourt(next.date).replace(/^\S+ /, ""))}` : h(jourCourt(next.date));
+        const badge = retard
+          ? `<span class="pill abo-badge abo-badge--retard"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5"></circle><path d="M12 8v4m0 3.5v.5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg>En retard</span>`
+          : `<span class="pill abo-badge abo-badge--${etat.cle} ${etat.pill}">${h(etat.mot)}</span>`;
+        const nomClient = h(name(client || {}) || "Client introuvable");
+        return `<article class="commande-ligne abonnement-ligne abonnement-ligne--${etat.cle}"><button class="commande-ligne-main" type="button" data-op="open-sub-detail" data-id="${h(s.id)}" aria-label="Ouvrir ${nomClient}, ${h(retard ? "en retard" : etat.mot)}"><span class="etat-commande etat-commande--${etat.cle}" aria-hidden="true"></span><span class="commande-ligne-corps"><strong>${nomClient}</strong><span class="abo-detail">${h(detail || "Adresse à compléter")}</span><span class="abo-panier">${h(panier(s.products) || "Panier vide")}</span></span><span class="abo-cellule abo-frequence">${h(frequency(s))}</span><span class="abo-cellule abo-prochaine${retard ? " abo-alerte" : ""}">${prochaine}</span>${badge}</button></article>`;
       })
       .join("") ||
     empty(
-      query
-        ? "Aucun abonnement ne correspond à ta recherche."
+      query || aboFiltre !== "tous"
+        ? "Aucun abonnement ne correspond à ce filtre."
         : "Crée ton premier abonnement : un client, ses produits et son rythme de livraison.",
     );
-  const today = data.subscriptions.today,
-    d = new Date(`${today}T12:00:00`);
-  d.setDate(d.getDate() - ((d.getDay() + 6) % 7) + weekOffset * 7);
-  const start = iso(d);
-  document.getElementById("subscriptionWeekLabel").textContent =
-    `${day(start)} — ${day(plus(start, 6))}`;
-  document.getElementById("subscriptionCalendar").innerHTML = Array.from(
-    { length: 7 },
-    (_, i) => {
-      const date = plus(start, i),
-        events = data.subscriptions.occurrences.filter((o) => o.date === date);
-      return `<div class="calendar-day ${date === today ? "is-today" : ""}"><h4>${h(day(date))}</h4>${events.map((o) => `<button type="button" class="calendar-event" data-op="edit-sub" data-id="${h(o.subscriptionId)}"><strong>${h(o.clientName)}</strong><small>${h(o.orderId ? status(o.orderStatus) : "À planifier")}</small></button>`).join("") || '<span class="calendar-free">—</span>'}</div>`;
-    },
-  ).join("");
-  const due = data.subscriptions.occurrences.filter((o) => o.due && !o.orderId);
-  document.getElementById("subscriptionReminders").innerHTML =
-    due.map(occurrenceCard).join("") || empty("Tous les rappels sont à jour.");
+  renderAgenda();
+  majSousTitreAbonnements();
+}
+
+// « Les 90 jours » : les echeances groupees par semaine (lundi), deux semaines
+// visibles, le reste derriere « Les N semaines suivantes ».
+function renderAgenda() {
+  const corps = document.getElementById("subscriptionAgenda");
+  if (!corps) return;
+  const occurrences = data.subscriptions.occurrences;
+  const compte = document.getElementById("aboAgendaCompte");
+  if (compte) compte.textContent = `${occurrences.length} livraison${occurrences.length > 1 ? "s" : ""}`;
+  const semaines = new Map();
+  for (const o of occurrences) {
+    const d = new Date(`${o.date}T12:00:00`);
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+    const cle = iso(d);
+    if (!semaines.has(cle)) semaines.set(cle, []);
+    semaines.get(cle).push(o);
+  }
+  const groupes = [...semaines.entries()].sort(([a], [b]) => a.localeCompare(b));
+  const visibles = agendaDeplie ? groupes : groupes.slice(0, 2);
+  const numero = (date) => {
+    const j = new Date(`${date}T12:00:00`).getDate();
+    return j === 1 ? "1er" : String(j);
+  };
+  corps.innerHTML = visibles.length
+    ? visibles.map(([lundi, liste]) => {
+        const titre = new Date(`${lundi}T12:00:00`).toLocaleDateString("fr-FR", { day: "numeric", month: "long" });
+        return `<section class="abo-semaine" aria-label="Semaine du ${h(titre)}"><p class="abo-semaine-titre">Semaine du ${h(titre)} · ${liste.length}</p>${liste.map((o) => {
+          const geste = o.orderId
+            ? `<span class="pill abo-badge abo-badge--commande">${h(status(o.orderStatus))}</span>`
+            : `<button class="abo-creer" type="button" data-op="generate-sub" data-id="${h(o.subscriptionId)}" data-date="${h(o.date)}" aria-label="Créer la commande du ${h(jourCourt(o.date))} pour ${h(o.clientName)}">Créer la commande</button>`;
+          return `<div class="abo-echeance subscription-card${enRetard(o) ? " abo-echeance--retard" : ""}"><span class="abo-jour" title="${h(jourCourt(o.date))}">${numero(o.date)}</span><span class="abo-echeance-texte"><strong>${h(o.clientName)}</strong><span>${h(panier(o.products))}${enRetard(o) ? " · en retard" : ""}</span></span>${geste}</div>`;
+        }).join("")}</section>`;
+      }).join('<div class="abo-separateur" aria-hidden="true"></div>')
+    : empty("Aucune livraison prévue dans les 90 jours.");
+  const plus = document.getElementById("aboAgendaPlus");
+  if (plus) {
+    const reste = groupes.length - 2;
+    plus.hidden = reste <= 0;
+    plus.setAttribute("aria-expanded", String(agendaDeplie));
+    plus.innerHTML = agendaDeplie
+      ? `Moins de semaines<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 15 6-6 6 6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>`
+      : `Les ${reste} semaine${reste > 1 ? "s" : ""} suivante${reste > 1 ? "s" : ""}<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>`;
+  }
 }
 function addLine(line) {
   const row = document.createElement("div");

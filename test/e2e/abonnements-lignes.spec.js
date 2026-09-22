@@ -49,9 +49,14 @@ for (const vue of ["mobile", "desktop"]) {
           nom: titre.textContent.trim().slice(0, 22),
           h: Math.round(l.getBoundingClientRect().height),
           lignesDeTitre: Math.round(titre.getBoundingClientRect().height / parseFloat(getComputedStyle(titre).lineHeight)),
-          infos: main.children.length - 1 + corps.children.length,
+          // Les informations VISIBLES : au bureau (planche 13a) le disque et
+          // « ville · frequence » se retirent, le panier, la frequence et la
+          // prochaine livraison apparaissent.
+          infos: [...main.children].filter(e => e.checkVisibility()).length - 1
+            + [...corps.children].filter(e => e.checkVisibility()).length,
           etatFond: getComputedStyle(etat).backgroundColor,
-          detail: corps.querySelector("span").textContent.trim(),
+          detail: [...corps.querySelectorAll("span")].find(e => e.checkVisibility())?.textContent.trim(),
+          frequence: l.querySelector(".abo-frequence")?.checkVisibility() ? l.querySelector(".abo-frequence").textContent.trim() : null,
           mot: l.querySelector(".pill").textContent.trim(),
           x: Math.round(l.getBoundingClientRect().left)
         };
@@ -71,15 +76,24 @@ for (const vue of ["mobile", "desktop"]) {
     expect(new Set(r.lignes.map(l => l.x)).size, "les lignes doivent etre empilees, pas en colonnes").toBe(1);
     expect(r.lignes.filter(l => l.lignesDeTitre <= 1 && (l.h < 64 - TOL || l.h > 72 + TOL)).map(l => `${l.nom} : ${l.h}px`)).toEqual([]);
     expect(r.lignes.filter(l => l.lignesDeTitre > 1 && l.h > 96)).toEqual([]);
-    expect(r.lignes.map(l => l.infos)).toEqual([4, 4, 4]);
-
     const parMot = Object.fromEntries(r.lignes.map(l => [l.mot, l]));
     expect(Object.keys(parMot).sort()).toEqual(["Actif", "Arrêté", "En pause"]);
-    expect(hex(parMot["Actif"].etatFond)).toBe(r.tokens.vertClair);
-    expect(hex(parMot["En pause"].etatFond)).toBe(r.tokens.pecheClaire);
-    expect(hex(parMot["Arrêté"].etatFond)).toBe(r.tokens.surfaceBasse);
-    expect(parMot["Actif"].detail).toBe("Besançon · Toutes les 2 semaines");
-    expect(parMot["En pause"].detail).toBe("Dole · Tous les mois");
+    if (vue === "mobile") {
+      // La ligne de la charte : quatre informations, le disque porte l'etat.
+      expect(r.lignes.map(l => l.infos)).toEqual([4, 4, 4]);
+      expect(hex(parMot["Actif"].etatFond)).toBe(r.tokens.vertClair);
+      expect(hex(parMot["En pause"].etatFond)).toBe(r.tokens.pecheClaire);
+      expect(hex(parMot["Arrêté"].etatFond)).toBe(r.tokens.surfaceBasse);
+      expect(parMot["Actif"].detail).toBe("Besançon · Toutes les 2 semaines");
+      expect(parMot["En pause"].detail).toBe("Dole · Tous les mois");
+    } else {
+      // La ligne de la planche 13a : nom et panier, frequence, prochaine, etat.
+      expect(r.lignes.map(l => l.infos)).toEqual([5, 5, 5]);
+      expect(parMot["Actif"].detail).toBe("4 Changes taille L");
+      expect(parMot["En pause"].detail).toBe("10 Alèses");
+      expect(parMot["Actif"].frequence).toBe("Toutes les 2 semaines");
+      expect(parMot["En pause"].frequence).toBe("Tous les mois");
+    }
     await ctx.close();
   });
 }

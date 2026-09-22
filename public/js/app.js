@@ -1,4 +1,4 @@
-import { initOperations, renderOperations, getRoutePoints } from "./operations.js";
+import { initOperations, renderOperations, getRoutePoints, majSousTitreAbonnements } from "./operations.js";
 // Sereo — point d'entree du front.
 //
 // Charge comme module ES (<script type="module"> dans index.html). Les
@@ -808,6 +808,7 @@ function showTab(tabName, options = {}) {
   if (nextTab === "commandes") majSousTitreCommandes();
   if (nextTab === "stock") majSousTitreStock();
   if (nextTab === "crm") majSousTitreClients();
+  if (nextTab === "abonnements") majSousTitreAbonnements();
 
   updateCustomerCartBar();
 

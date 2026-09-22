@@ -11637,3 +11637,152 @@ textarea::placeholder {
   background: var(--v8-principal); color: var(--v8-texte-sur-principal);
 }
 .cmd-client-filtre[hidden] { display: none; }
+
+/* ==========================================================================
+   ABONNEMENTS -- planches 13a (clair) / 14a (sombre). Valeurs copiees.
+   Au telephone la ligne reste celle de la charte (disque, nom, « ville ·
+   frequence », badge) ; au bureau elle devient la ligne a quatre colonnes de
+   la planche, dans UNE carte. Ecarts nommes dans DESIGN.md : pas d'opacite sur
+   la ligne en pause (3,70:1, sous le seuil) ; « Creer la commande » a 44 px.
+   ========================================================================== */
+
+.abo-recherche { width: 280px; }
+.ecran-entete .abo-nouveau { display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 24px; }
+
+.abo-grille { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 24px; align-items: start; }
+.abo-colonne { grid-column: span 7; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.abo-filtres { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.abo-pilules { display: flex; gap: 8px; flex-wrap: wrap; }
+:root[data-color-scheme] #abonnements .abo-pilule,
+:root:not([data-color-scheme]) #abonnements .abo-pilule {
+  height: 44px; min-height: 0; padding: 0 20px; border: 0; border-radius: 999px;
+  background: var(--v8-surface); color: var(--v8-texte-secondaire);
+  font: inherit; font-size: 15px; font-weight: 500; cursor: pointer;
+}
+:root[data-color-scheme] #abonnements .abo-pilule.abo-pilule--active,
+:root:not([data-color-scheme]) #abonnements .abo-pilule.abo-pilule--active {
+  background: var(--v8-principal); color: var(--v8-texte-sur-principal); font-weight: 600;
+}
+#abonnements .abo-pilule:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+:root[data-color-scheme] #abonnements .cmd-tri,
+:root:not([data-color-scheme]) #abonnements .cmd-tri { color: var(--v8-principal); font-weight: 500; }
+
+#abonnements .abo-carte {
+  background: var(--v8-surface); border-radius: 36px; min-width: 0;
+  box-shadow: 0 1px 2px rgba(15, 61, 61, 0.05), 0 12px 28px rgba(15, 61, 61, 0.05);
+}
+:root[data-color-scheme="dark"] #abonnements .abo-carte { box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 28px rgba(0,0,0,.3); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) #abonnements .abo-carte { box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 28px rgba(0,0,0,.3); }
+}
+#abonnements .abo-tableau { padding: 8px; }
+.abo-entete { display: none; }
+
+/* Les cellules du bureau, cachees au telephone. */
+#abonnements .abo-panier, #abonnements .abo-cellule { display: none; }
+
+/* --- « Les 90 jours » ----------------------------------------------------- */
+#abonnements .abo-agenda { grid-column: span 5; padding: 28px; display: flex; flex-direction: column; gap: 18px; }
+.abo-agenda-tete { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+:root[data-color-scheme] #abonnements .abo-agenda-tete h3,
+:root:not([data-color-scheme]) #abonnements .abo-agenda-tete h3 {
+  margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -0.01em; color: var(--v8-texte);
+}
+.abo-agenda-compte { font-size: 13.5px; font-weight: 500; color: var(--v8-texte-secondaire); }
+.abo-agenda-corps { display: flex; flex-direction: column; gap: 14px; }
+.abo-semaine { display: flex; flex-direction: column; gap: 8px; }
+.abo-semaine-titre { margin: 0; font-size: 13px; font-weight: 600; color: var(--v8-texte-secondaire); }
+.abo-separateur { height: 1px; background: var(--v8-surface-basse); }
+:root[data-color-scheme="dark"] .abo-separateur { background: var(--v8-vert-eau); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) .abo-separateur { background: var(--v8-vert-eau); }
+}
+#abonnements .abo-echeance.subscription-card {
+  display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 4px 0;
+  border: 0; border-radius: 0; background: transparent; box-shadow: none;
+}
+.abo-jour { width: 38px; flex: none; text-align: center; font-size: 16px; font-weight: 700; color: var(--v8-texte); font-variant-numeric: tabular-nums; }
+.abo-echeance-texte { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.abo-echeance-texte strong { font-size: 14.5px; font-weight: 600; color: var(--v8-texte); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.abo-echeance-texte span { font-size: 13px; font-weight: 500; color: var(--v8-texte-secondaire); overflow-wrap: anywhere; }
+.abo-echeance--retard .abo-echeance-texte span { color: var(--v8-alerte); }
+:root[data-color-scheme] #abonnements .abo-creer,
+:root:not([data-color-scheme]) #abonnements .abo-creer {
+  flex: none; height: 44px; min-height: 0; padding: 0 14px; border-radius: 999px;
+  border: 1.5px solid var(--v8-principal); background: transparent; color: var(--v8-principal);
+  font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+#abonnements .abo-creer:focus-visible, #abonnements .abo-agenda-plus:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+:root[data-color-scheme] #abonnements .abo-agenda-plus,
+:root:not([data-color-scheme]) #abonnements .abo-agenda-plus {
+  display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px;
+  border: 0; border-radius: 999px; background: transparent; color: var(--v8-principal);
+  font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer;
+}
+#abonnements .abo-agenda-plus[hidden] { display: none; }
+#abonnements .abo-agenda-plus svg { width: 16px; height: 16px; }
+
+/* Les badges de la planche : froid (actif), tiede (pause), neutre (arrete,
+   que la planche ne dessine pas -- il ne doit pas ressembler a « Actif »),
+   contour d'alerte (en retard). Texte principal en sombre (passation). */
+:root[data-color-scheme] #abonnements .pill.abo-badge,
+:root:not([data-color-scheme]) #abonnements .pill.abo-badge {
+  display: inline-flex; align-items: center; gap: 4px; min-height: 0; height: 24px; padding: 0 12px;
+  border: 0; border-radius: 999px; font-size: 12.5px; font-weight: 600; white-space: nowrap;
+}
+#abonnements .pill.abo-badge svg { width: 12px; height: 12px; }
+:root[data-color-scheme] #abonnements .pill.abo-badge--actif,
+:root:not([data-color-scheme]) #abonnements .pill.abo-badge--actif { background: var(--v8-vert-clair); color: var(--v8-principal-appuye); }
+:root[data-color-scheme] #abonnements .pill.abo-badge--pause,
+:root:not([data-color-scheme]) #abonnements .pill.abo-badge--pause { background: var(--v8-peche-claire); color: var(--v8-principal-appuye); }
+:root[data-color-scheme] #abonnements .pill.abo-badge--arrete,
+:root:not([data-color-scheme]) #abonnements .pill.abo-badge--arrete,
+:root[data-color-scheme] #abonnements .pill.abo-badge--commande,
+:root:not([data-color-scheme]) #abonnements .pill.abo-badge--commande { background: var(--v8-surface-basse); color: var(--v8-texte-secondaire); }
+:root[data-color-scheme] #abonnements .pill.abo-badge--retard,
+:root:not([data-color-scheme]) #abonnements .pill.abo-badge--retard {
+  padding: 0 10px; background: var(--v8-surface); color: var(--v8-alerte); box-shadow: inset 0 0 0 1.5px var(--v8-alerte);
+}
+:root[data-color-scheme="dark"] #abonnements .pill.abo-badge--actif,
+:root[data-color-scheme="dark"] #abonnements .pill.abo-badge--pause { color: var(--v8-principal); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) #abonnements .pill.abo-badge--actif,
+  :root:not([data-color-scheme="light"]) #abonnements .pill.abo-badge--pause { color: var(--v8-principal); }
+}
+
+/* --- Au bureau : le tableau de la planche ---------------------------------- */
+@media (min-width: 921px) {
+  .abo-entete {
+    display: grid; grid-template-columns: minmax(0, 1fr) 150px 150px 120px; column-gap: 16px;
+    padding: 10px 20px 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--v8-texte-secondaire);
+  }
+  .abo-droite { text-align: right; }
+  #abonnements #subscriptionList.subscription-list { display: flex; flex-direction: column; gap: 0; }
+  #abonnements .abonnement-ligne { min-height: 64px; border-radius: 24px; background: transparent; box-shadow: none; }
+  #abonnements .abonnement-ligne:hover { background: var(--v8-fond); }
+  #abonnements .abonnement-ligne .commande-ligne-main {
+    display: grid; grid-template-columns: minmax(0, 1fr) 150px 150px 120px; column-gap: 16px;
+    min-height: 64px; padding: 0 20px; border-radius: 24px;
+  }
+  #abonnements .abonnement-ligne .commande-ligne-main:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  #abonnements .abonnement-ligne .etat-commande, #abonnements .abonnement-ligne .abo-detail { display: none; }
+  #abonnements .abonnement-ligne .abo-panier { display: block; }
+  #abonnements .abonnement-ligne .abo-cellule { display: block; font-size: 14.5px; font-weight: 500; color: var(--v8-texte); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #abonnements .abonnement-ligne .abo-alerte { color: var(--v8-alerte); }
+  #abonnements .abonnement-ligne .commande-ligne-corps > strong { font-size: 15.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  :root[data-color-scheme] #abonnements .abonnement-ligne .commande-ligne-main .pill,
+  :root:not([data-color-scheme]) #abonnements .abonnement-ligne .commande-ligne-main .pill { justify-self: end; }
+}
+/* Entre 921 et 1280 px : l'agenda passe sous le tableau, et le tableau garde
+   de la place pour le nom (150 + 150 + 120 de colonnes fixes). */
+@media (max-width: 1280px) {
+  .abo-colonne, #abonnements .abo-agenda { grid-column: span 12; }
+}
+@media (max-width: 920px) {
+  .abo-recherche { width: 100%; flex: 1 1 100%; }
+  .abo-grille { gap: 16px; }
+  #abonnements .abo-agenda { padding: 20px; border-radius: 24px; }
+  #abonnements .abo-tableau { padding: 0; background: transparent; box-shadow: none; border-radius: 0; }
+  #abonnements #subscriptionList.subscription-list { gap: 10px; }
+}
