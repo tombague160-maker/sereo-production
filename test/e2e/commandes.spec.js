@@ -393,8 +393,13 @@ test("téléphone : ni la barre d'envoi ni la période ne poussent la page de c�
   await ouvrir(page);
   await page.locator('[data-cmd-filtre="a-envoyer"]').click();
   await expect(page.locator("#cmdEnvoi")).toBeVisible();
-  const largeur = await page.evaluate(() => document.documentElement.scrollWidth);
-  expect(largeur).toBeLessThanOrEqual(390);
+  // Pas scrollWidth : la page coupe ce qui deborde (overflow-x), et un champ
+  // coupe a droite ne se voit plus du tout. On mesure le BORD de chaque element.
+  const deborde = await page.evaluate(() => [...document.querySelectorAll(
+    "#cmdEnvoi *, #commandes .cmd-periode *, #commandes .cmd-filtres > *")]
+    .filter(e => e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().right > window.innerWidth + 0.5)
+    .map(e => e.id || e.className || e.tagName));
+  expect(deborde).toEqual([]);
 });
 
 test("les étiquettes de date suivent la planche (600), pas le label générique", async ({ page }) => {

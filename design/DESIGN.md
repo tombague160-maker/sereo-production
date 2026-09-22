@@ -1455,8 +1455,39 @@ existe et n'est pas dessiné est gardé, dans l'idiome de la planche, et nommé)
 - la période **Du / Au**, qui borne la liste **et** l'export. Sans elle, on ne pouvait
   plus exporter un mois.
 
+- le **secteur**, en pilule de sélection à côté du tri : sans lui, plus d'export par
+  secteur.
+
 La sélection ne garde que ce qui est à l'écran : une recherche ou un changement de jour
-retire les commandes masquées, pour qu'aucune ne parte sans avoir été vue.
+retire les commandes masquées, pour qu'aucune ne parte sans avoir été vue. « Tout
+sélectionner » coche la **page** (« … sur la page » quand il y en a plusieurs).
+
+La période borne la date de **commande**, comme l'ancien export et comme la colonne
+« Date commande » du CSV — même pour une planifiée, dont la ligne montre la date de
+livraison.
+
+L'alerte « N adresses à corriger » du tableau de bord ouvre **exactement** son compte
+(adresse ou ville manquante sur une commande ni livrée ni annulée), et la case se lit
+alors « Adresses à corriger ». La case cochée à la main garde la règle plus large de
+l'ancien écran.
+
+Une redirection (une saisie qui renvoie vers « À envoyer », un ancien lien) arrive sur une
+liste **propre** : « Bloquées seulement », la recherche, la période, le secteur et le jour
+sont remis à zéro. Sinon la commande qu'on vient de saisir pouvait être cachée.
+
+Le détail suit la commande **affichée** : « Modifier le profil » puis « Annuler » y revient,
+au lieu de rouvrir la première commande du même client. Il prend le focus à l'ouverture et
+le rend à la ligne à la fermeture ; cocher une ligne au clavier garde le focus sur la case.
+
+**Dette nommée** : les anciennes sections (`#commandes-jour`, `#commandes-planifiees`,
+`#bons-commande`, `#commandes-livrees`) restent dans la page, inatteignables, et se
+dessinent encore. Les retirer touche leurs rendus et leurs bancs : un lot à part.
+
+**Portées de rôles** (dormantes tant que `SEREO_SEPARATION_ROLES` n'est pas posé) : le
+préparateur et le livreur nommaient les anciennes listes ; ils nomment maintenant
+`commandes`, ce qui leur **élargit** la vue (toutes les commandes, y compris les gestes
+des planifiées). Une liste unique ne se découpe plus par écran ; si la séparation revient,
+c'est un filtre par rôle qu'il faudra, pas une liste d'écrans.
 
 Les gestes d'une commande planifiée (Confirmer, Annuler) sont posés **hors** du corps
 du détail, parce que « Modifier le profil » redessine ce corps. Un geste **ferme** le
