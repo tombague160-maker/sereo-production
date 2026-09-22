@@ -36,16 +36,19 @@ test.describe("Navigation laterale plate", () => {
 
   test("une entree reste allumee pour tous les ecrans qu'elle absorbe", async ({ page }) => {
     await page.goto("/");
+    // Une entree absorbe plusieurs ecrans (Stock : l'inventaire et « a
+    // recommander »). Passer de l'un a l'autre ne doit pas l'eteindre.
+    await page.locator("#nav-stock").click();
+    await page.locator("#tab-recommande").click();
+    await expect(page.locator("#recommande")).toHaveClass(/active/);
+    await expect(page.locator("#nav-stock")).toHaveClass(/active/);
+    // Et un ecran SECONDAIRE -- la saisie de commande, atteinte par le bouton
+    // de l'en-tete -- garde allumee l'entree Commandes.
     await page.locator("#nav-commandes").click();
-    // Les cinq listes de commandes vivent sous UNE entree. Se deplacer de
-    // l'une a l'autre ne doit pas eteindre Commandes -- sinon l'utilisateur
-    // ne sait plus ou il est.
-    for (const onglet of ["bons-commande", "commandes-livrees", "commande-client"]) {
-      await page.locator(`#tab-${onglet}`).click();
-      await expect(page.locator(`#${onglet}`)).toHaveClass(/active/);
-      await expect(page.locator("#nav-commandes")).toHaveClass(/active/);
-      await expect(page.locator("#nav-commandes")).toHaveAttribute("aria-selected", "true");
-    }
+    await page.locator('#enteteActions [data-target-tab="commande-client"]').click();
+    await expect(page.locator("#commande-client")).toHaveClass(/active/);
+    await expect(page.locator("#nav-commandes")).toHaveClass(/active/);
+    await expect(page.locator("#nav-commandes")).toHaveAttribute("aria-selected", "true");
   });
 
   test("un groupe d'un seul ecran n'affiche aucune pilule", async ({ page }) => {
@@ -58,12 +61,13 @@ test.describe("Navigation laterale plate", () => {
 
   test("la recherche du menu trouve un ecran qui n'a plus de ligne a soi", async ({ page }) => {
     await page.goto("/");
-    // « Bons de commande » n'est plus une entree : il est absorbe par
-    // Commandes. Si la recherche ne repondait que sur les huit libelles
-    // visibles, cet ecran deviendrait introuvable au clavier.
+    // « Bons de commande » n'est plus un ecran : ses bons vivent dans la liste
+    // unique des Commandes (planche 13c). Taper son ancien nom doit y mener,
+    // sur le filtre qui lui correspond.
     await page.fill("#menuSearch", "bons");
     await page.press("#menuSearch", "Enter");
-    await expect(page.locator("#bons-commande")).toHaveClass(/active/);
+    await expect(page.locator("#commandes")).toHaveClass(/active/);
+    await expect(page.locator('[data-cmd-filtre="toutes"]')).toHaveAttribute("aria-pressed", "true");
   });
 
   test("le bloc compte porte l'identite de /api/me, pas un nom de maquette", async ({ page }) => {

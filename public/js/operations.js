@@ -239,7 +239,9 @@ function occurrenceCard(item) {
     ? button(
         "view-order",
         h(status(item.orderStatus)),
-        `data-action="go-tab" data-target-tab="commandes-planifiees"`,
+        // « Voir la commande » : une fois confirmee, elle quitte « Planifiees »
+        // -- on ouvre donc toutes les commandes, ou elle se trouve toujours.
+        `data-action="go-tab" data-target-tab="bons-commande"`,
       )
     : button(
         "generate-sub",
@@ -448,7 +450,7 @@ function renderDashboard() {
       titre: `${sansAdresse.length} adresse${sansAdresse.length > 1 ? "s" : ""} à corriger`,
       detail: sansAdresse.slice(0, 2).map((o) => o.clientName).filter(Boolean).join(" · ")
         || "Commandes sans adresse complète",
-      cible: "bons-commande",
+      cible: "commandes-a-completer",
     });
   }
   // Le sous-titre de l'en-tete lit la tuile « En preparation » : il doit etre

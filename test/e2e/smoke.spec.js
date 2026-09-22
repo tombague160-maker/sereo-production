@@ -19,11 +19,12 @@ test.describe("Sereo smoke tests", () => {
     await page.goto("/");
     // Le chemin reel de la planche : l'entree Commandes ouvre le groupe, et
     // les cinq listes qu'elle absorbe apparaissent en pilules sous le titre.
+    // Les cinq listes n'en font plus qu'une (planche 13c) : l'entree Commandes
+    // ouvre le tableau unique.
     await page.locator("#nav-commandes").click();
-    await page.locator("#tab-bons-commande").click();
-    await expect(page.locator("#bons-commande")).toHaveClass(/active/);
+    await expect(page.locator("#commandes")).toHaveClass(/active/);
     // Soit on a des cards, soit empty state "Aucune commande"
-    const hasContent = await page.locator("#bons-commande .bdc-card, #bons-commande .empty-state").first().isVisible({ timeout: 5000 });
+    const hasContent = await page.locator("#commandes .cmd-ligne, #commandes .empty-state").first().isVisible({ timeout: 5000 });
     expect(hasContent).toBe(true);
   });
 

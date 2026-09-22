@@ -1409,6 +1409,39 @@ commandes livrées, dont l'adresse ne servira plus.
 bord mobile **son propre en-tête**, un bloc vert aux coins bas arrondis, et des
 libellés de barre basse non abrégés (« Préparer », « Abonnements »). Hors de ce lot.
 
+### Commandes des planches 13c/14c, posé le 22/09 — cinq listes, un tableau
+
+La passation : « **les cinq listes fusionnent en une** ». Un seul écran, `#commandes` :
+un tableau de six colonnes (Numéro, Date, Client, Secteur, Articles, Statut), des
+pilules de **statut**, une case « Bloquées seulement », un tri, une recherche locale
+qui va jusqu'au **produit** (l'ancienne ne cherchait que le numéro et le client),
+l'export CSV du filtre courant, une pagination côté navigateur (la passation la
+classe « inventée » faute de pagination serveur ; `/api/orders` rend tout, il suffit
+de découper). Aucun travail serveur.
+
+**Ce que la fusion ne devait pas perdre, et où c'est passé** :
+
+| Ancien écran | Son geste | Aujourd'hui |
+|---|---|---|
+| Commandes du jour | envoyer en préparation, **par lot** | pilule « À envoyer » : une colonne de choix et le bouton « Envoyer en préparation » |
+| Commandes planifiées | confirmer / annuler | le détail de la ligne (le modal existant) porte les deux boutons |
+| Commandes livrées | le détail produit ligne à ligne | le détail de la ligne |
+| Bons de commande | liste, recherche, export | le tableau lui-même |
+| Commande client | **créer** une commande — le seul chemin de l'application | un écran secondaire, atteint par « Nouvelle commande » dans l'en-tête ; l'entrée Commandes reste allumée |
+
+**Un écart avec la planche, qui comble un trou de la planche** : une septième pilule,
+« À envoyer ». Le statut des commandes terrain (`commande_client_validee`) n'était sous
+**aucune** des six pilules dessinées — et son geste n'avait plus de place.
+
+**Les anciens identifiants ne meurent pas** : `#bons-commande`, `#commandes-jour`,
+`#commandes-planifiees`, `#commandes-livrees` **redirigent** vers l'écran unique, filtré
+comme l'ancien écran, et l'adresse est réécrite en `#commandes`. Un favori, un lien, un
+`showTab("…")` codé en dur arrivent au bon endroit. La recherche du menu les trouve encore
+sous leur ancien nom. `config/tabs.js` refuse de charger si une redirection vise un
+écran absent.
+
+Précédent / Suivant font 44 px et non 36 : la planche les invente, la charte exige 44.
+
 ## 10. Guide pour l'agent
 
 - Toujours produire les deux modes (clair et sombre) avec les mêmes tokens ; lister les contrastes calculés.

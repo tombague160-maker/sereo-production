@@ -10885,3 +10885,245 @@ textarea::placeholder {
 .tb-pilule-mois:has(select:focus-visible) {
   box-shadow: var(--focus-ring);
 }
+
+/* ==========================================================================
+   COMMANDES -- planches 13c (clair) / 14c (sombre). Valeurs copiees.
+   Ecart assume : Precedent / Suivant a 44 px et non 36 -- la planche les
+   invente, la charte exige 44 pour une cible tactile.
+   ========================================================================== */
+
+/* La recherche locale et l'export, dans la fente d'en-tete. */
+.cmd-recherche {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: 320px;
+  height: 44px;
+  padding: 0 18px;
+  border-radius: 999px;
+  background: var(--v8-surface);
+  color: var(--v8-texte-secondaire);
+  box-shadow: 0 1px 2px rgba(15, 61, 61, 0.05);
+}
+.cmd-recherche[hidden] { display: none; }
+.cmd-recherche .icon { width: 18px; height: 18px; flex: none; }
+:root[data-color-scheme] .cmd-recherche input,
+:root:not([data-color-scheme]) .cmd-recherche input {
+  flex: 1; min-width: 0; min-height: 0; height: 100%;
+  padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none;
+  color: var(--v8-texte); font: inherit; font-size: 14.5px;
+}
+.cmd-recherche:has(input:focus-visible) { box-shadow: var(--focus-ring); }
+
+:root[data-color-scheme] .ecran-entete .cmd-export,
+:root:not([data-color-scheme]) .ecran-entete .cmd-export {
+  height: 44px; padding: 0 20px; border-radius: 999px;
+  border: 1.5px solid var(--v8-principal); background: transparent;
+  color: var(--v8-principal); font-size: 15px; font-weight: 600;
+}
+.ecran-entete .cmd-nouvelle { display: inline-flex; align-items: center; gap: 8px; height: 44px; }
+
+/* La rangee de filtres : une seule ligne, 8 px entre les elements. */
+.cmd-filtres {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 24px;
+}
+.cmd-filtres .cmd-pilules { margin: 0; flex-wrap: nowrap; }
+:root[data-color-scheme] .cmd-pilules .button.compact.filtre-pilule,
+:root:not([data-color-scheme]) .cmd-pilules .button.compact.filtre-pilule {
+  height: 44px; padding: 0 20px; border-radius: 999px; font-size: 15px; font-weight: 500;
+  background: var(--v8-surface); color: var(--v8-texte-secondaire); border: 0;
+}
+:root[data-color-scheme] .cmd-pilules .button.compact.filtre-pilule.active-filter,
+:root:not([data-color-scheme]) .cmd-pilules .button.compact.filtre-pilule.active-filter {
+  background: var(--v8-principal); color: var(--v8-texte-sur-principal); font-weight: 600;
+}
+.cmd-separateur { width: 1px; height: 28px; margin: 0 6px; background: var(--v8-squelette); flex: none; }
+.cmd-ressort { flex: 1; }
+
+/* La case « Bloquees seulement » : la CIBLE est la pilule entiere (44 px), pas
+   le carre de 20 px. */
+.cmd-case {
+  position: relative;
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 44px; padding: 0 16px; border-radius: 999px;
+  background: var(--v8-surface); color: var(--v8-principal);
+  font-size: 14px; font-weight: 500; cursor: pointer; flex: none;
+}
+.cmd-case input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+.cmd-case-carre {
+  width: 20px; height: 20px; border-radius: 6px; flex: none;
+  box-shadow: inset 0 0 0 2px var(--v8-texte-secondaire);
+}
+.cmd-case input:checked + .cmd-case-carre {
+  background: var(--v8-principal) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m5 12.5 4.5 4.5L19 7.5' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 14px no-repeat;
+  box-shadow: none;
+}
+.cmd-case:has(input:focus-visible) { box-shadow: var(--focus-ring); }
+
+.cmd-tri {
+  display: inline-flex; align-items: center; height: 44px; padding: 0 16px;
+  border-radius: 999px; background: var(--v8-surface); color: var(--v8-principal); flex: none;
+}
+:root[data-color-scheme] .cmd-tri select,
+:root:not([data-color-scheme]) .cmd-tri select {
+  min-height: 0; height: 100%; padding: 0; border: 0; border-radius: 0;
+  background: transparent; box-shadow: none; color: inherit;
+  font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer;
+}
+.cmd-tri:has(select:focus-visible) { box-shadow: var(--focus-ring); }
+
+/* L'envoi par lot, sous « A envoyer ». */
+.cmd-envoi {
+  display: flex; align-items: center; gap: 16px; margin: 0 0 16px;
+  padding: 10px 12px 10px 8px; border-radius: 24px; background: var(--v8-peche-claire);
+}
+.cmd-envoi[hidden] { display: none; }
+.cmd-envoi-compte { flex: 1; font-size: 14.5px; font-weight: 500; color: var(--v8-texte); }
+
+/* La carte tableau : #commandes, pour battre les surcharges du mode clair. */
+#commandes .cmd-carte {
+  margin: 0; padding: 8px; border: 0; border-radius: 36px;
+  background: var(--v8-surface);
+  box-shadow: 0 1px 2px rgba(15, 61, 61, 0.05), 0 12px 28px rgba(15, 61, 61, 0.05);
+}
+:root[data-color-scheme="dark"] #commandes .cmd-carte { box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 28px rgba(0,0,0,.3); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) #commandes .cmd-carte { box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 28px rgba(0,0,0,.3); }
+}
+
+.cmd-entete, .cmd-ligne {
+  display: grid;
+  grid-template-columns: 0 140px 120px minmax(0, 1fr) 150px 110px 150px;
+  column-gap: 16px;
+  align-items: center;
+}
+.cmd-carte--choix .cmd-entete, .cmd-carte--choix .cmd-ligne {
+  grid-template-columns: 24px 140px 120px minmax(0, 1fr) 150px 110px 150px;
+}
+.cmd-col-choix { display: flex; align-items: center; overflow: hidden; }
+.cmd-entete {
+  padding: 10px 20px 6px;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--v8-texte-secondaire);
+}
+.cmd-droite { text-align: right; justify-content: flex-end; display: flex; }
+.cmd-lignes { display: flex; flex-direction: column; }
+.cmd-ligne {
+  min-height: 56px; padding: 0 20px; border-radius: 20px;
+  color: var(--v8-texte); font-size: 14.5px; font-weight: 500; cursor: pointer;
+}
+.cmd-ligne:hover { background: var(--v8-fond); }
+.cmd-ligne:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.cmd-num { display: flex; flex-direction: column; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cmd-abo { font-size: 12px; font-weight: 500; color: var(--v8-texte-secondaire); }
+.cmd-date, .cmd-secteur { color: var(--v8-texte-secondaire); }
+.cmd-client { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cmd-articles { font-variant-numeric: tabular-nums; }
+.cmd-manquants { color: var(--v8-alerte); font-weight: 600; }
+.cmd-choix { width: 20px; height: 20px; accent-color: var(--v8-principal); cursor: pointer; }
+
+/* Les badges de la planche, 24 px. Chacun dit son mot : la couleur n'est
+   jamais seule a porter l'etat. */
+.cmd-badge {
+  display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 12px;
+  border-radius: 999px; font-size: 12.5px; font-weight: 600; white-space: nowrap;
+}
+.cmd-badge svg { width: 12px; height: 12px; }
+.cmd-badge--tiede { background: var(--v8-peche-claire); color: var(--v8-principal-appuye); }
+.cmd-badge--froid { background: var(--v8-vert-clair); color: var(--v8-principal-appuye); }
+.cmd-badge--plein { background: var(--v8-principal); color: var(--v8-texte-sur-principal); }
+.cmd-badge--neutre { background: var(--v8-surface-basse); color: var(--v8-texte-secondaire); }
+.cmd-badge--alerte {
+  gap: 4px; padding: 0 10px; background: var(--v8-surface); color: var(--v8-alerte);
+  box-shadow: inset 0 0 0 1.5px var(--v8-alerte);
+}
+/* En sombre, le texte des badges tiede et froid passe au principal (14c). */
+:root[data-color-scheme="dark"] .cmd-badge--tiede,
+:root[data-color-scheme="dark"] .cmd-badge--froid { color: var(--v8-principal); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) .cmd-badge--tiede,
+  :root:not([data-color-scheme="light"]) .cmd-badge--froid { color: var(--v8-principal); }
+}
+
+.cmd-pied { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px 8px; }
+.cmd-compte { font-size: 13.5px; font-weight: 500; color: var(--v8-texte-secondaire); font-variant-numeric: tabular-nums; }
+.cmd-pages { display: flex; gap: 8px; }
+:root[data-color-scheme] .cmd-pages .button.compact,
+:root:not([data-color-scheme]) .cmd-pages .button.compact {
+  min-height: 44px; padding: 0 16px; border-radius: 999px; font-size: 13.5px; font-weight: 600;
+}
+
+@media (max-width: 1180px) {
+  .cmd-filtres, .cmd-filtres .cmd-pilules { flex-wrap: wrap; }
+}
+
+/* Telephone : six colonnes ne tiennent pas. La ligne devient une carte a trois
+   rangs ; la planche mobile 8a sera posee par le lot mobile. */
+@media (max-width: 920px) {
+  .cmd-recherche { width: 100%; flex: 1 1 100%; }
+  .cmd-entete { display: none; }
+  .cmd-ligne, .cmd-carte--choix .cmd-ligne {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: "choix num statut" "choix client client" "choix date articles";
+    row-gap: 2px; padding: 12px 16px;
+  }
+  .cmd-ligne .cmd-col-choix { grid-area: choix; }
+  .cmd-ligne .cmd-num { grid-area: num; }
+  .cmd-ligne .cmd-statut { grid-area: statut; }
+  .cmd-ligne .cmd-client { grid-area: client; }
+  .cmd-ligne .cmd-date { grid-area: date; }
+  .cmd-ligne .cmd-articles { grid-area: articles; }
+  .cmd-ligne .cmd-secteur { display: none; }
+  .cmd-separateur, .cmd-ressort { display: none; }
+}
+
+/* Commandes, vu a l'ecran : la fente d'en-tete porte ici cinq commandes (la
+   planche en montre deux) et ecrasait le titre -- « Commande » coupe. Le titre
+   garde sa place, les commandes passent a la ligne. Et sept pilules, plus la
+   case et le tri, ne tiennent pas sur 1 118 px : la rangee passe a la ligne
+   au lieu de faire chevaucher « Livrees » par la case. */
+.ecran-entete { flex-wrap: wrap; }
+/* Au bureau seulement : sous 920 px l'en-tete passe en COLONNE, et une base
+   de 260 px y devenait une HAUTEUR -- 200 px de vide sous chaque titre. */
+@media (min-width: 921px) { .ecran-entete-texte { flex: 1 1 260px; } }
+.ecran-entete-texte h2 { white-space: nowrap; }
+.ecran-entete-actions { flex-wrap: wrap; justify-content: flex-end; }
+.cmd-filtres { flex-wrap: wrap; row-gap: 12px; }
+.cmd-filtres .cmd-pilules { flex-wrap: wrap; }
+
+/* --- Commandes : les constats de la relecture ----------------------------
+   « :root[data-color-scheme="light"] label » (0,2,1) repeignait la case et
+   le tri en gris, graisse 800 ; la planche 13c les veut en principal, 500. */
+:root[data-color-scheme] #commandes .cmd-case,
+:root:not([data-color-scheme]) #commandes .cmd-case,
+:root[data-color-scheme] #commandes .cmd-tri,
+:root:not([data-color-scheme]) #commandes .cmd-tri {
+  color: var(--v8-principal);
+  font-weight: 500;
+}
+
+/* La case de choix d'une ligne : la cible est une cellule de 44 px, pas un
+   carre de 20 -- a cote, on ouvrait le detail. */
+.cmd-carte--choix .cmd-entete, .cmd-carte--choix .cmd-ligne {
+  grid-template-columns: 44px 140px 120px minmax(0, 1fr) 150px 110px 150px;
+}
+.cmd-carte--choix .cmd-col-choix {
+  justify-content: center; min-width: 44px; min-height: 44px; cursor: pointer;
+}
+
+.cmd-periode, .cmd-jour {
+  display: inline-flex; align-items: center; gap: 10px; flex: none;
+  font-size: 13.5px; font-weight: 600; color: var(--v8-texte-secondaire);
+}
+.cmd-periode label, .cmd-jour { display: inline-flex; align-items: center; gap: 6px; }
+:root[data-color-scheme] #commandes .cmd-periode input,
+:root:not([data-color-scheme]) #commandes .cmd-periode input,
+:root[data-color-scheme] #commandes .cmd-jour input,
+:root:not([data-color-scheme]) #commandes .cmd-jour input {
+  min-height: 44px; height: 44px; padding: 0 14px; border-radius: 999px;
+}
+.cmd-detail-gestes { padding: 0 24px; }
+.cmd-detail-gestes[hidden] { display: none; }

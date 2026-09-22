@@ -30,7 +30,7 @@ import {
   MAX_BRAND_IMAGE_SIZE,
   applicationThemes
 } from "./config/themes.js";
-import { mainTabs, MOBILE_OVERFLOW_TABS, titles, GROUPES_NAV } from "./config/tabs.js";
+import { mainTabs, MOBILE_OVERFLOW_TABS, titles, GROUPES_NAV, REDIRECTIONS, ECRANS_SECONDAIRES } from "./config/tabs.js";
 import {
   gabaritTableauComptes,
   gabaritAccesRefuse,
@@ -198,11 +198,23 @@ function setNavigationSearchValue(value, sourceInput = null) {
 // pilules sous le titre de page.
 
 function groupeDeLOnglet(nomOnglet) {
+  // Un ecran SECONDAIRE (la saisie de commande) garde allumee l'entree de son
+  // ecran principal : on y arrive par un bouton de l'en-tete, pas par une
+  // pilule, mais on est toujours « dans les Commandes ».
+  if (nomOnglet in ECRANS_SECONDAIRES) return ECRANS_SECONDAIRES[nomOnglet];
   return Object.keys(GROUPES_NAV).find(groupe => GROUPES_NAV[groupe].includes(nomOnglet)) || null;
 }
 
 function libellesDuGroupe(groupe) {
-  return (GROUPES_NAV[groupe] || []).map(onglet => titles[onglet]?.title || "");
+  // La recherche du menu doit trouver un ecran par son ANCIEN nom aussi :
+  // « bons » ou « livrees » n'ont plus d'ecran a eux, ils vivent dans
+  // Commandes -- et la saisie de commande, ecran secondaire, en fait partie.
+  const ecrans = [
+    ...(GROUPES_NAV[groupe] || []),
+    ...Object.keys(ECRANS_SECONDAIRES).filter(onglet => ECRANS_SECONDAIRES[onglet] === groupe),
+    ...Object.keys(REDIRECTIONS).filter(onglet => groupeDeLOnglet(REDIRECTIONS[onglet].onglet) === groupe)
+  ];
+  return ecrans.map(onglet => titles[onglet]?.title || "");
 }
 
 function renderSousOnglets(nomOnglet) {
@@ -299,8 +311,11 @@ function navigateToFirstSearchMatch(value) {
   // On vise d'abord un ECRAN dont le titre correspond : « bons » doit ouvrir
   // Bons de commande, pas seulement mettre Commandes en evidence. A defaut,
   // la premiere entree restee visible.
+  // Les anciens ecrans-listes comptent aussi : « bons » doit ouvrir les
+  // Commandes, filtrees sur toutes, et « livrees » sur les livrees.
   const ecran = Object.keys(titles).find(onglet => {
-    return mainTabs.has(onglet) && normalizeTextKey(titles[onglet].title).includes(query);
+    return (mainTabs.has(onglet) || onglet in REDIRECTIONS)
+      && normalizeTextKey(titles[onglet].title).includes(query);
   });
   const entree = Array.from(document.querySelectorAll(".sidebar .tab"))
     .find(tab => !tab.classList.contains("is-hidden-by-search"));
@@ -351,6 +366,8 @@ function bindUi() {
     delete champ.dataset.depuisEntete;
     if (champ.files?.length) document.getElementById("ventesForm")?.requestSubmit();
   });
+
+  bindCommandes();
 
   document.getElementById("ventesForm")?.addEventListener("submit", event => {
     event.preventDefault();
@@ -522,6 +539,16 @@ function bindUi() {
 
     if (action === "refresh") runAction(actionButton, "Actualisation...", loadData);
     if (action === "go-tab") showTab(actionButton.dataset.targetTab || "journee");
+    if (action === "cmd-export") exportBdcCsv(commandesFiltrees(), "sereo-commandes");
+    if (action === "cmd-confirmer" || action === "cmd-annuler") {
+      runAction(actionButton, "...", () => gesteDuDetail(action, actionButton.dataset.orderId));
+    }
+    if (action === "cmd-envoyer") runAction(actionButton, "Envoi...", envoyerCommandesEnPreparation);
+    if (action === "cmd-page") {
+      commandesFiltre.page += Number(actionButton.dataset.sens) || 0;
+      renderCommandes();
+      document.getElementById("cmdLignes")?.scrollIntoView({ block: "nearest" });
+    }
     // La planche 6a met « Importer les ventes » en en-tete. Le formulaire
     // d'import, lui, ne bouge pas : le bouton ouvre simplement son selecteur
     // de fichier. Deux chemins vers un seul mecanisme, pas deux mecanismes.
@@ -634,12 +661,28 @@ function bindUi() {
 
 function getInitialTab() {
   const hash = window.location.hash.replace("#", "");
+  // Un ancien ecran-liste dans l'adresse (un favori, un lien) est rendu tel
+  // quel : showTab() le redirige, filtre compris.
+  if (hash in REDIRECTIONS) return hash;
   return mainTabs.has(hash) ? hash : "journee";
 }
 
 
 function showTab(tabName, options = {}) {
   const { updateHash = true } = options;
+  // Les quatre anciens ecrans-listes de commandes : ils ne sont plus des
+  // ecrans, mais on les honore -- l'ecran unique s'ouvre sur LEUR filtre.
+  const redirection = REDIRECTIONS[tabName];
+  if (redirection) {
+    commandesFiltre.statut = redirection.filtre;
+    commandesFiltre.completer = Boolean(redirection.completer);
+    commandesFiltre.page = 1;
+    tabName = redirection.onglet;
+    renderCommandes();
+    // L'adresse dit ou l'on est vraiment : #commandes, plus l'ancien nom.
+    // replaceState ne declenche pas de hashchange, donc pas de boucle.
+    history.replaceState(null, "", `#${tabName}`);
+  }
   const nextTab = titles[tabName] && mainTabs.has(tabName) ? tabName : "journee";
 
   document.querySelectorAll(".page").forEach(page => page.classList.remove("active"));
@@ -677,6 +720,9 @@ function showTab(tabName, options = {}) {
     commande.hidden = commande.dataset.ecran !== nextTab;
   });
   majEnteteTableauDeBord(nextTab);
+  // Le sous-titre de Commandes est un compte : il se pose APRES le sous-titre
+  // generique, sans quoi celui-ci l'ecraserait.
+  if (nextTab === "commandes") majSousTitreCommandes();
 
   updateCustomerCartBar();
 
@@ -1003,6 +1049,319 @@ function renderTourneeDuJour() {
   }
 }
 
+
+// ============================================================================
+// COMMANDES -- planches 13c / 14c. Un seul tableau, filtre par statut.
+// ============================================================================
+
+// Les pilules de la planche, plus UNE : « A envoyer ». Le statut des commandes
+// terrain (commande_client_validee) n'etait sous aucune des six, et avec lui le
+// geste qui le traite -- l'envoi en preparation par lot -- n'avait plus de
+// place. L'ordre suit le chemin d'une commande.
+const FILTRES_COMMANDES = [
+  { cle: "toutes", libelle: "Toutes", statuts: null },
+  { cle: "a-envoyer", libelle: "À envoyer", statuts: ["commande_client_validee"] },
+  { cle: "a-preparer", libelle: "À préparer", statuts: ["importe", "stock_a_verifier", "en_preparation", "preparation_terminee"] },
+  { cle: "pret", libelle: "Prêt livraison", statuts: ["pret_livraison"] },
+  { cle: "en-livraison", libelle: "En livraison", statuts: ["en_livraison"] },
+  { cle: "livrees", libelle: "Livrées", statuts: ["livre"] },
+  { cle: "planifiees", libelle: "Planifiées", statuts: ["planifiee", "a_confirmer"] }
+];
+
+// Les badges de la planche : tiede (peche claire), froid (vert clair), plein
+// (principal) ou contour d'alerte. Chaque statut dit son mot : la couleur
+// n'est jamais seule a porter l'etat.
+const STATUT_COMMANDE = {
+  brouillon: ["Brouillon", "neutre"],
+  commande_client_validee: ["À envoyer", "tiede"],
+  importe: ["Importée", "froid"],
+  stock_a_verifier: ["À vérifier", "tiede"],
+  en_preparation: ["En préparation", "tiede"],
+  preparation_terminee: ["Préparée", "tiede"],
+  pret_livraison: ["Prêt livraison", "froid"],
+  en_livraison: ["En livraison", "tiede"],
+  livre: ["Livrée", "plein"],
+  planifiee: ["Planifiée", "froid"],
+  a_confirmer: ["À confirmer", "froid"],
+  probleme_livraison: ["Problème", "alerte"],
+  a_reprogrammer: ["À reprogrammer", "tiede"],
+  annulee: ["Annulée", "neutre"]
+};
+
+const COMMANDES_PAR_PAGE = 20;
+const commandesFiltre = {
+  statut: "toutes", bloquees: false, completer: false, recherche: "", tri: "date-desc", page: 1,
+  du: "", au: "",
+  // Le jour des commandes terrain, comme l'ancien « Commandes du jour ».
+  jour: ""
+};
+const commandesSelection = new Set();
+
+function commandeBloquee(order) {
+  return ["importe", "stock_a_verifier"].includes(order.status) && order.canPrepare === false;
+}
+
+// La date d'une ligne : celle de LIVRAISON pour une commande planifiee (c'est
+// la seule qui compte encore), celle de la COMMANDE pour les autres.
+function dateDeLaCommande(order) {
+  return ["planifiee", "a_confirmer"].includes(order.status)
+    ? (order.deliveryDate || order.dateCommande)
+    : (order.dateCommande || order.deliveryDate);
+}
+
+function dateCourte(iso) {
+  if (!iso) return "—";
+  const d = new Date(`${String(iso).slice(0, 10)}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+}
+
+function articlesDe(order) {
+  return (order.products || []).reduce((n, p) => n + (Number(p.quantite) || 0), 0);
+}
+
+function commandesFiltrees() {
+  const filtre = FILTRES_COMMANDES.find(f => f.cle === commandesFiltre.statut) || FILTRES_COMMANDES[0];
+  const q = normalizeTextKey(commandesFiltre.recherche);
+  const liste = (orders || []).filter(order => {
+    if (filtre.statuts && !filtre.statuts.includes(order.status)) return false;
+    if (commandesFiltre.bloquees && !commandeBloquee(order)) return false;
+    // La regle de l'ancien ecran, reprise telle quelle (bdcNeedsCompletion).
+    if (commandesFiltre.completer && !bdcNeedsCompletion(order)) return false;
+    const jourCommande = String(dateDeLaCommande(order) || "").slice(0, 10);
+    if (commandesFiltre.du && jourCommande < commandesFiltre.du) return false;
+    if (commandesFiltre.au && jourCommande > commandesFiltre.au) return false;
+    if (filtre.cle === "a-envoyer" && commandesFiltre.jour
+      && String(order.dateCommande || "").slice(0, 10) !== commandesFiltre.jour) return false;
+    if (!q) return true;
+    // La recherche va jusqu'au PRODUIT (planche 13c : « Numero, client,
+    // produit... ») ; l'ancienne ne cherchait que le numero et le client.
+    const champs = [order.numero, order.clientName, order.sector, order.id,
+      ...(order.products || []).map(p => p.nom || p.produit)];
+    return champs.some(c => normalizeTextKey(c || "").includes(q));
+  });
+  const parDate = (a, b) => String(dateDeLaCommande(a) || "").localeCompare(String(dateDeLaCommande(b) || ""));
+  const tris = {
+    "date-desc": (a, b) => parDate(b, a),
+    "date-asc": parDate,
+    client: (a, b) => String(a.clientName || "").localeCompare(String(b.clientName || ""), "fr"),
+    numero: (a, b) => String(b.numero || "").localeCompare(String(a.numero || ""), "fr", { numeric: true })
+  };
+  return liste.sort(tris[commandesFiltre.tri] || tris["date-desc"]);
+}
+
+function badgeDeCommande(order) {
+  if (commandeBloquee(order)) {
+    return `<span class="cmd-badge cmd-badge--alerte"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true">`
+      + `<path d="M12 8v5M12 16.5h.01" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg>Bloquée</span>`;
+  }
+  const [mot, ton] = STATUT_COMMANDE[order.status] || [order.status || "Inconnu", "neutre"];
+  const coche = ton === "plein"
+    ? `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path></svg>`
+    : "";
+  return `<span class="cmd-badge cmd-badge--${ton}">${coche}${escapeHtml(mot)}</span>`;
+}
+
+function renderCommandes() {
+  const conteneur = document.getElementById("cmdLignes");
+  if (!conteneur) return;
+
+  // Les pilules
+  const pilules = document.getElementById("cmdPilules");
+  if (pilules) {
+    pilules.innerHTML = FILTRES_COMMANDES.map(f => {
+      const actif = f.cle === commandesFiltre.statut;
+      return `<button class="button secondary compact filtre-pilule${actif ? " active-filter" : ""}" type="button"`
+        + ` data-cmd-filtre="${f.cle}" aria-pressed="${actif}">${escapeHtml(f.libelle)}</button>`;
+    }).join("");
+  }
+  const caseBloquees = document.getElementById("cmdBloquees");
+  if (caseBloquees) caseBloquees.checked = commandesFiltre.bloquees;
+  const caseCompleter = document.getElementById("cmdACompleter");
+  if (caseCompleter) caseCompleter.checked = commandesFiltre.completer;
+  if (!commandesFiltre.jour) commandesFiltre.jour = getTodayDateInput();
+  const jour = document.getElementById("cmdJour");
+  if (jour) jour.value = commandesFiltre.jour;
+  const tri = document.getElementById("cmdTri");
+  if (tri) tri.value = commandesFiltre.tri;
+
+  const liste = commandesFiltrees();
+  // La selection ne garde que ce qui est A L'ECRAN : une recherche ou un
+  // changement de jour ne doit pas laisser partir des commandes masquees.
+  const visibles = new Set(liste.map(o => String(o.id)));
+  for (const id of [...commandesSelection]) if (!visibles.has(id)) commandesSelection.delete(id);
+  const pages = Math.max(1, Math.ceil(liste.length / COMMANDES_PAR_PAGE));
+  commandesFiltre.page = Math.min(Math.max(1, commandesFiltre.page), pages);
+  const debut = (commandesFiltre.page - 1) * COMMANDES_PAR_PAGE;
+  const page = liste.slice(debut, debut + COMMANDES_PAR_PAGE);
+  const choix = commandesFiltre.statut === "a-envoyer";
+  document.querySelector("#commandes .cmd-carte")?.classList.toggle("cmd-carte--choix", choix);
+
+  conteneur.innerHTML = page.length ? page.map(order => {
+    const bloquee = commandeBloquee(order);
+    const articles = articlesDe(order);
+    const manquants = (order.stockLines || []).filter(l => l.status !== "ok").length;
+    const colonneArticles = bloquee && manquants
+      ? `<span class="cmd-manquants">${manquants} manquant${manquants > 1 ? "s" : ""}</span>`
+      : `${articles}`;
+    const case_ = choix
+      ? `<label class="cmd-col-choix"><input type="checkbox" class="cmd-choix" data-cmd-choix="${escapeAttribute(order.id)}"`
+        + ` aria-label="Choisir ${escapeAttribute(order.numero || order.clientName || "la commande")}"`
+        + `${commandesSelection.has(String(order.id)) ? " checked" : ""}></label>`
+      : `<span class="cmd-col-choix"></span>`;
+    return `<div class="cmd-ligne" role="listitem" tabindex="0" data-cmd-ouvrir="${escapeAttribute(order.id)}"`
+      // Le nom accessible dit AUSSI le statut : « Bloquee » ne doit pas etre
+      // reserve a qui voit le badge.
+      + ` aria-label="${escapeAttribute(`${order.numero || ""} ${order.clientName || ""}, ${commandeBloquee(order) ? "Bloquée" : (STATUT_COMMANDE[order.status]?.[0] || order.status || "")}`.trim())}">`
+      + case_
+      + `<span class="cmd-num">${escapeHtml(order.numero || "—")}`
+      + `${order.subscriptionId ? '<span class="cmd-abo">Abonnement</span>' : ""}</span>`
+      + `<span class="cmd-date">${escapeHtml(dateCourte(dateDeLaCommande(order)))}</span>`
+      + `<span class="cmd-client">${escapeHtml(order.clientName || "Client")}</span>`
+      + `<span class="cmd-secteur">${escapeHtml(order.sector ? formatSectorLabel(order.sector) : "—")}</span>`
+      + `<span class="cmd-articles cmd-droite">${colonneArticles}</span>`
+      + `<span class="cmd-statut cmd-droite">${badgeDeCommande(order)}</span>`
+      + `</div>`;
+  }).join("") : emptyState("Aucune commande", commandesFiltre.recherche || commandesFiltre.bloquees || commandesFiltre.statut !== "toutes"
+    ? "Aucune commande ne correspond à ce filtre."
+    : "Les commandes importées et saisies apparaîtront ici.");
+
+  setText("cmdCompte", liste.length
+    ? `${debut + 1}–${debut + page.length} sur ${liste.length}`
+    : "0 sur 0");
+  const precedent = document.getElementById("cmdPrecedent");
+  const suivant = document.getElementById("cmdSuivant");
+  if (precedent) precedent.disabled = commandesFiltre.page <= 1;
+  if (suivant) suivant.disabled = commandesFiltre.page >= pages;
+
+  // L'envoi par lot, sous « A envoyer » seulement
+  const envoi = document.getElementById("cmdEnvoi");
+  if (envoi) {
+    // Visible meme sans ligne : c'est elle qui porte le choix du JOUR, et un
+    // jour vide doit pouvoir mener a un autre.
+    envoi.hidden = !choix;
+    const toutCase = document.getElementById("cmdToutSelectionner");
+    if (toutCase) toutCase.disabled = !liste.length;
+    const n = commandesSelection.size;
+    setText("cmdEnvoiCompte", n ? `${n} sélectionnée${n > 1 ? "s" : ""}` : "Aucune sélectionnée");
+    const bouton = document.getElementById("cmdEnvoyer");
+    if (bouton) bouton.disabled = n === 0;
+    const tout = document.getElementById("cmdToutSelectionner");
+    if (tout) tout.checked = liste.length > 0 && liste.every(o => commandesSelection.has(String(o.id)));
+  }
+
+  majSousTitreCommandes();
+}
+
+// Le sous-titre de la planche : « 124 bons depuis janvier · 5 en cours ».
+function majSousTitreCommandes() {
+  if (!document.getElementById("commandes")?.classList.contains("active")) return;
+  const annee = String(new Date().getFullYear());
+  const depuisJanvier = (orders || []).filter(o => String(o.dateCommande || "").startsWith(annee)).length;
+  const enCours = (orders || []).filter(o => !["livre", "annulee", "brouillon"].includes(o.status)).length;
+  setText("pageSubtitle", `${depuisJanvier} bon${depuisJanvier > 1 ? "s" : ""} depuis janvier · ${enCours} en cours`);
+}
+
+// Le detail d'une commande : le modal existant, plus les gestes que la planche
+// retire de la liste -- confirmer ou annuler une commande planifiee.
+function ouvrirDetailCommande(orderId) {
+  // Comme l'ouverture d'origine : on n'arrive jamais dans le detail en mode
+  // edition, meme apres un Echap pendant une edition precedente.
+  bdcState.editingClientId = null;
+  openBdcDetail(orderId);
+  const order = (orders || []).find(o => String(o.id) === String(orderId));
+  const gestes = document.getElementById("cmdDetailGestes");
+  if (!gestes) return;
+  gestes.hidden = true;
+  gestes.innerHTML = "";
+  if (!order || !["planifiee", "a_confirmer"].includes(order.status)) return;
+  gestes.innerHTML = `<button class="button ok" type="button" data-action="cmd-confirmer" data-order-id="${escapeAttribute(order.id)}">Confirmer</button>`
+    + `<button class="button danger" type="button" data-action="cmd-annuler" data-order-id="${escapeAttribute(order.id)}">Annuler la commande</button>`;
+  gestes.hidden = false;
+}
+
+// Un geste du detail FERME le detail : sinon la fenetre restait ouverte, figee,
+// et « Annuler » pouvait annuler une commande qui venait de passer en
+// preparation -- stock reserve rendu, sans rien demander.
+async function gesteDuDetail(action, orderId) {
+  if (action === "cmd-annuler"
+    && !window.confirm("Annuler cette commande planifiée ? Elle ne sera pas livrée.")) return;
+  closeBdcDetail();
+  if (action === "cmd-confirmer") await confirmPlannedOrder(orderId);
+  else await cancelPlannedOrder(orderId);
+}
+
+async function envoyerCommandesEnPreparation() {
+  const ids = Array.from(commandesSelection);
+  if (!ids.length) return;
+  await apiFetch("/api/customer-orders/send-preparation", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ orderIds: ids })
+  });
+  commandesSelection.clear();
+  await loadData();
+  notify(`${ids.length} commande${ids.length > 1 ? "s" : ""} envoyée${ids.length > 1 ? "s" : ""} en préparation.`, "success");
+}
+
+function bindCommandes() {
+  const ecran = document.getElementById("commandes");
+  if (!ecran) return;
+  ecran.addEventListener("click", event => {
+    const pilule = event.target.closest("[data-cmd-filtre]");
+    if (pilule) {
+      commandesFiltre.statut = pilule.dataset.cmdFiltre;
+      commandesFiltre.page = 1;
+      commandesSelection.clear();
+      renderCommandes();
+      return;
+    }
+    if (event.target.closest(".cmd-col-choix")) return;   // la case ne doit pas ouvrir le detail
+    const ligne = event.target.closest("[data-cmd-ouvrir]");
+    if (ligne) ouvrirDetailCommande(ligne.dataset.cmdOuvrir);
+  });
+  ecran.addEventListener("keydown", event => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const ligne = event.target.closest?.("[data-cmd-ouvrir]");
+    if (!ligne || event.target !== ligne) return;
+    event.preventDefault();
+    ouvrirDetailCommande(ligne.dataset.cmdOuvrir);
+  });
+  ecran.addEventListener("change", event => {
+    if (event.target.id === "cmdBloquees") {
+      commandesFiltre.bloquees = event.target.checked;
+      commandesFiltre.page = 1;
+      renderCommandes();
+    } else if (event.target.id === "cmdACompleter") {
+      commandesFiltre.completer = event.target.checked;
+      commandesFiltre.page = 1;
+      renderCommandes();
+    } else if (["cmdDu", "cmdAu", "cmdJour"].includes(event.target.id)) {
+      const cle = { cmdDu: "du", cmdAu: "au", cmdJour: "jour" }[event.target.id];
+      commandesFiltre[cle] = event.target.value;
+      commandesFiltre.page = 1;
+      renderCommandes();
+    } else if (event.target.id === "cmdTri") {
+      commandesFiltre.tri = event.target.value;
+      renderCommandes();
+    } else if (event.target.matches("[data-cmd-choix]")) {
+      const id = event.target.dataset.cmdChoix;
+      if (event.target.checked) commandesSelection.add(id); else commandesSelection.delete(id);
+      renderCommandes();
+    } else if (event.target.id === "cmdToutSelectionner") {
+      commandesFiltrees().forEach(o => {
+        if (event.target.checked) commandesSelection.add(String(o.id)); else commandesSelection.delete(String(o.id));
+      });
+      renderCommandes();
+    }
+  });
+  document.getElementById("cmdRecherche")?.addEventListener("input", event => {
+    commandesFiltre.recherche = event.target.value;
+    commandesFiltre.page = 1;
+    renderCommandes();
+  });
+}
+
 function renderAll() {
   majEnteteTableauDeBord(getInitialTab());
   renderStats();
@@ -1021,6 +1380,7 @@ function renderAll() {
   renderRecommande();
   renderCommandesLivrees();
   renderBonsCommande();
+  renderCommandes();
   renderProduits();
   renderVentes();
   renderAlertes();
@@ -2965,8 +3325,10 @@ function renderBdcTable(orders) {
 // Export CSV des bons filtres. Pas d'endpoint backend : Blob + download client-side.
 // Format : Numero;Date;Client;Adresse;CP;Ville;Secteur;Statut;Telephone;Lignes;Qté
 // Separateur ; (compatibilite Excel FR), encodage UTF-8 BOM pour les accents.
-function exportBdcCsv() {
-  const filtered = bdcFilterOrders();
+function exportBdcCsv(liste = null, prefixe = "sereo-bons-commande") {
+  // Le meme export sert l'ecran Commandes (planche 13c) : on lui passe SA
+  // liste filtree. Sans argument, il garde son comportement d'origine.
+  const filtered = liste || bdcFilterOrders();
   if (!filtered.length) {
     notify("Aucun bon à exporter (filtres vides).", "warning");
     return;
@@ -3009,7 +3371,7 @@ function exportBdcCsv() {
   const a = document.createElement("a");
   const date = new Date().toISOString().slice(0, 10);
   a.href = url;
-  a.download = `sereo-bons-commande-${date}.csv`;
+  a.download = `${prefixe}-${date}.csv`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -3238,6 +3600,10 @@ async function saveBdcClientEdit(triggerBtn) {
 function closeBdcDetail() {
   const modal = document.getElementById("bdc-detail-modal");
   if (!modal) return;
+  // Les gestes d'une planifiee ne survivent pas a la fermeture : le detail
+  // suivant, ouvert d'ailleurs, ne doit pas en heriter.
+  const gestes = document.getElementById("cmdDetailGestes");
+  if (gestes) { gestes.hidden = true; gestes.innerHTML = ""; }
   modal.setAttribute("aria-hidden", "true");
   document.body.classList.remove("version-modal-open");
   if (modal._releaseTrap) { modal._releaseTrap(); modal._releaseTrap = null; }
