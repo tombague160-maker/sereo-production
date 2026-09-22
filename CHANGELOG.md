@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.36.0](https://github.com/tombague160-maker/sereo-production/compare/v1.35.0...v1.36.0) (2026-09-22)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **clients:** l'écran des planches 13e/14e — liste, fiche, abonnement, commandes ([b075d93](https://github.com/tombague160-maker/sereo-production/commit/b075d933720977b247fd4a86a053806426dd5f3c))
+* Commandes, Stock et Clients des planches V8 ([#150](https://github.com/tombague160-maker/sereo-production/issues/150)) ([586d022](https://github.com/tombague160-maker/sereo-production/commit/586d022b7c5528dcc42e8233bc6cb379d14b1bd6))
+* **commandes:** l'écran unique des planches 13c/14c ([39db2c2](https://github.com/tombague160-maker/sereo-production/commit/39db2c2ad2569835e6ba02aa75a06f0bcc250599))
+* **stock:** l'écran des planches 13d/14d — carte « À recommander », tuiles, tableau ([902b45c](https://github.com/tombague160-maker/sereo-production/commit/902b45c15a34dc120541197c3718e7b789f7d11e))
+
+
+### 🐛 Corrections de bugs
+
+* **clients:** relecture — Modifier répercute sur les commandes, archivés exclus, « Les N autres » par identifiant, 409 dans le dialogue, a11y, 1320 px ([5c4ee07](https://github.com/tombague160-maker/sereo-production/commit/5c4ee0759f6045d4885d3ca40188507d05ec3c18))
+* **commandes:** seconde relecture — détail, redirections, secteur, période, focus, ports e2e ([7ae92cf](https://github.com/tombague160-maker/sereo-production/commit/7ae92cf98ad7ee84b170d1578c6c04bec203d0ca))
+* **stock:** relecture — « Sans catégorie » filtre, « Tout voir » aligné, 921-1280 px, focus, champ vide ([81e8ad6](https://github.com/tombague160-maker/sereo-production/commit/81e8ad6741373497baa89e4d61066eb78a7736df))
+
+
+### 🧪 Tests
+
+* **clients:** « Les N autres » sous un filtre laissé, fiche pleine largeur au téléphone ([5fef3e0](https://github.com/tombague160-maker/sereo-production/commit/5fef3e0d57b34e2d7c2752e4c2467f94fe8a53f9))
+* **clients:** le débordement se mesure à 1190 px, la largeur la plus étroite à deux colonnes ([68adf20](https://github.com/tombague160-maker/sereo-production/commit/68adf200930dec7e13e9adf59933efef103b8e2e))
+* **commandes:** le débordement mobile se mesure au bord, pas au scrollWidth ([71a2145](https://github.com/tombague160-maker/sereo-production/commit/71a2145733fb5dfa031c949c12a9b089f4c1a6f8))
+* **e2e:** le navigateur de test vit à Paris, comme le serveur et les utilisateurs ([3ffea7e](https://github.com/tombague160-maker/sereo-production/commit/3ffea7e0dcdcd7755dfd86c959003da79a2e46e4))
+
 ## [1.35.0](https://github.com/tombague160-maker/sereo-production/compare/v1.34.0...v1.35.0) (2026-09-22)
 
 
