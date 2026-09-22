@@ -305,21 +305,41 @@
     </div>
 
     <main class="content">
-      <header class="topbar">
-        <div>
-          <p class="eyebrow">Tableau de bord local</p>
+      <!-- L'EN-TETE D'ECRAN remplace la barre du haut.
+           Mesure sur les 14 planches desktop de l'export : aucune ne porte de
+           bandeau, ni de recherche globale, ni de bouton d'actualisation en
+           haut. Chaque ecran commence par son titre, dans la colonne, et
+           defile avec elle.
+           La recherche globale est partie pour de bon : elle doublait
+           #menuSearch, dans la barre laterale, qui fait le meme travail.
+           L'etat de synchronisation et l'actualisation RESTENT : la planche ne
+           les dessine pas, mais ne pas dessiner une fonction n'est pas decider
+           de la supprimer.
+           #enteteActions est une fente que chaque ecran remplit avec ses
+           propres commandes (la planche 6a y met le mois et l'import). -->
+      <header class="ecran-entete">
+        <div class="ecran-entete-texte">
           <h2 id="pageTitle">Tableau de bord</h2>
           <p id="pageSubtitle">Chiffre d’affaires livré, abonnements et opérations du jour.</p>
         </div>
-
-        <label class="topbar-search" for="globalNavigationSearch">
-          <svg class="icon" aria-hidden="true"><use href="#icon-search"></use></svg>
-          <input id="globalNavigationSearch" type="search" placeholder="Recherche rapide..." autocomplete="off" />
-        </label>
-
-        <div class="topbar-actions">
+        <div class="ecran-entete-actions">
+          <!-- La fente d'en-tete. Chaque ecran y met SES commandes ; showTab
+               ne montre que celles dont data-ecran vaut l'onglet actif.
+               La planche 6a place ici le mois et l'import des ventes.
+               #revenueMonth reste un <select> : un banc l'actionne par
+               selectOption, qu'un menu maison ne saurait pas recevoir. -->
+          <div id="enteteActions" class="ecran-entete-fente">
+            <label class="tb-pilule-mois" data-ecran="journee">
+              <span class="sr-only">Période du chiffre d’affaires</span>
+              <select id="revenueMonth" aria-label="Mois du chiffre d’affaires"></select>
+            </label>
+            <button class="button primary tb-importer" type="button" data-ecran="journee" data-action="importer-ventes">
+              <svg class="icon button-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg>
+              <span>Importer les ventes</span>
+            </button>
+          </div>
           <span id="syncStatus" class="status-chip" aria-live="polite">Prêt</span>
-          <button id="refreshButton" aria-label="Actualiser" class="button secondary" type="button" data-action="refresh">
+          <button id="refreshButton" aria-label="Actualiser" class="button secondary compact" type="button" data-action="refresh">
             <svg class="icon button-icon" aria-hidden="true"><use href="#icon-rotate-ccw"></use></svg>
             <span>Actualiser</span>
           </button>
@@ -333,36 +353,109 @@
       <div id="sousOnglets" class="filtre-pilules sous-onglets" role="tablist" aria-label="Vues" hidden></div>
 
       <section id="journee" class="page active" role="tabpanel" aria-labelledby="tab-journee">
-        <div class="op-welcome"><div><span class="op-eyebrow">SÉRÉO · VOTRE ACTIVITÉ</span><h2>Une journée bien organisée.</h2><p class="muted">Vos ventes, vos clients, vos prochaines livraisons.</p></div><div class="op-toolbar"><span id="opUpdated" class="muted" role="status" title="Actualisation automatique toutes les 60 secondes">Chargement…</span><button class="button secondary" type="button" data-op="refresh-operations">Actualiser</button></div></div>
-        <div class="op-section-title"><div><h3>Vue d’ensemble</h3><p class="muted">Chiffre d’affaires des commandes livrées, selon les montants enregistrés.</p></div><label class="op-period">Période<select id="revenueMonth" aria-label="Mois du chiffre d’affaires"></select></label></div>
-        <div class="op-kpis">
-          <article class="op-kpi op-kpi-featured"><span>Chiffre d’affaires livré</span><strong id="opRevenue">—</strong><small id="opDelivered">Commandes livrées</small></article>
-          <article class="op-kpi"><span>Panier moyen</span><strong id="opBasket">—</strong><small>Sur la période sélectionnée</small></article>
-          <article class="op-kpi"><span>Abonnements actifs</span><strong id="opSubscriptions">—</strong><a href="#abonnements">Voir mes abonnements ↗</a></article>
-          <article class="op-kpi"><span>Échéances à préparer</span><strong id="opDue">—</strong><small>Rappels arrivés à échéance</small></article>
-        </div>
-        <p id="revenueCaveat" class="muted op-caveat"></p>
-        <div class="op-dashboard-grid"><section class="panel"><div class="panel-heading"><h3>Votre activité sur 6 mois</h3><span class="op-tag">CA livré</span></div><div id="revenueChart" class="revenue-chart" aria-label="Chiffre d’affaires des six derniers mois"></div></section><section class="panel"><div class="panel-heading"><h3>À votre attention</h3><a href="#recommande">Voir le stock ↗</a></div><div id="opAlerts"></div></section></div>
-        <section class="panel"><div class="panel-heading"><div><span class="op-eyebrow">LES 7 PROCHAINS JOURS & LES RETARDS</span><h3>Vos livraisons récurrentes</h3></div><a href="#abonnements" id="opWeekCount">Voir le calendrier ↗</a></div><div id="dashboardSubscriptions"></div></section>
-        <div class="op-dashboard-grid"><section class="panel"><div class="panel-heading"><h3>À préparer aujourd’hui <span id="dashboardPreparingCount" class="op-tag">0</span></h3><a href="#preparation">Tout voir ↗</a></div><div id="dashboardPreparing"></div></section>
-          <!-- La carte « Tournee du jour » (planche TableauDeBord.png) : ou en
-               est la tournee, ce qui vient, et le seul geste qui compte ici --
-               ouvrir la carte. Cachee tant qu'aucune tournee n'existe. -->
-          <section class="panel tournee-du-jour" id="dashboardTournee" hidden>
-            <div class="panel-heading">
-              <h3>Tournée du jour</h3>
-              <span class="status-chip" id="dashboardTourneeStatut">En cours</span>
+        <!-- PLANCHE 6a / 6b. Grille de 12 colonnes, gap 24. La colonne large
+             alterne : 7+5 sur la premiere ligne, 5+7 sur la seconde. C'est
+             l'ordre du DOM, et il compte. -->
+        <div class="tb-grille">
+
+          <section class="panel tb-ca">
+            <div class="tb-ca-tetes">
+              <div class="tb-ca-bloc">
+                <span class="tb-libelle">Chiffre d’affaires livré</span>
+                <strong id="opRevenue" class="tb-montant">—</strong>
+                <small id="opDelivered" class="tb-legende">Commandes livrées</small>
+              </div>
+              <div class="tb-ca-bloc tb-ca-panier">
+                <span class="tb-libelle">Panier moyen</span>
+                <strong id="opBasket" class="tb-valeur">—</strong>
+              </div>
             </div>
-            <p class="tournee-du-jour-compte"><strong id="dashboardTourneeRang">0</strong> <span id="dashboardTourneeTotal">arrêts</span></p>
-            <div class="tournee-progression" aria-hidden="true"><div class="tournee-progression-barre" id="dashboardTourneeBarre"></div></div>
-            <ul class="tournee-du-jour-faits" id="dashboardTourneeFaits"></ul>
-            <a class="button primary" href="#livreur" data-action="go-tab" data-target-tab="livreur">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
-              Ouvrir la carte
-            </a>
+            <div id="revenueChart" class="revenue-chart" aria-label="Chiffre d’affaires des derniers mois"></div>
           </section>
-          <section class="panel" id="dashboardDeliveringPanel"><div class="panel-heading"><h3>À livrer <span id="dashboardDeliveringCount" class="op-tag">0</span></h3><a href="#livreur">Ouvrir la tournée ↗</a></div><div id="dashboardDelivering"></div></section></div>
-        <details class="op-details"><summary>Stock et suivi détaillé</summary>
+
+          <div class="tb-colonne">
+            <div class="tb-tuiles">
+              <!-- Les tuiles remplacent les deux listes de la version precedente.
+                   Les listes n'ont pas disparu : elles sont sous le depliant du bas. -->
+              <button class="panel tb-tuile" type="button" data-action="go-tab" data-target-tab="preparation">
+                <span class="tb-tuile-disque tb-tuile-disque--tiede" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 4h9l5 5v11H5zM14 4v5h5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></span>
+                <strong id="dashboardPreparingCount" class="tb-tuile-nombre">0</strong>
+                <span class="tb-tuile-titre">En préparation</span>
+                <span class="tb-tuile-detail" id="dashboardPreparingDetail">—</span>
+              </button>
+              <button class="panel tb-tuile" type="button" data-action="go-tab" data-target-tab="livreur">
+                <span class="tb-tuile-disque tb-tuile-disque--froid" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 7h10v9H3zM13 10h4l3 3v3h-7zM5 18a2 2 0 1 0 4 0 2 2 0 1 0-4 0M15 18a2 2 0 1 0 4 0 2 2 0 1 0-4 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></span>
+                <strong id="dashboardDeliveringCount" class="tb-tuile-nombre">0</strong>
+                <span class="tb-tuile-titre">En livraison</span>
+                <span class="tb-tuile-detail" id="dashboardDeliveringDetail">—</span>
+              </button>
+            </div>
+
+            <!-- La carte verte de la tournee du jour. La planche 6b la veut en
+                 SURFACE HAUTE sombre (#182E31), pas en principal : d'ou un jeton
+                 de role a elle, --v8-carte-tournee, et non --v8-principal, qui
+                 vaut #93CBC9 en sombre et en ferait un bloc menthe. -->
+            <section class="panel tournee-du-jour" id="dashboardTournee" hidden>
+              <div class="panel-heading">
+                <h3>Tournée du jour</h3>
+                <span class="status-chip" id="dashboardTourneeStatut">En cours</span>
+              </div>
+              <p class="tournee-du-jour-compte"><strong id="dashboardTourneeRang">0</strong> <span id="dashboardTourneeTotal">arrêts</span></p>
+              <div class="tournee-progression" aria-hidden="true"><div class="tournee-progression-barre" id="dashboardTourneeBarre"></div></div>
+              <ul class="tournee-du-jour-faits" id="dashboardTourneeFaits"></ul>
+              <a class="button primary" href="#livreur" data-action="go-tab" data-target-tab="livreur">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+                Ouvrir la carte
+              </a>
+            </section>
+
+            <!-- Sans tournee, la colonne droite ne peut pas rester vide : la
+                 planche ne traite pas ce cas. On y remet la liste a livrer. -->
+            <section class="panel" id="dashboardDeliveringPanel">
+              <div class="panel-heading"><h3>À livrer</h3><a href="#livreur">Ouvrir la tournée ↗</a></div>
+              <div id="dashboardDelivering"></div>
+            </section>
+          </div>
+
+          <section class="panel tb-regler">
+            <div class="panel-heading">
+              <h3>À régler</h3>
+              <span class="tb-badge-alerte" id="opAlertsCount" hidden>0</span>
+            </div>
+            <div id="opAlerts"></div>
+          </section>
+
+          <section class="panel tb-semaine">
+            <div class="panel-heading">
+              <h3>Cette semaine <span class="op-tag" id="opWeekCount">0</span></h3>
+              <a href="#abonnements" class="tb-lien">Tous les abonnements ↗</a>
+            </div>
+            <div id="dashboardSubscriptions"></div>
+          </section>
+        </div>
+
+        <!-- CE QUE LA PLANCHE NE MONTRE PAS, ET QUI RESTE.
+             La liste « a preparer » porte la regle « une ligne par commande »
+             de la charte §4 ; les quatre chiffres et le resume du jour sont des
+             donnees reelles. Une planche qui ne les dessine pas ne decide pas de
+             les supprimer -- elle les sort du premier regard. Ils passent donc
+             sous un depliant, ferme par defaut.
+             #opUpdated, #opSubscriptions, #opDue et #revenueCaveat y vivent
+             aussi parce que renderDashboard() les lit SANS GARDE : les retirer
+             leverait une TypeError qui interromprait tout le rendu. -->
+        <details class="op-details tb-detail">
+          <summary>Détail du jour</summary>
+          <div class="tb-detail-corps">
+            <p class="tb-detail-etat"><span id="opUpdated" class="muted" role="status">Chargement…</span></p>
+            <div class="op-kpis">
+              <article class="op-kpi"><span>Abonnements actifs</span><strong id="opSubscriptions">—</strong><a href="#abonnements">Voir mes abonnements ↗</a></article>
+              <article class="op-kpi"><span>Échéances à préparer</span><strong id="opDue">—</strong><small>Rappels arrivés à échéance</small></article>
+            </div>
+            <p id="revenueCaveat" class="muted op-caveat"></p>
+            <section class="panel">
+              <div class="panel-heading"><h3>À préparer aujourd’hui <span id="dashboardPreparingCountDetail" class="op-tag">0</span></h3><a href="#preparation">Tout voir ↗</a></div>
+              <div id="dashboardPreparing"></div>
+            </section>
         <div class="cards dashboard-cards">
           <article class="card blue">
             <span class="card-icon" aria-hidden="true"><svg class="icon"><use href="#icon-rotate-ccw"></use></svg></span>
@@ -436,7 +529,9 @@
           </div>
         </div>
 
+          </div>
         </details>
+
         <div class="panel visual-panel">
           <div class="panel-heading">
             <div>

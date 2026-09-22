@@ -104,7 +104,9 @@ for (const vue of ["desktop", "mobile"]) {
       //    decoration. Juger l'input reviendrait a mesurer une piece d'un
       //    composant, pas le composant -- et a reclamer 48 px a un element que
       //    personne ne voit.
-      const enveloppe = e => e.closest(".topbar-search, .sidebar-search") || e;
+      // La pilule du mois (planche 6a) est une enveloppe comme les deux autres :
+      // c'est elle qui porte le fond, la hauteur et le rayon, pas le <select>.
+      const enveloppe = e => e.closest(".topbar-search, .sidebar-search, .tb-pilule-mois") || e;
       const vus = new Set();
       const out = [];
       for (const e of document.querySelectorAll(
@@ -121,7 +123,7 @@ for (const vue of ["desktop", "mobile"]) {
           h: Math.round(b.height),
           rayon: Math.round(parseFloat(cs.borderTopLeftRadius) || 0),
           multi: cible.tagName === "TEXTAREA",
-          pilule: cible.classList.contains("sidebar-search")
+          pilule: cible.classList.contains("sidebar-search") || cible.classList.contains("tb-pilule-mois")
         });
       }
       return out;
@@ -131,7 +133,11 @@ for (const vue of ["desktop", "mobile"]) {
     // DEVINE : en mobile l enveloppe de recherche de la barre laterale est
     // masquee, il n en reste que deux. Un prealable trop haut transforme une
     // mesure juste en faux rouge.
-    expect(r.length, "aucun champ mesure").toBeGreaterThanOrEqual(2);
+    // UN suffit a rendre le zero non vide. Le seuil valait 2 : les deux champs
+    // etaient la recherche de la barre du haut et le mois. La barre du haut est
+    // partie -- aucune planche desktop n'en porte -- et il n'en reste qu'un sur
+    // telephone. Un seuil qui cite un compte se perime avec lui.
+    expect(r.length, "aucun champ mesure").toBeGreaterThanOrEqual(1);
 
     // Un `textarea` est multiligne : sa hauteur est un choix de contenu, pas de
     // composant. Il garde le rayon, pas la hauteur.

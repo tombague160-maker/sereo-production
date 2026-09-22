@@ -111,7 +111,12 @@ const CORRESPONDANCE = {
   "Avertissement": "--v8-avertissement",
   "Fond d'avertissement": "--v8-avertissement-fond",
   "Anneau de focus": "--v8-focus",
-  "Second ton du focus": "--v8-focus-halo"
+  "Second ton du focus": "--v8-focus-halo",
+  "Carte de tournée": "--v8-carte-tournee",
+  "Texte sur carte de tournée": "--v8-texte-sur-carte-tournee",
+  "Secondaire sur carte de tournée": "--v8-secondaire-sur-carte-tournee",
+  "Surface sur vert": "--v8-surface-sur-vert",
+  "Accent de donnée": "--v8-accent-donnee"
 };
 
 // --- Tests -----------------------------------------------------------------
@@ -123,13 +128,16 @@ test("jetons — la charte est lisible et porte bien ses deux palettes", () => {
   assert.equal(charteSombre.get("Principal"), "#93CBC9");
 });
 
-// 21 depuis le 18/09 : l'anneau de focus clavier et son second ton. Le compte
-// est EXACT et non un minimum -- un jeton ajoute sans etre porte a la charte
-// doit faire tomber ce cas, c'est toute sa raison d'etre.
-test("jetons — le CSS porte 21 jetons, dans chacun des trois blocs", () => {
-  assert.equal(cssClair.size, 21, `clair : ${[...cssClair.keys()].join(", ")}`);
-  assert.equal(cssSombre.size, 21, `sombre : ${[...cssSombre.keys()].join(", ")}`);
-  assert.equal(cssSombreMedia.size, 21, `sombre @media : ${[...cssSombreMedia.keys()].join(", ")}`);
+// 21 depuis le 18/09 : l'anneau de focus clavier et son second ton.
+// 26 depuis le 22/09 : les cinq roles du tableau de bord des planches 6a/6b
+// (carte de tournee et ses deux textes, surface sur vert, accent de donnee).
+// Le compte est EXACT et non un minimum -- un jeton ajoute sans etre porte a
+// la charte doit faire tomber ce cas, c'est toute sa raison d'etre. Il l'a
+// fait le 22/09 : les cinq jetons etaient dans le CSS, pas dans la charte.
+test("jetons — le CSS porte 26 jetons, dans chacun des trois blocs", () => {
+  assert.equal(cssClair.size, 26, `clair : ${[...cssClair.keys()].join(", ")}`);
+  assert.equal(cssSombre.size, 26, `sombre : ${[...cssSombre.keys()].join(", ")}`);
+  assert.equal(cssSombreMedia.size, 26, `sombre @media : ${[...cssSombreMedia.keys()].join(", ")}`);
 });
 
 test("jetons — les deux blocs sombres sont identiques (regle des 3 blocs)", () => {
@@ -177,7 +185,14 @@ const PAIRES = {
     ["--v8-avertissement", "--v8-fond", 4.5],
     ["--v8-avertissement", "--v8-surface-basse", 4.5],
     ["--v8-avertissement", "--v8-avertissement-fond", 4.5],
-    ["--v8-principal", "--v8-surface", 3.0]          // icone / forme
+    ["--v8-principal", "--v8-surface", 3.0],         // icone / forme
+    // La carte de tournee et ce qui se pose sur le vert (planche 6a).
+    ["--v8-texte-sur-carte-tournee", "--v8-carte-tournee", 4.5],
+    ["--v8-secondaire-sur-carte-tournee", "--v8-carte-tournee", 4.5],
+    ["--v8-texte-sur-carte-tournee", "--v8-surface-sur-vert", 4.5],
+    ["--v8-accent", "--v8-surface-sur-vert", 3.0],   // piste de progression
+    ["--v8-accent-donnee", "--v8-surface", 3.0],     // barre du mois courant
+    ["--v8-accent-donnee", "--v8-fond", 3.0]
   ],
   sombre: [
     ["--v8-texte", "--v8-fond", 4.5],
@@ -200,7 +215,12 @@ const PAIRES = {
     ["--v8-avertissement", "--v8-surface-haute", 4.5],
     ["--v8-avertissement", "--v8-avertissement-fond", 4.5],
     ["--v8-principal", "--v8-fond", 3.0],
-    ["--v8-accent", "--v8-fond", 3.0]
+    ["--v8-accent", "--v8-fond", 3.0],
+    ["--v8-texte-sur-carte-tournee", "--v8-carte-tournee", 4.5],
+    ["--v8-secondaire-sur-carte-tournee", "--v8-carte-tournee", 4.5],
+    ["--v8-texte-sur-carte-tournee", "--v8-surface-sur-vert", 4.5],
+    ["--v8-accent", "--v8-surface-sur-vert", 3.0],
+    ["--v8-accent-donnee", "--v8-surface", 3.0]
   ]
 };
 

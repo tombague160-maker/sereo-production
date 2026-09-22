@@ -59,7 +59,9 @@ for (const vue of [["desktop", 1440, 900], ["mobile", 390, 844]]) {
         const coupes = [];
         const ellipses = [];
         let juges = 0;
-        for (const el of document.querySelectorAll("section.page.active *, .sidebar *, .topbar *")) {
+        // .ecran-entete remplace .topbar, qui n'existe plus : viser l'ancienne
+        // classe ne trouvait rien, et le banc restait vert sans l'avoir lue.
+        for (const el of document.querySelectorAll("section.page.active *, .sidebar *, .ecran-entete *")) {
           const texte = [...el.childNodes].filter(n => n.nodeType === 3)
             .map(n => n.textContent).join("").trim();
           if (!texte) continue;

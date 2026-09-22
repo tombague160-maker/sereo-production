@@ -261,7 +261,7 @@ test.describe("Abonnements et pilotage", () => {
         () => document.documentElement.scrollWidth <= window.innerWidth,
       ),
     ).toBe(true);
-    await page.getByRole("link", { name: "Voir mes abonnements ↗" }).click();
+    await page.getByRole("link", { name: "Tous les abonnements ↗" }).click();
     await expect(page.locator("#abonnements")).toHaveClass(/active/);
     expect(
       await page.evaluate(
