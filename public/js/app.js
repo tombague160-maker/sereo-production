@@ -367,6 +367,23 @@ function bindUi() {
     if (champ.files?.length) document.getElementById("ventesForm")?.requestSubmit();
   });
 
+  // Meme regle que les ventes : le fichier choisi depuis l'en-tete PART.
+  document.getElementById("stockFile")?.addEventListener("change", event => {
+    const champ = event.target;
+    if (champ.dataset.depuisEntete !== "1") return;
+    delete champ.dataset.depuisEntete;
+    if (champ.files?.length) document.getElementById("stockForm")?.requestSubmit();
+  });
+
+  // Une tuile de categorie filtre le tableau ; la meme tuile, rappuyee, rend tout.
+  document.getElementById("stkCategories")?.addEventListener("click", event => {
+    const tuile = event.target.closest("[data-stk-categorie]");
+    if (!tuile) return;
+    const cle = tuile.dataset.stkCategorie;
+    stockFilter.category = stockFilter.category === cle ? "all" : cle;
+    renderStock();
+  });
+
   bindCommandes();
 
   document.getElementById("ventesForm")?.addEventListener("submit", event => {
@@ -560,6 +577,13 @@ function bindUi() {
     // La planche 6a met « Importer les ventes » en en-tete. Le formulaire
     // d'import, lui, ne bouge pas : le bouton ouvre simplement son selecteur
     // de fichier. Deux chemins vers un seul mecanisme, pas deux mecanismes.
+    if (action === "importer-stock") {
+      const champ = document.getElementById("stockFile");
+      if (champ) {
+        champ.dataset.depuisEntete = "1";
+        champ.click();
+      }
+    }
     if (action === "importer-ventes") {
       const champ = document.getElementById("ventesFile");
       if (champ) {
@@ -740,6 +764,7 @@ function showTab(tabName, options = {}) {
   // Le sous-titre de Commandes est un compte : il se pose APRES le sous-titre
   // generique, sans quoi celui-ci l'ecraserait.
   if (nextTab === "commandes") majSousTitreCommandes();
+  if (nextTab === "stock") majSousTitreStock();
 
   updateCustomerCartBar();
 
@@ -2299,6 +2324,15 @@ function renderStock() {
 
   container.innerHTML = "";
   renderStockFilterOptions();
+  renderStockRecommande();
+  renderStockCategories();
+  majSousTitreStock();
+  const entete = document.getElementById("stkEnteteProduit");
+  if (entete) {
+    entete.textContent = stockFilter.category === "all"
+      ? "Produit"
+      : `Produit · ${stockFilter.category || "Sans catégorie"}`;
+  }
 
   if (!stock.length) {
     container.innerHTML = emptyState("Aucun stock chargé", "Importe un fichier stock pour initialiser le catalogue.", { libelle: "Importer le stock", onglet: "journee" });
@@ -2313,8 +2347,121 @@ function renderStock() {
   }
 
   filtered.forEach(product => {
-    container.appendChild(createStockCard(product));
+    container.appendChild(creerLigneStock(product));
   });
+}
+
+// La cle de categorie d'un produit, telle que le filtre la compare.
+function categorieDuProduit(product) {
+  return String(product.category || product.type || "");
+}
+
+function sousLeSeuil(product) {
+  return ["stock_faible", "rupture"].includes(getStockLevel(product).status);
+}
+
+// « 20 references · 3 sous le seuil · 5 categories » (planche 13d). La planche
+// ajoute « trouvees dans le dernier import » : rien ne rattache les categories
+// a un import, la provenance n'est pas ecrite.
+function majSousTitreStock() {
+  if (!document.getElementById("stock")?.classList.contains("active")) return;
+  const n = stock.length;
+  const sous = getLowStockProducts().length;
+  const categories = new Set(stock.map(categorieDuProduit)).size;
+  setText("pageSubtitle", n
+    ? `${n} référence${n > 1 ? "s" : ""} · ${sous} sous le seuil · ${categories} catégorie${categories > 1 ? "s" : ""}`
+    : "Aucun produit importé");
+}
+
+// La carte « A recommander » : ce qui est sous le seuil, le plus en retard
+// d'abord. Cinq lignes au plus ; la liste complete, avec les besoins estimes,
+// reste sur l'ecran « A recommander ».
+function renderStockRecommande() {
+  const liste = document.getElementById("stkRecoListe");
+  if (!liste) return;
+  const bas = getLowStockProducts()
+    .map(product => {
+      const quantite = product.quantityAvailable ?? getProductQuantity(product) ?? 0;
+      return { product, quantite, seuil: getProductThreshold(product) };
+    })
+    .sort((a, b) => (a.quantite - a.seuil) - (b.quantite - b.seuil)
+      || String(getProductName(a.product)).localeCompare(getProductName(b.product), "fr"));
+  setText("stkRecoCompte", String(bas.length));
+  const compte = document.getElementById("stkRecoCompte");
+  if (compte) compte.setAttribute("aria-label", `${bas.length} produit${bas.length > 1 ? "s" : ""} sous le seuil`);
+  if (!bas.length) {
+    liste.innerHTML = `<p class="stk-reco-vide">Rien sous le seuil.</p>`;
+    return;
+  }
+  liste.innerHTML = bas.slice(0, 5).map(({ product, quantite, seuil }) => `
+    <div class="stk-reco-ligne">
+      <span class="stk-reco-nom">${escapeHtml(getProductName(product))}</span>
+      <span class="stk-reco-detail">${escapeHtml(quantite)} en stock · seuil ${escapeHtml(seuil)}</span>
+    </div>`).join("");
+}
+
+// Les tuiles de categorie : la somme en stock, le nom, et le nombre sous le
+// seuil (en alerte) ou, s'il n'y en a pas, le nombre de references. Jusqu'a
+// douze, une grille ; au-dela, une liste (passation : « lignes au-dela »).
+function renderStockCategories() {
+  const bloc = document.getElementById("stkCategories");
+  if (!bloc) return;
+  const parCategorie = new Map();
+  stock.forEach(product => {
+    const cle = categorieDuProduit(product);
+    const c = parCategorie.get(cle) || { cle, total: 0, references: 0, sous: 0 };
+    c.total += Number(product.quantityAvailable ?? getProductQuantity(product) ?? 0) || 0;
+    c.references += 1;
+    if (sousLeSeuil(product)) c.sous += 1;
+    parCategorie.set(cle, c);
+  });
+  const categories = [...parCategorie.values()]
+    .sort((a, b) => (a.cle ? 0 : 1) - (b.cle ? 0 : 1) || a.cle.localeCompare(b.cle, "fr"));
+  bloc.classList.toggle("stk-categories--liste", categories.length > 12);
+  bloc.hidden = !categories.length;
+  bloc.innerHTML = categories.map((c, i) => {
+    const nom = c.cle || "Sans catégorie";
+    const ligne = c.sous
+      ? `<span class="stk-tuile-sous stk-alerte">${c.sous} sous le seuil</span>`
+      : `<span class="stk-tuile-sous">${c.references} référence${c.references > 1 ? "s" : ""}</span>`;
+    const choisie = stockFilter.category === c.cle;
+    return `<button class="stk-tuile${choisie ? " stk-tuile--choisie" : ""}" type="button" data-stk-categorie="${escapeAttribute(c.cle)}" aria-pressed="${choisie}">
+      <span class="stk-tuile-pastille stk-tuile-pastille--${i % 2 ? "tiede" : "froid"}" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="${ICONE_CATEGORIE}" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path></svg></span>
+      <span class="stk-tuile-total">${escapeHtml(c.total)}</span>
+      <span class="stk-tuile-texte"><span class="stk-tuile-nom">${escapeHtml(nom)}</span>${ligne}</span>
+    </button>`;
+  }).join("");
+}
+
+// Une icone pour toutes : les categories sont LIBRES (lues dans le fichier),
+// aucune table ne dit quel dessin va a quel nom. La planche en invente cinq.
+const ICONE_CATEGORIE = "M12 3 3 8v8l9 5 9-5V8z";
+
+// Une ligne du tableau (planche 13d). La saisie directe du stock et l'edition
+// du seuil sont GARDEES -- la planche les montre en lecture seule, mais ce sont
+// les seuls chemins de l'application pour les poser. Les identifiants sont
+// propres a l'ecran : l'ecran « produits » rend les memes produits.
+function creerLigneStock(product) {
+  const level = getStockLevel(product);
+  const quantite = product.quantityAvailable ?? getProductQuantity(product);
+  const reserve = product.quantityReserved ?? 0;
+  const seuil = getProductThreshold(product);
+  const id = escapeAttribute(product.id);
+  const nom = getProductName(product);
+  const enAlerte = ["stock_faible", "rupture"].includes(level.status);
+  const ligne = document.createElement("div");
+  ligne.className = `stk-ligne${enAlerte ? " stk-ligne--alerte" : ""}`;
+  ligne.innerHTML = `
+    <span class="stk-nom">${escapeHtml(nom)}${level.status === "a_renseigner" ? ` <span class="stk-a-renseigner">À renseigner</span>` : ""}</span>
+    <span class="stk-code">${escapeHtml(product.code || product.sku || "-")}</span>
+    <span class="stk-reserve">${escapeHtml(reserve)} sur commandes</span>
+    <span class="stk-droite"><label class="sr-only" for="stk-seuil-${id}">Seuil de ${escapeHtml(nom)}</label><input class="stk-saisie stk-saisie--seuil" id="stk-seuil-${id}" data-stock-threshold-input data-product-id="${id}" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttribute(seuil)}"></span>
+    <span class="stk-droite"><label class="sr-only" for="stk-qte-${id}">Stock de ${escapeHtml(nom)}${enAlerte ? ", sous le seuil" : ""}</label><input class="stk-saisie stk-saisie--stock" id="stk-qte-${id}" data-stock-input data-product-id="${id}" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttribute(quantite === null ? "" : quantite)}" placeholder="—"></span>
+    <span class="stk-ajuster">
+      <button class="stk-pas" type="button" data-product-id="${id}" data-stock-delta="-1" aria-label="Retirer 1 unité de ${escapeAttribute(nom)}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button>
+      <button class="stk-pas stk-pas--plus" type="button" data-product-id="${id}" data-stock-delta="1" aria-label="Ajouter 1 unité à ${escapeAttribute(nom)}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button>
+    </span>`;
+  return ligne;
 }
 
 function renderStockFilterOptions() {

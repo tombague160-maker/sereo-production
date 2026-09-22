@@ -53,7 +53,7 @@ export const titles = {
     subtitle: "Charge les dossiers et le stock depuis des fichiers .xlsx."
   },
   stock: {
-    title: "Stock / Inventaire",
+    title: "Stock",
     subtitle: "Ajuste les quantités, contrôle les écarts et repère les produits à surveiller."
   },
   crm: {
@@ -145,7 +145,9 @@ export const GROUPES_NAV = {
   preparation: ["preparation"],
   tournee: ["livreur"],
   abonnements: ["abonnements"],
-  stock: ["stock", "recommande"],
+  // « A recommander » est une CARTE de l'ecran Stock (planche 13d) ; la liste
+  // detaillee reste un ecran secondaire, atteint par « Tout voir ».
+  stock: ["stock"],
   clients: ["crm", "relances"],
   analyse: ["statistiques", "exports"]
 };
@@ -159,7 +161,7 @@ export const ONGLETS_HORS_NAV = new Set(["parametres"]);
 // est. « commande-client » est la saisie d'une commande -- le seul chemin de
 // creation de l'application -- et la planche 13c ne lui donne aucune place :
 // une maquette qui ne dessine pas une fonction ne decide pas de la supprimer.
-export const ECRANS_SECONDAIRES = { "commande-client": "commandes" };
+export const ECRANS_SECONDAIRES = { "commande-client": "commandes", recommande: "stock" };
 
 // Deux inventaires qui se contredisent en silence, c'est la panne qu'on ne
 // voit qu'a l'usage : un ecran sans chemin, ou une entree qui ouvre du vide.

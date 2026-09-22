@@ -36,10 +36,16 @@ test.describe("Navigation laterale plate", () => {
 
   test("une entree reste allumee pour tous les ecrans qu'elle absorbe", async ({ page }) => {
     await page.goto("/");
-    // Une entree absorbe plusieurs ecrans (Stock : l'inventaire et « a
-    // recommander »). Passer de l'un a l'autre ne doit pas l'eteindre.
+    // Une entree absorbe plusieurs ecrans (Clients : la fiche et les
+    // relances). Passer de l'un a l'autre ne doit pas l'eteindre.
+    await page.locator("#nav-clients").click();
+    await page.locator("#tab-relances").click();
+    await expect(page.locator("#relances")).toHaveClass(/active/);
+    await expect(page.locator("#nav-clients")).toHaveClass(/active/);
+    // « A recommander » est devenu une CARTE du Stock (planche 13d) : son lien
+    // « Tout voir » ouvre la liste detaillee, et Stock reste allume.
     await page.locator("#nav-stock").click();
-    await page.locator("#tab-recommande").click();
+    await page.locator("#stock .stk-tout-voir").click();
     await expect(page.locator("#recommande")).toHaveClass(/active/);
     await expect(page.locator("#nav-stock")).toHaveClass(/active/);
     // Et un ecran SECONDAIRE -- la saisie de commande, atteinte par le bouton

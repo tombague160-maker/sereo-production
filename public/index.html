@@ -336,6 +336,14 @@
               <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"></circle><path d="m20 20-4.35-4.35" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>
               <input id="cmdRecherche" type="search" placeholder="Numéro, client, produit…" autocomplete="off" aria-label="Rechercher une commande" />
             </label>
+            <!-- Stock (planche 13d) : la recherche de l'ecran et l'import, qui
+                 ouvre le selecteur du formulaire de l'accueil (un mecanisme,
+                 deux chemins). -->
+            <label class="cmd-recherche stk-recherche" data-ecran="stock" hidden>
+              <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"></circle><path d="m20 20-4.35-4.35" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>
+              <input id="stockSearch" type="search" placeholder="Produit ou code" autocomplete="off" aria-label="Rechercher un produit" />
+            </label>
+            <button class="button primary stk-importer" type="button" data-ecran="stock" data-action="importer-stock" hidden>Importer le stock</button>
             <button class="button secondary cmd-export" type="button" data-ecran="commandes" data-action="cmd-export" hidden>Exporter en CSV</button>
             <button class="button primary cmd-nouvelle" type="button" data-ecran="commandes" data-action="go-tab" data-target-tab="commande-client" hidden>
               <svg class="icon button-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg>
@@ -884,51 +892,48 @@
         </div>
       </section>
 
-      <section id="stock" class="page" role="tabpanel" aria-labelledby="tab-stock">
-        <div class="panel">
-          <div class="panel-heading">
-            <h3>Stock</h3>
-            <div class="legend">
-              <span><i class="dot green-dot"></i> OK</span>
-              <span><i class="dot orange-dot"></i> Faible</span>
-              <span><i class="dot red-dot"></i> Rupture</span>
-              <span><i class="dot blue-dot"></i> À renseigner</span>
+      <section id="stock" class="page" role="tabpanel" aria-label="Stock">
+        <div class="stk-grille">
+          <!-- La carte « A recommander » : la vue « recommande » absorbee. Meme
+               compte que la pastille de la barre laterale (stock faible +
+               rupture) : deux nombres ne disent pas deux verites. -->
+          <article class="stk-carte stk-reco" aria-labelledby="stkRecoTitre">
+            <div class="stk-reco-tete">
+              <h3 id="stkRecoTitre"><svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3 3 8v8l9 5 9-5V8z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path></svg>À recommander</h3>
+              <span id="stkRecoCompte" class="stk-compte"></span>
             </div>
+            <div id="stkRecoListe" class="stk-reco-liste"></div>
+            <button class="stk-tout-voir" type="button" data-action="go-tab" data-target-tab="recommande" data-lien-secondaire>Tout voir, avec les besoins estimés</button>
+          </article>
+
+          <div id="stkCategories" class="stk-categories" role="group" aria-label="Catégories"></div>
+
+          <div class="stk-carte stk-tableau">
+            <div class="stk-filtres">
+              <label class="cmd-tri">
+                <span class="sr-only">Statut</span>
+                <select id="stockStatusFilter" aria-label="Filtrer par statut">
+                  <option value="all">Tous les statuts</option>
+                  <option value="disponible">Disponible</option>
+                  <option value="reserve">Réservé</option>
+                  <option value="stock_faible">Stock faible</option>
+                  <option value="rupture">Rupture</option>
+                  <option value="a_renseigner">À renseigner</option>
+                </select>
+              </label>
+            </div>
+            <div class="stk-entete" aria-hidden="true">
+              <span id="stkEnteteProduit">Produit</span><span>Code</span><span>Réservé</span>
+              <span class="stk-droite">Seuil</span><span class="stk-droite">Stock</span><span class="stk-droite">Ajuster</span>
+            </div>
+            <div id="stockList" class="stk-lignes"></div>
           </div>
 
-          <div class="stock-toolbar">
-            <label>
-              Rechercher
-              <input id="stockSearch" placeholder="Produit, référence, catégorie" autocomplete="off" />
-            </label>
-            <label>
-              Statut
-              <select id="stockStatusFilter">
-                <option value="all">Tous les statuts</option>
-                <option value="disponible">Disponible</option>
-                <option value="reserve">Réservé</option>
-                <option value="stock_faible">Stock faible</option>
-                <option value="rupture">Rupture</option>
-                <option value="a_renseigner">À renseigner</option>
-              </select>
-            </label>
-            <label>
-              Catégorie
-              <select id="stockCategoryFilter">
-                <option value="all">Toutes</option>
-              </select>
-            </label>
-          </div>
-
-          <div id="stockList" class="list"></div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-heading">
+          <!-- Hors planche, garde : la trace des ajustements manuels. -->
+          <div class="stk-carte stk-mouvements">
             <h3>Mouvements récents</h3>
-            <span class="muted">Ajustements manuels du stock</span>
+            <div id="stockMovementList" class="list compact-list"></div>
           </div>
-          <div id="stockMovementList" class="list compact-list"></div>
         </div>
       </section>
 

@@ -11147,3 +11147,219 @@ textarea::placeholder {
   :root:not([data-color-scheme]) #commandes .cmd-periode input { flex: 1; min-width: 0; }
   .cmd-tri { max-width: 100%; }
 }
+
+/* ==========================================================================
+   STOCK -- planches 13d (clair) / 14d (sombre). Valeurs copiees.
+   Ecarts assumes, nommes dans DESIGN.md : saisie directe du stock et du seuil
+   gardees ; pas de bouton « Commander » (aucune route ne commande a un
+   fournisseur) ; une icone de categorie pour toutes ; pas de tuile d'aide
+   (c'est une note de la charte, pas un contenu).
+   ========================================================================== */
+
+.stk-recherche { width: 280px; }
+.ecran-entete .stk-importer { height: 44px; padding: 0 24px; }
+
+.stk-grille {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 24px;
+  align-items: start;
+}
+
+#stock .stk-carte {
+  background: var(--v8-surface);
+  border-radius: 36px;
+  box-shadow: 0 1px 2px rgba(15, 61, 61, 0.05), 0 12px 28px rgba(15, 61, 61, 0.05);
+}
+:root[data-color-scheme="dark"] #stock .stk-carte,
+:root[data-color-scheme="dark"] #stock .stk-tuile { box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 28px rgba(0,0,0,.3); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) #stock .stk-carte,
+  :root:not([data-color-scheme="light"]) #stock .stk-tuile { box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 28px rgba(0,0,0,.3); }
+}
+
+/* --- La carte « A recommander » : span 5 ------------------------------- */
+#stock .stk-reco {
+  grid-column: span 5;
+  display: flex; flex-direction: column; gap: 18px;
+  padding: 28px;
+}
+.stk-reco-tete { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+:root[data-color-scheme] #stock .stk-reco-tete h3,
+:root:not([data-color-scheme]) #stock .stk-reco-tete h3 {
+  display: flex; align-items: center; gap: 10px; margin: 0;
+  font-size: 19px; font-weight: 600; letter-spacing: -0.01em; color: var(--v8-principal);
+}
+.stk-reco-tete h3 .icon { width: 20px; height: 20px; color: var(--v8-alerte); flex: none; }
+.stk-compte {
+  display: inline-flex; align-items: center; height: 26px; padding: 0 12px; border-radius: 999px;
+  background: var(--v8-surface); color: var(--v8-alerte); box-shadow: inset 0 0 0 1.5px var(--v8-alerte);
+  font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.stk-reco-liste { display: flex; flex-direction: column; }
+.stk-reco-ligne {
+  display: flex; flex-direction: column; justify-content: center; min-height: 44px; padding: 6px 0;
+}
+.stk-reco-ligne + .stk-reco-ligne { border-top: 1px solid var(--v8-surface-basse); }
+:root[data-color-scheme="dark"] .stk-reco-ligne + .stk-reco-ligne { border-top-color: var(--v8-vert-eau); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) .stk-reco-ligne + .stk-reco-ligne { border-top-color: var(--v8-vert-eau); }
+}
+.stk-reco-nom { font-size: 15px; font-weight: 500; color: var(--v8-texte); }
+.stk-reco-detail { font-size: 13px; font-weight: 500; color: var(--v8-alerte); font-variant-numeric: tabular-nums; }
+.stk-reco-vide { margin: 0; font-size: 14.5px; color: var(--v8-texte-secondaire); }
+:root[data-color-scheme] #stock .stk-tout-voir,
+:root:not([data-color-scheme]) #stock .stk-tout-voir {
+  align-self: flex-start; min-height: 44px; padding: 0 20px; border-radius: 999px;
+  border: 1.5px solid var(--v8-principal); background: transparent; color: var(--v8-principal);
+  font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer;
+}
+#stock .stk-tout-voir:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* --- Les tuiles de categorie : span 7, trois colonnes -------------------- */
+.stk-categories {
+  grid-column: span 7;
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px;
+}
+.stk-categories[hidden] { display: none; }
+:root[data-color-scheme] #stock .stk-tuile,
+:root:not([data-color-scheme]) #stock .stk-tuile {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 12px;
+  padding: 24px; border: 0; border-radius: 36px; min-height: 0;
+  background: var(--v8-surface); color: var(--v8-texte); text-align: left;
+  font: inherit; cursor: pointer;
+  box-shadow: 0 1px 2px rgba(15, 61, 61, 0.05), 0 12px 28px rgba(15, 61, 61, 0.05);
+}
+#stock .stk-tuile:hover { background: var(--v8-fond); }
+#stock .stk-tuile:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+/* La tuile choisie : le contour principal, et aria-pressed le dit. */
+:root[data-color-scheme] #stock .stk-tuile.stk-tuile--choisie,
+:root:not([data-color-scheme]) #stock .stk-tuile.stk-tuile--choisie {
+  box-shadow: inset 0 0 0 2px var(--v8-principal);
+}
+.stk-tuile-pastille {
+  display: flex; align-items: center; justify-content: center; flex: none;
+  width: 44px; height: 44px; border-radius: 999px; color: var(--v8-principal-appuye);
+}
+.stk-tuile-pastille svg { width: 22px; height: 22px; }
+.stk-tuile-pastille--froid { background: var(--v8-vert-clair); }
+.stk-tuile-pastille--tiede { background: var(--v8-peche-claire); }
+:root[data-color-scheme="dark"] .stk-tuile-pastille { color: var(--v8-principal); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) .stk-tuile-pastille { color: var(--v8-principal); }
+}
+.stk-tuile-total {
+  font-size: 36px; font-weight: 700; letter-spacing: -0.02em; line-height: 1;
+  color: var(--v8-texte); font-variant-numeric: tabular-nums;
+}
+.stk-tuile-texte { display: flex; flex-direction: column; }
+.stk-tuile-nom { font-size: 15px; font-weight: 600; color: var(--v8-texte); }
+.stk-tuile-sous { font-size: 13.5px; font-weight: 500; color: var(--v8-texte-secondaire); }
+.stk-tuile-sous.stk-alerte { color: var(--v8-alerte); }
+
+/* Au-dela de douze categories : des lignes (passation). */
+.stk-categories--liste { grid-template-columns: 1fr; gap: 8px; }
+:root[data-color-scheme] #stock .stk-categories--liste .stk-tuile,
+:root:not([data-color-scheme]) #stock .stk-categories--liste .stk-tuile {
+  flex-direction: row; align-items: center; gap: 16px; padding: 8px 20px; border-radius: 20px;
+}
+.stk-categories--liste .stk-tuile-pastille { width: 36px; height: 36px; }
+.stk-categories--liste .stk-tuile-total { order: 3; margin-left: auto; font-size: 17px; }
+.stk-categories--liste .stk-tuile-texte { flex-direction: row; gap: 12px; align-items: baseline; }
+
+/* --- Le tableau : span 12 ------------------------------------------------ */
+#stock .stk-tableau { grid-column: span 12; padding: 8px; }
+.stk-filtres { display: flex; justify-content: flex-end; padding: 8px 12px 4px; }
+.stk-filtres .cmd-tri { background: var(--v8-fond); }
+:root[data-color-scheme] #stock .stk-filtres .cmd-tri,
+:root:not([data-color-scheme]) #stock .stk-filtres .cmd-tri { color: var(--v8-principal); font-weight: 500; }
+.stk-entete, .stk-ligne {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 140px 140px 100px 100px 180px;
+  column-gap: 16px;
+  align-items: center;
+}
+.stk-entete {
+  padding: 10px 20px 6px;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--v8-texte-secondaire);
+}
+.stk-droite { display: flex; justify-content: flex-end; text-align: right; }
+.stk-lignes { display: flex; flex-direction: column; }
+.stk-ligne { min-height: 56px; padding: 0 20px; border-radius: 20px; }
+.stk-ligne:hover { background: var(--v8-fond); }
+.stk-nom { font-size: 15px; font-weight: 500; color: var(--v8-texte); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stk-a-renseigner { font-size: 12.5px; font-weight: 600; color: var(--v8-texte-secondaire); }
+.stk-code, .stk-reserve { font-size: 14.5px; font-weight: 500; color: var(--v8-texte-secondaire); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Seuil et stock restent SAISISSABLES : un champ qui se lit comme la valeur
+   de la planche (sans cadre) et se revele au survol et au focus. */
+:root[data-color-scheme] #stock .stk-saisie,
+:root:not([data-color-scheme]) #stock .stk-saisie {
+  width: 88px; min-height: 40px; height: 40px; padding: 0 12px; border: 0; border-radius: 999px;
+  background: transparent; box-shadow: none; text-align: right;
+  font: inherit; font-variant-numeric: tabular-nums; -moz-appearance: textfield;
+}
+#stock .stk-saisie::-webkit-inner-spin-button, #stock .stk-saisie::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+:root[data-color-scheme] #stock .stk-saisie--seuil,
+:root:not([data-color-scheme]) #stock .stk-saisie--seuil { font-size: 14.5px; font-weight: 500; color: var(--v8-texte-secondaire); }
+:root[data-color-scheme] #stock .stk-saisie--stock,
+:root:not([data-color-scheme]) #stock .stk-saisie--stock { font-size: 17px; font-weight: 700; color: var(--v8-texte); }
+:root[data-color-scheme] #stock .stk-ligne--alerte .stk-saisie--stock,
+:root:not([data-color-scheme]) #stock .stk-ligne--alerte .stk-saisie--stock { color: var(--v8-alerte); }
+:root[data-color-scheme] #stock .stk-saisie:hover,
+:root:not([data-color-scheme]) #stock .stk-saisie:hover { background: var(--v8-surface-basse); }
+:root[data-color-scheme] #stock .stk-saisie:focus-visible,
+:root:not([data-color-scheme]) #stock .stk-saisie:focus-visible { outline: none; background: var(--v8-surface-basse); box-shadow: var(--focus-ring); }
+
+.stk-ajuster { display: flex; justify-content: flex-end; gap: 6px; }
+:root[data-color-scheme] #stock .stk-pas,
+:root:not([data-color-scheme]) #stock .stk-pas {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 36px; height: 36px; min-height: 0; padding: 0; border: 0; border-radius: 999px;
+  background: var(--v8-surface-basse); color: var(--v8-principal); cursor: pointer;
+}
+:root[data-color-scheme="dark"] #stock .stk-pas:not(.stk-pas--plus) { background: var(--v8-fond); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) #stock .stk-pas:not(.stk-pas--plus) { background: var(--v8-fond); }
+}
+:root[data-color-scheme] #stock .stk-pas.stk-pas--plus,
+:root:not([data-color-scheme]) #stock .stk-pas.stk-pas--plus { background: var(--v8-principal); color: var(--v8-texte-sur-principal); }
+#stock .stk-pas svg { width: 16px; height: 16px; }
+#stock .stk-pas:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+#stock .stk-mouvements { grid-column: span 12; padding: 28px; }
+:root[data-color-scheme] #stock .stk-mouvements h3,
+:root:not([data-color-scheme]) #stock .stk-mouvements h3 { margin: 0 0 12px; font-size: 19px; font-weight: 600; color: var(--v8-principal); }
+
+@media (max-width: 1180px) {
+  #stock .stk-reco, .stk-categories { grid-column: span 12; }
+}
+
+/* Telephone : aucune planche mobile pour le stock de bureau ; la ligne devient
+   une carte a trois rangs, et les pas passent a 44 px sous le pouce. */
+@media (max-width: 920px) {
+  .stk-recherche { width: 100%; flex: 1 1 100%; }
+  .stk-grille { gap: 16px; }
+  #stock .stk-carte { border-radius: 24px; }
+  #stock .stk-reco { padding: 20px; }
+  .stk-categories { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  :root[data-color-scheme] #stock .stk-tuile,
+  :root:not([data-color-scheme]) #stock .stk-tuile { padding: 18px; border-radius: 24px; }
+  .stk-entete { display: none; }
+  .stk-ligne {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas: "nom nom ajuster" "code seuil stock" "reserve reserve reserve";
+    row-gap: 4px; padding: 12px 16px;
+  }
+  .stk-ligne .stk-nom { grid-area: nom; white-space: normal; }
+  .stk-ligne .stk-code { grid-area: code; }
+  .stk-ligne .stk-reserve { grid-area: reserve; }
+  .stk-ligne > .stk-droite:nth-of-type(4) { grid-area: seuil; }
+  .stk-ligne > .stk-droite:nth-of-type(5) { grid-area: stock; }
+  .stk-ligne .stk-ajuster { grid-area: ajuster; }
+  :root[data-color-scheme] #stock .stk-pas,
+  :root:not([data-color-scheme]) #stock .stk-pas { width: 44px; height: 44px; }
+  :root[data-color-scheme] #stock .stk-saisie,
+  :root:not([data-color-scheme]) #stock .stk-saisie { min-height: 44px; height: 44px; }
+}

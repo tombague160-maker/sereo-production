@@ -1493,6 +1493,51 @@ Les gestes d'une commande planifiée (Confirmer, Annuler) sont posés **hors** d
 du détail, parce que « Modifier le profil » redessine ce corps. Un geste **ferme** le
 détail, et « Annuler » demande confirmation.
 
+### Stock des planches 13d/14d, posé le 23/09 — une carte, des tuiles, un tableau
+
+La planche fusionne « Stock » et « À recommander » en **un** écran, sans pilule : la carte
+« À recommander » (span 5), les tuiles de catégorie (span 7, trois colonnes), le tableau
+(span 12 : Produit · catégorie, Code, Réservé « N sur commandes », Seuil, Stock, Ajuster
+− / +). Le titre devient « Stock » ; la recherche « Produit ou code » (pilule 280 px) et
+« Importer le stock » passent dans l'en-tête. Le bouton d'en-tête ouvre le sélecteur du
+formulaire de l'accueil et **envoie** le fichier choisi : un mécanisme, deux chemins.
+
+Règles posées là où la planche ne décide pas :
+
+- le badge de la carte est **le même compte** que la pastille de la barre latérale
+  (stock faible + rupture) ; la carte montre les cinq plus en retard sur leur seuil ;
+- une tuile dit, en alerte, combien de ses produits sont sous le seuil, sinon son nombre
+  de références ; son grand nombre reste neutre (la planche n'en donne aucune règle). La
+  pastille alterne froide / tiède par position, comme la planche ;
+- une tuile filtre le tableau, **la même tuile rappuyée rend tout** ; `aria-pressed` le dit ;
+- au-delà de **douze** catégories, les tuiles deviennent des lignes (passation) ;
+- les produits sans catégorie ont leur tuile, « Sans catégorie ».
+
+**Gardés, hors planche** (règle : ce qui existe et n'est pas dessiné est gardé, dans
+l'idiome de la planche, et nommé) :
+
+- la **saisie directe** du stock et l'**édition du seuil**, dans les colonnes Stock et
+  Seuil : des champs qui se lisent comme les valeurs de la planche et se révèlent au
+  survol et au focus. Ce sont les seuls chemins de l'application pour les poser ;
+- le **filtre de statut** (disponible, réservé, faible, rupture, à renseigner), en pilule
+  au-dessus du tableau ;
+- les **mouvements récents** ;
+- l'écran **« À recommander »** détaillé (besoins estimés), devenu écran secondaire : le
+  lien « Tout voir » de la carte y mène, et l'entrée Stock reste allumée.
+
+**Écarts assumés** :
+
+- pas de bouton « Commander » : aucune route ne commande à un fournisseur (les « bons de
+  commande » de l'application sont des commandes clients) ;
+- une seule icône de catégorie : les catégories sont libres, lues dans le fichier, et
+  aucune table ne dit quel dessin va à quel nom. La planche en invente cinq ;
+- pas de tuile d'aide : « Trois colonnes jusqu'à douze catégories ; au-delà, tableau »
+  est une note de la charte, pas un contenu pour l'utilisateur ;
+- le sous-titre ne dit pas « trouvées dans le dernier import » : rien ne rattache les
+  catégories à un import ;
+- les pas − / + font 36 px au bureau, 44 px au téléphone. Aucune planche mobile pour cet
+  écran : sous 920 px, la ligne devient une carte à trois rangs.
+
 ## 10. Guide pour l'agent
 
 - Toujours produire les deux modes (clair et sombre) avec les mêmes tokens ; lister les contrastes calculés.

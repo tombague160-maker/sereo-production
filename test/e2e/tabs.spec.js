@@ -127,10 +127,13 @@ test.describe("Parcours complet des onglets", () => {
       // barre qui mene a cet ecran est deja comptee juste au-dessus.
       // Un ecran SECONDAIRE (la saisie de commande) s'atteint par une commande
       // de l'en-tete, pas par une pilule : on la suit aussi.
-      const secondaires = await page.locator("#enteteActions [data-target-tab]:not([hidden])")
+      // Et un lien DANS l'ecran, marque data-lien-secondaire (« Tout voir » de
+      // la carte « A recommander ») : meme regle.
+      const secondaires = await page.locator(
+        "#enteteActions [data-target-tab]:not([hidden]), .page.active [data-lien-secondaire][data-target-tab]")
         .evaluateAll(els => els.map(el => el.dataset.targetTab));
       for (const onglet of secondaires) {
-        await page.locator(`#enteteActions [data-target-tab="${onglet}"]`).click();
+        await page.locator(`#enteteActions [data-target-tab="${onglet}"]:not([hidden]), .page.active [data-lien-secondaire][data-target-tab="${onglet}"]`).first().click();
         await expect(page.locator(`#${onglet}`), `${onglet} par l'en-tete`).toHaveClass(/active/);
         atteints.add(onglet);
         await page.locator(`#${entree}`).click();

@@ -54,17 +54,18 @@ test.describe("Barre laterale -- finitions de la v1.34.0", () => {
     // le bouton qui avait le focus est detruit et le focus retombe sur <body> :
     // Tab repart du haut de la page.
     await page.goto("/", { waitUntil: "networkidle" });
-    // Commandes n'a plus de pilules d'ecran (planche 13c) : Stock en a deux.
-    await page.locator("#nav-stock").click();
-    await page.locator("#tab-recommande").focus();
+    // Commandes et Stock n'ont plus de pilules d'ecran (planches 13c, 13d) :
+    // Clients en a deux.
+    await page.locator("#nav-clients").click();
+    await page.locator("#tab-relances").focus();
     await page.keyboard.press("Enter");
-    await expect(page.locator("#recommande")).toHaveClass(/active/);
+    await expect(page.locator("#relances")).toHaveClass(/active/);
     const focus = await page.evaluate(() => ({
       id: document.activeElement?.id || null,
       dansLaRangee: !!document.activeElement?.closest("#sousOnglets")
     }));
     expect(focus.dansLaRangee, `focus sur ${focus.id}`).toBe(true);
-    expect(focus.id).toBe("tab-recommande");
+    expect(focus.id).toBe("tab-relances");
   });
 
   test("« A jour » ne s'affiche pas quand la version n'a pas pu etre lue", async ({ page }) => {
