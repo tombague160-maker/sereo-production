@@ -11612,3 +11612,28 @@ textarea::placeholder {
   .cli-commande-articles { grid-area: articles; text-align: right; }
   #crm .cli-statut-filtre { margin-left: 0; }
 }
+
+/* --- Clients : la relecture ------------------------------------------------
+   Sous 1320 px la ligne de commande de la fiche (150 + 130 + 140 + ecarts)
+   debordait de la carte : elle passe sur deux rangs. */
+@media (max-width: 1320px) {
+  :root[data-color-scheme] #crm .cli-commande,
+  :root:not([data-color-scheme]) #crm .cli-commande {
+    grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "num statut" "date articles";
+    row-gap: 2px; padding: 10px 16px;
+  }
+  .cli-commande-num { grid-area: num; }
+  .cli-commande-statut { grid-area: statut; }
+  .cli-commande-date { grid-area: date; }
+  .cli-commande-articles { grid-area: articles; text-align: right; }
+}
+/* La classe subscription-card (utile au dispatcher) apportait une bordure. */
+#crm .cli-abonnement.subscription-card { border: 0; box-shadow: none; }
+.cli-erreur { margin: 0; padding: 12px 16px; border-radius: 18px; color: var(--v8-alerte); background: var(--v8-fond); font-size: 14px; font-weight: 600; }
+.cli-erreur[hidden] { display: none; }
+:root[data-color-scheme] #commandes .cmd-client-filtre,
+:root:not([data-color-scheme]) #commandes .cmd-client-filtre {
+  border: 0; font: inherit; font-size: 14px; font-weight: 600;
+  background: var(--v8-principal); color: var(--v8-texte-sur-principal);
+}
+.cmd-client-filtre[hidden] { display: none; }

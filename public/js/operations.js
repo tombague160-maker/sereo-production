@@ -161,7 +161,7 @@ export function initOperations(api) {
         );
         await context.loadData();
         context.notify(
-          "Commande créée. Confirme-la dans Commandes planifiées pour la préparer.",
+          "Commande créée. Confirme-la dans Commandes, filtre « Planifiées », pour la préparer.",
           "success",
         );
       }
@@ -226,7 +226,9 @@ export function initOperations(api) {
   }
 }
 export function renderOperations(next) {
-  data = next;
+  // Une COPIE : pousser dans next.crmClients ajoutait les fiches archivees au
+  // tableau que l'ecran Clients liste et compte.
+  data = { ...next, crmClients: [...(next.crmClients || [])] };
   // Une fiche archivée reste visible dans l'historique de ses abonnements.
   for (const c of next.subscriptions?.clients || [])
     if (!data.crmClients.some((item) => String(item.id) === String(c.id)))

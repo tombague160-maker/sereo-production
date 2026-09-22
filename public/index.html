@@ -264,7 +264,7 @@
         </button>
         <button class="more-sheet-item" type="button" role="menuitem" data-tab="crm" data-action="more-menu-pick">
           <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-home"></use></svg></span>
-          <span class="more-sheet-label">CRM</span>
+          <span class="more-sheet-label">Clients</span>
         </button>
         <button class="more-sheet-item" type="button" role="menuitem" data-tab="commande-client" data-action="more-menu-pick">
           <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-receipt"></use></svg></span>
@@ -657,6 +657,7 @@
               <label class="span-2">Produits préférés<input name="preferences" /></label>
               <label class="span-2">Notes<textarea name="notes" rows="3"></textarea></label>
             </div>
+            <p id="cliErreur" class="cli-erreur" role="alert" hidden></p>
             <div class="cli-dialogue-actions">
               <button class="button secondary" type="button" data-action="cli-fermer">Annuler</button>
               <button class="button primary" type="submit">Enregistrer</button>
@@ -697,6 +698,10 @@
               <option value="">Tous les secteurs</option>
             </select>
           </label>
+          <!-- Un client precis (depuis « Les N autres » de sa fiche) : par son
+               identifiant, pas par son nom -- les commandes importees portent
+               le nom sans prenom, et « Tilleuls » attrapait « Tilleuls 2 ». -->
+          <button id="cmdClientFiltre" class="cmd-case cmd-client-filtre" type="button" data-action="cmd-client-effacer" hidden></button>
           <span class="cmd-ressort" aria-hidden="true"></span>
           <!-- La periode Du / Au de l'ancien ecran : sans elle, on ne pouvait
                plus exporter un mois donne. La planche ne la dessine pas. -->
@@ -837,7 +842,7 @@
         </div>
       </section>
 
-      <section id="relances" class="page" role="tabpanel" aria-labelledby="tab-relances">
+      <section id="relances" class="page" role="tabpanel" aria-label="Rappels">
         <div class="field-app-grid">
           <div class="panel">
             <div class="panel-heading">

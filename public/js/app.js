@@ -598,17 +598,25 @@ function bindUi() {
     // d'import, lui, ne bouge pas : le bouton ouvre simplement son selecteur
     // de fichier. Deux chemins vers un seul mecanisme, pas deux mecanismes.
     if (action === "cli-nouveau") ouvrirDialogueClient();
+    if (action === "cmd-client-effacer") {
+      Object.assign(commandesFiltre, { client: "", clientNom: "", page: 1 });
+      renderCommandes();
+      document.getElementById("cmdRecherche")?.focus();
+    }
     if (action === "cli-modifier") ouvrirDialogueClient(actionButton.dataset.clientId);
     if (action === "cli-fermer") document.getElementById("cliDialogue")?.close();
     // « Les N autres » : la liste des commandes, cherchee sur ce client.
     if (action === "cli-voir-commandes") {
       showTab("commandes");
-      const champ = document.getElementById("cmdRecherche");
-      if (champ) champ.value = actionButton.dataset.clientNom || "";
       // Une liste PROPRE, comme une redirection : un filtre laisse d'avant
-      // cacherait les commandes du client.
-      Object.assign(commandesFiltre, { statut: "toutes", recherche: actionButton.dataset.clientNom || "", page: 1,
-        bloquees: false, completer: false, du: "", au: "", secteur: "", jour: "" });
+      // cacherait les commandes du client. Et le client par son IDENTIFIANT.
+      for (const id of ["cmdRecherche", "cmdDu", "cmdAu"]) {
+        const champ = document.getElementById(id);
+        if (champ) champ.value = "";
+      }
+      Object.assign(commandesFiltre, { statut: "toutes", recherche: "", page: 1, bloquees: false, completer: false,
+        du: "", au: "", secteur: "", jour: "",
+        client: actionButton.dataset.clientId || "", clientNom: actionButton.dataset.clientNom || "" });
       renderCommandes();
     }
     if (action === "importer-stock") {
@@ -745,7 +753,7 @@ function showTab(tabName, options = {}) {
     // Une redirection arrive sur une liste PROPRE, filtree comme l'ancien ecran.
     Object.assign(commandesFiltre, {
       statut: redirection.filtre, completer: redirection.completer || false,
-      bloquees: false, recherche: "", du: "", au: "", secteur: "", jour: "", page: 1
+      bloquees: false, recherche: "", du: "", au: "", secteur: "", jour: "", page: 1, client: "", clientNom: ""
     });
     for (const id of ["cmdRecherche", "cmdDu", "cmdAu"]) {
       const champ = document.getElementById(id);
@@ -1202,7 +1210,10 @@ function dateCourte(iso) {
   if (!iso) return "—";
   const d = new Date(`${String(iso).slice(0, 10)}T12:00:00`);
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+  // L'annee quand ce n'est pas celle-ci : « 1 janv. » d'une echeance ratee
+  // l'an dernier se lisait comme une date a venir.
+  const autreAnnee = d.getFullYear() !== new Date().getFullYear();
+  return d.toLocaleDateString("fr-FR", autreAnnee ? { day: "numeric", month: "short", year: "numeric" } : { day: "numeric", month: "short" });
 }
 
 function articlesDe(order) {
@@ -1219,6 +1230,7 @@ function commandesFiltrees() {
     if (commandesFiltre.completer === "profil" && !bdcNeedsCompletion(order)) return false;
     if (commandesFiltre.completer === "adresse" && !adresseACorriger(order)) return false;
     if (commandesFiltre.secteur && String(order.sector || "") !== commandesFiltre.secteur) return false;
+    if (commandesFiltre.client && String(order.clientId) !== String(commandesFiltre.client)) return false;
     // La periode borne la date de COMMANDE, comme l'ancien export et comme la
     // colonne « Date commande » du CSV -- meme pour une planifiee, dont la
     // ligne montre la date de livraison.
@@ -1271,6 +1283,12 @@ function renderCommandes() {
   }
   const caseBloquees = document.getElementById("cmdBloquees");
   if (caseBloquees) caseBloquees.checked = commandesFiltre.bloquees;
+  const filtreClient = document.getElementById("cmdClientFiltre");
+  if (filtreClient) {
+    filtreClient.hidden = !commandesFiltre.client;
+    filtreClient.textContent = commandesFiltre.client ? `Client : ${commandesFiltre.clientNom || "…"} ✕` : "";
+    filtreClient.setAttribute("aria-label", `Retirer le filtre client ${commandesFiltre.clientNom || ""}`.trim());
+  }
   const caseCompleter = document.getElementById("cmdACompleter");
   if (caseCompleter) caseCompleter.checked = Boolean(commandesFiltre.completer);
   setText("cmdACompleterLibelle", commandesFiltre.completer === "adresse" ? "Adresses à corriger" : "À compléter");
@@ -1808,7 +1826,9 @@ function commandesDuClient(clientId) {
 function derniereLivraison(clientId) {
   return commandesDuClient(clientId)
     .filter(o => o.status === "livre")
-    .map(o => String(o.deliveredAt || o.deliveryDate || "").slice(0, 10))
+    // deliveredAt est un instant UTC : on prend le JOUR a Paris (une livraison
+    // a 0 h 30 n'est pas celle de la veille).
+    .map(o => o.deliveredAt ? new Date(o.deliveredAt).toLocaleDateString("en-CA", { timeZone: "Europe/Paris" }) : String(o.deliveryDate || "").slice(0, 10))
     .filter(Boolean)
     .sort()
     .pop() || null;
@@ -1884,8 +1904,8 @@ function renderCrm() {
       const badge = abonnement
         ? `<span class="cli-badge cli-badge--${abonnement.status === "active" ? "froid" : "tiede"}">${abonnement.status === "active" ? "Abonné" : "En pause"}</span>`
         : "";
-      return `<button class="cli-ligne${choisi ? " cli-ligne--choisie" : ""}" type="button" role="listitem" data-cli-choisir="${escapeAttribute(client.id)}" aria-current="${choisi ? "true" : "false"}">`
-        + `<span class="cli-ligne-texte"><span class="cli-nom">${escapeHtml(nomDuClient(client))}</span>${meta}</span>${badge}</button>`;
+      return `<div role="listitem"><button class="cli-ligne${choisi ? " cli-ligne--choisie" : ""}" type="button" data-cli-choisir="${escapeAttribute(client.id)}" aria-current="${choisi ? "true" : "false"}">`
+        + `<span class="cli-ligne-texte"><span class="cli-nom">${escapeHtml(nomDuClient(client))}</span>${meta}</span>${badge}</button></div>`;
     }).join("");
   }
   renderFicheClient();
@@ -1970,7 +1990,7 @@ function renderFicheClient() {
     <section class="cli-commandes" aria-label="Commandes du client">
       <div class="cli-commandes-tete"><h3>Commandes</h3><span class="cli-note">${depuisJanvier} depuis janvier</span></div>
       <div class="cli-commandes-liste">${lignesCommandes}</div>
-      ${reste > 0 ? `<button class="cli-autres" type="button" data-action="cli-voir-commandes" data-client-nom="${escapeAttribute(nomDuClient(client))}">Les ${reste} autre${reste > 1 ? "s" : ""}${ICONE_CLI.chevron}</button>` : ""}
+      ${reste > 0 ? `<button class="cli-autres" type="button" data-action="cli-voir-commandes" data-client-id="${escapeAttribute(client.id)}" data-client-nom="${escapeAttribute(nomDuClient(client))}">Les ${reste} autre${reste > 1 ? "s" : ""}${ICONE_CLI.chevron}</button>` : ""}
     </section>`;
 }
 
@@ -1982,11 +2002,16 @@ function ouvrirDialogueClient(clientId = null) {
   const client = clientId ? crmClients.find(c => String(c.id) === String(clientId)) : null;
   setText("cliDialogueTitre", client ? "Modifier le client" : "Nouveau client");
   form.elements.id.value = client ? client.id : "";
+  const erreur = document.getElementById("cliErreur");
+  if (erreur) { erreur.hidden = true; erreur.textContent = ""; }
+  form.dataset.initial = "{}";
   if (client) {
     const valeurs = { nom: client.nom, prenom: client.prenom, telephone: client.telephone, email: client.email,
       adresse: client.rue, codePostal: client.codePostal, ville: client.ville, crmStatus: client.crmStatus || "prospect",
       nextReminderDate: client.nextReminderDate, needs: client.needs, preferences: client.preferences, notes: client.notes };
     for (const [cle, valeur] of Object.entries(valeurs)) if (form.elements[cle]) form.elements[cle].value = valeur ?? "";
+    // Ce que le dialogue a MONTRE : on n'enverra que ce qui en differe.
+    form.dataset.initial = JSON.stringify(Object.fromEntries(new FormData(form).entries()));
   }
   dialogue.showModal();
   form.elements.nom.focus();
@@ -2000,6 +2025,7 @@ function bindClients() {
     if (pilule) {
       crmFilter.secteur = pilule.dataset.cliSecteur;
       renderCrm();
+      document.querySelector(`[data-cli-secteur="${CSS.escape(crmFilter.secteur)}"]`)?.focus();
       return;
     }
     const ligne = event.target.closest("[data-cli-choisir]");
@@ -2007,6 +2033,10 @@ function bindClients() {
       clientChoisi = ligne.dataset.cliChoisir;
       renderCrm();
       document.querySelector(`[data-cli-choisir="${CSS.escape(clientChoisi)}"]`)?.focus();
+      // Sous 1180 px la fiche est SOUS la liste : sans ceci, rien ne semblait se passer.
+      if (window.matchMedia("(max-width: 1180px)").matches) {
+        document.getElementById("cliFiche")?.scrollIntoView({ block: "start", behavior: "smooth" });
+      }
       return;
     }
     const commande = event.target.closest("[data-cli-commande]");
@@ -2014,7 +2044,11 @@ function bindClients() {
   });
   ecran.addEventListener("change", event => {
     const statut = event.target.closest("[data-cli-statut]");
-    if (statut) runAction(statut, "", () => updateCrmClientStatus(statut.dataset.cliStatut, statut.value));
+    if (statut) {
+      const id = statut.dataset.cliStatut;
+      runAction(statut, "", () => updateCrmClientStatus(id, statut.value))
+        .then(() => document.querySelector(`[data-cli-statut="${CSS.escape(id)}"]`)?.focus());
+    }
   });
 }
 
@@ -2032,17 +2066,59 @@ function renderClientSelects() {
   if (relanceSelect) relanceSelect.innerHTML = options.replace("Nouveau client", "Choisir un client");
 }
 
+// Ce qui, dans une fiche, est recopie sur ses COMMANDES par /api/clients/:id :
+// l'adresse de livraison, le nom, le telephone. La route CRM ne le fait pas.
+const CHAMPS_IDENTITE = { nom: "nom", adresse: "rue", codePostal: "codePostal", ville: "ville", telephone: "telephone" };
+
 async function saveCrmClient(form) {
   const { id, ...data } = Object.fromEntries(new FormData(form).entries());
-  const cree = await apiFetch(id ? `/api/crm/clients/${encodeURIComponent(id)}` : "/api/crm/clients", {
-    method: id ? "PATCH" : "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data)
-  });
+  const erreur = document.getElementById("cliErreur");
+  if (erreur) { erreur.hidden = true; erreur.textContent = ""; }
+  try {
+    if (!id) {
+      const cree = await apiFetch("/api/crm/clients", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data)
+      });
+      // La fiche creee s'ouvre -- y compris si un filtre l'aurait cachee.
+      if (cree?.id) clientChoisi = String(cree.id);
+      Object.assign(crmFilter, { query: "", status: "all", secteur: "" });
+      const recherche = document.getElementById("crmSearch");
+      if (recherche) recherche.value = "";
+      const statut = document.getElementById("crmStatusFilter");
+      if (statut) statut.value = "all";
+    } else {
+      // Seulement ce qui a CHANGE : sinon des valeurs calculees par le serveur
+      // (prochaine relance, statut deduit) etaient figees dans la fiche.
+      const avant = JSON.parse(form.dataset.initial || "{}");
+      const change = Object.fromEntries(Object.entries(data).filter(([cle, valeur]) => String(avant[cle] ?? "") !== String(valeur)));
+      const identite = {}, crm = {};
+      for (const [cle, valeur] of Object.entries(change)) {
+        if (cle in CHAMPS_IDENTITE) identite[CHAMPS_IDENTITE[cle]] = valeur; else crm[cle] = valeur;
+      }
+      if (Object.keys(identite).length) {
+        await apiFetch(`/api/clients/${encodeURIComponent(id)}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(identite)
+        });
+      }
+      if (Object.keys(crm).length) {
+        await apiFetch(`/api/crm/clients/${encodeURIComponent(id)}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(crm)
+        });
+      }
+    }
+  } catch (error) {
+    // Dans le dialogue : un toast serait sous sa couche, assombri et inerte.
+    if (erreur) {
+      erreur.textContent = error?.message || "Enregistrement impossible.";
+      erreur.hidden = false;
+      return;
+    }
+    throw error;
+  }
   form.reset();
   document.getElementById("cliDialogue")?.close();
-  // La fiche ouverte est celle qu'on vient d'enregistrer.
-  if (cree?.id) clientChoisi = String(cree.id);
   await loadData();
   notify(id ? "Fiche client mise à jour." : "Client enregistré.", "success");
 }

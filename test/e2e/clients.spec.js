@@ -21,9 +21,19 @@ test.beforeAll(async () => {
   const commandes = seed.commandes || seed.orders;
   const modele = commandes.find(o => o.clientId === tilleuls.id);
   for (let i = 0; i < 4; i++) {
-    commandes.push({ ...modele, id: `o-t${i}`, numero: `CMD-2026-95${i}`, status: "livre",
+    // Nom d'IMPORT, different du nom de la fiche : « Les N autres » doit
+    // retrouver ces commandes par l'identifiant du client, pas par son nom.
+    commandes.push({ ...modele, id: `o-t${i}`, numero: `CMD-2026-95${i}`, status: "livre", clientName: "TILLEULS (import)",
       dateCommande: `2026-0${i + 1}-10`, deliveredAt: `2026-0${i + 1}-11T09:00:00Z` });
   }
+  // Une commande en cours du client sans rue : corriger sa fiche doit
+  // corriger l'adresse de LIVRAISON de cette commande.
+  commandes.push({ ...modele, id: "o-sr", numero: "CMD-2026-960", status: "pret_livraison", clientId: "c-sans-rue",
+    clientName: "Foyer Sans Rue", address: "", city: "Dole", postalCode: "39100", deliveredAt: null });
+  // Une fiche ARCHIVEE avec un abonnement arrete : l'ecran Abonnements la garde
+  // pour son historique, l'ecran Clients ne doit ni la lister ni la compter.
+  seed.clients.push({ id: "c-archive", nom: "Ancien Client Archive", ville: "Dole", rue: "1 rue X", codePostal: "39100", crmArchived: true });
+  seed.subscriptions.push({ ...seed.subscriptions[0], id: "sub-archive", clientId: "c-archive", status: "cancelled" });
   srv = await demarrer({ port: 3164, seed });
 });
 test.afterAll(async () => { if (srv) await srv.arreter(); });
@@ -39,6 +49,11 @@ test("le titre et le compte de la planche", async ({ page }) => {
   await ouvrir(page);
   await expect(page.locator("#pageTitle")).toHaveText("Clients");
   await expect(page.locator("#pageSubtitle")).toHaveText("7 clients · 1 abonné · 1 adresse à corriger");
+  // Apres un nouveau rendu (une pilule), la fiche archivee n'apparait pas :
+  // l'ecran Abonnements l'ajoutait au MEME tableau.
+  await page.locator('[data-cli-secteur=""]').click();
+  await expect(page.locator("#pageSubtitle")).toHaveText("7 clients · 1 abonné · 1 adresse à corriger");
+  await expect(ligne(page, "Ancien Client Archive")).toHaveCount(0);
 });
 
 test("la pilule « Abonnés » ne garde que les abonnements actifs", async ({ page }) => {
@@ -104,8 +119,15 @@ test("les commandes du client : quatre, puis « Les N autres »", async ({ page 
   await expect(autres).toHaveText(/^Les \d+ autres?$/);
   await autres.click();
   await expect(page.locator("#commandes")).toHaveClass(/active/);
-  await expect(page.locator("#cmdRecherche")).toHaveValue(/Tilleuls/);
+  await expect(page.locator("#cmdClientFiltre")).toContainText("Tilleuls");
+  await expect(page.locator("#cmdRecherche")).toHaveValue("");
   await expect(page.locator('#cmdLignes [data-cmd-ouvrir="o-t0"]')).toBeVisible();
+  // Seulement ce client : aucune commande d'un autre.
+  const autresClients = await page.locator("#cmdLignes .cmd-client").allTextContents();
+  expect(autresClients.every(t => /TILLEULS|Tilleuls/.test(t))).toBe(true);
+  // Et le filtre s'enleve.
+  await page.locator("#cmdClientFiltre").click();
+  await expect(page.locator("#cmdClientFiltre")).toBeHidden();
 });
 
 test("une commande de la fiche ouvre son détail", async ({ page }) => {
@@ -131,12 +153,31 @@ test("« Modifier » ouvre la fiche pré-remplie et l'enregistre", async ({ page
   await expect(dialogue).toBeVisible();
   await expect(dialogue.locator('[name="nom"]')).toHaveValue("Foyer Sans Rue");
   await dialogue.locator('[name="adresse"]').fill("4 rue des Arènes");
-  const envoi = page.waitForRequest(r => r.method() === "PATCH" && r.url().includes("/api/crm/clients/c-sans-rue"));
+  // L'adresse passe par la route qui la RECOPIE sur les commandes ; et rien
+  // d'autre n'est envoye (ni relance ni statut calcules par le serveur).
+  const routesCrm = [];
+  page.on("request", r => { if (r.method() === "PATCH" && r.url().includes("/api/crm/clients/")) routesCrm.push(r.postData()); });
+  const envoi = page.waitForRequest(r => r.method() === "PATCH" && r.url().includes("/api/clients/c-sans-rue"));
   await dialogue.locator('button[type="submit"]').click();
-  expect(JSON.parse((await envoi).postData()).adresse).toBe("4 rue des Arènes");
+  expect(JSON.parse((await envoi).postData())).toEqual({ rue: "4 rue des Arènes" });
   await expect(dialogue).toBeHidden();
+  expect(routesCrm).toEqual([]);
+  const commandes = await page.evaluate(async () => (await (await fetch("/api/orders")).json()));
+  expect(commandes.find(o => o.id === "o-sr").address).toBe("4 rue des Arènes");
   await expect(page.locator("#cliFiche .cli-fiche-nom")).toHaveText("Foyer Sans Rue");
   await expect(page.locator("#pageSubtitle")).toHaveText("7 clients · 1 abonné");
+});
+
+test("un doublon refusé s'affiche DANS le dialogue, qui reste ouvert", async ({ page }) => {
+  await ouvrir(page);
+  await page.locator('#enteteActions [data-action="cli-nouveau"]').click();
+  const dialogue = page.locator("#cliDialogue");
+  await dialogue.locator('[name="nom"]').fill("Doublon");
+  await dialogue.locator('[name="telephone"]').fill("03 81 47 22 15");
+  await dialogue.locator('button[type="submit"]').click();
+  await expect(page.locator("#cliErreur")).toBeVisible();
+  await expect(dialogue).toBeVisible();
+  await dialogue.locator('[data-action="cli-fermer"]').last().click();
 });
 
 test("« Nouveau client » crée la fiche et l'ouvre", async ({ page }) => {
@@ -179,4 +220,23 @@ test("téléphone : rien ne déborde de l'écran", async ({ page }) => {
     .filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.right > window.innerWidth + 0.5; })
     .map(e => e.className || e.tagName));
   expect(deborde).toEqual([]);
+});
+
+test("accessibilité : les lignes restent des boutons, les rappels ont un nom", async ({ page }) => {
+  await ouvrir(page);
+  const role = await page.locator("#crmList .cli-ligne").first().evaluate(e => e.getAttribute("role"));
+  expect(role).toBeNull();
+  await expect(page.locator("#crmList > [role=listitem]").first()).toBeVisible();
+  await expect(page.locator("#relances")).toHaveAttribute("aria-label", "Rappels");
+});
+
+test("à 1280 px, les commandes de la fiche tiennent dans la carte", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await ouvrir(page);
+  await ligne(page, "Tilleuls").click();
+  const debord = await page.evaluate(() => {
+    const carte = document.getElementById("cliFiche").getBoundingClientRect();
+    return [...document.querySelectorAll("#cliFiche .cli-commande *")].filter(e => e.getBoundingClientRect().right > carte.right + 0.5).length;
+  });
+  expect(debord).toBe(0);
 });
