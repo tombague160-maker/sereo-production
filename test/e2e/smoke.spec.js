@@ -49,14 +49,14 @@ test.describe("Sereo smoke tests", () => {
 
   test("import sans fichier renvoie une erreur user-friendly", async ({ page }) => {
     await page.goto("/");
-    // On clique le bouton "Importer les dossiers" sans avoir choisi de fichier
-    const importBtn = page.locator('button:has-text("Importer les dossiers"), button:has-text("Importer le stock")').first();
-    if (await importBtn.isVisible()) {
-      await importBtn.click();
-      // Notification "Choisis un fichier" apparait
-      await expect(page.locator(".notif, .toast").filter({ hasText: /fichier/i }).first())
-        .toBeVisible({ timeout: 3000 });
-    }
+    // On clique le bouton "Importer les dossiers" sans avoir choisi de fichier.
+    // Par son id : un bouton d'en-tete « Importer le stock » (masque ici) le
+    // precede dans le document, et le « .first() » d'avant sautait le banc.
+    const importBtn = page.locator("#importVentesButton");
+    await expect(importBtn).toBeVisible();
+    await importBtn.click();
+    await expect(page.locator(".notif, .toast").filter({ hasText: /fichier/i }).first())
+      .toBeVisible({ timeout: 3000 });
   });
 
   // v1.17.1 : nouveaux panneaux Parametres (Reglages tournee + Diagnostic dates)

@@ -367,6 +367,11 @@ function bindUi() {
     if (champ.files?.length) document.getElementById("ventesForm")?.requestSubmit();
   });
 
+  // Un selecteur ANNULE ne doit pas laisser l'envoi arme : le prochain fichier
+  // choisi dans le formulaire de l'accueil partirait sans clic.
+  for (const id of ["ventesFile", "stockFile"]) {
+    document.getElementById(id)?.addEventListener("cancel", event => { delete event.target.dataset.depuisEntete; });
+  }
   // Meme regle que les ventes : le fichier choisi depuis l'en-tete PART.
   document.getElementById("stockFile")?.addEventListener("change", event => {
     const champ = event.target;
@@ -382,6 +387,14 @@ function bindUi() {
     const cle = tuile.dataset.stkCategorie;
     stockFilter.category = stockFilter.category === cle ? "all" : cle;
     renderStock();
+    document.querySelector(`[data-stk-categorie="${CSS.escape(cle)}"]`)?.focus();
+  });
+  // « Tout voir » : la liste detaillee s'ouvre sur ce que la carte compte
+  // (sous le seuil), pas sur « urgent » seul -- sinon deux produits de la
+  // carte y manquaient.
+  document.querySelector("#stock .stk-tout-voir")?.addEventListener("click", () => {
+    recommendFilter = "low";
+    renderRecommande();
   });
 
   bindCommandes();
@@ -409,11 +422,6 @@ function bindUi() {
 
   document.getElementById("stockStatusFilter")?.addEventListener("change", event => {
     stockFilter.status = event.target.value;
-    renderStock();
-  });
-
-  document.getElementById("stockCategoryFilter")?.addEventListener("change", event => {
-    stockFilter.category = event.target.value;
     renderStock();
   });
 
@@ -525,7 +533,11 @@ function bindUi() {
   document.addEventListener("click", event => {
     const stockButton = event.target.closest("[data-stock-delta]");
     if (stockButton) {
-      runAction(stockButton, "...", () => changeStock(stockButton.dataset.productId, Number(stockButton.dataset.stockDelta)));
+      const { productId, stockDelta } = stockButton.dataset;
+      // Le rechargement redessine la ligne : on rend le focus au meme pas,
+      // sinon il tombe sur <body> et le clavier repart du haut.
+      runAction(stockButton, "...", () => changeStock(productId, Number(stockDelta)))
+        .then(() => document.querySelector(`#stockList [data-product-id="${CSS.escape(productId)}"][data-stock-delta="${CSS.escape(stockDelta)}"]`)?.focus());
       return;
     }
 
@@ -2323,7 +2335,6 @@ function renderStock() {
   if (!container) return;
 
   container.innerHTML = "";
-  renderStockFilterOptions();
   renderStockRecommande();
   renderStockCategories();
   majSousTitreStock();
@@ -2417,6 +2428,7 @@ function renderStockCategories() {
   });
   const categories = [...parCategorie.values()]
     .sort((a, b) => (a.cle ? 0 : 1) - (b.cle ? 0 : 1) || a.cle.localeCompare(b.cle, "fr"));
+  if (stockFilter.category !== "all" && !parCategorie.has(stockFilter.category)) stockFilter.category = "all";
   bloc.classList.toggle("stk-categories--liste", categories.length > 12);
   bloc.hidden = !categories.length;
   bloc.innerHTML = categories.map((c, i) => {
@@ -2464,26 +2476,11 @@ function creerLigneStock(product) {
   return ligne;
 }
 
-function renderStockFilterOptions() {
-  const categorySelect = document.getElementById("stockCategoryFilter");
-  if (!categorySelect) return;
-
-  const current = stockFilter.category || "all";
-  const categories = [...new Set(stock.map(product => product.category || product.type || "").filter(Boolean))]
-    .sort((a, b) => a.localeCompare(b, "fr"));
-
-  categorySelect.innerHTML = `
-    <option value="all">Toutes</option>
-    ${categories.map(category => `
-      <option value="${escapeAttribute(category)}" ${category === current ? "selected" : ""}>${escapeHtml(category)}</option>
-    `).join("")}
-  `;
-}
-
 function getFilteredStock() {
   const query = normalizeTextKey(stockFilter.query);
   const status = stockFilter.status || "all";
-  const category = stockFilter.category || "all";
+  // "" est une categorie (« Sans categorie »), pas « toutes » : pas de ||.
+  const category = stockFilter.category ?? "all";
 
   return stock.filter(product => {
     const haystack = normalizeTextKey([
@@ -2586,7 +2583,13 @@ async function changeStock(productId, delta) {
 }
 
 async function setStock(productId, value) {
-  const quantity = Number(String(value || 0).replace(",", "."));
+  // Un champ VIDE n'est pas un zero : le vider mettait le produit en rupture.
+  if (String(value ?? "").trim() === "") {
+    notify("Quantité vide : rien n'a été changé.", "warning");
+    await loadData();
+    return;
+  }
+  const quantity = Number(String(value).replace(",", "."));
 
   if (!Number.isFinite(quantity) || quantity < 0) {
     notify("Quantité invalide.", "warning");
@@ -2993,13 +2996,17 @@ function getRecommendationItems() {
 
   return uniqueStock
     .map(product => {
+      const inconnu = (product.quantityAvailable ?? getProductQuantity(product)) === null;
       const available = product.quantityAvailable ?? getProductQuantity(product) ?? 0;
       const needed = product.quantityNeeded ?? getNeededQuantityForProduct(product);
       const threshold = getProductThreshold(product);
       const shortage = Math.max(0, needed - available);
-      const thresholdGap = Math.max(0, threshold - available);
-      const recommended = Math.ceil(Math.max(shortage, thresholdGap));
-      const level = available <= 0 || shortage > 0 ? "urgent" : (recommended > 0 ? "bientot" : "ok");
+      // « Sous le seuil » = quantite <= seuil, partout (carte du Stock, pastille,
+      // getStockLevel). Pour en sortir, il faut repasser AU-DESSUS du seuil.
+      const thresholdGap = available <= threshold ? threshold - available + 1 : 0;
+      const recommended = inconnu ? 0 : Math.ceil(Math.max(shortage, thresholdGap));
+      // Une quantite inconnue n'est pas une rupture : elle est « a renseigner ».
+      const level = inconnu ? "ok" : (available <= 0 || shortage > 0 ? "urgent" : (recommended > 0 ? "bientot" : "ok"));
 
       return {
         product,
@@ -3008,7 +3015,7 @@ function getRecommendationItems() {
         threshold,
         recommended,
         level,
-        label: level === "urgent" ? "Urgent" : (level === "bientot" ? "Bientôt" : "OK")
+        label: inconnu ? "À renseigner" : (level === "urgent" ? "Urgent" : (level === "bientot" ? "Bientôt" : "OK"))
       };
     })
     .filter(item => item.level !== "ok" || recommendFilter === "all")

@@ -165,3 +165,61 @@ test("téléphone : aucune ligne ne déborde de l'écran", async ({ page }) => {
   const pas = await ligne(page, "Gants").locator('[data-stock-delta="1"]').boundingBox();
   expect(pas.height).toBeGreaterThanOrEqual(44);
 });
+
+// --- La relecture ------------------------------------------------------------
+
+test("la tuile « Sans catégorie » filtre vraiment", async ({ page }) => {
+  // "" etait lu comme « toutes » : l'en-tete disait filtre, le tableau montrait tout.
+  await ouvrir(page);
+  await page.locator('[data-stk-categorie=""]').click();
+  await expect(page.locator("#stkEnteteProduit")).toHaveText("Produit · Sans catégorie");
+  await expect(page.locator("#stockList .stk-ligne")).toHaveCount(1);
+  await expect(ligne(page, "Article sans catégorie")).toBeVisible();
+});
+
+test("au clavier, la tuile garde le focus après le filtrage", async ({ page }) => {
+  await ouvrir(page);
+  await page.locator('[data-stk-categorie="Hygiène"]').focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator('[data-stk-categorie="Hygiène"]')).toHaveAttribute("aria-pressed", "true");
+  expect(await page.evaluate(() => document.activeElement?.dataset?.stkCategorie)).toBe("Hygiène");
+});
+
+test("« Tout voir » montre ce que la carte compte, pas un produit à renseigner", async ({ page }) => {
+  await ouvrir(page);
+  const carte = await page.locator("#stkRecoListe .stk-reco-nom").allTextContents();
+  await page.locator("#stock .stk-tout-voir").click();
+  await expect(page.locator("#recommande")).toHaveClass(/active/);
+  const liste = page.locator("#recommandeList");
+  for (const nom of carte) await expect(liste).toContainText(nom);
+  await expect(liste).not.toContainText("Article à renseigner");
+  await expect(page.locator("#recommande")).toHaveAttribute("aria-label", "À recommander");
+});
+
+test("vider le champ Stock ne met pas le produit à zéro", async ({ page }) => {
+  await ouvrir(page);
+  let ecritures = 0;
+  page.on("request", r => { if (r.method() === "PATCH" && r.url().includes("/api/stock/p-change")) ecritures += 1; });
+  const champ = ligne(page, "Changes").locator("[data-stock-input]");
+  await champ.fill("");
+  await champ.blur();
+  await page.waitForTimeout(600);
+  expect(ecritures).toBe(0);
+});
+
+for (const largeur of [1024, 1280]) {
+  test(`à ${largeur} px, le nom du produit et du client restent lisibles`, async ({ page }) => {
+    // Les colonnes fixes (740 px au Stock, 766 aux Commandes) ne laissaient
+    // plus rien a la colonne du nom entre 921 et ~1270 px.
+    await page.setViewportSize({ width: largeur, height: 900 });
+    await ouvrir(page);
+    const nom = await ligne(page, "Changes").locator(".stk-nom").boundingBox();
+    expect(nom.width).toBeGreaterThan(120);
+    const debordeStock = await page.evaluate(() => [...document.querySelectorAll("#stock .stk-ligne")]
+      .filter(e => e.scrollWidth > e.clientWidth + 1).length);
+    expect(debordeStock).toBe(0);
+    await page.locator("#nav-commandes").click();
+    const client = await page.locator("#cmdLignes .cmd-client").first().boundingBox();
+    expect(client.width).toBeGreaterThan(120);
+  });
+}
