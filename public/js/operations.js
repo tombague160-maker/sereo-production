@@ -248,6 +248,36 @@ function occurrenceCard(item) {
       );
   return `<article class="op-occurrence ${item.overdue ? "is-overdue" : ""}"><div><span class="op-eyebrow">${h(day(item.date))}${item.overdue ? " · En retard" : ""}</span><strong>${h(item.clientName)}</strong><p>${h(products(item.products))}</p></div>${action}</article>`;
 }
+/** Une tuile de jour de « Cette semaine » (planche 6a). */
+function tuileDeJour(o) {
+  const d = new Date(`${o.date}T12:00:00`);
+  const semaine = d.toLocaleDateString("fr-FR", { weekday: "short" }).replace(".", "");
+  return `<button class="tb-jour" type="button" data-action="go-tab" data-target-tab="abonnements">`
+    + `<span class="tb-jour-date"><span class="tb-jour-semaine">${h(semaine)}</span>`
+    + `<span class="tb-jour-quantieme">${h(String(d.getDate()))}</span></span>`
+    + `<span class="tb-jour-corps"><span class="tb-jour-client">${h(o.clientName || "Client")}</span>`
+    + `<span class="tb-jour-produits">${o.overdue ? '<span class="tb-jour-retard">En retard</span> · ' : ""}${h(products(o.products))}</span></span></button>`;
+}
+
+/**
+ * Une ligne d'anomalie de « A regler » (planche 6a).
+ *
+ * L'icone est la MEME pour toutes : la planche en dessine plusieurs, mais une
+ * icone par type ferait porter la distinction a un dessin de 20 px. Le titre
+ * la porte deja, en toutes lettres.
+ */
+function ligneAnomalie(a) {
+  return `<button class="tb-anomalie" type="button" data-action="go-tab" data-target-tab="${h(a.cible)}">`
+    + `<svg class="tb-anomalie-icone" viewBox="0 0 24 24" fill="none" aria-hidden="true">`
+    + `<path d="M12 9v4M12 17h.01M10.3 3.9 2.6 17.3A2 2 0 0 0 4.3 20.3h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" `
+    + `stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>`
+    + `<span class="tb-anomalie-corps"><span class="tb-anomalie-titre">${h(a.titre)}</span>`
+    + `<span class="tb-anomalie-detail">${h(a.detail)}</span></span>`
+    + `<svg class="tb-anomalie-chevron" viewBox="0 0 24 24" fill="none" aria-hidden="true">`
+    + `<path d="m9 18 6-6-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" `
+    + `stroke-linejoin="round"></path></svg></button>`;
+}
+
 function renderDashboard() {
   const op = data.operations;
   if (!op) return;
@@ -282,18 +312,26 @@ function renderDashboard() {
   ]
     .filter(Boolean)
     .join(" ");
-  const months = op.history.slice(0, 6).reverse(),
+  // HUIT barres, pas six (planche 6a). Une lettre par mois, aucun montant
+  // ecrit au-dessus : la planche laisse la hauteur porter la donnee.
+  // Le mois courant prend une classe -- sa couleur ET la graisse de son
+  // etiquette le disent, pour ne pas faire porter le sens a la seule couleur.
+  const months = op.history.slice(0, 8).reverse(),
     max = Math.max(1, ...months.map((m) => m.revenue));
   document.getElementById("revenueChart").innerHTML = months
-    .map(
-      (m) =>
-        `<div class="revenue-column"><span>${h(money(m.revenue))}</span><div class="revenue-track"><i style="height:${Math.max(2, (m.revenue / max) * 100)}%"></i></div><small>${h(new Date(`${m.month}-01T12:00:00`).toLocaleDateString("fr-FR", { month: "short" }))}</small></div>`,
-    )
+    .map((m) => {
+      const courant = m.month === op.today.slice(0, 7);
+      const lettre = new Date(`${m.month}-01T12:00:00`)
+        .toLocaleDateString("fr-FR", { month: "narrow" });
+      return `<div class="revenue-column${courant ? " revenue-courant" : ""}" title="${h(new Date(`${m.month}-01T12:00:00`).toLocaleDateString("fr-FR", { month: "long", year: "numeric" }))} : ${h(money(m.revenue))}"><span>${h(money(m.revenue))}</span><div class="revenue-track"><i style="height:${Math.max(2, (m.revenue / max) * 100)}%"></i></div><small>${h(lettre)}</small></div>`;
+    })
     .join("");
   const weekEnd = plus(op.today, 6);
   const upcoming = op.subscriptions.filter((s) => s.date <= weekEnd);
+  // Des TUILES DE JOUR (planche 6a), et non les cartes d'occurrence : celles-ci
+  // restent telles quelles dans l'ecran Abonnements, qui les partage.
   document.getElementById("dashboardSubscriptions").innerHTML =
-    upcoming.slice(0, 8).map(occurrenceCard).join("") ||
+    upcoming.slice(0, 4).map(tuileDeJour).join("") ||
     empty(
       "Aucune livraison d’abonnement à prévoir dans les 7 prochains jours.",
     );
@@ -304,6 +342,20 @@ function renderDashboard() {
     ["dashboardDelivering", op.delivering],
   ]) {
     document.getElementById(id + "Count").textContent = list.length;
+    // Le meme compte, dans le titre de la liste detaillee sous le depliant.
+    const compteDetail = document.getElementById(id + "CountDetail");
+    if (compteDetail) compteDetail.textContent = list.length;
+    // Le sous-titre de la tuile : ce que la planche met sous le nombre.
+    const detail = document.getElementById(id + "Detail");
+    if (detail) {
+      const articles = list.reduce(
+        (n, o) => n + (o.products || []).reduce((q, p) => q + (Number(p.quantite) || 0), 0),
+        0,
+      );
+      detail.textContent = list.length
+        ? `${articles} article${articles > 1 ? "s" : ""}`
+        : "Rien à traiter";
+    }
     document.getElementById(id).innerHTML =
       list
         .slice(0, 5)
@@ -315,19 +367,100 @@ function renderDashboard() {
         )
         .join("") || empty("Aucune commande pour le moment.");
   }
+  // La planche 6a donne a chaque anomalie un TITRE et un DETAIL, et la rend
+  // cliquable vers l'ecran qui la traite. Une alerte qu'on ne peut pas suivre
+  // ne sert qu'a inquieter.
   const alerts = [];
   const overdue = op.subscriptions.filter((s) => s.overdue).length;
-  if (overdue) alerts.push(`${overdue} échéance(s) d’abonnement en retard`);
-  const out = data.stock.filter((p) => p.stockStatus === "rupture").length;
-  if (out) alerts.push(`${out} produit(s) en rupture de stock`);
-  const low = data.stock.filter((p) => p.stockStatus === "stock_faible").length;
-  if (low) alerts.push(`${low} produit(s) avec un stock faible`);
+  if (overdue) {
+    alerts.push({
+      titre: `${overdue} échéance${overdue > 1 ? "s" : ""} d’abonnement en retard`,
+      detail: op.subscriptions
+        .filter((s) => s.overdue)
+        .slice(0, 2)
+        .map((s) => s.clientName)
+        .join(" · ") || "À preparer au plus vite",
+      cible: "abonnements",
+    });
+  }
+  // L'ORDRE EST CELUI DE LA PLANCHE (1b, annotation l.194 ; 6a) : « tri par
+  // urgence, pas par type -- abonnement en retard, commande bloquee, stock
+  // sous le seuil, adresse a corriger ». Les ruptures et les livraisons a
+  // reprendre, que l'application connaissait deja, prennent leur rang dans
+  // cette echelle au lieu d'etre ajoutees a la fin.
+  // (Relecture du 22/09 : « commande bloquee » et « adresse a corriger »
+  // manquaient, alors que le serveur les calcule.)
+  const bloquees = data.orders.filter((o) =>
+    ["importe", "stock_a_verifier"].includes(o.status) && !o.canPrepare,
+  );
+  if (bloquees.length) {
+    alerts.push({
+      titre: `${bloquees.length} commande${bloquees.length > 1 ? "s" : ""} bloquée${bloquees.length > 1 ? "s" : ""}`,
+      detail: bloquees.slice(0, 2).map((o) => o.numero || o.clientName).filter(Boolean).join(" · ")
+        || "Stock insuffisant pour les préparer",
+      cible: "preparation",
+    });
+  }
   const issues = data.orders.filter((o) =>
     ["probleme_livraison", "a_reprogrammer"].includes(o.status),
   ).length;
-  if (issues) alerts.push(`${issues} livraison(s) à reprendre`);
+  if (issues) {
+    alerts.push({
+      titre: `${issues} livraison${issues > 1 ? "s" : ""} à reprendre`,
+      detail: "Absent, refus ou adresse introuvable",
+      cible: "livreur",
+    });
+  }
+  const out = data.stock.filter((p) => p.stockStatus === "rupture").length;
+  if (out) {
+    alerts.push({
+      titre: `${out} produit${out > 1 ? "s" : ""} en rupture`,
+      detail: data.stock
+        .filter((p) => p.stockStatus === "rupture")
+        .slice(0, 3)
+        .map((p) => p.nom || p.name || p.libelle || "Produit")
+        .join(", "),
+      cible: "recommande",
+    });
+  }
+  const low = data.stock.filter((p) => p.stockStatus === "stock_faible").length;
+  if (low) {
+    alerts.push({
+      titre: `${low} produit${low > 1 ? "s" : ""} sous le seuil`,
+      detail: data.stock
+        .filter((p) => p.stockStatus === "stock_faible")
+        .slice(0, 3)
+        .map((p) => p.nom || p.name || p.libelle || "Produit")
+        .join(", "),
+      cible: "stock",
+    });
+  }
+  // Une adresse manquante n'appelle un geste que sur une commande ENCORE A
+  // FAIRE : le serveur compte aussi les commandes livrees ou annulees, dont
+  // l'adresse ne sera plus jamais utilisee. On ne signale que ce qu'on peut
+  // encore corriger utilement.
+  const sansAdresse = data.orders.filter((o) =>
+    !["livre", "annulee"].includes(o.status)
+      && (!String(o.address || "").trim() || !String(o.city || "").trim()),
+  );
+  if (sansAdresse.length) {
+    alerts.push({
+      titre: `${sansAdresse.length} adresse${sansAdresse.length > 1 ? "s" : ""} à corriger`,
+      detail: sansAdresse.slice(0, 2).map((o) => o.clientName).filter(Boolean).join(" · ")
+        || "Commandes sans adresse complète",
+      cible: "bons-commande",
+    });
+  }
+  // Le sous-titre de l'en-tete lit la tuile « En preparation » : il doit etre
+  // recalcule apres ce rendu.
+  document.dispatchEvent(new CustomEvent("tableau-de-bord-rendu"));
+  const compteAlertes = document.getElementById("opAlertsCount");
+  if (compteAlertes) {
+    compteAlertes.textContent = alerts.length;
+    compteAlertes.hidden = alerts.length === 0;
+  }
   document.getElementById("opAlerts").innerHTML =
-    alerts.map((t) => `<div class="op-alert">${h(t)}</div>`).join("") ||
+    alerts.map(ligneAnomalie).join("") ||
     empty("Aucune alerte prioritaire.");
 }
 function renderSubscriptions() {

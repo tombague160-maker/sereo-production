@@ -100,6 +100,12 @@ async function relever(page) {
       // subie. En mode sombre le meme couple donne 6,99:1.
       if (el.closest(".marque, .brand-preview, [data-brand-preview]")) continue;
       if (el.closest("[disabled], [aria-disabled='true'], .is-disabled, .disabled")) continue;
+      // Un DEPLIANT FERME n'affiche pas son contenu -- seul son <summary> est a
+      // l'ecran. Un texte qu'on ne voit pas n'a pas de contraste a juger : le
+      // compter le ferait passer pour « invisible », ce qu'il n'est pas.
+      // (Le tableau de bord range sous un depliant ce que la planche 6a ne
+      // montre pas au premier regard.)
+      if (el.closest("details:not([open]) > :not(summary)")) continue;
       let opaque = true, p = el;
       while (p && p !== document.body) {
         if (parseFloat(getComputedStyle(p).opacity) < 0.99) { opaque = false; break; }

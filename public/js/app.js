@@ -182,7 +182,10 @@ function showStorageRecoveryBanner(recovery) {
 window.addEventListener("load", () => resetViewportScroll(false), { once: true });
 
 function setNavigationSearchValue(value, sourceInput = null) {
-  document.querySelectorAll("#menuSearch, #globalNavigationSearch").forEach(input => {
+  // #globalNavigationSearch vivait dans la barre du haut, que les planches
+  // desktop n'ont pas. Il doublait #menuSearch, dans la barre laterale, qui
+  // fait exactement le meme travail : une seule recherche de menu, desormais.
+  document.querySelectorAll("#menuSearch").forEach(input => {
     if (input !== sourceInput) input.value = value;
   });
 }
@@ -310,7 +313,7 @@ function navigateToFirstSearchMatch(value) {
 }
 
 function bindNavigationSearch() {
-  const inputs = Array.from(document.querySelectorAll("#menuSearch, #globalNavigationSearch"));
+  const inputs = Array.from(document.querySelectorAll("#menuSearch"));
   inputs.forEach(input => {
     input.addEventListener("input", event => {
       const value = event.target.value;
@@ -338,6 +341,16 @@ function bindUi() {
     button.addEventListener("click", () => showTab(button.dataset.tab));
   });
   bindNavigationSearch();
+
+  // Le bouton « Importer les ventes » de l'en-tete ouvre ce selecteur ; le
+  // fichier choisi doit alors PARTIR, sinon l'utilisateur croit ses ventes
+  // importees alors que rien n'a ete envoye. Relecture du 22/09.
+  document.getElementById("ventesFile")?.addEventListener("change", event => {
+    const champ = event.target;
+    if (champ.dataset.depuisEntete !== "1") return;
+    delete champ.dataset.depuisEntete;
+    if (champ.files?.length) document.getElementById("ventesForm")?.requestSubmit();
+  });
 
   document.getElementById("ventesForm")?.addEventListener("submit", event => {
     event.preventDefault();
@@ -509,6 +522,16 @@ function bindUi() {
 
     if (action === "refresh") runAction(actionButton, "Actualisation...", loadData);
     if (action === "go-tab") showTab(actionButton.dataset.targetTab || "journee");
+    // La planche 6a met « Importer les ventes » en en-tete. Le formulaire
+    // d'import, lui, ne bouge pas : le bouton ouvre simplement son selecteur
+    // de fichier. Deux chemins vers un seul mecanisme, pas deux mecanismes.
+    if (action === "importer-ventes") {
+      const champ = document.getElementById("ventesFile");
+      if (champ) {
+        champ.dataset.depuisEntete = "1";
+        champ.click();
+      }
+    }
     if (action === "open-more-menu") openMoreMenu();
     if (action === "close-more-menu") closeMoreMenu();
     if (action === "more-menu-pick") {
@@ -646,6 +669,14 @@ function showTab(tabName, options = {}) {
 
   setText("pageTitle", titles[nextTab].title);
   setText("pageSubtitle", titles[nextTab].subtitle);
+
+  // La fente d'en-tete ne montre que les commandes de l'ecran ouvert. Chaque
+  // ecran y depose les siennes en balisage, avec data-ecran : rien a deplacer
+  // dans le DOM, donc rien a casser quand on change d'onglet.
+  document.querySelectorAll("#enteteActions [data-ecran]").forEach(commande => {
+    commande.hidden = commande.dataset.ecran !== nextTab;
+  });
+  majEnteteTableauDeBord(nextTab);
 
   updateCustomerCartBar();
 
@@ -898,6 +929,45 @@ function refreshActiveRoute() {
  * Elle ne montre RIEN quand il n'y a pas de tournee : une carte vide dirait
  * « c'est casse » la ou la verite est « il n'y en a pas ».
  */
+/**
+ * Le titre du tableau de bord, selon la planche 6a : « Bonjour <nom> » et une
+ * phrase qui dit la date et ce qui attend.
+ *
+ * La planche ecrit « Bonjour Tom ». « Tom » est une donnee de maquette :
+ * l'identifiant reel vient de /api/me. Tant qu'il n'est pas arrive, on garde
+ * le titre generique plutot que d'inventer un nom.
+ */
+// Le tableau de bord est rendu par operations.js ; le sous-titre lit sa tuile.
+// Il faut donc le recalculer APRES ce rendu, et pas seulement a l'ouverture.
+document.addEventListener("tableau-de-bord-rendu", () => majEnteteTableauDeBord(getInitialTab()));
+
+function majEnteteTableauDeBord(ongletActif) {
+  if (ongletActif !== "journee") return;
+  const titre = document.getElementById("pageTitle");
+  const sous = document.getElementById("pageSubtitle");
+  if (!titre || !sous) return;
+
+  const nom = String(moi?.identifiant || "").trim();
+  titre.textContent = nom ? `Bonjour ${nom}` : titles.journee.title;
+
+  const jour = new Date().toLocaleDateString("fr-FR", {
+    weekday: "long", day: "numeric", month: "long"
+  });
+  // Le MEME nombre que la tuile « En preparation », lu sur elle : deux sources
+  // donneraient deux verites sur le meme ecran -- c'etait le cas.
+  const tuile = document.getElementById("dashboardPreparingCount")?.textContent?.trim();
+  const aPreparer = tuile && /^\d+$/.test(tuile) ? Number(tuile) : null;
+  const morceaux = [jour.charAt(0).toUpperCase() + jour.slice(1)];
+  if (aPreparer !== null) {
+    morceaux.push(`${aPreparer} commande${aPreparer > 1 ? "s" : ""} à préparer`);
+  }
+  // Les statuts d'une tournee sont brouillon, prete, en_livraison, terminee
+  // (server.js, ROUTE_STATUSES) : « en_cours » n'existait pas, la mention ne
+  // pouvait jamais s'afficher.
+  if (activeRoute && activeRoute.status === "en_livraison") morceaux.push("une tournée en cours");
+  sous.textContent = morceaux.join(" · ");
+}
+
 function renderTourneeDuJour() {
   const carte = document.getElementById("dashboardTournee");
   if (!carte) return;
@@ -934,6 +1004,7 @@ function renderTourneeDuJour() {
 }
 
 function renderAll() {
+  majEnteteTableauDeBord(getInitialTab());
   renderStats();
   renderDailySummary();
   renderImportSummary();
@@ -3795,6 +3866,9 @@ async function loadMoi() {
     moi = null;
   }
   renderCompteBarreLaterale();
+  // Le titre « Bonjour <identifiant> » depend de /api/me : s'il repond apres
+  // le premier rendu, le titre doit suivre.
+  majEnteteTableauDeBord(getInitialTab());
   renderComptes();
 }
 

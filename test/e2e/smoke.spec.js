@@ -7,7 +7,12 @@ const { test, expect } = require("./tuiles");
 test.describe("Sereo smoke tests", () => {
   test("page d'accueil charge le tableau de bord", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: "Tableau de bord" })).toBeVisible();
+    // Le titre du tableau de bord suit la planche 6a : « Bonjour <identifiant> »
+    // des que /api/me a repondu, « Tableau de bord » avant. Attendre l'un
+    // precisement faisait de ce test une course contre /api/me -- vert ou
+    // rouge selon qui arrivait le premier. On verifie ce que la planche promet.
+    await expect(page.locator("#journee")).toHaveClass(/active/);
+    await expect(page.locator("#pageTitle")).toHaveText(/^(Bonjour \S+|Tableau de bord)$/);
   });
 
   test("navigation vers Bons de commande affiche la liste ou empty state", async ({ page }) => {

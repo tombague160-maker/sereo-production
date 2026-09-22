@@ -6982,6 +6982,11 @@ html[data-color-scheme="light"] body,
   --v8-avertissement: #9A5A18;        /* texte et icones d'avertissement. 5,46 surface · 5,12 fond · 4,86 surface basse */
   --v8-avertissement-fond: #FFF1D8;   /* fond de badge tiede propre a l'avertissement : 4,89. La peche claire n'y suffit pas (4,45) */
   --v8-alerte: #C02B0A;
+  --v8-carte-tournee: #386B6D;
+  --v8-texte-sur-carte-tournee: #FFFFFF;
+  --v8-secondaire-sur-carte-tournee: #D6E5E3;
+  --v8-surface-sur-vert: #2A5254;
+  --v8-accent-donnee: #E8643F;
   --v8-focus: #0D1518;          /* anneau de focus : 18,46 sur blanc, 3,07 au pire (sur le principal) */
   --v8-focus-halo: #FFFFFF;     /* le second ton. 18,46 avec l'anneau, QUEL QUE SOIT le fond derriere */               /* texte et icones d'alerte seulement. Voyage TOUJOURS avec un mot ou une icone */
 }
@@ -7001,15 +7006,20 @@ html[data-color-scheme="light"] body,
     --v8-squelette: #1C3033;
     --v8-vert-eau: #243F42;             /* texte dessus : 9,81 */
     --v8-peche: #3B2724;                /* texte dessus : 12,19 */
-    --v8-peche-claire: #4A302B;         /* badge tiede ; texte 10,46 */
-    --v8-vert-clair: #172B2D;           /* badge froid ; texte 12,89 */
+    --v8-peche-claire: #3A2A28;         /* badge tiede -- valeur de l'export */
+    --v8-vert-clair: #1D3B3C;           /* badge froid -- valeur de l'export */
     --v8-texte: #E6F2EE;                /* 16,09 fond · 14,27 surface · 12,42 surface haute */
     --v8-texte-secondaire: #A8C4BE;     /* 9,94 fond · 8,82 surface · 7,67 surface haute */
     --v8-texte-sur-principal: #0D1518;
     --v8-texte-secondaire-sur-principal: #0D1518;
     --v8-avertissement: #FFD0AA;        /* 13,06 fond · 11,59 surface · 12,19 surface basse */
     --v8-avertissement-fond: #775841;   /* le plus CLAIR qui tienne 4,5 : il reste un badge, pas un trou noir */
-    --v8-alerte: #F85E3C;
+    --v8-alerte: #F2635A;
+    --v8-carte-tournee: #182E31;
+    --v8-texte-sur-carte-tournee: #E6F2EE;
+    --v8-secondaire-sur-carte-tournee: #A8C4BE;
+    --v8-surface-sur-vert: #243F42;
+    --v8-accent-donnee: #F5A08F;
     --v8-focus: #E6F2EE;
     --v8-focus-halo: #0D1518;               /* le rouge d'alerte, teinte gardee (11 deg), eclairci jusqu'a tenir 4,5 sur la surface la plus dure : 5,85 fond · 5,19 surface · 4,52 haute */
   }
@@ -7026,15 +7036,20 @@ html[data-color-scheme="light"] body,
   --v8-squelette: #1C3033;
   --v8-vert-eau: #243F42;
   --v8-peche: #3B2724;
-  --v8-peche-claire: #4A302B;
-  --v8-vert-clair: #172B2D;
+  --v8-peche-claire: #3A2A28;
+  --v8-vert-clair: #1D3B3C;
   --v8-texte: #E6F2EE;
   --v8-texte-secondaire: #A8C4BE;
   --v8-texte-sur-principal: #0D1518;
   --v8-texte-secondaire-sur-principal: #0D1518;
   --v8-avertissement: #FFD0AA;
   --v8-avertissement-fond: #775841;
-  --v8-alerte: #F85E3C;
+  --v8-alerte: #F2635A;
+  --v8-carte-tournee: #182E31;
+  --v8-texte-sur-carte-tournee: #E6F2EE;
+  --v8-secondaire-sur-carte-tournee: #A8C4BE;
+  --v8-surface-sur-vert: #243F42;
+  --v8-accent-donnee: #F5A08F;
   --v8-focus: #E6F2EE;
   --v8-focus-halo: #0D1518;
 }
@@ -10228,4 +10243,645 @@ textarea::placeholder {
 /* 5. La pastille « A jour » n'etait qu'un texte : elle doit pouvoir se taire. */
 .sidebar-version-etat[hidden] {
   display: none;
+}
+
+/* ==========================================================================
+   LE TABLEAU DE BORD -- planches 6a (clair) et 6b (sombre) de l'export.
+   Valeurs copiees des styles en ligne des planches, non arrondies.
+   Les trois ecarts assumes sont expliques la ou ils sont ecrits.
+   ========================================================================== */
+
+/* --- L'en-tete d'ecran, commun aux sept ecrans desktop --------------------
+   Il remplace la barre du haut, qu'aucune planche desktop ne porte. */
+.ecran-entete {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 0 0 24px;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+
+.ecran-entete-texte {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ecran-entete-texte h2 {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--v8-texte);
+}
+
+.ecran-entete-texte p {
+  margin: 0;
+  font-size: 15.5px;
+  font-weight: 400;
+  color: var(--v8-texte-secondaire);
+}
+
+.ecran-entete-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+}
+
+.ecran-entete-fente {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ecran-entete-fente [data-ecran][hidden] {
+  display: none;
+}
+
+/* La pilule de periode. La planche en fait un bouton de 44 px ; dessous vit un
+   <select> natif, parce qu'un banc l'actionne par selectOption -- et parce
+   qu'un menu maison coute un clavier, un focus et un role a reecrire. */
+.tb-pilule-mois {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  height: 44px;
+  padding: 0 20px;
+  border-radius: 999px;
+  background: var(--v8-surface);
+  color: var(--v8-texte);
+  box-shadow: 0 1px 2px rgba(15, 61, 61, 0.05), 0 8px 20px rgba(15, 61, 61, 0.06);
+  cursor: pointer;
+}
+
+:root[data-color-scheme] .tb-pilule-mois select,
+:root:not([data-color-scheme]) .tb-pilule-mois select {
+  min-height: 0;
+  height: 100%;
+  padding: 0 4px 0 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.tb-importer {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;                 /* planche 6a : 8 px entre le « + » et le libelle.
+                               Le mode clair le recevait d'une regle generique,
+                               le sombre non -- « +Importer » y etait colle. */
+  height: 44px;
+  padding: 0 24px;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* --- La grille de la planche --------------------------------------------
+   Douze colonnes, gap 24. La colonne large alterne : 7+5 puis 5+7. */
+.tb-grille {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 24px;
+  align-items: stretch;
+}
+
+/* Ces regles doivent battre « #journee > .panel » (1,1,1), qui impose un rayon
+   de carte, aucune ombre et 24 px de remplissage. D'ou le #journee ici : une
+   classe simple perdrait EN SILENCE. */
+#journee .tb-grille > .panel,
+#journee .tb-grille .tb-tuile {
+  margin: 0;
+  padding: 28px;
+  border: 0;
+  border-radius: 36px;
+  background: var(--v8-surface);
+  box-shadow: 0 1px 2px rgba(15, 61, 61, 0.05), 0 12px 28px rgba(15, 61, 61, 0.05);
+}
+
+:root[data-color-scheme="dark"] #journee .tb-grille > .panel,
+:root[data-color-scheme="dark"] #journee .tb-grille .tb-tuile {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 28px rgba(0, 0, 0, 0.3);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) #journee .tb-grille > .panel,
+  :root:not([data-color-scheme="light"]) #journee .tb-grille .tb-tuile {
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 28px rgba(0, 0, 0, 0.3);
+  }
+}
+
+#journee .tb-ca { grid-column: span 7; display: flex; flex-direction: column; gap: 20px; }
+#journee .tb-colonne { grid-column: span 5; display: flex; flex-direction: column; gap: 24px; }
+#journee .tb-regler { grid-column: span 5; display: flex; flex-direction: column; gap: 18px; }
+#journee .tb-semaine { grid-column: span 7; display: flex; flex-direction: column; gap: 18px; }
+
+/* --- La carte du chiffre d'affaires -------------------------------------- */
+.tb-ca-tetes {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.tb-ca-bloc { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tb-ca-panier { align-items: flex-end; text-align: right; flex: none; }
+
+.tb-libelle { font-size: 14px; font-weight: 500; color: var(--v8-texte-secondaire); }
+.tb-legende { font-size: 14px; font-weight: 400; color: var(--v8-texte-secondaire); }
+
+.tb-montant {
+  font-size: 44px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+  color: var(--v8-texte);
+}
+
+.tb-valeur {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--v8-texte);
+}
+
+/* --- Les deux tuiles chiffrees ------------------------------------------- */
+.tb-tuiles { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+
+#journee .tb-grille .tb-tuile {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px;
+  text-align: left;
+  color: var(--v8-texte);
+  font: inherit;
+  cursor: pointer;
+  transition: transform 140ms ease;
+}
+
+#journee .tb-grille .tb-tuile:hover { transform: translateY(-2px); }
+
+@media (prefers-reduced-motion: reduce) {
+  #journee .tb-grille .tb-tuile { transition: none; }
+  #journee .tb-grille .tb-tuile:hover { transform: none; }
+}
+
+.tb-tuile-disque {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  color: var(--v8-principal);
+}
+
+.tb-tuile-disque svg { width: 22px; height: 22px; }
+.tb-tuile-disque--tiede { background: var(--v8-peche-claire); }
+.tb-tuile-disque--froid { background: var(--v8-vert-clair); }
+
+.tb-tuile-nombre {
+  font-size: 40px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.tb-tuile-titre { font-size: 15px; font-weight: 600; }
+.tb-tuile-detail { font-size: 13.5px; font-weight: 500; color: var(--v8-texte-secondaire); }
+
+/* --- La carte « A regler » ------------------------------------------------ */
+.tb-regler .panel-heading h3,
+.tb-semaine .panel-heading h3,
+.tournee-du-jour .panel-heading h3 {
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* Le badge de compte. Son contour d'alerte le fait exister sans dependre du
+   remplissage : 5,85:1 en clair, donc au-dessus des 3:1 d'un contour. */
+.tb-badge-alerte {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--v8-surface);
+  color: var(--v8-alerte);
+  box-shadow: inset 0 0 0 1.5px var(--v8-alerte);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.tb-badge-alerte[hidden] { display: none; }
+
+#opAlerts { display: flex; flex-direction: column; }
+
+.tb-anomalie {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 44px;
+  padding: 14px 0;
+  border: 0;
+  border-top: 1px solid var(--v8-surface-basse);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tb-anomalie:first-child { border-top: 0; padding-top: 0; }
+.tb-anomalie svg { width: 20px; height: 20px; }
+.tb-anomalie-icone { color: var(--v8-alerte); }
+.tb-anomalie-corps { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tb-anomalie-titre { font-size: 15px; font-weight: 500; }
+.tb-anomalie-detail { font-size: 13.5px; font-weight: 500; color: var(--v8-texte-secondaire); }
+.tb-anomalie-chevron { color: var(--v8-texte-secondaire); }
+
+/* En sombre le filet doit se voir : --v8-surface-basse vaut #101D20, soit
+   1,10:1 sur la surface. C'est le vert d'eau qui porte le trait. */
+:root[data-color-scheme="dark"] .tb-anomalie { border-top-color: var(--v8-vert-eau); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) .tb-anomalie { border-top-color: var(--v8-vert-eau); }
+}
+
+/* --- La carte « Cette semaine » ------------------------------------------ */
+#dashboardSubscriptions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.tb-jour {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 18px;
+  background: var(--v8-fond);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tb-jour-date { display: flex; flex-direction: column; align-items: center; }
+.tb-jour-semaine {
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--v8-texte-secondaire);
+}
+.tb-jour-quantieme { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.tb-jour-corps { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tb-jour-client {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tb-jour-produits {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--v8-texte-secondaire);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tb-semaine .panel-heading a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* --- L'histogramme -------------------------------------------------------
+   La planche enleve les montants au-dessus des barres et reduit l'etiquette a
+   UNE lettre. La rangee fait 150 px, les barres s'y alignent en bas. */
+#journee .revenue-chart {
+  display: flex;
+  /* STRETCH, pas flex-end : les colonnes doivent prendre toute la hauteur
+     pour que la piste ait une hauteur a partager. Avec flex-end, les huit
+     barres restaient a 6 px quelles que soient les donnees. */
+  align-items: stretch;
+  gap: 10px;
+  /* 150 px, la hauteur que la planche 6a fixe a la rangee. Un « flex: 1 »
+     l'etirait a toute la hauteur de la carte : 389 px mesures. */
+  flex: none;
+  height: 150px;
+  margin: 0;
+  padding: 0;
+}
+
+#journee .revenue-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+/* La piste doit OCCUPER la hauteur libre de la colonne : sans elle, la
+   hauteur des barres, exprimee en pourcentage, se calcule sur zero et toutes
+   les barres tombent a leur minimum. C'est ce que la premiere capture a
+   montre -- huit traits de 2 px au lieu d'un histogramme. */
+#journee .revenue-track {
+  display: flex;
+  align-items: flex-end;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  background: none;
+  border-radius: 0;
+}
+
+#journee .revenue-column i {
+  display: block;
+  width: 100%;
+  min-height: 6px;
+  border-radius: 8px 8px 4px 4px;
+  background: var(--v8-principal);
+}
+
+/* Le mois courant. La planche le met en accent ; sur blanc l'accent vaut
+   2,34:1, sous les 3:1 d'un objet graphique porteur de sens -- et la passation
+   rejette elle-meme le vert d'eau a 1,88 pour ce motif. --v8-accent-donnee
+   garde la teinte et la saturation de l'accent et descend la clarte : 3,32:1.
+   La graisse de l'etiquette porte la meme information sans couleur. */
+#journee .revenue-column.revenue-courant i { background: var(--v8-accent-donnee); }
+#journee .revenue-column.revenue-courant small { font-weight: 700; color: var(--v8-texte); }
+
+#journee .revenue-column small {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--v8-texte-secondaire);
+}
+
+#journee .revenue-column > span { display: none; }
+
+/* --- La carte de tournee -------------------------------------------------
+   Elle etait verrouillee sur --v8-principal dans les deux modes, ce qui la
+   rendait MENTHE en sombre avec du texte noir. La planche 6b la veut en
+   surface haute. Un role n'est pas une couleur. */
+:root[data-color-scheme] #journee .panel.tournee-du-jour,
+:root:not([data-color-scheme]) #journee .panel.tournee-du-jour {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  flex: 1;
+  background: var(--v8-carte-tournee);
+  color: var(--v8-texte-sur-carte-tournee);
+  box-shadow: none;
+}
+
+#journee .tournee-du-jour h3,
+#journee .tournee-du-jour .tournee-du-jour-compte strong {
+  color: var(--v8-texte-sur-carte-tournee);
+}
+
+#journee .tournee-du-jour p,
+#journee .tournee-du-jour li,
+#journee .tournee-du-jour .tournee-du-jour-compte span {
+  color: var(--v8-secondaire-sur-carte-tournee);
+}
+
+#journee .tournee-du-jour .tournee-du-jour-compte strong {
+  font-size: 44px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+#journee .tournee-du-jour .tournee-du-jour-compte span { font-size: 17px; font-weight: 500; }
+
+/* Le chip. La planche 15 tranche : « sur vert, la surface secondaire est
+   #2A5254 opaque -- on teinte en sombre, pas en clair ». Le CSS faisait
+   l'inverse, un badge clair sur le vert. */
+:root[data-color-scheme] #journee .tournee-du-jour .panel-heading .status-chip,
+:root:not([data-color-scheme]) #journee .tournee-du-jour .panel-heading .status-chip {
+  height: 28px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--v8-surface-sur-vert);
+  color: var(--v8-texte-sur-carte-tournee);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* La piste. La planche y pose du blanc a 22 %, ce qui compose #648C8D :
+   l'accent dessus vaut 1,58:1, rempli et vide indiscernables. Opaque, la
+   meme paire vaut 3,69:1 -- et c'est la regle que la passation enonce. */
+#journee .tournee-progression {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--v8-surface-sur-vert);
+  overflow: hidden;
+}
+
+#journee .tournee-progression-barre {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--v8-accent);
+}
+
+#journee .tournee-du-jour .button.primary {
+  width: 100%;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* --- Le depliant du detail ----------------------------------------------- */
+.tb-detail { margin-top: 24px; }
+.tb-detail-corps { display: flex; flex-direction: column; gap: 20px; }
+.tb-detail-etat { margin: 0; }
+
+/* --- Mobile ---------------------------------------------------------------
+   La grille de douze colonnes n'a pas de sens sous 920 px : tout se met en
+   pile, dans l'ordre du DOM, qui est celui de la planche. */
+@media (max-width: 920px) {
+  .ecran-entete { flex-direction: column; align-items: stretch; gap: 16px; }
+  .ecran-entete-texte h2 { font-size: 24px; }
+  .tb-grille { grid-template-columns: minmax(0, 1fr); }
+  #journee .tb-ca,
+  #journee .tb-colonne,
+  #journee .tb-regler,
+  #journee .tb-semaine { grid-column: 1 / -1; }
+  #journee .tb-grille > .panel,
+  #journee .tb-grille .tb-tuile { border-radius: 24px; padding: 20px; }
+  #dashboardSubscriptions { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* `display: flex` bat le `display: none` que le navigateur donne a [hidden] :
+   la carte de tournee restait visible, vide, a cote du panneau qui la
+   remplace. Une regle de mise en page doit toujours rendre sa place a
+   l'attribut qui masque. */
+:root[data-color-scheme] #journee .panel.tournee-du-jour[hidden],
+:root:not([data-color-scheme]) #journee .panel.tournee-du-jour[hidden] {
+  display: none;
+}
+
+/* --- L'en-tete d'ecran : deux defauts vus a l'ecran ------------------------
+   1. Le bouton « Actualiser » a quitte la barre du haut, qui lui donnait sa
+      forme de pilule ; hors d'elle il retombait sur un rayon de 8 px. La
+      charte veut une pilule pour tout bouton.
+   2. Sur telephone, la pilule du mois etait ECRASEE a 32 px de large : la
+      rangee d'actions ne passait pas a la ligne, et c'est le selecteur qui
+      cedait. « septembre 2026 » y devenait illisible. Le banc de la charte ne
+      le voyait pas, justement parce qu'il ignore les champs de moins de 40 px. */
+/* Poids (0,5,0) : la regle a battre est « :root[data-color-scheme="light"]
+   .button.compact » (0,4,0), qui impose un rayon de 8 px. Une regle de meme
+   poids que la mienne perdait EN SILENCE -- la premiere version l'a fait. */
+:root[data-color-scheme] .ecran-entete .button.button,
+:root[data-color-scheme] .ecran-entete .button.compact,
+:root:not([data-color-scheme]) .ecran-entete .button.button,
+:root:not([data-color-scheme]) .ecran-entete .button.compact {
+  border-radius: 999px;
+}
+
+.tb-pilule-mois { flex-shrink: 0; }
+
+@media (max-width: 920px) {
+  .ecran-entete-actions { flex-wrap: wrap; }
+  .ecran-entete-fente { flex: 1 1 100%; flex-wrap: wrap; }
+  .tb-pilule-mois { flex: 1 1 auto; }
+  :root[data-color-scheme] .tb-pilule-mois select,
+  :root:not([data-color-scheme]) .tb-pilule-mois select { width: 100%; }
+}
+
+/* --- L'en-tete sur telephone ---------------------------------------------
+   Titre, mois, import, pastille et un grand bouton « Actualiser » empilaient
+   un ecran entier avant le premier chiffre. Sous 920 px, l'actualisation se
+   reduit a son icone -- 44 px, toujours une cible tactile -- et se range a
+   cote de sa pastille, sur une seule ligne. Son nom accessible reste
+   « Actualiser » (aria-label), seul le libelle visible disparait.
+   (L'en-tete mobile de la planche 1b, un bloc vert, releve du lot mobile.) */
+@media (max-width: 920px) {
+  .ecran-entete-actions { align-items: center; }
+  .ecran-entete-actions > .status-chip { margin-left: auto; }
+  :root[data-color-scheme] .ecran-entete #refreshButton,
+  :root:not([data-color-scheme]) .ecran-entete #refreshButton {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    padding: 0;
+    justify-content: center;
+  }
+  .ecran-entete #refreshButton > span { display: none; }
+}
+
+/* --- Tableau de bord : les constats de la relecture independante -------- */
+
+/* Titres des cartes. « :root[data-color-scheme="light"] .panel h3 » (0,3,1)
+   battait la regle de la planche (0,2,1) : graisse 950 et #2A5254 au lieu de
+   600 et du principal. Le poids (1,4,1) ci-dessous l'emporte. */
+:root[data-color-scheme] #journee .tb-grille .panel-heading h3,
+:root:not([data-color-scheme]) #journee .tb-grille .panel-heading h3 {
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--v8-texte);
+}
+
+:root[data-color-scheme] #journee .tb-grille .tournee-du-jour .panel-heading h3,
+:root:not([data-color-scheme]) #journee .tb-grille .tournee-du-jour .panel-heading h3 {
+  color: var(--v8-texte-sur-carte-tournee);
+}
+
+/* « Ouvrir la carte » en sombre. Il restait en surface #132224 avec du texte
+   menthe, sur une carte #182E31 : la forme du bouton ne tranchait qu'a
+   1,15:1 -- on ne la voyait plus. La planche 6b le veut plein, en principal
+   (#93CBC9), avec le texte du principal (#0D1518) : 10,22:1. En clair, il
+   garde la surface blanche et le texte principal, comme 6a. */
+:root[data-color-scheme="dark"] #journee .tournee-du-jour .button.primary {
+  background: var(--v8-principal);
+  border-color: var(--v8-principal);
+  color: var(--v8-texte-sur-principal);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) #journee .tournee-du-jour .button.primary {
+    background: var(--v8-principal);
+    border-color: var(--v8-principal);
+    color: var(--v8-texte-sur-principal);
+  }
+}
+
+/* La pilule du mois : la regle generique des « label » (0,2,1) repeignait le
+   texte en gris doux ; la planche le veut dans la couleur du texte. */
+:root[data-color-scheme] .ecran-entete .tb-pilule-mois,
+:root:not([data-color-scheme]) .ecran-entete .tb-pilule-mois {
+  color: var(--v8-texte);
+}
+
+:root[data-color-scheme] .ecran-entete .tb-importer,
+:root:not([data-color-scheme]) .ecran-entete .tb-importer {
+  padding: 0 24px;
+}
+
+/* Une echeance d'abonnement EN RETARD le dit, dans « Cette semaine » : la
+   version precedente le signalait, la tuile de jour l'avait perdu. Un mot,
+   pas seulement une couleur. */
+.tb-jour-retard {
+  color: var(--v8-alerte);
+  font-weight: 600;
+}
+
+@media (max-width: 920px) {
+  /* Le montant et le panier moyen se chevauchaient sur telephone et tablette :
+     les espaces de « 14 980,50 EUR » sont insecables, et la carte n'avait
+     aucune regle etroite. Ils s'empilent, et le montant suit la largeur. */
+  .tb-ca-tetes { flex-direction: column; gap: 12px; }
+  .tb-ca-panier { align-items: flex-start; text-align: left; }
+  .tb-montant { font-size: clamp(30px, 9vw, 44px); }
+
+  /* Le badge de « A regler » s'etirait sur toute la largeur : sous 820 px,
+     .panel-heading passe en grille. On le garde a sa taille. */
+  #journee .tb-regler .panel-heading { display: flex; align-items: center; justify-content: space-between; }
+  .tb-badge-alerte { justify-self: start; flex: none; }
+}
+
+/* L'anneau de la pilule du mois. Pour fondre le <select> dans sa pilule, je
+   lui avais retire bordure et ombre -- et avec elles l'anneau de focus, qui
+   passe par box-shadow (--focus-ring). Au clavier, on ne voyait plus ou l'on
+   etait. Le banc de focus ne le voyait pas non plus : il visait encore
+   .topbar, qui n'existe plus. L'anneau passe a la pilule, qui porte la forme. */
+.tb-pilule-mois:has(select:focus-visible) {
+  box-shadow: var(--focus-ring);
 }

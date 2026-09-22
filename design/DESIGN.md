@@ -49,6 +49,11 @@ au soleil, souvent d'une main. Rien de décoratif qui ne serve la lecture.
 | Alerte | `#C02B0A` | Texte et icônes d'alerte uniquement. Jamais couleur de lien, jamais pour un simple compteur | — |
 | Anneau de focus | `#0D1518` | L'indicateur de focus **clavier**. 18,46 sur blanc · 2,44 au pire, sur le vert le plus sombre de la barre latérale — d'où le second ton | — |
 | Second ton du focus | `#FFFFFF` | Le compagnon de l'anneau. **18,46 avec lui, quel que soit le fond derrière** — c'est ce qui rend l'indicateur percevable sans avoir à énumérer les surfaces | — |
+| Carte de tournée | `#386B6D` | Le fond de la carte « Tournée du jour » du tableau de bord (planches 6a/6b). **Un rôle, pas une couleur** : en clair il vaut le principal, en sombre la surface haute — la carte tenue sur `--v8-principal` devenait menthe en sombre | texte dessus **6,01:1** |
+| Texte sur carte de tournée | `#FFFFFF` | Le texte de cette carte | **6,01:1** |
+| Secondaire sur carte de tournée | `#D6E5E3` | Le texte secondaire de cette carte. **Rien ne se pose dessous** : la marge est de 0,13 | **4,63:1** |
+| Surface sur vert | `#2A5254` | La surface secondaire **posée sur le vert** (pastille de statut, piste de progression). La passation le tranche : « on teinte en sombre, pas en clair », et opaque — aucune couleur composée | blanc dessus **8,63:1** · accent dessus **3,69:1** |
+| Accent de donnée | `#E8643F` | L'accent, quand il **porte une donnée** sur fond clair (la barre du mois courant). Même teinte (13°) et même saturation que l'accent, clarté descendue à 0,58 : l'accent pur n'y donne que 2,34:1, sous les 3:1 d'un objet graphique porteur de sens | sur blanc **3,32:1** · sur le fond **3,12:1** |
 
 **Règle des trois signaux, valable dans les deux modes.** Accent, avertissement
 et alerte ne voyagent **jamais par la couleur seule** : chacun porte toujours
@@ -91,17 +96,22 @@ Chaque contraste ci-dessous est recalculé par `test/jetons-v8.test.js`.
 | Squelette de chargement | `#1C3033` | Jamais de texte dessus |
 | Vert d'eau sombre | `#243F42` | Surfaces secondaires. Texte dessus **9,81** |
 | Pêche sombre | `#3B2724` | Fonds doux. Texte dessus **12,19** |
-| Pêche claire | `#4A302B` | Fond de badge tiède. Texte **10,46** |
-| Vert clair | `#172B2D` | Fond de badge froid. Texte **12,89**, secondaire **7,96** |
+| Pêche claire | `#3A2A28` | Fond de badge tiède. Texte **11,87**, principal **7,54**. Valeur relevée dans l'export : elle y figure 23 fois, l'ancienne jamais |
+| Vert clair | `#1D3B3C` | Fond de badge froid. Texte **10,50**, secondaire **6,49**, principal **6,67**. Valeur relevée dans l'export : elle y figure 47 fois, l'ancienne jamais |
 | Texte | `#E6F2EE` | **16,09** fond · **14,27** surface · **12,42** surface haute |
 | Texte secondaire | `#A8C4BE` | **9,94** fond · **8,82** surface · **7,67** surface haute |
 | Texte sur principal | `#0D1518` | **10,22** |
 | Texte secondaire sur principal | `#0D1518` | même valeur : sur `#93CBC9`, le sombre est le seul texte qui tienne |
 | Avertissement | `#FFD0AA` | **13,06** fond · **11,59** surface · **12,19** surface basse |
 | Fond d'avertissement | `#775841` | Le plus **clair** qui tienne 4,5 sous `#FFD0AA` (**4,56**) : il reste un badge, pas un trou noir |
-| Alerte | `#F85E3C` | Le rouge d'alerte, teinte gardée (11°), éclairci jusqu'à tenir 4,5 sur la surface la plus dure : **5,85** fond · **5,19** surface · **4,52** surface haute. `#C02B0A` ne donne que 3,16 sur le fond sombre |
+| Alerte | `#F2635A` | Le rouge d'alerte, éclairci jusqu'à tenir 4,5 sur la surface la plus dure : **5,90** fond · **5,23** surface · **4,55** surface haute. `#C02B0A` ne donne que 3,16 sur le fond sombre. Valeur relevée dans l'export : elle y figure 48 fois, l'ancienne jamais |
 | Anneau de focus | `#E6F2EE` | 14,27 sur la surface, 16,09 sur le fond |
 | Second ton du focus | `#0D1518` | Les deux tons s'échangent entre les modes |
+| Carte de tournée | `#182E31` | La surface haute, comme la planche 6b la dessine — pas le principal menthe |
+| Texte sur carte de tournée | `#E6F2EE` | **12,42** sur la carte |
+| Secondaire sur carte de tournée | `#A8C4BE` | **7,67** sur la carte |
+| Surface sur vert | `#243F42` | Texte dessus **9,81** · accent dessus **5,53** |
+| Accent de donnée | `#F5A08F` | L'accent tel quel : **8,04** sur la surface, rien à assombrir |
 
 ## 3. Typographie
 
@@ -1311,6 +1321,93 @@ reste absente. Un nombre faux coûte plus cher qu'un nombre absent.
 **Reste à faire :** les quatorze écrans desktop de l'export (6a, 6b, 13a–f,
 14a–f). Le tableau de bord 6a vient en premier, et il n'a pas de `topbar` —
 celle qui existe aujourd'hui appartient à ce lot-là, pas à celui-ci.
+
+### Le tableau de bord des planches 6a/6b, posé le 22/09 — et la barre du haut qui n'existait pas
+
+**Mesure qui a tout déclenché** : sur les quatorze planches desktop de l'export,
+**aucune** ne porte de barre du haut — zéro « Recherche rapide », zéro bouton
+« Actualiser » hors de la barre latérale. Chaque écran commence par son propre
+titre, dans la colonne, et défile avec elle. La `topbar` est donc remplacée par un
+**en-tête d'écran** (titre 30 px / 700, sous-titre 15,5 px) qui porte une fente,
+`#enteteActions`, où chaque écran dépose ses propres commandes (`data-ecran`).
+Ce qui reste, parce que ce sont des fonctions et pas des ornements : l'état de
+synchronisation et l'actualisation. Ce qui part pour de bon : la recherche
+globale, qui doublait celle de la barre latérale.
+
+**La grille de la planche** : douze colonnes, gap 24 ; la colonne large alterne,
+7 + 5 puis 5 + 7. Carte « Chiffre d'affaires livré » avec son histogramme de huit
+mois ; deux tuiles chiffrées ; la carte de tournée ; « À régler » ; « Cette
+semaine ». Toutes les valeurs sont copiées des styles en ligne de 6a/6b.
+
+**Trois écarts avec la planche, chacun un défaut mesuré de la planche elle-même** :
+
+| Élément | Planche | Mesure | Posé |
+|---|---|---|---|
+| Barre du mois courant | accent `#EF9177` sur blanc | **2,34:1**, sous les 3:1 d'un objet graphique porteur de sens — la passation rejette le vert d'eau à 1,88 pour ce motif exact | `--v8-accent-donnee` `#E8643F` : même teinte, même saturation, clarté 0,58 → **3,32:1** ; l'étiquette du mois passe en gras, le sens ne tient pas qu'à la couleur |
+| Piste de progression | blanc à 22 % sur le vert, composé `#648C8D` | accent dessus **1,58:1** : rempli et vide indiscernables | `--v8-surface-sur-vert` `#2A5254` opaque → **3,69:1**, la règle même que la passation énonce |
+| Carte de tournée en sombre | `#182E31` | le CSS la tenait sur `--v8-principal`, qui vaut `#93CBC9` en sombre : un bloc menthe à texte noir | `--v8-carte-tournee` et ses deux textes : **un rôle n'est pas une couleur** |
+
+**Ce que la planche ne dessine pas et qui reste** : les listes « à préparer / à
+livrer » (règle « une ligne par commande » du §4), les chiffres d'abonnements, le
+résumé du jour et les imports Excel. Une maquette qui ne dessine pas une fonction
+ne décide pas de la supprimer. Les listes et les chiffres passent sous un dépliant
+fermé, « Détail du jour » ; `renderDashboard()` lit seize identifiants **sans
+garde**, et en retirer un interromprait tout le rendu.
+
+**Deux dérives de la palette, soldées le même jour.** ① Trois jetons sombres ne
+figuraient nulle part dans l'export : `#4A302B` → `#3A2A28` (présent 23 fois dans
+les planches), `#172B2D` → `#1D3B3C` (47 fois), `#F85E3C` → `#F2635A` (48 fois).
+② Les cinq jetons de rôle du tableau de bord sont entrés dans le CSS **sans** être
+portés à la charte ; `test/jetons-v8.test.js` est tombé, et c'est exactement ce
+pour quoi il existe (« le compte est EXACT et non un minimum »). Ils sont portés
+ci-dessus, en §2, avec leurs contrastes recalculés : 26 jetons, 48 paires.
+
+**Ce que les bancs ont appris** :
+- un dépliant **fermé** n'affiche pas son contenu ; le banc de contraste le comptait
+  comme un texte « invisible ». Il l'ignore désormais — 633 textes mesurés en
+  clair, 634 en sombre ;
+- le banc des champs exigeait **deux** champs sur téléphone : la recherche de la
+  barre du haut et le mois. La barre du haut est partie ; il en reste **un**. Un
+  seuil qui cite un compte se périme avec lui ;
+- le test de fumée attendait le titre « Tableau de bord », que la planche remplace
+  par « Bonjour <identifiant> » dès que `/api/me` répond : il faisait la **course**
+  contre l'API, vert ou rouge selon qui arrivait le premier ;
+- sur téléphone, la pilule du mois était **écrasée à 32 px** de large — invisible au
+  banc des champs, qui ignore justement ce qui fait moins de 40 px. Vue à l'œil.
+
+**La relecture indépendante, avant publication — verdict « bloquant », à raison.**
+Huit bancs neufs (`tableau-de-bord-relecture.spec.js`), **chacun lancé d'abord sur le
+code fautif** : sept rougissaient pour leur propre raison, le huitième est un témoin
+inverse. Deux constats méritent d'être retenus :
+- **L'histogramme était plat.** `align-items: flex-end` empêchait les colonnes de
+  s'étirer : huit barres à 6 px **quelles que soient les données**. La première
+  capture le montrait, et je l'avais mis sur le compte d'une base de test sans
+  chiffre d'affaires — explication plausible, jamais vérifiée. Le jeu semé a du
+  chiffre sur le mois courant : une barre doit monter, et c'est ce que le banc exige.
+- **« Importer les ventes » n'importait rien** : le bouton ouvrait le sélecteur, et
+  le fichier choisi ne partait jamais, sans un mot. L'envoi n'est automatique que
+  depuis ce bouton ; le formulaire du bas garde son geste (choisir, puis importer).
+
+Et trois leçons d'instrument :
+- deux bancs visaient encore `.topbar` : **verts sans avoir rien regardé**. Repointés sur
+  l'en-tête d'écran, ils ont aussitôt trouvé un contrôle **sans anneau de focus** — le
+  sélecteur de mois, dont j'avais retiré l'ombre qui portait l'anneau ;
+- un banc de chevauchement comparait des **boîtes** : la boîte du montant se
+  rétrécit (`min-width: 0`) et le texte déborde par-dessus sa voisine. Il compare
+  désormais les **étendues de texte** ;
+- un banc de cohérence (sous-titre contre tuile) passait **par hasard** : avec ces
+  données, deux calculs différents tombaient sur le même nombre. Une commande « en
+  préparation », que l'un compte et pas l'autre, le fait mordre.
+
+« À régler » suit maintenant l'ordre d'urgence de la planche (abonnement en retard,
+commande bloquée, livraison à reprendre, rupture, sous le seuil, adresse à
+corriger) ; les commandes bloquées et les adresses manquaient. Une adresse n'est
+signalée que sur une commande encore à faire : le serveur compte aussi les
+commandes livrées, dont l'adresse ne servira plus.
+
+**Relevé pour le lot mobile** (audit du 20/09) : la planche 1b donne au tableau de
+bord mobile **son propre en-tête**, un bloc vert aux coins bas arrondis, et des
+libellés de barre basse non abrégés (« Préparer », « Abonnements »). Hors de ce lot.
 
 ## 10. Guide pour l'agent
 

@@ -52,7 +52,10 @@ function releverControles(page, max) {
   return page.evaluate(n => {
     const sel = "section.page.active button, section.page.active a[href], "
       + "section.page.active input:not([type=hidden]), section.page.active select, "
-      + ".sidebar button, .topbar button, .topbar input";
+      // .topbar a disparu (aucune planche desktop n'en porte) : l'en-tete
+      // d'ecran l'a remplacee. Viser l'ancienne classe laissait ce banc VERT
+      // sans rien regarder de l'en-tete -- releve de la relecture du 22/09.
+      + ".sidebar button, .ecran-entete button, .ecran-entete select";
     return [...document.querySelectorAll(sel)]
       .filter(el => {
         const r = el.getBoundingClientRect();
