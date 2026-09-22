@@ -1546,6 +1546,38 @@ recommander » (qui recommande de repasser au-dessus du seuil). Une quantité in
 est « à renseigner », jamais une rupture. « Tout voir » ouvre la liste détaillée sur
 « sous le seuil ». Vider le champ Stock ne met plus le produit à zéro.
 
+### Clients des planches 13e/14e, posé le 23/09 — une liste, une fiche
+
+Liste à gauche (5 fr), fiche à droite (7 fr). Titre « Clients », compte « N clients ·
+N abonnés · N adresses à corriger ». Recherche « Nom, ville, téléphone » et « Nouveau
+client » dans l'en-tête. Pilules : Tous, les secteurs trouvés chez les clients, Abonnés.
+
+- **Ligne** : le nom, puis la ville et la **dernière livraison** (« livrée le 2 sept. »),
+  calculée depuis les commandes livrées déjà chargées dans la page — la passation la
+  classait « inventée, côté serveur » ; elle ne coûte rien côté navigateur. Une adresse
+  qui ne se géocode pas (même prédicat que le serveur : une rue, et un code postal ou une
+  ville) s'écrit en alerte « Adresse à corriger · ville ». Badge Abonné / En pause.
+- **Fiche** : nom, puces (secteur, abonnement), Appeler (`tel:`), Modifier ; Adresse /
+  Contact ; la carte d'abonnement (fréquence, « En retard », panier · rappel · échéance,
+  « Créer la commande » sur la prochaine échéance **sans** commande) ; les quatre
+  dernières commandes, « N depuis janvier », et « Les N autres », qui ouvre la liste des
+  commandes cherchée sur ce client.
+
+**Gardés, hors planche** :
+
+- le **statut commercial** (prospect, actif, à relancer, inactif) : en sélection dans la
+  fiche, et en filtre à côté des pilules (avec « relances du jour / en retard ») ;
+- le **formulaire** de l'ancien écran, dans un dialogue : « Nouveau client » le vide,
+  « Modifier » le pré-remplit — mêmes champs, mêmes noms, POST ou PATCH ;
+- les **rappels commerciaux** : l'écran « Rappels » devient secondaire, atteint par
+  « Rappels · N » dans l'en-tête (N = rappels à faire aujourd'hui ou en retard). La planche
+  ne le dessine pas ; c'est le seul endroit où ils se créent et se ferment.
+
+**Écarts assumés** : pas d'« interlocuteur » ni d'« instruction de livraison » (« Mme
+Ferrand, cadre de santé », « entrée de service ») — le modèle client n'a pas ces champs ;
+les notes, besoins et produits préférés s'affichent à leur place. Les pilules font
+44 px (la planche : 40), la charte l'exige.
+
 ## 10. Guide pour l'agent
 
 - Toujours produire les deux modes (clair et sombre) avec les mêmes tokens ; lister les contrastes calculés.

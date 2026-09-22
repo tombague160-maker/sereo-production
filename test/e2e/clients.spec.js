@@ -91,7 +91,11 @@ test("la fiche : Appeler, l'abonnement et « Créer la commande »", async ({ pa
 });
 
 test("les commandes du client : quatre, puis « Les N autres »", async ({ page }) => {
-  await ouvrir(page);
+  // Un filtre laisse sur Commandes (« Bloquees seulement ») ne doit pas cacher
+  // les commandes du client : la liste s'ouvre propre.
+  await page.goto(srv.base + "/#commandes", { waitUntil: "networkidle" });
+  await page.locator(".cmd-case", { hasText: "Bloqu" }).click();
+  await page.locator("#nav-clients").click();
   await ligne(page, "Tilleuls").click();
   await expect(page.locator("#cliFiche .cli-commande")).toHaveCount(4);
   // Les plus recentes d'abord : la commande de janvier n'est pas dans les quatre.
@@ -167,6 +171,10 @@ test("la recherche cherche le nom et la ville", async ({ page }) => {
 test("téléphone : rien ne déborde de l'écran", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await ouvrir(page);
+  // La fiche passe SOUS la liste, pleine largeur : deux colonnes ecrasees ne
+  // debordent pas, elles deviennent illisibles.
+  const fiche = await page.locator("#cliFiche").boundingBox();
+  expect(fiche.width).toBeGreaterThan(330);
   const deborde = await page.evaluate(() => [...document.querySelectorAll("#crm *")]
     .filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.right > window.innerWidth + 0.5; })
     .map(e => e.className || e.tagName));
