@@ -230,8 +230,8 @@ test("accessibilité : les lignes restent des boutons, les rappels ont un nom", 
   await expect(page.locator("#relances")).toHaveAttribute("aria-label", "Rappels");
 });
 
-test("à 1280 px, les commandes de la fiche tiennent dans la carte", async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 900 });
+test("à 1190 px, les commandes de la fiche tiennent dans la carte", async ({ page }) => {
+  await page.setViewportSize({ width: 1190, height: 900 });
   await ouvrir(page);
   await ligne(page, "Tilleuls").click();
   const debord = await page.evaluate(() => {
