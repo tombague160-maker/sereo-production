@@ -1442,6 +1442,26 @@ sous leur ancien nom. `config/tabs.js` refuse de charger si une redirection vise
 
 Précédent / Suivant font 44 px et non 36 : la planche les invente, la charte exige 44.
 
+**Trois outils de l'ancien écran que la planche ne dessine pas, gardés** (règle : ce qui
+existe et n'est pas dessiné est gardé, dans l'idiome de la planche, et nommé) :
+
+- le **jour** des commandes terrain, dans la barre « À envoyer » (aujourd'hui par défaut).
+  Sans lui, « Tout sélectionner » envoyait aussi une commande d'un jour passé, gardée
+  exprès. La barre reste visible même quand le jour est vide, parce que c'est elle qui
+  permet d'en choisir un autre ;
+- la case **« À compléter »** : adresse, téléphone ou secteur manquant, même règle que
+  l'ancien écran (`bdcNeedsCompletion`). L'alerte « adresses à corriger » du tableau de
+  bord y mène, par la redirection `#commandes-a-completer` ;
+- la période **Du / Au**, qui borne la liste **et** l'export. Sans elle, on ne pouvait
+  plus exporter un mois.
+
+La sélection ne garde que ce qui est à l'écran : une recherche ou un changement de jour
+retire les commandes masquées, pour qu'aucune ne parte sans avoir été vue.
+
+Les gestes d'une commande planifiée (Confirmer, Annuler) sont posés **hors** du corps
+du détail, parce que « Modifier le profil » redessine ce corps. Un geste **ferme** le
+détail, et « Annuler » demande confirmation.
+
 ## 10. Guide pour l'agent
 
 - Toujours produire les deux modes (clair et sombre) avec les mêmes tokens ; lister les contrastes calculés.

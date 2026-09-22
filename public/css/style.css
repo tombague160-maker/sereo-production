@@ -11127,3 +11127,23 @@ textarea::placeholder {
 }
 .cmd-detail-gestes { padding: 0 24px; }
 .cmd-detail-gestes[hidden] { display: none; }
+
+/* --- Commandes : la seconde relecture ------------------------------------
+   Les etiquettes de date : « label » generique (0,2,1) les passait en 800. */
+:root[data-color-scheme] #commandes .cmd-periode label,
+:root:not([data-color-scheme]) #commandes .cmd-periode label,
+:root[data-color-scheme] #commandes .cmd-jour,
+:root:not([data-color-scheme]) #commandes .cmd-jour {
+  font-size: 13.5px; font-weight: 600; color: var(--v8-texte-secondaire);
+}
+/* Telephone : la barre d'envoi et la periode passent a la ligne plutot que
+   de pousser la page de cote. */
+@media (max-width: 920px) {
+  .cmd-envoi { flex-wrap: wrap; gap: 8px 12px; padding: 10px 12px; }
+  .cmd-envoi-compte { flex: 1 1 100%; order: -1; }
+  .cmd-periode { flex: 1 1 100%; flex-wrap: wrap; }
+  .cmd-periode label { flex: 1 1 140px; }
+  :root[data-color-scheme] #commandes .cmd-periode input,
+  :root:not([data-color-scheme]) #commandes .cmd-periode input { flex: 1; min-width: 0; }
+  .cmd-tri { max-width: 100%; }
+}

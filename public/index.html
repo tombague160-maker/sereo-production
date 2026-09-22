@@ -657,7 +657,15 @@
           <label class="cmd-case">
             <input type="checkbox" id="cmdACompleter" />
             <span class="cmd-case-carre" aria-hidden="true"></span>
-            <span>À compléter</span>
+            <span id="cmdACompleterLibelle">À compléter</span>
+          </label>
+          <!-- Le secteur de l'ancien ecran « Bons de commande » : sans lui, plus
+               d'export par secteur. Meme forme que le tri. -->
+          <label class="cmd-tri">
+            <span class="sr-only">Secteur</span>
+            <select id="cmdSecteur" aria-label="Filtrer par secteur">
+              <option value="">Tous les secteurs</option>
+            </select>
           </label>
           <span class="cmd-ressort" aria-hidden="true"></span>
           <!-- La periode Du / Au de l'ancien ecran : sans elle, on ne pouvait
@@ -687,7 +695,7 @@
           <label class="cmd-case cmd-case--tout">
             <input type="checkbox" id="cmdToutSelectionner" />
             <span class="cmd-case-carre" aria-hidden="true"></span>
-            <span>Tout sélectionner</span>
+            <span id="cmdToutLibelle">Tout sélectionner</span>
           </label>
           <span id="cmdEnvoiCompte" class="cmd-envoi-compte">Aucune sélectionnée</span>
           <button id="cmdEnvoyer" class="button primary" type="button" data-action="cmd-envoyer" disabled>Envoyer en préparation</button>

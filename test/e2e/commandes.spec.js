@@ -32,11 +32,20 @@ test.beforeAll(async () => {
     clientName: "Foyer du Jour", deliveredAt: null });
   commandes.push({ ...base, id: "o-plan2", numero: "CMD-2026-906", status: "planifiee",
     clientName: "Residence Bis", deliveryDate: "2026-12-02", deliveredAt: null });
+  // Une commande d'AVANT la periode testee : seule la borne « Du » l'ecarte.
+  commandes.push({ ...base, id: "o-decembre", numero: "CMD-2025-907", status: "livre",
+    clientName: "Clinique de Decembre", dateCommande: "2025-12-20", deliveredAt: null });
+  // Seconde relecture : une commande a envoyer pour le bouton qui se rallumait,
+  // une commande sans adresse pour l'alerte du tableau de bord.
+  commandes.push({ ...base, id: "o-envoi2", numero: "CMD-2026-908", status: "commande_client_validee",
+    clientName: "Cabinet Envoi", dateCommande: "2026-02-10", deliveredAt: null });
+  commandes.push({ ...base, id: "o-sansadresse", numero: "CMD-2026-909", status: "importe",
+    clientName: "Client Sans Adresse", address: "", deliveredAt: null });
   // Une commande COMPLETE (adresse, telephone, secteur) : « A completer » l'ecarte.
   commandes.push({ ...base, id: "o-complet", numero: "CMD-2026-904", status: "livre",
     clientName: "Cabinet Complet", phone: "0381000000", sector: "Besancon Centre",
     postalCode: "25000", deliveredAt: null });
-  srv = await demarrer({ port: 3154, seed });
+  srv = await demarrer({ port: 3160, seed });
 });
 test.afterAll(async () => { if (srv) await srv.arreter(); });
 
@@ -223,6 +232,7 @@ test("la période Du / Au borne la liste ET l'export", async ({ page }) => {
   await page.fill("#cmdAu", "2026-01-31");
   await expect(page.locator('[data-cmd-ouvrir="o-hier"]')).toBeVisible();
   await expect(page.locator('[data-cmd-ouvrir="o-complet"]')).toHaveCount(0);
+  await expect(page.locator('[data-cmd-ouvrir="o-decembre"]')).toHaveCount(0);
   const [telechargement] = await Promise.all([
     page.waitForEvent("download"),
     page.locator('#enteteActions [data-action="cmd-export"]').click()
@@ -230,6 +240,7 @@ test("la période Du / Au borne la liste ET l'export", async ({ page }) => {
   const csv = require("fs").readFileSync(await telechargement.path(), "utf8");
   expect(csv).toContain("CMD-2026-903");
   expect(csv).not.toContain("CMD-2026-904");
+  expect(csv).not.toContain("CMD-2025-907");
 });
 
 test("la ligne dit son statut dans son nom accessible", async ({ page }) => {
@@ -259,8 +270,12 @@ test("la case de choix d'une ligne est une cible de 44 px", async ({ page }) => 
   await ouvrir(page);
   await page.locator('[data-cmd-filtre="a-envoyer"]').click();
   await page.fill("#cmdJour", "2026-01-15");
-  const boite = await page.locator('.cmd-ligne:has([data-cmd-choix="o-hier"]) .cmd-col-choix').boundingBox();
-  expect(boite.width).toBeGreaterThanOrEqual(44);
+  const ligne = page.locator('.cmd-ligne:has([data-cmd-choix="o-hier"])');
+  const boite = await ligne.locator('.cmd-col-choix').boundingBox();
+  // La PISTE, pas l'element : un element de 44 px dans une piste de 24 deborde
+  // sous le numero, et le clic y ouvre le detail.
+  const numero = await ligne.locator('.cmd-num').boundingBox();
+  expect(numero.x - boite.x).toBeGreaterThanOrEqual(44 + 16);
   expect(boite.height).toBeGreaterThanOrEqual(44);
 });
 
@@ -269,4 +284,122 @@ test("téléphone : le titre n'a pas 200 px de vide sous lui", async ({ page }) 
   await ouvrir(page);
   const h = await page.locator(".ecran-entete-texte").evaluate(e => e.getBoundingClientRect().height);
   expect(h).toBeLessThan(120);
+});
+
+// --- Seconde relecture -------------------------------------------------------
+
+test("« Modifier le profil » puis « Annuler » : le détail reste sur la même commande", async ({ page }) => {
+  // Toutes les commandes du jeu partagent un client : la premiere est une
+  // livree. L'ancien code rouvrait LA PREMIERE commande du client.
+  await ouvrir(page);
+  await page.locator('[data-cmd-filtre="planifiees"]').click();
+  await page.locator('[data-cmd-ouvrir="o-plan2"]').click();
+  const titre = page.locator("#bdc-detail-title");
+  await expect(titre).toHaveText("Bon CMD-2026-906");
+  await page.locator('#bdc-detail-body [data-action="bdc-edit-client"]').click();
+  await expect(titre).toHaveText("Bon CMD-2026-906");
+  await page.locator('#bdc-detail-body [data-action="bdc-cancel-edit"]').click();
+  await expect(titre).toHaveText("Bon CMD-2026-906");
+  await expect(page.locator('#cmdDetailGestes [data-action="cmd-annuler"]')).toHaveAttribute("data-order-id", "o-plan2");
+});
+
+test("une redirection arrive sur une liste propre", async ({ page }) => {
+  // « Bloquees seulement » coche, puis la saisie d'une commande renvoie vers
+  // « A envoyer » : la commande saisie etait cachee.
+  await ouvrir(page);
+  await page.locator(".cmd-case", { hasText: "Bloqu" }).click();
+  await page.fill("#cmdRecherche", "introuvable-xyz");
+  await page.evaluate(() => { location.hash = "#commandes-jour"; });
+  await expect(page.locator('[data-cmd-filtre="a-envoyer"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#cmdBloquees")).not.toBeChecked();
+  await expect(page.locator("#cmdRecherche")).toHaveValue("");
+  // Et le jour revient a aujourd'hui : la commande saisie est du jour.
+  const aujourdhui = await page.evaluate(() => new Date().toLocaleDateString("en-CA"));
+  await expect(page.locator("#cmdJour")).toHaveValue(aujourdhui);
+});
+
+test("le filtre Secteur de l'ancien écran est gardé", async ({ page }) => {
+  await ouvrir(page);
+  const options = await page.locator("#cmdSecteur option").evaluateAll(os => os.map(o => o.value).filter(Boolean));
+  expect(options.length).toBeGreaterThan(0);
+  const total = await lignes(page).count();
+  await page.selectOption("#cmdSecteur", options[0]);
+  const n = await lignes(page).count();
+  expect(n).toBeGreaterThan(0);
+  expect(n).toBeLessThan(total + 1);
+  const secteurs = await page.locator("#cmdLignes .cmd-secteur").allTextContents();
+  expect(new Set(secteurs).size).toBe(1);
+});
+
+test("l'alerte « adresses à corriger » ouvre exactement son compte", async ({ page }) => {
+  await page.goto(srv.base + "/#commandes-a-completer", { waitUntil: "networkidle" });
+  await expect(page.locator("#cmdACompleterLibelle")).toHaveText("Adresses à corriger");
+  await expect(page.locator('[data-cmd-ouvrir="o-sansadresse"]')).toBeVisible();
+  // o-1 est livree, adresse complete, sans telephone : « A completer » la
+  // montrerait, l'alerte ne la compte pas.
+  await expect(page.locator('[data-cmd-ouvrir="o-1"]')).toHaveCount(0);
+});
+
+test("la période borne la date de COMMANDE, même pour une planifiée", async ({ page }) => {
+  await ouvrir(page);
+  // o-plan2 : commandee aujourd'hui, livree le 02/12.
+  await page.fill("#cmdDu", "2026-12-02");
+  await page.fill("#cmdAu", "2026-12-02");
+  await expect(page.locator('[data-cmd-ouvrir="o-plan2"]')).toHaveCount(0);
+});
+
+test("liste vide sous « À compléter » : le message parle du filtre", async ({ page }) => {
+  await ouvrir(page);
+  await page.fill("#cmdDu", "2030-01-01");
+  await expect(page.locator("#commandes .empty-state")).toContainText("ne correspond");
+});
+
+test("cocher une ligne au clavier garde le focus sur la case", async ({ page }) => {
+  await ouvrir(page);
+  await page.locator('[data-cmd-filtre="a-envoyer"]').click();
+  await page.fill("#cmdJour", "2026-02-10");
+  const cas = page.locator('[data-cmd-choix="o-envoi2"]');
+  await cas.focus();
+  await page.keyboard.press("Space");
+  await expect(cas).toBeChecked();
+  expect(await page.evaluate(() => document.activeElement?.dataset?.cmdChoix)).toBe("o-envoi2");
+});
+
+test("le détail prend le focus, et le rend à la ligne en se fermant", async ({ page }) => {
+  await ouvrir(page);
+  const ligne1 = lignes(page).first();
+  const id = await ligne1.getAttribute("data-cmd-ouvrir");
+  await ligne1.focus();
+  await page.keyboard.press("Enter");
+  expect(await page.evaluate(() => !!document.activeElement?.closest("#bdc-detail-modal"))).toBe(true);
+  await page.locator('#bdc-detail-modal .version-modal-close').click();
+  await expect.poll(() => page.evaluate(() => document.activeElement?.dataset?.cmdOuvrir)).toBe(id);
+});
+
+test("après l'envoi, « Envoyer » reste éteint", async ({ page }) => {
+  await ouvrir(page);
+  await page.locator('[data-cmd-filtre="a-envoyer"]').click();
+  await page.fill("#cmdJour", "2026-02-10");
+  await page.locator('[data-cmd-choix="o-envoi2"]').check();
+  const reponse = page.waitForResponse(r => r.url().includes("/send-preparation"));
+  await page.locator("#cmdEnvoyer").click();
+  await reponse;
+  await page.waitForTimeout(800);
+  await expect(page.locator("#cmdEnvoyer")).toBeDisabled();
+});
+
+test("téléphone : ni la barre d'envoi ni la période ne poussent la page de côté", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await ouvrir(page);
+  await page.locator('[data-cmd-filtre="a-envoyer"]').click();
+  await expect(page.locator("#cmdEnvoi")).toBeVisible();
+  const largeur = await page.evaluate(() => document.documentElement.scrollWidth);
+  expect(largeur).toBeLessThanOrEqual(390);
+});
+
+test("les étiquettes de date suivent la planche (600), pas le label générique", async ({ page }) => {
+  await ouvrir(page);
+  await page.evaluate(() => document.documentElement.setAttribute("data-color-scheme", "light"));
+  const g = await page.locator("#commandes .cmd-periode label").first().evaluate(e => getComputedStyle(e).fontWeight);
+  expect(g).toBe("600");
 });

@@ -18,7 +18,10 @@ export const REDIRECTIONS = {
   "commandes-livrees": { onglet: "commandes", filtre: "livrees" },
   // L'ancien filtre « A completer » des bons (adresse ou telephone manquant) :
   // l'alerte « adresses a corriger » du tableau de bord y mene.
-  "commandes-a-completer": { onglet: "commandes", filtre: "toutes", completer: true }
+  // Son compte est celui des ADRESSES manquantes sur une commande encore a
+  // faire : la redirection ouvre exactement ce compte-la, pas le filtre plus
+  // large « A completer » (telephone, secteur, commandes livrees).
+  "commandes-a-completer": { onglet: "commandes", filtre: "toutes", completer: "adresse" }
 };
 
 // Tabs accessibles uniquement via le menu "Plus" de la mobile-tabbar (overflow

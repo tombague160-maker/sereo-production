@@ -543,7 +543,15 @@ function bindUi() {
     if (action === "cmd-confirmer" || action === "cmd-annuler") {
       runAction(actionButton, "...", () => gesteDuDetail(action, actionButton.dataset.orderId));
     }
-    if (action === "cmd-envoyer") runAction(actionButton, "Envoi...", envoyerCommandesEnPreparation);
+    // Pas de runAction : son « finally » rallumait le bouton APRES le rendu qui
+    // l'avait eteint (aucune selection) ; c'est renderCommandes qui decide.
+    if (action === "cmd-envoyer" && !envoiEnCours) {
+      envoiEnCours = true;
+      actionButton.disabled = true;
+      envoyerCommandesEnPreparation()
+        .catch(error => notifyEchec(error))
+        .finally(() => { envoiEnCours = false; renderCommandes(); });
+    }
     if (action === "cmd-page") {
       commandesFiltre.page += Number(actionButton.dataset.sens) || 0;
       renderCommandes();
@@ -674,9 +682,18 @@ function showTab(tabName, options = {}) {
   // ecrans, mais on les honore -- l'ecran unique s'ouvre sur LEUR filtre.
   const redirection = REDIRECTIONS[tabName];
   if (redirection) {
-    commandesFiltre.statut = redirection.filtre;
-    commandesFiltre.completer = Boolean(redirection.completer);
-    commandesFiltre.page = 1;
+    // Un filtre laisse d'une visite precedente (« Bloquees seulement », un
+    // jour passe, une recherche) cachait la commande qu'on venait de saisir.
+    // Une redirection arrive sur une liste PROPRE, filtree comme l'ancien ecran.
+    Object.assign(commandesFiltre, {
+      statut: redirection.filtre, completer: redirection.completer || false,
+      bloquees: false, recherche: "", du: "", au: "", secteur: "", jour: "", page: 1
+    });
+    for (const id of ["cmdRecherche", "cmdDu", "cmdAu"]) {
+      const champ = document.getElementById(id);
+      if (champ) champ.value = "";
+    }
+    commandesSelection.clear();
     tabName = redirection.onglet;
     renderCommandes();
     // L'adresse dit ou l'on est vraiment : #commandes, plus l'ancien nom.
@@ -1091,10 +1108,21 @@ const STATUT_COMMANDE = {
 const COMMANDES_PAR_PAGE = 20;
 const commandesFiltre = {
   statut: "toutes", bloquees: false, completer: false, recherche: "", tri: "date-desc", page: 1,
-  du: "", au: "",
+  du: "", au: "", secteur: "",
   // Le jour des commandes terrain, comme l'ancien « Commandes du jour ».
   jour: ""
 };
+// Un envoi en preparation en cours ; la ligne a qui rendre le focus quand le
+// detail se ferme.
+let envoiEnCours = false;
+let retourDuDetail = null;
+// Le filtre « A completer » a deux sens : false, « profil » (la case : la
+// regle de l'ancien ecran) ou « adresse » (l'alerte du tableau de bord : une
+// adresse manquante sur une commande encore a faire -- operations.js).
+function adresseACorriger(order) {
+  return !["livre", "annulee"].includes(order.status)
+    && (!String(order.address || "").trim() || !String(order.city || "").trim());
+}
 const commandesSelection = new Set();
 
 function commandeBloquee(order) {
@@ -1127,8 +1155,13 @@ function commandesFiltrees() {
     if (filtre.statuts && !filtre.statuts.includes(order.status)) return false;
     if (commandesFiltre.bloquees && !commandeBloquee(order)) return false;
     // La regle de l'ancien ecran, reprise telle quelle (bdcNeedsCompletion).
-    if (commandesFiltre.completer && !bdcNeedsCompletion(order)) return false;
-    const jourCommande = String(dateDeLaCommande(order) || "").slice(0, 10);
+    if (commandesFiltre.completer === "profil" && !bdcNeedsCompletion(order)) return false;
+    if (commandesFiltre.completer === "adresse" && !adresseACorriger(order)) return false;
+    if (commandesFiltre.secteur && String(order.sector || "") !== commandesFiltre.secteur) return false;
+    // La periode borne la date de COMMANDE, comme l'ancien export et comme la
+    // colonne « Date commande » du CSV -- meme pour une planifiee, dont la
+    // ligne montre la date de livraison.
+    const jourCommande = String(order.dateCommande || "").slice(0, 10);
     if (commandesFiltre.du && jourCommande < commandesFiltre.du) return false;
     if (commandesFiltre.au && jourCommande > commandesFiltre.au) return false;
     if (filtre.cle === "a-envoyer" && commandesFiltre.jour
@@ -1178,7 +1211,17 @@ function renderCommandes() {
   const caseBloquees = document.getElementById("cmdBloquees");
   if (caseBloquees) caseBloquees.checked = commandesFiltre.bloquees;
   const caseCompleter = document.getElementById("cmdACompleter");
-  if (caseCompleter) caseCompleter.checked = commandesFiltre.completer;
+  if (caseCompleter) caseCompleter.checked = Boolean(commandesFiltre.completer);
+  setText("cmdACompleterLibelle", commandesFiltre.completer === "adresse" ? "Adresses à corriger" : "À compléter");
+  const secteur = document.getElementById("cmdSecteur");
+  if (secteur) {
+    const secteurs = [...new Set((orders || []).map(o => String(o.sector || "")).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, "fr"));
+    if (commandesFiltre.secteur && !secteurs.includes(commandesFiltre.secteur)) secteurs.push(commandesFiltre.secteur);
+    secteur.innerHTML = `<option value="">Tous les secteurs</option>`
+      + secteurs.map(s => `<option value="${escapeAttribute(s)}">${escapeHtml(formatSectorLabel(s))}</option>`).join("");
+    secteur.value = commandesFiltre.secteur;
+  }
   if (!commandesFiltre.jour) commandesFiltre.jour = getTodayDateInput();
   const jour = document.getElementById("cmdJour");
   if (jour) jour.value = commandesFiltre.jour;
@@ -1223,6 +1266,7 @@ function renderCommandes() {
       + `<span class="cmd-statut cmd-droite">${badgeDeCommande(order)}</span>`
       + `</div>`;
   }).join("") : emptyState("Aucune commande", commandesFiltre.recherche || commandesFiltre.bloquees || commandesFiltre.statut !== "toutes"
+    || commandesFiltre.completer || commandesFiltre.du || commandesFiltre.au || commandesFiltre.secteur
     ? "Aucune commande ne correspond à ce filtre."
     : "Les commandes importées et saisies apparaîtront ici.");
 
@@ -1245,9 +1289,10 @@ function renderCommandes() {
     const n = commandesSelection.size;
     setText("cmdEnvoiCompte", n ? `${n} sélectionnée${n > 1 ? "s" : ""}` : "Aucune sélectionnée");
     const bouton = document.getElementById("cmdEnvoyer");
-    if (bouton) bouton.disabled = n === 0;
+    if (bouton) bouton.disabled = n === 0 || envoiEnCours;
     const tout = document.getElementById("cmdToutSelectionner");
-    if (tout) tout.checked = liste.length > 0 && liste.every(o => commandesSelection.has(String(o.id)));
+    if (tout) tout.checked = page.length > 0 && page.every(o => commandesSelection.has(String(o.id)));
+    setText("cmdToutLibelle", pages > 1 ? "Tout sélectionner sur la page" : "Tout sélectionner");
   }
 
   majSousTitreCommandes();
@@ -1274,6 +1319,10 @@ function ouvrirDetailCommande(orderId) {
   if (!gestes) return;
   gestes.hidden = true;
   gestes.innerHTML = "";
+  // Le focus entre dans la fenetre (sinon Tab continue derriere elle) et
+  // reviendra a la ligne a la fermeture.
+  retourDuDetail = String(orderId);
+  document.querySelector("#bdc-detail-modal .version-modal-card button")?.focus();
   if (!order || !["planifiee", "a_confirmer"].includes(order.status)) return;
   gestes.innerHTML = `<button class="button ok" type="button" data-action="cmd-confirmer" data-order-id="${escapeAttribute(order.id)}">Confirmer</button>`
     + `<button class="button danger" type="button" data-action="cmd-annuler" data-order-id="${escapeAttribute(order.id)}">Annuler la commande</button>`;
@@ -1333,7 +1382,7 @@ function bindCommandes() {
       commandesFiltre.page = 1;
       renderCommandes();
     } else if (event.target.id === "cmdACompleter") {
-      commandesFiltre.completer = event.target.checked;
+      commandesFiltre.completer = event.target.checked ? "profil" : false;
       commandesFiltre.page = 1;
       renderCommandes();
     } else if (["cmdDu", "cmdAu", "cmdJour"].includes(event.target.id)) {
@@ -1344,12 +1393,22 @@ function bindCommandes() {
     } else if (event.target.id === "cmdTri") {
       commandesFiltre.tri = event.target.value;
       renderCommandes();
+    } else if (event.target.id === "cmdSecteur") {
+      commandesFiltre.secteur = event.target.value;
+      commandesFiltre.page = 1;
+      renderCommandes();
     } else if (event.target.matches("[data-cmd-choix]")) {
       const id = event.target.dataset.cmdChoix;
       if (event.target.checked) commandesSelection.add(id); else commandesSelection.delete(id);
       renderCommandes();
+      // Le rendu refait les lignes : sans ceci, le focus tombait sur <body> et
+      // la selection au clavier repartait du haut de la page.
+      document.querySelector(`[data-cmd-choix="${CSS.escape(id)}"]`)?.focus();
     } else if (event.target.id === "cmdToutSelectionner") {
-      commandesFiltrees().forEach(o => {
+      // La PAGE, pas toute la liste : une commande d'une autre page ne part
+      // pas sans avoir ete vue.
+      const debut = (commandesFiltre.page - 1) * COMMANDES_PAR_PAGE;
+      commandesFiltrees().slice(debut, debut + COMMANDES_PAR_PAGE).forEach(o => {
         if (event.target.checked) commandesSelection.add(String(o.id)); else commandesSelection.delete(String(o.id));
       });
       renderCommandes();
@@ -3383,6 +3442,10 @@ function exportBdcCsv(liste = null, prefixe = "sereo-bons-commande") {
 function openBdcDetail(orderId) {
   const order = (orders || []).find(o => String(o.id) === String(orderId));
   if (!order) return;
+  // La commande AFFICHEE : editer puis annuler le profil doit y revenir, pas
+  // a la premiere commande du meme client -- sinon la fenetre montre un bon
+  // et ses boutons en visent un autre.
+  bdcState.detailOrderId = String(order.id);
 
   const modal = document.getElementById("bdc-detail-modal");
   const titleEl = document.getElementById("bdc-detail-title");
@@ -3592,9 +3655,16 @@ async function saveBdcClientEdit(triggerBtn) {
 
     // Reload data pour avoir l'ordre a jour, puis re-render modal en mode lecture
     await loadData();
-    const order = (orders || []).find(o => String(o.clientId) === String(clientId));
+    const order = commandeDuDetail(clientId);
     if (order) openBdcDetail(order.id);
   });
+}
+
+// La commande que le detail montre ; a defaut, la premiere du client.
+function commandeDuDetail(clientId) {
+  const affichee = (orders || []).find(o => String(o.id) === String(bdcState.detailOrderId));
+  if (affichee && String(affichee.clientId) === String(clientId)) return affichee;
+  return (orders || []).find(o => String(o.clientId) === String(clientId));
 }
 
 function closeBdcDetail() {
@@ -3607,6 +3677,12 @@ function closeBdcDetail() {
   modal.setAttribute("aria-hidden", "true");
   document.body.classList.remove("version-modal-open");
   if (modal._releaseTrap) { modal._releaseTrap(); modal._releaseTrap = null; }
+  if (retourDuDetail) {
+    const id = retourDuDetail;
+    retourDuDetail = null;
+    // Apres un geste, la liste se redessine : on retrouve la ligne par son id.
+    setTimeout(() => document.querySelector(`[data-cmd-ouvrir="${CSS.escape(id)}"]`)?.focus(), 0);
+  }
 }
 
 function bindBonsCommandeUi() {
@@ -3691,14 +3767,14 @@ function bindBonsCommandeUi() {
       const currentOrderId = document.querySelector('#bdc-detail-modal[aria-hidden="false"]')
         ? findOrderIdForClient(bdcState.editingClientId) : null;
       // Re-render le modal avec mode edition
-      const order = (orders || []).find(o => String(o.clientId) === String(bdcState.editingClientId));
+      const order = commandeDuDetail(bdcState.editingClientId);
       if (order) openBdcDetail(order.id);
       return;
     }
 
     // Cancel edition
     if (event.target.closest('[data-action="bdc-cancel-edit"]')) {
-      const order = (orders || []).find(o => String(o.clientId) === String(bdcState.editingClientId));
+      const order = commandeDuDetail(bdcState.editingClientId);
       bdcState.editingClientId = null;
       if (order) openBdcDetail(order.id);
       return;

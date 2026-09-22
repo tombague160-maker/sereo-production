@@ -1222,8 +1222,8 @@ const ROLES = {
       "journee",
       "preparation",
       "stock",
-      "bons-commande",
-      "commandes-jour",
+      // Les listes de commandes n'en font plus qu'une (planches 13c/14c).
+      "commandes",
       "recommande"
     ],
     peutEcrire: true,
@@ -1231,7 +1231,7 @@ const ROLES = {
   },
   livreur: {
     libelle: "Livreur",
-    onglets: ["journee", "livreur", "commandes-jour", "commandes-livrees"],
+    onglets: ["journee", "livreur", "commandes"],
     peutEcrire: true,
     administration: false
   }
