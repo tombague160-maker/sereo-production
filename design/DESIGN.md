@@ -1578,6 +1578,42 @@ Ferrand, cadre de santé », « entrée de service ») — le modèle client n'a
 les notes, besoins et produits préférés s'affichent à leur place. Les pilules font
 44 px (la planche : 40), la charte l'exige.
 
+### Abonnements des planches 13a/14a, posé le 23/09 — un tableau, les 90 jours
+
+**Au bureau** (≥ 921 px) : à gauche (7 colonnes), les pilules Tous / Actifs / En pause, le
+tri « Prochaine livraison » ou « Client », et **une** carte-tableau : Client (nom et
+panier « 3 changes molletonnés L, 2 alèses »), Fréquence, Prochaine (« Mer. 23 sept. », ou
+« Échue le 12 sept. » en alerte), État. À droite (5 colonnes), **« Les 90 jours »** :
+l'horizon que le serveur calcule déjà, groupé par semaine (« Semaine du 21 septembre ·
+3 »), deux semaines visibles et « Les N semaines suivantes ». Chaque échéance porte son
+geste (« Créer la commande », ou le statut de la commande déjà créée). Sous-titre :
+« 6 actifs · 1 en pause · 2 échéances en retard ».
+
+**Au téléphone** : la ligne de la charte ne change pas (disque d'état, nom, « ville ·
+fréquence », badge) ; le détail s'ouvre toujours dans le sheet. Les planches mobiles 3a–3c
+viendront avec le lot mobile.
+
+**Remplacés** : le calendrier d'une semaine (et sa navigation) et « Rappels à traiter »
+fusionnent dans « Les 90 jours » — la planche le décide. **Gardés** : la recherche (dans
+l'en-tête), le sheet de détail et ses actions, l'éditeur.
+
+**Écarts assumés** :
+
+- pas d'opacité sur la ligne en pause (la planche : 0,78) — composée sur blanc, elle
+  donnait **3,70:1** au nom et **3,29:1** au panier, sous le seuil ; le badge dit « En
+  pause » ;
+- « Arrêté », que la planche ne dessine pas, prend le badge neutre (surface basse) : sans
+  le disque, il avait les couleurs d'« Actif » ;
+- « Créer la commande » fait 44 px (la planche : 36) ;
+- pas de « Depuis le 4 sept. » sur une ligne en pause : aucun champ ne date la pause ;
+- la fréquence garde les libellés de l'application (« Toutes les 2 semaines ») plutôt que
+  « Tous les 15 j » / « Mensuel » : un seul vocabulaire entre la ligne, le sheet et
+  l'éditeur ;
+- entre 921 et 1280 px, l'agenda passe sous le tableau (colonnes fixes de 420 px).
+
+Le badge « En pause » prend le texte principal appuyé de la planche (**7,04:1**) au lieu
+de l'avertissement (4,45:1, sous le seuil).
+
 ## 10. Guide pour l'agent
 
 - Toujours produire les deux modes (clair et sombre) avec les mêmes tokens ; lister les contrastes calculés.
