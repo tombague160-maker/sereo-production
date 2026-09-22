@@ -89,7 +89,7 @@ export const titles = {
     subtitle: "Contrôle le stock, prépare les commandes et les envoie en livraison."
   },
   livreur: {
-    title: "Livraison",
+    title: "Tournée",
     subtitle: "Filtre par date et secteur, crée la tournée et suit les clients."
   },
   "bons-commande": {

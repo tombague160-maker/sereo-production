@@ -598,6 +598,15 @@ function bindUi() {
     // d'import, lui, ne bouge pas : le bouton ouvre simplement son selecteur
     // de fichier. Deux chemins vers un seul mecanisme, pas deux mecanismes.
     if (action === "cli-nouveau") ouvrirDialogueClient();
+    // « Nouvelle tournee » : la planification, ouverte et montree.
+    if (action === "trn-nouvelle") {
+      const planification = document.getElementById("routePlanning");
+      if (planification) {
+        planification.open = true;
+        planification.scrollIntoView({ block: "start", behavior: "smooth" });
+        planification.querySelector("summary")?.focus({ preventScroll: true });
+      }
+    }
     if (action === "cmd-client-effacer") {
       Object.assign(commandesFiltre, { client: "", clientNom: "", page: 1 });
       renderCommandes();
@@ -809,6 +818,7 @@ function showTab(tabName, options = {}) {
   if (nextTab === "stock") majSousTitreStock();
   if (nextTab === "crm") majSousTitreClients();
   if (nextTab === "abonnements") majSousTitreAbonnements();
+  if (nextTab === "livreur") majEnteteTournee();
 
   updateCustomerCartBar();
 
@@ -6182,6 +6192,19 @@ function notify(message, type = "info") {
 /** Le statut de tournee vu la derniere fois : la planification ne se replie qu'au CHANGEMENT. */
 let dernierStatutDeTournee = null;
 
+// Planche 13b : le titre de page est la tournee, le sous-titre son jour et
+// son avancement. Sans tournee, le titre generique de l'onglet reste.
+function majEnteteTournee() {
+  if (!document.getElementById("livreur")?.classList.contains("active")) return;
+  if (!activeRoute?.stops?.length) return;
+  const total = activeRoute.stops.length;
+  const rang = isRouteComplete(activeRoute) ? total : Math.min(activeStopIndex + 1, total);
+  setText("pageTitle", document.getElementById("tourneeNom")?.textContent || "Tournée");
+  const jour = document.getElementById("tourneeJour")?.textContent || "";
+  setText("pageSubtitle", [jour, isRouteComplete(activeRoute) ? "tournée terminée" : `arrêt ${rang} sur ${total}`]
+    .filter(Boolean).join(" · "));
+}
+
 function updateRouteProgress() {
   const element = document.getElementById("routeProgress");
   if (!element) return;
@@ -6217,6 +6240,7 @@ function updateRouteProgress() {
     element.setAttribute("aria-label", `Arrêt ${rang} sur ${total}, ${faits} terminé${faits > 1 ? "s" : ""}`);
     if (barre) barre.style.width = `${Math.round((faits / total) * 100)}%`;
     if (depart) depart.hidden = activeRoute.status !== "prete";
+    majEnteteTournee();
     return;
   }
 

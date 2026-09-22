@@ -1626,6 +1626,28 @@ l'alerte du tableau de bord comptent la même chose.
 Le badge « En pause » prend le texte principal appuyé de la planche (**7,04:1**) au lieu
 de l'avertissement (4,45:1, sous le seuil).
 
+### Tournée des planches 13b/14b, posé le 23/09 — la carte à gauche
+
+**Au bureau** (≥ 1181 px) : la grille « 60 / 40 » de la planche — la carte à gauche
+(3 fr), pleine hauteur d'écran (une hauteur **explicite**, que Leaflet connaît au moment du
+rendu) ; à droite (2 fr) l'arrêt en cours puis la liste des arrêts ; la planification et les
+commandes prêtes dessous, pleine largeur. Sans tournée, la planification passe en tête.
+Le **titre de page** est la tournée (« Tournée Besançon ») et le sous-titre son jour et son
+avancement (« Mercredi 16 septembre · arrêt 3 sur 8 »). « Nouvelle tournée » (ouvre la
+planification, repliée pendant la livraison) et « Recalculer le tracé » sont dans
+l'en-tête. Sur la carte, ni titre ni légende. Sous 1181 px : l'écran du téléphone, empilé.
+
+**Gardés, hors planche** : Appeler, Itinéraire, « Autres actions » (à reprogrammer,
+planifier la suite, suivant) — ils existent et servent sur la route.
+
+**Décisions du 19/09 maintenues contre la planche** (elles sont testées et datées) :
+
+- les flèches de réordonnancement ne s'affichent que sur une tournée **prête**, pas sur
+  une tournée qui roule (la planche les montre en livraison) ;
+- les marqueurs de carte gardent 34 / 28 px et le tracé 4,5 px (la planche : 44 et 7) ;
+- pas de distance par arrêt ni de « km restants » : la planche ne dit pas de quoi c'est la
+  distance, et rien ne la calcule côté navigateur.
+
 ## 10. Guide pour l'agent
 
 - Toujours produire les deux modes (clair et sombre) avec les mêmes tokens ; lister les contrastes calculés.

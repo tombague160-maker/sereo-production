@@ -11795,3 +11795,42 @@ textarea::placeholder {
   min-height: 44px; height: 44px; padding: 0 14px; cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 600;
 }
 #abonnements button.abo-badge--commande:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* ==========================================================================
+   TOURNEE -- planches 13b (clair) / 14b (sombre), au bureau.
+   La carte a gauche (3 fr), la tournee a droite (2 fr) : l'arret en cours,
+   puis la liste. La planification et les commandes pretes restent dessous.
+   Gardes, hors planche (ils existent) : Appeler, Itineraire, « Autres
+   actions ». Les marqueurs, le trace et les fleches de reordonnancement
+   gardent les decisions du 19/09 (DESIGN.md).
+   ========================================================================== */
+.ecran-entete .trn-recalculer { display: inline-flex; align-items: center; gap: 8px; }
+@media (min-width: 1181px) {
+  #livreur .driver-page {
+    max-width: none;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    grid-template-areas: "carte tournee" "carte liste" "plan plan" "cand cand" "legacy legacy";
+    gap: 24px;
+    align-items: start;
+  }
+  #livreur .driver-page.sans-tournee {
+    grid-template-areas: "plan plan" "cand cand" "carte liste" "legacy legacy";
+  }
+  #livreur .driver-page > #tourneeActive { grid-area: tournee; }
+  #livreur .driver-page > .tournee-liste-panel { grid-area: liste; }
+  #livreur .driver-page > .tournee-carte-panel { grid-area: carte; align-self: stretch; }
+  #livreur .driver-page > #routePlanning { grid-area: plan; }
+  #livreur .driver-page > .delivery-candidates-panel { grid-area: cand; }
+  #livreur .driver-page > .legacy-driver-panel { grid-area: legacy; }
+  #livreur .driver-page > * { order: 0; min-width: 0; }
+  /* La carte prend la hauteur de l'ecran : une hauteur EXPLICITE, que Leaflet
+     connait au moment du rendu (une piste qui ne se dimensionne qu'apres un
+     reflow rejouait le defaut des marqueurs a 100 000 px). */
+  #livreur .tournee-carte-panel #map { height: clamp(520px, calc(100vh - 200px), 880px); border-radius: 36px; }
+  #livreur .tournee-carte-panel { padding: 0; overflow: hidden; }
+  /* Sur la carte, la planche ne met ni titre ni legende : les marqueurs se
+     lisent dans la liste d'a cote. La legende reste dans le DOM (mobile). */
+  #livreur .tournee-carte-panel > .panel-heading { display: none; }
+  /* Le recalcul est dans l'en-tete ; le titre de page dit la tournee. */
+  #livreur .tournee-liste-panel .trn-recalculer-panneau { display: none; }
+}

@@ -366,6 +366,14 @@
               <svg class="icon button-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg>
               <span>Nouvel abonnement</span>
             </button>
+            <!-- Tournee (planche 13b) : « Nouvelle tournee » ouvre la planification
+                 (l'action existe, repliee pendant la livraison) ; « Recalculer le
+                 trace » remonte du panneau. -->
+            <button class="button secondary trn-nouvelle" type="button" data-ecran="livreur" data-action="trn-nouvelle" hidden>Nouvelle tournée</button>
+            <button class="button secondary trn-recalculer" type="button" data-ecran="livreur" data-op="recalculate-route" hidden>
+              <svg class="icon button-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+              <span>Recalculer le tracé</span>
+            </button>
             <button class="button secondary cmd-export" type="button" data-ecran="commandes" data-action="cmd-export" hidden>Exporter en CSV</button>
             <button class="button primary cmd-nouvelle" type="button" data-ecran="commandes" data-action="go-tab" data-target-tab="commande-client" hidden>
               <svg class="icon button-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg>
@@ -1041,7 +1049,7 @@
         <h3>Son rythme de livraison</h3><div class="op-form-grid"><label>Première livraison<input id="subStart" type="date" required></label><label>Fréquence<select id="subFrequency"><option value="7">Chaque semaine · même jour</option><option value="14">Toutes les 2 semaines · même jour</option><option value="10">Tous les 10 jours</option><option value="15">Tous les 15 jours</option><option value="21">Toutes les 3 semaines · même jour</option><option value="28">Toutes les 4 semaines · même jour</option><option value="monthly">Tous les mois · même date</option><option value="custom">Nombre de jours personnalisé</option></select></label><label id="subCustomWrap" hidden>Nombre de jours<input id="subCustom" type="number" min="1" max="366" value="10"></label><label>Rappel avant livraison (jours)<input id="subReminder" type="number" min="0" max="60" required value="7"></label><label>Statut<select id="subStatus"><option value="active">Actif</option><option value="paused">En pause</option><option value="cancelled">Arrêté</option></select></label></div>
         <p id="subScheduleHint" class="muted"></p><label>Notes de livraison<textarea id="subNotes" rows="2" maxlength="2000" placeholder="Digicode, consignes, horaire préféré…"></textarea></label><p class="muted">Les modifications s’appliquent aux prochaines échéances. Les commandes déjà créées restent à gérer dans Commandes, filtre « Planifiées ».</p><p id="subError" class="op-error" role="alert"></p><div class="op-dialog-footer"><button class="button secondary" type="button" data-op="close-sub">Annuler</button><button id="subSave" class="button primary" type="submit">Enregistrer l’abonnement</button></div>
       </form></dialog>
-      <section id="livreur" class="page" role="tabpanel" aria-labelledby="tab-livreur">
+      <section id="livreur" class="page" role="tabpanel" aria-label="Tournée">
         <div class="driver-page">
 
           <!-- L'ARRET EN COURS D'ABORD (planche Main.png). Sur la route, c'est
@@ -1099,15 +1107,15 @@
             </div>
           </div>
 
-          <div class="panel">
+          <div class="panel tournee-liste-panel">
             <div class="panel-heading">
               <h3>Ordre de tournée</h3>
-              <span id="routeMetrics" class="muted">Distance estimée indisponible.</span><button class="button secondary" type="button" data-op="recalculate-route">Recalculer le tracé</button>
+              <span id="routeMetrics" class="muted">Distance estimée indisponible.</span><button class="button secondary trn-recalculer-panneau" type="button" data-op="recalculate-route">Recalculer le tracé</button>
             </div>
             <div id="routeStopsList" class="route-stops"></div>
           </div>
 
-          <div class="panel">
+          <div class="panel tournee-carte-panel">
             <div class="panel-heading">
               <h3>Carte tournée</h3>
               <span class="muted">Trajet routier · départ → clients → arrivée</span>
