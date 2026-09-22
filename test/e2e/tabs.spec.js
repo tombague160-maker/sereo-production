@@ -124,7 +124,11 @@ test.describe("Parcours complet des onglets", () => {
       expect(ouvert, `l'entree ${entree} n'ouvre aucun ecran`).toBeTruthy();
       atteints.add(ouvert);
 
-      const pilules = await page.locator("#sousOnglets [data-tab]")
+      // Seules les pilules d'une rangee VISIBLE sont des chemins. Un groupe d'un
+      // seul ecran rend quand meme sa pilule, masquee, pour porter le nom
+      // accessible de la page ; elle n'est pas un chemin, et l'entree de la
+      // barre qui mene a cet ecran est deja comptee juste au-dessus.
+      const pilules = await page.locator("#sousOnglets:not([hidden]) [data-tab]")
         .evaluateAll(els => els.map(el => el.dataset.tab));
       for (const onglet of pilules) {
         await page.locator(`#tab-${onglet}`).click();

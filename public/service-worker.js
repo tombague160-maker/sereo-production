@@ -1,8 +1,12 @@
 // IMPORTANT : bumper CACHE_NAME a chaque modification d'un fichier d'APP_SHELL.
-// Sans bump, l'ancienne version reste servie depuis le cache indefiniment —
-// notamment manifest.webmanifest, dont une version perimee casse l'installation
-// sur l'ecran d'accueil sans aucun message d'erreur.
-const CACHE_NAME = "sereo-shell-20260918-badges";
+// Ce qui se passe SANS bump, verifie dans le code le 22/09 : les ressources
+// statiques sont servies RESEAU D'ABORD (handler fetch, en bas), donc un
+// utilisateur EN LIGNE recoit toujours la nouvelle version. Le cache n'est
+// qu'un repli hors ligne -- et c'est la qu'un oubli de bump laisse d'anciennes
+// copies, que le livreur en tournee sans reseau continuerait de recevoir.
+// (Ce commentaire disait « servie depuis le cache indefiniment », ce qui ne
+//  correspond plus a la strategie reseau-d'abord.)
+const CACHE_NAME = "sereo-shell-20260922-barre-laterale";
 const API_CACHE_NAME = "sereo-api-20260514";
 const APP_SHELL = [
   "/css/style.css",
