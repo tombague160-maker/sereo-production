@@ -10166,3 +10166,66 @@ textarea::placeholder {
   color: var(--bl-secondaire);
   opacity: 1;
 }
+
+/* ==========================================================================
+   FINITIONS DE LA BARRE LATERALE -- relevees avant la publication de la v1.34.0.
+   Chaque regle ci-dessous repond a un defaut MESURE a l'ecran, et chacune a
+   un banc (barre-laterale-finitions.spec.js) qui rougissait avant elle.
+   ========================================================================== */
+
+/* 1. Entre 821 et 920 px, EN CLAIR, la page passait en une colonne : deux
+      surcharges du mode clair le font des 920 px, alors que le bandeau et la
+      barre d'onglets n'arrivent qu'a 820. Entre les deux, la barre occupait
+      tout un ecran (900 x 800) et le contenu commencait 800 px plus bas. Un
+      telephone tenu a l'horizontale (844 px) tombe dans cette plage.
+      Le mode sombre, lui, gardait la disposition bureau, et tous les bancs la
+      valident : on aligne le clair sur lui plutot que d'inventer un troisieme
+      comportement. */
+@media (min-width: 821px) and (max-width: 920px) {
+  :root[data-color-scheme="light"] .app {
+    display: grid;
+    grid-template-columns: var(--bl-largeur) minmax(0, 1fr);
+  }
+}
+
+/* 2. La barre a une hauteur d'ecran et un contenu d'environ 734 px. Sous cette
+      hauteur (un portable 1280 x 720), ses blocs se compressaient : le bloc
+      compte tombait de 64 a 50 px, rogne sous son propre contenu. Aucun bloc
+      ne se comprime plus ; c'est la barre qui defile. */
+.sidebar > * {
+  flex-shrink: 0;
+}
+
+@media (min-width: 821px) {
+  .sidebar {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--bl-champ) transparent;
+  }
+}
+
+/* 3. Sur telephone, le bandeau reprend l'etage qu'il avait en v1.33.0 (950).
+      La barre de bureau n'a besoin que de 40 ; le bandeau, lui, doit rester
+      au-dessus des volets de la carte Leaflet (400) s'il vient a coller. */
+@media (max-width: 820px) {
+  .sidebar {
+    z-index: 950;
+  }
+}
+
+/* 4. L'anneau de focus de la barre. Sa regle (0,3,0) perdait contre une
+      regle generique du mode clair, « :root[data-color-scheme="light"]
+      button:focus-visible » (0,3,1) : l'anneau prevu n'etait pas applique, et
+      l'anneau sombre qui le remplacait tombe a 2,44:1 sur le vert. Le :root
+      en tete lui donne (0,4,0). */
+:root .sidebar :is(button, input, [tabindex]):focus-visible {
+  outline: 2px solid var(--bl-secondaire);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+/* 5. La pastille « A jour » n'etait qu'un texte : elle doit pouvoir se taire. */
+.sidebar-version-etat[hidden] {
+  display: none;
+}

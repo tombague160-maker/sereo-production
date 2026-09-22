@@ -206,13 +206,10 @@ function renderSousOnglets(nomOnglet) {
   const rangee = document.getElementById("sousOnglets");
   if (!rangee) return;
   const onglets = GROUPES_NAV[groupeDeLOnglet(nomOnglet)] || [];
-  // Un groupe d'un seul ecran n'apprendrait rien : la rangee reste absente
-  // plutot que d'afficher une pilule unique et toujours active.
-  if (onglets.length < 2) {
-    rangee.innerHTML = "";
-    rangee.hidden = true;
-    return;
-  }
+  // La rangee est reconstruite a chaque changement d'ecran. Si le focus y
+  // etait, le bouton qui le portait va disparaitre : sans rien faire, le focus
+  // retomberait sur <body> et Tab repartirait du haut de la page.
+  const avaitLeFocus = rangee.contains(document.activeElement);
   rangee.innerHTML = onglets.map(onglet => {
     const actif = onglet === nomOnglet;
     // L'identifiant « tab-<onglet> » vit ICI et nulle part ailleurs : c'est lui
@@ -223,7 +220,14 @@ function renderSousOnglets(nomOnglet) {
       + ` data-tab="${onglet}" data-action="go-tab" data-target-tab="${onglet}">`
       + `${escapeHtml(titles[onglet]?.title || onglet)}</button>`;
   }).join("");
-  rangee.hidden = false;
+  // Un groupe d'un seul ecran n'apprendrait rien : la rangee reste MASQUEE.
+  // Mais sa pilule est quand meme rendue, parce que c'est elle qui porte
+  // l'identifiant « tab-<onglet> » que vise l'aria-labelledby de la page :
+  // sans elle, le Tableau de bord, la Preparation, la Tournee et les
+  // Abonnements n'avaient plus de nom accessible. Un element masque peut
+  // nommer un autre element ; un element absent, non.
+  rangee.hidden = onglets.length < 2;
+  if (avaitLeFocus && !rangee.hidden) rangee.querySelector('[aria-selected="true"]')?.focus();
 }
 
 /**
@@ -240,7 +244,9 @@ function renderCompteBarreLaterale() {
   if (!nom || !role || !avatar) return;
   const identifiant = String(moi?.identifiant || "").trim();
   nom.textContent = identifiant || "Session locale";
-  role.textContent = moi?.roleLibelle || (moi ? libelleRole(moi.role) : "\u2026");
+  // Tant que /api/me n'a pas repondu, et s'il echoue (le livreur hors ligne),
+  // on n'affiche rien plutot qu'un « ... » qui promet une reponse a venir.
+  role.textContent = moi?.roleLibelle || (moi ? libelleRole(moi.role) : "");
   avatar.textContent = (identifiant || "S").charAt(0).toUpperCase();
 }
 
@@ -259,7 +265,7 @@ function renderBadgesNav(compteurs) {
     badge.textContent = nombre > 99 ? "99+" : String(nombre);
     badge.hidden = nombre === 0;
     badge.toggleAttribute("data-alerte", Boolean(alerte) && nombre > 0);
-    badge.setAttribute("aria-label", `${nombre} \u00e0 traiter`);
+    badge.setAttribute("aria-label", `${nombre} à traiter`);
   };
   poser("commandes", compteurs.aTraiter);
   poser("tournee", compteurs.livraisonsDuJour);
@@ -5672,6 +5678,15 @@ async function loadVersionInfo() {
       ? `v${versionInfoCache.version}`
       : "—";
   }
+  // La pastille « A jour » etait ecrite en dur : elle l'affirmait meme quand la
+  // version n'avait pas pu etre lue. /api/version ne connait pas la derniere
+  // version publiee ; elle ne peut donc dire qu'une chose vraie -- la page
+  // tourne sur la version du serveur -- et seulement si elle l'a lue.
+  const etat = document.getElementById("sidebarVersionEtat");
+  if (etat && !swUpdateNotificationShown) {
+    etat.textContent = "À jour";
+    etat.hidden = !versionInfoCache?.version;
+  }
 }
 
 function bindVersionModal() {
@@ -5813,6 +5828,13 @@ let swUpdateNotificationShown = false;
 function showSwUpdateNotification() {
   if (swUpdateNotificationShown) return;
   swUpdateNotificationShown = true;
+  // Une nouvelle version attend un rechargement : la pastille cesse de dire
+  // « A jour », ce qui serait faux, et le dit.
+  const etat = document.getElementById("sidebarVersionEtat");
+  if (etat) {
+    etat.textContent = "Mise à jour";
+    etat.hidden = false;
+  }
   try {
     if (document.getElementById("sw-update-toast")) return;
     const toast = document.createElement("div");
