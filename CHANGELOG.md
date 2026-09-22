@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.35.0](https://github.com/tombague160-maker/sereo-production/compare/v1.34.0...v1.35.0) (2026-09-22)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **v8:** le tableau de bord des planches 6a/6b, sans barre du haut ([056f475](https://github.com/tombague160-maker/sereo-production/commit/056f475ec2eb522e72adef037441a5177e87084d))
+
 ## [1.34.0](https://github.com/tombague160-maker/sereo-production/compare/v1.33.0...v1.34.0) (2026-09-22)
 
 
