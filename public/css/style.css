@@ -11834,3 +11834,19 @@ textarea::placeholder {
   /* Le recalcul est dans l'en-tete ; le titre de page dit la tournee. */
   #livreur .tournee-liste-panel .trn-recalculer-panneau { display: none; }
 }
+
+/* --- Tournee : la relecture ------------------------------------------------
+   Sous 1181 px c'est l'ecran du telephone : ni « Nouvelle tournee » ni le
+   second « Recalculer » dans l'en-tete (le panneau garde le sien). */
+@media (max-width: 1180px) {
+  .ecran-entete .trn-nouvelle, .ecran-entete .trn-recalculer { display: none; }
+}
+@media (min-width: 1181px) {
+  /* La carte a SA hauteur : etiree sur deux rangees, elle laissait une bande
+     vide sous elle, ou ouvrait un vide entre l'arret et la liste. */
+  #livreur .driver-page > .tournee-carte-panel { align-self: start; }
+  #livreur .tournee-carte-panel #map { border: 0; }
+}
+/* Un titre de page long (« Tournee Saint-Martin-de-Belleville ») se coupe
+   proprement au lieu de deborder. */
+.ecran-entete-texte h2 { overflow: hidden; text-overflow: ellipsis; max-width: 100%; }

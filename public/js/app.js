@@ -220,8 +220,12 @@ function libellesDuGroupe(groupe) {
     ...Object.keys(ECRANS_SECONDAIRES).filter(onglet => ECRANS_SECONDAIRES[onglet] === groupe),
     ...Object.keys(REDIRECTIONS).filter(onglet => groupeDeLOnglet(REDIRECTIONS[onglet].onglet) === groupe)
   ];
-  return ecrans.map(onglet => titles[onglet]?.title || "");
+  // Et les noms que les ecrans portaient AVANT les planches V8 : « livraison »
+  // doit encore trouver la Tournee, « CRM » les Clients.
+  return [...ecrans.map(onglet => titles[onglet]?.title || ""), ...(ANCIENS_NOMS[groupe] || [])];
 }
+
+const ANCIENS_NOMS = { tournee: ["Livraison"], clients: ["CRM"], stock: ["Inventaire"] };
 
 function renderSousOnglets(nomOnglet) {
   const rangee = document.getElementById("sousOnglets");
@@ -6196,12 +6200,21 @@ let dernierStatutDeTournee = null;
 // son avancement. Sans tournee, le titre generique de l'onglet reste.
 function majEnteteTournee() {
   if (!document.getElementById("livreur")?.classList.contains("active")) return;
-  if (!activeRoute?.stops?.length) return;
+  // Sans tournee (effacee, remise a zero), le titre generique revient : le
+  // nom d'une tournee disparue ne reste pas en tete de page.
+  if (!activeRoute?.stops?.length) {
+    setText("pageTitle", titles.livreur.title);
+    setText("pageSubtitle", titles.livreur.subtitle);
+    return;
+  }
   const total = activeRoute.stops.length;
   const rang = isRouteComplete(activeRoute) ? total : Math.min(activeStopIndex + 1, total);
   setText("pageTitle", document.getElementById("tourneeNom")?.textContent || "Tournée");
   const jour = document.getElementById("tourneeJour")?.textContent || "";
-  setText("pageSubtitle", [jour, isRouteComplete(activeRoute) ? "tournée terminée" : `arrêt ${rang} sur ${total}`]
+  const etape = isRouteComplete(activeRoute) ? "tournée terminée"
+    : activeRoute.status === "prete" ? `${total} arrêt${total > 1 ? "s" : ""}, prête à partir`
+    : `arrêt ${rang} sur ${total}`;
+  setText("pageSubtitle", [jour, etape]
     .filter(Boolean).join(" · "));
 }
 
@@ -6245,6 +6258,7 @@ function updateRouteProgress() {
   }
 
   if (bloc) bloc.hidden = true;
+  majEnteteTournee();
   if (!route.length || currentIndex < 0) {
     element.textContent = "Aucune tournée";
     return;

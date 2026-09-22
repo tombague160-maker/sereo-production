@@ -34,6 +34,9 @@ test("au bureau : la carte à gauche, l'arrêt puis la liste à droite", async (
   expect(part).toBeGreaterThan(0.55);
   expect(part).toBeLessThan(0.65);
   expect(plan.y).toBeGreaterThan(carte.y + carte.height - 1);
+  // Pas de vide entre l'arret et la liste : la carte n'etire pas les rangees.
+  const panneauListe = await boite(page, ".tournee-liste-panel");
+  expect(panneauListe.y - (arret.y + arret.height)).toBeLessThan(40);
 });
 
 test("les marqueurs sont dans la carte (Leaflet connaît sa taille)", async ({ page }) => {
@@ -84,4 +87,19 @@ test("au téléphone : rien ne déborde", async ({ page }) => {
     .filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.right > window.innerWidth + 0.5 && !e.closest(".leaflet-pane"); })
     .map(e => e.className || e.tagName));
   expect(deborde).toEqual([]);
+});
+
+test("au téléphone, l'en-tête ne porte ni « Nouvelle tournée » ni un second « Recalculer »", async ({ page }) => {
+  await ouvrir(page, 390);
+  await expect(page.locator('#enteteActions [data-action="trn-nouvelle"]')).toBeHidden();
+  const visibles = await page.locator('[data-op="recalculate-route"]').evaluateAll(els => els.filter(e => e.checkVisibility()).length);
+  expect(visibles).toBe(1);
+});
+
+test("« livraison » dans la recherche du menu trouve encore la Tournée", async ({ page }) => {
+  await ouvrir(page);
+  await page.locator("#nav-journee").click();
+  await page.fill("#menuSearch", "livraison");
+  await page.press("#menuSearch", "Enter");
+  await expect(page.locator("#livreur")).toHaveClass(/active/);
 });
