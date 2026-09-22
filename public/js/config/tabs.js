@@ -4,7 +4,25 @@
 // s'y refere pour rejeter une ancre inconnue. MOBILE_OVERFLOW_TABS liste ce qui
 // bascule dans le menu "Plus" sur mobile, la barre basse ne tenant que 4 items.
 
-export const mainTabs = new Set(["abonnements", "journee", "stock", "crm", "commande-client", "commandes-jour", "commandes-planifiees", "relances", "statistiques", "exports", "preparation", "bons-commande", "livreur", "recommande", "commandes-livrees", "parametres"]);
+export const mainTabs = new Set(["abonnements", "journee", "stock", "crm", "commandes", "commande-client", "relances", "statistiques", "exports", "preparation", "livreur", "recommande", "parametres"]);
+
+// LES CINQ LISTES DE COMMANDES FUSIONNENT EN UNE (planche 13c, passation).
+// Les quatre anciens ecrans-listes ne sont plus des ecrans, mais leurs
+// identifiants REDIRIGENT vers l'ecran unique, avec le filtre qui leur
+// correspond : un lien, un favori, un geste code en dur qui visait l'ancien
+// ecran arrive au bon endroit au lieu de retomber sur le tableau de bord.
+export const REDIRECTIONS = {
+  "commandes-jour": { onglet: "commandes", filtre: "a-envoyer" },
+  "commandes-planifiees": { onglet: "commandes", filtre: "planifiees" },
+  "bons-commande": { onglet: "commandes", filtre: "toutes" },
+  "commandes-livrees": { onglet: "commandes", filtre: "livrees" },
+  // L'ancien filtre « A completer » des bons (adresse ou telephone manquant) :
+  // l'alerte « adresses a corriger » du tableau de bord y mene.
+  // Son compte est celui des ADRESSES manquantes sur une commande encore a
+  // faire : la redirection ouvre exactement ce compte-la, pas le filtre plus
+  // large « A completer » (telephone, secteur, commandes livrees).
+  "commandes-a-completer": { onglet: "commandes", filtre: "toutes", completer: "adresse" }
+};
 
 // Tabs accessibles uniquement via le menu "Plus" de la mobile-tabbar (overflow
 // car > 5 destinations). Quand l'utilisateur navigue vers l'une d'elles, le
@@ -35,12 +53,16 @@ export const titles = {
     subtitle: "Charge les dossiers et le stock depuis des fichiers .xlsx."
   },
   stock: {
-    title: "Stock / Inventaire",
+    title: "Stock",
     subtitle: "Ajuste les quantités, contrôle les écarts et repère les produits à surveiller."
   },
   crm: {
-    title: "CRM",
+    title: "Clients",
     subtitle: "Prospects, clients, relances et historique commercial."
+  },
+  commandes: {
+    title: "Commandes",
+    subtitle: "Tous les bons, du terrain à la livraison."
   },
   "commande-client": {
     title: "Commande client",
@@ -119,12 +141,17 @@ export const titles = {
 // celui que l'entree ouvre.
 export const GROUPES_NAV = {
   journee: ["journee"],
-  commandes: ["commandes-jour", "commande-client", "commandes-planifiees", "bons-commande", "commandes-livrees"],
+  commandes: ["commandes"],
   preparation: ["preparation"],
   tournee: ["livreur"],
   abonnements: ["abonnements"],
-  stock: ["stock", "recommande"],
-  clients: ["crm", "relances"],
+  // « A recommander » est une CARTE de l'ecran Stock (planche 13d) ; la liste
+  // detaillee reste un ecran secondaire, atteint par « Tout voir ».
+  stock: ["stock"],
+  // Les rappels ne sont plus un onglet (planche 13e) : le retard d'un
+  // abonnement se lit sur la fiche. La liste des rappels reste un ecran
+  // secondaire, atteint par « Rappels » dans l'en-tete de Clients.
+  clients: ["crm"],
   analyse: ["statistiques", "exports"]
 };
 
@@ -132,11 +159,28 @@ export const GROUPES_NAV = {
 // et le confie a l'engrenage du bloc compte. Il reste un onglet valide.
 export const ONGLETS_HORS_NAV = new Set(["parametres"]);
 
+// Les ecrans SECONDAIRES : un geste de l'ecran principal y mene (un bouton de
+// l'en-tete), pas une pilule. Leur entree de nav reste allumee pendant qu'on y
+// est. « commande-client » est la saisie d'une commande -- le seul chemin de
+// creation de l'application -- et la planche 13c ne lui donne aucune place :
+// une maquette qui ne dessine pas une fonction ne decide pas de la supprimer.
+export const ECRANS_SECONDAIRES = { "commande-client": "commandes", recommande: "stock", relances: "clients" };
+
 // Deux inventaires qui se contredisent en silence, c'est la panne qu'on ne
 // voit qu'a l'usage : un ecran sans chemin, ou une entree qui ouvre du vide.
 // La verification est donc faite au CHARGEMENT du module, pas dans un banc.
 const ongletsGroupes = Object.values(GROUPES_NAV).flat();
-const attendus = [...mainTabs].filter(onglet => !ONGLETS_HORS_NAV.has(onglet));
+const attendus = [...mainTabs].filter(onglet =>
+  !ONGLETS_HORS_NAV.has(onglet) && !(onglet in ECRANS_SECONDAIRES));
+const secondairesSansGroupe = Object.entries(ECRANS_SECONDAIRES)
+  .filter(([, groupe]) => !(groupe in GROUPES_NAV)).map(([onglet]) => onglet);
+const redirectionsMortes = Object.entries(REDIRECTIONS)
+  .filter(([, cible]) => !mainTabs.has(cible.onglet)).map(([onglet]) => onglet);
+if (secondairesSansGroupe.length || redirectionsMortes.length) {
+  throw new Error(
+    `navigation incoherente -- ecran secondaire sans groupe : [${secondairesSansGroupe}] ; redirection vers un ecran absent : [${redirectionsMortes}]`
+  );
+}
 const orphelins = attendus.filter(onglet => !ongletsGroupes.includes(onglet));
 const inconnus = ongletsGroupes.filter(onglet => !mainTabs.has(onglet));
 if (orphelins.length || inconnus.length) {

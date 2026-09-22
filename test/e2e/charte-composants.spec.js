@@ -106,7 +106,9 @@ for (const vue of ["desktop", "mobile"]) {
       //    personne ne voit.
       // La pilule du mois (planche 6a) est une enveloppe comme les deux autres :
       // c'est elle qui porte le fond, la hauteur et le rayon, pas le <select>.
-      const enveloppe = e => e.closest(".topbar-search, .sidebar-search, .tb-pilule-mois") || e;
+      // La recherche et le tri de Commandes (planche 13c) sont eux aussi des
+      // pilules de 44 px : l'enveloppe porte la forme.
+      const enveloppe = e => e.closest(".topbar-search, .sidebar-search, .tb-pilule-mois, .cmd-recherche, .cmd-tri") || e;
       const vus = new Set();
       const out = [];
       for (const e of document.querySelectorAll(
@@ -123,7 +125,7 @@ for (const vue of ["desktop", "mobile"]) {
           h: Math.round(b.height),
           rayon: Math.round(parseFloat(cs.borderTopLeftRadius) || 0),
           multi: cible.tagName === "TEXTAREA",
-          pilule: cible.classList.contains("sidebar-search") || cible.classList.contains("tb-pilule-mois")
+          pilule: ["sidebar-search", "tb-pilule-mois", "cmd-recherche", "cmd-tri"].some(c => cible.classList.contains(c))
         });
       }
       return out;
@@ -248,11 +250,11 @@ test("charte §4 — les PILULES DE FILTRE sont des pilules de 44 px", async ({ 
   //    mesure ne dit aujourd'hui si la rangee deborde. Nomme, pas fait a moitie.
   test.setTimeout(180000);
   const { ctx, page } = await ouvrir(browser, "desktop");
-  await page.evaluate(() => { location.hash = "#bons-commande"; });
+  await page.evaluate(() => { location.hash = "#commandes"; });
   await page.waitForTimeout(900);
 
   const r = await page.evaluate(() =>
-    [...document.querySelectorAll(".bdc-status-filter, .active-filter")]
+    [...document.querySelectorAll("#commandes .cmd-pilules .filtre-pilule")]
       .filter(e => { const b = e.getBoundingClientRect(); return b.width > 10 && b.height > 6; })
       .map(e => ({
         nom: e.textContent.trim().slice(0, 16) || e.className,

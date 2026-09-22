@@ -20,11 +20,8 @@ const { test, expect } = require("./tuiles");
 const TABS = [
   { id: "abonnements", label: "Abonnements" },
   { id: "journee", label: "Tableau de bord" },
+  { id: "commandes", label: "Commandes" },
   { id: "commande-client", label: "Commande client" },
-  { id: "commandes-jour", label: "Commandes du jour" },
-  { id: "commandes-planifiees", label: "Commandes planifiées" },
-  { id: "bons-commande", label: "Bons de commande" },
-  { id: "commandes-livrees", label: "Commandes livrées" },
   { id: "preparation", label: "Préparation" },
   { id: "livreur", label: "Livraison" },
   { id: "stock", label: "Stock" },
@@ -57,7 +54,7 @@ function collectConsoleErrors(page) {
 }
 
 test.describe("Parcours complet des onglets", () => {
-  test("les 15 onglets s'affichent sans erreur console", async ({ page }) => {
+  test("tous les onglets s'affichent sans erreur console", async ({ page }) => {
     const errors = collectConsoleErrors(page);
 
     await page.goto("/");
@@ -128,6 +125,20 @@ test.describe("Parcours complet des onglets", () => {
       // seul ecran rend quand meme sa pilule, masquee, pour porter le nom
       // accessible de la page ; elle n'est pas un chemin, et l'entree de la
       // barre qui mene a cet ecran est deja comptee juste au-dessus.
+      // Un ecran SECONDAIRE (la saisie de commande) s'atteint par une commande
+      // de l'en-tete, pas par une pilule : on la suit aussi.
+      // Et un lien DANS l'ecran, marque data-lien-secondaire (« Tout voir » de
+      // la carte « A recommander ») : meme regle.
+      const secondaires = await page.locator(
+        "#enteteActions [data-target-tab]:not([hidden]), .page.active [data-lien-secondaire][data-target-tab]")
+        .evaluateAll(els => els.map(el => el.dataset.targetTab));
+      for (const onglet of secondaires) {
+        await page.locator(`#enteteActions [data-target-tab="${onglet}"]:not([hidden]), .page.active [data-lien-secondaire][data-target-tab="${onglet}"]`).first().click();
+        await expect(page.locator(`#${onglet}`), `${onglet} par l'en-tete`).toHaveClass(/active/);
+        atteints.add(onglet);
+        await page.locator(`#${entree}`).click();
+      }
+
       const pilules = await page.locator("#sousOnglets:not([hidden]) [data-tab]")
         .evaluateAll(els => els.map(el => el.dataset.tab));
       for (const onglet of pilules) {
@@ -145,5 +156,22 @@ test.describe("Parcours complet des onglets", () => {
 
     const manquants = TABS.map(tab => tab.id).filter(id => !atteints.has(id));
     expect(manquants, `ecrans sans aucun chemin depuis la barre : ${manquants}`).toEqual([]);
+  });
+
+  test("les quatre anciennes listes de commandes redirigent, avec leur filtre", async ({ page }) => {
+    // Un favori, un lien partage ou un geste code en dur qui visait l'ancien
+    // ecran doit arriver sur la liste unique, filtree comme l'ancien ecran.
+    const ATTENDU = {
+      "bons-commande": "toutes",
+      "commandes-livrees": "livrees",
+      "commandes-planifiees": "planifiees",
+      "commandes-jour": "a-envoyer"
+    };
+    for (const [ancien, filtre] of Object.entries(ATTENDU)) {
+      await page.goto(`/#${ancien}`);
+      await expect(page.locator("#commandes"), `${ancien} -> commandes`).toHaveClass(/active/);
+      await expect(page.locator(`[data-cmd-filtre="${filtre}"]`)).toHaveAttribute("aria-pressed", "true");
+      expect(new URL(page.url()).hash).toBe("#commandes");
+    }
   });
 });

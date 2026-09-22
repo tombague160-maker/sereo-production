@@ -360,8 +360,7 @@ test("comptes — portee stricte : admin et bureau voient tout", () => {
 test("comptes — portee stricte : chaque onglet reste atteignable par au moins un role", () => {
   // Garde-fou contre une portee qui rendrait un ecran inaccessible a tous.
   const tousLesOnglets = [
-    "journee", "commande-client", "commandes-jour", "commandes-planifiees",
-    "bons-commande", "commandes-livrees", "preparation", "livreur", "stock",
+    "journee", "commande-client", "commandes", "preparation", "livreur", "stock",
     "recommande", "crm", "relances", "statistiques", "exports", "parametres"
   ];
 
@@ -369,6 +368,21 @@ test("comptes — portee stricte : chaque onglet reste atteignable par au moins 
     const roles = Object.keys(ROLES).filter(role => roleAllowsTabStrict(role, onglet));
     assert.ok(roles.length > 0, `aucun role ne peut atteindre l'onglet ${onglet}`);
   }
+});
+
+test("comptes — portee stricte : chaque onglet nomme par un role existe dans l'application", async () => {
+  // Une portee qui nomme un ecran disparu est muette : le role perd l'ecran
+  // sans qu'aucun banc ne rougisse. C'est arrive quand les cinq listes de
+  // commandes ont fusionne en « commandes ».
+  const { mainTabs } = await import("../public/js/config/tabs.js");
+  for (const [role, definition] of Object.entries(ROLES)) {
+    if (definition.onglets === "*") continue;
+    for (const onglet of definition.onglets) {
+      assert.ok(mainTabs.has(onglet), `le role ${role} nomme l'onglet ${onglet}, absent de l'application`);
+    }
+  }
+  assert.equal(roleAllowsTabStrict("preparateur", "commandes"), true);
+  assert.equal(roleAllowsTabStrict("livreur", "commandes"), true);
 });
 
 test("comptes — isKnownRole distingue les roles declares", () => {

@@ -1409,6 +1409,175 @@ commandes livrées, dont l'adresse ne servira plus.
 bord mobile **son propre en-tête**, un bloc vert aux coins bas arrondis, et des
 libellés de barre basse non abrégés (« Préparer », « Abonnements »). Hors de ce lot.
 
+### Commandes des planches 13c/14c, posé le 22/09 — cinq listes, un tableau
+
+La passation : « **les cinq listes fusionnent en une** ». Un seul écran, `#commandes` :
+un tableau de six colonnes (Numéro, Date, Client, Secteur, Articles, Statut), des
+pilules de **statut**, une case « Bloquées seulement », un tri, une recherche locale
+qui va jusqu'au **produit** (l'ancienne ne cherchait que le numéro et le client),
+l'export CSV du filtre courant, une pagination côté navigateur (la passation la
+classe « inventée » faute de pagination serveur ; `/api/orders` rend tout, il suffit
+de découper). Aucun travail serveur.
+
+**Ce que la fusion ne devait pas perdre, et où c'est passé** :
+
+| Ancien écran | Son geste | Aujourd'hui |
+|---|---|---|
+| Commandes du jour | envoyer en préparation, **par lot** | pilule « À envoyer » : une colonne de choix et le bouton « Envoyer en préparation » |
+| Commandes planifiées | confirmer / annuler | le détail de la ligne (le modal existant) porte les deux boutons |
+| Commandes livrées | le détail produit ligne à ligne | le détail de la ligne |
+| Bons de commande | liste, recherche, export | le tableau lui-même |
+| Commande client | **créer** une commande — le seul chemin de l'application | un écran secondaire, atteint par « Nouvelle commande » dans l'en-tête ; l'entrée Commandes reste allumée |
+
+**Un écart avec la planche, qui comble un trou de la planche** : une septième pilule,
+« À envoyer ». Le statut des commandes terrain (`commande_client_validee`) n'était sous
+**aucune** des six pilules dessinées — et son geste n'avait plus de place.
+
+**Les anciens identifiants ne meurent pas** : `#bons-commande`, `#commandes-jour`,
+`#commandes-planifiees`, `#commandes-livrees` **redirigent** vers l'écran unique, filtré
+comme l'ancien écran, et l'adresse est réécrite en `#commandes`. Un favori, un lien, un
+`showTab("…")` codé en dur arrivent au bon endroit. La recherche du menu les trouve encore
+sous leur ancien nom. `config/tabs.js` refuse de charger si une redirection vise un
+écran absent.
+
+Précédent / Suivant font 44 px et non 36 : la planche les invente, la charte exige 44.
+
+**Trois outils de l'ancien écran que la planche ne dessine pas, gardés** (règle : ce qui
+existe et n'est pas dessiné est gardé, dans l'idiome de la planche, et nommé) :
+
+- le **jour** des commandes terrain, dans la barre « À envoyer » (aujourd'hui par défaut).
+  Sans lui, « Tout sélectionner » envoyait aussi une commande d'un jour passé, gardée
+  exprès. La barre reste visible même quand le jour est vide, parce que c'est elle qui
+  permet d'en choisir un autre ;
+- la case **« À compléter »** : adresse, téléphone ou secteur manquant, même règle que
+  l'ancien écran (`bdcNeedsCompletion`). L'alerte « adresses à corriger » du tableau de
+  bord y mène, par la redirection `#commandes-a-completer` ;
+- la période **Du / Au**, qui borne la liste **et** l'export. Sans elle, on ne pouvait
+  plus exporter un mois.
+
+- le **secteur**, en pilule de sélection à côté du tri : sans lui, plus d'export par
+  secteur.
+
+La sélection ne garde que ce qui est à l'écran : une recherche ou un changement de jour
+retire les commandes masquées, pour qu'aucune ne parte sans avoir été vue. « Tout
+sélectionner » coche la **page** (« … sur la page » quand il y en a plusieurs).
+
+La période borne la date de **commande**, comme l'ancien export et comme la colonne
+« Date commande » du CSV — même pour une planifiée, dont la ligne montre la date de
+livraison.
+
+L'alerte « N adresses à corriger » du tableau de bord ouvre **exactement** son compte
+(adresse ou ville manquante sur une commande ni livrée ni annulée), et la case se lit
+alors « Adresses à corriger ». La case cochée à la main garde la règle plus large de
+l'ancien écran.
+
+Une redirection (une saisie qui renvoie vers « À envoyer », un ancien lien) arrive sur une
+liste **propre** : « Bloquées seulement », la recherche, la période, le secteur et le jour
+sont remis à zéro. Sinon la commande qu'on vient de saisir pouvait être cachée.
+
+Le détail suit la commande **affichée** : « Modifier le profil » puis « Annuler » y revient,
+au lieu de rouvrir la première commande du même client. Il prend le focus à l'ouverture et
+le rend à la ligne à la fermeture ; cocher une ligne au clavier garde le focus sur la case.
+
+**Dette nommée** : les anciennes sections (`#commandes-jour`, `#commandes-planifiees`,
+`#bons-commande`, `#commandes-livrees`) restent dans la page, inatteignables, et se
+dessinent encore. Les retirer touche leurs rendus et leurs bancs : un lot à part.
+
+**Portées de rôles** (dormantes tant que `SEREO_SEPARATION_ROLES` n'est pas posé) : le
+préparateur et le livreur nommaient les anciennes listes ; ils nomment maintenant
+`commandes`, ce qui leur **élargit** la vue (toutes les commandes, y compris les gestes
+des planifiées). Une liste unique ne se découpe plus par écran ; si la séparation revient,
+c'est un filtre par rôle qu'il faudra, pas une liste d'écrans.
+
+Les gestes d'une commande planifiée (Confirmer, Annuler) sont posés **hors** du corps
+du détail, parce que « Modifier le profil » redessine ce corps. Un geste **ferme** le
+détail, et « Annuler » demande confirmation.
+
+### Stock des planches 13d/14d, posé le 23/09 — une carte, des tuiles, un tableau
+
+La planche fusionne « Stock » et « À recommander » en **un** écran, sans pilule : la carte
+« À recommander » (span 5), les tuiles de catégorie (span 7, trois colonnes), le tableau
+(span 12 : Produit · catégorie, Code, Réservé « N sur commandes », Seuil, Stock, Ajuster
+− / +). Le titre devient « Stock » ; la recherche « Produit ou code » (pilule 280 px) et
+« Importer le stock » passent dans l'en-tête. Le bouton d'en-tête ouvre le sélecteur du
+formulaire de l'accueil et **envoie** le fichier choisi : un mécanisme, deux chemins.
+
+Règles posées là où la planche ne décide pas :
+
+- le badge de la carte est **le même compte** que la pastille de la barre latérale
+  (stock faible + rupture) ; la carte montre les cinq plus en retard sur leur seuil ;
+- une tuile dit, en alerte, combien de ses produits sont sous le seuil, sinon son nombre
+  de références ; son grand nombre reste neutre (la planche n'en donne aucune règle). La
+  pastille alterne froide / tiède par position, comme la planche ;
+- une tuile filtre le tableau, **la même tuile rappuyée rend tout** ; `aria-pressed` le dit ;
+- au-delà de **douze** catégories, les tuiles deviennent des lignes (passation) ;
+- les produits sans catégorie ont leur tuile, « Sans catégorie ».
+
+**Gardés, hors planche** (règle : ce qui existe et n'est pas dessiné est gardé, dans
+l'idiome de la planche, et nommé) :
+
+- la **saisie directe** du stock et l'**édition du seuil**, dans les colonnes Stock et
+  Seuil : des champs qui se lisent comme les valeurs de la planche et se révèlent au
+  survol et au focus. Ce sont les seuls chemins de l'application pour les poser ;
+- le **filtre de statut** (disponible, réservé, faible, rupture, à renseigner), en pilule
+  au-dessus du tableau ;
+- les **mouvements récents** ;
+- l'écran **« À recommander »** détaillé (besoins estimés), devenu écran secondaire : le
+  lien « Tout voir » de la carte y mène, et l'entrée Stock reste allumée.
+
+**Écarts assumés** :
+
+- pas de bouton « Commander » : aucune route ne commande à un fournisseur (les « bons de
+  commande » de l'application sont des commandes clients) ;
+- une seule icône de catégorie : les catégories sont libres, lues dans le fichier, et
+  aucune table ne dit quel dessin va à quel nom. La planche en invente cinq ;
+- pas de tuile d'aide : « Trois colonnes jusqu'à douze catégories ; au-delà, tableau »
+  est une note de la charte, pas un contenu pour l'utilisateur ;
+- le sous-titre ne dit pas « trouvées dans le dernier import » : rien ne rattache les
+  catégories à un import ;
+- les pas − / + font 36 px au bureau, 44 px au téléphone. Aucune planche mobile pour cet
+  écran : sous **1280 px**, la ligne devient une carte à trois rangs, avec « Seuil » et
+  « Stock » écrits devant leur champ (sans en-tête de colonnes, c'étaient deux nombres
+  sans nom). Même chose pour la ligne des Commandes : entre 921 et 1280 px, les colonnes
+  fixes (740 px au Stock, 766 aux Commandes) ne laissaient rien au nom.
+
+« Sous le seuil » veut dire **quantité ≤ seuil**, partout : carte, pastille, écran « À
+recommander » (qui recommande de repasser au-dessus du seuil). Une quantité inconnue
+est « à renseigner », jamais une rupture. « Tout voir » ouvre la liste détaillée sur
+« sous le seuil ». Vider le champ Stock ne met plus le produit à zéro.
+
+### Clients des planches 13e/14e, posé le 23/09 — une liste, une fiche
+
+Liste à gauche (5 fr), fiche à droite (7 fr). Titre « Clients », compte « N clients ·
+N abonnés · N adresses à corriger ». Recherche « Nom, ville, téléphone » et « Nouveau
+client » dans l'en-tête. Pilules : Tous, les secteurs trouvés chez les clients, Abonnés.
+
+- **Ligne** : le nom, puis la ville et la **dernière livraison** (« livrée le 2 sept. »),
+  calculée depuis les commandes livrées déjà chargées dans la page — la passation la
+  classait « inventée, côté serveur » ; elle ne coûte rien côté navigateur. Une adresse
+  qui ne se géocode pas (même prédicat que le serveur : une rue, et un code postal ou une
+  ville) s'écrit en alerte « Adresse à corriger · ville ». Badge Abonné / En pause.
+- **Fiche** : nom, puces (secteur, abonnement), Appeler (`tel:`), Modifier ; Adresse /
+  Contact ; la carte d'abonnement (fréquence, « En retard », panier · rappel · échéance,
+  « Créer la commande » sur la prochaine échéance **sans** commande) ; les quatre
+  dernières commandes, « N depuis janvier », et « Les N autres », qui ouvre la liste des
+  commandes cherchée sur ce client.
+
+**Gardés, hors planche** :
+
+- le **statut commercial** (prospect, actif, à relancer, inactif) : en sélection dans la
+  fiche, et en filtre à côté des pilules (avec « relances du jour / en retard ») ;
+- le **formulaire** de l'ancien écran, dans un dialogue : « Nouveau client » le vide,
+  « Modifier » le pré-remplit — mêmes champs, mêmes noms, POST ou PATCH ;
+- les **rappels commerciaux** : l'écran « Rappels » devient secondaire, atteint par
+  « Rappels · N » dans l'en-tête (N = rappels à faire aujourd'hui ou en retard). La planche
+  ne le dessine pas ; c'est le seul endroit où ils se créent et se ferment.
+
+**Écarts assumés** : pas d'« interlocuteur » ni d'« instruction de livraison » (« Mme
+Ferrand, cadre de santé », « entrée de service ») — le modèle client n'a pas ces champs ;
+les notes, besoins et produits préférés s'affichent à leur place. Les pilules font
+44 px (la planche : 40), la charte l'exige.
+
 ## 10. Guide pour l'agent
 
 - Toujours produire les deux modes (clair et sombre) avec les mêmes tokens ; lister les contrastes calculés.

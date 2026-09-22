@@ -19,11 +19,12 @@ test.describe("Sereo smoke tests", () => {
     await page.goto("/");
     // Le chemin reel de la planche : l'entree Commandes ouvre le groupe, et
     // les cinq listes qu'elle absorbe apparaissent en pilules sous le titre.
+    // Les cinq listes n'en font plus qu'une (planche 13c) : l'entree Commandes
+    // ouvre le tableau unique.
     await page.locator("#nav-commandes").click();
-    await page.locator("#tab-bons-commande").click();
-    await expect(page.locator("#bons-commande")).toHaveClass(/active/);
+    await expect(page.locator("#commandes")).toHaveClass(/active/);
     // Soit on a des cards, soit empty state "Aucune commande"
-    const hasContent = await page.locator("#bons-commande .bdc-card, #bons-commande .empty-state").first().isVisible({ timeout: 5000 });
+    const hasContent = await page.locator("#commandes .cmd-ligne, #commandes .empty-state").first().isVisible({ timeout: 5000 });
     expect(hasContent).toBe(true);
   });
 
@@ -48,14 +49,14 @@ test.describe("Sereo smoke tests", () => {
 
   test("import sans fichier renvoie une erreur user-friendly", async ({ page }) => {
     await page.goto("/");
-    // On clique le bouton "Importer les dossiers" sans avoir choisi de fichier
-    const importBtn = page.locator('button:has-text("Importer les dossiers"), button:has-text("Importer le stock")').first();
-    if (await importBtn.isVisible()) {
-      await importBtn.click();
-      // Notification "Choisis un fichier" apparait
-      await expect(page.locator(".notif, .toast").filter({ hasText: /fichier/i }).first())
-        .toBeVisible({ timeout: 3000 });
-    }
+    // On clique le bouton "Importer les dossiers" sans avoir choisi de fichier.
+    // Par son id : un bouton d'en-tete « Importer le stock » (masque ici) le
+    // precede dans le document, et le « .first() » d'avant sautait le banc.
+    const importBtn = page.locator("#importVentesButton");
+    await expect(importBtn).toBeVisible();
+    await importBtn.click();
+    await expect(page.locator(".notif, .toast").filter({ hasText: /fichier/i }).first())
+      .toBeVisible({ timeout: 3000 });
   });
 
   // v1.17.1 : nouveaux panneaux Parametres (Reglages tournee + Diagnostic dates)

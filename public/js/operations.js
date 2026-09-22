@@ -161,7 +161,7 @@ export function initOperations(api) {
         );
         await context.loadData();
         context.notify(
-          "Commande créée. Confirme-la dans Commandes planifiées pour la préparer.",
+          "Commande créée. Confirme-la dans Commandes, filtre « Planifiées », pour la préparer.",
           "success",
         );
       }
@@ -226,7 +226,9 @@ export function initOperations(api) {
   }
 }
 export function renderOperations(next) {
-  data = next;
+  // Une COPIE : pousser dans next.crmClients ajoutait les fiches archivees au
+  // tableau que l'ecran Clients liste et compte.
+  data = { ...next, crmClients: [...(next.crmClients || [])] };
   // Une fiche archivée reste visible dans l'historique de ses abonnements.
   for (const c of next.subscriptions?.clients || [])
     if (!data.crmClients.some((item) => String(item.id) === String(c.id)))
@@ -239,7 +241,9 @@ function occurrenceCard(item) {
     ? button(
         "view-order",
         h(status(item.orderStatus)),
-        `data-action="go-tab" data-target-tab="commandes-planifiees"`,
+        // « Voir la commande » : une fois confirmee, elle quitte « Planifiees »
+        // -- on ouvre donc toutes les commandes, ou elle se trouve toujours.
+        `data-action="go-tab" data-target-tab="bons-commande"`,
       )
     : button(
         "generate-sub",
@@ -448,7 +452,7 @@ function renderDashboard() {
       titre: `${sansAdresse.length} adresse${sansAdresse.length > 1 ? "s" : ""} à corriger`,
       detail: sansAdresse.slice(0, 2).map((o) => o.clientName).filter(Boolean).join(" · ")
         || "Commandes sans adresse complète",
-      cible: "bons-commande",
+      cible: "commandes-a-completer",
     });
   }
   // Le sous-titre de l'en-tete lit la tuile « En preparation » : il doit etre

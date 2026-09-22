@@ -10885,3 +10885,755 @@ textarea::placeholder {
 .tb-pilule-mois:has(select:focus-visible) {
   box-shadow: var(--focus-ring);
 }
+
+/* ==========================================================================
+   COMMANDES -- planches 13c (clair) / 14c (sombre). Valeurs copiees.
+   Ecart assume : Precedent / Suivant a 44 px et non 36 -- la planche les
+   invente, la charte exige 44 pour une cible tactile.
+   ========================================================================== */
+
+/* La recherche locale et l'export, dans la fente d'en-tete. */
+.cmd-recherche {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: 320px;
+  height: 44px;
+  padding: 0 18px;
+  border-radius: 999px;
+  background: var(--v8-surface);
+  color: var(--v8-texte-secondaire);
+  box-shadow: 0 1px 2px rgba(15, 61, 61, 0.05);
+}
+.cmd-recherche[hidden] { display: none; }
+.cmd-recherche .icon { width: 18px; height: 18px; flex: none; }
+:root[data-color-scheme] .cmd-recherche input,
+:root:not([data-color-scheme]) .cmd-recherche input {
+  flex: 1; min-width: 0; min-height: 0; height: 100%;
+  padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none;
+  color: var(--v8-texte); font: inherit; font-size: 14.5px;
+}
+.cmd-recherche:has(input:focus-visible) { box-shadow: var(--focus-ring); }
+
+:root[data-color-scheme] .ecran-entete .cmd-export,
+:root:not([data-color-scheme]) .ecran-entete .cmd-export {
+  height: 44px; padding: 0 20px; border-radius: 999px;
+  border: 1.5px solid var(--v8-principal); background: transparent;
+  color: var(--v8-principal); font-size: 15px; font-weight: 600;
+}
+.ecran-entete .cmd-nouvelle { display: inline-flex; align-items: center; gap: 8px; height: 44px; }
+
+/* La rangee de filtres : une seule ligne, 8 px entre les elements. */
+.cmd-filtres {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 24px;
+}
+.cmd-filtres .cmd-pilules { margin: 0; flex-wrap: nowrap; }
+:root[data-color-scheme] .cmd-pilules .button.compact.filtre-pilule,
+:root:not([data-color-scheme]) .cmd-pilules .button.compact.filtre-pilule {
+  height: 44px; padding: 0 20px; border-radius: 999px; font-size: 15px; font-weight: 500;
+  background: var(--v8-surface); color: var(--v8-texte-secondaire); border: 0;
+}
+:root[data-color-scheme] .cmd-pilules .button.compact.filtre-pilule.active-filter,
+:root:not([data-color-scheme]) .cmd-pilules .button.compact.filtre-pilule.active-filter {
+  background: var(--v8-principal); color: var(--v8-texte-sur-principal); font-weight: 600;
+}
+.cmd-separateur { width: 1px; height: 28px; margin: 0 6px; background: var(--v8-squelette); flex: none; }
+.cmd-ressort { flex: 1; }
+
+/* La case « Bloquees seulement » : la CIBLE est la pilule entiere (44 px), pas
+   le carre de 20 px. */
+.cmd-case {
+  position: relative;
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 44px; padding: 0 16px; border-radius: 999px;
+  background: var(--v8-surface); color: var(--v8-principal);
+  font-size: 14px; font-weight: 500; cursor: pointer; flex: none;
+}
+.cmd-case input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+.cmd-case-carre {
+  width: 20px; height: 20px; border-radius: 6px; flex: none;
+  box-shadow: inset 0 0 0 2px var(--v8-texte-secondaire);
+}
+.cmd-case input:checked + .cmd-case-carre {
+  background: var(--v8-principal) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m5 12.5 4.5 4.5L19 7.5' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 14px no-repeat;
+  box-shadow: none;
+}
+.cmd-case:has(input:focus-visible) { box-shadow: var(--focus-ring); }
+
+.cmd-tri {
+  display: inline-flex; align-items: center; height: 44px; padding: 0 16px;
+  border-radius: 999px; background: var(--v8-surface); color: var(--v8-principal); flex: none;
+}
+:root[data-color-scheme] .cmd-tri select,
+:root:not([data-color-scheme]) .cmd-tri select {
+  min-height: 0; height: 100%; padding: 0; border: 0; border-radius: 0;
+  background: transparent; box-shadow: none; color: inherit;
+  font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer;
+}
+.cmd-tri:has(select:focus-visible) { box-shadow: var(--focus-ring); }
+
+/* L'envoi par lot, sous « A envoyer ». */
+.cmd-envoi {
+  display: flex; align-items: center; gap: 16px; margin: 0 0 16px;
+  padding: 10px 12px 10px 8px; border-radius: 24px; background: var(--v8-peche-claire);
+}
+.cmd-envoi[hidden] { display: none; }
+.cmd-envoi-compte { flex: 1; font-size: 14.5px; font-weight: 500; color: var(--v8-texte); }
+
+/* La carte tableau : #commandes, pour battre les surcharges du mode clair. */
+#commandes .cmd-carte {
+  margin: 0; padding: 8px; border: 0; border-radius: 36px;
+  background: var(--v8-surface);
+  box-shadow: 0 1px 2px rgba(15, 61, 61, 0.05), 0 12px 28px rgba(15, 61, 61, 0.05);
+}
+:root[data-color-scheme="dark"] #commandes .cmd-carte { box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 28px rgba(0,0,0,.3); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) #commandes .cmd-carte { box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 28px rgba(0,0,0,.3); }
+}
+
+.cmd-entete, .cmd-ligne {
+  display: grid;
+  grid-template-columns: 0 140px 120px minmax(0, 1fr) 150px 110px 150px;
+  column-gap: 16px;
+  align-items: center;
+}
+.cmd-carte--choix .cmd-entete, .cmd-carte--choix .cmd-ligne {
+  grid-template-columns: 24px 140px 120px minmax(0, 1fr) 150px 110px 150px;
+}
+.cmd-col-choix { display: flex; align-items: center; overflow: hidden; }
+.cmd-entete {
+  padding: 10px 20px 6px;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--v8-texte-secondaire);
+}
+.cmd-droite { text-align: right; justify-content: flex-end; display: flex; }
+.cmd-lignes { display: flex; flex-direction: column; }
+.cmd-ligne {
+  min-height: 56px; padding: 0 20px; border-radius: 20px;
+  color: var(--v8-texte); font-size: 14.5px; font-weight: 500; cursor: pointer;
+}
+.cmd-ligne:hover { background: var(--v8-fond); }
+.cmd-ligne:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.cmd-num { display: flex; flex-direction: column; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cmd-abo { font-size: 12px; font-weight: 500; color: var(--v8-texte-secondaire); }
+.cmd-date, .cmd-secteur { color: var(--v8-texte-secondaire); }
+.cmd-client { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cmd-articles { font-variant-numeric: tabular-nums; }
+.cmd-manquants { color: var(--v8-alerte); font-weight: 600; }
+.cmd-choix { width: 20px; height: 20px; accent-color: var(--v8-principal); cursor: pointer; }
+
+/* Les badges de la planche, 24 px. Chacun dit son mot : la couleur n'est
+   jamais seule a porter l'etat. */
+.cmd-badge {
+  display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 12px;
+  border-radius: 999px; font-size: 12.5px; font-weight: 600; white-space: nowrap;
+}
+.cmd-badge svg { width: 12px; height: 12px; }
+.cmd-badge--tiede { background: var(--v8-peche-claire); color: var(--v8-principal-appuye); }
+.cmd-badge--froid { background: var(--v8-vert-clair); color: var(--v8-principal-appuye); }
+.cmd-badge--plein { background: var(--v8-principal); color: var(--v8-texte-sur-principal); }
+.cmd-badge--neutre { background: var(--v8-surface-basse); color: var(--v8-texte-secondaire); }
+.cmd-badge--alerte {
+  gap: 4px; padding: 0 10px; background: var(--v8-surface); color: var(--v8-alerte);
+  box-shadow: inset 0 0 0 1.5px var(--v8-alerte);
+}
+/* En sombre, le texte des badges tiede et froid passe au principal (14c). */
+:root[data-color-scheme="dark"] .cmd-badge--tiede,
+:root[data-color-scheme="dark"] .cmd-badge--froid { color: var(--v8-principal); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) .cmd-badge--tiede,
+  :root:not([data-color-scheme="light"]) .cmd-badge--froid { color: var(--v8-principal); }
+}
+
+.cmd-pied { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px 8px; }
+.cmd-compte { font-size: 13.5px; font-weight: 500; color: var(--v8-texte-secondaire); font-variant-numeric: tabular-nums; }
+.cmd-pages { display: flex; gap: 8px; }
+:root[data-color-scheme] .cmd-pages .button.compact,
+:root:not([data-color-scheme]) .cmd-pages .button.compact {
+  min-height: 44px; padding: 0 16px; border-radius: 999px; font-size: 13.5px; font-weight: 600;
+}
+
+@media (max-width: 1180px) {
+  .cmd-filtres, .cmd-filtres .cmd-pilules { flex-wrap: wrap; }
+}
+
+/* Telephone : six colonnes ne tiennent pas. La ligne devient une carte a trois
+   rangs ; la planche mobile 8a sera posee par le lot mobile. */
+@media (max-width: 920px) {
+  .cmd-recherche { width: 100%; flex: 1 1 100%; }
+  .cmd-entete { display: none; }
+  .cmd-ligne, .cmd-carte--choix .cmd-ligne {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: "choix num statut" "choix client client" "choix date articles";
+    row-gap: 2px; padding: 12px 16px;
+  }
+  .cmd-ligne .cmd-col-choix { grid-area: choix; }
+  .cmd-ligne .cmd-num { grid-area: num; }
+  .cmd-ligne .cmd-statut { grid-area: statut; }
+  .cmd-ligne .cmd-client { grid-area: client; }
+  .cmd-ligne .cmd-date { grid-area: date; }
+  .cmd-ligne .cmd-articles { grid-area: articles; }
+  .cmd-ligne .cmd-secteur { display: none; }
+  .cmd-separateur, .cmd-ressort { display: none; }
+}
+
+/* Commandes, vu a l'ecran : la fente d'en-tete porte ici cinq commandes (la
+   planche en montre deux) et ecrasait le titre -- « Commande » coupe. Le titre
+   garde sa place, les commandes passent a la ligne. Et sept pilules, plus la
+   case et le tri, ne tiennent pas sur 1 118 px : la rangee passe a la ligne
+   au lieu de faire chevaucher « Livrees » par la case. */
+.ecran-entete { flex-wrap: wrap; }
+/* Au bureau seulement : sous 920 px l'en-tete passe en COLONNE, et une base
+   de 260 px y devenait une HAUTEUR -- 200 px de vide sous chaque titre. */
+@media (min-width: 921px) { .ecran-entete-texte { flex: 1 1 260px; } }
+.ecran-entete-texte h2 { white-space: nowrap; }
+.ecran-entete-actions { flex-wrap: wrap; justify-content: flex-end; }
+.cmd-filtres { flex-wrap: wrap; row-gap: 12px; }
+.cmd-filtres .cmd-pilules { flex-wrap: wrap; }
+
+/* --- Commandes : les constats de la relecture ----------------------------
+   « :root[data-color-scheme="light"] label » (0,2,1) repeignait la case et
+   le tri en gris, graisse 800 ; la planche 13c les veut en principal, 500. */
+:root[data-color-scheme] #commandes .cmd-case,
+:root:not([data-color-scheme]) #commandes .cmd-case,
+:root[data-color-scheme] #commandes .cmd-tri,
+:root:not([data-color-scheme]) #commandes .cmd-tri {
+  color: var(--v8-principal);
+  font-weight: 500;
+}
+
+/* La case de choix d'une ligne : la cible est une cellule de 44 px, pas un
+   carre de 20 -- a cote, on ouvrait le detail. */
+.cmd-carte--choix .cmd-entete, .cmd-carte--choix .cmd-ligne {
+  grid-template-columns: 44px 140px 120px minmax(0, 1fr) 150px 110px 150px;
+}
+.cmd-carte--choix .cmd-col-choix {
+  justify-content: center; min-width: 44px; min-height: 44px; cursor: pointer;
+}
+
+.cmd-periode, .cmd-jour {
+  display: inline-flex; align-items: center; gap: 10px; flex: none;
+  font-size: 13.5px; font-weight: 600; color: var(--v8-texte-secondaire);
+}
+.cmd-periode label, .cmd-jour { display: inline-flex; align-items: center; gap: 6px; }
+:root[data-color-scheme] #commandes .cmd-periode input,
+:root:not([data-color-scheme]) #commandes .cmd-periode input,
+:root[data-color-scheme] #commandes .cmd-jour input,
+:root:not([data-color-scheme]) #commandes .cmd-jour input {
+  min-height: 44px; height: 44px; padding: 0 14px; border-radius: 999px;
+}
+.cmd-detail-gestes { padding: 0 24px; }
+.cmd-detail-gestes[hidden] { display: none; }
+
+/* --- Commandes : la seconde relecture ------------------------------------
+   Les etiquettes de date : « label » generique (0,2,1) les passait en 800. */
+:root[data-color-scheme] #commandes .cmd-periode label,
+:root:not([data-color-scheme]) #commandes .cmd-periode label,
+:root[data-color-scheme] #commandes .cmd-jour,
+:root:not([data-color-scheme]) #commandes .cmd-jour {
+  font-size: 13.5px; font-weight: 600; color: var(--v8-texte-secondaire);
+}
+/* Telephone : la barre d'envoi et la periode passent a la ligne plutot que
+   de pousser la page de cote. */
+@media (max-width: 920px) {
+  .cmd-envoi { flex-wrap: wrap; gap: 8px 12px; padding: 10px 12px; }
+  .cmd-envoi-compte { flex: 1 1 100%; order: -1; }
+  .cmd-periode { flex: 1 1 100%; flex-wrap: wrap; }
+  .cmd-periode label { flex: 1 1 140px; }
+  :root[data-color-scheme] #commandes .cmd-periode input,
+  :root:not([data-color-scheme]) #commandes .cmd-periode input { flex: 1; min-width: 0; }
+  .cmd-tri { max-width: 100%; }
+}
+
+/* ==========================================================================
+   STOCK -- planches 13d (clair) / 14d (sombre). Valeurs copiees.
+   Ecarts assumes, nommes dans DESIGN.md : saisie directe du stock et du seuil
+   gardees ; pas de bouton « Commander » (aucune route ne commande a un
+   fournisseur) ; une icone de categorie pour toutes ; pas de tuile d'aide
+   (c'est une note de la charte, pas un contenu).
+   ========================================================================== */
+
+.stk-recherche { width: 280px; }
+.ecran-entete .stk-importer { height: 44px; padding: 0 24px; }
+
+.stk-grille {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 24px;
+  align-items: start;
+}
+
+#stock .stk-carte {
+  background: var(--v8-surface);
+  border-radius: 36px;
+  box-shadow: 0 1px 2px rgba(15, 61, 61, 0.05), 0 12px 28px rgba(15, 61, 61, 0.05);
+}
+:root[data-color-scheme="dark"] #stock .stk-carte,
+:root[data-color-scheme="dark"] #stock .stk-tuile { box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 28px rgba(0,0,0,.3); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) #stock .stk-carte,
+  :root:not([data-color-scheme="light"]) #stock .stk-tuile { box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 28px rgba(0,0,0,.3); }
+}
+
+/* --- La carte « A recommander » : span 5 ------------------------------- */
+#stock .stk-reco {
+  grid-column: span 5;
+  display: flex; flex-direction: column; gap: 18px;
+  padding: 28px;
+}
+.stk-reco-tete { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+:root[data-color-scheme] #stock .stk-reco-tete h3,
+:root:not([data-color-scheme]) #stock .stk-reco-tete h3 {
+  display: flex; align-items: center; gap: 10px; margin: 0;
+  font-size: 19px; font-weight: 600; letter-spacing: -0.01em; color: var(--v8-principal);
+}
+.stk-reco-tete h3 .icon { width: 20px; height: 20px; color: var(--v8-alerte); flex: none; }
+.stk-compte {
+  display: inline-flex; align-items: center; height: 26px; padding: 0 12px; border-radius: 999px;
+  background: var(--v8-surface); color: var(--v8-alerte); box-shadow: inset 0 0 0 1.5px var(--v8-alerte);
+  font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.stk-reco-liste { display: flex; flex-direction: column; }
+.stk-reco-ligne {
+  display: flex; flex-direction: column; justify-content: center; min-height: 44px; padding: 6px 0;
+}
+.stk-reco-ligne + .stk-reco-ligne { border-top: 1px solid var(--v8-surface-basse); }
+:root[data-color-scheme="dark"] .stk-reco-ligne + .stk-reco-ligne { border-top-color: var(--v8-vert-eau); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) .stk-reco-ligne + .stk-reco-ligne { border-top-color: var(--v8-vert-eau); }
+}
+.stk-reco-nom { font-size: 15px; font-weight: 500; color: var(--v8-texte); }
+.stk-reco-detail { font-size: 13px; font-weight: 500; color: var(--v8-alerte); font-variant-numeric: tabular-nums; }
+.stk-reco-vide { margin: 0; font-size: 14.5px; color: var(--v8-texte-secondaire); }
+:root[data-color-scheme] #stock .stk-tout-voir,
+:root:not([data-color-scheme]) #stock .stk-tout-voir {
+  align-self: flex-start; min-height: 44px; padding: 0 20px; border-radius: 999px;
+  border: 1.5px solid var(--v8-principal); background: transparent; color: var(--v8-principal);
+  font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer;
+}
+#stock .stk-tout-voir:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* --- Les tuiles de categorie : span 7, trois colonnes -------------------- */
+.stk-categories {
+  grid-column: span 7;
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px;
+}
+.stk-categories[hidden] { display: none; }
+:root[data-color-scheme] #stock .stk-tuile,
+:root:not([data-color-scheme]) #stock .stk-tuile {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 12px;
+  padding: 24px; border: 0; border-radius: 36px; min-height: 0;
+  background: var(--v8-surface); color: var(--v8-texte); text-align: left;
+  font: inherit; cursor: pointer;
+  box-shadow: 0 1px 2px rgba(15, 61, 61, 0.05), 0 12px 28px rgba(15, 61, 61, 0.05);
+}
+#stock .stk-tuile:hover { background: var(--v8-fond); }
+#stock .stk-tuile:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+/* La tuile choisie : le contour principal, et aria-pressed le dit. */
+:root[data-color-scheme] #stock .stk-tuile.stk-tuile--choisie,
+:root:not([data-color-scheme]) #stock .stk-tuile.stk-tuile--choisie {
+  box-shadow: inset 0 0 0 2px var(--v8-principal);
+}
+.stk-tuile-pastille {
+  display: flex; align-items: center; justify-content: center; flex: none;
+  width: 44px; height: 44px; border-radius: 999px; color: var(--v8-principal-appuye);
+}
+.stk-tuile-pastille svg { width: 22px; height: 22px; }
+.stk-tuile-pastille--froid { background: var(--v8-vert-clair); }
+.stk-tuile-pastille--tiede { background: var(--v8-peche-claire); }
+:root[data-color-scheme="dark"] .stk-tuile-pastille { color: var(--v8-principal); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) .stk-tuile-pastille { color: var(--v8-principal); }
+}
+.stk-tuile-total {
+  font-size: 36px; font-weight: 700; letter-spacing: -0.02em; line-height: 1;
+  color: var(--v8-texte); font-variant-numeric: tabular-nums;
+}
+.stk-tuile-texte { display: flex; flex-direction: column; }
+.stk-tuile-nom { font-size: 15px; font-weight: 600; color: var(--v8-texte); }
+.stk-tuile-sous { font-size: 13.5px; font-weight: 500; color: var(--v8-texte-secondaire); }
+.stk-tuile-sous.stk-alerte { color: var(--v8-alerte); }
+
+/* Au-dela de douze categories : des lignes (passation). */
+.stk-categories--liste { grid-template-columns: 1fr; gap: 8px; }
+:root[data-color-scheme] #stock .stk-categories--liste .stk-tuile,
+:root:not([data-color-scheme]) #stock .stk-categories--liste .stk-tuile {
+  flex-direction: row; align-items: center; gap: 16px; padding: 8px 20px; border-radius: 20px;
+}
+.stk-categories--liste .stk-tuile-pastille { width: 36px; height: 36px; }
+.stk-categories--liste .stk-tuile-total { order: 3; margin-left: auto; font-size: 17px; }
+.stk-categories--liste .stk-tuile-texte { flex-direction: row; gap: 12px; align-items: baseline; }
+
+/* --- Le tableau : span 12 ------------------------------------------------ */
+#stock .stk-tableau { grid-column: span 12; padding: 8px; }
+.stk-filtres { display: flex; justify-content: flex-end; padding: 8px 12px 4px; }
+.stk-filtres .cmd-tri { background: var(--v8-fond); }
+:root[data-color-scheme] #stock .stk-filtres .cmd-tri,
+:root:not([data-color-scheme]) #stock .stk-filtres .cmd-tri { color: var(--v8-principal); font-weight: 500; }
+.stk-entete, .stk-ligne {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 140px 140px 100px 100px 180px;
+  column-gap: 16px;
+  align-items: center;
+}
+.stk-entete {
+  padding: 10px 20px 6px;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--v8-texte-secondaire);
+}
+.stk-droite { display: flex; justify-content: flex-end; text-align: right; }
+.stk-lignes { display: flex; flex-direction: column; }
+.stk-ligne { min-height: 56px; padding: 0 20px; border-radius: 20px; }
+.stk-ligne:hover { background: var(--v8-fond); }
+.stk-nom { font-size: 15px; font-weight: 500; color: var(--v8-texte); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stk-a-renseigner { font-size: 12.5px; font-weight: 600; color: var(--v8-texte-secondaire); }
+.stk-code, .stk-reserve { font-size: 14.5px; font-weight: 500; color: var(--v8-texte-secondaire); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Seuil et stock restent SAISISSABLES : un champ qui se lit comme la valeur
+   de la planche (sans cadre) et se revele au survol et au focus. */
+:root[data-color-scheme] #stock .stk-saisie,
+:root:not([data-color-scheme]) #stock .stk-saisie {
+  width: 88px; min-height: 40px; height: 40px; padding: 0 12px; border: 0; border-radius: 999px;
+  background: transparent; box-shadow: none; text-align: right;
+  font: inherit; font-variant-numeric: tabular-nums; -moz-appearance: textfield;
+}
+#stock .stk-saisie::-webkit-inner-spin-button, #stock .stk-saisie::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+:root[data-color-scheme] #stock .stk-saisie--seuil,
+:root:not([data-color-scheme]) #stock .stk-saisie--seuil { font-size: 14.5px; font-weight: 500; color: var(--v8-texte-secondaire); }
+:root[data-color-scheme] #stock .stk-saisie--stock,
+:root:not([data-color-scheme]) #stock .stk-saisie--stock { font-size: 17px; font-weight: 700; color: var(--v8-texte); }
+:root[data-color-scheme] #stock .stk-ligne--alerte .stk-saisie--stock,
+:root:not([data-color-scheme]) #stock .stk-ligne--alerte .stk-saisie--stock { color: var(--v8-alerte); }
+:root[data-color-scheme] #stock .stk-saisie:hover,
+:root:not([data-color-scheme]) #stock .stk-saisie:hover { background: var(--v8-surface-basse); }
+:root[data-color-scheme] #stock .stk-saisie:focus-visible,
+:root:not([data-color-scheme]) #stock .stk-saisie:focus-visible { outline: none; background: var(--v8-surface-basse); box-shadow: var(--focus-ring); }
+
+.stk-ajuster { display: flex; justify-content: flex-end; gap: 6px; }
+:root[data-color-scheme] #stock .stk-pas,
+:root:not([data-color-scheme]) #stock .stk-pas {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 36px; height: 36px; min-height: 0; padding: 0; border: 0; border-radius: 999px;
+  background: var(--v8-surface-basse); color: var(--v8-principal); cursor: pointer;
+}
+:root[data-color-scheme="dark"] #stock .stk-pas:not(.stk-pas--plus) { background: var(--v8-fond); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) #stock .stk-pas:not(.stk-pas--plus) { background: var(--v8-fond); }
+}
+:root[data-color-scheme] #stock .stk-pas.stk-pas--plus,
+:root:not([data-color-scheme]) #stock .stk-pas.stk-pas--plus { background: var(--v8-principal); color: var(--v8-texte-sur-principal); }
+#stock .stk-pas svg { width: 16px; height: 16px; }
+#stock .stk-pas:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+#stock .stk-mouvements { grid-column: span 12; padding: 28px; }
+:root[data-color-scheme] #stock .stk-mouvements h3,
+:root:not([data-color-scheme]) #stock .stk-mouvements h3 { margin: 0 0 12px; font-size: 19px; font-weight: 600; color: var(--v8-principal); }
+
+@media (max-width: 1180px) {
+  #stock .stk-reco, .stk-categories { grid-column: span 12; }
+}
+
+/* Telephone : aucune planche mobile pour le stock de bureau ; la ligne devient
+   une carte a trois rangs, et les pas passent a 44 px sous le pouce. */
+@media (max-width: 920px) {
+  .stk-recherche { width: 100%; flex: 1 1 100%; }
+  .stk-grille { gap: 16px; }
+  #stock .stk-carte { border-radius: 24px; }
+  #stock .stk-reco { padding: 20px; }
+  .stk-categories { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  :root[data-color-scheme] #stock .stk-tuile,
+  :root:not([data-color-scheme]) #stock .stk-tuile { padding: 18px; border-radius: 24px; }
+  .stk-entete { display: none; }
+  .stk-ligne {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas: "nom nom ajuster" "code seuil stock" "reserve reserve reserve";
+    row-gap: 4px; padding: 12px 16px;
+  }
+  .stk-ligne .stk-nom { grid-area: nom; white-space: normal; }
+  .stk-ligne .stk-code { grid-area: code; }
+  .stk-ligne .stk-reserve { grid-area: reserve; }
+  .stk-ligne > .stk-droite:nth-of-type(4) { grid-area: seuil; }
+  .stk-ligne > .stk-droite:nth-of-type(5) { grid-area: stock; }
+  .stk-ligne .stk-ajuster { grid-area: ajuster; }
+  :root[data-color-scheme] #stock .stk-pas,
+  :root:not([data-color-scheme]) #stock .stk-pas { width: 44px; height: 44px; }
+  :root[data-color-scheme] #stock .stk-saisie,
+  :root:not([data-color-scheme]) #stock .stk-saisie { min-height: 44px; height: 44px; }
+}
+
+/* --- Stock et Commandes : la relecture ------------------------------------
+   Entre 921 et 1280 px, les colonnes fixes des tableaux (Stock 740 px, Commandes
+   766 px) ne laissaient rien a la colonne du nom : il disparaissait. La ligne
+   passe en carte des 1280 px, comme au telephone. */
+@media (min-width: 921px) and (max-width: 1280px) {
+  .stk-entete, .cmd-entete { display: none; }
+  .stk-ligne {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas: "nom nom ajuster" "code seuil stock" "reserve reserve reserve";
+    row-gap: 4px; padding: 12px 16px;
+  }
+  .stk-ligne .stk-nom { grid-area: nom; white-space: normal; }
+  .stk-ligne .stk-code { grid-area: code; }
+  .stk-ligne .stk-reserve { grid-area: reserve; }
+  .stk-ligne > .stk-droite:nth-of-type(4) { grid-area: seuil; }
+  .stk-ligne > .stk-droite:nth-of-type(5) { grid-area: stock; }
+  .stk-ligne .stk-ajuster { grid-area: ajuster; }
+  .cmd-ligne, .cmd-carte--choix .cmd-ligne {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: "choix num statut" "choix client client" "choix date articles";
+    row-gap: 2px; padding: 12px 16px;
+  }
+  .cmd-ligne .cmd-col-choix { grid-area: choix; }
+  .cmd-ligne .cmd-num { grid-area: num; }
+  .cmd-ligne .cmd-statut { grid-area: statut; }
+  .cmd-ligne .cmd-client { grid-area: client; }
+  .cmd-ligne .cmd-date { grid-area: date; }
+  .cmd-ligne .cmd-articles { grid-area: articles; }
+  .cmd-ligne .cmd-secteur { display: none; }
+}
+/* Sans en-tete de colonnes, seuil et stock etaient deux nombres sans nom, et
+   rien ne disait qu'ils se modifient (pas de survol au doigt). */
+@media (max-width: 1280px) {
+  .stk-ligne > .stk-droite:nth-of-type(4),
+  .stk-ligne > .stk-droite:nth-of-type(5) { align-items: center; gap: 6px; }
+  .stk-ligne > .stk-droite:nth-of-type(4)::before { content: "Seuil"; }
+  .stk-ligne > .stk-droite:nth-of-type(5)::before { content: "Stock"; }
+  .stk-ligne > .stk-droite::before { font-size: 12px; font-weight: 600; color: var(--v8-texte-secondaire); }
+  :root[data-color-scheme] #stock .stk-saisie,
+  :root:not([data-color-scheme]) #stock .stk-saisie { background: var(--v8-surface-basse); }
+}
+.stk-tuile-nom { overflow-wrap: anywhere; }
+
+/* ==========================================================================
+   CLIENTS -- planches 13e (clair) / 14e (sombre). Valeurs copiees.
+   Noms neufs (cli-*) : les .crm-* portent une couche de surcharges du mode
+   clair qu'on ne veut pas heriter.
+   ========================================================================== */
+
+.cli-recherche { width: 280px; }
+.ecran-entete .cli-nouveau { display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 24px; }
+:root[data-color-scheme] .ecran-entete .cli-rappels,
+:root:not([data-color-scheme]) .ecran-entete .cli-rappels {
+  height: 44px; padding: 0 20px; border-radius: 999px;
+  border: 1.5px solid var(--v8-principal); background: transparent;
+  color: var(--v8-principal); font-size: 15px; font-weight: 600;
+}
+.cli-rappels-compte { font-variant-numeric: tabular-nums; }
+
+.cli-grille {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: 24px;
+  align-items: start;
+}
+.cli-colonne { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.cli-filtres { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cli-pilules { display: flex; flex-wrap: wrap; gap: 8px; }
+:root[data-color-scheme] #crm .cli-pilule,
+:root:not([data-color-scheme]) #crm .cli-pilule {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 44px; min-height: 0; padding: 0 16px; border: 0; border-radius: 999px;
+  background: var(--v8-surface); color: var(--v8-texte-secondaire);
+  font: inherit; font-size: 14px; font-weight: 500; cursor: pointer;
+}
+#crm .cli-pilule svg { width: 14px; height: 14px; }
+:root[data-color-scheme] #crm .cli-pilule.cli-pilule--active,
+:root:not([data-color-scheme]) #crm .cli-pilule.cli-pilule--active {
+  background: var(--v8-principal); color: var(--v8-texte-sur-principal); font-weight: 600;
+}
+#crm .cli-pilule:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+#crm .cli-statut-filtre { margin-left: auto; }
+:root[data-color-scheme] #crm .cli-statut-filtre,
+:root:not([data-color-scheme]) #crm .cli-statut-filtre { color: var(--v8-principal); font-weight: 500; }
+
+#crm .cli-carte {
+  background: var(--v8-surface);
+  border-radius: 36px;
+  box-shadow: 0 1px 2px rgba(15, 61, 61, 0.05), 0 12px 28px rgba(15, 61, 61, 0.05);
+  min-width: 0;
+}
+:root[data-color-scheme="dark"] #crm .cli-carte { box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 28px rgba(0,0,0,.3); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) #crm .cli-carte { box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 28px rgba(0,0,0,.3); }
+}
+
+/* --- La liste ----------------------------------------------------------- */
+#crm .cli-liste-carte { padding: 8px; max-height: calc(100vh - 220px); overflow-y: auto; }
+.cli-liste { display: flex; flex-direction: column; }
+:root[data-color-scheme] #crm .cli-ligne,
+:root:not([data-color-scheme]) #crm .cli-ligne {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  min-height: 60px; padding: 0 16px; border: 0; border-radius: 22px;
+  background: transparent; color: var(--v8-texte); text-align: left;
+  font: inherit; cursor: pointer;
+}
+#crm .cli-ligne:hover, #crm .cli-ligne.cli-ligne--choisie { background: var(--v8-fond); }
+#crm .cli-ligne:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.cli-ligne-texte { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.cli-nom { font-size: 15px; font-weight: 600; color: var(--v8-texte); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cli-meta {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 500; color: var(--v8-texte-secondaire);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cli-meta svg { width: 13px; height: 13px; flex: none; }
+.cli-alerte { color: var(--v8-alerte); }
+
+.cli-badge {
+  display: inline-flex; align-items: center; gap: 4px; flex: none;
+  height: 24px; padding: 0 12px; border-radius: 999px;
+  font-size: 12.5px; font-weight: 600; white-space: nowrap;
+}
+.cli-badge svg { width: 12px; height: 12px; }
+.cli-badge--froid { background: var(--v8-vert-clair); color: var(--v8-principal-appuye); }
+.cli-badge--tiede { background: var(--v8-peche-claire); color: var(--v8-principal-appuye); }
+.cli-badge--alerte { padding: 0 10px; background: var(--v8-surface); color: var(--v8-alerte); box-shadow: inset 0 0 0 1.5px var(--v8-alerte); }
+:root[data-color-scheme="dark"] .cli-badge--froid,
+:root[data-color-scheme="dark"] .cli-badge--tiede { color: var(--v8-principal); }
+:root[data-color-scheme="dark"] .cli-badge--alerte { background: var(--v8-fond); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) .cli-badge--froid,
+  :root:not([data-color-scheme="light"]) .cli-badge--tiede { color: var(--v8-principal); }
+  :root:not([data-color-scheme="light"]) .cli-badge--alerte { background: var(--v8-fond); }
+}
+.cli-puce { height: 28px; font-size: 13px; }
+
+/* --- La fiche ------------------------------------------------------------ */
+#crm .cli-fiche { padding: 32px; display: flex; flex-direction: column; gap: 24px; }
+.cli-fiche-vide { margin: 0; color: var(--v8-texte-secondaire); }
+.cli-fiche-tete { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+.cli-fiche-identite { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+:root[data-color-scheme] #crm .cli-fiche-nom,
+:root:not([data-color-scheme]) #crm .cli-fiche-nom {
+  margin: 0; font-size: 24px; font-weight: 700; line-height: 1.2; letter-spacing: -0.02em; color: var(--v8-texte);
+  overflow-wrap: anywhere;
+}
+.cli-puces { display: flex; gap: 8px; flex-wrap: wrap; }
+.cli-fiche-gestes { display: flex; gap: 10px; flex: none; }
+:root[data-color-scheme] #crm .cli-appeler,
+:root:not([data-color-scheme]) #crm .cli-appeler {
+  display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 18px;
+  border-radius: 999px; font-size: 14.5px; font-weight: 600; text-decoration: none;
+}
+#crm .cli-appeler svg { width: 16px; height: 16px; }
+:root[data-color-scheme] #crm .cli-bouton-contour,
+:root:not([data-color-scheme]) #crm .cli-bouton-contour {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  height: 44px; min-height: 0; padding: 0 18px; border-radius: 999px;
+  border: 1.5px solid var(--v8-principal); background: transparent; color: var(--v8-principal);
+  font: inherit; font-size: 14.5px; font-weight: 600; cursor: pointer;
+}
+#crm .cli-bouton-contour:focus-visible, #crm .cli-appeler:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.cli-champs { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.cli-champs > div { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cli-libelle { margin: 0; font-size: 13px; font-weight: 500; color: var(--v8-texte-secondaire); }
+.cli-valeur { margin: 0; font-size: 15px; font-weight: 500; line-height: 1.45; color: var(--v8-texte); overflow-wrap: anywhere; }
+.cli-valeur.cli-alerte { color: var(--v8-alerte); }
+.cli-note { margin: 0; font-size: 13.5px; font-weight: 400; color: var(--v8-texte-secondaire); overflow-wrap: anywhere; }
+.cli-notes { display: flex; flex-direction: column; gap: 4px; }
+.cli-statut { display: flex; align-items: center; gap: 12px; }
+:root[data-color-scheme] #crm .cli-statut select,
+:root:not([data-color-scheme]) #crm .cli-statut select {
+  min-height: 44px; height: 44px; padding: 0 16px; border-radius: 999px; font-size: 14px; font-weight: 500;
+}
+
+.cli-abonnement {
+  display: flex; align-items: center; gap: 16px; padding: 20px; border-radius: 24px;
+  background: var(--v8-fond);
+}
+.cli-abonnement-texte { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.cli-abonnement-titre {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 0;
+  font-size: 16px; font-weight: 600; color: var(--v8-texte);
+}
+.cli-abonnement-detail { margin: 0; font-size: 14px; color: var(--v8-texte-secondaire); overflow-wrap: anywhere; }
+:root[data-color-scheme] #crm .cli-abonnement .cli-bouton-contour,
+:root:not([data-color-scheme]) #crm .cli-abonnement .cli-bouton-contour { padding: 0 20px; }
+
+.cli-commandes { display: flex; flex-direction: column; gap: 8px; }
+.cli-commandes-tete { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+:root[data-color-scheme] #crm .cli-commandes-tete h3,
+:root:not([data-color-scheme]) #crm .cli-commandes-tete h3 {
+  margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; color: var(--v8-texte);
+}
+.cli-commandes-liste { display: flex; flex-direction: column; }
+:root[data-color-scheme] #crm .cli-commande,
+:root:not([data-color-scheme]) #crm .cli-commande {
+  display: grid; grid-template-columns: 150px 130px minmax(0, 1fr) 140px; column-gap: 16px; align-items: center;
+  width: 100%; min-height: 52px; padding: 0 16px; border: 0; border-radius: 18px;
+  background: transparent; color: var(--v8-texte); text-align: left; font: inherit; cursor: pointer;
+}
+#crm .cli-commande:hover { background: var(--v8-fond); }
+#crm .cli-commande:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.cli-commande-num { font-size: 14.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cli-commande-date, .cli-commande-articles { font-size: 14px; font-weight: 500; color: var(--v8-texte-secondaire); }
+.cli-commande-statut { display: flex; justify-content: flex-end; }
+:root[data-color-scheme] #crm .cli-autres,
+:root:not([data-color-scheme]) #crm .cli-autres {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 8px;
+  min-height: 44px; padding: 0 12px; border: 0; border-radius: 999px; background: transparent;
+  color: var(--v8-principal); font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer;
+}
+#crm .cli-autres svg { width: 16px; height: 16px; }
+#crm .cli-autres:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* --- Le dialogue ---------------------------------------------------------- */
+.cli-dialogue {
+  width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 32px);
+  padding: 0; border: 0; border-radius: 36px; background: var(--v8-surface); color: var(--v8-texte);
+}
+.cli-dialogue::backdrop { background: rgba(13, 21, 24, 0.45); }
+.cli-formulaire { display: flex; flex-direction: column; gap: 20px; padding: 28px; }
+.cli-dialogue-tete { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.cli-dialogue-tete h2 { margin: 0; font-size: 22px; font-weight: 700; color: var(--v8-texte); }
+.cli-dialogue-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
+@media (max-width: 1180px) {
+  .cli-grille { grid-template-columns: 1fr; }
+  #crm .cli-liste-carte { max-height: 420px; }
+}
+@media (max-width: 920px) {
+  .cli-recherche { width: 100%; flex: 1 1 100%; }
+  #crm .cli-carte { border-radius: 24px; }
+  #crm .cli-fiche { padding: 20px; gap: 20px; }
+  .cli-champs { grid-template-columns: 1fr; }
+  .cli-abonnement { flex-direction: column; align-items: stretch; }
+  :root[data-color-scheme] #crm .cli-commande,
+  :root:not([data-color-scheme]) #crm .cli-commande {
+    grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "num statut" "date articles";
+    row-gap: 2px; padding: 10px 16px;
+  }
+  .cli-commande-num { grid-area: num; }
+  .cli-commande-statut { grid-area: statut; }
+  .cli-commande-date { grid-area: date; }
+  .cli-commande-articles { grid-area: articles; text-align: right; }
+  #crm .cli-statut-filtre { margin-left: 0; }
+}
+
+/* --- Clients : la relecture ------------------------------------------------
+   Sous 1320 px la ligne de commande de la fiche (150 + 130 + 140 + ecarts)
+   debordait de la carte : elle passe sur deux rangs. */
+@media (max-width: 1320px) {
+  :root[data-color-scheme] #crm .cli-commande,
+  :root:not([data-color-scheme]) #crm .cli-commande {
+    grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "num statut" "date articles";
+    row-gap: 2px; padding: 10px 16px;
+  }
+  .cli-commande-num { grid-area: num; }
+  .cli-commande-statut { grid-area: statut; }
+  .cli-commande-date { grid-area: date; }
+  .cli-commande-articles { grid-area: articles; text-align: right; }
+}
+/* La classe subscription-card (utile au dispatcher) apportait une bordure. */
+#crm .cli-abonnement.subscription-card { border: 0; box-shadow: none; }
+.cli-erreur { margin: 0; padding: 12px 16px; border-radius: 18px; color: var(--v8-alerte); background: var(--v8-fond); font-size: 14px; font-weight: 600; }
+.cli-erreur[hidden] { display: none; }
+:root[data-color-scheme] #commandes .cmd-client-filtre,
+:root:not([data-color-scheme]) #commandes .cmd-client-filtre {
+  border: 0; font: inherit; font-size: 14px; font-weight: 600;
+  background: var(--v8-principal); color: var(--v8-texte-sur-principal);
+}
+.cmd-client-filtre[hidden] { display: none; }

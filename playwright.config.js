@@ -14,6 +14,11 @@ module.exports = defineConfig({
 
   use: {
     baseURL: process.env.SEREO_E2E_BASE_URL || "http://127.0.0.1:3100",
+    // Le serveur et les donnees semees comptent les jours a PARIS ; le
+    // navigateur de la CI est en UTC. Entre 22 h et minuit UTC, « aujourd'hui »
+    // n'etait pas le meme jour des deux cotes, et le filtre du jour des
+    // Commandes cachait la commande semee. Les utilisateurs sont a Paris.
+    timezoneId: "Europe/Paris",
     trace: "on-first-retry",
     screenshot: "only-on-failure"
   },

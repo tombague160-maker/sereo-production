@@ -30,7 +30,7 @@ import {
   MAX_BRAND_IMAGE_SIZE,
   applicationThemes
 } from "./config/themes.js";
-import { mainTabs, MOBILE_OVERFLOW_TABS, titles, GROUPES_NAV } from "./config/tabs.js";
+import { mainTabs, MOBILE_OVERFLOW_TABS, titles, GROUPES_NAV, REDIRECTIONS, ECRANS_SECONDAIRES } from "./config/tabs.js";
 import {
   gabaritTableauComptes,
   gabaritAccesRefuse,
@@ -74,8 +74,14 @@ let stockFilter = {
 };
 let crmFilter = {
   query: "",
-  status: "all"
+  status: "all",
+  // Le secteur (planche 13e) : "" = tous, "__abonnes" = les abonnes.
+  secteur: ""
 };
+// Le client dont la fiche est ouverte (planche 13e : une ligne selectionnee).
+let clientChoisi = null;
+// Les abonnements et leurs echeances, pour la fiche client.
+let abonnementsDonnees = { items: [], occurrences: [] };
 let relanceFilter = "today";
 let customerProductFilter = {
   query: "",
@@ -198,11 +204,23 @@ function setNavigationSearchValue(value, sourceInput = null) {
 // pilules sous le titre de page.
 
 function groupeDeLOnglet(nomOnglet) {
+  // Un ecran SECONDAIRE (la saisie de commande) garde allumee l'entree de son
+  // ecran principal : on y arrive par un bouton de l'en-tete, pas par une
+  // pilule, mais on est toujours « dans les Commandes ».
+  if (nomOnglet in ECRANS_SECONDAIRES) return ECRANS_SECONDAIRES[nomOnglet];
   return Object.keys(GROUPES_NAV).find(groupe => GROUPES_NAV[groupe].includes(nomOnglet)) || null;
 }
 
 function libellesDuGroupe(groupe) {
-  return (GROUPES_NAV[groupe] || []).map(onglet => titles[onglet]?.title || "");
+  // La recherche du menu doit trouver un ecran par son ANCIEN nom aussi :
+  // « bons » ou « livrees » n'ont plus d'ecran a eux, ils vivent dans
+  // Commandes -- et la saisie de commande, ecran secondaire, en fait partie.
+  const ecrans = [
+    ...(GROUPES_NAV[groupe] || []),
+    ...Object.keys(ECRANS_SECONDAIRES).filter(onglet => ECRANS_SECONDAIRES[onglet] === groupe),
+    ...Object.keys(REDIRECTIONS).filter(onglet => groupeDeLOnglet(REDIRECTIONS[onglet].onglet) === groupe)
+  ];
+  return ecrans.map(onglet => titles[onglet]?.title || "");
 }
 
 function renderSousOnglets(nomOnglet) {
@@ -299,8 +317,11 @@ function navigateToFirstSearchMatch(value) {
   // On vise d'abord un ECRAN dont le titre correspond : « bons » doit ouvrir
   // Bons de commande, pas seulement mettre Commandes en evidence. A defaut,
   // la premiere entree restee visible.
+  // Les anciens ecrans-listes comptent aussi : « bons » doit ouvrir les
+  // Commandes, filtrees sur toutes, et « livrees » sur les livrees.
   const ecran = Object.keys(titles).find(onglet => {
-    return mainTabs.has(onglet) && normalizeTextKey(titles[onglet].title).includes(query);
+    return (mainTabs.has(onglet) || onglet in REDIRECTIONS)
+      && normalizeTextKey(titles[onglet].title).includes(query);
   });
   const entree = Array.from(document.querySelectorAll(".sidebar .tab"))
     .find(tab => !tab.classList.contains("is-hidden-by-search"));
@@ -352,6 +373,38 @@ function bindUi() {
     if (champ.files?.length) document.getElementById("ventesForm")?.requestSubmit();
   });
 
+  // Un selecteur ANNULE ne doit pas laisser l'envoi arme : le prochain fichier
+  // choisi dans le formulaire de l'accueil partirait sans clic.
+  for (const id of ["ventesFile", "stockFile"]) {
+    document.getElementById(id)?.addEventListener("cancel", event => { delete event.target.dataset.depuisEntete; });
+  }
+  // Meme regle que les ventes : le fichier choisi depuis l'en-tete PART.
+  document.getElementById("stockFile")?.addEventListener("change", event => {
+    const champ = event.target;
+    if (champ.dataset.depuisEntete !== "1") return;
+    delete champ.dataset.depuisEntete;
+    if (champ.files?.length) document.getElementById("stockForm")?.requestSubmit();
+  });
+
+  // Une tuile de categorie filtre le tableau ; la meme tuile, rappuyee, rend tout.
+  document.getElementById("stkCategories")?.addEventListener("click", event => {
+    const tuile = event.target.closest("[data-stk-categorie]");
+    if (!tuile) return;
+    const cle = tuile.dataset.stkCategorie;
+    stockFilter.category = stockFilter.category === cle ? "all" : cle;
+    renderStock();
+    document.querySelector(`[data-stk-categorie="${CSS.escape(cle)}"]`)?.focus();
+  });
+  // « Tout voir » : la liste detaillee s'ouvre sur ce que la carte compte
+  // (sous le seuil), pas sur « urgent » seul -- sinon deux produits de la
+  // carte y manquaient.
+  document.querySelector("#stock .stk-tout-voir")?.addEventListener("click", () => {
+    recommendFilter = "low";
+    renderRecommande();
+  });
+
+  bindCommandes();
+
   document.getElementById("ventesForm")?.addEventListener("submit", event => {
     event.preventDefault();
     runAction(event.submitter, "Import...", () => importFile("ventes", "ventesFile"));
@@ -375,11 +428,6 @@ function bindUi() {
 
   document.getElementById("stockStatusFilter")?.addEventListener("change", event => {
     stockFilter.status = event.target.value;
-    renderStock();
-  });
-
-  document.getElementById("stockCategoryFilter")?.addEventListener("change", event => {
-    stockFilter.category = event.target.value;
     renderStock();
   });
 
@@ -415,6 +463,8 @@ function bindUi() {
     event.preventDefault();
     runAction(event.submitter, "Enregistrement...", () => saveCrmClient(event.currentTarget));
   });
+
+  bindClients();
 
   document.getElementById("relanceForm")?.addEventListener("submit", event => {
     event.preventDefault();
@@ -491,7 +541,11 @@ function bindUi() {
   document.addEventListener("click", event => {
     const stockButton = event.target.closest("[data-stock-delta]");
     if (stockButton) {
-      runAction(stockButton, "...", () => changeStock(stockButton.dataset.productId, Number(stockButton.dataset.stockDelta)));
+      const { productId, stockDelta } = stockButton.dataset;
+      // Le rechargement redessine la ligne : on rend le focus au meme pas,
+      // sinon il tombe sur <body> et le clavier repart du haut.
+      runAction(stockButton, "...", () => changeStock(productId, Number(stockDelta)))
+        .then(() => document.querySelector(`#stockList [data-product-id="${CSS.escape(productId)}"][data-stock-delta="${CSS.escape(stockDelta)}"]`)?.focus());
       return;
     }
 
@@ -522,9 +576,56 @@ function bindUi() {
 
     if (action === "refresh") runAction(actionButton, "Actualisation...", loadData);
     if (action === "go-tab") showTab(actionButton.dataset.targetTab || "journee");
+    if (action === "cmd-export") exportBdcCsv(commandesFiltrees(), "sereo-commandes");
+    if (action === "cmd-confirmer" || action === "cmd-annuler") {
+      runAction(actionButton, "...", () => gesteDuDetail(action, actionButton.dataset.orderId));
+    }
+    // Pas de runAction : son « finally » rallumait le bouton APRES le rendu qui
+    // l'avait eteint (aucune selection) ; c'est renderCommandes qui decide.
+    if (action === "cmd-envoyer" && !envoiEnCours) {
+      envoiEnCours = true;
+      actionButton.disabled = true;
+      envoyerCommandesEnPreparation()
+        .catch(error => notifyEchec(error))
+        .finally(() => { envoiEnCours = false; renderCommandes(); });
+    }
+    if (action === "cmd-page") {
+      commandesFiltre.page += Number(actionButton.dataset.sens) || 0;
+      renderCommandes();
+      document.getElementById("cmdLignes")?.scrollIntoView({ block: "nearest" });
+    }
     // La planche 6a met « Importer les ventes » en en-tete. Le formulaire
     // d'import, lui, ne bouge pas : le bouton ouvre simplement son selecteur
     // de fichier. Deux chemins vers un seul mecanisme, pas deux mecanismes.
+    if (action === "cli-nouveau") ouvrirDialogueClient();
+    if (action === "cmd-client-effacer") {
+      Object.assign(commandesFiltre, { client: "", clientNom: "", page: 1 });
+      renderCommandes();
+      document.getElementById("cmdRecherche")?.focus();
+    }
+    if (action === "cli-modifier") ouvrirDialogueClient(actionButton.dataset.clientId);
+    if (action === "cli-fermer") document.getElementById("cliDialogue")?.close();
+    // « Les N autres » : la liste des commandes, cherchee sur ce client.
+    if (action === "cli-voir-commandes") {
+      showTab("commandes");
+      // Une liste PROPRE, comme une redirection : un filtre laisse d'avant
+      // cacherait les commandes du client. Et le client par son IDENTIFIANT.
+      for (const id of ["cmdRecherche", "cmdDu", "cmdAu"]) {
+        const champ = document.getElementById(id);
+        if (champ) champ.value = "";
+      }
+      Object.assign(commandesFiltre, { statut: "toutes", recherche: "", page: 1, bloquees: false, completer: false,
+        du: "", au: "", secteur: "", jour: "",
+        client: actionButton.dataset.clientId || "", clientNom: actionButton.dataset.clientNom || "" });
+      renderCommandes();
+    }
+    if (action === "importer-stock") {
+      const champ = document.getElementById("stockFile");
+      if (champ) {
+        champ.dataset.depuisEntete = "1";
+        champ.click();
+      }
+    }
     if (action === "importer-ventes") {
       const champ = document.getElementById("ventesFile");
       if (champ) {
@@ -634,12 +735,37 @@ function bindUi() {
 
 function getInitialTab() {
   const hash = window.location.hash.replace("#", "");
+  // Un ancien ecran-liste dans l'adresse (un favori, un lien) est rendu tel
+  // quel : showTab() le redirige, filtre compris.
+  if (hash in REDIRECTIONS) return hash;
   return mainTabs.has(hash) ? hash : "journee";
 }
 
 
 function showTab(tabName, options = {}) {
   const { updateHash = true } = options;
+  // Les quatre anciens ecrans-listes de commandes : ils ne sont plus des
+  // ecrans, mais on les honore -- l'ecran unique s'ouvre sur LEUR filtre.
+  const redirection = REDIRECTIONS[tabName];
+  if (redirection) {
+    // Un filtre laisse d'une visite precedente (« Bloquees seulement », un
+    // jour passe, une recherche) cachait la commande qu'on venait de saisir.
+    // Une redirection arrive sur une liste PROPRE, filtree comme l'ancien ecran.
+    Object.assign(commandesFiltre, {
+      statut: redirection.filtre, completer: redirection.completer || false,
+      bloquees: false, recherche: "", du: "", au: "", secteur: "", jour: "", page: 1, client: "", clientNom: ""
+    });
+    for (const id of ["cmdRecherche", "cmdDu", "cmdAu"]) {
+      const champ = document.getElementById(id);
+      if (champ) champ.value = "";
+    }
+    commandesSelection.clear();
+    tabName = redirection.onglet;
+    renderCommandes();
+    // L'adresse dit ou l'on est vraiment : #commandes, plus l'ancien nom.
+    // replaceState ne declenche pas de hashchange, donc pas de boucle.
+    history.replaceState(null, "", `#${tabName}`);
+  }
   const nextTab = titles[tabName] && mainTabs.has(tabName) ? tabName : "journee";
 
   document.querySelectorAll(".page").forEach(page => page.classList.remove("active"));
@@ -677,6 +803,11 @@ function showTab(tabName, options = {}) {
     commande.hidden = commande.dataset.ecran !== nextTab;
   });
   majEnteteTableauDeBord(nextTab);
+  // Le sous-titre de Commandes est un compte : il se pose APRES le sous-titre
+  // generique, sans quoi celui-ci l'ecraserait.
+  if (nextTab === "commandes") majSousTitreCommandes();
+  if (nextTab === "stock") majSousTitreStock();
+  if (nextTab === "crm") majSousTitreClients();
 
   updateCustomerCartBar();
 
@@ -867,6 +998,7 @@ async function loadData() {
   historique = data.historique;
   orders = data.orders;
   crmClients = data.crmClients;
+  abonnementsDonnees = data.subscriptions || { items: [], occurrences: [] };
   crmRelances = data.crmRelances;
   todayCustomerOrders = data.todayCustomerOrders;
   plannedOrders = data.plannedOrders;
@@ -1003,6 +1135,371 @@ function renderTourneeDuJour() {
   }
 }
 
+
+// ============================================================================
+// COMMANDES -- planches 13c / 14c. Un seul tableau, filtre par statut.
+// ============================================================================
+
+// Les pilules de la planche, plus UNE : « A envoyer ». Le statut des commandes
+// terrain (commande_client_validee) n'etait sous aucune des six, et avec lui le
+// geste qui le traite -- l'envoi en preparation par lot -- n'avait plus de
+// place. L'ordre suit le chemin d'une commande.
+const FILTRES_COMMANDES = [
+  { cle: "toutes", libelle: "Toutes", statuts: null },
+  { cle: "a-envoyer", libelle: "À envoyer", statuts: ["commande_client_validee"] },
+  { cle: "a-preparer", libelle: "À préparer", statuts: ["importe", "stock_a_verifier", "en_preparation", "preparation_terminee"] },
+  { cle: "pret", libelle: "Prêt livraison", statuts: ["pret_livraison"] },
+  { cle: "en-livraison", libelle: "En livraison", statuts: ["en_livraison"] },
+  { cle: "livrees", libelle: "Livrées", statuts: ["livre"] },
+  { cle: "planifiees", libelle: "Planifiées", statuts: ["planifiee", "a_confirmer"] }
+];
+
+// Les badges de la planche : tiede (peche claire), froid (vert clair), plein
+// (principal) ou contour d'alerte. Chaque statut dit son mot : la couleur
+// n'est jamais seule a porter l'etat.
+const STATUT_COMMANDE = {
+  brouillon: ["Brouillon", "neutre"],
+  commande_client_validee: ["À envoyer", "tiede"],
+  importe: ["Importée", "froid"],
+  stock_a_verifier: ["À vérifier", "tiede"],
+  en_preparation: ["En préparation", "tiede"],
+  preparation_terminee: ["Préparée", "tiede"],
+  pret_livraison: ["Prêt livraison", "froid"],
+  en_livraison: ["En livraison", "tiede"],
+  livre: ["Livrée", "plein"],
+  planifiee: ["Planifiée", "froid"],
+  a_confirmer: ["À confirmer", "froid"],
+  probleme_livraison: ["Problème", "alerte"],
+  a_reprogrammer: ["À reprogrammer", "tiede"],
+  annulee: ["Annulée", "neutre"]
+};
+
+const COMMANDES_PAR_PAGE = 20;
+const commandesFiltre = {
+  statut: "toutes", bloquees: false, completer: false, recherche: "", tri: "date-desc", page: 1,
+  du: "", au: "", secteur: "",
+  // Le jour des commandes terrain, comme l'ancien « Commandes du jour ».
+  jour: ""
+};
+// Un envoi en preparation en cours ; la ligne a qui rendre le focus quand le
+// detail se ferme.
+let envoiEnCours = false;
+let retourDuDetail = null;
+// Le filtre « A completer » a deux sens : false, « profil » (la case : la
+// regle de l'ancien ecran) ou « adresse » (l'alerte du tableau de bord : une
+// adresse manquante sur une commande encore a faire -- operations.js).
+function adresseACorriger(order) {
+  return !["livre", "annulee"].includes(order.status)
+    && (!String(order.address || "").trim() || !String(order.city || "").trim());
+}
+const commandesSelection = new Set();
+
+function commandeBloquee(order) {
+  return ["importe", "stock_a_verifier"].includes(order.status) && order.canPrepare === false;
+}
+
+// La date d'une ligne : celle de LIVRAISON pour une commande planifiee (c'est
+// la seule qui compte encore), celle de la COMMANDE pour les autres.
+function dateDeLaCommande(order) {
+  return ["planifiee", "a_confirmer"].includes(order.status)
+    ? (order.deliveryDate || order.dateCommande)
+    : (order.dateCommande || order.deliveryDate);
+}
+
+function dateCourte(iso) {
+  if (!iso) return "—";
+  const d = new Date(`${String(iso).slice(0, 10)}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return "—";
+  // L'annee quand ce n'est pas celle-ci : « 1 janv. » d'une echeance ratee
+  // l'an dernier se lisait comme une date a venir.
+  const autreAnnee = d.getFullYear() !== new Date().getFullYear();
+  return d.toLocaleDateString("fr-FR", autreAnnee ? { day: "numeric", month: "short", year: "numeric" } : { day: "numeric", month: "short" });
+}
+
+function articlesDe(order) {
+  return (order.products || []).reduce((n, p) => n + (Number(p.quantite) || 0), 0);
+}
+
+function commandesFiltrees() {
+  const filtre = FILTRES_COMMANDES.find(f => f.cle === commandesFiltre.statut) || FILTRES_COMMANDES[0];
+  const q = normalizeTextKey(commandesFiltre.recherche);
+  const liste = (orders || []).filter(order => {
+    if (filtre.statuts && !filtre.statuts.includes(order.status)) return false;
+    if (commandesFiltre.bloquees && !commandeBloquee(order)) return false;
+    // La regle de l'ancien ecran, reprise telle quelle (bdcNeedsCompletion).
+    if (commandesFiltre.completer === "profil" && !bdcNeedsCompletion(order)) return false;
+    if (commandesFiltre.completer === "adresse" && !adresseACorriger(order)) return false;
+    if (commandesFiltre.secteur && String(order.sector || "") !== commandesFiltre.secteur) return false;
+    if (commandesFiltre.client && String(order.clientId) !== String(commandesFiltre.client)) return false;
+    // La periode borne la date de COMMANDE, comme l'ancien export et comme la
+    // colonne « Date commande » du CSV -- meme pour une planifiee, dont la
+    // ligne montre la date de livraison.
+    const jourCommande = String(order.dateCommande || "").slice(0, 10);
+    if (commandesFiltre.du && jourCommande < commandesFiltre.du) return false;
+    if (commandesFiltre.au && jourCommande > commandesFiltre.au) return false;
+    if (filtre.cle === "a-envoyer" && commandesFiltre.jour
+      && String(order.dateCommande || "").slice(0, 10) !== commandesFiltre.jour) return false;
+    if (!q) return true;
+    // La recherche va jusqu'au PRODUIT (planche 13c : « Numero, client,
+    // produit... ») ; l'ancienne ne cherchait que le numero et le client.
+    const champs = [order.numero, order.clientName, order.sector, order.id,
+      ...(order.products || []).map(p => p.nom || p.produit)];
+    return champs.some(c => normalizeTextKey(c || "").includes(q));
+  });
+  const parDate = (a, b) => String(dateDeLaCommande(a) || "").localeCompare(String(dateDeLaCommande(b) || ""));
+  const tris = {
+    "date-desc": (a, b) => parDate(b, a),
+    "date-asc": parDate,
+    client: (a, b) => String(a.clientName || "").localeCompare(String(b.clientName || ""), "fr"),
+    numero: (a, b) => String(b.numero || "").localeCompare(String(a.numero || ""), "fr", { numeric: true })
+  };
+  return liste.sort(tris[commandesFiltre.tri] || tris["date-desc"]);
+}
+
+function badgeDeCommande(order) {
+  if (commandeBloquee(order)) {
+    return `<span class="cmd-badge cmd-badge--alerte"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true">`
+      + `<path d="M12 8v5M12 16.5h.01" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg>Bloquée</span>`;
+  }
+  const [mot, ton] = STATUT_COMMANDE[order.status] || [order.status || "Inconnu", "neutre"];
+  const coche = ton === "plein"
+    ? `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path></svg>`
+    : "";
+  return `<span class="cmd-badge cmd-badge--${ton}">${coche}${escapeHtml(mot)}</span>`;
+}
+
+function renderCommandes() {
+  const conteneur = document.getElementById("cmdLignes");
+  if (!conteneur) return;
+
+  // Les pilules
+  const pilules = document.getElementById("cmdPilules");
+  if (pilules) {
+    pilules.innerHTML = FILTRES_COMMANDES.map(f => {
+      const actif = f.cle === commandesFiltre.statut;
+      return `<button class="button secondary compact filtre-pilule${actif ? " active-filter" : ""}" type="button"`
+        + ` data-cmd-filtre="${f.cle}" aria-pressed="${actif}">${escapeHtml(f.libelle)}</button>`;
+    }).join("");
+  }
+  const caseBloquees = document.getElementById("cmdBloquees");
+  if (caseBloquees) caseBloquees.checked = commandesFiltre.bloquees;
+  const filtreClient = document.getElementById("cmdClientFiltre");
+  if (filtreClient) {
+    filtreClient.hidden = !commandesFiltre.client;
+    filtreClient.textContent = commandesFiltre.client ? `Client : ${commandesFiltre.clientNom || "…"} ✕` : "";
+    filtreClient.setAttribute("aria-label", `Retirer le filtre client ${commandesFiltre.clientNom || ""}`.trim());
+  }
+  const caseCompleter = document.getElementById("cmdACompleter");
+  if (caseCompleter) caseCompleter.checked = Boolean(commandesFiltre.completer);
+  setText("cmdACompleterLibelle", commandesFiltre.completer === "adresse" ? "Adresses à corriger" : "À compléter");
+  const secteur = document.getElementById("cmdSecteur");
+  if (secteur) {
+    const secteurs = [...new Set((orders || []).map(o => String(o.sector || "")).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, "fr"));
+    if (commandesFiltre.secteur && !secteurs.includes(commandesFiltre.secteur)) secteurs.push(commandesFiltre.secteur);
+    secteur.innerHTML = `<option value="">Tous les secteurs</option>`
+      + secteurs.map(s => `<option value="${escapeAttribute(s)}">${escapeHtml(formatSectorLabel(s))}</option>`).join("");
+    secteur.value = commandesFiltre.secteur;
+  }
+  if (!commandesFiltre.jour) commandesFiltre.jour = getTodayDateInput();
+  const jour = document.getElementById("cmdJour");
+  if (jour) jour.value = commandesFiltre.jour;
+  const tri = document.getElementById("cmdTri");
+  if (tri) tri.value = commandesFiltre.tri;
+
+  const liste = commandesFiltrees();
+  // La selection ne garde que ce qui est A L'ECRAN : une recherche ou un
+  // changement de jour ne doit pas laisser partir des commandes masquees.
+  const visibles = new Set(liste.map(o => String(o.id)));
+  for (const id of [...commandesSelection]) if (!visibles.has(id)) commandesSelection.delete(id);
+  const pages = Math.max(1, Math.ceil(liste.length / COMMANDES_PAR_PAGE));
+  commandesFiltre.page = Math.min(Math.max(1, commandesFiltre.page), pages);
+  const debut = (commandesFiltre.page - 1) * COMMANDES_PAR_PAGE;
+  const page = liste.slice(debut, debut + COMMANDES_PAR_PAGE);
+  const choix = commandesFiltre.statut === "a-envoyer";
+  document.querySelector("#commandes .cmd-carte")?.classList.toggle("cmd-carte--choix", choix);
+
+  conteneur.innerHTML = page.length ? page.map(order => {
+    const bloquee = commandeBloquee(order);
+    const articles = articlesDe(order);
+    const manquants = (order.stockLines || []).filter(l => l.status !== "ok").length;
+    const colonneArticles = bloquee && manquants
+      ? `<span class="cmd-manquants">${manquants} manquant${manquants > 1 ? "s" : ""}</span>`
+      : `${articles}`;
+    const case_ = choix
+      ? `<label class="cmd-col-choix"><input type="checkbox" class="cmd-choix" data-cmd-choix="${escapeAttribute(order.id)}"`
+        + ` aria-label="Choisir ${escapeAttribute(order.numero || order.clientName || "la commande")}"`
+        + `${commandesSelection.has(String(order.id)) ? " checked" : ""}></label>`
+      : `<span class="cmd-col-choix"></span>`;
+    return `<div class="cmd-ligne" role="listitem" tabindex="0" data-cmd-ouvrir="${escapeAttribute(order.id)}"`
+      // Le nom accessible dit AUSSI le statut : « Bloquee » ne doit pas etre
+      // reserve a qui voit le badge.
+      + ` aria-label="${escapeAttribute(`${order.numero || ""} ${order.clientName || ""}, ${commandeBloquee(order) ? "Bloquée" : (STATUT_COMMANDE[order.status]?.[0] || order.status || "")}`.trim())}">`
+      + case_
+      + `<span class="cmd-num">${escapeHtml(order.numero || "—")}`
+      + `${order.subscriptionId ? '<span class="cmd-abo">Abonnement</span>' : ""}</span>`
+      + `<span class="cmd-date">${escapeHtml(dateCourte(dateDeLaCommande(order)))}</span>`
+      + `<span class="cmd-client">${escapeHtml(order.clientName || "Client")}</span>`
+      + `<span class="cmd-secteur">${escapeHtml(order.sector ? formatSectorLabel(order.sector) : "—")}</span>`
+      + `<span class="cmd-articles cmd-droite">${colonneArticles}</span>`
+      + `<span class="cmd-statut cmd-droite">${badgeDeCommande(order)}</span>`
+      + `</div>`;
+  }).join("") : emptyState("Aucune commande", commandesFiltre.recherche || commandesFiltre.bloquees || commandesFiltre.statut !== "toutes"
+    || commandesFiltre.completer || commandesFiltre.du || commandesFiltre.au || commandesFiltre.secteur
+    ? "Aucune commande ne correspond à ce filtre."
+    : "Les commandes importées et saisies apparaîtront ici.");
+
+  setText("cmdCompte", liste.length
+    ? `${debut + 1}–${debut + page.length} sur ${liste.length}`
+    : "0 sur 0");
+  const precedent = document.getElementById("cmdPrecedent");
+  const suivant = document.getElementById("cmdSuivant");
+  if (precedent) precedent.disabled = commandesFiltre.page <= 1;
+  if (suivant) suivant.disabled = commandesFiltre.page >= pages;
+
+  // L'envoi par lot, sous « A envoyer » seulement
+  const envoi = document.getElementById("cmdEnvoi");
+  if (envoi) {
+    // Visible meme sans ligne : c'est elle qui porte le choix du JOUR, et un
+    // jour vide doit pouvoir mener a un autre.
+    envoi.hidden = !choix;
+    const toutCase = document.getElementById("cmdToutSelectionner");
+    if (toutCase) toutCase.disabled = !liste.length;
+    const n = commandesSelection.size;
+    setText("cmdEnvoiCompte", n ? `${n} sélectionnée${n > 1 ? "s" : ""}` : "Aucune sélectionnée");
+    const bouton = document.getElementById("cmdEnvoyer");
+    if (bouton) bouton.disabled = n === 0 || envoiEnCours;
+    const tout = document.getElementById("cmdToutSelectionner");
+    if (tout) tout.checked = page.length > 0 && page.every(o => commandesSelection.has(String(o.id)));
+    setText("cmdToutLibelle", pages > 1 ? "Tout sélectionner sur la page" : "Tout sélectionner");
+  }
+
+  majSousTitreCommandes();
+}
+
+// Le sous-titre de la planche : « 124 bons depuis janvier · 5 en cours ».
+function majSousTitreCommandes() {
+  if (!document.getElementById("commandes")?.classList.contains("active")) return;
+  const annee = String(new Date().getFullYear());
+  const depuisJanvier = (orders || []).filter(o => String(o.dateCommande || "").startsWith(annee)).length;
+  const enCours = (orders || []).filter(o => !["livre", "annulee", "brouillon"].includes(o.status)).length;
+  setText("pageSubtitle", `${depuisJanvier} bon${depuisJanvier > 1 ? "s" : ""} depuis janvier · ${enCours} en cours`);
+}
+
+// Le detail d'une commande : le modal existant, plus les gestes que la planche
+// retire de la liste -- confirmer ou annuler une commande planifiee.
+function ouvrirDetailCommande(orderId) {
+  // Comme l'ouverture d'origine : on n'arrive jamais dans le detail en mode
+  // edition, meme apres un Echap pendant une edition precedente.
+  bdcState.editingClientId = null;
+  openBdcDetail(orderId);
+  const order = (orders || []).find(o => String(o.id) === String(orderId));
+  const gestes = document.getElementById("cmdDetailGestes");
+  if (!gestes) return;
+  gestes.hidden = true;
+  gestes.innerHTML = "";
+  // Le focus entre dans la fenetre (sinon Tab continue derriere elle) et
+  // reviendra a la ligne a la fermeture.
+  retourDuDetail = String(orderId);
+  document.querySelector("#bdc-detail-modal .version-modal-card button")?.focus();
+  if (!order || !["planifiee", "a_confirmer"].includes(order.status)) return;
+  gestes.innerHTML = `<button class="button ok" type="button" data-action="cmd-confirmer" data-order-id="${escapeAttribute(order.id)}">Confirmer</button>`
+    + `<button class="button danger" type="button" data-action="cmd-annuler" data-order-id="${escapeAttribute(order.id)}">Annuler la commande</button>`;
+  gestes.hidden = false;
+}
+
+// Un geste du detail FERME le detail : sinon la fenetre restait ouverte, figee,
+// et « Annuler » pouvait annuler une commande qui venait de passer en
+// preparation -- stock reserve rendu, sans rien demander.
+async function gesteDuDetail(action, orderId) {
+  if (action === "cmd-annuler"
+    && !window.confirm("Annuler cette commande planifiée ? Elle ne sera pas livrée.")) return;
+  closeBdcDetail();
+  if (action === "cmd-confirmer") await confirmPlannedOrder(orderId);
+  else await cancelPlannedOrder(orderId);
+}
+
+async function envoyerCommandesEnPreparation() {
+  const ids = Array.from(commandesSelection);
+  if (!ids.length) return;
+  await apiFetch("/api/customer-orders/send-preparation", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ orderIds: ids })
+  });
+  commandesSelection.clear();
+  await loadData();
+  notify(`${ids.length} commande${ids.length > 1 ? "s" : ""} envoyée${ids.length > 1 ? "s" : ""} en préparation.`, "success");
+}
+
+function bindCommandes() {
+  const ecran = document.getElementById("commandes");
+  if (!ecran) return;
+  ecran.addEventListener("click", event => {
+    const pilule = event.target.closest("[data-cmd-filtre]");
+    if (pilule) {
+      commandesFiltre.statut = pilule.dataset.cmdFiltre;
+      commandesFiltre.page = 1;
+      commandesSelection.clear();
+      renderCommandes();
+      return;
+    }
+    if (event.target.closest(".cmd-col-choix")) return;   // la case ne doit pas ouvrir le detail
+    const ligne = event.target.closest("[data-cmd-ouvrir]");
+    if (ligne) ouvrirDetailCommande(ligne.dataset.cmdOuvrir);
+  });
+  ecran.addEventListener("keydown", event => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const ligne = event.target.closest?.("[data-cmd-ouvrir]");
+    if (!ligne || event.target !== ligne) return;
+    event.preventDefault();
+    ouvrirDetailCommande(ligne.dataset.cmdOuvrir);
+  });
+  ecran.addEventListener("change", event => {
+    if (event.target.id === "cmdBloquees") {
+      commandesFiltre.bloquees = event.target.checked;
+      commandesFiltre.page = 1;
+      renderCommandes();
+    } else if (event.target.id === "cmdACompleter") {
+      commandesFiltre.completer = event.target.checked ? "profil" : false;
+      commandesFiltre.page = 1;
+      renderCommandes();
+    } else if (["cmdDu", "cmdAu", "cmdJour"].includes(event.target.id)) {
+      const cle = { cmdDu: "du", cmdAu: "au", cmdJour: "jour" }[event.target.id];
+      commandesFiltre[cle] = event.target.value;
+      commandesFiltre.page = 1;
+      renderCommandes();
+    } else if (event.target.id === "cmdTri") {
+      commandesFiltre.tri = event.target.value;
+      renderCommandes();
+    } else if (event.target.id === "cmdSecteur") {
+      commandesFiltre.secteur = event.target.value;
+      commandesFiltre.page = 1;
+      renderCommandes();
+    } else if (event.target.matches("[data-cmd-choix]")) {
+      const id = event.target.dataset.cmdChoix;
+      if (event.target.checked) commandesSelection.add(id); else commandesSelection.delete(id);
+      renderCommandes();
+      // Le rendu refait les lignes : sans ceci, le focus tombait sur <body> et
+      // la selection au clavier repartait du haut de la page.
+      document.querySelector(`[data-cmd-choix="${CSS.escape(id)}"]`)?.focus();
+    } else if (event.target.id === "cmdToutSelectionner") {
+      // La PAGE, pas toute la liste : une commande d'une autre page ne part
+      // pas sans avoir ete vue.
+      const debut = (commandesFiltre.page - 1) * COMMANDES_PAR_PAGE;
+      commandesFiltrees().slice(debut, debut + COMMANDES_PAR_PAGE).forEach(o => {
+        if (event.target.checked) commandesSelection.add(String(o.id)); else commandesSelection.delete(String(o.id));
+      });
+      renderCommandes();
+    }
+  });
+  document.getElementById("cmdRecherche")?.addEventListener("input", event => {
+    commandesFiltre.recherche = event.target.value;
+    commandesFiltre.page = 1;
+    renderCommandes();
+  });
+}
+
 function renderAll() {
   majEnteteTableauDeBord(getInitialTab());
   renderStats();
@@ -1021,6 +1518,7 @@ function renderAll() {
   renderRecommande();
   renderCommandesLivrees();
   renderBonsCommande();
+  renderCommandes();
   renderProduits();
   renderVentes();
   renderAlertes();
@@ -1278,58 +1776,280 @@ function formatMoney(value) {
   return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(value) || 0);
 }
 
+const ICONE_CLI = {
+  abonnes: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 9a5 5 0 0 1 5-5h6l-2-2m6 8a5 5 0 0 1-5 5H8l2 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>',
+  lieu: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path></svg>',
+  tel: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6.5 4h3l2 5-2.5 1.5a11 11 0 0 0 4.5 4.5L15 12.5l5 2v3a2 2 0 0 1-2.2 2A15 15 0 0 1 4.5 6.2 2 2 0 0 1 6.5 4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path></svg>',
+  retard: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5"></circle><path d="M12 8v4m0 3.5v.5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg>',
+  chevron: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m9 6 6 6-6 6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>'
+};
+
+function nomDuClient(client) {
+  return [client.prenom, client.nom].filter(Boolean).join(" ") || client.nom || "Client";
+}
+
+// Le meme predicat que le serveur (adresseGeocodable) : une rue, et un code
+// postal ou une ville. Sans cela, la tournee ne place pas le client.
+function adresseClientACorriger(client) {
+  return !(String(client.rue || "").trim() && (String(client.codePostal || "").trim() || String(client.ville || "").trim()));
+}
+
+// L'abonnement d'un client : l'actif d'abord, sinon celui en pause. Un
+// abonnement arrete ne se montre plus (la planche n'en dessine aucun).
+function abonnementDuClient(clientId) {
+  const siens = (abonnementsDonnees.items || []).filter(s => String(s.clientId) === String(clientId));
+  return siens.find(s => s.status === "active") || siens.find(s => s.status === "paused") || null;
+}
+
+// La prochaine echeance SANS commande : c'est elle que « Creer la commande »
+// produit. En retard si sa date est passee.
+function echeanceAFaire(abonnement) {
+  return (abonnementsDonnees.occurrences || [])
+    .filter(o => o.subscriptionId === abonnement.id && !o.orderId)
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)))[0] || null;
+}
+
+function frequenceLisible(abonnement) {
+  const f = abonnement.frequency || {};
+  const n = Number(f.interval) || 1;
+  if (f.unit === "months") return n === 1 ? "tous les mois" : `tous les ${n} mois`;
+  return n === 1 ? "tous les jours" : (n % 7 === 0 ? (n === 7 ? "toutes les semaines" : `toutes les ${n / 7} semaines`) : `tous les ${n} j`);
+}
+
+function commandesDuClient(clientId) {
+  return (orders || []).filter(o => String(o.clientId) === String(clientId))
+    .sort((a, b) => String(b.dateCommande || "").localeCompare(String(a.dateCommande || "")));
+}
+
+// La derniere LIVRAISON (planche 13e : « livree le 2 sept. »). Les commandes
+// sont deja dans la page : le calcul ne coute rien au serveur.
+function derniereLivraison(clientId) {
+  return commandesDuClient(clientId)
+    .filter(o => o.status === "livre")
+    // deliveredAt est un instant UTC : on prend le JOUR a Paris (une livraison
+    // a 0 h 30 n'est pas celle de la veille).
+    .map(o => o.deliveredAt ? new Date(o.deliveredAt).toLocaleDateString("en-CA", { timeZone: "Europe/Paris" }) : String(o.deliveryDate || "").slice(0, 10))
+    .filter(Boolean)
+    .sort()
+    .pop() || null;
+}
+
+function clientsFiltres() {
+  const query = normalizeTextKey(crmFilter.query);
+  const today = getTodayDateInput();
+  const filtre = crmFilter.status || "all";
+  return crmClients.filter(client => {
+    if (query && !normalizeTextKey([client.nom, client.prenom, client.telephone, client.rue, client.ville, client.email]
+      .join(" ")).includes(query)) return false;
+    if (crmFilter.secteur === "__abonnes") {
+      if (abonnementDuClient(client.id)?.status !== "active") return false;
+    } else if (crmFilter.secteur && String(client.secteur || "") !== crmFilter.secteur) return false;
+    if (filtre === "relance_today") return client.nextReminderDate === today;
+    if (filtre === "relance_late") return Boolean(client.nextReminderDate && client.nextReminderDate < today);
+    if (filtre !== "all") return client.crmStatus === filtre;
+    return true;
+  }).sort((a, b) => nomDuClient(a).localeCompare(nomDuClient(b), "fr"));
+}
+
+// « 47 clients · 6 abonnes · 1 adresse a corriger » (planche 13e).
+function majSousTitreClients() {
+  if (!document.getElementById("crm")?.classList.contains("active")) return;
+  const n = crmClients.length;
+  const abonnes = new Set((abonnementsDonnees.items || []).filter(s => s.status === "active")
+    .map(s => String(s.clientId)).filter(id => crmClients.some(c => String(c.id) === id))).size;
+  const aCorriger = crmClients.filter(adresseClientACorriger).length;
+  const morceaux = [`${n} client${n > 1 ? "s" : ""}`, `${abonnes} abonné${abonnes > 1 ? "s" : ""}`];
+  if (aCorriger) morceaux.push(`${aCorriger} adresse${aCorriger > 1 ? "s" : ""} à corriger`);
+  setText("pageSubtitle", morceaux.join(" · "));
+}
+
 function renderCrm() {
   const container = document.getElementById("crmList");
-  const summary = document.getElementById("crmSummary");
   if (!container) return;
-
-  const today = getTodayDateInput();
-  const query = normalizeTextKey(crmFilter.query);
-  const filter = crmFilter.status || "all";
-  let list = crmClients.slice();
-
-  if (query) {
-    list = list.filter(client => normalizeTextKey([
-      client.nom, client.prenom, client.telephone, client.rue, client.ville, client.email
-    ].join(" ")).includes(query));
-  }
-  if (filter !== "all") {
-    if (filter === "relance_today") list = list.filter(client => client.nextReminderDate === today);
-    else if (filter === "relance_late") list = list.filter(client => client.nextReminderDate && client.nextReminderDate < today);
-    else list = list.filter(client => client.crmStatus === filter);
-  }
-
-  if (summary) summary.textContent = `${list.length} contact${list.length > 1 ? "s" : ""}`;
   renderClientSelects();
 
-  if (!list.length) {
-    container.innerHTML = emptyState("Aucun contact", "Crée une fiche ou modifie les filtres.");
-    return;
+  // Les pilules : Tous, les secteurs trouves chez les clients, Abonnes.
+  const pilules = document.getElementById("cliPilules");
+  if (pilules) {
+    const secteurs = [...new Set(crmClients.map(c => String(c.secteur || "")).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, "fr"));
+    const pilule = (cle, libelle, icone = "") => {
+      const actif = crmFilter.secteur === cle;
+      return `<button class="cli-pilule${actif ? " cli-pilule--active" : ""}" type="button" data-cli-secteur="${escapeAttribute(cle)}" aria-pressed="${actif}">${icone}${escapeHtml(libelle)}</button>`;
+    };
+    pilules.innerHTML = pilule("", "Tous")
+      + secteurs.map(s => pilule(s, formatSectorLabel(s))).join("")
+      + pilule("__abonnes", "Abonnés", ICONE_CLI.abonnes);
   }
 
-  container.innerHTML = list.map(client => `
-    <article class="crm-card">
-      <header class="item-header">
-        <div>
-          <h4>${escapeHtml([client.prenom, client.nom].filter(Boolean).join(" ") || client.nom)}</h4>
-          <p>${escapeHtml([client.rue, client.codePostal, client.ville].filter(Boolean).join(" - ") || "Adresse a completer")}</p>
-        </div>
-        <span class="pill ${crmStatusPill(client.crmStatus)}">${escapeHtml(crmStatusLabel(client.crmStatus))}</span>
-      </header>
-      <div class="crm-meta">
-        <span>${escapeHtml(client.telephone || "Telephone a completer")}</span>
-        <span>${escapeHtml(client.email || "Email non renseigne")}</span>
-        <span>${escapeHtml(client.totalOrders || 0)} commande(s)</span>
-        <span>${formatMoney(client.totalRevenue || 0)}</span>
+  const rappels = (crmRelances || []).filter(r => r.status === "a_faire" && String(r.datePrevue || "") <= getTodayDateInput()).length;
+  setText("cliRappelsCompte", rappels ? ` · ${rappels}` : "");
+  majSousTitreClients();
+
+  const list = clientsFiltres();
+  if (!list.some(c => String(c.id) === String(clientChoisi))) clientChoisi = list[0] ? String(list[0].id) : null;
+
+  if (!list.length) {
+    container.innerHTML = emptyState("Aucun client", crmClients.length
+      ? "Aucun client ne correspond à ce filtre."
+      : "Crée une fiche avec « Nouveau client ».");
+  } else {
+    container.innerHTML = list.map(client => {
+      const choisi = String(client.id) === clientChoisi;
+      const abonnement = abonnementDuClient(client.id);
+      const livraison = derniereLivraison(client.id);
+      const meta = adresseClientACorriger(client)
+        ? `<span class="cli-meta cli-alerte">${ICONE_CLI.lieu}Adresse à corriger${client.ville ? ` · ${escapeHtml(client.ville)}` : ""}</span>`
+        : `<span class="cli-meta">${escapeHtml([client.ville, livraison ? `livrée le ${dateCourte(livraison)}` : ""].filter(Boolean).join(" · ") || "—")}</span>`;
+      const badge = abonnement
+        ? `<span class="cli-badge cli-badge--${abonnement.status === "active" ? "froid" : "tiede"}">${abonnement.status === "active" ? "Abonné" : "En pause"}</span>`
+        : "";
+      return `<div role="listitem"><button class="cli-ligne${choisi ? " cli-ligne--choisie" : ""}" type="button" data-cli-choisir="${escapeAttribute(client.id)}" aria-current="${choisi ? "true" : "false"}">`
+        + `<span class="cli-ligne-texte"><span class="cli-nom">${escapeHtml(nomDuClient(client))}</span>${meta}</span>${badge}</button></div>`;
+    }).join("");
+  }
+  renderFicheClient();
+}
+
+function renderFicheClient() {
+  const fiche = document.getElementById("cliFiche");
+  if (!fiche) return;
+  const client = crmClients.find(c => String(c.id) === String(clientChoisi));
+  if (!client) {
+    fiche.innerHTML = `<p class="cli-fiche-vide">Choisis un client dans la liste.</p>`;
+    return;
+  }
+  const abonnement = abonnementDuClient(client.id);
+  const puces = [client.secteur ? formatSectorLabel(client.secteur) : client.ville, abonnement ? (abonnement.status === "active" ? "Abonné" : "En pause") : ""]
+    .filter(Boolean).map((p, i) => `<span class="cli-badge cli-badge--${i === 1 && abonnement?.status !== "active" ? "tiede" : "froid"} cli-puce">${escapeHtml(p)}</span>`).join("");
+  const appeler = client.telephone
+    ? `<a class="button primary cli-appeler" href="tel:${escapeAttribute(String(client.telephone).replace(/[^\d+]/g, ""))}">${ICONE_CLI.tel}<span>Appeler</span></a>`
+    : "";
+  const adresse = adresseClientACorriger(client)
+    ? `<p class="cli-valeur cli-alerte">Adresse à corriger</p><p class="cli-note">${escapeHtml([client.rue, client.codePostal, client.ville].filter(Boolean).join(" ") || "Aucune adresse")}</p>`
+    : `<p class="cli-valeur">${escapeHtml(client.rue)}<br>${escapeHtml([client.codePostal, client.ville].filter(Boolean).join(" "))}</p>`;
+  const contact = `<p class="cli-valeur">${escapeHtml(client.telephone || "Téléphone à compléter")}</p>`
+    + (client.email ? `<p class="cli-note">${escapeHtml(client.email)}</p>` : "");
+
+  let carteAbonnement = "";
+  if (abonnement) {
+    const echeance = echeanceAFaire(abonnement);
+    const enRetard = Boolean(echeance?.overdue);
+    const produits = (abonnement.products || []).map(p => `${p.quantite} ${p.nom || p.designation || p.code || ""}`.trim()).join(", ");
+    const morceaux = [produits, `rappel ${abonnement.reminderDays ?? 0} j`, echeance ? `échéance du ${dateCourte(echeance.date)}` : ""].filter(Boolean);
+    const geste = abonnement.status === "active" && echeance
+      ? `<button class="cli-bouton-contour" type="button" data-op="generate-sub" data-id="${escapeAttribute(abonnement.id)}" data-date="${escapeAttribute(echeance.date)}">Créer la commande</button>`
+      : "";
+    carteAbonnement = `<div class="cli-abonnement subscription-card">
+      <div class="cli-abonnement-texte">
+        <p class="cli-abonnement-titre">Abonnement · ${escapeHtml(frequenceLisible(abonnement))}${enRetard ? `<span class="cli-badge cli-badge--alerte">${ICONE_CLI.retard}En retard</span>` : ""}${abonnement.status !== "active" ? `<span class="cli-badge cli-badge--tiede">En pause</span>` : ""}</p>
+        <p class="cli-abonnement-detail">${escapeHtml(morceaux.join(" · "))}</p>
+      </div>${geste}</div>`;
+  }
+
+  const commandes = commandesDuClient(client.id);
+  const annee = String(new Date().getFullYear());
+  const depuisJanvier = commandes.filter(o => String(o.dateCommande || "").startsWith(annee)).length;
+  const visibles = commandes.slice(0, 4);
+  const reste = commandes.length - visibles.length;
+  const lignesCommandes = visibles.length
+    ? visibles.map(o => `<button class="cli-commande" type="button" data-cli-commande="${escapeAttribute(o.id)}" aria-label="${escapeAttribute(`${o.numero || ""}, ${STATUT_COMMANDE[o.status]?.[0] || o.status || ""}`)}">`
+        + `<span class="cli-commande-num">${escapeHtml(o.numero || "—")}</span>`
+        + `<span class="cli-commande-date">${escapeHtml(dateCourte(o.dateCommande))}</span>`
+        + `<span class="cli-commande-articles">${articlesDe(o)} article${articlesDe(o) > 1 ? "s" : ""}</span>`
+        + `<span class="cli-commande-statut">${badgeDeCommande(o)}</span></button>`).join("")
+    : `<p class="cli-note">Aucune commande.</p>`;
+
+  const extras = [
+    client.nextReminderDate ? `Prochaine relance : ${dateCourte(client.nextReminderDate)}` : "",
+    client.needs ? `Besoins : ${client.needs}` : "",
+    client.preferences ? `Préférés : ${client.preferences}` : "",
+    client.notes || ""
+  ].filter(Boolean);
+
+  fiche.innerHTML = `
+    <header class="cli-fiche-tete">
+      <div class="cli-fiche-identite">
+        <h2 class="cli-fiche-nom">${escapeHtml(nomDuClient(client))}</h2>
+        <div class="cli-puces">${puces}</div>
       </div>
-      <p class="muted">${escapeHtml(client.notes || client.needs || "Aucune note")}</p>
-      <div class="card-actions">
-        <button class="button ok compact" type="button" data-crm-status-client="${escapeAttribute(client.id)}" data-crm-status="client_actif">Client actif</button>
-        <button class="button warning compact" type="button" data-crm-status-client="${escapeAttribute(client.id)}" data-crm-status="client_a_relancer">A relancer</button>
-        <button class="button danger compact" type="button" data-crm-status-client="${escapeAttribute(client.id)}" data-crm-status="client_inactif">Inactif</button>
-      </div>
-    </article>
-  `).join("");
+      <div class="cli-fiche-gestes">${appeler}<button class="cli-bouton-contour" type="button" data-action="cli-modifier" data-client-id="${escapeAttribute(client.id)}">Modifier</button></div>
+    </header>
+    <div class="cli-champs">
+      <div><p class="cli-libelle">Adresse</p>${adresse}</div>
+      <div><p class="cli-libelle">Contact</p>${contact}</div>
+    </div>
+    ${extras.length ? `<div class="cli-notes">${extras.map(e => `<p class="cli-note">${escapeHtml(e)}</p>`).join("")}</div>` : ""}
+    <label class="cli-statut">
+      <span class="cli-libelle">Statut commercial</span>
+      <select data-cli-statut="${escapeAttribute(client.id)}" aria-label="Statut commercial de ${escapeAttribute(nomDuClient(client))}">
+        ${["prospect", "client_actif", "client_a_relancer", "client_inactif"].map(s => `<option value="${s}"${(client.crmStatus || "prospect") === s ? " selected" : ""}>${escapeHtml(crmStatusLabel(s))}</option>`).join("")}
+      </select>
+    </label>
+    ${carteAbonnement}
+    <section class="cli-commandes" aria-label="Commandes du client">
+      <div class="cli-commandes-tete"><h3>Commandes</h3><span class="cli-note">${depuisJanvier} depuis janvier</span></div>
+      <div class="cli-commandes-liste">${lignesCommandes}</div>
+      ${reste > 0 ? `<button class="cli-autres" type="button" data-action="cli-voir-commandes" data-client-id="${escapeAttribute(client.id)}" data-client-nom="${escapeAttribute(nomDuClient(client))}">Les ${reste} autre${reste > 1 ? "s" : ""}${ICONE_CLI.chevron}</button>` : ""}
+    </section>`;
+}
+
+function ouvrirDialogueClient(clientId = null) {
+  const dialogue = document.getElementById("cliDialogue");
+  const form = document.getElementById("crmForm");
+  if (!dialogue || !form || typeof dialogue.showModal !== "function") return;
+  form.reset();
+  const client = clientId ? crmClients.find(c => String(c.id) === String(clientId)) : null;
+  setText("cliDialogueTitre", client ? "Modifier le client" : "Nouveau client");
+  form.elements.id.value = client ? client.id : "";
+  const erreur = document.getElementById("cliErreur");
+  if (erreur) { erreur.hidden = true; erreur.textContent = ""; }
+  form.dataset.initial = "{}";
+  if (client) {
+    const valeurs = { nom: client.nom, prenom: client.prenom, telephone: client.telephone, email: client.email,
+      adresse: client.rue, codePostal: client.codePostal, ville: client.ville, crmStatus: client.crmStatus || "prospect",
+      nextReminderDate: client.nextReminderDate, needs: client.needs, preferences: client.preferences, notes: client.notes };
+    for (const [cle, valeur] of Object.entries(valeurs)) if (form.elements[cle]) form.elements[cle].value = valeur ?? "";
+    // Ce que le dialogue a MONTRE : on n'enverra que ce qui en differe.
+    form.dataset.initial = JSON.stringify(Object.fromEntries(new FormData(form).entries()));
+  }
+  dialogue.showModal();
+  form.elements.nom.focus();
+}
+
+function bindClients() {
+  const ecran = document.getElementById("crm");
+  if (!ecran) return;
+  ecran.addEventListener("click", event => {
+    const pilule = event.target.closest("[data-cli-secteur]");
+    if (pilule) {
+      crmFilter.secteur = pilule.dataset.cliSecteur;
+      renderCrm();
+      document.querySelector(`[data-cli-secteur="${CSS.escape(crmFilter.secteur)}"]`)?.focus();
+      return;
+    }
+    const ligne = event.target.closest("[data-cli-choisir]");
+    if (ligne) {
+      clientChoisi = ligne.dataset.cliChoisir;
+      renderCrm();
+      document.querySelector(`[data-cli-choisir="${CSS.escape(clientChoisi)}"]`)?.focus();
+      // Sous 1180 px la fiche est SOUS la liste : sans ceci, rien ne semblait se passer.
+      if (window.matchMedia("(max-width: 1180px)").matches) {
+        document.getElementById("cliFiche")?.scrollIntoView({ block: "start", behavior: "smooth" });
+      }
+      return;
+    }
+    const commande = event.target.closest("[data-cli-commande]");
+    if (commande) ouvrirDetailCommande(commande.dataset.cliCommande);
+  });
+  ecran.addEventListener("change", event => {
+    const statut = event.target.closest("[data-cli-statut]");
+    if (statut) {
+      const id = statut.dataset.cliStatut;
+      runAction(statut, "", () => updateCrmClientStatus(id, statut.value))
+        .then(() => document.querySelector(`[data-cli-statut="${CSS.escape(id)}"]`)?.focus());
+    }
+  });
 }
 
 function renderClientSelects() {
@@ -1346,16 +2066,61 @@ function renderClientSelects() {
   if (relanceSelect) relanceSelect.innerHTML = options.replace("Nouveau client", "Choisir un client");
 }
 
+// Ce qui, dans une fiche, est recopie sur ses COMMANDES par /api/clients/:id :
+// l'adresse de livraison, le nom, le telephone. La route CRM ne le fait pas.
+const CHAMPS_IDENTITE = { nom: "nom", adresse: "rue", codePostal: "codePostal", ville: "ville", telephone: "telephone" };
+
 async function saveCrmClient(form) {
-  const data = Object.fromEntries(new FormData(form).entries());
-  await apiFetch("/api/crm/clients", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data)
-  });
+  const { id, ...data } = Object.fromEntries(new FormData(form).entries());
+  const erreur = document.getElementById("cliErreur");
+  if (erreur) { erreur.hidden = true; erreur.textContent = ""; }
+  try {
+    if (!id) {
+      const cree = await apiFetch("/api/crm/clients", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data)
+      });
+      // La fiche creee s'ouvre -- y compris si un filtre l'aurait cachee.
+      if (cree?.id) clientChoisi = String(cree.id);
+      Object.assign(crmFilter, { query: "", status: "all", secteur: "" });
+      const recherche = document.getElementById("crmSearch");
+      if (recherche) recherche.value = "";
+      const statut = document.getElementById("crmStatusFilter");
+      if (statut) statut.value = "all";
+    } else {
+      // Seulement ce qui a CHANGE : sinon des valeurs calculees par le serveur
+      // (prochaine relance, statut deduit) etaient figees dans la fiche.
+      const avant = JSON.parse(form.dataset.initial || "{}");
+      const change = Object.fromEntries(Object.entries(data).filter(([cle, valeur]) => String(avant[cle] ?? "") !== String(valeur)));
+      const identite = {}, crm = {};
+      for (const [cle, valeur] of Object.entries(change)) {
+        if (cle in CHAMPS_IDENTITE) identite[CHAMPS_IDENTITE[cle]] = valeur; else crm[cle] = valeur;
+      }
+      if (Object.keys(identite).length) {
+        await apiFetch(`/api/clients/${encodeURIComponent(id)}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(identite)
+        });
+      }
+      if (Object.keys(crm).length) {
+        await apiFetch(`/api/crm/clients/${encodeURIComponent(id)}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(crm)
+        });
+      }
+    }
+  } catch (error) {
+    // Dans le dialogue : un toast serait sous sa couche, assombri et inerte.
+    if (erreur) {
+      erreur.textContent = error?.message || "Enregistrement impossible.";
+      erreur.hidden = false;
+      return;
+    }
+    throw error;
+  }
   form.reset();
+  document.getElementById("cliDialogue")?.close();
   await loadData();
-  notify("Fiche CRM enregistree.", "success");
+  notify(id ? "Fiche client mise à jour." : "Client enregistré.", "success");
 }
 
 async function updateCrmClientStatus(clientId, status) {
@@ -1879,7 +2644,15 @@ function renderStock() {
   if (!container) return;
 
   container.innerHTML = "";
-  renderStockFilterOptions();
+  renderStockRecommande();
+  renderStockCategories();
+  majSousTitreStock();
+  const entete = document.getElementById("stkEnteteProduit");
+  if (entete) {
+    entete.textContent = stockFilter.category === "all"
+      ? "Produit"
+      : `Produit · ${stockFilter.category || "Sans catégorie"}`;
+  }
 
   if (!stock.length) {
     container.innerHTML = emptyState("Aucun stock chargé", "Importe un fichier stock pour initialiser le catalogue.", { libelle: "Importer le stock", onglet: "journee" });
@@ -1894,30 +2667,129 @@ function renderStock() {
   }
 
   filtered.forEach(product => {
-    container.appendChild(createStockCard(product));
+    container.appendChild(creerLigneStock(product));
   });
 }
 
-function renderStockFilterOptions() {
-  const categorySelect = document.getElementById("stockCategoryFilter");
-  if (!categorySelect) return;
+// La cle de categorie d'un produit, telle que le filtre la compare.
+function categorieDuProduit(product) {
+  return String(product.category || product.type || "");
+}
 
-  const current = stockFilter.category || "all";
-  const categories = [...new Set(stock.map(product => product.category || product.type || "").filter(Boolean))]
-    .sort((a, b) => a.localeCompare(b, "fr"));
+function sousLeSeuil(product) {
+  return ["stock_faible", "rupture"].includes(getStockLevel(product).status);
+}
 
-  categorySelect.innerHTML = `
-    <option value="all">Toutes</option>
-    ${categories.map(category => `
-      <option value="${escapeAttribute(category)}" ${category === current ? "selected" : ""}>${escapeHtml(category)}</option>
-    `).join("")}
-  `;
+// « 20 references · 3 sous le seuil · 5 categories » (planche 13d). La planche
+// ajoute « trouvees dans le dernier import » : rien ne rattache les categories
+// a un import, la provenance n'est pas ecrite.
+function majSousTitreStock() {
+  if (!document.getElementById("stock")?.classList.contains("active")) return;
+  const n = stock.length;
+  const sous = getLowStockProducts().length;
+  const categories = new Set(stock.map(categorieDuProduit)).size;
+  setText("pageSubtitle", n
+    ? `${n} référence${n > 1 ? "s" : ""} · ${sous} sous le seuil · ${categories} catégorie${categories > 1 ? "s" : ""}`
+    : "Aucun produit importé");
+}
+
+// La carte « A recommander » : ce qui est sous le seuil, le plus en retard
+// d'abord. Cinq lignes au plus ; la liste complete, avec les besoins estimes,
+// reste sur l'ecran « A recommander ».
+function renderStockRecommande() {
+  const liste = document.getElementById("stkRecoListe");
+  if (!liste) return;
+  const bas = getLowStockProducts()
+    .map(product => {
+      const quantite = product.quantityAvailable ?? getProductQuantity(product) ?? 0;
+      return { product, quantite, seuil: getProductThreshold(product) };
+    })
+    .sort((a, b) => (a.quantite - a.seuil) - (b.quantite - b.seuil)
+      || String(getProductName(a.product)).localeCompare(getProductName(b.product), "fr"));
+  setText("stkRecoCompte", String(bas.length));
+  const compte = document.getElementById("stkRecoCompte");
+  if (compte) compte.setAttribute("aria-label", `${bas.length} produit${bas.length > 1 ? "s" : ""} sous le seuil`);
+  if (!bas.length) {
+    liste.innerHTML = `<p class="stk-reco-vide">Rien sous le seuil.</p>`;
+    return;
+  }
+  liste.innerHTML = bas.slice(0, 5).map(({ product, quantite, seuil }) => `
+    <div class="stk-reco-ligne">
+      <span class="stk-reco-nom">${escapeHtml(getProductName(product))}</span>
+      <span class="stk-reco-detail">${escapeHtml(quantite)} en stock · seuil ${escapeHtml(seuil)}</span>
+    </div>`).join("");
+}
+
+// Les tuiles de categorie : la somme en stock, le nom, et le nombre sous le
+// seuil (en alerte) ou, s'il n'y en a pas, le nombre de references. Jusqu'a
+// douze, une grille ; au-dela, une liste (passation : « lignes au-dela »).
+function renderStockCategories() {
+  const bloc = document.getElementById("stkCategories");
+  if (!bloc) return;
+  const parCategorie = new Map();
+  stock.forEach(product => {
+    const cle = categorieDuProduit(product);
+    const c = parCategorie.get(cle) || { cle, total: 0, references: 0, sous: 0 };
+    c.total += Number(product.quantityAvailable ?? getProductQuantity(product) ?? 0) || 0;
+    c.references += 1;
+    if (sousLeSeuil(product)) c.sous += 1;
+    parCategorie.set(cle, c);
+  });
+  const categories = [...parCategorie.values()]
+    .sort((a, b) => (a.cle ? 0 : 1) - (b.cle ? 0 : 1) || a.cle.localeCompare(b.cle, "fr"));
+  if (stockFilter.category !== "all" && !parCategorie.has(stockFilter.category)) stockFilter.category = "all";
+  bloc.classList.toggle("stk-categories--liste", categories.length > 12);
+  bloc.hidden = !categories.length;
+  bloc.innerHTML = categories.map((c, i) => {
+    const nom = c.cle || "Sans catégorie";
+    const ligne = c.sous
+      ? `<span class="stk-tuile-sous stk-alerte">${c.sous} sous le seuil</span>`
+      : `<span class="stk-tuile-sous">${c.references} référence${c.references > 1 ? "s" : ""}</span>`;
+    const choisie = stockFilter.category === c.cle;
+    return `<button class="stk-tuile${choisie ? " stk-tuile--choisie" : ""}" type="button" data-stk-categorie="${escapeAttribute(c.cle)}" aria-pressed="${choisie}">
+      <span class="stk-tuile-pastille stk-tuile-pastille--${i % 2 ? "tiede" : "froid"}" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="${ICONE_CATEGORIE}" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path></svg></span>
+      <span class="stk-tuile-total">${escapeHtml(c.total)}</span>
+      <span class="stk-tuile-texte"><span class="stk-tuile-nom">${escapeHtml(nom)}</span>${ligne}</span>
+    </button>`;
+  }).join("");
+}
+
+// Une icone pour toutes : les categories sont LIBRES (lues dans le fichier),
+// aucune table ne dit quel dessin va a quel nom. La planche en invente cinq.
+const ICONE_CATEGORIE = "M12 3 3 8v8l9 5 9-5V8z";
+
+// Une ligne du tableau (planche 13d). La saisie directe du stock et l'edition
+// du seuil sont GARDEES -- la planche les montre en lecture seule, mais ce sont
+// les seuls chemins de l'application pour les poser. Les identifiants sont
+// propres a l'ecran : l'ecran « produits » rend les memes produits.
+function creerLigneStock(product) {
+  const level = getStockLevel(product);
+  const quantite = product.quantityAvailable ?? getProductQuantity(product);
+  const reserve = product.quantityReserved ?? 0;
+  const seuil = getProductThreshold(product);
+  const id = escapeAttribute(product.id);
+  const nom = getProductName(product);
+  const enAlerte = ["stock_faible", "rupture"].includes(level.status);
+  const ligne = document.createElement("div");
+  ligne.className = `stk-ligne${enAlerte ? " stk-ligne--alerte" : ""}`;
+  ligne.innerHTML = `
+    <span class="stk-nom">${escapeHtml(nom)}${level.status === "a_renseigner" ? ` <span class="stk-a-renseigner">À renseigner</span>` : ""}</span>
+    <span class="stk-code">${escapeHtml(product.code || product.sku || "-")}</span>
+    <span class="stk-reserve">${escapeHtml(reserve)} sur commandes</span>
+    <span class="stk-droite"><label class="sr-only" for="stk-seuil-${id}">Seuil de ${escapeHtml(nom)}</label><input class="stk-saisie stk-saisie--seuil" id="stk-seuil-${id}" data-stock-threshold-input data-product-id="${id}" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttribute(seuil)}"></span>
+    <span class="stk-droite"><label class="sr-only" for="stk-qte-${id}">Stock de ${escapeHtml(nom)}${enAlerte ? ", sous le seuil" : ""}</label><input class="stk-saisie stk-saisie--stock" id="stk-qte-${id}" data-stock-input data-product-id="${id}" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttribute(quantite === null ? "" : quantite)}" placeholder="—"></span>
+    <span class="stk-ajuster">
+      <button class="stk-pas" type="button" data-product-id="${id}" data-stock-delta="-1" aria-label="Retirer 1 unité de ${escapeAttribute(nom)}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button>
+      <button class="stk-pas stk-pas--plus" type="button" data-product-id="${id}" data-stock-delta="1" aria-label="Ajouter 1 unité à ${escapeAttribute(nom)}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button>
+    </span>`;
+  return ligne;
 }
 
 function getFilteredStock() {
   const query = normalizeTextKey(stockFilter.query);
   const status = stockFilter.status || "all";
-  const category = stockFilter.category || "all";
+  // "" est une categorie (« Sans categorie »), pas « toutes » : pas de ||.
+  const category = stockFilter.category ?? "all";
 
   return stock.filter(product => {
     const haystack = normalizeTextKey([
@@ -2020,7 +2892,13 @@ async function changeStock(productId, delta) {
 }
 
 async function setStock(productId, value) {
-  const quantity = Number(String(value || 0).replace(",", "."));
+  // Un champ VIDE n'est pas un zero : le vider mettait le produit en rupture.
+  if (String(value ?? "").trim() === "") {
+    notify("Quantité vide : rien n'a été changé.", "warning");
+    await loadData();
+    return;
+  }
+  const quantity = Number(String(value).replace(",", "."));
 
   if (!Number.isFinite(quantity) || quantity < 0) {
     notify("Quantité invalide.", "warning");
@@ -2427,13 +3305,17 @@ function getRecommendationItems() {
 
   return uniqueStock
     .map(product => {
+      const inconnu = (product.quantityAvailable ?? getProductQuantity(product)) === null;
       const available = product.quantityAvailable ?? getProductQuantity(product) ?? 0;
       const needed = product.quantityNeeded ?? getNeededQuantityForProduct(product);
       const threshold = getProductThreshold(product);
       const shortage = Math.max(0, needed - available);
-      const thresholdGap = Math.max(0, threshold - available);
-      const recommended = Math.ceil(Math.max(shortage, thresholdGap));
-      const level = available <= 0 || shortage > 0 ? "urgent" : (recommended > 0 ? "bientot" : "ok");
+      // « Sous le seuil » = quantite <= seuil, partout (carte du Stock, pastille,
+      // getStockLevel). Pour en sortir, il faut repasser AU-DESSUS du seuil.
+      const thresholdGap = available <= threshold ? threshold - available + 1 : 0;
+      const recommended = inconnu ? 0 : Math.ceil(Math.max(shortage, thresholdGap));
+      // Une quantite inconnue n'est pas une rupture : elle est « a renseigner ».
+      const level = inconnu ? "ok" : (available <= 0 || shortage > 0 ? "urgent" : (recommended > 0 ? "bientot" : "ok"));
 
       return {
         product,
@@ -2442,7 +3324,7 @@ function getRecommendationItems() {
         threshold,
         recommended,
         level,
-        label: level === "urgent" ? "Urgent" : (level === "bientot" ? "Bientôt" : "OK")
+        label: inconnu ? "À renseigner" : (level === "urgent" ? "Urgent" : (level === "bientot" ? "Bientôt" : "OK"))
       };
     })
     .filter(item => item.level !== "ok" || recommendFilter === "all")
@@ -2965,8 +3847,10 @@ function renderBdcTable(orders) {
 // Export CSV des bons filtres. Pas d'endpoint backend : Blob + download client-side.
 // Format : Numero;Date;Client;Adresse;CP;Ville;Secteur;Statut;Telephone;Lignes;Qté
 // Separateur ; (compatibilite Excel FR), encodage UTF-8 BOM pour les accents.
-function exportBdcCsv() {
-  const filtered = bdcFilterOrders();
+function exportBdcCsv(liste = null, prefixe = "sereo-bons-commande") {
+  // Le meme export sert l'ecran Commandes (planche 13c) : on lui passe SA
+  // liste filtree. Sans argument, il garde son comportement d'origine.
+  const filtered = liste || bdcFilterOrders();
   if (!filtered.length) {
     notify("Aucun bon à exporter (filtres vides).", "warning");
     return;
@@ -3009,7 +3893,7 @@ function exportBdcCsv() {
   const a = document.createElement("a");
   const date = new Date().toISOString().slice(0, 10);
   a.href = url;
-  a.download = `sereo-bons-commande-${date}.csv`;
+  a.download = `${prefixe}-${date}.csv`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -3021,6 +3905,10 @@ function exportBdcCsv() {
 function openBdcDetail(orderId) {
   const order = (orders || []).find(o => String(o.id) === String(orderId));
   if (!order) return;
+  // La commande AFFICHEE : editer puis annuler le profil doit y revenir, pas
+  // a la premiere commande du meme client -- sinon la fenetre montre un bon
+  // et ses boutons en visent un autre.
+  bdcState.detailOrderId = String(order.id);
 
   const modal = document.getElementById("bdc-detail-modal");
   const titleEl = document.getElementById("bdc-detail-title");
@@ -3230,17 +4118,34 @@ async function saveBdcClientEdit(triggerBtn) {
 
     // Reload data pour avoir l'ordre a jour, puis re-render modal en mode lecture
     await loadData();
-    const order = (orders || []).find(o => String(o.clientId) === String(clientId));
+    const order = commandeDuDetail(clientId);
     if (order) openBdcDetail(order.id);
   });
+}
+
+// La commande que le detail montre ; a defaut, la premiere du client.
+function commandeDuDetail(clientId) {
+  const affichee = (orders || []).find(o => String(o.id) === String(bdcState.detailOrderId));
+  if (affichee && String(affichee.clientId) === String(clientId)) return affichee;
+  return (orders || []).find(o => String(o.clientId) === String(clientId));
 }
 
 function closeBdcDetail() {
   const modal = document.getElementById("bdc-detail-modal");
   if (!modal) return;
+  // Les gestes d'une planifiee ne survivent pas a la fermeture : le detail
+  // suivant, ouvert d'ailleurs, ne doit pas en heriter.
+  const gestes = document.getElementById("cmdDetailGestes");
+  if (gestes) { gestes.hidden = true; gestes.innerHTML = ""; }
   modal.setAttribute("aria-hidden", "true");
   document.body.classList.remove("version-modal-open");
   if (modal._releaseTrap) { modal._releaseTrap(); modal._releaseTrap = null; }
+  if (retourDuDetail) {
+    const id = retourDuDetail;
+    retourDuDetail = null;
+    // Apres un geste, la liste se redessine : on retrouve la ligne par son id.
+    setTimeout(() => document.querySelector(`[data-cmd-ouvrir="${CSS.escape(id)}"]`)?.focus(), 0);
+  }
 }
 
 function bindBonsCommandeUi() {
@@ -3325,14 +4230,14 @@ function bindBonsCommandeUi() {
       const currentOrderId = document.querySelector('#bdc-detail-modal[aria-hidden="false"]')
         ? findOrderIdForClient(bdcState.editingClientId) : null;
       // Re-render le modal avec mode edition
-      const order = (orders || []).find(o => String(o.clientId) === String(bdcState.editingClientId));
+      const order = commandeDuDetail(bdcState.editingClientId);
       if (order) openBdcDetail(order.id);
       return;
     }
 
     // Cancel edition
     if (event.target.closest('[data-action="bdc-cancel-edit"]')) {
-      const order = (orders || []).find(o => String(o.clientId) === String(bdcState.editingClientId));
+      const order = commandeDuDetail(bdcState.editingClientId);
       bdcState.editingClientId = null;
       if (order) openBdcDetail(order.id);
       return;
