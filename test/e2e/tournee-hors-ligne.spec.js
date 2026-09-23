@@ -44,11 +44,17 @@ const MOT_DE_PASSE = "banc-e2e-hors-ligne-sans-valeur";
 const BASIC = "Basic " + Buffer.from(`${IDENTIFIANT}:${MOT_DE_PASSE}`).toString("base64");
 const TERMINAUX = ["livre", "absent", "probleme", "a_reprogrammer"];
 
-/** Un mandataire qui peut COUPER : toute connexion fermee sans reponse. */
+/**
+ * Un mandataire qui peut COUPER (toute connexion fermee sans reponse), ou
+ * faire la PASSERELLE EN ERREUR (502 : serveur arrete derriere le mandataire,
+ * pendant que sereo-updater reconstruit l'image) -- le telephone, lui, reste
+ * en ligne.
+ */
 async function mandataire(cible) {
-  const etat = { coupe: false };
+  const etat = { coupe: false, passerelle: false };
   const server = http.createServer((req, res) => {
     if (etat.coupe) { req.socket.destroy(); return; }
+    if (etat.passerelle) { res.writeHead(502, { "Content-Type": "text/plain" }); res.end("Bad Gateway"); return; }
     const amont = http.request(cible + req.url, { method: req.method, headers: req.headers }, r => {
       res.writeHead(r.statusCode, r.headers);
       r.pipe(res);
@@ -78,7 +84,7 @@ test.afterAll(async () => {
   if (mdt) await mdt.arreter();
   if (srv) await srv.arreter();
 });
-test.afterEach(() => { if (mdt) mdt.etat.coupe = false; });
+test.afterEach(() => { if (mdt) { mdt.etat.coupe = false; mdt.etat.passerelle = false; } });
 
 async function couper(ctx) {
   mdt.etat.coupe = true;
@@ -328,6 +334,40 @@ test("session PERDUE (le serveur rend sa page de connexion) : la copie et ses do
     expect(apres.copie, "session perdue, la page de l'application a ete servie hors ligne").toBe(false);
     await expect(apres.page.locator("#routeStopsList"), "session perdue, la tournee s'est rouverte hors ligne").toHaveCount(0);
     await expect(apres.page.locator("body")).toContainText("Séréo demande le réseau pour s’ouvrir.");
+  } finally {
+    await ctx.close();
+  }
+});
+
+// Relecture adverse (23/09) : rouverte par une passerelle en erreur (ou par le
+// delai de 5 s), la page n'avait qu'un declencheur de retour, l'evenement
+// « online ». Un telephone qui ne s'est jamais cru hors ligne ne l'emet pas :
+// la page restait « Hors ligne », figee, les autres ecrans bloques.
+test("rouverte par une PASSERELLE en erreur (502), telephone qui se croit en ligne : au retour du serveur, tout repart SANS evenement « online »", async ({ browser }) => {
+  test.setTimeout(120000);
+  const ctx = await browser.newContext({ viewport: MOBILE, timezoneId: "Europe/Paris" });
+  try {
+    const page = await ctx.newPage();
+    await preparerEnLigne(page);
+
+    // Le serveur s'arrete derriere le mandataire ; le telephone reste en ligne.
+    mdt.etat.passerelle = true;
+    const rouverte = await ouvrirHorsLigne(ctx, mdt.base + "/#livreur");
+    expect(rouverte.echec).toBeNull();
+    expect(rouverte.copie, "prealable : la page ne vient pas de la copie du service worker").toBe(true);
+    expect(await rouverte.page.evaluate(() => navigator.onLine), "prealable : le telephone se croit en ligne").toBe(true);
+    await expect(rouverte.page.locator("#routeStopsList .route-stop").first()).toBeVisible();
+    await expect(rouverte.page.locator("#bandeauHorsLigneTitre")).toHaveText(/^Hors ligne — données de \d{2}:\d{2}$/);
+
+    // Le serveur revient. Aucun « online » : personne ne l'emettra.
+    mdt.etat.passerelle = false;
+    await expect(rouverte.page.locator("#syncStatus"), "le serveur est revenu, mais la page rouverte reste sur sa copie")
+      .toHaveText("À jour", { timeout: 45000 });
+    expect(await rouverte.page.evaluate(() => document.documentElement.hasAttribute("data-ouverte-hors-ligne"))).toBe(false);
+    await expect(rouverte.page.locator("#bandeauHorsLigne")).toBeHidden();
+    await rouverte.page.evaluate(() => { location.hash = "#stock"; });
+    await expect(rouverte.page.locator("#stock")).toBeVisible();
+    await expect(rouverte.page.locator("#ecranDemandeReseau")).toBeHidden();
   } finally {
     await ctx.close();
   }

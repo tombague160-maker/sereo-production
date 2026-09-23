@@ -246,6 +246,68 @@ test("sw — passerelle en erreur (502/503/504) vers la tournee : la copie ; san
   assert.equal(r.status, 502);
 });
 
+/** Un fichier statique demande par la page `clientId` : son corps. */
+async function demanderFichier(sw, clientId, chemin) {
+  let reponse = null;
+  sw.ecouteurs.fetch({
+    request: { url: ORIGINE + chemin, method: "GET", mode: "no-cors", headers: new Headers() },
+    clientId, resultingClientId: "",
+    respondWith(p) { reponse = p; },
+    waitUntil() {}
+  });
+  assert.ok(reponse, `${chemin} : le service worker n'a pas repondu`);
+  return (await reponse).text();
+}
+
+// Relecture adverse (23/09) : la reponse reseau qui arrive APRES la copie
+// (reseau lent, release du jour) classait quand meme la page « en retard » :
+// ses fichiers suivants passaient par le reseau, en NOUVELLE version, sous
+// l'ancien HTML de la copie.
+test("sw — copie rendue PUIS page reseau d'une version plus recente : la copie garde SES fichiers (temoin : la page reseau prend le reseau)", async () => {
+  // DELAI_NAVIGATION_TOURNEE_MS (5 s) accelere 100 fois : 50 ms.
+  for (const [nom, delaiPage, attendu] of [["temoin", 10, "nouveau"], ["copie rendue", 120, "ancien"]]) {
+    const sw = await semerPage();
+    const shell = await sw.caches.open(CACHE_NAME);
+    await shell.put(ORIGINE + "/js/app.js", new Response("ancien"));
+    sw.reseau(url => (url.endsWith("/js/app.js")
+      ? attendre(30).then(() => new Response("nouveau"))
+      : attendre(delaiPage).then(() => pageServeur({ shell: "sereo-shell-nouvelle-version" }))));
+    const { reponse, attentes } = naviguer(sw, "/#livreur");
+    const r = await reponse;
+    assert.equal(r.headers.get("X-Sereo-Cache") === "copie", nom !== "temoin", `${nom} : prealable, la mauvaise page a ete rendue`);
+    await Promise.all(attentes);
+    assert.equal(await demanderFichier(sw, "page-neuve", "/js/app.js"), attendu, nom);
+  }
+});
+
+// Relecture adverse (23/09) : la page de connexion ouverte DIRECTEMENT (favori
+// /login) ne passait pas par le service worker, et ne vidait rien.
+test("sw — navigation DIRECTE vers /login : la page de connexion (« 0 ») vide le cache ; hors ligne, rien n'est vide (temoin)", async () => {
+  const sw = await semerPage();
+  const magasin = await sw.caches.open(API);
+  await magasin.put(ORIGINE + "/api/routes", new Response("[]"));
+  const aller = chemin => {
+    const attentes = [];
+    let reponse = null;
+    sw.ecouteurs.fetch({
+      request: { url: ORIGINE + chemin, method: "GET", mode: "navigate", headers: new Headers() },
+      clientId: "", resultingClientId: "page-login",
+      respondWith(p) { reponse = p; },
+      waitUntil(p) { attentes.push(p); }
+    });
+    return Promise.resolve(reponse).catch(() => null).then(r => Promise.all(attentes).then(() => r));
+  };
+  // Hors ligne : le livreur qui ouvre /login par erreur ne perd pas sa tournee.
+  sw.couper();
+  await aller("/login");
+  assert.equal(sw.magasins.has(API), true, "hors ligne, /login a vide la copie de la tournee");
+  assert.ok(await pageGardee(sw), "hors ligne, /login a oublie la page de la tournee");
+  // En ligne : le serveur rend la page de connexion, qui annonce « 0 ».
+  sw.reseau(() => Promise.resolve(pageServeur({ fin: 0, shell: null, html: "<html><form action=\"/login\"></form></html>" })));
+  await aller("/login?next=%2F%23livreur");
+  assert.equal(sw.magasins.has(API), false, "la page de connexion est rendue, mais la page et les donnees de la session restent");
+});
+
 test("sw — en ligne, la tournee vient du RESEAU, jamais de la copie", async () => {
   const sw = await semerPage();
   sw.reseau(() => Promise.resolve(pageServeur({ html: "<html>fraiche</html>" })));

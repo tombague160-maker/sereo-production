@@ -8135,10 +8135,15 @@ function quitterOuvertureHorsLigne() {
  * des copies, tout se relit. Dans cet ordre : un rechargement parti avant le
  * renvoi decrirait l'etat d'avant les gestes.
  */
+let retourEnCours = null;
 function auRetourDuReseau() {
-  Promise.resolve(viderLaFile()).catch(() => {}).then(() => {
-    if (ouverteHorsLigne || copieAffichee !== null) loadData();
-  });
+  // Un seul retour a la fois : la sonde reguliere et « online » peuvent se croiser.
+  if (retourEnCours) return retourEnCours;
+  retourEnCours = Promise.resolve(viderLaFile()).catch(() => {}).then(() => {
+    if (ouverteHorsLigne || copieAffichee !== null) return loadData();
+    return undefined;
+  }).catch(() => {}).finally(() => { retourEnCours = null; });
+  return retourEnCours;
 }
 
 // Le telephone qui se croit en ligne ne dit jamais « online » : sans essai
@@ -8146,14 +8151,42 @@ function auRetourDuReseau() {
 // prochain rechargement.
 const RENVOI_PERIODIQUE_MS = 20_000;
 
+// Relecture adverse (23/09) : une page ROUVERTE sans reseau par le delai de
+// 5 s ou par une passerelle en erreur (502/503/504, serveur arrete pendant que
+// sereo-updater reconstruit l'image) vient d'un telephone qui se croit en
+// ligne : aucun « online » n'arrivera. Sans essai regulier, elle restait
+// « Hors ligne », figee, les autres ecrans bloques, jusqu'a un rechargement a
+// la main. On sonde donc le serveur (/api/me : leger, jamais mis en cache par
+// le service worker) ; toute reponse qui ne vient pas d'une passerelle en
+// erreur dit qu'il est la -- un 401 aussi : loadData renvoie alors vers la
+// connexion, et vide le cache de donnees (apiFetch).
+const DELAI_SONDE_RETOUR_MS = 8000;
+let sondeEnCours = false;
+async function sonderLeRetourDuReseau() {
+  if (!ouverteHorsLigne || sondeEnCours || retourEnCours || estDefinitivementHorsLigne() || document.hidden) return;
+  sondeEnCours = true;
+  try {
+    const signal = typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+      ? AbortSignal.timeout(DELAI_SONDE_RETOUR_MS) : undefined;
+    const reponse = await fetch("/api/me", { cache: "no-store", credentials: "same-origin", signal });
+    if (![502, 503, 504].includes(reponse.status)) auRetourDuReseau();
+  } catch {
+    // Toujours pas de reseau : le prochain essai viendra.
+  } finally {
+    sondeEnCours = false;
+  }
+}
+
 function brancherFileHorsLigne() {
   window.addEventListener("online", () => { horsLigneDepuis = null; setStatus(dernierStatut); auRetourDuReseau(); });
   window.addEventListener("offline", () => { horsLigneDepuis = new Date(); setStatus(dernierStatut); });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible" && ecrituresEnAttente > 0 && !estDefinitivementHorsLigne()) viderLaFile();
+    if (document.visibilityState === "visible") sonderLeRetourDuReseau();
   });
   setInterval(() => {
     if (ecrituresEnAttente > 0 && !estDefinitivementHorsLigne()) viderLaFile();
+    sonderLeRetourDuReseau();
   }, RENVOI_PERIODIQUE_MS);
   // A l'ouverture : l'onglet a pu etre ferme avec des ecritures en attente.
   // C'est le prix de ne pas utiliser Background Sync, absent d'iOS Safari --

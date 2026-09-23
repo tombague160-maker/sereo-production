@@ -4322,7 +4322,9 @@ rouvre sans réseau — onglet fermé, téléphone redémarré. Branche
   personne ne peut la prolonger). L'en-tête est aussi sur le 304 d'une revalidation
   (le navigateur remplace les en-têtes gardés par ceux du 304). La **page de
   connexion** annonce « 0 » : le service worker vide alors tout le cache de données,
-  page et données — la session est finie, rien ne se rouvre. Sans session du tout
+  page et données — la session est finie, rien ne se rouvre. Qu'elle soit rendue en
+  place sur « / » ou ouverte directement (`/login`, favori) : ce second cas ne passait
+  pas par le service worker, corrigé par la relecture adverse (plus bas). Sans session du tout
   (authentification désactivée, ou accès Basic sans cookie), rien n'est annoncé :
   la page n'est ni gardée ni oubliée.
 - **Les autres écrans, hors ligne** : une navigation vers un autre écran rend une
@@ -4375,6 +4377,14 @@ rouvre sans réseau — onglet fermé, téléphone redémarré. Branche
   sécurité, hors de ce lot.
 - **Une session qui expire pendant que la page rouverte est affichée** : la page ne
   se referme pas d'elle-même ; seule la réouverture suivante est refusée.
+- **Un compte désactivé, ou une session invalidée côté serveur**, pendant que le
+  téléphone est hors ligne : le téléphone ne peut pas le savoir. La copie se rouvre
+  jusqu'à la fin annoncée (émission + 12 h), avec les noms, adresses et téléphones de
+  la tournée. Au premier contact avec le serveur (navigation, sonde de retour, toute
+  lecture), le refus arrive : page de connexion ou 401, et le cache de données part.
+  Fermer cet écart demanderait de ne rien rouvrir hors ligne — contraire à la
+  décision 4 ; raccourcir la fenêtre, c'est raccourcir la session (décision de
+  sécurité, hors de ce lot).
 - **Safari et l'ancre** : non mesuré (aucun banc WebKit). Le bouton « Ouvrir la
   tournée » passe par `?ecran=livreur`, que le service worker reconnaît sans l'ancre ;
   un favori `/#livreur` sur iPhone, lui, reste non vérifié.
@@ -4395,9 +4405,12 @@ par le formulaire, navigateur fermé puis relancé sur le même profil) :
 2. après la déconnexion, rien ne se rouvre (témoin dans le cas : la même ouverture,
    avant, rend la tournée ; puis, file vide, le retour du réseau relit tout) ;
 3. session perdue (la page de connexion) : copie et données oubliées (témoin : avant,
-   elles sont là).
+   elles sont là) ;
+4. rouverte par une passerelle en erreur (502), téléphone qui se croit en ligne : au
+   retour du serveur, tout repart sans événement `online` (relecture adverse).
 
-`test/tournee-hors-ligne.test.js` : 13 cas du service worker (vrai fichier, bac à sable)
+`test/tournee-hors-ligne.test.js` : 15 cas du service worker (vrai fichier, bac à sable ;
+2 ajoutés par la relecture adverse)
 et 3 cas du serveur (HTTP, authentification active). `test/api.test.js` : sans
 authentification, aucune fin annoncée.
 
@@ -4431,6 +4444,40 @@ meilleur-trajet, livreur-ne-perd-rien, integration-lots-1-5, operations, hors-li
 etats-limites, chargement-instantane, tabs : 92/92 (un premier passage a buté sur des
 ports pris par d'autres worktrees — 3188, 3190, 3194 —, rejoués verts) ;
 interface-finitions, abonnements-mobile, clients-mobile : 45/45.
+
+### Relecture adverse (23/09) : trois défauts, trois corrections
+
+- **Rouverte par le délai de 5 s ou par une passerelle en erreur, la page ne
+  revenait jamais d'elle-même** (important, vrai). Le seul déclencheur du retour
+  était l'événement `online` ; un téléphone qui se croit en ligne (4G sans débit,
+  serveur OMV arrêté pendant que `sereo-updater` reconstruit l'image) ne l'émet
+  jamais. La page restait « Hors ligne », figée, les autres écrans bloqués. Corrigé
+  (`app.js`, `sonderLeRetourDuReseau`) : tant que la page est rouverte hors ligne,
+  toutes les 20 s (le rythme du renvoi de la file) et au retour au premier plan, une
+  sonde légère (`GET /api/me`, jamais mise en cache par le service worker, 8 s au
+  plus) ; toute réponse qui ne vient pas d'une passerelle en erreur (502/503/504)
+  lance `auRetourDuReseau` — un 401 aussi : la relecture renvoie alors vers la
+  connexion et vide le cache. `auRetourDuReseau` ne se lance plus deux fois en même
+  temps (sonde et `online` peuvent se croiser). Page ouverte normalement : rien ne
+  change, la sonde ne part pas.
+- **Une copie déjà rendue, puis la page réseau d'une version plus récente**
+  (mineur, vrai) : le service worker classait quand même la page « en retard »,
+  et ses fichiers suivants arrivaient en nouvelle version sous l'ancien HTML.
+  Corrigé (`service-worker.js`, `naviguer`) : la page n'est « en retard » que si
+  c'est la page réseau qui est rendue.
+- **La page de connexion ouverte directement ne vidait rien** (mineur, vrai) : le
+  service worker laissait passer toute navigation vers `/login`. Corrigé : une
+  navigation vers `/login` passe par lui ; si le serveur rend la page de connexion
+  (« 0 »), le cache de données part. Hors ligne, rien n'est vidé : le livreur qui
+  ouvre `/login` par erreur garde sa tournée. `/login.js` et `POST /login` restent
+  hors du service worker. La révocation hors ligne, elle, est un écart nommé
+  (plus haut) : aucune correction ne la ferme sans renoncer à la décision 4.
+
+| Retiré (code de `1d20c2f`) | Banc | Rouge |
+|---|---|---|
+| sonde de retour | e2e 4 « PASSERELLE en erreur (502) » | reçu « Données de 20:45 » au lieu de « À jour » après 45 s (préalables verts : copie, `navigator.onLine` vrai, bandeau daté) |
+| garde « page réseau rendue » | unitaire « copie rendue PUIS page réseau » | `'nouveau'` au lieu de `'ancien'` (témoin, page réseau rendue : `'nouveau'`, vert) |
+| `/login` par le service worker | unitaire « navigation DIRECTE vers /login » | `true` au lieu de `false` (témoin hors ligne : rien vidé, vert) |
 
 ### Ce qui reste
 

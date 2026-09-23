@@ -372,11 +372,23 @@ a:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
 function naviguer(event) {
   const url = new URL(event.request.url);
   let garde = Promise.resolve();
+  // Relecture adverse (23/09) : la page n'est « en retard » (ses fichiers par
+  // le reseau) que si c'est la page RESEAU qui est rendue. Une copie deja
+  // rendue (reseau lent, puis page d'une version plus recente) annonce le
+  // shell de CE service worker : ses fichiers sont les siens, dans ce cache.
+  // Sans cette garde, elle aurait mele son ancien HTML a de nouveaux scripts.
+  let enRetard = false;
+  const rendreReseau = response => {
+    if (enRetard) {
+      if (clientsEnRetard.size > 50) clientsEnRetard.clear();
+      clientsEnRetard.add(event.resultingClientId);
+    }
+    return response;
+  };
   const reseau = fetch(event.request).then(response => {
     const shell = response.headers.get("X-Sereo-Shell");
     if (shell && shell !== CACHE_NAME && event.resultingClientId) {
-      if (clientsEnRetard.size > 50) clientsEnRetard.clear();
-      clientsEnRetard.add(event.resultingClientId);
+      enRetard = true;
       // La nouvelle version existe : on la demande tout de suite.
       self.registration.update().catch(() => {});
     }
@@ -386,7 +398,7 @@ function naviguer(event) {
   // Le rangement doit finir meme si la copie a deja repondu (reseau lent).
   event.waitUntil(reseau.then(() => garde, () => {}));
   if (!versLaTournee(url)) {
-    return reseau.catch(() => pageTourneeValide().then(page => pageDemandeReseau(Boolean(page))));
+    return reseau.then(rendreReseau, () => pageTourneeValide().then(page => pageDemandeReseau(Boolean(page))));
   }
   return new Promise(resolve => {
     let rendu = false;
@@ -403,7 +415,8 @@ function naviguer(event) {
         repli().then(copie => rendre(copie || response));
         return;
       }
-      rendre(response);
+      // Rendue seulement si la copie ne l'a pas precedee (rendu).
+      if (!rendu) rendre(rendreReseau(response));
     }, () => {
       clearTimeout(minuteur);
       repli().then(copie => rendre(copie || pageDemandeReseau(false)));
@@ -426,6 +439,18 @@ self.addEventListener("fetch", event => {
 
   // Ignore tout sauf GET (POST/PATCH/DELETE laisses passer)
   if (request.method !== "GET") return;
+
+  // La page de connexion ouverte DIRECTEMENT (favori /login) : jamais mise en
+  // cache, mais si le serveur la rend (fin de session « 0 »), la copie de la
+  // tournee et ses donnees partent, comme sur « / » (relecture adverse, 23/09).
+  // Hors ligne, rien n'est vide : le livreur qui l'ouvre par erreur garde sa
+  // tournee.
+  if (request.mode === "navigate" && url.pathname === "/login") {
+    const reseau = fetch(request);
+    event.waitUntil(reseau.then(response => (finDeSession(response) === 0 ? caches.delete(API_CACHE_NAME) : undefined), () => {}));
+    event.respondWith(reseau);
+    return;
+  }
 
   // Endpoint /login : pas de cache (auth-sensible), pas de passage par ici.
   if (url.pathname.startsWith("/login")) return;
