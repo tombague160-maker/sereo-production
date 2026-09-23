@@ -2375,3 +2375,226 @@ contenu de `public/` : tout fichier modifié renouvelle le shell sans geste de p
   « Cette semaine » affiche encore « 0 » pendant le chargement. Au téléphone, les toasts
   « Stock mis à jour » s'empilent depuis le bas et peuvent couvrir un bouton − / + après
   cinq ou six ajustements rapides (constat du banc, antérieur à ce lot, non traité).
+
+## Lot du 23/09 — deux bancs instables
+
+Deux bancs rouges par intermittence en suite complète locale, verts seuls. Méthode
+suivie : faire tomber chaque banc SOUS CHARGE, lire la cause du rouge, corriger la
+cause (jamais un retry, jamais une attente allongée), puis rejouer la même charge.
+La charge : des bancs qui parlent au serveur commun (`badges`, `tabs`, `smoke`,
+`hors-ligne`, `contraste-application`, `themes`…) plus `contraste-champs`, répétés,
+huit ouvriers, sur un serveur isolé du worktree — pendant que le banc visé tourne
+en boucle dans un second processus. **Composition NON vérifiable** (relecture
+adverse du 23/09, voir plus bas) : le premier jet disait « les dix-huit bancs »,
+or le dépôt en compte vingt qui touchent le serveur commun en plus de
+`contraste-champs`, et la configuration de charge a été supprimée sans être
+commitée. On ne sait donc plus lesquels manquaient.
+
+### `operations.spec.js`, cas « départ et arrivée, calcul routier… » — CORRIGÉ
+
+**Cause, mesurée.** `loadData()` part au `DOMContentLoaded` sans être attendu par
+`page.goto()` et interroge dix-sept routes. Le banc cliquait « Tout sélectionner »
+dès les deux adresses confirmées. Si les commandes n'étaient pas encore arrivées,
+`selectAllDelivery()` sélectionnait une liste VIDE, « Créer une tournée optimisée »
+restait désactivé, et le banc mourait d'un timeout de 30 s sur ce bouton.
+
+**Ce n'était PAS qu'un défaut de banc** (le premier jet disait « l'application n'a
+rien de faux » : c'était faux, relevé par la relecture adverse). Un livreur sur
+réseau lent qui touche « Tout sélectionner » avant la fin du chargement perdait le
+même geste : rien de sélectionné, « Aucune commande prête à livrer — Termine des
+préparations… » affiché à tort, puis les commandes arrivaient décochées, « 0
+sélection », création de tournée désactivée. Le banc attendait les données ; un
+humain ne le fait pas. Le produit est corrigé, voir « Relecture adverse » plus bas.
+
+**Reproduit avant la correction, sans artifice** : 1 rouge sur 60 sous charge
+(cas seul, `--repeat-each=60`, pendant 582 tests sur le serveur commun). Une sonde
+posée dans la page datait l'apparition des commandes candidates et l'instant du clic :
+sur les 59 verts, le clic venait 135 ms à 1,1 s après elles (médiane 398 ms) ; sur le
+rouge, elles n'étaient PAS encore affichées au clic (1 223 ms après le chargement).
+Rouge lu : `locator.click: Test timeout` sur `#createRouteButton`, « element is not
+enabled ». Même rouge, déterministe, en retardant `/api/orders` de 2,5 s par
+`page.route`. Ce stimulus n'était pas commité au premier jet, et les artefacts du
+rouge naturel ont été effacés par Playwright au passage vert suivant : la sonde
+de datation n'existe plus nulle part. Le stimulus EST désormais commité dans le
+cas lui-même (première réponse de `/api/orders` retardée de 2,5 s, à chaque
+passage) : le rouge d'avant se rejoue, voir « Relecture adverse ».
+
+**Correction** : attendre l'état réel — les deux commandes prêtes affichées parmi les
+candidates — avant « Tout sélectionner », puis que le bouton de création soit actif.
+Aucune attente fixe. Avec le retard de 2,5 s, le banc corrigé passe (5/5).
+Après correction, même charge : 60 verts sur 60. Ce chiffre seul ne prouve pas grand
+chose — à un rouge sur 60, zéro sur 60 arrive une fois sur trois sans rien corriger ;
+la preuve est le stimulus : rouge avant, vert après, à chaque fois.
+
+### `contraste-champs.spec.js`, cas « mode light » — NON REPRODUIT, rien de corrigé
+
+**126 répétitions du cas clair sous charge, 0 rouge** (10 + 30 + 70 + 4 + 6 + 6, jusqu'à
+huit ouvriers, avec les bancs qui écrivent sur le même serveur : réglages de tournée
+de `smoke`, rejeux de `hors-ligne`…). Et pas seulement vert : sur 70 exécutions
+journalisées, les 37 champs mesurés ont rendu 70 fois la même couleur de texte et le
+même fond. Le seuil n'est pas frôlé : le texte indicatif le plus pâle sur fond blanc
+(`rgb(79,116,119)`) est à 5,1:1.
+
+Portée de ce « 0 rouge » : il vaut pour la charge JOUÉE ce jour-là, dont la liste
+n'est plus vérifiable (voir l'en-tête du lot). Il ne dit rien d'une charge qui
+inclurait les bancs manquants ; « non reproduit » n'est donc pas « absent ».
+
+Pistes vérifiées et écartées : le mode de couleur est par appareil (localStorage,
+jamais lu du serveur) ; le thème serveur (`/api/settings/appearance`) n'est écrit par
+aucun banc ; le rafraîchissement périodique (60 s) ne tourne que sur l'accueil ; les
+transitions sont coupées par le banc lui-même.
+
+Aucune cause n'est donc affirmée. Une hypothèse NON vérifiée mérite d'être nommée :
+`playwright.config.js` a `reuseExistingServer: !CI`. En local, si un serveur écoute
+déjà sur 3100 — celui d'un autre worktree, ou un serveur lancé à la main sur un autre
+état du code —, la suite le réutilise sans rien dire et mesure le CSS de CET autre
+code. Cela rendrait exactement « rouge en suite locale, vert seul et en CI » ; rien
+ne prouve que ce soit arrivé ce jour-là. Et « vert en CI » ne départage rien : la CI
+tourne avec `workers: 1` et `retries: 2` (`playwright.config.js`, lignes 11-12) —
+sans charge parallèle, et un rouge intermittent y serait rejoué deux fois avant
+d'être compté. La charge locale expliquerait le même schéma aussi bien que
+`reuseExistingServer` (omission relevée par la relecture adverse).
+
+**Durcissements proposés, non posés** (chacun avec son risque) :
+
+1. Joindre au rapport, sur rouge seulement, les deux photographies (avec / sans
+   texte) de l'onglet fautif. Ne change aucun verdict ; le prochain rouge dira sa
+   cause. Risque : quelques Mo d'artefacts par rouge.
+2. Vérifier, avant de mesurer, que le serveur interrogé sert le `style.css` du
+   worktree (empreinte comparée au fichier local). Prendrait l'hypothèse ci-dessus.
+   Risque : casse un lancement volontaire contre un autre serveur
+   (`SEREO_E2E_BASE_URL`) ; à poser dans une configuration commune, pas dans ce banc.
+3. Remplacer les attentes fixes (400 ms après le changement d'onglet, 120 ms entre
+   les deux photographies) par l'attente de la section active et de deux images
+   d'animation. Risque : une attente mal ciblée (un onglet qui redirige) pend au
+   lieu de mesurer ; et rien ne montre aujourd'hui que ces délais soient en cause.
+
+### Relecture adverse du 23/09 — trois défauts, trois vrais
+
+**1. (important) Le produit partageait le défaut du banc — VRAI, corrigé.** Mesuré
+avant correction par le banc neuf `test/e2e/livraison-chargement.spec.js` (serveur
+semé, port 3186, `/api/orders` retardé de 4 s) : un toucher sur « Tout
+sélectionner » pendant le chargement affichait « Aucune commande prête à livrer ».
+
+Posé :
+- Les trois boutons de sélection de la tournée (« Tout sélectionner », « Tout
+  désélectionner », « Sélectionner ce secteur ») naissent `disabled` dans
+  `index.html` (marqués `data-attend-commandes`) ; `loadData()` les active dès que
+  les commandes sont assignées (`activerSelectionLivraison()`).
+- `#deliveryCandidates` entre dans `poserSquelettes()` : la liste porte un
+  squelette et `aria-busy="true"` pendant le chargement, comme les treize autres
+  zones de la liste.
+- `renderDeliveryCandidates()` ne dessine rien tant que le premier chargement n'est
+  pas fini (`commandesChargees`) : « Filtrer », resté actif, ne peut plus afficher
+  le faux état vide, et le filtre choisi entre-temps s'applique au rendu final.
+
+Décisions : **désactiver plutôt que mémoriser le geste.** Retenir « il a touché Tout
+sélectionner » et l'appliquer à l'arrivée des données aurait sélectionné des
+commandes que le livreur n'a jamais vues ; un bouton désactivé dit « pas encore »,
+et le squelette dit pourquoi. « Tout désélectionner » est désactivé avec les deux
+autres pour que le groupe se lise d'un bloc, bien qu'il soit inoffensif seul.
+« Créer une tournée optimisée » n'est pas touché : sans sélection il refuse déjà
+avec un message.
+
+Écarts nommés, NON corrigés :
+- Si la route `/api/orders` ÉCHOUE, `loadData()` retombe sur `[]` : la liste dit
+  alors « Aucune commande prête à livrer » alors qu'on ne sait pas. Une notification
+  « Sections indisponibles : commandes » l'accompagne ; l'état vide lui-même ment
+  encore. Hors de ce lot.
+- Même classe ailleurs, mesurée par lecture seulement : « Tout sélectionner » des
+  commandes du jour (`select-all-today-orders`) sélectionne `todayCustomerOrders`
+  tel qu'il est au toucher, sans attendre le chargement. Non rejoué, non corrigé.
+  Celui des Commandes (`#cmdToutSelectionner`) se protège déjà : désactivé quand
+  la liste est vide.
+
+Preuves rouges (chaque mutation seule, puis restauration) :
+- produit d'avant (`app.js` et `index.html` de 4eb6e5a) : rouge « faux état vide
+  affiché avant l'arrivée des commandes », reçu « Aucune commande prête à livrer » ;
+- boutons non désactivés seuls : rouge « Tout sélectionner accepte un toucher qui
+  ne sélectionnera rien », attendu `false`, reçu `true` ;
+- sans le squelette seul : rouge « la liste n'annonce pas son chargement »,
+  attendu `"true"`, reçu `null` ;
+- sans la garde du rendu seule : rouge « faux état vide », via « Filtrer » ;
+- boutons jamais réactivés : rouge « ne se réactive pas », reçu `disabled`.
+
+**2. (mineur) La composition de la charge — VRAI, corrigé dans le texte.** Mesure
+sur le dépôt : vingt fichiers de bancs touchent le serveur commun en plus de
+`contraste-champs` — les dix-neuf que liste la relecture, plus `etats-limites`
+(son premier cas, « hors ligne », fait `goto("/")` sans serveur semé ; la relecture
+l'avait manqué aussi). La configuration de charge n'ayant pas été commitée, la
+liste jouée ce jour-là ne se reconstitue pas : l'en-tête du lot et la conclusion
+« non reproduit » de `contraste-champs` le disent désormais. Aucune charge n'a été
+rejouée pour réparer ce chiffre : sept worktrees tournaient en parallèle.
+
+**3. (mineur) Le « rouge avant » ne se rejouait pas — VRAI, corrigé.** Le stimulus
+est commité dans `operations.spec.js` : la PREMIÈRE réponse de `/api/orders`
+arrive 2,5 s après les autres, à chaque passage (les rechargements suivants ne
+sont pas ralentis). Rejoué ce jour, stimulus en place :
+- produit d'avant + banc d'avant (sans les deux attentes) : rouge
+  `locator.click: Test timeout` sur `#createRouteButton`, « element is not
+  enabled » — le rouge naturel, trait pour trait ;
+- produit d'avant + banc corrigé : vert (l'attente du banc suffit au banc) ;
+- produit corrigé + banc d'avant : vert (le clic de Playwright attend désormais que
+  « Tout sélectionner » soit actif — ce que fait un humain qui voit un bouton grisé).
+La sonde de datation du premier jet (MutationObserver) reste perdue ; elle n'est
+pas refaite, le stimulus commité la remplace comme preuve.
+
+### Reprise du 23/09 (après une coupure réseau) — le banc neuf était instable lui aussi
+
+La correction de la relecture a été interrompue avant ses commits de fin. Reprise
+sur la branche, tout re-mesuré plutôt que relayé :
+
+**Le banc neuf `livraison-chargement.spec.js` tombait : 1 rouge sur 30 sous
+charge.** Rouge lu : `locator.click: Element is outside of the viewport`, sur le
+toucher forcé (`click({ force: true })`) de « Tout sélectionner » ; la photographie
+du rouge montre la page REMONTÉE en haut. Cause, mesurée par une sonde (fenêtre
+1280 × 720, commandes retardées) : pendant le chargement le bouton est à 1 170 px,
+il faut donc faire défiler ; or l'app remet la page en haut au `DOMContentLoaded`
+(`showTab` → `resetViewportScroll`) puis au `load` (`app.js`, écouteur `load`) —
+tout de suite, à l'image suivante, et 120 ms plus tard. Quand une de ces remises
+tombe entre le défilement de Playwright et son clic, le bouton n'est plus à l'écran.
+Sous charge, le `load` arrive plus tard et la fenêtre s'élargit.
+
+Correction du banc : le toucher passe par `HTMLElement.click()` (via
+`locator.evaluate`), l'activation telle que la spec HTML la définit — sans effet sur
+un bouton désactivé, un vrai clic sur un bouton actif. Plus de défilement, donc plus
+de course avec la remise en haut. Écartés : une fenêtre haute (le bouton suit la
+hauteur de la carte, 880 px au plus : il aurait fallu 2 400 px et un couplage à la
+mise en page), une attente du `load` puis des 120 ms (attente calée sur une
+constante de l'app), `dispatchEvent("click")` (passe outre `disabled`, le banc
+n'aurait plus rien jugé).
+
+Preuves, rejouées sur le banc final (chaque mutation seule, restauration par
+`git show HEAD:` puis `git diff --quiet`) :
+- produit de 4eb6e5a : rouge « faux état vide », reçu « Aucune commande prête à
+  livrer » ;
+- boutons sans `disabled` : rouge « accepte un toucher… », attendu `false`, reçu
+  `true` ;
+- `deliveryCandidates` retiré de `poserSquelettes()` : rouge « n'annonce pas son
+  chargement », attendu `"true"`, reçu `null` ;
+- garde `if (!commandesChargees) return;` retirée : rouge « faux état vide » ;
+- `activerSelectionLivraison()` jamais appelé : rouge « ne se réactive pas », reçu
+  `disabled`.
+Les trois combinaisons du défaut 3 (`operations.spec.js`) sont aussi rejouées :
+produit et banc d'avant → rouge « element is not enabled » sur `#createRouteButton`,
+les deux autres → vert.
+
+Répétitions sous charge (charge : les dix-neuf bancs du serveur commun plus
+`contraste-champs`, quatre ouvriers, répétés, serveur isolé 3212 ; `etats-limites`
+en est exclu car ses serveurs semés ont des ports fixes) :
+- `livraison-chargement` : rouge 1/30 AVANT (ci-dessus) ; 40/40 vert APRÈS ;
+- `operations`, cas de route, stimulus commité (la course a lieu à CHAQUE passage) :
+  40/40 vert ;
+- `contraste-champs`, cas « mode light » : 40/40 vert à quatre ouvriers, en plus de
+  ses passages dans les charges elles-mêmes (396/396 puis 1 485/1 485, soit 19
+  « mode light » de plus) — 59 passages ce jour, 185 avec ceux du premier jet :
+  toujours non reproduit, toujours aucune cause affirmée.
+Les bancs à serveur semé à port fixe se répètent à UN ouvrier (quatre ouvriers se
+disputeraient le port), la charge tournant à côté dans un second processus.
+
+Écart nommé, NON corrigé (même classe que le défaut 1 : un geste perdu pendant le
+chargement) : un utilisateur qui fait défiler la page avant la fin du `load` est
+renvoyé en haut par `resetViewportScroll(false)`. Mesuré par la sonde sur la seule
+position qu'elle avait : `scrollY` 138 au `DOMContentLoaded` (le défilement vers
+l'ancre `#livreur`), 0 au `load` — la remise écrase toute position prise avant.
+Le défilement d'un humain n'a pas été rejoué. Hors de ce lot.
