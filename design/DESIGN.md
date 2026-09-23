@@ -4291,3 +4291,205 @@ authentifié, que le lot écrans n'avait pas rejoués sur l'arbre fusionné).
 - Les écarts nommés par chaque lot restent les leurs (le collant inerte de Commande
   client, « Se déconnecter » sans authentification, « Nouveau client » tôt dans
   l'ordre du clavier, « Itinéraire » visible au bureau…).
+
+## Lot 2 de l audit géo : débloquer les tournées (23/09)
+
+Source : rapport d'audit du 23/09 (code audité `019788c`), constats H8, H9, M2, M7 et
+les gardes « (API) » du §2 basse ; décisions de Thomas n° 7 (retirer l'ancien panneau
+et `/api/optimize-route`) et n° 10 (pas de contestations : une note « remis à… »).
+Branche `feat/tournees-annulables`, partie de `c05e6f1` (release 1.42.0). Attention :
+la branche locale `main` du dépôt principal est restée à 1.41.1 (`ef470c6`) ; les
+preuves rouges sont rejouées contre `c05e6f1`, pas contre `main`.
+
+### Fait
+
+- **H8 — annuler une tournée prête.** `POST /api/routes/:id/annuler`. Ses commandes
+  n'avaient pas quitté « prête » (créer une tournée ne change ni le statut ni le
+  stock d'une commande) : seul leur rattachement (`routeId`) est défait ; le stock
+  est donc celui d'avant, sans rien rendre (mesuré : quantité et réservé identiques
+  avant la création et après l'annulation). Refusée sur une tournée partie
+  (« clôture-la »). À l'écran : « Annuler la tournée » à côté de « Démarrer ».
+- **H8 — clôturer une tournée en cours.** `POST /api/routes/:id/cloturer`. Les arrêts
+  restants passent « À reprogrammer » (« Tournée clôturée avant cet arrêt »), leur
+  commande revient d'elle-même dans les commandes prêtes, réservation gardée pour
+  la relivraison (comme un absent, lot 1) ; les livrés restent livrés. Irréversible :
+  la tournée ne repart plus, un geste ne l'y rouvre plus. À l'écran : dans « Autres
+  actions ». Une tournée finie à moitié ne reste donc plus « en livraison ».
+- **Deux statuts de tournée** : `annulee` et `cloturee`, dans `ROUTE_STATUSES` (sinon
+  `normalizeRoute` les ramenait à « prête » à la première écriture — pris par
+  mutant). Finis partout : arrêts figés (`arretVivant`), tracé hors de la liste et
+  non chargé par `readDb` (les deux ensembles, écart nommé du lot 5), purgeables à
+  12 mois (`completedAt` posé aux deux gestes) ; « terminées » au tableau de bord
+  compte aussi les clôturées.
+- **Confirmation explicite** pour les deux gestes (`window.confirm`, comme le
+  découpage et la purge) : elle dit ce qui va se passer — « sa commande redevient
+  prête à livrer, et le stock ne bouge pas » ; « 1 livraison reste livrée. À
+  reprogrammer (1) : Foyer de la Veille. … C'est définitif ». Refuser ne fait rien
+  (banc). Les deux ne sont **jamais mis en file** hors ligne (`JAMAIS_EN_FILE`) :
+  rejouée des heures plus tard, une clôture arrêterait une tournée que le livreur a
+  continuée ; elles échouent franchement.
+- **H9 — la tournée du jour d'abord.** `choisirTourneeAffichee` : du jour en cours,
+  sinon du jour prête ; sans tournée du jour, une passée non soldée ; sinon une à
+  venir. Le jour d'une tournée sans date est celui de sa création. Le choix
+  « Tournées du jour » apparaît dès qu'il y a deux candidates (celles du jour, les
+  passées non soldées, et celle qu'on regarde). Une tournée d'un jour passé non
+  soldée est **signalée en tête de page** (« Tournée Dole du mardi 22 septembre
+  n'est pas soldée : 1 arrêt à faire »), avec « Voir » et « Clôturer » (ou
+  « Annuler » si elle n'est jamais partie).
+- **M2 — un arrêt traité en lecture seule.** Toucher un arrêt déjà traité le garde à
+  l'écran (`arretConsulte`) au lieu de sauter au suivant ; « Livré », « Absent »,
+  « Problème » y sont désactivés ; un encart dit ce qui a été fait (« Problème ·
+  Adresse introuvable », « Livré à 9 h 10 · remis à … »), avec « Corriger le statut »
+  et « Revenir à l'arrêt à faire ». Un bouton désactivé dit pourquoi (geste en
+  attente d'envoi, livraison dans ses 4 s d'Annuler, tournée annulée).
+- **M2 — « Corriger le statut ».** Un dialogue (mêmes pièces que le motif) : livré,
+  client absent, problème, « à faire : j'y repasse » ; la **cause est obligatoire**.
+  Serveur : `POST /api/routes/:routeId/stops/:stopId/correction`, un geste à part,
+  jamais un geste ordinaire rejoué. Journalisée (historique « Correction »,
+  « Cabinet Dupont : Absent → Livré — Absent tapé par erreur », avec qui), gardée sur
+  l'arrêt (`corrections`). **Stocks** : le rayon a été déduit à la préparation et ne
+  bouge jamais ici ; seule la réservation suit (« Livré » la consomme, défaire une
+  livraison la redonne — mesuré, l'aller-retour livré → absent → livré rend le stock
+  d'avant). Une livraison corrigée est datée du geste d'origine. « À faire » rouvre
+  une tournée terminée, jamais une clôturée. Refusée si la commande est repartie
+  (autre tournée), a changé d'état par un autre écran, ou si sa réservation a été
+  libérée à la main. Hors ligne, elle passe par la file et se montre faite, « En
+  attente d'envoi » (`gesteArretDeLEntree` reconnaît aussi `…/correction`).
+- **Gardes de l'API.**
+  - une commande n'entre **jamais dans deux tournées actives**, aussi sans départ (la
+    garde ne valait qu'en mode routier), et `createRoute` appelé sans sélection non
+    plus ;
+  - une commande d'une tournée active ne **repasse pas en préparation**
+    (`start-preparation`, `PATCH /api/orders/:id` avec un autre statut) : 409 qui
+    nomme la tournée ;
+  - **aucun geste sur une tournée finie** (terminée, clôturée, annulée), ni sur une
+    tournée pas encore partie, ni un geste **différent** sur un arrêt déjà traité
+    (409, « utilise « Corriger le statut » ») ; le **même** geste renvoyé est un
+    succès sans écriture ;
+  - exception, pour ne rien perdre (lot 1) : un geste du livreur **fait avant la
+    clôture** (son `faitLe`) et arrivé après (file hors ligne) s'applique sur un
+    arrêt soldé **par la clôture**, si la commande n'est pas repartie ; la tournée
+    reste clôturée.
+  - les refus **nomment la commande et la tournée** : « La commande CMD-2026-012
+    (EHPAD Les Tilleuls) est déjà dans la tournée « Tournée Dole du 23/09 » »,
+    « … est prévue le 23/09, pas le 25/09 », « … n'est plus prête à livrer ». Avant,
+    une commande choisie hors filtre était **retirée en silence** (5 cochées, 4
+    livrées).
+- **Liste des commandes à mettre en tournée** : le filtre de date s'ouvre sur le jour
+  (les « à reprogrammer » le passent, lot 1) ; une commande déjà dans une tournée
+  active est **grisée** (case désactivée, fond et trait pointillé, jamais l'opacité du
+  texte), en fin de liste, avec « Déjà dans « Tournée Dole du mercredi 23 septembre »
+  (prête) » ; « Tout sélectionner » et « Sélectionner ce secteur » ne la prennent pas.
+- **Décision 10 — « remis à… ».** Un champ « Remis à » (facultatif, 80 caractères) au
+  dessus de « Livré », lu à l'appui et envoyé avec le geste (donc avec lui dans la file
+  hors ligne), vidé à l'arrêt suivant, rendu au champ par « Annuler ». Gardé sur
+  l'arrêt **et** la commande (`normalizeOrder` le laisse passer), lu dans l'historique
+  (« … : livre — remis à la voisine »), dans l'encart de l'arrêt traité et dans le
+  détail de la commande (« Livrée : 23 septembre à 9 h 10 · Remis à … »).
+- **Décision 7.** L'ancien panneau « Clients tournée » est retiré (HTML, `renderClients`,
+  `selectClient`, `startTour`, `resetTour`, le chemin « client sans tournée » de
+  `updateCurrentDeliveryStatus` et `nextClient`, et les aides devenues mortes) ; la
+  grille du bureau perd sa rangée. `POST /api/optimize-route` est retirée : `grep` du
+  23/09, aucun écran ni banc ne l'appelait (un commentaire de `api.test.js` la
+  nommait seulement).
+
+### Preuves rouges (ancien code `c05e6f1`, cause lue)
+
+- Banc serveur `test/tournees-debloquees.test.js` (21 cas) contre `server.js` et
+  `sqliteStore.js` de `c05e6f1` : **18 rouges sur les 18 cas d'alors**, chacun de sa
+  cause — `Cannot POST /api/routes/r-cours/annuler` (et `/cloturer`, `/correction`) ;
+  « une commande est entrée dans deux tournées » (201) ; « la tournée est créée sans
+  la commande choisie » ; « la commande repasse en préparation » (200,
+  `en_preparation`) ; « l'arrêt s'est rouvert » (200, arrêt `en_livraison` sur une
+  tournée `terminee`) ; `Transition non autorisee : livre -> a_reprogrammer` au lieu
+  du 409 qui renvoie à la correction ; `remisA` perdu ; « l'ancienne route répond
+  encore : 200 ».
+- Gardes neuves prises par mutant (copie restaurée, empreinte vérifiée) : 16 sur 16 —
+  statuts retirés de `ROUTE_STATUSES` (7 rouges : la tournée clôturée redevient
+  « prête »), liste (« la liste envoie encore le tracé »), `sqliteStore`
+  (« readDb charge encore le tracé »), purge, exception « geste avant la clôture »
+  (deux mutants : retirée ; sans la borne de date, le témoin rougit), réservation non
+  rendue, tournée finie, arrêt soldé, préparation, nommer, les deux tournées (d'abord
+  **redondant** avec la garde qui nomme, vert ; un cas « `createRoute` sans
+  sélection » ajouté le prend), `remisA` dans `normalizeOrder`, réouverture d'une
+  terminée, clôturée qui resterait clôturée, tournée pas partie.
+- Banc e2e `test/e2e/tournees-debloquees.spec.js` (11 cas, ports 3330 et 3331), chaque
+  cas **seul** (le mode `serial` laisse les suivants « did not run ») contre
+  `server.js`, `sqliteStore.js`, `app.js`, `index.html` et `style.css` de `c05e6f1` :
+  9 rouges sur les 9 cas d'alors — « la tournée d'hier masque celle du jour » ;
+  `#deliveryDate` reçu `""` ; aucun `#tourneeChoix`, aucun signal, aucun
+  `#cloturerTourneeButton`. Trois de ces rouges tombent sur la tournée d'hier
+  affichée (préalable) : leur propre cause est prise par mutant d'`app.js`, 8 sur 8 —
+  choix de l'ancienne tournée (« masque celle du jour »), signal caché, relecture
+  (« toucher un arrêt traité affiche un autre arrêt », reçu « EHPAD Les Tilleuls… »),
+  date vide, grisé retiré (« une commande déjà en tournée se coche »), `remisA` non
+  envoyé (reçu `""`), annuler/clôturer mis en file (« la clôture attend dans la
+  file »), correction non superposée (« reçu « Livré », attendu « Absent » »).
+
+### Bancs et résultats (sur `9bba7a8` et suivants)
+
+`npm run check` ; `npm test` 566/566 ; en une passe sur `9bba7a8` : e2e du lot,
+tournee, tournee-mobile, ecran-livreur, carte-telephone, meilleur-trajet,
+livreur-ne-perd-rien, integration-lots-1-5, operations, hors-ligne 84/84 ; et
+(sur `b77099a`, avant deux retouches de bancs et d'`app.js` rejouées depuis par les
+84), parce qu'ils visitent la Tournée ou le
+détail d'une commande : adresses-a-verifier, barre-laterale-finitions,
+carte-et-lignes, clients, commandes, ecrans-sans-planche, integration-interface,
+livraison-chargement, motif-dialogue, navigation-mobile, rapidite-tournee,
+tableau-de-bord, tabs, tuiles-bloquees, cibles-tactiles, focus-clavier,
+contraste-application, etats-limites, chargement-instantane : 174/174. Contrastes
+mesurés par le banc : signal 4,89 (clair) / 4,56 (sombre) ; « Déjà dans » 4,56 /
+9,28. Cibles : champ « Remis à », choix, gestes du signal ≥ 44 px.
+
+**Banc adapté, sans l'affaiblir** : `tournee-mobile.spec.js` « 4a » comptait deux
+commandes du même client, aujourd'hui et demain, **dans le filtre par défaut** — que ce
+lot change (le jour). Il retire désormais le filtre de date avant de compter ; ce
+qu'il garde (deux jours se distinguent sur la ligne) est intact.
+
+Deux rouges vus en route, **non imputables** : « port 3188 / 3175 déjà pris par un
+autre processus » (un autre worktree lançait les mêmes bancs en même temps) ; relancés,
+verts.
+
+### Décisions prises dans le lot
+
+- Deux statuts neufs plutôt qu'un drapeau sur `terminee` : une annulée n'a jamais roulé
+  (elle ne compte pas au tableau de bord), une clôturée si ; et le refus d'un geste
+  doit dire laquelle.
+- La correction est un **point d'entrée à part**, pas un geste ordinaire rouvert : le
+  geste du livreur garde ses gardes (idempotence, arrêt soldé), la correction a les
+  siennes (cause, commande non repartie, stock).
+- « Livré » corrigé : daté du geste d'origine (`deliveredAt` de l'arrêt), c'est là que
+  le livreur était.
+- Un geste arrivé après la clôture mais fait avant elle **passe** : c'est la vérité du
+  terrain, et le lot 1 promet que le livreur ne perd rien.
+- Correction d'un arrêt en échec dont la commande est restée « en livraison » (donnée
+  d'avant le lot 1, ou semée ainsi) : acceptée, rien n'est reparti.
+- Annuler et clôturer demandent le réseau (jamais en file).
+
+### Écarts nommés
+
+- **`POST /api/livraison` et `POST /api/reset-tournee` restent** : la décision 7 ne les
+  nomme pas. Plus aucun écran ne les appelle (le premier servait l'ancien panneau).
+  `reset-tournee` remet une tournée en cours à « prête » et des commandes **livrées** à
+  « prête » : à retirer, ou à garder derrière une confirmation, par décision.
+- **La correction vers « Absent » ou « Problème » ne propose pas la liste des motifs** :
+  la cause libre sert de motif (« Absent (correction : …) »).
+- **Les rôles** ne restreignent que les onglets (déjà vrai) : un compte « livreur »
+  peut annuler ou clôturer une tournée.
+- Le champ « Remis à » ajoute une ligne (≈ 56 px) au-dessus de « Livré » : au
+  téléphone de 390 × 844, « Client absent » finit à 13 px au-dessus de la barre basse
+  (banc « sous le pouce » vert).
+- `window.confirm` n'est pas au style V8 (même choix que le découpage et la purge).
+- Trois remplacements dans `server.js` (étendre les ensembles de statuts finis, 3
+  lignes) et un dans `sqliteStore.js` ont été faits par un script `py` au lieu de
+  l'outil Edit ; relus par `node --check`, le diff et les bancs (dont les mutants qui
+  les retirent).
+- Hors périmètre, non touché : `CACHE_NAME` (le nom du shell suit l'empreinte).
+
+### Ce qui reste
+
+- Décider du sort de `/api/livraison` et `/api/reset-tournee`.
+- Proposer les motifs dans la correction vers « Absent » / « Problème ».
+- Une commande « À reprogrammer » ne s'annule toujours pas (écart du lot 1).
+- Un sélecteur des tournées d'autres jours (hors « du jour » et « à solder ») n'existe
+  pas : une tournée terminée hier ne se rouvre pas à l'écran (le serveur la rend).
