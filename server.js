@@ -167,14 +167,48 @@ const AUTH_REALM = cleanEnv(process.env.SEREO_AUTH_REALM) || "Sereo";
 // le user devra se reconnecter une fois apres deploy d'une nouvelle version).
 // Pour la persistance des sessions a travers les restarts, definir
 // SEREO_AUTH_SESSION_SECRET dans les variables d'environnement (Tom.yml).
-const AUTH_SESSION_SECRET_BASE = cleanEnv(process.env.SEREO_AUTH_SESSION_SECRET)
-  || crypto.randomBytes(32).toString("base64");
+//
+// Lot 1 de l'audit geo (H2), 23/09 : sans la variable, le secret aleatoire est
+// desormais ECRIT dans le dossier de donnees (fichier `session-secret`, a cote
+// de la base, jamais dans le depot : data/ est ignore par git) et relu au
+// demarrage suivant. Avant, chaque redemarrage -- donc chaque mise a jour
+// deployee -- deconnectait tout le monde, et un livreur hors ligne retrouvait
+// au retour du reseau une session morte. La variable, si elle est definie,
+// reste prioritaire. Si le dossier n'est pas inscriptible, on revient a
+// l'ancien comportement, en le disant.
+const FICHIER_SECRET_SESSION = path.join(path.dirname(STORAGE_ENGINE === "json" ? DB_PATH : SQLITE_PATH), "session-secret");
+
+function secretDeSessionPersistant(fichier) {
+  try {
+    const lu = fs.readFileSync(fichier, "utf8").trim();
+    if (lu.length >= 32) return { secret: lu, origine: "fichier" };
+  } catch { /* absent : on le cree */ }
+  const neuf = crypto.randomBytes(32).toString("base64");
+  try {
+    fs.mkdirSync(path.dirname(fichier), { recursive: true });
+    // Temporaire puis renommage : un fichier a moitie ecrit ne sert jamais de secret.
+    const temporaire = `${fichier}.${process.pid}.tmp`;
+    fs.writeFileSync(temporaire, neuf, { mode: 0o600 });
+    fs.renameSync(temporaire, fichier);
+    return { secret: neuf, origine: "cree" };
+  } catch (error) {
+    return { secret: neuf, origine: "memoire", erreur: error.message };
+  }
+}
+
+const SECRET_SESSION_ENV = cleanEnv(process.env.SEREO_AUTH_SESSION_SECRET);
+const SECRET_SESSION = SECRET_SESSION_ENV
+  ? { secret: SECRET_SESSION_ENV, origine: "env" }
+  : secretDeSessionPersistant(FICHIER_SECRET_SESSION);
+const AUTH_SESSION_SECRET_BASE = SECRET_SESSION.secret;
 const AUTH_SESSION_SECRET = `${AUTH_SESSION_SECRET_BASE}|${AUTH_PASSWORD}`;
-if (!cleanEnv(process.env.SEREO_AUTH_SESSION_SECRET)) {
+if (SECRET_SESSION.origine === "cree") {
+  console.warn(`[auth] SEREO_AUTH_SESSION_SECRET non defini : secret de session cree dans ${FICHIER_SECRET_SESSION} (garde entre les redemarrages).`);
+} else if (SECRET_SESSION.origine === "memoire") {
   console.warn(
-    "[auth] SEREO_AUTH_SESSION_SECRET non defini : secret HMAC aleatoire genere. "
-    + "Les sessions seront invalidees au prochain redemarrage. "
-    + "Pour persister les sessions, definir cette variable dans l'environnement."
+    "[auth] SEREO_AUTH_SESSION_SECRET non defini et dossier de donnees non inscriptible "
+    + `(${SECRET_SESSION.erreur}) : secret aleatoire en memoire. Les sessions seront invalidees au prochain redemarrage. `
+    + "Definir SEREO_AUTH_SESSION_SECRET dans l'environnement pour les garder."
   );
 }
 const AUTH_COOKIE_NAME = "sereo_access";
@@ -434,6 +468,96 @@ app.use(express.static(path.join(__dirname, "public"), {
   }
 }));
 app.use("/api", requireTrustedApiRequest);
+app.use("/api", gesteIdempotent);
+
+// --- UN GESTE RENVOYE N'EST APPLIQUE QU'UNE FOIS (lot 1 de l'audit geo) ------
+//
+// Depuis le 23/09, la page met en file TOUTE ecriture dont l'envoi echoue --
+// delai depasse, reseau qui ne repond pas, passerelle 502/503/504 -- et plus
+// seulement quand le telephone se declare hors ligne (H1). Or un delai depasse
+// peut signifier que le serveur a RECU et APPLIQUE l'ecriture : la renvoyer
+// creerait une commande terrain ou une tournee en double. D'ou cette cle :
+// chaque ecriture porte X-Sereo-Geste (un identifiant tire par la page, garde
+// dans la file) ; une cle deja vue rend le statut de la premiere reponse, sans
+// rien reappliquer. Une cle en cours de traitement fait attendre la seconde.
+// Duree de memoire : GESTES_MEMOIRE_JOURS, au-dela de la borne d'age d'un
+// geste (GESTE_AGE_MAX_JOURS). En stockage JSON (migration seulement) : en
+// memoire, perdu au redemarrage.
+const ENTETE_GESTE = "x-sereo-geste";
+const CLE_GESTE_VALIDE = /^[A-Za-z0-9_-]{8,100}$/;
+const GESTES_MEMOIRE_JOURS = 14;
+const gestesEnCours = new Map();
+const gestesRecusEnMemoire = new Map();
+
+function lireGesteRecu(cle) {
+  if (useSqliteStorage()) return getSqliteStore().getGesteRecu(cle);
+  return gestesRecusEnMemoire.get(cle) || null;
+}
+
+function enregistrerGesteRecu(entree) {
+  const oublierAvant = new Date(Date.now() - GESTES_MEMOIRE_JOURS * 24 * 3600 * 1000).toISOString();
+  if (useSqliteStorage()) {
+    getSqliteStore().saveGesteRecu(entree, oublierAvant);
+    return;
+  }
+  gestesRecusEnMemoire.set(entree.cle, entree);
+}
+
+function gesteIdempotent(req, res, next) {
+  if (!["POST", "PATCH", "PUT", "DELETE"].includes(req.method)) return next();
+  const cle = String(req.get(ENTETE_GESTE) || "");
+  if (!CLE_GESTE_VALIDE.test(cle)) return next();
+  const chemin = req.originalUrl;
+
+  const repondreDejaFait = connu => {
+    if (connu.methode !== req.method || connu.chemin !== chemin) {
+      res.status(409).json({ error: "Cette clé de geste a déjà servi pour une autre écriture." });
+      return;
+    }
+    res.set("X-Sereo-Geste-Rejoue", "1");
+    res.status(connu.statut).json({ rejoue: true });
+  };
+
+  let connu = null;
+  try { connu = lireGesteRecu(cle); } catch { connu = null; }
+  if (connu) return repondreDejaFait(connu);
+
+  const enCours = gestesEnCours.get(cle);
+  if (enCours) {
+    enCours.then(() => {
+      let fini = null;
+      try { fini = lireGesteRecu(cle); } catch { fini = null; }
+      if (fini) repondreDejaFait(fini);
+      else next();
+    });
+    return;
+  }
+
+  let liberer;
+  gestesEnCours.set(cle, new Promise(resolve => { liberer = resolve; }));
+  let note = false;
+  const noter = () => {
+    if (note) return;
+    note = true;
+    // Un 5xx n'est pas une reponse definitive : le renvoi doit pouvoir reessayer.
+    if (res.statusCode < 500) {
+      try {
+        enregistrerGesteRecu({ cle, methode: req.method, chemin, statut: res.statusCode, recuLe: new Date().toISOString() });
+      } catch (error) {
+        console.warn("[geste] cle d'idempotence non enregistree :", error.message);
+      }
+    }
+  };
+  // Enregistree AVANT l'envoi de la reponse : un renvoi qui arrive pendant que
+  // la premiere reponse part trouve deja la cle.
+  const envoyer = res.send.bind(res);
+  res.send = corps => { noter(); return envoyer(corps); };
+  res.on("close", () => {
+    gestesEnCours.delete(cle);
+    liberer();
+  });
+  next();
+}
 
 function cleanEnv(value) {
   return String(value ?? "").trim();
@@ -4179,7 +4303,9 @@ function mapOrderStatusToClientStatus(order) {
   return "restant";
 }
 
-function setOrderStatus(order, status) {
+// `quand` : l'heure du GESTE, deja bornee par horodatageDuGeste (lot 1 de
+// l'audit geo, M6). Sans elle, l'heure d'arrivee au serveur.
+function setOrderStatus(order, status, quand = null) {
   if (!ORDER_STATUSES.has(status)) {
     throw badRequest("Statut commande invalide");
   }
@@ -4187,7 +4313,7 @@ function setOrderStatus(order, status) {
     throw badRequest(`Transition non autorisee : ${order.status} -> ${status}`);
   }
 
-  if (status === "livre" && order.status !== "livre") order.deliveredAt = new Date().toISOString();
+  if (status === "livre" && order.status !== "livre") order.deliveredAt = quand || new Date().toISOString();
   order.status = status;
   order.preparationStatus = inferPreparationStatus(status);
   order.deliveryStatus = inferDeliveryStatus(status);
@@ -4885,8 +5011,17 @@ function confirmPlannedOrder(db, orderId) {
 
 function replanOrder(db, orderId, payload = {}) {
   const sourceOrder = findOrder(db, orderId);
-  if (!["livre", "a_reprogrammer", "probleme_livraison"].includes(sourceOrder.status)) {
-    throw badRequest("Seules les commandes livrees ou a reprogrammer peuvent etre replanifiees");
+  // M1 (lot 1 de l'audit geo). Replanifier une commande EN ECHEC la clonait :
+  // l'originale restait livrable (double livraison), le clone perdait
+  // consignes et coordonnees et reservait le stock une seconde fois. Depuis le
+  // 23/09, une commande en echec revient d'elle-meme dans les commandes pretes
+  // (updateRouteStop) : la relivrer, c'est la mettre dans une tournee, pas la
+  // dupliquer. « Planifier la suite » reste reserve a une commande LIVREE.
+  if (STATUTS_A_RELIVRER.includes(sourceOrder.status)) {
+    throw badRequest("Cette commande revient dans « Commandes prêtes à livrer » : ajoute-la à une tournée plutôt que de la dupliquer.");
+  }
+  if (sourceOrder.status !== "livre") {
+    throw badRequest("Seules les commandes livrees peuvent etre replanifiees");
   }
 
   const result = createPlannedOrder(db, {
@@ -5281,12 +5416,22 @@ function getSectors(db) {
   });
 }
 
+// Ce qui peut entrer dans une tournee (C1, lot 1 de l'audit geo).
+// `probleme_livraison` y entre aussi : c'est le statut que prenait un absent
+// avant le 23/09. Les commandes deja bloquees ainsi en base reviennent donc
+// d'elles-memes, sans migration ; la transition probleme_livraison ->
+// en_livraison (depart de la tournee) existe deja.
+const STATUTS_A_PLANIFIER = ["pret_livraison", "a_reprogrammer", "probleme_livraison"];
+// Une commande A RELIVRER a deja manque son jour : le filtre de date ne la
+// cache pas (sinon choisir « demain » la ferait disparaitre de la liste).
+const STATUTS_A_RELIVRER = ["a_reprogrammer", "probleme_livraison"];
+
 function getDeliverableOrders(db, filters = {}) {
   const sector = clean(filters.sector);
   const city = normalizeCity(filters.city);
 
   return db.commandes.filter(order => {
-    if (!["pret_livraison", "en_livraison", "a_reprogrammer"].includes(order.status)) return false;
+    if (![...STATUTS_A_PLANIFIER, "en_livraison"].includes(order.status)) return false;
     if (sector && sector !== "Tous" && normalizeTextKey(order.sector) !== normalizeTextKey(sector)) return false;
     if (city && normalizeTextKey(order.city) !== normalizeTextKey(city)) return false;
     return true;
@@ -5300,8 +5445,8 @@ function createRoute(db, options = {}) {
   const deliveryDate = normalizeDateInput(options.deliveryDate);
 
   let orders = getDeliverableOrders(db, { sector, city }).filter(order => {
-    if (!["pret_livraison", "a_reprogrammer"].includes(order.status)) return false;
-    if (deliveryDate && order.deliveryDate !== deliveryDate) return false;
+    if (!STATUTS_A_PLANIFIER.includes(order.status)) return false;
+    if (deliveryDate && order.deliveryDate !== deliveryDate && !STATUTS_A_RELIVRER.includes(order.status)) return false;
     return true;
   });
 
@@ -5314,7 +5459,10 @@ function createRoute(db, options = {}) {
     throw badRequest("Aucune commande prete selectionnee pour la tournee");
   }
 
-  if (options.plan && orders.some(order => db.routes.some(route => ["prete", "en_livraison"].includes(route.status) && route.stops.some(stop => String(stop.orderId) === String(order.id))))) {
+  // Seul un arret ENCORE A FAIRE retient la commande : un absent de ce matin,
+  // revenu « A reprogrammer », se replanifie meme si sa tournee n'est pas finie.
+  const arretEncoreAFaire = stop => !["livre", "absent", "probleme", "a_reprogrammer"].includes(stop.status);
+  if (options.plan && orders.some(order => db.routes.some(route => ["prete", "en_livraison"].includes(route.status) && route.stops.some(stop => String(stop.orderId) === String(order.id) && arretEncoreAFaire(stop))))) {
     throw badRequest("Une commande sélectionnée appartient déjà à une tournée active.");
   }
   const optimizedOrders = options.plan ? options.plan.ordered.map(item => {
@@ -5477,6 +5625,32 @@ function startRoute(db, routeId) {
   return route;
 }
 
+// --- L'HEURE DU GESTE (lot 1 de l'audit geo, M6) ----------------------------
+// Le telephone envoie `faitLe` : l'heure a laquelle le livreur a touche le
+// bouton. Hors ligne, le geste peut arriver des heures plus tard ; le dater a
+// l'arrivee ferait tomber le chiffre d'affaires dans le mauvais jour.
+// L'horloge du telephone n'est pas une source de verite : elle est BORNEE.
+//  - dans le futur au-dela d'une marge d'horloge : on garde l'heure du serveur ;
+//  - plus vieille que GESTE_AGE_MAX_JOURS : on garde l'heure du serveur (un
+//    telephone a l'heure fausse, pas une livraison d'il y a trois semaines) ;
+//  - avant le depart de la tournee : ramenee au depart (horloge en retard).
+// Defaut 7 jours (plage raisonnable : 3 a 14) : un vendredi hors ligne rejoue
+// le lundi matin passe encore.
+const GESTE_AGE_MAX_JOURS = 7;
+const GESTE_AVANCE_HORLOGE_MS = 5 * 60 * 1000;
+
+function horodatageDuGeste(brut, { maintenant = new Date(), plancher = null } = {}) {
+  const serveur = maintenant.getTime();
+  const t = typeof brut === "string" && brut ? Date.parse(brut) : NaN;
+  if (!Number.isFinite(t)) return new Date(serveur).toISOString();
+  if (t > serveur + GESTE_AVANCE_HORLOGE_MS) return new Date(serveur).toISOString();
+  if (t < serveur - GESTE_AGE_MAX_JOURS * 24 * 3600 * 1000) return new Date(serveur).toISOString();
+  let retenu = Math.min(t, serveur);
+  const bas = plancher ? Date.parse(plancher) : NaN;
+  if (Number.isFinite(bas) && retenu < bas && bas <= serveur) retenu = bas;
+  return new Date(retenu).toISOString();
+}
+
 /**
  * @param {string} notes  instruction de livraison, telle qu'elle vient de la
  *                        commande. Elle ne dit RIEN de la cause d'un echec.
@@ -5486,7 +5660,7 @@ function startRoute(db, routeId) {
  * qu'on corrige : passer le motif dans `notes` ecraserait l'instruction de
  * livraison de la commande, et la perdrait pour la prochaine tournee.
  */
-function updateRouteStop(db, routeId, stopId, status, notes = "", motif = null) {
+function updateRouteStop(db, routeId, stopId, status, notes = "", motif = null, faitLe = null) {
   if (!STOP_STATUSES.has(status)) {
     throw badRequest("Statut arret invalide");
   }
@@ -5509,23 +5683,37 @@ function updateRouteStop(db, routeId, stopId, status, notes = "", motif = null) 
   const stop = route.stops.find(item => String(item.id) === String(stopId));
   if (!stop) throw notFound("Arret introuvable");
 
-  const now = new Date().toISOString();
+  // L'heure du GESTE, pas celle de l'arrivee ici (M6) : une livraison faite
+  // hors ligne a 9 h 10 et envoyee a 11 h 30 est datee de 9 h 10.
+  const now = horodatageDuGeste(faitLe, { plancher: route.startedAt });
   stop.status = status;
   stop.notes = clean(notes || stop.notes);
+  // La version de la tournee : la page ne remplace jamais sa tournee par une
+  // copie plus ancienne (refreshActiveRoute, H4).
+  route.updatedAt = new Date().toISOString();
 
   const order = findOrder(db, stop.orderId);
   const client = findClient(db, order.clientId);
 
+  // C1 (lot 1 de l'audit geo) : un absent ou un probleme n'est plus une
+  // impasse. La commande passait en `probleme_livraison`, qu'aucune liste ne
+  // propose et qu'aucun bouton ne fait sortir ; son stock restait reserve pour
+  // toujours. Elle passe desormais a `a_reprogrammer` : elle REVIENT d'elle-meme
+  // dans « Commandes pretes a livrer », marquee « A reprogrammer ». La cause
+  // reste lisible dans deliveryStatus (absent / probleme) et dans l'arret.
+  // Le stock, lui, reste reserve pour la relivraison (RESERVED_ORDER_STATUSES
+  // compte a_reprogrammer) : ni libere, ni reserve une seconde fois -- la
+  // tournee suivante ne reserve rien, et la livraison consomme la reservation.
   if (status === "livre") {
-    setOrderStatus(order, "livre");
+    setOrderStatus(order, "livre", now);
     if (client) client.statut = "livree";
   } else if (status === "absent") {
-    setOrderStatus(order, "probleme_livraison");
+    setOrderStatus(order, "a_reprogrammer");
     order.deliveryStatus = "absent";
     if (client) client.statut = "absent";
   } else if (status === "probleme") {
+    setOrderStatus(order, "a_reprogrammer");
     order.deliveryStatus = "probleme";
-    setOrderStatus(order, "probleme_livraison");
     if (client) client.statut = "probleme";
   } else if (status === "a_reprogrammer") {
     setOrderStatus(order, "a_reprogrammer");
@@ -7353,7 +7541,7 @@ app.post("/api/routes", async (req, res) => {
       if (!Array.isArray(req.body.orderIds) || !req.body.orderIds.length) throw badRequest("Sélectionne les commandes de la tournée.");
       const snapshot = readDb();
       const ids = new Set((req.body.orderIds || []).map(String));
-      const selected = getDeliverableOrders(snapshot, req.body).filter(o => ids.has(String(o.id)) && ["pret_livraison", "a_reprogrammer"].includes(o.status));
+      const selected = getDeliverableOrders(snapshot, req.body).filter(o => ids.has(String(o.id)) && STATUTS_A_PLANIFIER.includes(o.status));
       if (selected.length !== ids.size) throw badRequest("Certaines commandes ne sont plus prêtes.");
       plan = await routing.roadPlan(selected, req.body.departure, req.body.arrival, snapshot.settings.tournee.stopDurationMin);
     }
@@ -7416,7 +7604,7 @@ app.patch("/api/routes/:routeId/stops/:stopId", async (req, res) => {
     const result = await withWriteLock(async () => {
       const db = readDb();
       const r = updateRouteStop(db, req.params.routeId, req.params.stopId,
-        req.body.status, req.body.notes, req.body.motif);
+        req.body.status, req.body.notes, req.body.motif, req.body.faitLe);
 
       // La cause DANS le libelle : l'historique est le seul endroit ou une
       // tournee passee se relit, et un statut sans sa cause n'y apprend rien.
@@ -7831,6 +8019,7 @@ module.exports = {
   getDashboardSummary,
   getDeliverableOrders,
   createRoute,
+  horodatageDuGeste,
   optimizeOrders,
   parseCoordinate,
   getCoordinates,

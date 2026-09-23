@@ -53,7 +53,7 @@ Variables principales :
 | `SEREO_SQLITE_PATH` | `./data/sereo.sqlite` | Fichier SQLite (volume persistant en prod) |
 | `SEREO_AUTH_USER` | _vide_ | Identifiant HTTP Basic |
 | `SEREO_AUTH_PASSWORD` | _vide_ | Mot de passe HTTP Basic (les 2 ensemble) |
-| `SEREO_AUTH_SESSION_SECRET` | _aléatoire_ | Secret HMAC cookies (à définir en prod pour persister les sessions) |
+| `SEREO_AUTH_SESSION_SECRET` | _aléatoire, gardé dans `session-secret` du dossier de données_ | Secret HMAC cookies (prioritaire sur le fichier) |
 | `SEREO_ENABLE_DB_EXPORT` | `0` | Mettre à `1` uniquement pour debug local |
 
 Voir [`.env.example`](.env.example) et [`DEPLOYMENT.md`](DEPLOYMENT.md) pour la liste complète.
