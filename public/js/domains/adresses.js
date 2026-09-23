@@ -276,6 +276,28 @@ function fermerEditeur() {
   choix = null;
 }
 
+/**
+ * Le focus apres un geste qui detruit le bouton actif (Annuler vide
+ * l'editeur ; Accepter, Garder et Enregistrer reecrivent la liste). Sans cela
+ * il retombait sur <body> et il fallait reparcourir la fenetre au clavier
+ * (relecture du lot 3). Ordre : le bouton « Placer sur la carte » de la meme
+ * ligne si elle est encore la, sinon la ligne qui a pris sa place, sinon le
+ * resume de la liste.
+ */
+function remettreLeFocus(id, index = 0) {
+  const conteneur = document.getElementById("adressesListe");
+  if (!conteneur) return;
+  const meme = id ? conteneur.querySelector(`[data-adr-ligne="${cssId(id)}"] [data-adr="corriger"]`) : null;
+  const lignes = [...conteneur.querySelectorAll("[data-adr-ligne]")];
+  const voisine = lignes.length ? lignes[Math.min(Math.max(index, 0), lignes.length - 1)] : null;
+  let cible = meme || voisine?.querySelector("button[data-adr]") || null;
+  if (!cible) {
+    cible = document.getElementById("adressesResume");
+    cible?.setAttribute("tabindex", "-1");
+  }
+  cible?.focus();
+}
+
 function cssId(id) {
   return typeof CSS !== "undefined" && CSS.escape ? CSS.escape(String(id)) : String(id).replace(/"/g, '\\"');
 }
@@ -391,8 +413,10 @@ async function enregistrer(id, point, bouton) {
       body: JSON.stringify({ lat: point.lat, lng: point.lng, precision: point.precision || "manuel", libelle: point.libelle || "" })
     });
     ctx.notify(`Position enregistrée pour ${ligne.nom}.`, "success");
+    const index = liste.findIndex(l => String(l.id) === String(id));
     fermerEditeur();
     await chargerListe();
+    remettreLeFocus(id, index);
     afficherErreursTournee([]);
     await ctx.loadData();
   } catch (erreur) {
@@ -423,7 +447,9 @@ function surClic(evenement) {
     if (String(enEdition) === String(id)) fermerEditeur();
     else ouvrirEditeur(id);
   } else if (action === "annuler") {
+    const ouvert = enEdition;
     fermerEditeur();
+    remettreLeFocus(ouvert);
   } else if (action === "accepter") {
     const ligne = ligneDe(id);
     if (ligne?.proposition) enregistrer(id, ligne.proposition, cible);

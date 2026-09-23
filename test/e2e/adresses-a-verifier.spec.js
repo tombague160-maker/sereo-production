@@ -293,3 +293,52 @@ for (const mode of ["light", "dark"]) {
     await ctx.close();
   });
 }
+
+// Relecture du lot 3 : Annuler, Accepter, Garder et Enregistrer detruisent le
+// bouton qui a le focus (innerHTML). Avant, le focus retombait sur <body>.
+test("au clavier, le focus reste dans la fenetre apres Annuler et apres Enregistrer", async ({ browser }) => {
+  const { ctx, page, erreurs } = await ouvrir(browser, "desktop");
+  // Deux lignes a verifier, quel que soit l'etat laisse par les tests d'avant.
+  await page.evaluate(async () => {
+    for (const id of ["c-veto", "c-inconnu"]) {
+      await fetch(`/api/clients/${id}/coordinates`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lat: "", lng: "" }) });
+    }
+  });
+  await page.evaluate(() => { document.querySelector('[data-adr="ouvrir"]')?.click(); });
+  const veto = ligne(page, "c-veto");
+  await expect(veto).toBeVisible();
+  await expect(ligne(page, "c-inconnu")).toBeVisible();
+  const focus = () => page.evaluate(() => {
+    const a = document.activeElement;
+    return {
+      ligne: a?.closest("[data-adr-ligne]")?.dataset.adrLigne || "",
+      action: a?.dataset?.adr || a?.id || a?.tagName || "",
+      dansLaFenetre: Boolean(a && document.getElementById("adressesDialog").contains(a))
+    };
+  });
+
+  // Annuler : le focus revient sur « Placer sur la carte » de la meme ligne.
+  await veto.getByRole("button", { name: "Placer sur la carte" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(veto.locator("[data-adr-editeur]")).toBeVisible();
+  await veto.getByRole("button", { name: "Annuler" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(veto.locator("[data-adr-editeur]")).toBeHidden();
+  expect(await focus()).toEqual({ ligne: "c-veto", action: "corriger", dansLaFenetre: true });
+
+  // Enregistrer : la ligne disparait, le focus passe a la ligne suivante.
+  await page.keyboard.press("Enter");
+  const champ = veto.locator("[data-adr-champ]");
+  await expect(champ).toBeFocused();
+  await champ.fill("47.2301, 6.0212");
+  await champ.press("Enter");
+  await expect(veto.locator("[data-adr-position]")).toContainText("47,2301");
+  await veto.getByRole("button", { name: "Enregistrer cette position" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(ligne(page, "c-veto")).toHaveCount(0);
+  const apres = await focus();
+  expect(apres.dansLaFenetre, JSON.stringify(apres)).toBe(true);
+  expect(apres.ligne, JSON.stringify(apres)).not.toBe("");
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
