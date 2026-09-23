@@ -2328,6 +2328,9 @@ function healDatabaseAtBoot() {
         at: lastStorageRecovery.at
       });
     }
+    // Revue du 23/09 (lot 5) : la position « Me localiser » exacte ne dort plus
+    // dans le trace des tournees terminees calculees avant le lot.
+    rognerTracesGpsTerminees(db);
     writeDb(db, { backup: false });
     if (lastStorageRecovery) {
       console.error(`[boot] ATTENTION : recovery storage detectee au demarrage (${lastStorageRecovery.mode}).`);
@@ -5466,9 +5469,19 @@ function normalizeRoute(route, orders) {
     if (route[cle]) positions[cle] = arrondirPositionGps(route[cle]);
   }
 
+  // Revue du 23/09 : le trace d'une tournee calculee AVANT le lot part de la
+  // position exacte (recalee sur la route) ; on le rogne autour de la position
+  // arrondie. Seulement s'il est charge : sans propriete `geometry` (tournee
+  // terminee, stockage SQLite), le trace en base ne bouge pas ici -- voir
+  // rognerTracesGpsTerminees, au demarrage.
+  const trace = Object.prototype.hasOwnProperty.call(route, "geometry")
+    ? { geometry: rognerTraceGps(route.geometry, { ...route, ...positions }) }
+    : {};
+
   return {
     ...route,
     ...positions,
+    ...trace,
     deliveryDate: normalizeDateInput(route.deliveryDate),
     status: routeStatus,
     stops: normalizedStops,
@@ -5489,6 +5502,73 @@ function arrondirPositionGps(point) {
     return valeur === "" || valeur === null || !Number.isFinite(n) ? valeur : Math.round(n * 1000) / 1000;
   };
   return { ...point, lat: arrondi(point.lat), lng: arrondi(point.lng) };
+}
+
+// Le rayon rogne autour de la position arrondie : l'arrondi a 3 decimales
+// deplace le point d'au plus ~67 m, le recalage sur la route en ajoute un peu.
+const RAYON_TRACE_GPS_M = 150;
+
+/** La position « Me localiser » arrondie, en { lat, lng } ; null sinon. */
+function positionGpsArrondie(point) {
+  if (!point || typeof point !== "object" || point.label !== LIBELLE_POSITION_GPS) return null;
+  const arrondie = arrondirPositionGps(point);
+  const lat = Number(arrondie.lat), lng = Number(arrondie.lng);
+  return arrondie.lat === "" || arrondie.lng === "" || !Number.isFinite(lat) || !Number.isFinite(lng) ? null : { lat, lng };
+}
+
+/**
+ * Le trace sans ses sommets a moins de RAYON_TRACE_GPS_M de la position
+ * « Me localiser » (depart et/ou arrivee) : ils sont remplaces par la position
+ * arrondie. Un trace calcule avant le lot partait de la position exacte.
+ * Idempotent (la position arrondie est fixe) : une deuxieme passe ne change
+ * rien, donc rien n'est reecrit en base. Rend le meme objet quand rien ne change.
+ */
+function rognerTraceGps(geometry, route) {
+  const coords = geometry && Array.isArray(geometry.coordinates) ? geometry.coordinates : null;
+  if (!coords || coords.length < 2) return geometry;
+  const depart = positionGpsArrondie(route.departure);
+  const arrivee = positionGpsArrondie(route.arrival);
+  if (!depart && !arrivee) return geometry;
+  const loin = (c, p) => !Array.isArray(c) || distance({ lat: c[1], lng: c[0] }, p) * 1000 > RAYON_TRACE_GPS_M;
+
+  let debut = 0;
+  let fin = coords.length;
+  if (depart) while (debut < fin && !loin(coords[debut], depart)) debut++;
+  if (arrivee) while (fin > debut && !loin(coords[fin - 1], arrivee)) fin--;
+  if (debut === 0 && fin === coords.length) return geometry;
+
+  const tete = depart ? [depart.lng, depart.lat] : coords[0];
+  const queue = arrivee ? [arrivee.lng, arrivee.lat] : coords[coords.length - 1];
+  // Tout le trace tient dans le rayon : il se reduit a ses deux extremites.
+  const net = debut >= fin
+    ? [tete, queue]
+    : [...(debut > 0 ? [tete] : []), ...coords.slice(debut, fin), ...(fin < coords.length ? [queue] : [])];
+  // Deja rogne (seules les extremites ont pu etre remplacees, par elles-memes) :
+  // le meme objet, pour que rien ne change.
+  const meme = (a, b) => Array.isArray(a) && Array.isArray(b) && a[0] === b[0] && a[1] === b[1];
+  if (net.length === coords.length && meme(net[0], coords[0]) && meme(net[net.length - 1], coords[coords.length - 1])) return geometry;
+  return { ...geometry, coordinates: net };
+}
+
+/**
+ * Au demarrage : les traces des tournees terminees ne sont pas charges par
+ * readDb (stockage SQLite), normalizeRoute ne les voit donc jamais. On les lit
+ * pour les tournees parties de « Me localiser », et on pose ceux a rogner sur
+ * la tournee : l'ecriture qui suit les enregistre. Rend le nombre de traces rognes.
+ */
+function rognerTracesGpsTerminees(db) {
+  if (!useSqliteStorage()) return 0;
+  let rognes = 0;
+  for (const route of db.routes) {
+    if (Object.prototype.hasOwnProperty.call(route, "geometry")) continue;
+    if (!positionGpsArrondie(route.departure) && !positionGpsArrondie(route.arrival)) continue;
+    const stocke = getSqliteStore().getRouteTrace(route.id);
+    const rogne = rognerTraceGps(stocke, route);
+    if (rogne === stocke) continue;
+    route.geometry = rogne;
+    rognes += 1;
+  }
+  return rognes;
 }
 
 function startRoute(db, routeId) {
@@ -8014,6 +8094,8 @@ module.exports = {
   // Lot 5 (audit geo) : purge des tournees anciennes
   purgerTourneesAnciennes,
   tourneesAPurger,
+  rognerTraceGps,
+  _healDatabaseAtBoot: healDatabaseAtBoot,
   dimancheDePaques,
   joursFeriesFrance,
   alerteDateNonOuvree,

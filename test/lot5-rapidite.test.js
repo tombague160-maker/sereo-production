@@ -400,6 +400,59 @@ test("lot 5 : la position « Me localiser » est stockee arrondie a 3 decimales,
   assert.deepEqual([adresse.departure.lat, adresse.departure.lng], [47.2381234, 6.0241234], "une adresse choisie a ete arrondie");
 });
 
+test("lot 5 : le trace d'une tournee calculee avant le lot ne garde pas la position « Me localiser » exacte", async () => {
+  const { DatabaseSync } = require("node:sqlite");
+  const km = (a, b) => S._distance({ lat: a[1], lng: a[0] }, { lat: b[1], lng: b[0] });
+  // Le domicile du livreur, et un trace OSRM qui en part (sommet 0 recale sur
+  // la route), puis s'eloigne d'environ 32 m par sommet.
+  const EXACT = [5.91236, 46.75125];
+  const precis = { type: "LineString", coordinates: [EXACT, ...Array.from({ length: 29 }, (_, j) => [5.9124 + (j + 1) * 0.0003, 46.7513 + (j + 1) * 0.0002])] };
+  const gps = { lat: 46.7512345, lng: 5.9123456, label: "Ma position actuelle" };
+  const cmd = [commande("t1", "livre"), commande("t2", "pret_livraison"), commande("t3", "livre")];
+  writeDb({
+    ...defaultDb(), clients: clients(), commandes: cmd,
+    routes: [
+      tournee("gps-finie", "terminee", [cmd[0]], { departure: gps, completedAt: "2026-09-01T12:00:00.000Z" }),
+      tournee("gps-prete", "prete", [cmd[1]], { departure: gps, arrival: gps }),
+      tournee("adresse", "terminee", [cmd[2]], { departure: { lat: 46.7512345, lng: 5.9123456, label: "Dépôt" } })
+    ]
+  }, { backup: false });
+  // Les traces tels qu'une version d'avant le lot les a enregistres.
+  const aller = structuredClone(precis);
+  const allerRetour = { ...precis, coordinates: [...precis.coordinates, ...precis.coordinates.slice().reverse()] };
+  let cnx = new DatabaseSync(process.env.SEREO_SQLITE_PATH);
+  const poser = cnx.prepare("UPDATE traces_tournees SET trace = ? WHERE route_id = ?");
+  poser.run(JSON.stringify(aller), "gps-finie");
+  poser.run(JSON.stringify(allerRetour), "gps-prete");
+  poser.run(JSON.stringify(aller), "adresse");
+  cnx.close();
+
+  S._healDatabaseAtBoot();
+
+  cnx = new DatabaseSync(process.env.SEREO_SQLITE_PATH);
+  const stocke = id => JSON.parse(cnx.prepare("SELECT trace FROM traces_tournees WHERE route_id = ?").get(id).trace).coordinates;
+  const finie = stocke("gps-finie"), prete = stocke("gps-prete"), adresse = stocke("adresse");
+  cnx.close();
+  const ARRONDI = [5.912, 46.751];
+  assert.equal(adresse.length, 30, "temoin : le trace d'une adresse choisie a ete rogne");
+  assert.deepEqual(finie[0], ARRONDI, "le trace stocke d'une tournee terminee part encore de la position exacte");
+  assert.ok(finie.slice(1).every(c => km(c, ARRONDI) > 0.15), "un sommet a moins de 150 m du depart reste dans le trace stocke");
+  assert.ok(finie.length > 20, `le trace a ete trop rogne (${finie.length} sommets)`);
+  assert.deepEqual([prete[0], prete[prete.length - 1]], [ARRONDI, ARRONDI], "le trace d'une tournee prete garde depart ou arrivee exacts");
+  assert.ok(prete.slice(1, -1).every(c => km(c, ARRONDI) > 0.15));
+  assert.ok(![...finie, ...prete].some(c => c[0] === EXACT[0] && c[1] === EXACT[1]), "la position exacte est encore stockee");
+  // Ce que l'ecran recoit.
+  assert.deepEqual((await api("/api/routes/gps-finie")).body.geometry.coordinates, finie);
+  // Idempotent : une deuxieme passe ne change rien.
+  S._healDatabaseAtBoot();
+  cnx = new DatabaseSync(process.env.SEREO_SQLITE_PATH);
+  const encore = JSON.parse(cnx.prepare("SELECT trace FROM traces_tournees WHERE route_id = 'gps-finie'").get().trace).coordinates;
+  cnx.close();
+  assert.deepEqual(encore, finie, "une deuxieme passe rogne encore");
+  const g = { type: "LineString", coordinates: finie };
+  assert.equal(S.rognerTraceGps(g, { departure: gps }), g, "une passe sur un trace deja rogne rend un nouvel objet");
+});
+
 // --- 8. Decision 5 : purge des tournees terminees de plus de 12 mois -------------
 
 const MAINTENANT = new Date("2026-09-23T10:00:00.000Z");
