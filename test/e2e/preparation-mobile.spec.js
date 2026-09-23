@@ -226,8 +226,10 @@ test("7b — la ligne ouvre une PAGE : en-tete vert, retour, produits, manque en
         sousCouleur: getComputedStyle(p.querySelector(".commande-page-produit-texte span")).color,
         qte: p.querySelector(".commande-page-quantite").textContent.trim()
       })),
-      compte: d.querySelector(".commande-page-compte").textContent.replace(/\s+/g, " ").trim(),
-      bouton: { texte: bouton.textContent.trim(), desactive: bouton.disabled, decrit: bouton.getAttribute("aria-describedby"), bas: Math.round(bouton.getBoundingClientRect().bottom), h: Math.round(bouton.getBoundingClientRect().height) },
+      // Lectures tolerantes : sans la page 7b, le banc doit rougir sur sa
+      // premiere attente (le cadre), pas planter sur un element absent.
+      compte: (d.querySelector(".commande-page-compte")?.textContent || "").replace(/\s+/g, " ").trim(),
+      bouton: bouton ? { texte: bouton.textContent.trim(), desactive: bouton.disabled, decrit: bouton.getAttribute("aria-describedby"), bas: Math.round(bouton.getBoundingClientRect().bottom), h: Math.round(bouton.getBoundingClientRect().height) } : {},
       raison: raison ? { id: raison.id, texte: raison.textContent.trim(), couleur: getComputedStyle(raison).color, visible: raison.checkVisibility() } : null,
       date: !!d.querySelector("[data-delivery-date-input]"),
       itineraire: !!d.querySelector("[data-action=\"open-order-maps\"]")
