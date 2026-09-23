@@ -12084,3 +12084,37 @@ textarea::placeholder {
   :root:not([data-color-scheme="light"]) .ecran-entete .tb-pilule-mois { background: var(--v8-principal); color: var(--v8-texte-sur-principal); }
   :root:not([data-color-scheme="light"]) .ecran-entete .tb-pilule-mois select { color: var(--v8-texte-sur-principal); }
 }
+
+/* --- Mobile, Clients (planches 9a, 8c) : la liste, puis la fiche --------- */
+.cli-retour { display: none; }
+@media (max-width: 820px) {
+  #crm[data-vue="liste"] .cli-fiche { display: none; }
+  #crm[data-vue="fiche"] .cli-colonne { display: none; }
+  /* La liste defile avec la page (elle etait coupee dans sa carte). */
+  #crm .cli-liste-carte { max-height: none; overflow: visible; }
+  :root[data-color-scheme] #crm .cli-retour,
+  :root:not([data-color-scheme]) #crm .cli-retour {
+    display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+    min-height: 44px; padding: 0 14px 0 8px; border: 0; border-radius: 999px;
+    background: var(--v8-fond); color: var(--v8-principal);
+    font: inherit; font-size: 14.5px; font-weight: 600; cursor: pointer;
+  }
+  #crm .cli-retour svg { width: 20px; height: 20px; }
+  #crm .cli-retour:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  /* Les lignes de la planche 9a : 72 px, nom 16/600, meta 13,5. */
+  :root[data-color-scheme] #crm .cli-ligne,
+  :root:not([data-color-scheme]) #crm .cli-ligne { min-height: 72px; padding: 0 14px; border-radius: 18px; }
+  #crm .cli-nom { font-size: 16px; letter-spacing: -0.01em; }
+  #crm .cli-meta { font-size: 13.5px; }
+  #crm .cli-liste > [role="listitem"] + [role="listitem"] { box-shadow: 0 -1px 0 var(--v8-surface-basse); }
+}
+/* « Itineraire » : au telephone (planche 8c), pas au bureau (planche 13e). */
+.cli-itineraire { display: none; }
+@media (max-width: 820px) {
+  :root[data-color-scheme] #crm .cli-itineraire,
+  :root:not([data-color-scheme]) #crm .cli-itineraire { display: inline-flex; text-decoration: none; }
+  /* La fiche ouverte : l'en-tete ne porte plus la recherche ni « Nouveau
+     client » de la liste. */
+  body:has(#crm.active[data-vue="fiche"]) .ecran-entete .cli-recherche,
+  body:has(#crm.active[data-vue="fiche"]) .ecran-entete .cli-nouveau { display: none; }
+}

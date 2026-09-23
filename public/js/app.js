@@ -1958,6 +1958,12 @@ function renderFicheClient() {
   const appeler = client.telephone
     ? `<a class="button primary cli-appeler" href="tel:${escapeAttribute(String(client.telephone).replace(/[^\d+]/g, ""))}">${ICONE_CLI.tel}<span>Appeler</span></a>`
     : "";
+  // « Itineraire » (planche 8c, le second geste du terrain) : seulement si
+  // l'adresse permet un trajet (rue ET ville) -- sinon le lien serait vide.
+  const trajet = buildGoogleMapsUrl(client);
+  const itineraire = trajet
+    ? `<a class="cli-bouton-contour cli-itineraire" href="${escapeAttribute(trajet)}" target="_blank" rel="noopener noreferrer">Itinéraire</a>`
+    : "";
   const adresse = adresseClientACorriger(client)
     ? `<p class="cli-valeur cli-alerte">Adresse à corriger</p><p class="cli-note">${escapeHtml([client.rue, client.codePostal, client.ville].filter(Boolean).join(" ") || "Aucune adresse")}</p>`
     : `<p class="cli-valeur">${escapeHtml(client.rue)}<br>${escapeHtml([client.codePostal, client.ville].filter(Boolean).join(" "))}</p>`;
@@ -2001,12 +2007,13 @@ function renderFicheClient() {
   ].filter(Boolean);
 
   fiche.innerHTML = `
+    <button class="cli-retour" type="button" data-action="cli-retour" aria-label="Retour à la liste des clients"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m15 18-6-6 6-6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg><span>Clients</span></button>
     <header class="cli-fiche-tete">
       <div class="cli-fiche-identite">
         <h2 class="cli-fiche-nom">${escapeHtml(nomDuClient(client))}</h2>
         <div class="cli-puces">${puces}</div>
       </div>
-      <div class="cli-fiche-gestes">${appeler}<button class="cli-bouton-contour" type="button" data-action="cli-modifier" data-client-id="${escapeAttribute(client.id)}">Modifier</button></div>
+      <div class="cli-fiche-gestes">${appeler}${itineraire}<button class="cli-bouton-contour" type="button" data-action="cli-modifier" data-client-id="${escapeAttribute(client.id)}">Modifier</button></div>
     </header>
     <div class="cli-champs">
       <div><p class="cli-libelle">Adresse</p>${adresse}</div>
@@ -2050,6 +2057,20 @@ function ouvrirDialogueClient(clientId = null) {
   form.elements.nom.focus();
 }
 
+// La vue du telephone : « liste » ou « fiche » (sans effet au-dessus de 820 px,
+// ou la liste et la fiche sont cote a cote).
+function ouvrirVueClient(vue) {
+  const ecran = document.getElementById("crm");
+  if (!ecran) return;
+  ecran.dataset.vue = vue;
+  window.scrollTo({ top: 0 });
+  if (vue === "fiche") {
+    document.querySelector("#cliFiche .cli-retour")?.focus();
+  } else if (clientChoisi) {
+    document.querySelector(`[data-cli-choisir="${CSS.escape(clientChoisi)}"]`)?.focus();
+  }
+}
+
 function bindClients() {
   const ecran = document.getElementById("crm");
   if (!ecran) return;
@@ -2066,10 +2087,18 @@ function bindClients() {
       clientChoisi = ligne.dataset.cliChoisir;
       renderCrm();
       document.querySelector(`[data-cli-choisir="${CSS.escape(clientChoisi)}"]`)?.focus();
-      // Sous 1180 px la fiche est SOUS la liste : sans ceci, rien ne semblait se passer.
-      if (window.matchMedia("(max-width: 1180px)").matches) {
+      // Au telephone (planches 9a puis 8c) : la liste, PUIS la fiche en plein
+      // ecran, avec un retour. Entre 821 et 1180 px la fiche est sous la liste :
+      // on la montre.
+      if (window.matchMedia("(max-width: 820px)").matches) {
+        ouvrirVueClient("fiche");
+      } else if (window.matchMedia("(max-width: 1180px)").matches) {
         document.getElementById("cliFiche")?.scrollIntoView({ block: "start", behavior: "smooth" });
       }
+      return;
+    }
+    if (event.target.closest("[data-action='cli-retour']")) {
+      ouvrirVueClient("liste");
       return;
     }
     const commande = event.target.closest("[data-cli-commande]");

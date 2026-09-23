@@ -209,17 +209,38 @@ test("la recherche cherche le nom et la ville", async ({ page }) => {
   await expect(page.locator("#crm .empty-state")).toBeVisible();
 });
 
-test("téléphone : rien ne déborde de l'écran", async ({ page }) => {
+test("téléphone : la liste, puis la fiche en plein écran, puis le retour (planches 9a, 8c)", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await ouvrir(page);
-  // La fiche passe SOUS la liste, pleine largeur : deux colonnes ecrasees ne
-  // debordent pas, elles deviennent illisibles.
-  const fiche = await page.locator("#cliFiche").boundingBox();
-  expect(fiche.width).toBeGreaterThan(330);
-  const deborde = await page.evaluate(() => [...document.querySelectorAll("#crm *")]
+  const deborde = () => page.evaluate(() => [...document.querySelectorAll("#crm *")]
     .filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.right > window.innerWidth + 0.5; })
     .map(e => e.className || e.tagName));
-  expect(deborde).toEqual([]);
+  // D'abord la liste seule : la fiche n'est pas ouverte d'office sous elle.
+  await expect(page.locator("#crmList")).toBeVisible();
+  await expect(page.locator("#cliFiche")).toBeHidden();
+  expect(await deborde()).toEqual([]);
+  // Un tap : la fiche, pleine largeur, et la liste s'efface.
+  await ligne(page, "Tilleuls").click();
+  await expect(page.locator("#cliFiche")).toBeVisible();
+  await expect(page.locator("#crmList")).toBeHidden();
+  expect((await page.locator("#cliFiche").boundingBox()).width).toBeGreaterThan(330);
+  await expect(page.locator("#cliFiche .cli-fiche-nom")).toContainText("Tilleuls");
+  // Les deux gestes du terrain (planche 8c), et plus la recherche de la liste.
+  await expect(page.locator("#cliFiche .cli-itineraire")).toHaveAttribute("href", /google\.com\/maps\/dir/);
+  await expect(page.locator("#crmSearch")).toBeHidden();
+  expect(await deborde()).toEqual([]);
+  // Le retour : la liste, et le focus sur la ligne qu'on avait ouverte.
+  await page.locator("#cliFiche .cli-retour").click();
+  await expect(page.locator("#crmList")).toBeVisible();
+  await expect(page.locator("#cliFiche")).toBeHidden();
+  expect(await page.evaluate(() => document.activeElement?.textContent || "")).toContain("Tilleuls");
+});
+
+test("au bureau, le bouton retour n'existe pas (liste et fiche côte à côte)", async ({ page }) => {
+  await ouvrir(page);
+  await expect(page.locator("#cliFiche .cli-retour")).toBeHidden();
+  await expect(page.locator("#crmList")).toBeVisible();
+  await expect(page.locator("#cliFiche")).toBeVisible();
 });
 
 test("accessibilité : les lignes restent des boutons, les rappels ont un nom", async ({ page }) => {
