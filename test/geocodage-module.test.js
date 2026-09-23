@@ -24,6 +24,40 @@ test("nettoyage — temoin : une adresse ordinaire, un lieu-dit et une rue « Ba
   assert.equal(geo.nettoyerAdresse({ rue: "12 rue Mégevand", ville: "Besançon" }).complement, "");
 });
 
+test("nettoyage — une virgule apres le numero ne coupe pas la voie (« 12, rue de Dole », « Rue de Dole, 12 », « 12 bis, rue X »)", () => {
+  // Relecture adverse du lot 3 : le numero seul etait pris pour la voie, et
+  // la rue entiere partait en complement. La BAN ne recevait que « 12 ».
+  assert.equal(geo.nettoyerAdresse({ rue: "12, rue de Dole", ville: "Besançon" }).rue, "12 rue de Dole");
+  assert.equal(geo.nettoyerAdresse({ rue: "Rue de Dole, 12", ville: "Besançon" }).rue, "12 Rue de Dole");
+  assert.equal(geo.nettoyerAdresse({ rue: "12 bis, rue X", ville: "Besançon" }).rue, "12 bis rue X");
+  const avecComplement = geo.nettoyerAdresse({ rue: "Bât. B, 12, rue de Dole, Apt 3", ville: "Besançon" });
+  assert.equal(avecComplement.rue, "12 rue de Dole");
+  assert.equal(avecComplement.complement, "Bât. B, Apt 3");
+});
+
+test("cle de cache — deux voies differentes au meme numero n'ont jamais la meme cle", () => {
+  assert.notEqual(
+    geo.cleGeocodage({ rue: "12, rue de Dole", codePostal: "25000", ville: "Besançon" }),
+    geo.cleGeocodage({ rue: "12, avenue Foch", codePostal: "25000", ville: "Besançon" })
+  );
+  // Temoin : la virgule seule ne change pas l'adresse.
+  assert.equal(
+    geo.cleGeocodage({ rue: "12, rue de Dole", codePostal: "25000", ville: "Besançon" }),
+    geo.cleGeocodage({ rue: "12 rue de Dole", codePostal: "25000", ville: "Besançon" })
+  );
+});
+
+test("nettoyage — une voie « Bateau », « Batie », « Bâtie » ou « Batz » n'est pas un batiment", () => {
+  assert.equal(geo.nettoyerAdresse({ rue: "12 rue du Bateau", ville: "Dole" }).rue, "12 rue du Bateau");
+  assert.equal(geo.nettoyerAdresse({ rue: "5 chemin de la Batie", ville: "Dole" }).rue, "5 chemin de la Batie");
+  assert.equal(geo.nettoyerAdresse({ rue: "3 rue de la Bâtie", ville: "Dole" }).rue, "3 rue de la Bâtie");
+  assert.equal(geo.nettoyerAdresse({ rue: "Rue de Batz", ville: "Dole" }).rue, "Rue de Batz");
+  // Temoin : un vrai batiment colle a la voie part toujours en complement.
+  assert.equal(geo.nettoyerAdresse({ rue: "3 rue de Dole Bat B", ville: "Dole" }).rue, "3 rue de Dole");
+  assert.equal(geo.nettoyerAdresse({ rue: "3 rue de Dole Bât. C", ville: "Dole" }).rue, "3 rue de Dole");
+  assert.equal(geo.nettoyerAdresse({ rue: "3 rue de Dole Batiment 2", ville: "Dole" }).rue, "3 rue de Dole");
+});
+
 test("nettoyage — CEDEX quitte la ville et le code CEDEX n'est pas un filtre", () => {
   const n = geo.nettoyerAdresse({ rue: "8 rue Charles Nodier", codePostal: "25035", ville: "Besançon Cedex 3" });
   assert.equal(n.ville, "Besançon");
