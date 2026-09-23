@@ -12324,6 +12324,18 @@ textarea::placeholder {
 #crmList { --squelette-ligne: 60px; }
 #opAlerts { --squelette-ligne: 64px; }
 #dashboardSubscriptions { --squelette-ligne: 74px; }
+/* Entre 821 et 1280 px, Commandes et Stock sont des CARTES a trois rangs
+   (« la relecture » : des 1280 px ; Commandes aussi sous 920 px). La ligne
+   grise de 56 px y attendait une ligne de tableau : la liste sautait de 170
+   (Commandes) a 290 px (Stock) a l'arrivee des donnees. Mesures du 23/09 :
+   carte de commande 95 px, carte de stock 129 px (pas de 36 px), 141 px sous
+   920 px (pas de 44 px). */
+@media (min-width: 821px) and (max-width: 1280px) {
+  #cmdLignes { --squelette-ligne: 95px; }
+}
+@media (min-width: 921px) and (max-width: 1280px) {
+  #stockList { --squelette-ligne: 129px; }
+}
 @media (max-width: 920px) {
   #stockList { --squelette-ligne: 141px; }
 }

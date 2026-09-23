@@ -988,6 +988,9 @@ function poserChiffresEnAttente() {
   for (const id of CHIFFRES_EN_ATTENTE) {
     const el = document.getElementById(id);
     if (!el) continue;
+    // Le texte du balisage est garde : « Commandes livrees » (#opDelivered)
+    // est un LIBELLE tant que le rendu ne l'a pas remplace par un compte.
+    el.dataset.texteInitial = el.textContent.trim();
     el.textContent = "";
     el.classList.add("squelette-chiffre");
   }
@@ -1018,9 +1021,14 @@ function retirerSquelettes() {
   }
   // Un chiffre que son rendu n'a pas rempli (le tableau de bord en erreur)
   // redevient « — » : un bloc gris a vie promettrait un nombre qui ne vient pas.
+  // Un LIBELLE, lui, revient tel quel : /api/operations en erreur donnait « — »
+  // au-dessus de « — », et la tuile perdait son nom. Un « 0 » du balisage
+  // n'est pas un libelle (c'est le zero qui ment) : il devient « — » aussi.
   for (const el of document.querySelectorAll(".squelette-chiffre")) {
     el.classList.remove("squelette-chiffre");
-    if (!el.textContent.trim()) el.textContent = "—";
+    const initial = el.dataset.texteInitial || "";
+    delete el.dataset.texteInitial;
+    if (!el.textContent.trim()) el.textContent = /\p{L}/u.test(initial) ? initial : "—";
   }
   chiffresDejaCharges = true;
 }

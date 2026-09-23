@@ -210,7 +210,15 @@ test.describe("à la taille de ce qu'ils remplacent", () => {
       expect(sauts, "la page a saute a l'arrivee des donnees").toEqual([]);
       await ctx.close();
     });
+  }
 
+  // Les lignes changent de FORME entre 821 et 1280 px : Commandes et Stock y
+  // passent en carte a trois rangs (style.css, « la relecture »), et Commandes
+  // l'est deja sous 920 px. Le premier jet ne mesurait qu'a 1440 et 390 px :
+  // entre les deux, la ligne grise gardait 56 px pour une carte de 90 a 130 px,
+  // et la liste sautait de 170 a 290 px a l'arrivee des donnees (relecture du
+  // 23/09). 1280 est le bord haut de la plage, 880 est entre 821 et 920.
+  for (const largeur of [1440, 1280, 1024, 880, 390]) {
     test(`une ligne grise a la hauteur d'une ligne réelle, à ${largeur} px`, async ({ browser }) => {
       test.setTimeout(180000);
       const ZONES = [["commandes", "#cmdLignes", ".cmd-ligne"], ["stock", "#stockList", ".stk-ligne"], ["crm", "#crmList", ":scope > *"]];
@@ -228,4 +236,33 @@ test.describe("à la taille de ce qu'ils remplacent", () => {
       expect(ecarts).toEqual([]);
     });
   }
+});
+
+// --- Un libelle n'est pas un chiffre (relecture du 23/09) --------------------
+//
+// « Commandes livrees » (#opDelivered) est dans la liste des chiffres en
+// attente : le rendu y ecrit « 12 commandes livrees ». Mais si /api/operations
+// echoue, le rendu sort sans rien ecrire, et le premier jet remettait « — »
+// dans tout element vide : la tuile montrait « — » au-dessus de « — », sans
+// son nom. Le libelle doit revenir ; les vrais chiffres, eux, disent « — ».
+test("tableau de bord en erreur : le libellé revient, les chiffres disent « — »", async ({ browser }) => {
+  test.setTimeout(120000);
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: "light" });
+  const page = await ctx.newPage();
+  await page.route("**/api/**", async route => {
+    await new Promise(r => setTimeout(r, 800));
+    if (new URL(route.request().url()).pathname === "/api/operations") {
+      await route.fulfill({ status: 500, json: { error: "panne simulee" } });
+      return;
+    }
+    route.continue();
+  });
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  // Le squelette a bien ete pose (sinon le banc ne jugerait rien).
+  await expect(page.locator("#opDelivered.squelette-chiffre")).toHaveCount(1, { timeout: 5000 });
+  await page.waitForFunction(() => !document.querySelector('.squelette, .squelette-chiffre, [aria-busy="true"]'), null, { timeout: 30000 });
+  await expect(page.locator("#opDelivered")).toHaveText("Commandes livrées");
+  await expect(page.locator("#opRevenue")).toHaveText("—");
+  await expect(page.locator("#opBasket")).toHaveText("—");
+  await ctx.close();
 });
