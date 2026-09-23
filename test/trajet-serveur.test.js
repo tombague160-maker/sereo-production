@@ -185,5 +185,9 @@ test("decoupage : au-dela de 50 commandes, des groupes de 50 au plus, sans en pe
   assert.equal(r.body.groupes.length, 2);
   assert.ok(r.body.groupes.every((g) => g.length <= 50));
   assert.deepEqual(r.body.groupes.flat().sort(), [...ids].sort());
+  // Par direction : les pairs a l'ouest (lng 5,5), les impairs a l'est (6,4),
+  // melanges dans l'entree. Chaque groupe est d'un seul cote.
+  const cotes = r.body.groupes.map((g) => [g.filter((id) => Number(id.slice(1)) % 2 === 0).length, g.filter((id) => Number(id.slice(1)) % 2 === 1).length]);
+  assert.deepEqual(cotes, [[37, 0], [0, 36]]);
   assert.equal(readDb().routes.length, 0, "une proposition n'ecrit rien");
 });

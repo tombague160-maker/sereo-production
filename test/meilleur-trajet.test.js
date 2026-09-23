@@ -341,3 +341,17 @@ test("au-dela de 50 commandes : decoupage en tournees <= 50, par direction depui
   // En dessous de la limite : un seul paquet, intact.
   assert.equal(decouperEnTournees(points.slice(0, 50), { lat: 47.2, lng: 6 }, 50).length, 1);
 });
+
+// Revue du 23/09 : les donnees ci-dessus arrivent DEJA rangees par cote, et un
+// decoupage dans l'ordre recu les passait aussi. Ici l'entree alterne ouest et
+// est : seul un regroupement par direction rend deux paquets d'un seul cote
+// (un decoupage sequentiel donne 19/18 et 18/19).
+test("decoupage : une entree qui alterne ouest et est rend deux paquets d'un seul cote", () => {
+  const points = Array.from({ length: 74 }, (_, i) => {
+    const ouest = i % 2 === 0;
+    return { id: `${ouest ? "o" : "e"}${i}`, lat: (ouest ? 47.09 : 46.9) + i * 0.0005, lng: ouest ? 5.49 : 6.35 };
+  });
+  const paquets = routing.decouperEnTournees(points, { lat: 47.2378, lng: 6.0241 }, 50);
+  const cotes = paquets.map((p) => [p.filter((x) => x.id.startsWith("o")).length, p.filter((x) => x.id.startsWith("e")).length]);
+  assert.deepEqual(cotes, [[37, 0], [0, 37]]);
+});

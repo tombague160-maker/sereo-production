@@ -78,9 +78,11 @@ test.describe("Tournée — « À livrer en premier »", () => {
 test.describe("Tournée — plus de 50 commandes", () => {
   test.describe.configure({ mode: "serial" });
   let serveur;
-  // 55 commandes : 30 a l'ouest de Besancon (Dole), 25 a l'est (Pontarlier).
+  // 55 commandes, qui alternent : les paires (28) a l'ouest de Besancon (Dole),
+  // les impaires (27) a l'est (Pontarlier). Rangees par cote dans l'entree, un
+  // decoupage dans l'ordre recu passerait aussi (revue du 23/09).
   const commandes = Array.from({ length: 55 }, (_, i) => {
-    const ouest = i < 30;
+    const ouest = i % 2 === 0;
     const client = { ...CLIENTS[0], id: `c-${i}`, nom: `Client ${String(i).padStart(2, "0")}` };
     return commandePrete(`m-${i}`, client, { lat: (ouest ? 47.09 : 46.9) + i * 0.0005, lng: ouest ? 5.49 : 6.35 });
   });
@@ -115,10 +117,10 @@ test.describe("Tournée — plus de 50 commandes", () => {
     expect(question).toMatch(/2 tournées \(28 \+ 27\)/);
     expect(envoye.orderIds.length).toBe(28);
     expect(envoye.retirerInjoignables).toBe(true);
-    // Une direction par tournee : 30 a l'ouest ne tiennent pas dans 28, mais
-    // la premiere tournee ne melange pas plus de 3 commandes de l'autre cote.
-    const ouest = envoye.orderIds.filter(id => Number(id.slice(2)) < 30).length;
-    expect(Math.min(ouest, 28 - ouest)).toBeLessThanOrEqual(3);
+    // Une direction par tournee : la premiere est l'ouest entier (28), sans
+    // une commande de l'est.
+    const ouest = envoye.orderIds.filter(id => Number(id.slice(2)) % 2 === 0).length;
+    expect(ouest).toBe(28);
     await expect(page.locator("#selectedDeliveryCount")).toHaveText("27 sélection");
   });
 });
