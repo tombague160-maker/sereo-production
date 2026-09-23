@@ -841,17 +841,18 @@ function deliveryRows(db) {
 
 /** Empreinte d'une ligne : le type et la longueur de chaque valeur, puis la valeur. */
 function rowHash(values) {
-  const hash = crypto.createHash("sha1");
+  // Une seule chaine, un seul update : les petits update() par valeur
+  // coutaient plus que le hachage lui-meme (profil du 23/09).
+  let s = "";
   for (const value of values) {
     if (value === null || value === undefined) {
-      hash.update("\u0000|");
+      s += "\u0000|";
     } else {
-      const s = String(value);
-      hash.update(`${typeof value === "number" ? "n" : "s"}${s.length}:`);
-      hash.update(s);
+      const v = String(value);
+      s += `${typeof value === "number" ? "n" : "s"}${v.length}:${v}`;
     }
   }
-  return hash.digest("base64");
+  return crypto.createHash("sha1").update(s).digest("base64");
 }
 
 function dataVersion(database) {
