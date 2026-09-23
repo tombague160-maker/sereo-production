@@ -1179,6 +1179,11 @@
       <section id="livreur" class="page" role="tabpanel" aria-label="Tournée">
         <div class="driver-page">
 
+          <!-- Lot 2 de l'audit geo (H9) : une tournee d'un jour passe, pas
+               soldee, se SIGNALE ici, avec le geste qui la solde. Avant, elle
+               s'affichait a la place de celle du jour, a chaque ouverture. -->
+          <div id="tourneesNonSoldees" class="tournee-retard" role="status" hidden></div>
+
           <!-- L'ARRET EN COURS D'ABORD (planche Main.png). Sur la route, c'est
                le seul ecran qui compte : l'en-tete dit ou on en est, la carte
                dit ou on va, les trois gestes sont sous le pouce. La
@@ -1193,15 +1198,35 @@
               <div class="tournee-progression" aria-hidden="true"><div class="tournee-progression-barre" id="tourneeProgressionBarre"></div></div>
             </header>
 
+            <!-- Lot 2 (H9) : plusieurs tournees ce jour-la (ou une d'un jour
+                 passe a solder) : on choisit celle qu'on regarde. -->
+            <label class="tournee-choix" id="tourneeChoixBloc" hidden>
+              <span>Tournées du jour</span>
+              <select id="tourneeChoix"></select>
+            </label>
+
             <div class="panel current-driver-card">
               <div class="tournee-depart" id="tourneeDepart">
                 <p class="muted">Ordre proposé, modifiable avant le départ.</p>
-                <button id="startRouteButton" class="button primary" type="button" data-action="start-route">Démarrer la tournée</button>
+                <div class="tournee-depart-gestes">
+                  <!-- Lot 2 (H8) : une tournee mal creee s'annule avant le depart. -->
+                  <button id="annulerTourneeButton" class="button secondary" type="button" data-action="annuler-tournee">Annuler la tournée</button>
+                  <button id="startRouteButton" class="button primary" type="button" data-action="start-route">Démarrer la tournée</button>
+                </div>
               </div>
 
               <div id="currentClient" class="current-client-box" aria-live="polite">
                 Aucune tournée créée.
               </div>
+
+              <!-- Decision 10 (lot 2) : « remis a… », facultatif, part avec
+                   « Livre » (et avec lui dans la file hors ligne). Hors de
+                   #currentClient, que chaque rendu reecrit : ce qui est tape
+                   survit au sondage de 60 s. -->
+              <label class="remis-a" id="remisABloc">
+                <span>Remis à</span>
+                <input id="remisAInput" type="text" maxlength="80" autocomplete="off" placeholder="facultatif : accueil, voisin, infirmière…" />
+              </label>
 
               <!-- Planche 4b : Appeler a gauche, « Y aller » au centre (Google
                    Maps), la carte a droite ; « Livre » en 56 px dessous ; Client
@@ -1243,6 +1268,9 @@
                          corrigee depuis la route. Remplace les deux champs
                          numeriques qui envoyaient l'identifiant de l'arret. -->
                     <button id="corrigerPositionButton" class="button secondary compact" type="button" data-adr="ouvrir-cible">Corriger la position</button>
+                    <!-- Lot 2 (H8) : une tournee en cours qu'on ne finira pas.
+                         Irreversible : une confirmation le dit. -->
+                    <button id="cloturerTourneeButton" class="button secondary compact" type="button" data-action="cloturer-tournee" hidden>Clôturer la tournée</button>
                   </div>
                 </details>
               </div>
@@ -1354,13 +1382,10 @@
             <div id="deliveryCandidates" class="delivery-candidates"></div>
           </div>
 
-          <div class="panel legacy-driver-panel">
-            <div class="panel-heading">
-              <h3>Clients tournée</h3>
-            </div>
-
-            <div id="clientsList" class="driver-client-list"></div>
-          </div>
+          <!-- Lot 2 de l'audit geo, decision 7 (23/09) : l'ancien panneau
+               « Clients tournee » est retire. Son « Livre » marquait la
+               commande sans solder l'arret (M7) : la tournee ne finissait
+               jamais, et un « Absent » ensuite etait refuse. -->
         </div>
       </section>
 
@@ -1665,6 +1690,25 @@
       <div class="motif-actions">
         <button class="button secondary" type="button" data-action="motif-annuler">Annuler</button>
         <button class="button primary" type="button" data-action="motif-valider">Enregistrer</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Lot 2 de l'audit geo (M2) : « Corriger le statut » d'un arret deja
+       traite. Memes pieces que le motif (radios, precision, deux boutons) ;
+       ici la cause est OBLIGATOIRE : elle part dans l'historique. -->
+  <dialog id="correctionDialog" class="motif-dialog" aria-labelledby="correctionTitre">
+    <form method="dialog" id="correctionForm">
+      <h3 id="correctionTitre">Corriger le statut</h3>
+      <p class="muted" id="correctionSousTitre"></p>
+      <div id="correctionListe" class="motif-liste" role="radiogroup" aria-labelledby="correctionTitre"></div>
+      <label class="motif-commentaire">Pourquoi cette correction ?
+        <input id="correctionCause" type="text" maxlength="160" autocomplete="off" required
+               placeholder="Ex. : absent tapé par erreur" />
+      </label>
+      <div class="motif-actions">
+        <button class="button secondary" type="button" data-action="correction-annuler">Annuler</button>
+        <button class="button primary" type="button" data-action="correction-valider">Corriger</button>
       </div>
     </form>
   </dialog>
