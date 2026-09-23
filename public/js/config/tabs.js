@@ -80,8 +80,11 @@ export const titles = {
     title: "Rappels",
     subtitle: "Appels, visites et confirmations liées aux commandes."
   },
+  // « Analyse » : le nom de la passation et de la barre laterale. L'ecran
+  // s'appelait « Statistiques » sous une entree « Analyse » -- deux noms pour
+  // un lieu. L'ancien nom reste trouvable par la recherche (ANCIENS_NOMS).
   statistiques: {
-    title: "Statistiques",
+    title: "Analyse",
     subtitle: "Ventes, progression, paniers moyens et meilleurs clients."
   },
   preparation: {

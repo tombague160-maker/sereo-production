@@ -218,15 +218,19 @@ test("12 — si les commandes n'ont pas pu être lues, les listes disent l'erreu
   await ctx.close();
 });
 
-test("12 — « Tout sélectionner » des commandes du jour attend les commandes", async ({ browser }) => {
+test("12 — « Tout sélectionner » attend les commandes", async ({ browser }) => {
+  // « Tout sélectionner » des commandes du jour est parti avec son écran (lot
+  // « écrans sans planche », intégration du 23/09) ; la règle vaut pour ceux
+  // qui restent, ceux de la tournée (data-attend-commandes).
   test.setTimeout(60000);
   const ctx = await contexte(browser);
   const page = await ctx.newPage();
   await ralentirApi(page);
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(800);
-  const boutons = page.locator('[data-action="select-all-today-orders"], [data-action="clear-today-orders"]');
-  expect(await boutons.count()).toBe(2);
+  const boutons = page.locator("[data-attend-commandes]");
+  expect(await boutons.count()).toBeGreaterThan(0);
+  await expect(page.locator('[data-action="select-all-today-orders"]')).toHaveCount(0);
   for (const b of await boutons.all()) await expect(b).toBeDisabled();
   for (const b of await boutons.all()) await expect(b).toBeEnabled({ timeout: 15000 });
   await ctx.close();
@@ -361,36 +365,6 @@ test("3 — les champs du formulaire vont au plus par deux, de 821 à 1920 px", 
   }
   console.log(`[commande-client/colonnes] ` + (trop.join(" · ") || "au plus deux partout"));
   expect(trop).toEqual([]);
-});
-
-test("12 — une copie du cache sans la liste du jour n'active pas « Tout sélectionner » des commandes du jour", async ({ browser }) => {
-  // Premier chargement de la journee : la copie d'hier a `orders`, mais pas
-  // l'URL du jour de /api/customer-orders/today (lireDernieresDonnees l'y
-  // autorise). Les boutons du jour agissent sur cette liste-la : ils attendent
-  // ELLE, pas les commandes. Le cache est pose a la main, service worker
-  // bloque : c'est la lecture de la copie qu'on juge, pas le service worker.
-  test.setTimeout(60000);
-  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, serviceWorkers: "block" });
-  const page = await ctx.newPage();
-  await page.goto(srv.base + "/manifest.webmanifest");
-  const poses = await page.evaluate(async () => {
-    const chemins = ["/api/operations", "/api/subscriptions", "/api/clients", "/api/stock", "/api/ventes", "/api/historique",
-      "/api/orders", "/api/crm/clients", "/api/reminders", "/api/planned-orders", "/api/statistics", "/api/sectors",
-      "/api/delivery-sectors", "/api/routes", "/api/stock-movements", "/api/dashboard"];
-    const cache = await caches.open("sereo-api-banc");
-    for (const c of chemins) await cache.put(c, await fetch(c));
-    return (await cache.keys()).length;
-  });
-  expect(poses, "prealable : la copie est posee").toBe(16);
-  await ralentirApi(page);
-  await page.goto(srv.base + "/#commandes-jour", { waitUntil: "domcontentloaded" });
-  await expect(page.locator("#syncStatus"), "prealable : la copie du cache n'a pas ete lue").toHaveText(/^Mise à jour/, { timeout: 2000 });
-  const boutons = page.locator('[data-action="select-all-today-orders"], [data-action="clear-today-orders"]');
-  for (const b of await boutons.all()) await expect(b, "active sur la copie, sans la liste du jour").toBeDisabled();
-  // Temoin : la selection de la tournee porte sur `orders` -- la copie l'active.
-  await expect(page.locator('[data-action="select-all-delivery"]')).toBeEnabled();
-  for (const b of await boutons.all()) await expect(b).toBeEnabled({ timeout: 15000 });
-  await ctx.close();
 });
 
 test("12 — si les commandes n'ont pas pu être lues, les sous-titres ne disent pas le vide non plus", async ({ browser }) => {

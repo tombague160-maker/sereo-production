@@ -1485,6 +1485,7 @@ le rend à la ligne à la fermeture ; cocher une ligne au clavier garde le focus
 **Dette nommée** : les anciennes sections (`#commandes-jour`, `#commandes-planifiees`,
 `#bons-commande`, `#commandes-livrees`) restent dans la page, inatteignables, et se
 dessinent encore. Les retirer touche leurs rendus et leurs bancs : un lot à part.
+**Soldée le 23/09** — voir « Écrans sans planche au style V8 », en fin de fichier.
 
 **Portées de rôles** (dormantes tant que `SEREO_SEPARATION_ROLES` n'est pas posé) : le
 préparateur et le livreur nommaient les anciennes listes ; ils nomment maintenant
@@ -4087,3 +4088,137 @@ Relecture de `f0cc23a`. Chaque défaut a été mesuré avant d'être corrigé ; 
 
 Tous les mutants ont été restaurés par copie. Au vert : `abonnement-creation.spec.js`
 12 sur 12, et `operations.spec.js` 5 sur 5.
+
+## Écrans sans planche au style V8, posé le 23/09
+
+Les écrans que les planches V8 ne dessinent pas : **Analyse** (l'ancien
+« Statistiques »), **Exports**, **Rappels**, **À recommander** (la liste détaillée
+derrière la carte du Stock) et l'**habillage** de **Commande client**. Décision de
+Thomas, déléguée : **pas de nouveau dessin**. On leur applique le système déjà posé
+ailleurs, et rien d'autre. Bloc « ECRANS SANS PLANCHE » en fin de `style.css` ; toutes
+ses règles portent l'`#id` de l'écran (elles battent les
+`:root[data-color-scheme="light"] X` des couches anciennes).
+
+**Ce qui est appliqué**
+
+- **Analyse** : le titre de l'écran suit la passation et la barre latérale
+  (« Analyse », `config/tabs.js`). Deux noms pour un lieu, c'était un de trop.
+  « Statistiques » reste trouvable par la recherche du menu (`ANCIENS_NOMS`).
+- Le bandeau « SEREO commercial / Statistiques » est **retiré** : il répétait le titre
+  de l'écran, et ses deux pilules d'évolution répétaient les tuiles sans dire laquelle
+  était la semaine et laquelle le mois. Chaque évolution se lit **une fois**, dans sa
+  tuile.
+- Les six tuiles chiffrées ont le rendu de celles du tableau de bord : blanches,
+  sans trait coloré à gauche ni point coloré dans le coin (un code couleur sans
+  légende), chiffres en `tabular-nums`. Une baisse se dit par le mot **et** par la
+  couleur d'alerte. Une tuile ne se soulève plus au survol : ce n'est pas un bouton.
+- L'**histogramme** a le rendu de celui du tableau de bord : ni grille ni dégradé,
+  barres pleines au principal, le jour courant (la dernière barre) à l'accent de
+  donnée, son étiquette en gras — la même information sans la couleur. L'étiquette ne
+  garde que le **jour du mois** (« 09-10 » se cassait en « 09- / 10 » sous une colonne
+  de 22 px) ; la date entière reste dans le nom accessible et l'infobulle. Au
+  téléphone, tous les jours sont lisibles (l'ancienne règle en cachait un sur deux, à
+  9 px). Un **jour sans vente** est un moignon **vert d'eau**, pas une barre au
+  principal : relevé au plancher de 6 px, il se lisait comme une petite vente (relecture
+  du 23/09 ; en sombre, l'ancien écran les distinguait). 3,20:1 entre les deux états en
+  clair, ~6:1 en sombre. Aujourd'hui sans vente reste un moignon ; son étiquette en gras
+  dit encore quel jour c'est.
+- Les **classements** (meilleurs clients, produits) : des lignes à filet, rang en
+  pastille, montant en `tabular-nums`, une jauge plate au principal (plus de dégradé
+  corail-vert).
+- **Exports, Rappels, À recommander, Commande client** : les cartes imbriquées sont
+  blanches à filet régulier (surface basse en clair, vert d'eau en sombre), sans trait
+  coloré ; les listes n'ont plus de fond dégradé. Commande client : **seules** ses
+  cartes (catalogue, panier vide) — la grille de son formulaire n'est pas touchée, un
+  autre lot la reprend.
+- Les **gestes d'un rappel** (Fait, Reporté, Annulé) n'ont plus de dégradé : un geste
+  plein (Fait) et deux à contour ; « Annulé » garde la couleur d'alerte, avec son mot.
+  « Reporté » passait à 4,45:1 sur son ancien fond ; il est au-dessus de 4,5:1 partout.
+- **Au téléphone**, dans le cadre commun (en-tête vert, barre basse) : les filtres des
+  Rappels et d'À recommander sont des **pilules** de 44 px à leur largeur, plusieurs
+  par rangée (et non cinq gros boutons pleine largeur empilés) ; la choisie est pleine
+  au principal et se dit par `aria-pressed`. L'anneau clavier est écrit avec les jetons
+  `--v8-focus` / `--v8-focus-halo`, **pas** `--focus-ring`, qui n'est défini qu'en
+  clair (en sombre l'anneau tombait à « none »). Les trois exports sont des **gestes**,
+  pas des filtres : des boutons à leur largeur qui passent à la ligne. La pastille de
+  compte d'un en-tête de carte garde sa largeur. Les quatre chiffres d'un produit à
+  recommander passent deux par rangée : à trois, « À recommander » débordait de sa case.
+
+**Dette 7, soldée** : les quatre anciennes listes de commandes (`#commandes-jour`,
+`#commandes-planifiees`, `#bons-commande`, `#commandes-livrees`), inatteignables depuis
+l'écran unique des Commandes mais encore dessinées, quittent la page avec leurs rendus,
+leurs filtres et leurs gestes propres. Vérifié avant (grep) : aucune portée de rôle ne
+les nomme plus (les rôles nomment `commandes`), aucun geste atteignable n'y menait
+(leurs adresses redirigeaient déjà), et les bancs qui les visaient ont été repris
+(`performance.spec.js` ne mesure plus des identifiants absents, qui rendaient −1 et
+passaient ; `etats-vides.test.js` vise la clé « livrees »). **Gardé** :
+
+- les **redirections** et les titres des anciens écrans (`config/tabs.js`) : un favori,
+  un lien ou un `showTab("commandes-planifiees")` codé en dur arrivent sur l'écran
+  Commandes, filtré ; la recherche du menu les trouve encore ;
+- la **fenêtre de détail** d'une commande (`#bdc-detail-modal`), qui vivait entre deux
+  de ces sections : c'est celle de l'écran Commandes ;
+- `confirmPlannedOrder` / `cancelPlannedOrder` (les gestes Confirmer / Annuler du
+  détail), `bdcNeedsCompletion` (la case « À compléter ») et `exportBdcCsv` (l'export
+  de l'écran Commandes, qui lui passe sa liste filtrée).
+
+`loadData` ne demande **plus** `/api/customer-orders/today` : seul l'ancien écran
+« Commandes du jour » lisait ces commandes. La requête partait encore à chaque
+chargement, et son échec affichait « Partiel (1 indispo) » avec un toast nommant la clé
+brute `todayCustomerOrders`, pour des données qu'aucun écran ne montre. L'écran
+Commandes filtre `orders` (`/api/orders`) par son propre jour (`#cmdJour`). La route
+serveur reste (`test/api.test.js` la tient) ; la porte « endpoint du jour » de
+`lireDernieresDonnees` aussi, sans occupant.
+
+**Croisement avec `fix/interface-finitions`** (relecture du 23/09 ; mesuré sur
+`bff9ee7`, branche encore mouvante). Ce lot-là, point 12 de l'audit, fait attendre
+leurs commandes à « Tout sélectionner » / « Tout désélectionner » de `#commandes-jour`
+(`data-attend-commandes-du-jour disabled`, `activerSelectionDuJour()` quand
+`todayCustomerOrders` arrive) — la section et la liste que celui-ci retire. Conflit dans
+`public/index.html`, `style.css` et ce fichier ; `app.js` fusionne **sans** conflit, et
+c'est le piège. **Résolution, éprouvée** sur un arbre fusionné :
+
+1. `index.html` : garder la **suppression**. Reprendre la section ramènerait deux
+   boutons inertes (leurs gestionnaires ont quitté `app.js`), et
+   `test/ecrans-sans-planche.test.js` le refuse.
+2. `app.js` : retirer `if (a("todayCustomerOrders")) activerSelectionDuJour();` et
+   `activerSelectionDuJour()` — plus aucune clé ni aucun bouton à activer ; code mort
+   que la fusion automatique laisse passer.
+3. `style.css` et ce fichier : deux ajouts en fin de fichier, à garder **entiers**. Ôter
+   les seuls marqueurs ne suffit pas : git a sorti du conflit des lignes communes, et le
+   résultat perd le `}` qui ferme le `@media` de ce lot et l'ouverture du commentaire
+   d'en-tête des finitions (CSS cassée : cinq bancs des finitions et de
+   `preparation-lignes.spec.js` rouges). Reconstruire : les deux fins de fichier bout à
+   bout, 13 629 lignes pour `style.css`.
+4. `test/e2e/interface-finitions.spec.js` : le test « 12 — Tout sélectionner des
+   commandes du jour attend les commandes » attend 2 boutons et en trouve 0 : le
+   **réécrire**, ce qu'il protège vaut pour les boutons qui restent (ceux de la
+   tournée) :
+
+   ```js
+   // « Tout sélectionner » des commandes du jour est parti avec son écran (lot
+   // « écrans sans planche ») ; la règle vaut pour ceux qui restent.
+   const boutons = page.locator("[data-attend-commandes]");
+   expect(await boutons.count()).toBeGreaterThan(0);
+   await expect(page.locator('[data-action="select-all-today-orders"]')).toHaveCount(0);
+   for (const b of await boutons.all()) await expect(b).toBeDisabled();
+   for (const b of await boutons.all()) await expect(b).toBeEnabled({ timeout: 15000 });
+   ```
+
+   Et **supprimer** « 12 — une copie du cache sans la liste du jour n'active pas… » :
+   après la fusion il reste **vert sans rien juger** (ses boucles portent sur zéro
+   bouton), et la liste du jour qu'il protégeait n'est plus chargée.
+
+Sur l'arbre ainsi résolu : `interface-finitions.spec.js`, `ecrans-sans-planche.spec.js`,
+`performance.spec.js`, `preparation-lignes.spec.js` — 43 verts ; les bancs Node des deux
+lots (`ecrans-sans-planche`, `interface-finitions`, `etats-vides`, `jetons-v8`, `auth`)
+verts. `connexion.spec.js` (serveur authentifié) n'y a pas été rejoué.
+
+**Non fait, nommé** : les règles CSS des anciennes listes (`.bdc-list`, `.bdc-search`,
+`.stats-hero`, `.commandes-livrees-card`…) restent dans `style.css`, sans élément à
+styler. Les retirer touche des dizaines de sélecteurs groupés dans les couches
+anciennes, pendant que d'autres lots écrivent ce fichier : un nettoyage à part.
+
+Bancs : `test/e2e/ecrans-sans-planche.spec.js` (serveur semé, port 3306 ; clair et
+sombre ; styles calculés et textes rendus) et `test/ecrans-sans-planche.test.js` (plus
+aucune référence aux conteneurs disparus ; contre-témoin : les quatre redirections).

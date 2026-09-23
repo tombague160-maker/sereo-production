@@ -30,8 +30,14 @@ test("les fichiers texte partent compressés", async ({ page }) => {
 test("les écrans décrochés ne se dessinent pas", async ({ page }) => {
   await page.goto(srv.base + "/#commandes", { waitUntil: "networkidle" });
   await expect(page.locator("#cmdLignes .cmd-ligne").first()).toBeVisible();
-  const r = await page.evaluate(() => Object.fromEntries(["bdc-list", "commandesLivreesList", "produitsList", "alertesList", "todayOrdersList", "plannedOrdersList"]
+  // Les quatre anciennes listes de commandes (bdc-list, commandesLivreesList,
+  // todayOrdersList, plannedOrdersList) ont quitte la page le 23/09 : un
+  // identifiant absent rendait -1 ici, un vert qui ne mesurait plus rien.
+  // Leur absence est tenue par ecrans-sans-planche.spec.js.
+  const r = await page.evaluate(() => Object.fromEntries(["produitsList", "alertesList"]
     .map(id => [id, document.getElementById(id)?.getElementsByTagName("*").length ?? -1])));
+  // Les deux ecrans restants existent : sans eux, le -1 passerait aussi.
+  for (const [id, n] of Object.entries(r)) expect(n, `${id} absent`).toBeGreaterThanOrEqual(0);
   // Au plus les squelettes de chargement : aucune ligne de donnees.
   for (const [id, n] of Object.entries(r)) expect(n, id).toBeLessThan(40);
   // Et l'ecran qui porte ces commandes, lui, les montre (le filtre « Livrees »).
