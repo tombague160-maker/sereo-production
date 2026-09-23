@@ -1021,6 +1021,35 @@ function clientAGeocoder(client) {
   return !getCoordinates(client) && adresseGeocodable(adresseDuClient(client));
 }
 
+/** « adresse » pour un numero trouve, « approximative » pour une rue seule. */
+function precisionDuType(type) {
+  return type === "housenumber" ? "adresse" : "approximative";
+}
+
+/**
+ * La precision d'un client DEJA place mais sans precision (geocode avant le
+ * lot 4 de l'audit geo) : elle se relit dans le cache du geocodeur, sans appel
+ * reseau, et seulement si le point du cache EST celui du client. Un point pose
+ * a la main ou venu du fichier ne correspond pas : il reste sans mention.
+ */
+function precisionDepuisLeCache(client) {
+  if (client.positionPrecision) return "";
+  const point = getCoordinates(client);
+  const adresse = adresseDuClient(client);
+  if (!point || !adresseGeocodable(adresse)) return "";
+  const entree = getSqliteStore().getGeocodage(cleGeocodage(adresse));
+  if (!entree || entree.statut !== GEOCODAGE_STATUTS.TROUVE) return "";
+  if (Number(entree.lat) !== point.lat || Number(entree.lng) !== point.lng) return "";
+  return precisionDuType(entree.type);
+}
+
+/** Meme point, a 1e-7 pres : une commande livree ailleurs (EHPAD, proche) n'est pas le client. */
+function memePoint(a, b) {
+  const pa = getCoordinates(a);
+  const pb = getCoordinates(b);
+  return Boolean(pa && pb) && Math.abs(pa.lat - pb.lat) < 1e-7 && Math.abs(pa.lng - pb.lng) < 1e-7;
+}
+
 /**
  * Geocode les clients depourvus de coordonnees.
  *
@@ -1058,16 +1087,30 @@ async function geocoderClients({ forcer = false, max = GEOCODER_MAX_PAR_LOT } = 
   const bilan = await withWriteLock(async () => {
     const db = readDb();
     let appliques = 0;
+    let rattrapes = 0;
 
     for (const client of db.clients) {
       const entree = resultats.get(String(client.id));
-      if (!entree || entree.statut !== GEOCODAGE_STATUTS.TROUVE) continue;
+      if (!entree || entree.statut !== GEOCODAGE_STATUTS.TROUVE) {
+        // Un client place avant le lot 4 n'avait jamais de precision : le
+        // point « approximatif » ne se voyait pas. Rattrape depuis le cache,
+        // lui et ses commandes au MEME point (pas celles livrees ailleurs).
+        const rattrapee = precisionDepuisLeCache(client);
+        if (!rattrapee) continue;
+        client.positionPrecision = rattrapee;
+        rattrapes += 1;
+        for (const order of db.commandes) {
+          if (String(order.clientId) !== String(client.id) || order.positionPrecision) continue;
+          if (memePoint(order, client)) order.positionPrecision = rattrapee;
+        }
+        continue;
+      }
 
       client.lat = entree.lat;
       client.lng = entree.lng;
       // Lot 4 (audit geo) : un point « street » est pose au milieu de la rue,
       // parfois a des centaines de metres de la porte. La carte le distingue.
-      const precision = entree.type === "housenumber" ? "adresse" : "approximative";
+      const precision = precisionDuType(entree.type);
       client.positionPrecision = precision;
       appliques += 1;
 
@@ -1081,10 +1124,8 @@ async function geocoderClients({ forcer = false, max = GEOCODER_MAX_PAR_LOT } = 
       }
     }
 
-    if (appliques > 0) {
-      addHistory(db, "Geocodage", `${appliques} client(s) geolocalise(s) automatiquement`);
-      writeDb(db);
-    }
+    if (appliques > 0) addHistory(db, "Geocodage", `${appliques} client(s) geolocalise(s) automatiquement`);
+    if (appliques > 0 || rattrapes > 0) writeDb(db);
 
     return appliques;
   });
@@ -3956,6 +3997,7 @@ function syncWorkflow(db) {
       products: client.produits,
       lat: client.lat,
       lng: client.lng,
+      positionPrecision: client.positionPrecision,
       notes: client.notes,
       priority: client.priority,
       dateCommande: today,
@@ -6693,6 +6735,11 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
           produits: [],
           lat: vente.lat !== "" ? vente.lat : (existingClient.lat || ""),
           lng: vente.lng !== "" ? vente.lng : (existingClient.lng || ""),
+          // La precision suit le point qu'on garde (lot 4 de l'audit geo) : ce
+          // client est RECONSTRUIT a chaque import, et la perdre effacait le
+          // « approximatif » de toutes ses commandes suivantes. Un point venu
+          // du fichier n'en porte pas.
+          positionPrecision: vente.lat !== "" ? "" : (existingClient.positionPrecision || ""),
           secteur: vente.secteur,
           deliveryDate: vente.deliveryDate,
           notes: vente.notes || existingClient.notes || "",
@@ -6808,6 +6855,7 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
           sameKeyOrder.phone = client.telephone || sameKeyOrder.phone;
           if (client.lat !== "") sameKeyOrder.lat = client.lat;
           if (client.lng !== "") sameKeyOrder.lng = client.lng;
+          if (client.lat !== "") sameKeyOrder.positionPrecision = client.positionPrecision || "";
           updatedCount += 1;
           return;
         }
@@ -6825,6 +6873,8 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
           products: orderData.produits,
           lat: client.lat,
           lng: client.lng,
+          // Le point du client, et ce qu'il vaut (lot 4 de l'audit geo).
+          positionPrecision: client.positionPrecision,
           notes: client.notes,
           priority: client.priority,
           dateCommande: orderData.dateCommande,
