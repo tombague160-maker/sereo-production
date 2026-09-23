@@ -106,6 +106,13 @@ test("parametres : sans depot par defaut, « retour au depot » coche, texte du 
   assert.equal(r.body.depot, null);
   assert.equal(r.body.retourAuDepot, true);
   assert.equal(r.body.messagePrevenir, "Bonjour, je passe vers {heure} pour votre livraison.");
+  // Une base d'AVANT le lot (ses reglages n'ont que vitesse et arret) : memes defauts.
+  writeDb({ ...readDb(), settings: { ...readDb().settings, tournee: { averageSpeedKmh: 30, stopDurationMin: 8 } } }, { backup: false });
+  const ancienne = await request("/api/settings/tournee", undefined, "GET");
+  assert.deepEqual(
+    [ancienne.body.averageSpeedKmh, ancienne.body.stopDurationMin, ancienne.body.depot, ancienne.body.retourAuDepot],
+    [30, 8, null, true]
+  );
 });
 
 test("parametres : le depot, le retour et le texte se memorisent ; un depot douteux est refuse", async () => {

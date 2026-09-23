@@ -93,6 +93,9 @@ test("heures : rien plutot qu'une heure fausse (troncons absents, desaccordes, t
   // Reordonnee a la main : le serveur efface les troncons ; une liste qui n'a
   // plus la bonne longueur ne correspond plus a l'ordre.
   assert.equal(horairesDeTournee({ ...base, troncons: [troncon(1, 1), troncon(1, 1)] }, { maintenant: T0 }), null);
+  // Un arret retire (commande reportee, retirerDesTourneesSiReportee) laisse
+  // un troncon de trop : il ne correspond plus a rien.
+  assert.equal(horairesDeTournee({ ...base, troncons: [troncon(1, 1), troncon(1, 1), troncon(1, 1), troncon(1, 1)] }, { maintenant: T0 }), null);
   assert.equal(horairesDeTournee({ ...base, troncons: [troncon(1, 1), null, troncon(1, 1)] }, { maintenant: T0 }), null);
   assert.equal(horairesDeTournee({ ...base, status: "terminee", troncons: [troncon(1, 1), troncon(1, 1), troncon(1, 1)] }, { maintenant: T0 }), null);
   const tousFaits = { status: "en_livraison", stops: [arret("a", "livre"), arret("b", "livre")], troncons: [troncon(1, 1), troncon(1, 1), troncon(1, 1)] };
