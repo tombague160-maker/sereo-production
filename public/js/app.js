@@ -751,6 +751,10 @@ function bindUi() {
   });
 
   window.addEventListener("hashchange", () => showTab(getInitialTab(), { updateHash: false }));
+  // Le bouton retour du telephone, depuis une fiche client : la liste.
+  window.addEventListener("popstate", () => {
+    if (document.getElementById("crm")?.dataset.vue === "fiche") ouvrirVueClient("liste", { depuisHistorique: true });
+  });
 }
 
 function getInitialTab() {
@@ -763,6 +767,9 @@ function getInitialTab() {
 
 
 function showTab(tabName, options = {}) {
+  // Quitter Clients referme la fiche : y revenir montre la liste (planche 9a).
+  const ecranClients = document.getElementById("crm");
+  if (ecranClients && ecranClients.dataset.vue === "fiche" && tabName !== "crm") ecranClients.dataset.vue = "liste";
   const { updateHash = true } = options;
   // Les quatre anciens ecrans-listes de commandes : ils ne sont plus des
   // ecrans, mais on les honore -- l'ecran unique s'ouvre sur LEUR filtre.
@@ -1228,6 +1235,14 @@ function dateDeLaCommande(order) {
     : (order.dateCommande || order.deliveryDate);
 }
 
+// « 16 sept. » -> <jour>16</jour> <mois>sept.</mois> (et l'annee, s'il y en a
+// une, avec le mois). Le texte lu ne change pas.
+function dateEnDeuxMorceaux(texte) {
+  const [jour, ...reste] = String(texte).split(" ");
+  if (!reste.length) return escapeHtml(texte);
+  return `<span class="cmd-date-jour">${escapeHtml(jour)}</span> <span class="cmd-date-mois">${escapeHtml(reste.join(" "))}</span>`;
+}
+
 function dateCourte(iso) {
   if (!iso) return "—";
   const d = new Date(`${String(iso).slice(0, 10)}T12:00:00`);
@@ -1360,9 +1375,13 @@ function renderCommandes() {
       + case_
       + `<span class="cmd-num">${escapeHtml(order.numero || "—")}`
       + `${order.subscriptionId ? '<span class="cmd-abo">Abonnement</span>' : ""}</span>`
-      + `<span class="cmd-date">${escapeHtml(dateCourte(dateDeLaCommande(order)))}</span>`
+      // La date en deux morceaux (planche 8a : le jour en grand, le mois en
+      // petit) ; le texte reste « 16 sept. » pour le bureau et les bancs.
+      + `<span class="cmd-date">${dateEnDeuxMorceaux(dateCourte(dateDeLaCommande(order)))}</span>`
       + `<span class="cmd-client">${escapeHtml(order.clientName || "Client")}</span>`
       + `<span class="cmd-secteur">${escapeHtml(order.sector ? formatSectorLabel(order.sector) : "—")}</span>`
+      // La ligne de detail du telephone (planche 8a) : « CMD-2026-007 · Champagnole ».
+      + `<span class="cmd-meta">${escapeHtml([order.subscriptionId ? "Abonnement" : (order.numero || ""), order.sector ? formatSectorLabel(order.sector) : ""].filter(Boolean).join(" · "))}</span>`
       + `<span class="cmd-articles cmd-droite">${colonneArticles}</span>`
       + `<span class="cmd-statut cmd-droite">${badgeDeCommande(order)}</span>`
       + `</div>`;
@@ -1958,6 +1977,12 @@ function renderFicheClient() {
   const appeler = client.telephone
     ? `<a class="button primary cli-appeler" href="tel:${escapeAttribute(String(client.telephone).replace(/[^\d+]/g, ""))}">${ICONE_CLI.tel}<span>Appeler</span></a>`
     : "";
+  // « Itineraire » (planche 8c, le second geste du terrain) : seulement si
+  // l'adresse permet un trajet (rue ET ville) -- sinon le lien serait vide.
+  const trajet = buildGoogleMapsUrl(client);
+  const itineraire = trajet
+    ? `<a class="cli-bouton-contour cli-itineraire" href="${escapeAttribute(trajet)}" target="_blank" rel="noopener noreferrer">Itinéraire</a>`
+    : "";
   const adresse = adresseClientACorriger(client)
     ? `<p class="cli-valeur cli-alerte">Adresse à corriger</p><p class="cli-note">${escapeHtml([client.rue, client.codePostal, client.ville].filter(Boolean).join(" ") || "Aucune adresse")}</p>`
     : `<p class="cli-valeur">${escapeHtml(client.rue)}<br>${escapeHtml([client.codePostal, client.ville].filter(Boolean).join(" "))}</p>`;
@@ -2001,12 +2026,13 @@ function renderFicheClient() {
   ].filter(Boolean);
 
   fiche.innerHTML = `
+    <button class="cli-retour" type="button" data-action="cli-retour" aria-label="Retour à la liste des clients"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m15 18-6-6 6-6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg><span>Clients</span></button>
     <header class="cli-fiche-tete">
       <div class="cli-fiche-identite">
         <h2 class="cli-fiche-nom">${escapeHtml(nomDuClient(client))}</h2>
         <div class="cli-puces">${puces}</div>
       </div>
-      <div class="cli-fiche-gestes">${appeler}<button class="cli-bouton-contour" type="button" data-action="cli-modifier" data-client-id="${escapeAttribute(client.id)}">Modifier</button></div>
+      <div class="cli-fiche-gestes">${appeler}${itineraire}<button class="cli-bouton-contour" type="button" data-action="cli-modifier" data-client-id="${escapeAttribute(client.id)}">Modifier</button></div>
     </header>
     <div class="cli-champs">
       <div><p class="cli-libelle">Adresse</p>${adresse}</div>
@@ -2050,6 +2076,28 @@ function ouvrirDialogueClient(clientId = null) {
   form.elements.nom.focus();
 }
 
+// La vue du telephone : « liste » ou « fiche » (sans effet au-dessus de 820 px,
+// ou la liste et la fiche sont cote a cote).
+function ouvrirVueClient(vue, { depuisHistorique = false } = {}) {
+  const ecran = document.getElementById("crm");
+  if (!ecran) return;
+  // Ouvrir une fiche pose une entree d'historique : le retour du telephone
+  // ramene a la liste au lieu de quitter l'ecran. Le bouton « Clients » de la
+  // fiche consomme cette entree.
+  if (vue === "fiche" && ecran.dataset.vue !== "fiche") history.pushState({ cliVue: "fiche" }, "", location.hash || "#crm");
+  if (vue === "liste" && ecran.dataset.vue === "fiche" && !depuisHistorique && history.state?.cliVue === "fiche") {
+    history.back();
+    return;
+  }
+  ecran.dataset.vue = vue;
+  window.scrollTo({ top: 0 });
+  if (vue === "fiche") {
+    document.querySelector("#cliFiche .cli-retour")?.focus();
+  } else if (clientChoisi) {
+    document.querySelector(`[data-cli-choisir="${CSS.escape(clientChoisi)}"]`)?.focus();
+  }
+}
+
 function bindClients() {
   const ecran = document.getElementById("crm");
   if (!ecran) return;
@@ -2066,10 +2114,18 @@ function bindClients() {
       clientChoisi = ligne.dataset.cliChoisir;
       renderCrm();
       document.querySelector(`[data-cli-choisir="${CSS.escape(clientChoisi)}"]`)?.focus();
-      // Sous 1180 px la fiche est SOUS la liste : sans ceci, rien ne semblait se passer.
-      if (window.matchMedia("(max-width: 1180px)").matches) {
+      // Au telephone (planches 9a puis 8c) : la liste, PUIS la fiche en plein
+      // ecran, avec un retour. Entre 821 et 1180 px la fiche est sous la liste :
+      // on la montre.
+      if (window.matchMedia("(max-width: 820px)").matches) {
+        ouvrirVueClient("fiche");
+      } else if (window.matchMedia("(max-width: 1180px)").matches) {
         document.getElementById("cliFiche")?.scrollIntoView({ block: "start", behavior: "smooth" });
       }
+      return;
+    }
+    if (event.target.closest("[data-action='cli-retour']")) {
+      ouvrirVueClient("liste");
       return;
     }
     const commande = event.target.closest("[data-cli-commande]");
@@ -2154,6 +2210,10 @@ async function saveCrmClient(form) {
   document.getElementById("cliDialogue")?.close();
   await loadData();
   notify(id ? "Fiche client mise à jour." : "Client enregistré.", "success");
+  // Au telephone, la fiche creee s'ouvre (et pas seulement sa ligne).
+  if (!id && window.matchMedia("(max-width: 820px)").matches) ouvrirVueClient("fiche");
+  // Le rendu a remplace le bouton retour : le focus y revient.
+  if (document.getElementById("crm")?.dataset.vue === "fiche") document.querySelector("#cliFiche .cli-retour")?.focus();
 }
 
 async function updateCrmClientStatus(clientId, status) {

@@ -262,7 +262,8 @@ test.describe("Abonnements et pilotage", () => {
         () => document.documentElement.scrollWidth <= window.innerWidth,
       ),
     ).toBe(true);
-    await page.getByRole("link", { name: "Tous les abonnements ↗" }).click();
+    // Au telephone le lien porte le mot de la planche 1b, « Abonnements ».
+    await page.getByRole("link", { name: "Abonnements", exact: true }).click();
     await expect(page.locator("#abonnements")).toHaveClass(/active/);
     expect(
       await page.evaluate(
