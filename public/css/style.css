@@ -15058,3 +15058,30 @@ html, body, main.content { overflow-x: clip; }
 }
 /* [hidden] gagne sur tout ce qui precede. */
 #gestesBas [hidden] { display: none !important; }
+
+/* ==========================================================================
+   PANIER COLLANT, RELECTURE DU 23/09
+   --------------------------------------------------------------------------
+   1. La rangee d'actions de l'en-tete depassait le bord de 921 a 1225 px
+      (Clients, Commandes, Stock, Abonnements) : `flex: none` la gardait a sa
+      largeur d'une ligne, et son `flex-wrap: wrap` ne servait jamais. Avec
+      `hidden`, le focus faisait parfois defiler .content de cote ; `clip`
+      l'interdit : « Actualiser » recevait le focus hors de l'ecran. Bornee a
+      la largeur de l'en-tete, la rangee passe a la ligne, alignee a droite.
+      Sous 921 px, l'en-tete est deja en colonne. Mesure (11 ecrans, 921 a
+      1920 px) : seules changent les rangees qui depassaient l'en-tete -- dans
+      la marge du contenu, ou au-dela du bord.
+   2. La barre laterale du bureau declare `position: sticky` depuis juillet
+      et n'a jamais colle (le `hidden` de body etait deja la) : `clip` la
+      faisait coller partout. Un changement que tout utilisateur de bureau
+      voit, que personne n'a decide -- le meme cas que le bandeau du
+      telephone. Neutralisee comme lui (`relative` : l'etage 40 reste) ; a
+      trancher par Thomas (DESIGN.md).
+   ========================================================================== */
+@media (min-width: 921px) {
+  .ecran-entete-actions { max-width: 100%; }
+  .ecran-entete-fente { flex-wrap: wrap; justify-content: flex-end; max-width: 100%; }
+}
+@media (min-width: 821px) {
+  .sidebar { position: relative; }
+}

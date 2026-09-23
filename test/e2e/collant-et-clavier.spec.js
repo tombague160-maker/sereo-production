@@ -139,13 +139,45 @@ test("1 — rien ne se chevauche au bureau : panier, catalogue, barre latérale,
     if (intersecte(r.panier, r.catalogue)) defauts.push(`${largeur}px : le panier recouvre le catalogue`);
     if (intersecte(r.panier, r.barre)) defauts.push(`${largeur}px : le panier recouvre la barre laterale`);
     if (r.barre.droite > r.contenu.gauche + 1) defauts.push(`${largeur}px : la barre laterale recouvre le contenu`);
-    // La barre laterale colle (voulu : sa propre barre de defilement) et
-    // tient dans la fenetre -- son bas n'est jamais inatteignable.
-    if (r.barre.haut !== 0 || r.barre.bas > r.fenetre) defauts.push(`${largeur}px : barre laterale de ${r.barre.haut} a ${r.barre.bas} pour ${r.fenetre}px`);
     await ctx.close();
   }
   console.log(`[chevauchement] ${defauts.length} defaut(s)` + defauts.map(d => "\n   " + d).join(""));
   expect(defauts).toEqual([]);
+});
+
+// Relecture du 23/09 : la barre laterale du bureau declare `position: sticky`
+// depuis juillet, mais n'a jamais colle (le `hidden` de body etait deja la).
+// `clip` la faisait coller sur tous les ecrans : un changement que tout
+// utilisateur de bureau voit, et que personne n'a decide -- le meme cas que
+// le bandeau du telephone, ci-dessous. Neutralisee comme lui ; question a
+// Thomas (DESIGN.md, ecarts nommes).
+test("1 — au bureau, la barre latérale défile avec la page, comme avant", async ({ browser }) => {
+  test.setTimeout(120000);
+  const vus = {};
+  for (const largeur of [921, 1440]) {
+    const ctx = await contexte(browser, { viewport: { width: largeur, height: 700 } });
+    // Clients n'est pas ici : ses six clients semes ne font pas defiler 1440 px.
+    for (const onglet of ["stock", "commandes", "commande-client"]) {
+      const page = await ctx.newPage();
+      if (onglet === "stock" || onglet === "commande-client") {
+        await page.route("**/api/stock", route => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(stockLong()) }));
+      }
+      await page.goto(srv.base + "/#" + onglet, { waitUntil: "networkidle" });
+      vus[`${largeur} ${onglet}`] = await page.evaluate(async () => {
+        const max = document.scrollingElement.scrollHeight - innerHeight;
+        scrollTo(0, Math.min(400, max));
+        await new Promise(r => setTimeout(r, 150));
+        return { defile: Math.round(scrollY), haut: Math.round(document.querySelector("aside.sidebar").getBoundingClientRect().top) };
+      });
+      await page.close();
+    }
+    await ctx.close();
+  }
+  console.log("[barre laterale] " + Object.entries(vus).map(([o, v]) => `${o}: defile ${v.defile}, haut ${v.haut}`).join(" · "));
+  for (const [cle, v] of Object.entries(vus)) {
+    expect(v.defile, `prealable ${cle} : la page defile`).toBeGreaterThan(40);
+    expect(v.haut, `${cle} : la barre laterale part avec la page`).toBe(-v.defile);
+  }
 });
 
 test("1 — au téléphone, le bandeau de marque défile avec la page (il ne colle que sur Tournée, comme avant)", async ({ browser }) => {
@@ -197,16 +229,18 @@ test("1 — la bannière de récupération de la base défile avec la page, sans
 });
 
 test("1 — aucun débordement horizontal, rien d'utile rogné, de 360 à 1440 px", async ({ browser }) => {
-  // `clip` rogne comme `hidden` : on verifie qu'aucun contenu ne depasse le
-  // bord (et ne serait donc coupe), hors des conteneurs qui defilent d'eux-
-  // memes. Ecart NOMME, anterieur au lot et hors de son perimetre : de 821 a
-  // ~1180 px, la rangee d'actions de l'en-tete de Clients et de Commandes
-  // depasse (« Actualiser » coupe a 1024) -- `hidden` le coupait deja, a
-  // l'identique (mesure du 23/09) ; elle est exclue ici.
+  // `clip` rogne : on verifie qu'aucun contenu ne depasse le bord (et ne
+  // serait donc coupe), hors des conteneurs qui defilent d'eux-memes. C'est
+  // la liste `hors` qui juge : `scrollWidth` ne voit presque plus rien, body
+  // et main rognant ce que leurs descendants depassent. AUCUNE exclusion : la
+  // rangee d'actions de l'en-tete, qui depassait de 921 a 1225 px (Clients,
+  // Commandes, Stock, Abonnements -- « Actualiser » hors de l'ecran), passe
+  // desormais a la ligne (relecture du 23/09). 921, 1024 et 1200 : les
+  // largeurs ou elle depassait.
   test.setTimeout(300000);
   const defauts = [];
   const ONGLETS = ["journee", "crm", "commandes", "commande-client", "relances", "statistiques", "stock", "preparation", "abonnements", "livreur", "parametres"];
-  for (const largeur of [360, 390, 820, 1024, 1440]) {
+  for (const largeur of [360, 390, 820, 921, 1024, 1200, 1440]) {
     const ctx = await contexte(browser, { viewport: { width: largeur, height: 844 } });
     const page = await ctx.newPage();
     for (const onglet of ONGLETS) {
@@ -226,7 +260,6 @@ test("1 — aucun débordement horizontal, rien d'utile rogné, de 360 à 1440 p
           if (b.width <= 1 || b.height <= 1) continue;
           const cs = getComputedStyle(e);
           if (cs.visibility === "hidden" || cs.position === "fixed") continue;
-          if (e.closest(".ecran-entete-actions")) continue;
           if ((b.right > innerWidth + 1 || b.left < -1) && !dansDefileur(e)) hors.push(`${e.tagName.toLowerCase()}.${String(e.className).split(" ")[0]} [${Math.round(b.left)}..${Math.round(b.right)}]`);
         }
         return { large: document.scrollingElement.scrollWidth, fenetre: innerWidth, hors };
@@ -237,6 +270,48 @@ test("1 — aucun débordement horizontal, rien d'utile rogné, de 360 à 1440 p
     await ctx.close();
   }
   console.log(`[debordement] ${defauts.length} defaut(s)` + defauts.map(d => "\n   " + d).join(""));
+  expect(defauts).toEqual([]);
+});
+
+// Relecture du 23/09 : `clip` interdit tout defilement de cote, meme celui
+// que le focus provoquait. Un bouton d'en-tete au-dela du bord recevait donc
+// le focus SANS etre vu (« Actualiser » a 1024 px). On parcourt l'en-tete au
+// clavier, de sa premiere commande a la derniere, aux largeurs ou la rangee
+// depassait, et chaque element atteint doit etre dans la fenetre.
+test("1 — au clavier, chaque commande de l'en-tête est à l'écran quand elle reçoit le focus", async ({ browser }) => {
+  test.setTimeout(240000);
+  const defauts = [];
+  let atteints = 0;
+  for (const largeur of [921, 1024, 1200, 1440]) {
+    const ctx = await contexte(browser, { viewport: { width: largeur, height: 844 } });
+    const page = await ctx.newPage();
+    for (const onglet of ["journee", "crm", "commandes", "stock", "abonnements", "livreur"]) {
+      await page.goto(srv.base + "/#" + onglet, { waitUntil: "networkidle" });
+      // Une sentinelle en tete de l'en-tete : le premier Tab tombe sur sa
+      // premiere commande.
+      await page.evaluate(() => {
+        const s = document.createElement("button");
+        s.id = "sentinelleEntete"; s.textContent = "debut";
+        document.querySelector(".ecran-entete").prepend(s); s.focus();
+      });
+      for (let i = 0; i < 30; i++) {
+        await page.keyboard.press("Tab");
+        const v = await page.evaluate(() => {
+          const e = document.activeElement;
+          if (!e || !e.closest(".ecran-entete")) return null;
+          const b = e.getBoundingClientRect();
+          return { nom: e.id || String(e.className).split(" ").slice(-1)[0], gauche: Math.round(b.left), droite: Math.round(b.right), fenetre: innerWidth };
+        });
+        if (!v) break;
+        atteints++;
+        if (v.gauche < -1 || v.droite > v.fenetre + 1) defauts.push(`${largeur}px #${onglet} : « ${v.nom} » a le focus hors de l'ecran (${v.gauche}..${v.droite}, fenetre ${v.fenetre})`);
+      }
+    }
+    await ctx.close();
+  }
+  console.log(`[focus en-tete] ${atteints} focus, ${defauts.length} defaut(s)` + defauts.map(d => "\n   " + d).join(""));
+  // Prealable : l'en-tete a bien ete parcouru (six ecrans, quatre largeurs).
+  expect(atteints, "prealable : Tab atteint les commandes de l'en-tete").toBeGreaterThan(24 * 2);
   expect(defauts).toEqual([]);
 });
 
