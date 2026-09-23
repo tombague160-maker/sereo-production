@@ -382,7 +382,62 @@ test("fiche : la flèche, puis le retour du téléphone, ramènent la liste ; le
   await ligne(page, "Tilleuls").click();
   await retour.click();
   await expect(page.locator("#crmList")).toBeVisible();
+  // Garde : un rechargement depuis une fiche repart sur la liste, et la fiche
+  // rouverte se referme d'une seule fleche (l'entree { cliVue } restee dans
+  // l'historique ne la piege pas).
+  await ligne(page, "Tilleuls").click();
+  await page.reload({ waitUntil: "networkidle" });
+  await expect(page.locator("#crmList")).toBeVisible();
+  await expect(page.locator("#cliFiche")).toBeHidden();
+  await ligne(page, "Bellevue").click();
+  await expect(page.locator("#cliFiche")).toBeVisible();
+  await retour.click();
+  await expect(page.locator("#crmList")).toBeVisible();
+  await expect(page.locator("#cliFiche")).toBeHidden();
+  // ... et la fleche s'arrete a la liste : ni un second recul dans
+  // l'historique, ni un autre ecran ; le focus revient sur la ligne ouverte.
+  await expect(ligne(page, "Bellevue")).toBeFocused();
+  await expect(page.locator("#crm")).toHaveClass(/active/);
+  expect(await page.evaluate(() => [location.hash, history.state?.cliVue ?? null])).toEqual(["#crm", "fiche"]);
 });
+
+// L'anneau clavier HORS du vert : le tri, « Nouveau client » fixe, une
+// commande de la fiche et « Les N autres ». `--focus-ring` n'est defini que
+// sous le theme clair : en sombre, une regle qui ne compte que sur lui ne
+// dessine rien (la declaration box-shadow devient invalide).
+for (const schema of ["light", "dark"]) {
+  test(`au clavier, l'anneau se voit hors du vert : tri, Nouveau client, commandes (${schema})`, async ({ page }) => {
+    await ouvrir(page, schema);
+    await page.keyboard.press("Tab");
+    // `porteur` dessine l'anneau : le select du tri le dessine sur son
+    // etiquette (.cli-tri), les autres sur eux-memes.
+    const anneau = porteur => page.evaluate(p => {
+      const e = document.activeElement, cs = getComputedStyle(document.querySelector(p)), csE = getComputedStyle(e);
+      return {
+        focus: e.matches(":focus-visible"),
+        ombre: cs.boxShadow, contour: csE.outlineStyle === "none" ? "none" : `${csE.outlineStyle} ${csE.outlineWidth}`
+      };
+    }, porteur);
+    const vus = {};
+    await page.locator("#cliTri").focus();
+    vus.tri = await anneau("#crm .cli-tri");
+    await page.locator(".ecran-entete .cli-nouveau").focus();
+    vus.nouveau = await anneau(".ecran-entete .cli-nouveau");
+    await ligne(page, "Tilleuls").click();
+    await expect(page.locator("#cliFiche")).toBeVisible();
+    await page.keyboard.press("Tab");
+    await page.locator("#cliFiche .cli-commande").first().focus();
+    vus.commande = await anneau("#cliFiche .cli-commande");
+    await page.locator("#cliFiche .cli-autres").focus();
+    vus.autres = await anneau("#cliFiche .cli-autres");
+    // Un anneau : un contour, ou une ombre pleine autour (0 0 0 n) -- pas la
+    // seule ombre portee du bouton fixe (0 8px 24px).
+    const sansAnneau = Object.entries(vus)
+      .filter(([, v]) => !v.focus || (!/0px 0px 0px/.test(v.ombre) && v.contour === "none"))
+      .map(([quoi, v]) => ({ quoi, ...v }));
+    expect(sansAnneau).toEqual([]);
+  });
+}
 
 test("hors ligne, le bandeau ne coupe pas le vert : l'en-tête, les filtres et la fiche se ferment chacun", async ({ page }) => {
   await ouvrir(page);
