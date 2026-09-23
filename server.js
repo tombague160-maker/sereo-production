@@ -477,13 +477,15 @@ app.use(express.static(path.join(__dirname, "public"), {
  * Decision 4 (23/09) : jusqu'a quand la page de l'application peut etre
  * rouverte HORS LIGNE (ecran Tournee seulement, public/service-worker.js).
  * La fin de la session du cookie (emission + 12 h), jamais plus : hors ligne,
- * personne ne peut la prolonger. Sans authentification (developpement, bancs),
- * 12 h a partir de maintenant. Acces par l'en-tete Basic, sans cookie : rien
- * n'est annonce (null), la page ne se garde pas -- et ne s'oublie pas non plus.
+ * personne ne peut la prolonger. Rien n'est annonce (null : la page ne se
+ * garde pas, et ne s'oublie pas non plus) quand il n'y a pas de session du
+ * tout : authentification desactivee (developpement, bancs -- « sans session
+ * valide connue, on ne montre rien »), ou acces par l'en-tete Basic, sans
+ * cookie.
  */
 function finDeSessionConnue(req, now = Date.now()) {
   const duree = AUTH_COOKIE_MAX_AGE_SECONDS * 1000;
-  if (!isAccessAuthEnabled()) return now + duree;
+  if (!isAccessAuthEnabled()) return null;
   const valeur = getAccessSessionCookie(req);
   if (!valeur || !isValidAccessSessionValue(valeur, now)) return null;
   const session = readAccessSession(valeur, now);
