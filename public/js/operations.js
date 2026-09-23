@@ -280,8 +280,10 @@ export function initOperations(api) {
   $("subReminder").addEventListener("input", () => majRappel());
   for (const point of ["departure", "arrival"]) {
     document.getElementById(`${point}Query`).addEventListener("input", () => {
-      if (point === "departure") departure = null;
-      else arrival = null;
+      if (point === "departure") {
+        departure = null;
+        departDuDepot = false;
+      } else arrival = null;
       document.getElementById(`${point}Results`).hidden = true;
     });
     document
@@ -291,10 +293,50 @@ export function initOperations(api) {
         const value = option?.dataset.point
           ? JSON.parse(option.dataset.point)
           : null;
-        if (point === "departure") departure = value;
-        else arrival = value;
+        if (point === "departure") {
+          departure = value;
+          departDuDepot = false;
+        } else arrival = value;
       });
   }
+  // Lot 6 : une fois touchee par le livreur, la case « retour » n'est plus
+  // reprise des Parametres pendant la session (app.js memorise son choix).
+  document.getElementById("returnToStart")?.addEventListener("change", () => {
+    retourTouche = true;
+  });
+}
+
+// Lot 6 de l'audit geo (23/09) : le depot par defaut des Parametres remplit le
+// depart tant que le livreur n'en a pas choisi un autre (recherche,
+// localisation, saisie) ; « retour au depart » suit le reglage tant qu'il n'a
+// pas touche la case. Preparer une tournee tient alors en deux gestes :
+// choisir les commandes, creer. `forcer` : le reglage vient d'etre change dans
+// les Parametres, il s'applique meme a une case deja touchee.
+let departDuDepot = false,
+  retourTouche = false;
+export function preremplirDepart(depot, retour, { forcer = false } = {}) {
+  const champ = document.getElementById("departureQuery");
+  const caseRetour = document.getElementById("returnToStart");
+  if (!champ) return;
+  if (depot && (!departure || departDuDepot)) {
+    departure = { lat: depot.lat, lng: depot.lng, label: depot.label };
+    departDuDepot = true;
+    champ.value = depot.label;
+    document.getElementById("departureResults").hidden = true;
+  } else if (!depot && departDuDepot) {
+    departure = null;
+    departDuDepot = false;
+    champ.value = "";
+  }
+  if (caseRetour && typeof retour === "boolean" && (forcer || !retourTouche)) {
+    caseRetour.checked = retour;
+    if (forcer) retourTouche = false;
+  }
+}
+
+/** Le depart choisi pour la tournee a creer (null s'il n'y en a pas encore). */
+export function departChoisi() {
+  return departure;
 }
 export function renderOperations(next) {
   // Une COPIE : pousser dans next.crmClients ajoutait les fiches archivees au
@@ -1190,6 +1232,7 @@ async function locate() {
     lng: arrondi(location.coords.longitude),
     label: "Ma position actuelle",
   };
+  departDuDepot = false;
   document.getElementById("departureQuery").value =
     `Ma position · précision ${Math.round(location.coords.accuracy)} m`;
   document.getElementById("departureResults").hidden = true;

@@ -1236,6 +1236,11 @@
                 <details class="gestes-plus">
                   <summary>Autres actions</summary>
                   <div class="gestes-rangee">
+                    <!-- Lot 6 (audit geo) : « Prevenir » ouvre l'application SMS du
+                         telephone, numero et texte prets (« je passe vers 10 h 40 ») :
+                         aucun fournisseur, aucun cout. Un lien, pas un bouton : c'est
+                         le telephone qui envoie. -->
+                    <a id="prevenirButton" class="button secondary compact trn-prevenir" data-action="prevenir-client" aria-disabled="true">Prévenir</a>
                     <button id="markRescheduleButton" class="button secondary compact" type="button" data-action="mark-reschedule">À reprogrammer</button>
                     <button id="replanCurrentButton" class="button secondary compact" type="button" data-action="replan-current-stop">Planifier suite</button>
                     <button id="nextClientButton" class="button secondary compact" type="button" data-action="next-client">Suivant</button>
@@ -1253,6 +1258,9 @@
             <div class="panel-heading">
               <h3>Ordre de tournée</h3>
               <span id="routeMetrics" class="muted">Distance estimée indisponible.</span><button class="button secondary trn-recalculer-panneau" type="button" data-op="recalculate-route">Recalculer le tracé</button>
+              <!-- Lot 6 : « Reoptimiser » (tournee prete, autre depart possible) ou
+                   « Reoptimiser les arrets restants » (en route, depuis la position). -->
+              <button id="reoptimiserButton" class="button secondary trn-reoptimiser" type="button" data-action="reoptimiser" hidden>Réoptimiser</button>
             </div>
             <div id="routeStopsList" class="route-stops"></div>
           </div>
@@ -1353,6 +1361,14 @@
 
             <div id="deliveryCandidates" class="delivery-candidates"></div>
           </div>
+
+          <!-- Lot 6 (audit geo) : l'historique des tournees terminees -- km du
+               trace prevu, duree reelle (depart -> dernier arret), et par mois
+               un total par secteur. Calcule sur les tournees deja chargees. -->
+          <details class="panel trn-historique" id="tourneesHistorique">
+            <summary class="trn-historique-titre"><h3>Historique des tournées</h3></summary>
+            <div id="tourneesHistoriqueContenu" class="trn-historique-contenu"></div>
+          </details>
 
           <div class="panel legacy-driver-panel">
             <div class="panel-heading">
@@ -1581,6 +1597,35 @@
                   <span id="tourneeStopValue" class="settings-slider-value">6 min</span>
                 </div>
               </article>
+              <!-- Lot 6 (audit geo) : le depot par defaut. Le depart d'une nouvelle
+                   tournee est prerempli : preparer une tournee tient en deux gestes
+                   (choisir les commandes, creer). -->
+              <article class="item par-depot">
+                <h4 id="parDepotTitre">Dépôt par défaut</h4>
+                <p class="muted">Le départ prérempli d’une nouvelle tournée.</p>
+                <p id="parDepotActuel" class="par-depot-actuel" aria-live="polite">Aucun dépôt enregistré.</p>
+                <div class="par-depot-recherche">
+                  <label class="par-champ">Adresse du dépôt
+                    <input id="parDepotRecherche" type="text" autocomplete="off" maxlength="200" placeholder="Adresse ou ville" />
+                  </label>
+                  <button class="button secondary compact" type="button" data-action="par-depot-chercher">Rechercher</button>
+                </div>
+                <select id="parDepotResultats" aria-label="Confirmer l’adresse du dépôt" hidden></select>
+                <div class="quick-actions">
+                  <button id="parDepotEffacer" class="button secondary compact" type="button" data-action="par-depot-effacer" hidden>Effacer le dépôt</button>
+                </div>
+                <label class="par-case"><input id="parRetourDepot" type="checkbox" checked /> Retour au dépôt coché par défaut</label>
+              </article>
+              <article class="item">
+                <h4><label for="parMessagePrevenir">Message « Prévenir »</label></h4>
+                <p class="muted" id="parMessageAide">Le SMS que le téléphone prépare pour le client. {heure} devient l’heure d’arrivée estimée.</p>
+                <textarea id="parMessagePrevenir" rows="2" maxlength="300" aria-describedby="parMessageAide"></textarea>
+              </article>
+              <article class="item">
+                <h4 id="parNavigationTitre">« Y aller » ouvre</h4>
+                <p class="muted">Réglage de cet appareil.</p>
+                <div id="parNavigation" class="par-segments" role="group" aria-labelledby="parNavigationTitre"></div>
+              </article>
               <p id="tourneeSettingsStatus" class="muted" aria-live="polite">Chargement…</p>
             </div>
           </article>
@@ -1653,6 +1698,24 @@
   <!-- Le motif d'un arret en echec. `<dialog>` natif, comme #subscriptionDialog :
        il piege le focus, se ferme a Echap et rend l'arriere-plan inerte, trois
        comportements qu'il faudrait sinon reecrire a la main et mal. -->
+  <!-- Lot 6 (audit geo) : « Reoptimiser » une tournee prete. Une tournee
+       preparee au bureau repart du domicile : le depart se choisit ici. -->
+  <dialog id="reoptimiserDialog" class="motif-dialog reopt-dialog" aria-labelledby="reoptTitre">
+    <form method="dialog" id="reoptForm">
+      <h3 id="reoptTitre">Réoptimiser la tournée</h3>
+      <p class="muted">Séréo recalcule le meilleur ordre des arrêts. Les commandes « À livrer en premier » restent en tête.</p>
+      <fieldset class="reopt-choix-liste">
+        <legend>Partir de</legend>
+        <div id="reoptDeparts"></div>
+      </fieldset>
+      <p id="reoptErreur" class="op-error" role="alert"></p>
+      <div class="motif-actions">
+        <button class="button secondary" type="button" data-action="reopt-annuler">Annuler</button>
+        <button class="button primary" type="button" data-action="reopt-valider">Réoptimiser</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="motifProblemeDialog" class="motif-dialog" aria-labelledby="motifTitre">
     <form method="dialog" id="motifForm">
       <h3 id="motifTitre">Que s'est-il passé ?</h3>

@@ -156,17 +156,19 @@ test("4b — « Prochain : <client> » nomme l'arret suivant non termine", async
   await ctx.close();
 });
 
-test("4b — « Y aller » ouvre Google Maps sur l'adresse de l'arret, encodee", async ({ browser }) => {
+// Lot 6 de l'audit geo (23/09) : RENVERSE, pas supprime. « Y aller » visait
+// l'adresse en texte ; il vise desormais les COORDONNEES de l'arret quand elles
+// existent (une position corrigee a la main, un lieu-dit sans rue y menent).
+// Le repli sur l'adresse en texte est juge dans test/tournee-pratique.test.js.
+test("4b — « Y aller » ouvre Google Maps sur les coordonnees de l'arret", async ({ browser }) => {
   test.setTimeout(120000);
   const { ctx, page } = await ouvrir(browser, srv.base);
   await page.evaluate(() => { window.__ouvert = []; window.open = url => { window.__ouvert.push(url); return null; }; });
   await expect(page.locator("#mapsButton")).toHaveText("Y aller");
   await page.locator("#mapsButton").click();
   const urls = await page.evaluate(() => window.__ouvert);
-  // La ville est celle du serveur, canonisee SANS cedille (une cle de secteur) :
-  // Google la resout pareil. Les accents de la rue, eux, sont encodes.
-  expect(urls).toEqual(["https://www.google.com/maps/dir/?api=1&destination="
-    + encodeURIComponent("12 avenue du Général de Gaulle 25000 Besancon")]);
+  // L'arret 3 (EHPAD Les Tilleuls) est seme a 47.238, 6.024.
+  expect(urls).toEqual(["https://www.google.com/maps/dir/?api=1&destination=47.238,6.024"]);
   await ctx.close();
 });
 

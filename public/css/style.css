@@ -14702,3 +14702,102 @@ textarea {
 :root {
   --focus-ring: 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus);
 }
+
+/* ==========================================================================
+   LOT 6 DE L'AUDIT GEO : PRATIQUE AU QUOTIDIEN (23/09)
+   --------------------------------------------------------------------------
+   Heures d'arrivee (discretes : texte secondaire, dans la ligne de detail),
+   « Prevenir », « Reoptimiser », « Faire maintenant », « Ajouter a la tournee
+   en cours », le depot des Parametres, l'historique des tournees. Cibles de
+   44 px au moins, anneau clavier du theme, jetons v8 (clair et sombre).
+   Banc : test/e2e/tournee-pratique.spec.js.
+   ========================================================================== */
+
+/* L'heure d'arrivee d'un arret, a la suite du detail de la ligne. */
+.route-stop-heure { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Le cockpit : l'heure d'arrivee de l'arret affiche, et le trajet jusqu'au
+   prochain (planche 4b : « 6,2 km · environ 14 min »). */
+:root[data-color-scheme] .panel p.arret-heure,
+:root:not([data-color-scheme]) .panel p.arret-heure {
+  margin: 2px 0 0; font-size: 14px; color: var(--v8-texte-secondaire);
+  font-variant-numeric: tabular-nums;
+}
+:root[data-color-scheme] .panel p.arret-heure strong,
+:root:not([data-color-scheme]) .panel p.arret-heure strong { color: var(--v8-texte); font-weight: 650; }
+:root[data-color-scheme] .panel .arret-prochain-trajet,
+:root:not([data-color-scheme]) .panel .arret-prochain-trajet {
+  flex-basis: 100%; font-size: 13.5px; font-weight: 500; color: var(--v8-texte-secondaire);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Un arret choisi hors de l'ordre : une phrase et « Faire maintenant ». */
+.arret-hors-ordre {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px;
+  margin: 12px 0 0; padding: 10px 12px 10px 16px; border-radius: 18px;
+  border: 1px solid var(--v8-vert-eau); background: var(--v8-surface-basse);
+  color: var(--v8-texte); font-size: 14px;
+}
+
+/* Les boutons du lot : 44 px au moins partout (48 au telephone, regle commune). */
+:root[data-color-scheme] :is(.trn-maintenant, .trn-ajouter, .trn-reoptimiser, .trn-prevenir, #parametres .par-depot .button),
+:root:not([data-color-scheme]) :is(.trn-maintenant, .trn-ajouter, .trn-reoptimiser, .trn-prevenir, #parametres .par-depot .button) {
+  min-height: 44px; min-width: 44px;
+}
+:root[data-color-scheme] :is(.trn-maintenant, .trn-ajouter, .trn-reoptimiser, .trn-prevenir):focus-visible,
+:root:not([data-color-scheme]) :is(.trn-maintenant, .trn-ajouter, .trn-reoptimiser, .trn-prevenir):focus-visible {
+  outline: none; box-shadow: var(--focus-ring);
+}
+/* « Ajouter a la tournee en cours » sous la carte de la commande, a sa largeur. */
+.delivery-card-ligne > .trn-ajouter { justify-self: start; }
+/* « Prevenir » est un lien (l'application SMS du telephone) : hors d'usage,
+   il se montre comme un bouton desactive, et le toucher dit pourquoi. */
+.trn-prevenir { text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
+.trn-prevenir[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
+
+/* Le dialogue « Reoptimiser » : des choix pleine largeur a 48 px. */
+.reopt-choix-liste { margin: 14px 0; padding: 0; border: 0; }
+.reopt-choix-liste legend { margin-bottom: 8px; font-weight: 600; color: var(--v8-texte); }
+.reopt-choix-liste > div { display: grid; gap: 8px; }
+.reopt-choix {
+  display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 10px 14px;
+  border: 1px solid var(--v8-vert-eau); border-radius: 14px;
+  background: var(--v8-surface-basse); color: var(--v8-texte); cursor: pointer;
+}
+.reopt-choix input { width: 20px; height: 20px; margin: 0; accent-color: var(--v8-principal); }
+.reopt-choix:has(input:checked) { border-color: var(--v8-principal); background: var(--v8-vert-clair); font-weight: 650; }
+.reopt-choix:has(input:focus-visible) { box-shadow: var(--focus-ring); }
+
+/* Parametres : le depot par defaut. */
+#parametres .par-depot-recherche { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
+#parametres .par-depot-recherche .par-champ { flex: 1 1 220px; min-width: 0; }
+#parametres .par-depot-actuel { margin: 4px 0 8px; font-weight: 600; color: var(--v8-texte); }
+#parametres .par-depot select,
+#parametres #parMessagePrevenir {
+  width: 100%; min-height: 44px; margin-top: 8px; padding: 8px 12px;
+  border: 1px solid var(--v8-vert-eau); border-radius: 14px;
+  background: var(--v8-surface-basse); color: var(--v8-texte); font: inherit;
+}
+#parametres #parMessagePrevenir { resize: vertical; }
+#parametres .par-depot select:focus-visible,
+#parametres #parMessagePrevenir:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+#parametres .par-depot .par-case { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+
+/* L'historique des tournees : repliable, sous la preparation. */
+.trn-historique-titre { display: flex; align-items: center; min-height: 44px; cursor: pointer; }
+.trn-historique-titre h3 { margin: 0; }
+.trn-historique-titre:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 12px; }
+.trn-historique-contenu { display: grid; gap: 12px; margin-top: 8px; }
+.trn-historique-mois h4 { margin: 8px 0 2px; }
+:root[data-color-scheme] .panel p.trn-historique-total,
+:root:not([data-color-scheme]) .panel p.trn-historique-total { margin: 0 0 8px; color: var(--v8-texte-secondaire); font-variant-numeric: tabular-nums; }
+.trn-historique-defile { overflow-x: auto; max-width: 100%; }
+.trn-historique-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.trn-historique-table :is(th, td) { padding: 8px 10px; border-bottom: 1px solid var(--v8-vert-eau); text-align: left; color: var(--v8-texte); }
+.trn-historique-table thead th { font-size: 13px; font-weight: 600; color: var(--v8-texte-secondaire); }
+.trn-historique-note { color: var(--v8-texte-secondaire); font-size: 12.5px; }
+.trn-historique-liste { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.trn-historique-liste li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; padding: 8px 0; border-bottom: 1px solid var(--v8-vert-eau); color: var(--v8-texte); }
+
+/* [hidden] gagne sur tout ce qui precede. */
+:is(#reoptimiserButton, #parDepotResultats, #parDepotEffacer, .trn-ajouter)[hidden] { display: none !important; }

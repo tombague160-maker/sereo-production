@@ -1,5 +1,21 @@
-import { initOperations, renderOperations, getRoutePoints, majSousTitreAbonnements } from "./operations.js";
+import { initOperations, renderOperations, getRoutePoints, majSousTitreAbonnements, preremplirDepart } from "./operations.js";
 import { initAdresses, majAlerteAdresses, afficherErreursTournee } from "./domains/adresses.js";
+// Lot 6 de l'audit geo : heures d'arrivee, « Y aller », « Prevenir », historique.
+import {
+  horairesDeTournee,
+  formatHeure,
+  formatDistance,
+  formatDuree,
+  formatMinutes,
+  lienNavigation,
+  applisDeNavigation,
+  appliRetenue,
+  estAppareilApple,
+  textePrevenir,
+  lienSms,
+  MESSAGE_PREVENIR_DEFAUT,
+  historiqueDesTournees
+} from "./domains/tournee-pratique.js";
 // Sereo — point d'entree du front.
 //
 // Charge comme module ES (<script type="module"> dans index.html). Les
@@ -173,6 +189,7 @@ document.addEventListener("DOMContentLoaded", () => {
   bindUi();
   initOperations({apiFetch, loadData, notify, recalculateRoute, formatSectorLabel});
   initAdresses({ apiFetch, loadData, notify, getCurrentTarget: () => getCurrentDeliveryTarget() });
+  initTourneePratique();
   bindVersionModal();
   bindBonsCommandeUi();
   initMap();
@@ -785,6 +802,16 @@ function bindUi() {
     if (action === "next-client") nextClient();
     if (action === "open-maps") openGoogleMaps();
     if (action === "call-current-client") callCurrentClient();
+    // Lot 6 de l'audit geo : pratique au quotidien.
+    if (action === "prevenir-client") prevenirClient(event, actionButton);
+    if (action === "reoptimiser") runAction(actionButton, "Calcul…", reoptimiserTournee);
+    if (action === "reopt-annuler") document.getElementById("reoptimiserDialog")?.close();
+    if (action === "reopt-valider") runAction(actionButton, "Calcul…", validerReoptimisation);
+    if (action === "faire-maintenant") runAction(actionButton, "Envoi…", () => faireMaintenant(actionButton.dataset.stopId));
+    if (action === "ajouter-a-la-tournee") runAction(actionButton, "Ajout…", () => ajouterALaTournee(actionButton.dataset.orderId));
+    if (action === "par-depot-chercher") runAction(actionButton, "Recherche…", chercherDepot);
+    if (action === "par-depot-effacer") runAction(actionButton, "…", () => enregistrerReglagesTournee({ depot: null }, "Dépôt effacé."));
+    if (action === "par-navigation") choisirAppliNavigation(actionButton.dataset.appli);
     if (action === "export-annex-orders") downloadOrdersExport("annexe");
     if (action === "export-planned-orders") downloadOrdersExport("planned");
     if (action === "export-all-orders") downloadOrdersExport("all");
@@ -5557,7 +5584,7 @@ async function renderTourneeSettings() {
       clearTimeout(tourneeSaveTimer);
       tourneeSaveTimer = setTimeout(async () => {
         try {
-          await apiFetch("/api/settings/tournee", {
+          const enregistres = await apiFetch("/api/settings/tournee", {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -5565,6 +5592,8 @@ async function renderTourneeSettings() {
               stopDurationMin: Number(stopSlider.value)
             })
           });
+          // Lot 6 : la duree d'arret compte dans les heures d'arrivee.
+          if (enregistres && typeof enregistres === "object") recevoirReglagesTournee(enregistres);
           if (status) status.textContent = "Enregistré ✓";
         } catch (error) {
           // Une mise en file n'est pas une erreur : la prefixer de "Erreur :"
@@ -5591,6 +5620,9 @@ async function renderTourneeSettings() {
   tourneeSettingsLoadingPromise = (async () => {
     try {
       const tournee = await apiFetch("/api/settings/tournee");
+      // Lot 6 : depot, retour, texte du SMS -- et la duree d'arret des heures
+      // d'arrivee. Lu ici, sans requete de plus : ce rendu suit chaque chargement.
+      recevoirReglagesTournee(tournee);
       // R2 MAJOR : ne PAS ecraser le slider si l'utilisateur l'a touche
       // pendant le fetch (timer != null = interaction recente, PATCH en
       // queue). Dans ce cas, sa saisie locale est la source de verite.
@@ -6301,6 +6333,17 @@ function renderDeliveryCandidates() {
       <span>À livrer en premier<span class="sr-only"> : ${escapeHtml(order.clientName)}</span></span>
     `;
     ligne.append(label, premier);
+    // Lot 6 : en route, une commande urgente rejoint la tournee EN COURS, a
+    // l'endroit ou elle allonge le moins le trajet (le serveur choisit).
+    if (activeRoute?.status === "en_livraison" && !isRouteComplete(activeRoute)) {
+      const ajouter = document.createElement("button");
+      ajouter.type = "button";
+      ajouter.className = "button secondary compact trn-ajouter";
+      ajouter.dataset.action = "ajouter-a-la-tournee";
+      ajouter.dataset.orderId = String(order.id);
+      ajouter.innerHTML = `Ajouter à la tournée en cours<span class="sr-only"> : ${escapeHtml(order.clientName)}</span>`;
+      ligne.append(ajouter);
+    }
     container.appendChild(ligne);
   });
 }
@@ -6477,6 +6520,8 @@ function renderRoute() {
   const list = document.getElementById("routeStopsList");
   const current = document.getElementById("currentClient");
   const metrics = document.getElementById("routeMetrics");
+  // Lot 6 : l'historique suit les tournees chargees (s'il est ouvert).
+  rendreHistoriqueTournees();
 
   if (!list || !current) return;
 
@@ -6487,11 +6532,16 @@ function renderRoute() {
     document.querySelectorAll('[data-op="recalculate-route"]').forEach(bouton =>
       bouton.classList.remove("trn-recalculer--requis"));
     setButtonDisabled("startRouteButton", true);
+    majBoutonReoptimiser();
     updateDriverActionButtons(null);
     return;
   }
 
-  if (metrics) metrics.textContent = formatRouteMetrics(activeRoute);
+  // Lot 6 : les heures d'arrivee (troncons OSRM + duree d'arret des Parametres,
+  // recalculees depuis l'heure reelle quand la tournee roule).
+  const horaires = horairesAffiches();
+  if (metrics) metrics.textContent = formatRouteMetrics(activeRoute) + resumeDuReste(horaires);
+  majBoutonReoptimiser();
   // Planche 4c : sans trace routier (reordonnee a la main, ou jamais calculee),
   // la carte dessine un pointille ; « Recalculer le trace » se signale alors,
   // cercle d'accent. Meme critere que renderMap : la geometrie.
@@ -6518,9 +6568,15 @@ function renderRoute() {
     // Un geste en file (lot 1 de l'audit geo) : l'arret est montre fait, et la
     // ligne dit que le serveur ne le sait pas encore.
     const attente = stop.enAttenteEnvoi ? `<span class="route-stop-attente">En attente d’envoi</span>` : "";
+    // Lot 6 : l'heure d'arrivee estimee, discrete, DANS la ligne de detail (la
+    // ligne garde ses quatre informations, charte §4).
+    const arrivee = horaires?.arrivees.get(String(stop.id));
+    const heure = Number.isFinite(arrivee)
+      ? `<span class="route-stop-heure"> · vers ${escapeHtml(formatHeure(arrivee))}</span>`
+      : "";
     const detail = attente + (stop.problemReason
       ? `<span class="route-stop-motif">${escapeHtml(stop.problemReason)}</span>`
-      : `<span title="${escapeAttribute(formatStopAddress(stop))}">${escapeHtml(formatStopMeta(stop))}</span>`);
+      : `<span title="${escapeAttribute(formatStopAddress(stop))}">${escapeHtml(formatStopMeta(stop))}${heure}</span>`);
     // Les fleches ne sont rendues QUE quand la tournee se reordonne encore.
     // Avant, deux boutons de 60 px etaient rendus desactives sur chaque
     // ligne d'une tournee en cours : 120 px de vide par arret.
@@ -6624,8 +6680,28 @@ function showCurrentStop(stop) {
   const suivant = activeRoute
     ? activeRoute.stops.find((s, i) => i > index && !isStopTerminal(s.status))
     : null;
+  // Lot 6 : avec les troncons OSRM (lot 7), la planche 4b est posee en entier
+  // -- « 6,2 km · environ 14 min » jusqu'au prochain, et l'heure d'arrivee
+  // estimee de l'arret affiche.
+  const horaires = horairesAffiches();
+  const trajetSuivant = suivant ? horaires?.trajets.get(String(suivant.id)) : null;
   const prochain = suivant ? `
-    <p class="arret-prochain"><span class="arret-prochain-mot">Prochain : ${escapeHtml(suivant.clientName)}</span>${suivant.city ? `<span class="arret-prochain-lieu">${escapeHtml(formatSectorLabel(suivant.city))}</span>` : ""}</p>` : "";
+    <p class="arret-prochain"><span class="arret-prochain-mot">Prochain : ${escapeHtml(suivant.clientName)}</span>${suivant.city ? `<span class="arret-prochain-lieu">${escapeHtml(formatSectorLabel(suivant.city))}</span>` : ""}${trajetSuivant ? `<span class="arret-prochain-trajet">${escapeHtml(`${formatDistance(trajetSuivant.distance)} · ${formatDuree(trajetSuivant.duree)}`)}</span>` : ""}</p>` : "";
+  const arriveeEstimee = horaires?.arrivees.get(String(stop.id));
+  const heureArrivee = Number.isFinite(arriveeEstimee)
+    ? `<p class="arret-heure">Arrivée prévue vers <strong>${escapeHtml(formatHeure(arriveeEstimee))}</strong></p>`
+    : "";
+  // En route, un arret choisi HORS de l'ordre (touche dans la liste) : il peut
+  // passer en tete des restants. Seulement la ou il sert -- la ligne d'arret
+  // garde ses quatre informations (charte §4).
+  const premierRestant = activeRoute ? activeRoute.stops.findIndex(s => !isStopTerminal(s.status)) : -1;
+  const horsOrdre = activeRoute?.status === "en_livraison" && !isStopTerminal(stop.status)
+    && index >= 0 && premierRestant >= 0 && index !== premierRestant && !stop.enAttenteEnvoi;
+  const faireMaintenant = horsOrdre ? `
+    <div class="arret-hors-ordre">
+      <span>Prévu après ${escapeHtml(activeRoute.stops[premierRestant].clientName)}.</span>
+      <button class="button secondary compact trn-maintenant" type="button" data-action="faire-maintenant" data-stop-id="${escapeAttribute(stop.id)}">Faire maintenant</button>
+    </div>` : "";
 
   container.innerHTML = `
     <div class="current-client-main arret">
@@ -6635,10 +6711,12 @@ function showCurrentStop(stop) {
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
         <span>${escapeHtml(formatStopAddress(stop))}</span>
       </p>
+      ${heureArrivee}
       ${stop.phone ? `<p class="arret-secondaire">${escapeHtml(formatPhone(stop.phone))}</p>` : ""}
       ${stop.notes ? `<span class="current-client-note">${escapeHtml(stop.notes)}</span>` : ""}
       ${getAddressWarning(stop) ? `<span class="address-warning">${escapeHtml(getAddressWarning(stop))}</span>` : ""}
     </div>
+    ${faireMaintenant}
     ${articles}
     ${prochain}
   `;
@@ -6700,7 +6778,7 @@ function showRouteCompleted(routeData) {
       <ul class="fin-problemes" aria-label="Arrêts non livrés">
         ${enEchec.map(stop => `<li><strong>${escapeHtml(stop.clientName)}</strong><span>${escapeHtml(stop.problemReason || formatStopStatus(stop.status))}</span></li>`).join("")}
       </ul>` : ""}
-      ${routeData.arrival ? `<p class="fin-arrivee"><span class="fin-chiffre-libelle">Arrivée</span><span>${escapeHtml(routeData.arrival.label || "Point choisi")}</span><a class="button primary" href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${routeData.arrival.lat},${routeData.arrival.lng}`)}" target="_blank" rel="noopener noreferrer">Y aller</a></p>` : ""}
+      ${routeData.arrival && lienNavigation(routeData.arrival) ? `<p class="fin-arrivee"><span class="fin-chiffre-libelle">Arrivée</span><span>${escapeHtml(routeData.arrival.label || "Point choisi")}</span><a class="button primary" href="${escapeAttribute(lienNavigation(routeData.arrival, appliNavigation(), { apple: APPAREIL_APPLE }))}" target="_blank" rel="noopener noreferrer">Y aller</a></p>` : ""}
       <div class="quick-actions">
         <button class="button primary" type="button" data-action="go-tab" data-target-tab="journee">Retour accueil</button>
         <button class="button secondary" type="button" data-action="go-tab" data-target-tab="recommande">Voir à recommander</button>
@@ -7281,9 +7359,11 @@ function openGoogleMaps() {
     return;
   }
 
-  const mapsUrl = buildGoogleMapsUrl(target);
+  // Lot 6 : l'application choisie sur cet appareil (Google Maps par defaut),
+  // vers les coordonnees de l'arret quand elles existent.
+  const mapsUrl = lienNavigation(target, appliNavigation(), { apple: APPAREIL_APPLE });
   if (!mapsUrl) {
-    notify("Adresse incomplète, impossible d'ouvrir Google Maps correctement.", "warning");
+    notify("Ni position ni adresse complète : impossible d’ouvrir l’itinéraire.", "warning");
     return;
   }
 
@@ -7362,7 +7442,10 @@ function updateDriverActionButtons(target = getCurrentDeliveryTarget()) {
   const canReplan = Boolean(target?.orderId && target.status === "livre");
 
   setButtonDisabled("callClientButton", !hasTarget || !buildPhoneUrl(target?.phone || target?.telephone));
-  setButtonDisabled("mapsButton", !hasTarget || !buildGoogleMapsUrl(target));
+  // Lot 6 : « Y aller » vise les coordonnees quand elles existent -- un
+  // lieu-dit sans rue, place a la main, a desormais son bouton.
+  setButtonDisabled("mapsButton", !hasTarget || !lienNavigation(target));
+  majLienPrevenir(target);
   setButtonDisabled("markDeliveredButton", !canChangeStatus);
   setButtonDisabled("markAbsentButton", !canChangeStatus);
   setButtonDisabled("markProblemButton", !canChangeStatus);
@@ -7903,7 +7986,11 @@ function estDefinitivementHorsLigne() {
 // trois heures apres, elle effacerait ce qui a ete saisi entre-temps) et les
 // comptes (un mot de passe n'a rien a faire en clair dans indexedDB). Pour
 // elles, l'echec franc vaut mieux.
-const JAMAIS_EN_FILE = [/^\/api\/comptes(\/|$)/, /^\/api\/orders\/purge$/];
+// Lot 6 : « Reoptimiser » non plus -- c'est un calcul routier depuis la
+// position de l'instant ; rejoue une heure plus tard, il reordonnerait la
+// tournee d'apres un endroit que le livreur a quitte. L'ecran le refuse hors
+// ligne, avant tout envoi.
+const JAMAIS_EN_FILE = [/^\/api\/comptes(\/|$)/, /^\/api\/orders\/purge$/, /^\/api\/routes\/[^/]+\/reoptimiser$/];
 
 /** Met l'ecriture en file si elle est recuperable. Rend true si c'est fait. */
 async function tenterMiseEnFile(url, options) {
@@ -8292,7 +8379,13 @@ function majEnteteTournee() {
   const etape = isRouteComplete(activeRoute) ? "tournée terminée"
     : activeRoute.status === "prete" ? `${total} arrêt${total > 1 ? "s" : ""}, prête à partir`
     : `arrêt ${rang} sur ${total}`;
-  setText("pageSubtitle", [jour, etape]
+  // Lot 6 (planche 13b : « 18 km restants, environ 47 min ») : en route, le
+  // reste et l'heure de retour, quand les troncons le permettent.
+  const horaires = activeRoute.status === "en_livraison" ? horairesAffiches() : null;
+  const reste = horaires
+    ? `${formatDistance(horaires.metresRestants)} restants, retour vers ${formatHeure(horaires.retour)}`
+    : "";
+  setText("pageSubtitle", [jour, etape, reste]
     .filter(Boolean).join(" · "));
 }
 
@@ -8995,3 +9088,435 @@ setInterval(async () => {
   operationsRefreshing = true;
   try { await loadData(); } finally { operationsRefreshing = false; }
 }, 60000);
+
+// === LOT 6 DE L'AUDIT GEO : PRATIQUE AU QUOTIDIEN (23/09) ===================
+//
+// Heures d'arrivee, km restants et heure de retour (troncons OSRM du lot 7 et
+// duree d'arret des Parametres) ; depot par defaut ; « Y aller » vers les
+// coordonnees, dans l'application choisie ; « Prevenir » par SMS ;
+// « Reoptimiser » ; « Faire maintenant » ; « Ajouter a la tournee en cours » ;
+// historique des tournees. Les fonctions pures vivent dans
+// domains/tournee-pratique.js ; ici, l'ecran.
+//
+// Toute ecriture passe par apiFetch : file hors ligne et cle d'idempotence du
+// lot 1. Seule la reoptimisation est refusee hors ligne (JAMAIS_EN_FILE).
+
+const CLE_APPLI_NAVIGATION = "sereo.navigation";
+const APPAREIL_APPLE = estAppareilApple();
+let appliNavigationSession = "";
+let reglagesTournee = {
+  stopDurationMin: 6,
+  depot: null,
+  retourAuDepot: true,
+  messagePrevenir: MESSAGE_PREVENIR_DEFAUT
+};
+
+function initTourneePratique() {
+  const retourPlanification = document.getElementById("returnToStart");
+  // « Retour au depot » memorise : la case de la planification ecrit le
+  // reglage (discretement ; hors ligne, il attend dans la file).
+  retourPlanification?.addEventListener("change", () => {
+    enregistrerReglagesTournee({ retourAuDepot: retourPlanification.checked })
+      .catch(erreur => { if (!erreur?.enFile) notifyEchec(erreur); });
+  });
+  const retourParametres = document.getElementById("parRetourDepot");
+  retourParametres?.addEventListener("change", () => {
+    enregistrerReglagesTournee({ retourAuDepot: retourParametres.checked }, retourParametres.checked
+      ? "« Retour au dépôt » sera coché pour les prochaines tournées."
+      : "« Retour au dépôt » ne sera plus coché d’office.")
+      .catch(notifyEchec);
+  });
+  const message = document.getElementById("parMessagePrevenir");
+  message?.addEventListener("change", () => {
+    enregistrerReglagesTournee({ messagePrevenir: message.value }, "Message « Prévenir » enregistré.").catch(notifyEchec);
+  });
+  const resultats = document.getElementById("parDepotResultats");
+  resultats?.addEventListener("change", () => {
+    const option = resultats.selectedOptions[0];
+    if (!option?.dataset.point) return;
+    const point = JSON.parse(option.dataset.point);
+    resultats.hidden = true;
+    const champ = document.getElementById("parDepotRecherche");
+    if (champ) champ.value = "";
+    enregistrerReglagesTournee({ depot: point }, `Dépôt enregistré : ${point.label}.`)
+      .then(() => document.getElementById("parDepotActuel")?.focus?.())
+      .catch(notifyEchec);
+  });
+  document.getElementById("parDepotRecherche")?.addEventListener("keydown", event => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    const bouton = document.querySelector('[data-action="par-depot-chercher"]');
+    runAction(bouton, "Recherche…", chercherDepot);
+  });
+  document.getElementById("tourneesHistorique")?.addEventListener("toggle", rendreHistoriqueTournees);
+  rendreReglagesPratiques();
+}
+
+// --- Reglages -------------------------------------------------------------------
+
+function recevoirReglagesTournee(reglages) {
+  if (!reglages || typeof reglages !== "object") return;
+  const avant = reglagesTournee.stopDurationMin;
+  reglagesTournee = {
+    ...reglagesTournee,
+    ...reglages,
+    messagePrevenir: reglages.messagePrevenir || MESSAGE_PREVENIR_DEFAUT
+  };
+  preremplirDepart(reglagesTournee.depot, reglagesTournee.retourAuDepot !== false);
+  rendreReglagesPratiques();
+  // Les heures d'arrivee dependent de la duree d'arret : on ne redessine que
+  // si elle a change (un rendu de plus deplacerait le focus pour rien).
+  if (activeRoute && avant !== reglagesTournee.stopDurationMin) {
+    renderRoute();
+    updateRouteProgress();
+  } else {
+    // Le texte du SMS a pu changer : le lien seul, sans rien redessiner.
+    majLienPrevenir(getCurrentDeliveryTarget());
+  }
+}
+
+async function enregistrerReglagesTournee(patch, message = "") {
+  const statut = document.getElementById("tourneeSettingsStatus");
+  // L'ecran suit tout de suite : l'ecriture peut attendre dans la file.
+  reglagesTournee = { ...reglagesTournee, ...patch };
+  rendreReglagesPratiques();
+  if (Object.prototype.hasOwnProperty.call(patch, "depot") || Object.prototype.hasOwnProperty.call(patch, "retourAuDepot")) {
+    preremplirDepart(reglagesTournee.depot, reglagesTournee.retourAuDepot !== false, { forcer: true });
+  }
+  try {
+    const enregistres = await apiFetch("/api/settings/tournee", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch)
+    });
+    recevoirReglagesTournee(enregistres);
+    if (statut) statut.textContent = "Enregistré ✓";
+    if (message) notify(message, "success");
+  } catch (erreur) {
+    if (statut) statut.textContent = erreur?.enFile ? erreur.message : `Erreur : ${erreur?.message || "réseau"}`;
+    throw erreur;
+  }
+}
+
+function rendreReglagesPratiques() {
+  const depot = reglagesTournee.depot;
+  const actuel = document.getElementById("parDepotActuel");
+  if (actuel) actuel.textContent = depot ? `Dépôt : ${depot.label}` : "Aucun dépôt enregistré.";
+  const effacer = document.getElementById("parDepotEffacer");
+  if (effacer) effacer.hidden = !depot;
+  const retour = document.getElementById("parRetourDepot");
+  if (retour) retour.checked = reglagesTournee.retourAuDepot !== false;
+  const message = document.getElementById("parMessagePrevenir");
+  // Jamais sous les doigts : une saisie en cours n'est pas ecrasee.
+  if (message && document.activeElement !== message) message.value = reglagesTournee.messagePrevenir || MESSAGE_PREVENIR_DEFAUT;
+  rendreChoixNavigation();
+}
+
+async function chercherDepot() {
+  const champ = document.getElementById("parDepotRecherche");
+  const select = document.getElementById("parDepotResultats");
+  const q = String(champ?.value || "").trim();
+  if (q.length < 3) throw new Error("Saisis l’adresse du dépôt (3 caractères au moins).");
+  const resultats = await apiFetch(`/api/geocode?q=${encodeURIComponent(q)}`);
+  if (!Array.isArray(resultats) || !resultats.length) throw new Error("Aucune adresse trouvée. Précise la ville ou le code postal.");
+  select.innerHTML = '<option value="">Confirmer une adresse</option>' + resultats.map((p, i) => {
+    const point = { label: String(p.label || q).slice(0, 200), lat: p.lat, lng: p.lng };
+    return `<option value="${i}" data-point="${escapeAttribute(JSON.stringify(point))}">${escapeHtml(point.label)}</option>`;
+  }).join("");
+  select.hidden = false;
+  select.focus();
+}
+
+// --- « Y aller » -------------------------------------------------------------------
+
+function appliNavigation() {
+  let choix = appliNavigationSession;
+  try { choix = localStorage.getItem(CLE_APPLI_NAVIGATION) || choix; } catch { /* navigation privee : le choix de la session */ }
+  return appliRetenue(choix, APPAREIL_APPLE);
+}
+
+function choisirAppliNavigation(cle) {
+  const retenue = appliRetenue(cle, APPAREIL_APPLE);
+  appliNavigationSession = retenue;
+  try { localStorage.setItem(CLE_APPLI_NAVIGATION, retenue); } catch { /* le choix vaut pour la session */ }
+  rendreChoixNavigation();
+  document.querySelector(`#parNavigation [data-appli="${retenue}"]`)?.focus();
+  const libelle = applisDeNavigation(APPAREIL_APPLE).find(a => a.cle === retenue)?.libelle || "Google Maps";
+  notify(`« Y aller » ouvrira ${libelle} sur cet appareil.`, "success");
+  // L'ecran de fin porte un lien « Y aller » vers l'arrivee.
+  if (activeRoute && isRouteComplete(activeRoute)) renderRoute();
+}
+
+function rendreChoixNavigation() {
+  const actuelle = appliNavigation();
+  const applis = applisDeNavigation(APPAREIL_APPLE);
+  const groupe = document.getElementById("parNavigation");
+  if (groupe) {
+    groupe.innerHTML = applis.map(a =>
+      `<button type="button" class="par-segment" data-action="par-navigation" data-appli="${escapeAttribute(a.cle)}" aria-pressed="${a.cle === actuelle}">${escapeHtml(a.libelle)}</button>`
+    ).join("");
+  }
+  const bouton = document.getElementById("mapsButton");
+  const libelle = applis.find(a => a.cle === actuelle)?.libelle || "Google Maps";
+  if (bouton) bouton.title = `Ouvrir l’itinéraire dans ${libelle}`;
+}
+
+// --- Heures d'arrivee ---------------------------------------------------------------
+
+function horairesAffiches() {
+  if (!activeRoute?.stops?.length) return null;
+  return horairesDeTournee(activeRoute, {
+    maintenant: Date.now(),
+    dureeArretMin: reglagesTournee.stopDurationMin
+  });
+}
+
+/** « · 18 km restants · retour vers 15 h 20 », ou rien sans troncons. */
+function resumeDuReste(horaires) {
+  if (!horaires) return "";
+  return ` · ${formatDistance(horaires.metresRestants)} restants · retour vers ${formatHeure(horaires.retour)}`;
+}
+
+// --- « Prevenir » --------------------------------------------------------------------
+
+function lienPrevenirPour(target) {
+  if (!target) return "";
+  const arrivee = horairesAffiches()?.arrivees.get(String(target.id));
+  const texte = textePrevenir(reglagesTournee.messagePrevenir, Number.isFinite(arrivee) ? formatHeure(arrivee) : "");
+  return lienSms(target.phone || target.telephone, texte, { apple: APPAREIL_APPLE });
+}
+
+function majLienPrevenir(target) {
+  const lien = document.getElementById("prevenirButton");
+  if (!lien) return;
+  const actif = Boolean(target) && activeRoute && ["prete", "en_livraison"].includes(activeRoute.status) && !isStopTerminal(target.status);
+  const href = actif ? lienPrevenirPour(target) : "";
+  if (href) {
+    lien.setAttribute("href", href);
+    lien.removeAttribute("aria-disabled");
+  } else {
+    lien.removeAttribute("href");
+    lien.setAttribute("aria-disabled", "true");
+  }
+}
+
+function prevenirClient(event, lien) {
+  const target = getCurrentDeliveryTarget();
+  const href = lien.getAttribute("aria-disabled") === "true" ? "" : lienPrevenirPour(target);
+  if (!href) {
+    event.preventDefault();
+    notify(target ? "Numéro de téléphone manquant." : "Aucun client sélectionné.", "warning");
+    return;
+  }
+  // L'heure a pu avancer depuis le dernier rendu : le texte est refait a
+  // l'instant du geste, avant que le lien ne s'ouvre.
+  lien.setAttribute("href", href);
+}
+
+// --- Reoptimiser --------------------------------------------------------------------
+
+function positionDuTelephone() {
+  if (!navigator.geolocation) {
+    return Promise.reject(new Error("La localisation n’est pas disponible sur cet appareil."));
+  }
+  return new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(
+    position => {
+      // ~100 m (decision 5 du 23/09) : la position exacte ne quitte pas le telephone.
+      const arrondi = v => Math.round(v * 1000) / 1000;
+      resolve({ lat: arrondi(position.coords.latitude), lng: arrondi(position.coords.longitude), label: "Ma position actuelle" });
+    },
+    () => reject(new Error("Localisation refusée ou indisponible. Autorise-la dans le navigateur, puis recommence.")),
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 }
+  ));
+}
+
+function majBoutonReoptimiser() {
+  const bouton = document.getElementById("reoptimiserButton");
+  if (!bouton) return;
+  const statut = activeRoute?.stops?.length ? activeRoute.status : null;
+  const restants = statut === "en_livraison" && activeRoute.stops.some(s => !isStopTerminal(s.status));
+  bouton.hidden = !(statut === "prete" || restants);
+  // Pendant le calcul, runAction affiche « Calcul… » : on n'y touche pas.
+  if (!bouton.disabled) bouton.textContent = statut === "en_livraison" ? "Réoptimiser les arrêts restants" : "Réoptimiser";
+}
+
+function refuserHorsLigne() {
+  if (estDefinitivementHorsLigne()) {
+    throw new Error("Hors ligne : réoptimiser demande le réseau (calcul routier). Rien n’a été changé.");
+  }
+}
+
+async function reoptimiserTournee() {
+  if (!activeRoute?.stops?.length) throw new Error("Crée une tournée avant de la réoptimiser.");
+  refuserHorsLigne();
+  if (activeRoute.status === "prete") {
+    ouvrirDialogueReoptimiser();
+    return;
+  }
+  if (activeRoute.status !== "en_livraison") throw new Error("Cette tournée est terminée.");
+  const position = await positionDuTelephone();
+  const resultat = await apiFetch(`/api/routes/${encodeURIComponent(activeRoute.id)}/reoptimiser`, {
+    method: "POST",
+    timeoutMs: 90000,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ position })
+  });
+  await appliquerGesteArret(resultat);
+  allerAuPremierRestant();
+  notify("Arrêts restants réoptimisés depuis ta position.", "success");
+}
+
+const memePoint = (a, b) => Boolean(a && b) && Number(a.lat) === Number(b.lat) && Number(a.lng) === Number(b.lng);
+
+function ouvrirDialogueReoptimiser() {
+  const dialogue = document.getElementById("reoptimiserDialog");
+  const liste = document.getElementById("reoptDeparts");
+  if (!dialogue || !liste) return;
+  const options = [];
+  const actuel = activeRoute.departure;
+  if (actuel && getEntityCoordinates(actuel)) options.push({ cle: "actuel", libelle: `Le départ prévu : ${actuel.label || "point choisi"}` });
+  const depot = reglagesTournee.depot;
+  if (depot && !memePoint(actuel, depot)) options.push({ cle: "depot", libelle: `Le dépôt : ${depot.label}` });
+  options.push({ cle: "position", libelle: "Ma position actuelle" });
+  liste.innerHTML = options.map((o, i) => `
+    <label class="reopt-choix"><input type="radio" name="reoptDepart" value="${escapeAttribute(o.cle)}" ${i === 0 ? "checked" : ""}><span>${escapeHtml(o.libelle)}</span></label>`).join("");
+  const erreur = document.getElementById("reoptErreur");
+  if (erreur) erreur.textContent = "";
+  dialogue.showModal();
+  liste.querySelector("input:checked")?.focus();
+}
+
+async function validerReoptimisation() {
+  const dialogue = document.getElementById("reoptimiserDialog");
+  const erreur = document.getElementById("reoptErreur");
+  if (!activeRoute) return;
+  try {
+    refuserHorsLigne();
+    const choix = document.querySelector('input[name="reoptDepart"]:checked')?.value || "actuel";
+    const corps = {};
+    let depart = null;
+    if (choix === "depot" && reglagesTournee.depot) depart = { ...reglagesTournee.depot };
+    if (choix === "position") depart = await positionDuTelephone();
+    if (depart) {
+      corps.departure = depart;
+      // Une tournee qui revenait a son depart revient au nouveau.
+      if (!activeRoute.arrival || memePoint(activeRoute.departure, activeRoute.arrival)) corps.arrival = depart;
+    }
+    const resultat = await apiFetch(`/api/routes/${encodeURIComponent(activeRoute.id)}/reoptimiser`, {
+      method: "POST",
+      timeoutMs: 90000,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(corps)
+    });
+    dialogue?.close();
+    await appliquerGesteArret(resultat);
+    allerAuPremierRestant();
+    notify("Tournée réoptimisée.", "success");
+  } catch (e) {
+    // L'erreur reste DANS le dialogue, a cote du choix qui l'a causee.
+    if (erreur) erreur.textContent = e?.message || "Réoptimisation impossible.";
+  }
+}
+
+function allerAuPremierRestant() {
+  if (!activeRoute) return;
+  const premier = activeRoute.stops.findIndex(s => !isStopTerminal(s.status));
+  activeStopIndex = premier >= 0 ? premier : 0;
+  renderRoute();
+  renderMap();
+  updateRouteProgress();
+}
+
+// --- Faire maintenant, ajouter en route --------------------------------------------
+
+function selectionnerArret(stopId) {
+  const index = activeRoute ? activeRoute.stops.findIndex(s => String(s.id) === String(stopId)) : -1;
+  if (index >= 0) selectStop(index);
+}
+
+async function faireMaintenant(stopId) {
+  if (!activeRoute) return;
+  const stop = activeRoute.stops.find(s => String(s.id) === String(stopId));
+  if (!stop) return;
+  try {
+    const resultat = await apiFetch(`/api/routes/${encodeURIComponent(activeRoute.id)}/stops/${encodeURIComponent(stopId)}/maintenant`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}"
+    });
+    await appliquerGesteArret(resultat);
+    selectionnerArret(stopId);
+    notify(resultat?.horairesARecalculer
+      ? `${stop.clientName} : à faire maintenant. Heures d’arrivée à recalculer (« Réoptimiser les arrêts restants »).`
+      : `${stop.clientName} : à faire maintenant.`, resultat?.horairesARecalculer ? "warning" : "success");
+  } catch (erreur) {
+    if (!erreur?.enFile) throw erreur;
+    // Hors ligne : le geste attend dans la file (lot 1) ; l'ecran montre deja
+    // l'arret, le livreur y va.
+    selectionnerArret(stopId);
+    notify(`${erreur.message} ${stop.clientName} reste affiché.`, "warning");
+  }
+}
+
+async function ajouterALaTournee(orderId) {
+  if (!activeRoute || activeRoute.status !== "en_livraison") throw new Error("Aucune tournée en cours.");
+  const commande = orders.find(o => String(o.id) === String(orderId));
+  const nom = commande?.clientName || "La commande";
+  let resultat;
+  try {
+    resultat = await apiFetch(`/api/routes/${encodeURIComponent(activeRoute.id)}/ajouter`, {
+      method: "POST",
+      timeoutMs: 90000,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ orderId })
+    });
+  } catch (erreur) {
+    // Une adresse a verifier : le lot 3 la nomme sous la preparation.
+    if (erreur?.details?.adresses) afficherErreursTournee(erreur.details.adresses);
+    throw erreur;
+  }
+  deliverySelection.delete(String(orderId));
+  deliveryFirst.delete(String(orderId));
+  await appliquerGesteArret(resultat);
+  notify(`${nom} : ajoutée à la tournée en cours${resultat?.rang ? ` (arrêt ${resultat.rang})` : ""}.${resultat?.horairesARecalculer ? " Heures d’arrivée à recalculer." : ""}`, "success");
+}
+
+// --- Historique des tournees ----------------------------------------------------------
+
+function rendreHistoriqueTournees() {
+  const panneau = document.getElementById("tourneesHistorique");
+  const contenu = document.getElementById("tourneesHistoriqueContenu");
+  if (!panneau || !contenu || !panneau.open) return;
+  const { tournees, mois } = historiqueDesTournees(deliveryRoutes);
+  if (!tournees.length) {
+    contenu.innerHTML = emptyState("Aucune tournée terminée", "Les tournées finies apparaîtront ici, avec leurs kilomètres et leur durée.");
+    return;
+  }
+  const km = valeur => `${String(Math.round(valeur * 10) / 10).replace(".", ",")} km`;
+  const nomDuMois = cle => {
+    const date = new Date(`${cle}-15T12:00:00`);
+    if (Number.isNaN(date.getTime())) return "Sans date";
+    const texte = date.toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+    return texte.charAt(0).toUpperCase() + texte.slice(1);
+  };
+  const inconnus = (n, mot) => (n ? ` <span class="trn-historique-note">(${n} ${mot})</span>` : "");
+  const tableaux = mois.map(m => `
+    <section class="trn-historique-mois" aria-label="${escapeAttribute(nomDuMois(m.mois))}">
+      <h4>${escapeHtml(nomDuMois(m.mois))}</h4>
+      <p class="trn-historique-total">${escapeHtml(`${m.total.tournees} tournée${m.total.tournees > 1 ? "s" : ""} · ${km(m.total.km)} · ${formatMinutes(m.total.minutes)} · ${m.total.livres} livré${m.total.livres > 1 ? "s" : ""}`)}</p>
+      <div class="trn-historique-defile">
+        <table class="trn-historique-table">
+          <caption class="sr-only">Total par secteur, ${escapeHtml(nomDuMois(m.mois))}</caption>
+          <thead><tr><th scope="col">Secteur</th><th scope="col">Tournées</th><th scope="col">Km prévus</th><th scope="col">Durée</th><th scope="col">Livrés</th></tr></thead>
+          <tbody>${m.secteurs.map(s => `<tr data-secteur="${escapeAttribute(s.secteur)}"><th scope="row">${escapeHtml(formatSectorLabel(s.secteur))}</th><td>${s.tournees}</td><td>${km(s.km)}${inconnus(s.kmInconnus, "sans tracé")}</td><td>${escapeHtml(formatMinutes(s.minutes))}${inconnus(s.minutesInconnues, "sans heures")}</td><td>${s.livres}</td></tr>`).join("")}</tbody>
+        </table>
+      </div>
+    </section>`).join("");
+  const dernieres = tournees.slice(0, 10).map(t => `
+      <li><span>${escapeHtml(formatJourDeTournee(t.jour))} · ${escapeHtml(formatSectorLabel(t.secteur))}</span><span class="muted">${escapeHtml([`${t.livres}/${t.arrets} livrés`, t.km === null ? "" : km(t.km), t.minutes === null ? "" : formatMinutes(t.minutes)].filter(Boolean).join(" · "))}</span></li>`).join("");
+  contenu.innerHTML = `
+    <p class="muted">Kilomètres du tracé prévu (pas ceux roulés), durée du départ au dernier arrêt.</p>
+    ${tableaux}
+    <h4>Dernières tournées</h4>
+    <ul class="trn-historique-liste">${dernieres}</ul>`;
+}
