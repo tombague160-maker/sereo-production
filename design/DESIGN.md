@@ -2598,3 +2598,132 @@ renvoyé en haut par `resetViewportScroll(false)`. Mesuré par la sonde sur la s
 position qu'elle avait : `scrollY` 138 au `DOMContentLoaded` (le défilement vers
 l'ancre `#livreur`), 0 au `load` — la remise écrase toute position prise avant.
 Le défilement d'un humain n'a pas été rejoué. Hors de ce lot.
+
+## Clients au téléphone (planches 9a, 8c, 12c), posé le 23/09
+
+Sous **820 px** ; au bureau (planche 13e), rien ne change : ce qui est propre au téléphone
+est caché hors du media, et le tri n'y est ni rendu ni appliqué. CSS : le bloc « CLIENTS AU
+TELEPHONE » en fin de `style.css`. Banc : `test/e2e/clients-mobile.spec.js` (15 cas, port
+3302) ; `clients.spec.js` reste vert.
+
+**Posé — la liste (9a)**
+
+- **Les filtres dans le vert** : l'en-tête se prolonge dans le bloc des pilules (Tous, les
+  secteurs, Abonnés), un seul vert arrondi de 28 px dessous — le motif des Abonnements (3a).
+  Pilules de 44 px : inactives en surface sur vert, l'active en blanc à texte vert (plein
+  clair en sombre). Le **statut commercial** (hors planche, gardé) y est une pilule de plus,
+  sur la surface sur vert.
+- **La ligne « N clients » / tri**, sous le vert : le compte de la liste **filtrée**
+  (« 1 client » sous « Abonnés »), et le tri **« Dernière livraison »** ou **« Nom »**.
+- **« Nouveau client » fixé en bas**, pleine largeur moins 16 px, 48 px, à 14 px au-dessus
+  de la barre basse. La liste lui réserve sa place (172 px sous le dernier client) : tout
+  en bas, le dernier client est entièrement au-dessus du bouton — mesuré. Même élément que
+  le bouton de l'en-tête du bureau (un geste, deux positions) ; il disparaît dans la fiche.
+- **« Rappels »** (hors planche, gardé : seul chemin vers les rappels) partage sa rangée avec
+  la pastille de synchro et « Actualiser », au lieu d'en faire une de plus.
+
+**Posé — la fiche (8c clair, 12c sombre)**
+
+- **Le bloc vert de la fiche** : la flèche de retour (rond de 44 px, surface sur vert) à
+  gauche du nom (24 px), les puces dessous — le lieu en surface sur vert, l'abonnement en
+  blanc à texte vert (en sombre : vert clair sombre, texte principal, comme 12c) — puis
+  **« Appeler »** (blanc ; plein clair en sombre) et **« Itinéraire »** (contour clair ; en
+  sombre, contour et texte principal, comme 12c), 48 px, côte à côte. Le bloc prolonge
+  l'en-tête de l'écran, dont le titre « Clients » et les gestes de la liste s'effacent.
+- **« Itinéraire »** ouvre Google Maps sur l'adresse du client, encodée : le même
+  constructeur (`buildGoogleMapsUrl`) que « Y aller » de la tournée ; il n'est rendu que si
+  l'adresse a une rue **et** une ville (sinon le lien serait vide).
+- **Le reste en cartes V8** (surface, rayon 24, marge 18) : adresse et contact avec leur
+  icône et un filet entre eux ; les notes ; le statut commercial ; l'abonnement (titre et
+  badge sur une rangée, « Créer la commande » en pleine largeur) ; les commandes (le
+  numéro, puis « date · articles », le badge à droite, un filet entre elles ; « Les N
+  autres » centré).
+- **Le passage liste → fiche → retour** : la flèche et le retour du téléphone ramènent la
+  liste, le focus revient sur la ligne ouverte. Mesuré aussi après un rechargement depuis
+  une fiche : la liste revient, et la fiche rouverte se referme d'une seule flèche — la
+  flèche s'arrête à la liste, sans second recul dans l'historique (garde : le code de
+  `main` le fait déjà ; le `popstate` privé de `depuisHistorique` recule d'une entrée de
+  trop et le cas le prend, `cliVue` reçu `null` au lieu de `"fiche"`).
+
+**Décisions prises**
+
+- **Le tri par défaut, au téléphone, est « Dernière livraison »** : c'est celui de la
+  planche, et la passation le dit « le plus utile en tournée ». Il est calculé **dans le
+  navigateur**, depuis les commandes déjà chargées (même décision qu'au bureau pour « livrée
+  le … » : rien de neuf côté serveur). Les clients jamais livrés viennent ensuite, par nom.
+  Au bureau la liste reste par nom ; passer le seuil de 820 px (une tablette qu'on tourne)
+  redessine la liste dans l'ordre de la largeur.
+- **« Modifier »** (hors planche, gardé : seul chemin vers le formulaire) est un **rond de
+  48 px** au bout de la rangée Appeler / Itinéraire, avec un crayon ; son nom accessible
+  reste le mot « Modifier », caché à l'œil seulement. À trois boutons pleine largeur,
+  « Appeler » et « Itinéraire » ne tenaient plus sur 358 px.
+- **La pastille de synchro et « Actualiser » restent** en haut du vert de la fiche (la
+  planche ne les dessine pas ; gardés comme dans « Les 90 jours » des Abonnements).
+- **L'ordre des cartes est celui du DOM du bureau** : adresse et contact, notes, statut,
+  abonnement, commandes. Les réordonner au seul téléphone (`order`) aurait séparé l'ordre
+  du clavier de l'ordre lu.
+- Les libellés « Adresse » / « Contact » sont **cachés à l'œil**, lus par les lecteurs
+  d'écran : la planche met l'icône à leur place. Le statut commercial passe **en colonne**
+  (côte à côte, « Statut commercial » tenait sur deux lignes).
+- **Hors ligne**, le bandeau s'intercale entre l'en-tête et l'écran : l'en-tête garde son
+  arrondi, et les filtres (liste) ou le bloc de la fiche deviennent une carte verte fermée
+  — deux verts fermés plutôt qu'un vert coupé (le motif des Abonnements).
+- **L'anneau clavier hors du vert** (« Nouveau client » fixé, les commandes de la fiche,
+  « Les N autres ») écrit ses deux tons en clair (`--v8-focus-halo`, `--v8-focus`) au lieu
+  de `var(--focus-ring)` : ce jeton n'est défini que sous le thème clair, et en sombre la
+  déclaration `box-shadow` devenait invalide — aucun anneau (mesuré : ombre `none`, contour
+  `none`, sur les trois). Le tri garde `--focus-ring` : en sombre, le contour du `select`
+  porte l'anneau, le banc l'y voit.
+- **La puce « En pause »** prend la teinte tiède partout. Avant, sans secteur ni ville, elle
+  devenait la première puce et prenait la teinte froide d'« Abonné » ; seul effet au bureau,
+  sur ce seul cas.
+
+**Écarts nommés**
+
+- le titre de la carte d'abonnement garde sa fréquence (« Abonnement · toutes les 2
+  semaines ») au lieu de « Abonnement » seul et « Tous les 15 j · rappel … » dessous : la
+  carte est celle du bureau ;
+- la fiche commence sous la rangée synchro / Actualiser : une rangée de plus que 8c ;
+- barre basse opaque et bouton à 14 px d'elle telle qu'elle est rendue (lot 1).
+
+**Omis, faute de données** : l'interlocuteur (« Mme Ferrand, cadre de santé ») et
+l'instruction de livraison (« entrée de service ») — le modèle client n'a pas ces champs ;
+les notes s'affichent dans leur carte, comme au bureau.
+
+**Constaté hors du lot, non corrigé** : au bureau, « Itinéraire » **se voit**, souligné
+(capture de l'audit `crm-bureau-light.png`, sur `main`), alors que la section 13e décide
+« au téléphone, pas au bureau » : `.cli-itineraire { display: none }` (0,1,0) perd contre
+`:root[data-color-scheme] #crm .cli-bouton-contour { display: inline-flex }` (1,2,0). La
+consigne « au bureau, rien ne change » m'interdisait de le retirer. À trancher : l'ôter
+(la décision écrite) ou le garder et le styler comme « Modifier ».
+
+**Constaté hors du lot, non corrigé (2)** : au bureau **en sombre**, « Modifier » et les
+commandes de la fiche n'ont **aucun anneau** au clavier (sonde à 1280 px : ombre `none`,
+contour `none`) — `#crm .cli-bouton-contour:focus-visible` et `#crm
+.cli-commande:focus-visible` comptent sur `--focus-ring`, défini sous le seul thème clair.
+Sur `main`, pas de ce lot ; même remède que ci-dessus, à poser au bureau.
+
+**Ce que le banc mesure** : dans les deux thèmes, le vert des filtres et de la fiche collé
+à l'en-tête, les rayons, le contraste ≥ 4,5:1 de tout texte de l'en-tête de fiche et des
+cartes, la hauteur des pilules (≥ 44) et des gestes (≥ 48), la couleur d'« Appeler » ; le
+tri et le compte ; le bouton fixe (position, place réservée) ; le lien d'« Itinéraire »
+(l'adresse affichée, encodée) ; ce qui est gardé ; l'anneau clavier sur chaque geste du
+vert, et hors du vert dans les deux thèmes (tri, « Nouveau client », une commande, « Les N
+autres ») ; le rechargement depuis une fiche ; le bandeau hors ligne ; le bureau inchangé (ligne de tri cachée, bouton non fixe,
+fiche en carte blanche, icônes cachées, liste par nom, retour au bon ordre au passage du
+seuil). **Ne voit pas** : les règles `prefers-color-scheme` sans `data-color-scheme` —
+l'application pose toujours l'attribut, elles ne servent qu'avant le script (comme dans
+les autres lots).
+
+**Preuves rouges** : les 13 premiers cas échouent avec le HTML, le CSS et le JS de `main`
+(sauf le lien d'« Itinéraire », vert sur `main` : il existait, le cas est une garde) —
+rejoué cas par cas à la reprise, chacun rouge sur sa propre assertion ; douze mutations
+ciblées (un morceau du lot retiré à la fois) ont été prises chacune par son cas (mesure de
+la session d'implémentation, non rejouée à la reprise). L'anneau hors du vert : avant le
+remède, le cas sombre liste « Nouveau client », la commande et « Les N autres » sans
+anneau ; chacune des trois déclarations remise seule à `var(--focus-ring)` (ou retirée)
+rend le cas sombre rouge sur son seul élément, le cas clair restant vert. La
+couleur d'« Appeler » en sombre est posée sous les deux portées du thème : retirer l'une ne
+suffit pas, retirer les deux rend le cas rouge.
+
+**`CACHE_NAME`** : non touché — le nom annoncé porte l'empreinte du contenu de `public/`.
