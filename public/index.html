@@ -424,6 +424,17 @@
         </span>
       </div>
 
+      <!-- DECISION 4 (23/09) : l'application rouverte SANS RESEAU ne montre que
+           l'ecran Tournee. Les autres ecrans le disent ici, a la place de leur
+           contenu (app.js, majEcranDemandeReseau). -->
+      <section id="ecranDemandeReseau" class="ecran-demande-reseau" role="status" hidden>
+        <div class="empty-state">
+          <h4>Cet écran demande le réseau</h4>
+          <p>Sans réseau, seule la tournée s’ouvre, avec les dernières données connues. Le reste revient avec le réseau.</p>
+          <a class="button primary empty-state-action" href="#livreur">Ouvrir la tournée</a>
+        </div>
+      </section>
+
       <!-- Les onglets qu'une entree de nav absorbe, rendus par app.js pour le
            SEUL groupe actif. La rangee reste masquee quand le groupe n'a qu'un
            ecran. Forme : les pilules de filtre de la charte, que la planche
@@ -1179,6 +1190,11 @@
       <section id="livreur" class="page" role="tabpanel" aria-label="Tournée">
         <div class="driver-page">
 
+          <!-- Lot 2 de l'audit geo (H9) : une tournee d'un jour passe, pas
+               soldee, se SIGNALE ici, avec le geste qui la solde. Avant, elle
+               s'affichait a la place de celle du jour, a chaque ouverture. -->
+          <div id="tourneesNonSoldees" class="tournee-retard" role="status" hidden></div>
+
           <!-- L'ARRET EN COURS D'ABORD (planche Main.png). Sur la route, c'est
                le seul ecran qui compte : l'en-tete dit ou on en est, la carte
                dit ou on va, les trois gestes sont sous le pouce. La
@@ -1193,15 +1209,35 @@
               <div class="tournee-progression" aria-hidden="true"><div class="tournee-progression-barre" id="tourneeProgressionBarre"></div></div>
             </header>
 
+            <!-- Lot 2 (H9) : plusieurs tournees ce jour-la (ou une d'un jour
+                 passe a solder) : on choisit celle qu'on regarde. -->
+            <label class="tournee-choix" id="tourneeChoixBloc" hidden>
+              <span>Tournées du jour</span>
+              <select id="tourneeChoix"></select>
+            </label>
+
             <div class="panel current-driver-card">
               <div class="tournee-depart" id="tourneeDepart">
                 <p class="muted">Ordre proposé, modifiable avant le départ.</p>
-                <button id="startRouteButton" class="button primary" type="button" data-action="start-route">Démarrer la tournée</button>
+                <div class="tournee-depart-gestes">
+                  <!-- Lot 2 (H8) : une tournee mal creee s'annule avant le depart. -->
+                  <button id="annulerTourneeButton" class="button secondary" type="button" data-action="annuler-tournee">Annuler la tournée</button>
+                  <button id="startRouteButton" class="button primary" type="button" data-action="start-route">Démarrer la tournée</button>
+                </div>
               </div>
 
               <div id="currentClient" class="current-client-box" aria-live="polite">
                 Aucune tournée créée.
               </div>
+
+              <!-- Decision 10 (lot 2) : « remis a… », facultatif, part avec
+                   « Livre » (et avec lui dans la file hors ligne). Hors de
+                   #currentClient, que chaque rendu reecrit : ce qui est tape
+                   survit au sondage de 60 s. -->
+              <label class="remis-a" id="remisABloc">
+                <span>Remis à</span>
+                <input id="remisAInput" type="text" maxlength="80" autocomplete="off" placeholder="facultatif : accueil, voisin, infirmière…" />
+              </label>
 
               <!-- Planche 4b : Appeler a gauche, « Y aller » au centre (Google
                    Maps), la carte a droite ; « Livre » en 56 px dessous ; Client
@@ -1236,6 +1272,11 @@
                 <details class="gestes-plus">
                   <summary>Autres actions</summary>
                   <div class="gestes-rangee">
+                    <!-- Lot 6 (audit geo) : « Prevenir » ouvre l'application SMS du
+                         telephone, numero et texte prets (« je passe vers 10 h 40 ») :
+                         aucun fournisseur, aucun cout. Un lien, pas un bouton : c'est
+                         le telephone qui envoie. -->
+                    <a id="prevenirButton" class="button secondary compact trn-prevenir" data-action="prevenir-client" aria-disabled="true">Prévenir</a>
                     <button id="markRescheduleButton" class="button secondary compact" type="button" data-action="mark-reschedule">À reprogrammer</button>
                     <button id="replanCurrentButton" class="button secondary compact" type="button" data-action="replan-current-stop">Planifier suite</button>
                     <button id="nextClientButton" class="button secondary compact" type="button" data-action="next-client">Suivant</button>
@@ -1243,6 +1284,9 @@
                          corrigee depuis la route. Remplace les deux champs
                          numeriques qui envoyaient l'identifiant de l'arret. -->
                     <button id="corrigerPositionButton" class="button secondary compact" type="button" data-adr="ouvrir-cible">Corriger la position</button>
+                    <!-- Lot 2 (H8) : une tournee en cours qu'on ne finira pas.
+                         Irreversible : une confirmation le dit. -->
+                    <button id="cloturerTourneeButton" class="button secondary compact" type="button" data-action="cloturer-tournee" hidden>Clôturer la tournée</button>
                   </div>
                 </details>
               </div>
@@ -1253,6 +1297,9 @@
             <div class="panel-heading">
               <h3>Ordre de tournée</h3>
               <span id="routeMetrics" class="muted">Distance estimée indisponible.</span><button class="button secondary trn-recalculer-panneau" type="button" data-op="recalculate-route">Recalculer le tracé</button>
+              <!-- Lot 6 : « Reoptimiser » (tournee prete, autre depart possible) ou
+                   « Reoptimiser les arrets restants » (en route, depuis la position). -->
+              <button id="reoptimiserButton" class="button secondary trn-reoptimiser" type="button" data-action="reoptimiser" hidden>Réoptimiser</button>
             </div>
             <div id="routeStopsList" class="route-stops"></div>
           </div>
@@ -1354,13 +1401,18 @@
             <div id="deliveryCandidates" class="delivery-candidates"></div>
           </div>
 
-          <div class="panel legacy-driver-panel">
-            <div class="panel-heading">
-              <h3>Clients tournée</h3>
-            </div>
+          <!-- Lot 2 de l'audit geo, decision 7 (23/09) : l'ancien panneau
+               « Clients tournee » est retire. Son « Livre » marquait la
+               commande sans solder l'arret (M7) : la tournee ne finissait
+               jamais, et un « Absent » ensuite etait refuse. -->
 
-            <div id="clientsList" class="driver-client-list"></div>
-          </div>
+          <!-- Lot 6 (audit geo) : l'historique des tournees terminees -- km du
+               trace prevu, duree reelle (depart -> dernier arret), et par mois
+               un total par secteur. Calcule sur les tournees deja chargees. -->
+          <details class="panel trn-historique" id="tourneesHistorique">
+            <summary class="trn-historique-titre"><h3>Historique des tournées</h3></summary>
+            <div id="tourneesHistoriqueContenu" class="trn-historique-contenu"></div>
+          </details>
         </div>
       </section>
 
@@ -1581,7 +1633,44 @@
                   <span id="tourneeStopValue" class="settings-slider-value">6 min</span>
                 </div>
               </article>
+              <!-- Lot 6 (audit geo) : le depot par defaut. Le depart d'une nouvelle
+                   tournee est prerempli : preparer une tournee tient en deux gestes
+                   (choisir les commandes, creer). -->
+              <article class="item par-depot">
+                <h4 id="parDepotTitre">Dépôt par défaut</h4>
+                <p class="muted">Le départ prérempli d’une nouvelle tournée.</p>
+                <p id="parDepotActuel" class="par-depot-actuel" aria-live="polite">Aucun dépôt enregistré.</p>
+                <div class="par-depot-recherche">
+                  <label class="par-champ">Adresse du dépôt
+                    <input id="parDepotRecherche" type="text" autocomplete="off" maxlength="200" placeholder="Adresse ou ville" />
+                  </label>
+                  <button class="button secondary compact" type="button" data-action="par-depot-chercher">Rechercher</button>
+                </div>
+                <select id="parDepotResultats" aria-label="Confirmer l’adresse du dépôt" hidden></select>
+                <div class="quick-actions">
+                  <button id="parDepotEffacer" class="button secondary compact" type="button" data-action="par-depot-effacer" hidden>Effacer le dépôt</button>
+                </div>
+                <label class="par-case"><input id="parRetourDepot" type="checkbox" checked /> Retour au dépôt coché par défaut</label>
+              </article>
+              <article class="item">
+                <!-- Nomme par son titre (aria-labelledby) : un <label> dans le
+                     titre ferait une cible de 20 px (cibles-tactiles.spec.js). -->
+                <h4 id="parMessageTitre">Message « Prévenir »</h4>
+                <p class="muted" id="parMessageAide">Le SMS que le téléphone prépare pour le client. {heure} devient l’heure d’arrivée estimée.</p>
+                <textarea id="parMessagePrevenir" rows="2" maxlength="300" aria-labelledby="parMessageTitre" aria-describedby="parMessageAide"></textarea>
+              </article>
+              <article class="item">
+                <h4 id="parNavigationTitre">« Y aller » ouvre</h4>
+                <p class="muted">Réglage de cet appareil.</p>
+                <div id="parNavigation" class="par-segments" role="group" aria-labelledby="parNavigationTitre"></div>
+              </article>
               <p id="tourneeSettingsStatus" class="muted" aria-live="polite">Chargement…</p>
+              <!-- Calcul routier OSRM integre (23/09) : carte locale ou serveur
+                   public, zone, date de la carte, derniere erreur. -->
+              <article class="item">
+                <h4>Calcul routier</h4>
+                <p id="calculRoutierEtat" class="muted">Chargement…</p>
+              </article>
             </div>
           </article>
 
@@ -1653,6 +1742,24 @@
   <!-- Le motif d'un arret en echec. `<dialog>` natif, comme #subscriptionDialog :
        il piege le focus, se ferme a Echap et rend l'arriere-plan inerte, trois
        comportements qu'il faudrait sinon reecrire a la main et mal. -->
+  <!-- Lot 6 (audit geo) : « Reoptimiser » une tournee prete. Une tournee
+       preparee au bureau repart du domicile : le depart se choisit ici. -->
+  <dialog id="reoptimiserDialog" class="motif-dialog reopt-dialog" aria-labelledby="reoptTitre">
+    <form method="dialog" id="reoptForm">
+      <h3 id="reoptTitre">Réoptimiser la tournée</h3>
+      <p class="muted">Séréo recalcule le meilleur ordre des arrêts. Les commandes « À livrer en premier » restent en tête.</p>
+      <fieldset class="reopt-choix-liste">
+        <legend>Partir de</legend>
+        <div id="reoptDeparts"></div>
+      </fieldset>
+      <p id="reoptErreur" class="op-error" role="alert"></p>
+      <div class="motif-actions">
+        <button class="button secondary" type="button" data-action="reopt-annuler">Annuler</button>
+        <button class="button primary" type="button" data-action="reopt-valider">Réoptimiser</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="motifProblemeDialog" class="motif-dialog" aria-labelledby="motifTitre">
     <form method="dialog" id="motifForm">
       <h3 id="motifTitre">Que s'est-il passé ?</h3>
@@ -1665,6 +1772,25 @@
       <div class="motif-actions">
         <button class="button secondary" type="button" data-action="motif-annuler">Annuler</button>
         <button class="button primary" type="button" data-action="motif-valider">Enregistrer</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Lot 2 de l'audit geo (M2) : « Corriger le statut » d'un arret deja
+       traite. Memes pieces que le motif (radios, precision, deux boutons) ;
+       ici la cause est OBLIGATOIRE : elle part dans l'historique. -->
+  <dialog id="correctionDialog" class="motif-dialog" aria-labelledby="correctionTitre">
+    <form method="dialog" id="correctionForm">
+      <h3 id="correctionTitre">Corriger le statut</h3>
+      <p class="muted" id="correctionSousTitre"></p>
+      <div id="correctionListe" class="motif-liste" role="radiogroup" aria-labelledby="correctionTitre"></div>
+      <label class="motif-commentaire">Pourquoi cette correction ?
+        <input id="correctionCause" type="text" maxlength="160" autocomplete="off" required
+               placeholder="Ex. : absent tapé par erreur" />
+      </label>
+      <div class="motif-actions">
+        <button class="button secondary" type="button" data-action="correction-annuler">Annuler</button>
+        <button class="button primary" type="button" data-action="correction-valider">Corriger</button>
       </div>
     </form>
   </dialog>

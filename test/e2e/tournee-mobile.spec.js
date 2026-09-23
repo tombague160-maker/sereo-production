@@ -156,17 +156,19 @@ test("4b — « Prochain : <client> » nomme l'arret suivant non termine", async
   await ctx.close();
 });
 
-test("4b — « Y aller » ouvre Google Maps sur l'adresse de l'arret, encodee", async ({ browser }) => {
+// Lot 6 de l'audit geo (23/09) : RENVERSE, pas supprime. « Y aller » visait
+// l'adresse en texte ; il vise desormais les COORDONNEES de l'arret quand elles
+// existent (une position corrigee a la main, un lieu-dit sans rue y menent).
+// Le repli sur l'adresse en texte est juge dans test/tournee-pratique.test.js.
+test("4b — « Y aller » ouvre Google Maps sur les coordonnees de l'arret", async ({ browser }) => {
   test.setTimeout(120000);
   const { ctx, page } = await ouvrir(browser, srv.base);
   await page.evaluate(() => { window.__ouvert = []; window.open = url => { window.__ouvert.push(url); return null; }; });
   await expect(page.locator("#mapsButton")).toHaveText("Y aller");
   await page.locator("#mapsButton").click();
   const urls = await page.evaluate(() => window.__ouvert);
-  // La ville est celle du serveur, canonisee SANS cedille (une cle de secteur) :
-  // Google la resout pareil. Les accents de la rue, eux, sont encodes.
-  expect(urls).toEqual(["https://www.google.com/maps/dir/?api=1&destination="
-    + encodeURIComponent("12 avenue du Général de Gaulle 25000 Besancon")]);
+  // L'arret 3 (EHPAD Les Tilleuls) est seme a 47.238, 6.024.
+  expect(urls).toEqual(["https://www.google.com/maps/dir/?api=1&destination=47.238,6.024"]);
   await ctx.close();
 });
 
@@ -216,6 +218,14 @@ test("4c — tournee PARTIE sans trace : pas de cercle, le serveur refuserait le
 test("4a — la commande prete se lit « CMD-... · n articles », puis son jour et son secteur", async ({ browser }) => {
   test.setTimeout(120000);
   const { ctx, page } = await ouvrir(browser, srv.base);
+  // Lot 2 de l'audit geo (23/09) : la liste s'ouvre sur le JOUR. Les deux
+  // jours du meme client se comparent filtre de date retire (toutes dates) --
+  // ce que le livreur fait pour preparer demain.
+  await page.evaluate(() => {
+    const champ = document.getElementById("deliveryDate");
+    champ.value = "";
+    champ.dispatchEvent(new Event("change", { bubbles: true }));
+  });
   const r = await page.evaluate(() => [...document.querySelectorAll("#deliveryCandidates .delivery-card")].map(c => {
     const vu = sel => (c.querySelector(sel)?.checkVisibility() ? c.querySelector(sel).textContent.trim() : null);
     return {
@@ -229,8 +239,8 @@ test("4a — la commande prete se lit « CMD-... · n articles », puis son jour
   for (const c of r) {
     expect(c.court).toMatch(/^CMD-\d{4}-\d{3,} · \d+ articles?$/);
     // La carte n'a pas de detail : l'adresse quitte la ligne (la planche),
-    // mais le jour et le secteur y restent -- le filtre par defaut melange
-    // les dates et les secteurs.
+    // mais le jour et le secteur y restent -- sans filtre de date, la liste
+    // melange les dates et les secteurs.
     expect(c.adresse, "l'adresse quitte la ligne au telephone").toBe(false);
     expect(c.contexte, "le jour et le secteur de la commande ont disparu de la ligne").toMatch(/^[a-zé]+\.? \d{2}\/\d{2} · .+/);
   }

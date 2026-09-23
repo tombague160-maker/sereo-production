@@ -1311,6 +1311,21 @@ test("la page annonce le shell du service worker (X-Sereo-Shell)", async () => {
   assert.equal(css.headers.get("x-sereo-shell"), null);
 });
 
+test("sans authentification, aucune fin de session annoncee : la page ne se rouvre pas hors ligne (decision 4)", async () => {
+  // Le service worker ne garde la page (ecran Tournee hors ligne) que si elle
+  // annonce une fin de session a venir (X-Sereo-Session-Fin). Sans
+  // authentification (developpement, bancs), il n'y a pas de session : rien
+  // n'est annonce, rien ne se rouvre hors ligne -- et les bancs sans
+  // authentification gardent le comportement d'avant (la page suivante ne
+  // remplit pas le cache de donnees). Le cas authentifie :
+  // test/tournee-hors-ligne.test.js. Temoin : la page, elle, est bien servie
+  // ici avec son autre en-tete (X-Sereo-Shell, cas precedent).
+  const page = await fetch(`${baseUrl}/`);
+  assert.equal(page.status, 200);
+  assert.ok(page.headers.get("x-sereo-shell"), "temoin : ce n'est pas la page de l'application");
+  assert.equal(page.headers.get("x-sereo-session-fin"), null);
+});
+
 test("le nom du shell porte l'empreinte des fichiers statiques (livraison sans bump)", async () => {
   // Le defaut vise : une livraison modifie app.js, style.css, index.html sans
   // bumper CACHE_NAME. Si le nom du shell ne dependait que de CACHE_NAME, le

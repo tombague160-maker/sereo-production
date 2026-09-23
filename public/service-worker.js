@@ -34,6 +34,7 @@ const APP_SHELL = [
   "/js/config/tabs.js",
   "/js/domains/comptes.js",
   "/js/domains/adresses.js",
+  "/js/domains/tournee-pratique.js",
   // Les quatre graisses du premier rendu (prechargees par index.html).
   "/fonts/poppins-400-latin.woff2",
   "/fonts/poppins-500-latin.woff2",
@@ -257,19 +258,170 @@ function reseauDabord(request) {
   }).catch(() => caches.match(request));
 }
 
-// La navigation passe au reseau, SANS cache : c'est elle qui porte le controle
-// de session (sans session, le serveur rend la page de connexion). On lit
-// seulement l'en-tete X-Sereo-Shell de la reponse.
+// --- L'ECRAN TOURNEE SE ROUVRE SANS RESEAU (decision 4, 23/09) --------------
+//
+// Avant : la navigation passait au reseau, sans aucun repli. Un livreur qui
+// fermait l'application en zone blanche (ou dont le telephone redemarrait) ne
+// pouvait plus la rouvrir : page d'erreur du navigateur, tournee perdue
+// jusqu'au retour du reseau (M10 de l'audit geo, arbitrage de DESIGN.md).
+//
+// Decision de Thomas : l'ecran Tournee, ET SEULEMENT LUI, se rouvre hors
+// ligne. La navigation passe toujours au reseau d'abord : c'est elle qui porte
+// le controle de session. Le HTML de l'application est garde a chaque
+// navigation reussie, et rendu depuis le cache a UNE condition de chaque :
+//  - la navigation vise l'ecran Tournee (#livreur, ou ?ecran=livreur, pour un
+//    navigateur qui ne transmettrait pas l'ancre) ;
+//  - le reseau a echoue (ou se tait depuis DELAI_NAVIGATION_TOURNEE_MS) ;
+//  - une session VALIDE est connue : le serveur annonce sa fin dans l'en-tete
+//    X-Sereo-Session-Fin de la page, et cette fin n'est pas passee ;
+//  - la page gardee annonce le shell de CE service worker (sinon ses scripts,
+//    servis par ce cache-ci, ne seraient pas les siens).
+// La page gardee vit DANS le cache de donnees (API_CACHE_NAME) : elle part avec
+// lui, a la deconnexion (POST /logout) comme a l'expiration de session (401,
+// app.js). Et une navigation qui recoit la page de connexion (fin de session
+// « 0 ») vide ce cache : la session est finie, ni la page ni ses donnees ne se
+// rouvrent. Les autres ecrans, hors ligne, rendent une page qui le dit.
+const CLE_PAGE_TOURNEE = "/__sereo/page-tournee";
+// Reseau qui se tait (4G sans debit) : au-dela, la copie de la tournee. Defaut
+// 5 s ; plage raisonnable 3 a 10 s (en dessous, un serveur lent au reveil
+// ferait ouvrir la copie ; au-dessus, le livreur attend devant un ecran blanc).
+const DELAI_NAVIGATION_TOURNEE_MS = 5000;
+
+function versLaTournee(url) {
+  if (url.pathname !== "/" && url.pathname !== "/index.html") return false;
+  return url.hash === "#livreur" || url.searchParams.get("ecran") === "livreur";
+}
+
+/** La fin de session annoncee par une page (ms), ou null si elle n'en dit rien. */
+function finDeSession(response) {
+  const valeur = response.headers.get("X-Sereo-Session-Fin");
+  if (valeur === null || valeur.trim() === "") return null;
+  const fin = Number(valeur);
+  return Number.isFinite(fin) ? fin : 0;
+}
+
+/** Garde la page, ou vide le cache de donnees si la session est finie. */
+function retenirOuOublier(response) {
+  const fin = finDeSession(response);
+  if (fin === null) return Promise.resolve();
+  if (!(fin > Date.now())) return caches.delete(API_CACHE_NAME);
+  if (!response.ok || response.type !== "basic" || response.redirected) return Promise.resolve();
+  if (!response.headers.get("X-Sereo-Shell")) return Promise.resolve();
+  const copy = response.clone();
+  return caches.open(API_CACHE_NAME).then(cache => cache.put(CLE_PAGE_TOURNEE, copy));
+}
+
+/** La page gardee, si elle peut etre rendue maintenant ; sinon null. */
+function pageTourneeValide() {
+  return caches.open(API_CACHE_NAME)
+    .then(cache => cache.match(CLE_PAGE_TOURNEE).then(page => {
+      if (!page) return null;
+      const fin = finDeSession(page);
+      if (!(fin > Date.now())) {
+        // Session finie pendant la coupure : la page ne se rouvrira plus.
+        return cache.delete(CLE_PAGE_TOURNEE).then(() => null);
+      }
+      return page.headers.get("X-Sereo-Shell") === CACHE_NAME ? page : null;
+    }))
+    .catch(() => null);
+}
+
+/** La page gardee, marquee : la page sait qu'elle s'ouvre sans reseau. */
+function rendreCopieTournee(page) {
+  const headers = new Headers(page.headers);
+  for (const nom of ["Content-Length", "Content-Encoding", "ETag", "Last-Modified"]) headers.delete(nom);
+  headers.set("X-Sereo-Cache", "copie");
+  return page.text().then(html => new Response(
+    html.replace(/<html\b/i, '<html data-ouverte-hors-ligne=""'),
+    { status: 200, statusText: "OK", headers }
+  ));
+}
+
+/** Hors ligne, un autre ecran : une page qui dit qu'il demande le reseau. */
+function pageDemandeReseau(tourneeDisponible) {
+  const lien = tourneeDisponible
+    ? '<p>La tournée, elle, s’ouvre sans réseau.</p><a class="action" href="/?ecran=livreur#livreur">Ouvrir la tournée</a>'
+    : '<p>Séréo demande le réseau pour s’ouvrir.</p>';
+  const html = `<!DOCTYPE html>
+<html lang="fr"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hors ligne — Séréo</title>
+<style>
+:root { color-scheme: light dark; --fond: #fafaf8; --texte: #1f2a2e; --second: #4a5a5f; --action: #1d5e52; --sur-action: #ffffff; --focus: #1d5e52; }
+@media (prefers-color-scheme: dark) { :root { --fond: #0d1518; --texte: #eef3f1; --second: #b8c6c2; --action: #8fd3c3; --sur-action: #0d1518; --focus: #8fd3c3; } }
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--fond); color: var(--texte); font: 16px/1.5 system-ui, sans-serif; }
+main { max-width: 26rem; padding: 24px 16px; }
+h1 { font-size: 1.35rem; margin: 0 0 8px; }
+p { margin: 0 0 12px; color: var(--second); }
+a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 20px; border-radius: 999px; background: var(--action); color: var(--sur-action); font-weight: 600; text-decoration: none; }
+a:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+</style></head>
+<body><main><h1>Hors ligne — cet écran demande le réseau</h1>${lien}</main></body></html>`;
+  return new Response(html, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      "X-Sereo-Cache": "hors-ligne"
+    }
+  });
+}
+
+// La navigation passe au reseau d'abord : c'est elle qui porte le controle de
+// session (sans session, le serveur rend la page de connexion). On lit
+// l'en-tete X-Sereo-Shell de la reponse, et on garde (ou oublie) la page.
 function naviguer(event) {
-  return fetch(event.request).then(response => {
-    const shell = response.headers.get("X-Sereo-Shell");
-    if (shell && shell !== CACHE_NAME && event.resultingClientId) {
+  const url = new URL(event.request.url);
+  let garde = Promise.resolve();
+  // Relecture adverse (23/09) : la page n'est « en retard » (ses fichiers par
+  // le reseau) que si c'est la page RESEAU qui est rendue. Une copie deja
+  // rendue (reseau lent, puis page d'une version plus recente) annonce le
+  // shell de CE service worker : ses fichiers sont les siens, dans ce cache.
+  // Sans cette garde, elle aurait mele son ancien HTML a de nouveaux scripts.
+  let enRetard = false;
+  const rendreReseau = response => {
+    if (enRetard) {
       if (clientsEnRetard.size > 50) clientsEnRetard.clear();
       clientsEnRetard.add(event.resultingClientId);
+    }
+    return response;
+  };
+  const reseau = fetch(event.request).then(response => {
+    const shell = response.headers.get("X-Sereo-Shell");
+    if (shell && shell !== CACHE_NAME && event.resultingClientId) {
+      enRetard = true;
       // La nouvelle version existe : on la demande tout de suite.
       self.registration.update().catch(() => {});
     }
+    garde = retenirOuOublier(response).catch(() => {});
     return response;
+  });
+  // Le rangement doit finir meme si la copie a deja repondu (reseau lent).
+  event.waitUntil(reseau.then(() => garde, () => {}));
+  if (!versLaTournee(url)) {
+    return reseau.then(rendreReseau, () => pageTourneeValide().then(page => pageDemandeReseau(Boolean(page))));
+  }
+  return new Promise(resolve => {
+    let rendu = false;
+    const rendre = reponse => { if (!rendu) { rendu = true; resolve(reponse); } };
+    const repli = () => pageTourneeValide().then(page => (page ? rendreCopieTournee(page) : null));
+    const minuteur = setTimeout(() => {
+      repli().then(copie => { if (copie) rendre(copie); });
+    }, DELAI_NAVIGATION_TOURNEE_MS);
+    reseau.then(response => {
+      clearTimeout(minuteur);
+      // Passerelle en erreur (serveur arrete derriere le mandataire) : pour la
+      // tournee, c'est un reseau absent, comme pour les gestes (lot 1, H1).
+      if ([502, 503, 504].includes(response.status)) {
+        repli().then(copie => rendre(copie || response));
+        return;
+      }
+      // Rendue seulement si la copie ne l'a pas precedee (rendu).
+      if (!rendu) rendre(rendreReseau(response));
+    }, () => {
+      clearTimeout(minuteur);
+      repli().then(copie => rendre(copie || pageDemandeReseau(false)));
+    });
   });
 }
 
@@ -288,6 +440,18 @@ self.addEventListener("fetch", event => {
 
   // Ignore tout sauf GET (POST/PATCH/DELETE laisses passer)
   if (request.method !== "GET") return;
+
+  // La page de connexion ouverte DIRECTEMENT (favori /login) : jamais mise en
+  // cache, mais si le serveur la rend (fin de session « 0 »), la copie de la
+  // tournee et ses donnees partent, comme sur « / » (relecture adverse, 23/09).
+  // Hors ligne, rien n'est vide : le livreur qui l'ouvre par erreur garde sa
+  // tournee.
+  if (request.mode === "navigate" && url.pathname === "/login") {
+    const reseau = fetch(request);
+    event.waitUntil(reseau.then(response => (finDeSession(response) === 0 ? caches.delete(API_CACHE_NAME) : undefined), () => {}));
+    event.respondWith(reseau);
+    return;
+  }
 
   // Endpoint /login : pas de cache (auth-sensible), pas de passage par ici.
   if (url.pathname.startsWith("/login")) return;

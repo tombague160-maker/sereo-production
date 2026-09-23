@@ -343,6 +343,10 @@ quelqu'un qui n'est plus connecté — les données, elles, resteraient inaccess
 sécurité, donc il revient à Thomas, pas à moi.** La file d'attente fonctionne sans
 lui : elle se vide au retour du réseau dans l'onglet ouvert, et au démarrage suivant.
 
+> **Tranché le 23/09 (décision 4 de Thomas)** : l'écran Tournée, et lui seul, se
+> rouvre hors ligne, sous session valide connue. Voir la dernière section, « L écran
+> Tournée se rouvre sans réseau ».
+
 ### Trois cécités de l'instrument de contraste — fermées le 18/09
 
 Le banc annonçait **1 275 textes, 0 défaut**. Il ne mentait pas ; sa **portée**
@@ -4291,3 +4295,1089 @@ authentifié, que le lot écrans n'avait pas rejoués sur l'arbre fusionné).
 - Les écarts nommés par chaque lot restent les leurs (le collant inerte de Commande
   client, « Se déconnecter » sans authentification, « Nouveau client » tôt dans
   l'ordre du clavier, « Itinéraire » visible au bureau…).
+
+## Lot 2 de l audit géo : débloquer les tournées (23/09)
+
+Source : rapport d'audit du 23/09 (code audité `019788c`), constats H8, H9, M2, M7 et
+les gardes « (API) » du §2 basse ; décisions de Thomas n° 7 (retirer l'ancien panneau
+et `/api/optimize-route`) et n° 10 (pas de contestations : une note « remis à… »).
+Branche `feat/tournees-annulables`, partie de `c05e6f1` (release 1.42.0). Attention :
+la branche locale `main` du dépôt principal est restée à 1.41.1 (`ef470c6`) ; les
+preuves rouges sont rejouées contre `c05e6f1`, pas contre `main`.
+
+### Fait
+
+- **H8 — annuler une tournée prête.** `POST /api/routes/:id/annuler`. Ses commandes
+  n'avaient pas quitté « prête » (créer une tournée ne change ni le statut ni le
+  stock d'une commande) : seul leur rattachement (`routeId`) est défait ; le stock
+  est donc celui d'avant, sans rien rendre (mesuré : quantité et réservé identiques
+  avant la création et après l'annulation). Refusée sur une tournée partie
+  (« clôture-la »). À l'écran : « Annuler la tournée » à côté de « Démarrer ».
+- **H8 — clôturer une tournée en cours.** `POST /api/routes/:id/cloturer`. Les arrêts
+  restants passent « À reprogrammer » (« Tournée clôturée avant cet arrêt »), leur
+  commande revient d'elle-même dans les commandes prêtes, réservation gardée pour
+  la relivraison (comme un absent, lot 1) ; les livrés restent livrés. Irréversible :
+  la tournée ne repart plus, un geste ne l'y rouvre plus. À l'écran : dans « Autres
+  actions ». Une tournée finie à moitié ne reste donc plus « en livraison ».
+- **Deux statuts de tournée** : `annulee` et `cloturee`, dans `ROUTE_STATUSES` (sinon
+  `normalizeRoute` les ramenait à « prête » à la première écriture — pris par
+  mutant). Finis partout : arrêts figés (`arretVivant`), tracé hors de la liste et
+  non chargé par `readDb` (les deux ensembles, écart nommé du lot 5), purgeables à
+  12 mois (`completedAt` posé aux deux gestes) ; « terminées » au tableau de bord
+  compte aussi les clôturées.
+- **Confirmation explicite** pour les deux gestes (`window.confirm`, comme le
+  découpage et la purge) : elle dit ce qui va se passer — « sa commande redevient
+  prête à livrer, et le stock ne bouge pas » ; « 1 livraison reste livrée. À
+  reprogrammer (1) : Foyer de la Veille. … C'est définitif ». Refuser ne fait rien
+  (banc). Les deux ne sont **jamais mis en file** hors ligne (`JAMAIS_EN_FILE`) :
+  rejouée des heures plus tard, une clôture arrêterait une tournée que le livreur a
+  continuée ; elles échouent franchement.
+- **H9 — la tournée du jour d'abord.** `choisirTourneeAffichee` : du jour en cours,
+  sinon du jour prête ; sans tournée du jour, une passée non soldée ; sinon une à
+  venir. Le jour d'une tournée sans date est celui de sa création. Le choix
+  « Tournées du jour » apparaît dès qu'il y a deux candidates (celles du jour, les
+  passées non soldées, et celle qu'on regarde). Une tournée d'un jour passé non
+  soldée est **signalée en tête de page** (« Tournée Dole du mardi 22 septembre
+  n'est pas soldée : 1 arrêt à faire »), avec « Voir » et « Clôturer » (ou
+  « Annuler » si elle n'est jamais partie).
+- **M2 — un arrêt traité en lecture seule.** Toucher un arrêt déjà traité le garde à
+  l'écran (`arretConsulte`) au lieu de sauter au suivant ; « Livré », « Absent »,
+  « Problème » y sont désactivés ; un encart dit ce qui a été fait (« Problème ·
+  Adresse introuvable », « Livré à 9 h 10 · remis à … »), avec « Corriger le statut »
+  et « Revenir à l'arrêt à faire ». Un bouton désactivé dit pourquoi (geste en
+  attente d'envoi, livraison dans ses 4 s d'Annuler, tournée annulée).
+- **M2 — « Corriger le statut ».** Un dialogue (mêmes pièces que le motif) : livré,
+  client absent, problème, « à faire : j'y repasse » ; la **cause est obligatoire**.
+  Serveur : `POST /api/routes/:routeId/stops/:stopId/correction`, un geste à part,
+  jamais un geste ordinaire rejoué. Journalisée (historique « Correction »,
+  « Cabinet Dupont : Absent → Livré — Absent tapé par erreur », avec qui), gardée sur
+  l'arrêt (`corrections`). **Stocks** : le rayon a été déduit à la préparation et ne
+  bouge jamais ici ; seule la réservation suit (« Livré » la consomme, défaire une
+  livraison la redonne — mesuré, l'aller-retour livré → absent → livré rend le stock
+  d'avant). Une livraison corrigée est datée du geste d'origine. « À faire » rouvre
+  une tournée terminée, jamais une clôturée. Refusée si la commande est repartie
+  (autre tournée), a changé d'état par un autre écran, ou si sa réservation a été
+  libérée à la main. Hors ligne, elle passe par la file et se montre faite, « En
+  attente d'envoi » (`gesteArretDeLEntree` reconnaît aussi `…/correction`).
+- **Gardes de l'API.**
+  - une commande n'entre **jamais dans deux tournées actives**, aussi sans départ (la
+    garde ne valait qu'en mode routier), et `createRoute` appelé sans sélection non
+    plus ;
+  - une commande d'une tournée active ne **repasse pas en préparation**
+    (`start-preparation`, `PATCH /api/orders/:id` avec un autre statut) : 409 qui
+    nomme la tournée ;
+  - **aucun geste sur une tournée finie** (terminée, clôturée, annulée), ni sur une
+    tournée pas encore partie, ni un geste **différent** sur un arrêt déjà traité
+    (409, « utilise « Corriger le statut » ») ; le **même** geste renvoyé est un
+    succès sans écriture ;
+  - exception, pour ne rien perdre (lot 1) : un geste du livreur **fait avant la
+    clôture** (son `faitLe`) et arrivé après (file hors ligne) s'applique sur un
+    arrêt soldé **par la clôture**, si la commande n'est pas repartie ; la tournée
+    reste clôturée.
+  - les refus **nomment la commande et la tournée** : « La commande CMD-2026-012
+    (EHPAD Les Tilleuls) est déjà dans la tournée « Tournée Dole du 23/09 » »,
+    « … est prévue le 23/09, pas le 25/09 », « … n'est plus prête à livrer ». Avant,
+    une commande choisie hors filtre était **retirée en silence** (5 cochées, 4
+    livrées).
+- **Liste des commandes à mettre en tournée** : le filtre de date s'ouvre sur le jour
+  (les « à reprogrammer » le passent, lot 1) ; une commande déjà dans une tournée
+  active est **grisée** (case désactivée, fond et trait pointillé, jamais l'opacité du
+  texte), en fin de liste, avec « Déjà dans « Tournée Dole du mercredi 23 septembre »
+  (prête) » ; « Tout sélectionner » et « Sélectionner ce secteur » ne la prennent pas.
+- **Décision 10 — « remis à… ».** Un champ « Remis à » (facultatif, 80 caractères) au
+  dessus de « Livré », lu à l'appui et envoyé avec le geste (donc avec lui dans la file
+  hors ligne), vidé à l'arrêt suivant, rendu au champ par « Annuler ». Gardé sur
+  l'arrêt **et** la commande (`normalizeOrder` le laisse passer), lu dans l'historique
+  (« … : livre — remis à la voisine »), dans l'encart de l'arrêt traité et dans le
+  détail de la commande (« Livrée : 23 septembre à 9 h 10 · Remis à … »).
+- **Décision 7.** L'ancien panneau « Clients tournée » est retiré (HTML, `renderClients`,
+  `selectClient`, `startTour`, `resetTour`, le chemin « client sans tournée » de
+  `updateCurrentDeliveryStatus` et `nextClient`, et les aides devenues mortes) ; la
+  grille du bureau perd sa rangée. `POST /api/optimize-route` est retirée : `grep` du
+  23/09, aucun écran ni banc ne l'appelait (un commentaire de `api.test.js` la
+  nommait seulement).
+
+### Preuves rouges (ancien code `c05e6f1`, cause lue)
+
+- Banc serveur `test/tournees-debloquees.test.js` (21 cas) contre `server.js` et
+  `sqliteStore.js` de `c05e6f1` : **18 rouges sur les 18 cas d'alors**, chacun de sa
+  cause — `Cannot POST /api/routes/r-cours/annuler` (et `/cloturer`, `/correction`) ;
+  « une commande est entrée dans deux tournées » (201) ; « la tournée est créée sans
+  la commande choisie » ; « la commande repasse en préparation » (200,
+  `en_preparation`) ; « l'arrêt s'est rouvert » (200, arrêt `en_livraison` sur une
+  tournée `terminee`) ; `Transition non autorisee : livre -> a_reprogrammer` au lieu
+  du 409 qui renvoie à la correction ; `remisA` perdu ; « l'ancienne route répond
+  encore : 200 ».
+- Gardes neuves prises par mutant (copie restaurée, empreinte vérifiée) : 16 sur 16 —
+  statuts retirés de `ROUTE_STATUSES` (7 rouges : la tournée clôturée redevient
+  « prête »), liste (« la liste envoie encore le tracé »), `sqliteStore`
+  (« readDb charge encore le tracé »), purge, exception « geste avant la clôture »
+  (deux mutants : retirée ; sans la borne de date, le témoin rougit), réservation non
+  rendue, tournée finie, arrêt soldé, préparation, nommer, les deux tournées (d'abord
+  **redondant** avec la garde qui nomme, vert ; un cas « `createRoute` sans
+  sélection » ajouté le prend), `remisA` dans `normalizeOrder`, réouverture d'une
+  terminée, clôturée qui resterait clôturée, tournée pas partie.
+- Banc e2e `test/e2e/tournees-debloquees.spec.js` (11 cas, ports 3330 et 3331), chaque
+  cas **seul** (le mode `serial` laisse les suivants « did not run ») contre
+  `server.js`, `sqliteStore.js`, `app.js`, `index.html` et `style.css` de `c05e6f1` :
+  9 rouges sur les 9 cas d'alors — « la tournée d'hier masque celle du jour » ;
+  `#deliveryDate` reçu `""` ; aucun `#tourneeChoix`, aucun signal, aucun
+  `#cloturerTourneeButton`. Trois de ces rouges tombent sur la tournée d'hier
+  affichée (préalable) : leur propre cause est prise par mutant d'`app.js`, 8 sur 8 —
+  choix de l'ancienne tournée (« masque celle du jour »), signal caché, relecture
+  (« toucher un arrêt traité affiche un autre arrêt », reçu « EHPAD Les Tilleuls… »),
+  date vide, grisé retiré (« une commande déjà en tournée se coche »), `remisA` non
+  envoyé (reçu `""`), annuler/clôturer mis en file (« la clôture attend dans la
+  file »), correction non superposée (« reçu « Livré », attendu « Absent » »).
+
+### Bancs et résultats (sur `9bba7a8` et suivants)
+
+`npm run check` ; `npm test` 566/566 ; en une passe sur `9bba7a8` : e2e du lot,
+tournee, tournee-mobile, ecran-livreur, carte-telephone, meilleur-trajet,
+livreur-ne-perd-rien, integration-lots-1-5, operations, hors-ligne 84/84 ; et
+(sur `754f406`, avant la retouche d'`app.js` de `9bba7a8`, rejouée depuis par les
+84), parce qu'ils visitent la Tournée ou le
+détail d'une commande : adresses-a-verifier, barre-laterale-finitions,
+carte-et-lignes, clients, commandes, ecrans-sans-planche, integration-interface,
+livraison-chargement, motif-dialogue, navigation-mobile, rapidite-tournee,
+tableau-de-bord, tabs, tuiles-bloquees, cibles-tactiles, focus-clavier,
+contraste-application, etats-limites, chargement-instantane : 174/174. Contrastes
+mesurés par le banc : signal 4,89 (clair) / 4,56 (sombre) ; « Déjà dans » 4,56 /
+9,28. Cibles : champ « Remis à », choix, gestes du signal ≥ 44 px.
+
+**Banc adapté, sans l'affaiblir** : `tournee-mobile.spec.js` « 4a » comptait deux
+commandes du même client, aujourd'hui et demain, **dans le filtre par défaut** — que ce
+lot change (le jour). Il retire désormais le filtre de date avant de compter ; ce
+qu'il garde (deux jours se distinguent sur la ligne) est intact.
+
+Deux rouges vus en route, **non imputables** : « port 3188 / 3175 déjà pris par un
+autre processus » (un autre worktree lançait les mêmes bancs en même temps) ; relancés,
+verts.
+
+### Décisions prises dans le lot
+
+- Deux statuts neufs plutôt qu'un drapeau sur `terminee` : une annulée n'a jamais roulé
+  (elle ne compte pas au tableau de bord), une clôturée si ; et le refus d'un geste
+  doit dire laquelle.
+- La correction est un **point d'entrée à part**, pas un geste ordinaire rouvert : le
+  geste du livreur garde ses gardes (idempotence, arrêt soldé), la correction a les
+  siennes (cause, commande non repartie, stock).
+- « Livré » corrigé : daté du geste d'origine (`deliveredAt` de l'arrêt), c'est là que
+  le livreur était.
+- Un geste arrivé après la clôture mais fait avant elle **passe** : c'est la vérité du
+  terrain, et le lot 1 promet que le livreur ne perd rien.
+- Correction d'un arrêt en échec dont la commande est restée « en livraison » (donnée
+  d'avant le lot 1, ou semée ainsi) : acceptée, rien n'est reparti.
+- Annuler et clôturer demandent le réseau (jamais en file).
+
+### Écarts nommés
+
+- **`POST /api/livraison` et `POST /api/reset-tournee` restent** : la décision 7 ne les
+  nomme pas. Plus aucun écran ne les appelle (le premier servait l'ancien panneau).
+  `reset-tournee` remet une tournée en cours à « prête » et des commandes **livrées** à
+  « prête » : à retirer, ou à garder derrière une confirmation, par décision.
+- **La correction vers « Absent » ou « Problème » ne propose pas la liste des motifs** :
+  la cause libre sert de motif (« Absent (correction : …) »).
+- **Les rôles** ne restreignent que les onglets (déjà vrai) : un compte « livreur »
+  peut annuler ou clôturer une tournée.
+- Le champ « Remis à » ajoute une ligne (≈ 56 px) au-dessus de « Livré » : au
+  téléphone de 390 × 844, « Client absent » finit à 13 px au-dessus de la barre basse
+  (banc « sous le pouce » vert).
+- `window.confirm` n'est pas au style V8 (même choix que le découpage et la purge).
+- Trois remplacements dans `server.js` (étendre les ensembles de statuts finis, 3
+  lignes) et un dans `sqliteStore.js` ont été faits par un script `py` au lieu de
+  l'outil Edit ; relus par `node --check`, le diff et les bancs (dont les mutants qui
+  les retirent).
+- Hors périmètre, non touché : `CACHE_NAME` (le nom du shell suit l'empreinte).
+
+### Ce qui reste
+
+- Décider du sort de `/api/livraison` et `/api/reset-tournee`.
+- Proposer les motifs dans la correction vers « Absent » / « Problème ».
+- Une commande « À reprogrammer » ne s'annule toujours pas (écart du lot 1).
+- Un sélecteur des tournées d'autres jours (hors « du jour » et « à solder ») n'existe
+  pas : une tournée terminée hier ne se rouvre pas à l'écran (le serveur la rend).
+
+### Relecture adverse du lot 2 (23/09) — cinq défauts, cinq vrais, cinq corrigés
+
+Relus sur `f063247`, chacun vérifié sur le code avant d'y toucher.
+
+- **Important, vrai : un « Livré » arrivé après la clôture ignorait une libération du
+  stock faite entre-temps.** Clôture (la commande passe « À reprogrammer », réservée),
+  puis `release-stock` à la main (le rayon recompte 4), puis le « Livré » en file, fait
+  avant la clôture : il passait (`gesteArriveApresCloture` ne regarde pas le stock), ne
+  consommait rien (plus de réservation) : le rayon comptait une marchandise livrée.
+  Corrigé (`reprendreStockLibere`) : la réservation est reprise (le rayon est déduit de
+  nouveau), puis consommée par la livraison, et l'historique le dit (« Stock deduit »).
+  Si le rayon n'en a plus assez, le geste est **refusé en le disant** (409) : le stock ne
+  passe jamais sous zéro en silence, la commande reste à reprogrammer. Rouge sur
+  l'ancien code : `actual: { rayon: 24, reserve: 16 }`, attendu `{ rayon: 20, reserve: 16 }` ;
+  le refus : `actual: 200, expected: 409`.
+- **Important, vrai : rouvert, l'écran ne montrait jamais une tournée finie.**
+  `choisirTourneeAffichee` ne prenait que les tournées non soldées : la seule tournée du
+  jour, terminée, donnait « Aucune tournée créée. » après un rechargement, et le
+  sélecteur (caché sous deux options) n'y menait pas : l'arrêt à corriger (M2) et le
+  bilan n'étaient atteignables qu'avant un rechargement. Corrigé : la dernière tournée
+  du jour finie (terminée ou clôturée) est choisie après les tournées passées à solder,
+  avant une tournée d'un jour à venir. Rouge : `Expected substring: "Tournée terminée"`,
+  `Received string: "Aucune tournée créée."`.
+- **Mineur, vrai : Entrée dans la cause de « Corriger le statut » annulait en silence.**
+  Un seul champ texte, aucun bouton `submit` : Entrée soumet, `method="dialog"` ferme, et
+  la fermeture valait « Annuler ». Corrigé : Entrée vaut « Corriger » (sans statut
+  choisi, le dialogue reste et le dit). Rouge : `Expected: "livre"`, `Received: "probleme"`.
+- **Mineur, vrai : la liste du jour cachait sans le dire les commandes prêtes en retard
+  et sans date.** Corrigé par un signal dans le résumé (« Hors de cette date : 1
+  commande prête en retard et 1 sans date ; vide la date pour les voir. »). Les
+  commandes d'un jour à venir ne sont pas signalées : elles ne manquent rien. Rouge :
+  `Received string: "3 commande(s) prête(s) - tous secteurs, mer. 23/09"`.
+- **Mineur, vrai : `POST /api/livraison` restait une porte vers M7.** Elle livrait une
+  commande qui attend son arrêt dans une tournée active sans solder l'arrêt. Elle
+  **refuse** désormais (409, la tournée nommée) ; hors tournée, rien ne change (C1.R2
+  verts). La route n'est pas retirée : son sort reste une décision (écart nommé plus
+  haut). Rouge : `actual: 200, expected: 409`.
+
+Bancs : `test/tournees-debloquees.test.js` (+3 cas, 24/24), `test/e2e/tournees-debloquees.spec.js`
+(+3 cas, 14/14 ; les serveurs sont resemés sur leurs ports par `resemer`, le port
+n'est écrit qu'une fois : `test/ports-e2e.test.js` vert). Verts aussi : tournee,
+tournee-mobile, ecran-livreur, carte-telephone, meilleur-trajet, livreur-ne-perd-rien,
+integration-lots-1-5, operations, hors-ligne (87/87 avec le banc du lot) et `npm test`
+(569/569).
+
+Ce qui reste après la relecture :
+
+- Le dialogue du **motif** (« Client absent », « Problème », lot 1) a la même forme :
+  Entrée dans la précision ferme sans enregistrer. Hors de cette relecture, non touché.
+- `corrigerArret` refuse toujours « Livré » sur une commande dont le stock a été libéré
+  (choix du lot) ; le geste en retard, lui, reprend le stock. Aligner les deux est une
+  décision.
+- Un « Livré » en retard refusé faute de stock n'a aujourd'hui aucun chemin pour être
+  enregistré (`corrigerArret` le refuse aussi) : la commande reste à reprogrammer. À décider.
+
+## Lot 6 de l audit géo : pratique au quotidien (23/09)
+
+Audit de référence : rapport du 23/09, §3b, §5 et lot 6. Décisions de Thomas du 23/09
+appliquées : n° 5 (position « Me localiser » arrondie à ~100 m : aussi pour
+« Réoptimiser les arrêts restants »), n° 6 (150 km), n° 9 (pas de créneaux : « À livrer en
+premier » est gardé par chaque réoptimisation). Branche `feat/tournee-pratique`, partie de
+`main` 1.42.0 (`c05e6f1`).
+
+### Fait
+
+- **Heure d'arrivée par arrêt, km restants, heure de retour** (planches 4a/4b, 13b).
+  `public/js/domains/tournee-pratique.js` (`horairesDeTournee`, pur) lit les tronçons
+  OSRM du lot 7 (`route.troncons`) et la durée d'arrêt des Paramètres. Référence : maintenant
+  pour une tournée prête (« si tu pars maintenant ») ; en route, l'heure du dernier geste
+  (arrêt soldé le plus récent), du départ ou du dernier calcul depuis la position GPS
+  (`tronconsDepuis`), la plus tardive — et jamais avant maintenant : un livreur en retard
+  arrive « maintenant », la suite glisse. Un arrêt fait dans le désordre, au milieu des
+  restants : le trajet passe par lui. Tronçons absents ou désaccordés (réordonnancement à la
+  main, arrêt retiré d'une commande reportée) : **aucune heure plutôt qu'une heure fausse**.
+  Affichage : « · vers 10 h 40 » DANS la ligne de détail (la ligne garde ses quatre
+  informations, charte §4) ; cockpit « Arrivée prévue vers 10 h 40 » et « Prochain : … ·
+  6,2 km · environ 14 min » (la planche 4b, posée en entier) ; en-tête « 69 km restants,
+  retour vers 15 h 20 » (planche 13b) ; même chose à la suite des métriques. Heures
+  arrondies à 5 min.
+- **Dépôt par défaut** (Paramètres → Réglages tournée) : recherche d'adresse (le relais
+  `/api/geocode` du lot 5), confirmation, « Effacer ». `settings.tournee.depot`
+  `{ label ≤ 200, lat, lng }` validé au serveur (refusé plutôt que tronqué), `retourAuDepot`
+  (défaut **vrai**, y compris pour une base d'avant le lot), `messagePrevenir`. Le départ de
+  la préparation est prérempli tant que le livreur n'en a pas choisi un autre ; « Retour au
+  point de départ » suit le réglage, et **décocher la case dans la préparation le
+  mémorise** (PATCH discret, en file hors ligne). Préparer une tournée : « Tout
+  sélectionner », « Créer » — **deux gestes** (banc : deux clics, départ et arrivée = dépôt).
+- **« Y aller »** vers les **coordonnées** de l'arrêt quand elles existent, sinon l'adresse
+  (rue et ville, la règle d'avant) : un lieu-dit sans rue, placé à la main, a son bouton.
+  Un point **approximatif** (rue, lieu-dit, commune) cède à l'adresse complète quand elle
+  existe (relecture adverse, ci-dessous).
+  Google Maps, Waze, Plans (**seulement sur iPhone/iPad**, iPadOS compris) ; le choix vit
+  dans Paramètres, **par appareil** (`localStorage`, repli sur la session), titre du bouton
+  « Ouvrir l'itinéraire dans Waze ». L'écran de fin suit le même choix.
+- **« Prévenir »** (cockpit, « Autres actions ») : un lien `sms:` avec le numéro du client et
+  « Bonjour, je passe vers 10 h 40 pour votre livraison. » ; texte modifiable dans
+  Paramètres (`{heure}` ; sans heure connue, « vers {heure} » devient « bientôt »). Aucun
+  fournisseur, aucun coût : c'est l'application SMS du téléphone qui envoie. Le lien est
+  refait à l'instant du toucher (l'heure a pu avancer depuis le rendu). iOS : `&body=`,
+  ailleurs `?body=`.
+- **« Réoptimiser »** (`POST /api/routes/:id/reoptimiser`) : tournée **prête** → dialogue
+  « Partir de » (le départ prévu, le dépôt s'il diffère, ma position) ; une tournée qui
+  revenait à son départ revient au nouveau. Tournée **en livraison** → « Réoptimiser les
+  arrêts restants » depuis la position GPS arrondie à 3 décimales **sur le téléphone** (et
+  au serveur) ; les arrêts soldés restent en tête ; le départ enregistré ne change pas.
+  L'optimiseur est celui du lot 7 ; « À livrer en premier » reste devant.
+- **« Faire maintenant »** (`POST …/stops/:stopId/maintenant`) : un arrêt choisi hors de
+  l'ordre montre, dans le cockpit, « Prévu après X » et le bouton (pas dans la ligne : elle
+  garde ses quatre informations). L'arrêt passe en tête des restants ; les tronçons des
+  restants sont recalculés depuis le dernier arrêt soldé.
+- **« Ajouter à la tournée en cours »** (`POST /api/routes/:id/ajouter`) : sur chaque
+  commande prête, quand une tournée roule. Insertion au **moindre détour** entre le point de
+  reprise, les restants et l'arrivée (table OSRM ; repli à vol d'oiseau), égale à la force
+  brute sur 300 tirages. La commande passe en livraison, l'arrêt a un identifiant neuf (un
+  arrêt retiré laisse son numéro à un autre : `createStop` numérote par rang).
+- **Historique des tournées** (Tournée, repliable, sous la préparation) : par mois, un
+  total par secteur (tournées, km **du tracé prévu**, durée **réelle** départ → dernier
+  arrêt, livrés), les tournées sans tracé ou sans heures comptées à part ; les dix
+  dernières. Calculé sur les tournées déjà chargées : aucune requête de plus.
+- **File hors ligne et idempotence (lot 1)** : « Faire maintenant », « Ajouter », les
+  réglages passent par `apiFetch` (clé `X-Sereo-Geste`, file). Un « Faire maintenant »
+  hors ligne attend dans la file et l'écran montre déjà l'arrêt. Une même clé renvoyée
+  n'ajoute qu'une fois (banc, deux envois simultanés puis un troisième).
+- Toute réponse d'écriture porte la tournée (et la commande, le client) telle que les
+  listes la rendent, avec `updatedAt` : l'écran l'applique par la mise à jour ciblée du
+  lot 5 (`appliquerGesteArret`), gardes du lot 1 comprises (jamais une tournée plus
+  ancienne, gestes en file superposés).
+
+### Décisions prises
+
+- **Réoptimiser n'est jamais mis en file** (`JAMAIS_EN_FILE`), et l'écran le refuse hors
+  ligne avant tout envoi : c'est un calcul routier depuis la position de l'instant ;
+  rejoué une heure plus tard, il réordonnerait la tournée d'après un endroit quitté. Même
+  famille que la purge et le découpage.
+- **Sans calcul routier** (OSRM muet), « Faire maintenant » et « Ajouter » changent quand
+  même l'ordre ; les tronçons tombent (`null`), la réponse le dit
+  (`horairesARecalculer`), la notification invite à « Réoptimiser les arrêts restants ».
+  En route, le tracé reste (on n'efface pas la carte sous le livreur) ; avant le départ, il
+  est à refaire, comme après un réordonnancement à la main.
+- **Tronçons alignés sur l'ordre** : après un changement d'ordre en route, les soldés
+  passent en tête et gardent leurs tronçons d'origine (historique), ceux des restants sont
+  recalculés ; `totalDistance` = trajets faits connus + nouveau reste.
+- **« Retour au départ » décoché dès qu'une AUTRE arrivée est confirmée**, sans toucher
+  au réglage (seul un geste sur la case l'écrit), et les réglages qui arrivent après ne la
+  recochent pas. Cause : `operations.spec.js` (commandes lentes) choisissait une arrivée,
+  puis les réglages recochaient la case — l'arrivée choisie était ignorée.
+- **Le choix de l'application est par appareil**, dans Paramètres, sans question au
+  premier « Y aller » : le geste le plus fréquent garde un seul toucher (Google Maps par
+  défaut, comme avant).
+- Une commande urgente ne s'ajoute qu'à une tournée **qui roule** (bouton) ; le serveur
+  accepte aussi une tournée prête (API).
+
+### Écarts nommés
+
+- **Hors périmètre, laissés aux autres lots de la vague 2** : l'ancien panneau
+  « Clients tournée » et `/api/optimize-route` (décision 7 ; lot « tournées
+  annulables », M7) ; la note « remis à… » (décision 10) ; l'écran Tournée hors ligne
+  (le module neuf est dans `APP_SHELL`) ; OSRM dans l'image.
+- **`tournee-mobile.spec.js` « 4b — Y aller » renversé**, pas supprimé : il attendait
+  l'adresse en texte, il attend désormais les coordonnées de l'arrêt semé.
+- Le SMS : le séparateur `&body=` (iOS) / `?body=` (ailleurs) est l'usage constaté, non
+  mesuré sur un vrai téléphone ; un fixe ne reçoit pas de SMS (rien ne le distingue).
+- Les heures sont des estimations hors trafic (tronçons OSRM + durée d'arrêt fixe) ; la
+  référence en route est l'heure du dernier geste **connu du serveur** : un geste encore en
+  file n'en donne pas.
+- La position envoyée pour « Réoptimiser les arrêts restants » n'est pas stockée ; le tracé
+  recalculé part d'elle (arrondie, ~100 m) et n'est pas rogné par `rognerTraceGps`, qui ne
+  lit que départ et arrivée.
+- `lib/routing.js` : une fonction ajoutée (`tableDesDurees`), en fin de fichier.
+  `serveur-seme.js` : une option `routageAdaptatif` (table et tronçons suivant la
+  requête), le mode par défaut ne change pas.
+- Une modification de `server.js` faite par script (déplacement des constantes du lot
+  avant `normalizeSettings`), et une de `package.json` (script `check`), au lieu de l'outil
+  Edit ; relues par `node --check`, `npm run check` et les bancs.
+- `ecrans-sans-planche.spec.js` a refusé de partir une fois (port 3306 pris par un autre
+  worktree, refus voulu) ; rejoué ensuite : vert.
+
+### Preuves rouges
+
+Ancien code (`c05e6f1`, fichiers remis par copie, restaurés, empreinte vérifiée) :
+- `tournee-pratique-serveur.test.js` : 15 rouges sur 15 — `404` sur les trois routes
+  neuves, `depot` `undefined` au lieu de `null`.
+- `tournee-pratique.spec.js` (un cas à la fois) : la ligne d'arrêt sans « vers … »
+  (`toContainText`, heures), `#prevenirButton`, `#reoptimiserButton`, `.arret-hors-ordre button`,
+  `[data-action="ajouter-a-la-tournee"]`, `#parDepotActuel` « element(s) not found » ;
+  « Expected: Entrepôt de démonstration / Received: "" » (deux gestes) ; `retourAuDepot`
+  « Expected: false / Received: undefined » ; historique et contraste : le panneau
+  n'existe pas (le clic attend jusqu'au délai).
+
+Mutants (copie, restauration vérifiée par empreinte), chacun rouge pour sa cause :
+insertion toujours en fin (`['a','b','d','u']` au lieu de `['a','b','u','d']`) ; soldés
+oubliés en tête ; position exacte envoyée (`6.0512345,47.2004567`) ; panne qui garde les
+tronçons ; ajout sans passage en livraison (`pret_livraison`) ; dépôt non validé (200 au
+lieu de 400) ; retour au dépôt décoché par défaut sur une base ancienne ; « à livrer en
+premier » oublié en route (`d` au lieu de `a`) ; heure de référence toujours maintenant ;
+retard dans le passé ; durée d'arrêt ignorée ; tronçon de trop accepté (renforcé : le premier
+banc passait par une autre garde) ; « Y aller » sans les coordonnées ; Plans hors Apple ;
+SMS sans heure qui garde `{heure}` ; tournées en cours dans l'historique ; trajet qui ne
+passe pas par l'arrêt fait. À l'écran : heures non branchées ; lien « Prévenir » non
+rafraîchi aux réglages (le défaut qu'a trouvé le premier passage du banc, corrigé) ;
+« Y aller » qui ignore le choix ; réoptimiser mis en file sur un réseau muet ; réoptimiser
+hors ligne non refusé ; départ non prérempli ; retour non mémorisé ; position exacte
+envoyée ; arrivée confirmée qui ne décoche pas le retour (et la variante « seulement si
+déjà cochée », prise par `operations.spec.js`). Un défaut trouvé par un banc existant :
+`cibles-tactiles.spec.js`, le `<label>` du message dans le titre faisait 20 px de haut —
+nommé désormais par `aria-labelledby`.
+
+### Bancs
+
+`test/tournee-pratique.test.js` (12, pur), `test/tournee-pratique-serveur.test.js` (15,
+serveur et faux OSRM local), `test/e2e/tournee-pratique.spec.js` (14, ports **3332** et
+**3333**, horloge du navigateur figée, contraste ≥ 4,5:1 en clair et en sombre, 44 px).
+
+Vérifié sur `1a2db4e` (le code de la tête ; seul ce fichier a changé depuis) :
+`npm run check` ; `npm test` 572/572 ; e2e tournee-pratique, tournee, tournee-mobile,
+ecran-livreur, carte-telephone, meilleur-trajet, livreur-ne-perd-rien,
+integration-lots-1-5, operations, hors-ligne, carte-et-lignes, rapidite-tournee,
+ecrans-sans-planche : 116/116. Sur `b268646` (même code) : parametres,
+parametres-mobile, cibles-tactiles 28/28 ; texte-coupe, focus-clavier,
+contraste-application, contraste-champs, integration-interface, typographie,
+charte-composants, etats-limites : verts. Sur `076813c` (avant le correctif du
+`<label>`, une ligne de `index.html`) : themes, tabs, livraison-chargement,
+chargement-instantane verts.
+
+### Ce qui reste
+
+- Mesurer les heures annoncées contre les heures réelles (les gestes sont datés) et
+  ajuster la durée d'arrêt par client ou par secteur.
+- Un « Prévenir » groupé (les N prochains clients) ; le choix de l'application au premier
+  « Y aller » si les livreurs ne vont pas dans Paramètres.
+- Réoptimiser en route sans GPS (depuis le dernier arrêt soldé).
+- L'historique : km **roulés** (aucune trace n'est enregistrée), export.
+
+### Relecture adverse du 23/09 : six défauts, six vrais
+
+Relecture de `f5c572d`. Chaque défaut a été vérifié par un banc écrit AVANT le correctif et
+commité rouge (`8a2991a`, sur le code de `f5c572d`) ; correctifs `4e610bd` (serveur) et
+`5110ba7` (écran).
+
+1. **Important, vrai : « Y aller » préférait tout point, même approximatif.** Une commande
+   géocodée « au milieu de la rue » (type BAN `street`, accepté comme TROUVÉ) ouvrait
+   Google Maps au milieu d'une route de plusieurs kilomètres, là où le texte « 48 route de
+   Lons 39300 Champagnole » menait au numéro (la règle d'avant le lot). Corrigé :
+   `lienNavigation` lit `geoPrecision` ; `rue`, `lieu-dit`, `commune` cèdent à l'adresse
+   complète quand elle existe. Sans adresse, le point reste (le texte ne ferait pas mieux) ;
+   `numero`, `manuel` (position placée à la main) et une précision vide gardent le point.
+   Rouge : `actual: '…destination=46.75,5.91'`, `expected: '…destination=48%20route%20de%20Lons…'`.
+2. **Important, vrai : l'ajout en route pouvait passer devant un « À livrer en premier ».**
+   `meilleurePlace` comparait toutes les places de 0 à n. Corrigé : un argument `depuis`, la
+   place qui suit le dernier « en premier » des restants. Rouge : tournée [d (en premier),
+   c, b, a], `u` près du dépôt → `expected: 'd'`, `actual: 'u'` ; témoin sans épingle : `u`
+   passe bien en tête.
+3. **Important, vrai : une tournée sans arrivée se réoptimisait en boucle.** En route,
+   l'arrivée devenait la position du livreur : ordre de circuit fermé, retour fictif dans
+   les km restants, l'heure de « retour » et `totalDistance` (repris par l'historique).
+   Avant le départ, le serveur refusait une réoptimisation sans arrivée, et le dialogue en
+   imposait une (le nouveau départ) sans lire « retour au dépôt ». Corrigé : `roadPlan`
+   prend `arriveeLibre` — le chemin OUVERT du lot 7 (l'arrivée coûte 0 depuis chaque arrêt,
+   le tracé s'arrête au dernier, le tronçon « vers l'arrivée » est nul : toujours un par
+   arrêt, plus un) ; le serveur l'emploie dès qu'aucune arrivée n'existe ; le dialogue,
+   pour une tournée sans arrivée, n'en envoie une (le nouveau départ) que si « retour au
+   dépôt » est coché ; l'écran dit « fin vers » au lieu de « retour vers »
+   (`horairesDeTournee` rend `avecRetour`). Rouges : `totalDistance` `expected: 3.5`,
+   `actual: 6` (en route) ; `400 « Confirme un point de départ et un point d'arrivée. »`
+   (prête) ; e2e « Expected substring: "fin vers" / Received: "… retour vers 23 h 25" » ;
+   mutant du seul dialogue : « Expected path: not "arrival" / Received value: {Entrepôt…} ».
+4. **Mineur, vrai : une position corrigée pendant le calcul était écrasée.** L'empreinte de
+   la tournée ne contrôle que ids et statuts ; `memoriserPositionDuCalcul` réécrivait le
+   point de l'instantané en gardant `geoSource: "manuel"`. Corrigé : l'empreinte des
+   positions lues pour le calcul (celle de `positionPourTournee`, client compris) est
+   recomparée sous le verrou, pour les restants (réoptimiser) et pour la commande
+   (ajouter) ; même refus que `createRoute` : « Une position a été corrigée pendant le
+   calcul. Recommence. ». Rouges : `[47.2, 6.02, 'manuel']` au lieu de `[47.21, 6.022,
+   'manuel']` (et de même pour l'ajout). Le banc joue la correction PENDANT la requête OSRM
+   (crochet `pendantLeCalcul` du faux OSRM).
+5. **Mineur, vrai : une commande absente rajoutée à SA tournée n'était plus retirée par un
+   report.** Décision : l'ajout reste permis (repasser l'après-midi chez un absent du matin
+   est un usage) ; c'est `retirerDesTourneesSiReportee` (M4, lot 1) qui prend désormais
+   l'arrêt ENCORE À FAIRE de la commande, pas le premier. Un arrêt soldé n'est toujours
+   jamais retiré. Rouge : `['absent', 'en_livraison']` au lieu de `['absent']`.
+6. **Mineur, vrai : « déjà dans une tournée active » n'était vérifié que sur
+   l'instantané.** Une tournée prête créée au bureau pendant le calcul prenait la commande
+   sans changer son statut. Corrigé : le contrôle est refait sous le verrou. Rouge :
+   `expected: 400`, `actual: 201` (la tournée concurrente créée par le crochet du faux OSRM).
+
+**Écarts nommés.** Une précision vide (point d'origine inconnue, antérieur au lot 3) garde
+le point : rien ne dit qu'il est approximatif. Une position placée à la main dans
+« Adresses à vérifier » sans déplacer le marqueur garde la précision d'origine (`rue`…) ;
+l'arrêt ne porte pas `geoSource`, « Y aller » la traite donc comme approximative et suit
+l'adresse. « Faire maintenant » et « Ajouter » sur une tournée sans arrivée font toujours
+tomber les heures (`trajetDansLOrdre` exige une arrivée) : rien de faux n'est affiché.
+Constaté hors du lot, non corrigé : `createRoute` SANS départ (pas de `plan`) ne vérifie
+pas « déjà dans une tournée active » ; une tournée prête peut donc reprendre une commande
+d'une autre tournée prête. Deux mutations temporaires d'`app.js` faites par script
+(copie, restaurée par `cp` et `cmp`), rien de commité ainsi.
+
+**Bancs.** `test/tournee-pratique.test.js` +2 (14), `test/tournee-pratique-serveur.test.js`
++7 (22), `test/e2e/tournee-pratique.spec.js` +1 (15, port 3333, réponse du serveur
+retouchée pour une tournée sans départ). Résultats sur `5110ba7` : `npm test` 581/581 ;
+e2e tournee-pratique, tournee, tournee-mobile, ecran-livreur, carte-telephone,
+meilleur-trajet, livreur-ne-perd-rien, integration-lots-1-5, operations, hors-ligne :
+88/88.
+
+## 23/09 — L écran Tournée se rouvre sans réseau (décision 4)
+
+Source : arbitrage ouvert le 18/09 (section de la file hors ligne, plus haut), M10 de
+l'audit géo du 23/09. Décision de Thomas : **l'écran Tournée, et seulement lui**, se
+rouvre sans réseau — onglet fermé, téléphone redémarré. Branche
+`feat/tournee-hors-ligne`, partie de `main` v1.42.0 (`c05e6f1`).
+
+### Fait
+
+- **Le service worker garde la page** (`public/service-worker.js`, `naviguer`). La
+  navigation passe toujours au réseau d'abord : c'est elle qui porte le contrôle de
+  session. Chaque navigation réussie range le HTML de l'application **dans le cache
+  de données** (`sereo-api-…`, clé `/__sereo/page-tournee`) : il part donc avec lui à
+  la déconnexion (`POST /logout`) et à l'expiration de session (401, `apiFetch`).
+- **Il ne la rend que pour la tournée**, et à quatre conditions : la navigation vise
+  `#livreur` (ou `?ecran=livreur`, pour un navigateur qui ne transmettrait pas
+  l'ancre) ; le réseau a échoué, se tait depuis 5 s, ou la passerelle répond
+  502/503/504 ; la session connue n'est pas finie ; la page gardée annonce le shell de
+  **ce** service worker (sinon ses scripts, servis par ce cache-ci, ne seraient pas
+  les siens). La copie garde les en-têtes de la page (CSP comprise) et porte
+  `data-ouverte-hors-ligne` sur `<html>`.
+- **La session, dite par le serveur** (`server.js`, `finDeSessionConnue`) : la page
+  annonce `X-Sereo-Session-Fin` = émission du cookie + 12 h, jamais plus (hors ligne,
+  personne ne peut la prolonger). L'en-tête est aussi sur le 304 d'une revalidation
+  (le navigateur remplace les en-têtes gardés par ceux du 304). La **page de
+  connexion** annonce « 0 » : le service worker vide alors tout le cache de données,
+  page et données — la session est finie, rien ne se rouvre. Qu'elle soit rendue en
+  place sur « / » ou ouverte directement (`/login`, favori) : ce second cas ne passait
+  pas par le service worker, corrigé par la relecture adverse (plus bas). Sans session du tout
+  (authentification désactivée, ou accès Basic sans cookie), rien n'est annoncé :
+  la page n'est ni gardée ni oubliée.
+- **Les autres écrans, hors ligne** : une navigation vers un autre écran rend une
+  page du service worker, « Hors ligne — cet écran demande le réseau », avec un
+  bouton « Ouvrir la tournée » seulement si une copie valide existe (sans session :
+  « Séréo demande le réseau pour s’ouvrir. », rien d'autre). Dans la page rouverte,
+  les autres onglets ne montrent pas leurs données de secours : `#ecranDemandeReseau`
+  le dit à leur place (état vide de la charte, bouton 44 px vers la tournée).
+- **Le bandeau** dit « Hors ligne — données de HH:MM » (ou « du JJ/MM ») dès que
+  l'écran montre des copies, et dès la copie lue au démarrage. Des données fraiches,
+  puis une coupure : « Hors ligne depuis HH h MM », comme avant.
+- **Les gestes en file** restent superposés (lot 1) : l'arrêt livré hors ligne revient
+  « Livré — En attente d’envoi » après le redémarrage, et l'écran ne propose pas de
+  le relivrer.
+- **Au retour du réseau** (`auRetourDuReseau`) : la file part **d'abord**, puis, si
+  l'écran montre des copies, tout se relit. Au premier chargement complet venu du
+  réseau, la page redevient entière (`quitterOuvertureHorsLigne` : marque retirée,
+  identité et version relues).
+- `registration.update()` sans `catch` : hors ligne, son rejet remontait en erreur de
+  page. Il n'était jamais atteint avant (la page ne s'ouvrait pas hors ligne).
+
+### Décisions prises dans le lot
+
+- **La page vit dans le cache de données, pas dans celui du shell** : elle hérite
+  ainsi des deux purges existantes (déconnexion, 401) sans code de plus.
+- **« Seulement la tournée » lu strictement** : l'icône de l'écran d'accueil
+  (`start_url` = `/`) rouvre, hors ligne, la page « demande le réseau » avec son
+  bouton « Ouvrir la tournée » — un toucher de plus, plutôt qu'une application
+  entière servie sans réseau.
+- **Réseau muet** : copie au bout de **5 s** (défaut ; plage raisonnable 3 à 10 s : en
+  dessous, un serveur lent au réveil ferait ouvrir la copie ; au-dessus, le livreur
+  attend devant un écran blanc). Seulement pour la tournée : un autre écran attend le
+  réseau.
+- **Sans authentification, pas d'ouverture hors ligne** : il n'y a pas de session,
+  donc pas de « session valide connue ». Mesuré : la première version annonçait 12 h
+  dans ce cas, et `chargement-instantane.spec.js` « la déconnexion vide le cache de
+  données » rougissait (le serveur sans authentification sert l'application à la
+  place de `/login`, et la navigation remettait la page dans le cache). La
+  production a l'authentification (DEPLOYMENT.md).
+
+### Écarts nommés
+
+- **Une nouvelle version activée pendant que la page est ouverte** (le toast
+  « Recharger ») : la page gardée annonce l'ancien shell, elle n'est plus rendue ;
+  la tournée ne se rouvre hors ligne qu'après une navigation en ligne sur la nouvelle
+  version. Choisi : jamais d'ancien HTML sous de nouveaux scripts.
+- **La session ne glisse pas** : elle finit 12 h après la connexion. Un livreur
+  connecté la veille au soir ne rouvre pas sa tournée hors ligne le matin — le
+  serveur l'aurait refusé de toute façon. Allonger la session est une décision de
+  sécurité, hors de ce lot.
+- **Une session qui expire pendant que la page rouverte est affichée** : la page ne
+  se referme pas d'elle-même ; seule la réouverture suivante est refusée.
+- **Un compte désactivé, ou une session invalidée côté serveur**, pendant que le
+  téléphone est hors ligne : le téléphone ne peut pas le savoir. La copie se rouvre
+  jusqu'à la fin annoncée (émission + 12 h), avec les noms, adresses et téléphones de
+  la tournée. Au premier contact avec le serveur (navigation, sonde de retour, toute
+  lecture), le refus arrive : page de connexion ou 401, et le cache de données part.
+  Fermer cet écart demanderait de ne rien rouvrir hors ligne — contraire à la
+  décision 4 ; raccourcir la fenêtre, c'est raccourcir la session (décision de
+  sécurité, hors de ce lot).
+- **Safari et l'ancre** : non mesuré (aucun banc WebKit). Le bouton « Ouvrir la
+  tournée » passe par `?ecran=livreur`, que le service worker reconnaît sans l'ancre ;
+  un favori `/#livreur` sur iPhone, lui, reste non vérifié.
+- **L'instrument** : Playwright 1.61 + Chromium, profil relancé hors ligne — les
+  requêtes d'API du service worker échappaient à l'émulation (16 « requestfinished »
+  côté service worker, pastille « À jour » hors ligne). Le banc coupe donc aussi le
+  chemin (mandataire qui ferme toute connexion) ; `navigator.onLine` vient de
+  `setOffline`.
+- **La file est celle du navigateur** (lot 1) : inchangé.
+
+### Bancs, et le rouge de chacun
+
+`test/e2e/tournee-hors-ligne.spec.js` (serveur semé **authentifié**, port 3334, connexion
+par le formulaire, navigateur fermé puis relancé sur le même profil) :
+
+1. fermée puis rouverte hors ligne, téléphone redémarré : la tournée revient, geste en
+   file compris ; le reste demande le réseau ; tout repart au retour ;
+2. après la déconnexion, rien ne se rouvre (témoin dans le cas : la même ouverture,
+   avant, rend la tournée ; puis, file vide, le retour du réseau relit tout) ;
+3. session perdue (la page de connexion) : copie et données oubliées (témoin : avant,
+   elles sont là) ;
+4. rouverte par une passerelle en erreur (502), téléphone qui se croit en ligne : au
+   retour du serveur, tout repart sans événement `online` (relecture adverse).
+
+`test/tournee-hors-ligne.test.js` : 15 cas du service worker (vrai fichier, bac à sable ;
+2 ajoutés par la relecture adverse)
+et 3 cas du serveur (HTTP, authentification active). `test/api.test.js` : sans
+authentification, aucune fin annoncée.
+
+| Retiré (v1.42.0, ou mutant par copie, restauré par copie) | Banc | Rouge |
+|---|---|---|
+| tout (sources de `c05e6f1`) | e2e 1 | `page.goto: net::ERR_FAILED at …/#livreur` |
+| idem | e2e 2 | témoin : `net::ERR_FAILED` |
+| idem | e2e 3 | témoin : la clé `/__sereo/page-tournee` absente |
+| idem | unitaires | 11 rouges sur 16 (les 5 verts : négatifs dont le témoin rougit) |
+| fin de session ignorée | unitaire « session EXPIREE » | `'copie'` au lieu de `'hors-ligne'` |
+| tous les écrans rendus | unitaires « AUTRE écran », « réseau MUET » | `'copie'` ; `'repondu'` au lieu de `'attend'` |
+| pas de purge sur la page de connexion | unitaire « CONNEXION » | `true` au lieu de `false` |
+| shell ignoré | unitaire « AUTRE version » | `'copie'` |
+| pas de délai | unitaire « réseau MUET » | `null` |
+| pas de repli sur 502 | unitaire « passerelle » | `null` au lieu de `'copie'` |
+| pas de marque | unitaire « COPIE, marquée » | le HTML sans `data-ouverte-hors-ligne` |
+| en-tête de fin retiré | unitaire « serveur — fin de SA session » | `null` |
+| « 0 » retiré de la page de connexion | unitaire ; e2e 3 | `null` ; 24 clés restent en cache |
+| 12 h sans authentification | `api.test.js` | `'1790231224895'` au lieu de `null` |
+| titre du bandeau sans date | e2e 1 | reçu « Hors ligne » |
+| `#ecranDemandeReseau` jamais montré | e2e 1 | `hidden` |
+| jamais de sortie du mode | e2e 1 | le bandeau reste visible |
+| retour du réseau sans relecture | e2e 2 | reçu « Données de 20:21 » au lieu de « À jour » |
+| `registration.update()` sans `catch` | e2e 1 | `Failed to update a ServiceWorker…` en erreur de page |
+| règle CSS des pages retirée | e2e 1 | `#stock` visible |
+
+**Exécutions** (sur l'arbre final) : `npm run check` ; `node --check` du service
+worker ; `npm test` 562/562 ;
+e2e tournee-hors-ligne, tournee, tournee-mobile, ecran-livreur, carte-telephone,
+meilleur-trajet, livreur-ne-perd-rien, integration-lots-1-5, operations, hors-ligne,
+etats-limites, chargement-instantane, tabs : 92/92 (un premier passage a buté sur des
+ports pris par d'autres worktrees — 3188, 3190, 3194 —, rejoués verts) ;
+interface-finitions, abonnements-mobile, clients-mobile : 45/45.
+
+### Relecture adverse (23/09) : trois défauts, trois corrections
+
+- **Rouverte par le délai de 5 s ou par une passerelle en erreur, la page ne
+  revenait jamais d'elle-même** (important, vrai). Le seul déclencheur du retour
+  était l'événement `online` ; un téléphone qui se croit en ligne (4G sans débit,
+  serveur OMV arrêté pendant que `sereo-updater` reconstruit l'image) ne l'émet
+  jamais. La page restait « Hors ligne », figée, les autres écrans bloqués. Corrigé
+  (`app.js`, `sonderLeRetourDuReseau`) : tant que la page est rouverte hors ligne,
+  toutes les 20 s (le rythme du renvoi de la file) et au retour au premier plan, une
+  sonde légère (`GET /api/me`, jamais mise en cache par le service worker, 8 s au
+  plus) ; toute réponse qui ne vient pas d'une passerelle en erreur (502/503/504)
+  lance `auRetourDuReseau` — un 401 aussi : la relecture renvoie alors vers la
+  connexion et vide le cache. `auRetourDuReseau` ne se lance plus deux fois en même
+  temps (sonde et `online` peuvent se croiser). Page ouverte normalement : rien ne
+  change, la sonde ne part pas.
+- **Une copie déjà rendue, puis la page réseau d'une version plus récente**
+  (mineur, vrai) : le service worker classait quand même la page « en retard »,
+  et ses fichiers suivants arrivaient en nouvelle version sous l'ancien HTML.
+  Corrigé (`service-worker.js`, `naviguer`) : la page n'est « en retard » que si
+  c'est la page réseau qui est rendue.
+- **La page de connexion ouverte directement ne vidait rien** (mineur, vrai) : le
+  service worker laissait passer toute navigation vers `/login`. Corrigé : une
+  navigation vers `/login` passe par lui ; si le serveur rend la page de connexion
+  (« 0 »), le cache de données part. Hors ligne, rien n'est vidé : le livreur qui
+  ouvre `/login` par erreur garde sa tournée. `/login.js` et `POST /login` restent
+  hors du service worker. La révocation hors ligne, elle, est un écart nommé
+  (plus haut) : aucune correction ne la ferme sans renoncer à la décision 4.
+
+| Retiré (code de `1d20c2f`) | Banc | Rouge |
+|---|---|---|
+| sonde de retour | e2e 4 « PASSERELLE en erreur (502) » | reçu « Données de 20:45 » au lieu de « À jour » après 45 s (préalables verts : copie, `navigator.onLine` vrai, bandeau daté) |
+| garde « page réseau rendue » | unitaire « copie rendue PUIS page réseau » | `'nouveau'` au lieu de `'ancien'` (témoin, page réseau rendue : `'nouveau'`, vert) |
+| `/login` par le service worker | unitaire « navigation DIRECTE vers /login » | `true` au lieu de `false` (témoin hors ligne : rien vidé, vert) |
+
+### Ce qui reste
+
+- Vérifier sur un vrai téléphone (Android Chrome, iPhone Safari) : icône de l'écran
+  d'accueil hors ligne, puis « Ouvrir la tournée » ; redémarrage du téléphone.
+- La durée de session (12 h, sans glissement) décide de ce qui se rouvre le matin :
+  à trancher si les tournées commencent loin de la connexion.
+- Relecture adverse de ce lot.
+
+## Calcul routier OSRM intégré à l image Séréo (23/09)
+
+Décision 2 revue par Thomas : **aucune manipulation de sa part**. Son serveur (OMV,
+Docker, service `sereo-updater`, builder Docker LEGACY) reconstruit l'image depuis le
+`Dockerfile` à chaque release ; le compose côté serveur, hors dépôt, ne change pas.
+Tout le reste est dans l'image et dans Séréo. Branche `feat/osrm-integre`.
+
+### Fait
+
+- **Image.** `Dockerfile` : base `node:24-trixie-slim` (Debian 13, la même que l'image
+  OSRM) au lieu de `node:24-alpine`, dont la libc (musl) n'exécute pas les binaires
+  OSRM officiels (glibc). Étape `FROM ghcr.io/project-osrm/osrm-backend:v26.9.0-debian
+  AS osrm` (version **épinglée** ; l'image Docker Hub `osrm/osrm-backend` n'est plus
+  publiée depuis 2021, v5.25) ; `COPY --from=osrm` de `osrm-extract`, `-partition`,
+  `-customize`, `-routed` et du profil voiture (`/opt/osrm/profiles/car.lua` et son
+  dossier `lib/`). Par apt (`--no-install-recommends`) : `tini`, `osmium-tool`,
+  `ca-certificates`. `/sbin/tini` est un lien vers `/usr/bin/tini` : ENTRYPOINT
+  inchangé. HEALTHCHECK par `node -e fetch(...)` (pas de `wget` sur slim). Utilisateur
+  `node` (uid 1000), `NODE_ENV`, variables : inchangés.
+- **Vérifié dans l'image construite** (builder legacy, `DOCKER_BUILDKIT=0`) : `ldd` des
+  quatre binaires OSRM et d'`osmium` : **0 bibliothèque manquante** (OSRM ne dépend que
+  de libstdc++, libgcc, libm, libc) ; `osrm-routed --version` v26.9.0 ; osmium 1.18.0 ;
+  `node:sqlite` (SQLite 3.53.4) ; `nice` et `ionice` présents ; `id` = 1000(node).
+- **Taille de l'image** : 76,4 Mo → **113 Mo** compressés (contenu) ; 312 Mo → **464 Mo**
+  sur disque (mesures `docker image ls`, avant = arbre de `main` `c05e6f1`).
+- **Gestionnaire `lib/osrm-local.js`**, démarré par `startServer()` APRÈS l'écoute et
+  sans être attendu (`demarrer()` rend la main, ne jette jamais, `setImmediate`) :
+  1. choisit la zone selon la mémoire (`os.totalmem`, ou la limite du cgroup
+     `process.constrainedMemory()` si plus basse) et le disque libre du volume
+     (`statfs`, plus la place déjà prise par nos cartes) — tableau plus bas ;
+     `SEREO_OSRM_ZONE` la force (`france`, `voisins`, `region`, `aucune`, ou des
+     chemins Geofabrik comme `europe/monaco`) ;
+  2. télécharge les extraits Geofabrik en HTTPS dans `/app/data/osrm/telechargements`,
+     reprend un téléchargement interrompu (`Range` + `If-Range` sur l'ETag), vérifie la
+     somme MD5 **publiée par Geofabrik** : un fichier faux est supprimé et refusé ;
+  3. **fusionne** plusieurs extraits avec `osmium merge`. Choix : `osrm-extract` ne lit
+     qu'un fichier, et préparer chaque région à part donnerait des cartes séparées où
+     Besançon → Mulhouse ou Dole → Lausanne serait incalculable ; osmium coûte
+     quelques Mo dans l'image ;
+  4. prépare `extract → partition → customize` (MLD, profil voiture) sous `nice -n 19`
+     et `ionice -c 3`, avec la moitié des cœurs, dans `versions/<v…>-en-cours`, **à
+     côté** de la carte en service ; ne bascule qu'après succès complet : renommage du
+     dossier, puis pointeur `courante.json` réécrit par renommage (atomique). Un échec
+     supprime le dossier en cours et **garde l'ancienne carte**, qui continue de
+     servir ;
+  5. lance `osrm-routed --algorithm mld --ip 127.0.0.1 --port 5000 --mmap
+     --default-radius 3000`, le sonde (prêt au premier HTTP), le surveille et le
+     **relance** s'il meurt (2 s, 5 s, 15 s, 60 s, puis 5 min) ;
+  6. refait la carte **chaque mois** : à 3 h (Europe/Paris) quand elle a 30 jours ; la
+     toute première carte part 2 minutes après le démarrage, à toute heure ; après un
+     échec, nouvel essai à 3 h, jamais deux essais à moins de 20 h ; supprime les
+     anciennes versions et les extraits après une bascule réussie ;
+  7. journalise chaque étape (`[osrm-local] …`, sans URL complète ni donnée
+     personnelle) ; `SEREO_OSRM_LOCAL=0` coupe tout (ni réseau, ni processus, ni
+     dossier) ; sans binaires OSRM (poste de développement, CI), il ne fait rien.
+- **Routage.** `lib/routing.js` : `definirServeurLocal()`. Quand la carte locale est
+  prête, elle passe AVANT la chaîne du lot 7 (`SEREO_ROUTING_URL`, puis son repli), qui
+  reste le repli. Un refus de la carte locale (4xx, typiquement `NoSegment` : point à
+  plus de 3 km de toute route de la zone) envoie CE calcul au serveur suivant, sans
+  pause ; une panne (réseau, délai, 5xx) met la carte locale en pause 60 s, comme le
+  principal. Le code du lot 7 est inchangé ; ses bancs restent verts.
+- **État visible.** `/api/storage/status` porte `calculRoutier` (actif, prêt, zone, date
+  de la carte, étape en cours, dernière erreur, espace utilisé, raison, `resume`).
+  Paramètres → « Réglages tournée » : une ligne « Calcul routier » affiche `resume`,
+  par exemple « Sur carte locale « Bourgogne-Franche-Comté », données du 22/09/2026,
+  1,2 Go. » ou « Serveur public en attendant la carte locale « … » : téléchargement
+  1/2 : 42 %. ». Aucun CSS ajouté (`.item`, `.muted` existants).
+- `.env.example` : `SEREO_OSRM_LOCAL`, `SEREO_OSRM_ZONE`, `SEREO_OSRM_DIR`,
+  `SEREO_OSRM_PORT`. `npm run check` vérifie `lib/osrm-local.js`.
+
+### Zones et défauts prudents
+
+Seuils = mémoire ET disque (libre + nos cartes). Tailles des extraits Geofabrik
+relevées le 22/09/2026 ; Geofabrik découpe la France selon les ANCIENNES régions.
+
+| Zone | Extraits | Téléchargement | Mémoire exigée | Disque exigé |
+|---|---|---|---|---|
+| `france` | `europe/france` | 5,1 Go | ≥ 24 Go | ≥ 50 Go |
+| `voisins` | bourgogne, franche-comte, alsace, lorraine, champagne-ardenne, auvergne, rhone-alpes, centre, ile-de-france, switzerland | 2,5 Go | ≥ 12 Go | ≥ 30 Go |
+| `region` | bourgogne, franche-comte | 0,33 Go | ≥ 3 Go | ≥ 6 Go |
+| (rien) | serveur public | — | — | — |
+
+Base des seuils (estimations, **non mesurées au-delà de Monaco**) : `osrm-extract`
+monte à environ 2,5 fois l'extrait en mémoire, plus Séréo et l'ancienne carte qui sert
+pendant la mise à jour ; disque = extraits + fusion + DEUX cartes (l'ancienne reste
+jusqu'à la bascule), une carte MLD pesant 2 à 4 fois l'extrait (Monaco mesuré : 1,25 Mo
+de carte pour 0,69 Mo d'extrait, 1,8×).
+
+### Vérification réelle (Docker Desktop, ce poste, 23/09)
+
+Image construite avec `DOCKER_BUILDKIT=0`, lancée avec `SEREO_OSRM_ZONE=europe/monaco`
+et un volume neuf :
+
+- `/healthz` : **200 en 0,5 s** après `docker run` ; conteneur `healthy` (healthcheck
+  node, code 0).
+- Au bout de 2 min : téléchargement (MD5 vérifiée), extract, partition, customize,
+  bascule, `osrm-routed` lancé et prêt, **en 2 s** au total ; `courante.json`, un seul
+  dossier de version, extraits supprimés, 1,25 Mo sur le disque ; `osrm-routed` à 7 Mo
+  de mémoire (mmap).
+- Dans le conteneur : `/route` Ok (2 009 m, 228 s) ; un point à Paris → **400
+  NoSegment** : le rayon de 3 km refuse bien un point hors zone.
+- **Tournée par Séréo** : conteneur relancé avec `SEREO_ROUTING_URL=http://127.0.0.1:9`
+  (injoignable) et `SEREO_ROUTING_REPLI_URL=` (aucun repli) : la carte locale était
+  le SEUL chemin possible. `POST /api/routes` sur 3 commandes fictives à Monaco :
+  **201, `routingMode: road`, 4,6 km**. Au redémarrage, la carte en place est relancée
+  sans rien retélécharger.
+- **Relance réelle** : `osrm-routed` tué (`SIGKILL`) → la tournée suivante échoue
+  (« indisponible » : aucun repli dans ce montage, contre-témoin) → relance au bout de
+  2 s → la tournée d'après passe (201, 4,6 km).
+- `docker stop` : 0,37 s. Conteneur, volume, images de test, image OSRM et
+  `node:24-trixie-slim` supprimés ensuite.
+
+### Preuves rouges (ancien code, ou mutant ; cause lue)
+
+- `test/dockerfile-osrm.test.js` sur l'ancien `Dockerfile` : « aucune etape OSRM : FROM
+  node:24-alpine » ; « wget n'existe pas sur l'image slim : le healthcheck echouerait
+  toujours ».
+- `test/osrm-routage-local.test.js` sur les anciens `lib/routing.js` et `server.js` :
+  « server.js n'a pas de gestionnaire de carte locale », « lib/routing.js ne connait pas
+  la carte locale » (×3).
+- `test/e2e/calcul-routier.spec.js` sur l'ancien `app.js` + `index.html` : « element(s)
+  not found » (×2) ; nouvel `index.html` avec l'ancien `app.js` : « Expected: "Serveur
+  public (binaires OSRM absents de cette installation)." / Received: "Chargement…" ».
+- `lib/osrm-local.js` est neuf : son banc (`test/osrm-local.test.js`) et celui du
+  routage sont éprouvés par **20 mutants, 20 rouges, 0 échappé** (harnais en TAP ;
+  témoin : bancs non mutés verts). Un par comportement : ressources ignorées (« 16 Go
+  de memoire : pas la France entiere ») ; MD5 non vérifiée (préparation réussie sur un
+  fichier faux) ; bascule avant la préparation (« pointeur deja bascule pendant
+  osrm-extract », « le pointeur a bouge malgre l'echec ») ; dossier en cours gardé
+  (« version a moitie preparee laissee ») ; pas de relance (« jamais relance ») ;
+  `SEREO_OSRM_LOCAL` ignoré ; binaires non vérifiés ; pas de reprise ; planning sans
+  l'heure (« carte de 31 jours refaite a 14 h ») ; sans le délai de 20 h ; pas de
+  priorité basse (« osmium sans priorite basse ») ; `demarrer()` qui rend une promesse ;
+  anciennes versions gardées ; heure de Paris par `format()` (« heure de Paris
+  illisible » : `fr-FR` rend « 03 h », `Number` donne NaN — défaut réel, trouvé par le
+  banc pendant l'écriture) ; tailles en Go seulement ; refus local sans bascule (« Le
+  calcul routier refuse une des positions… ») ; pas de pause après panne ; carte
+  jamais consultée ; `server.js` qui ne branche pas son gestionnaire ; état absent de
+  `/api/storage/status`.
+- **Défaut trouvé en relisant, corrigé** (`f27206a`) : le flux d'écriture de l'extrait
+  n'avait pas d'écouteur « error ». Banc « ecriture impossible pendant le
+  telechargement » (réseau lent, dossier à la place du fichier partiel) sur le code
+  d'avant : **exception non rattrapée** `EISDIR … open …europe_a.osm.pbf.part` (Séréo
+  serait tombé), puis préparation bloquée jusqu'au délai de silence. Harnais repassé
+  sur le code final : 20 mutants, 0 échappé (témoins : 14 et 4 `ok`).
+- Le premier passage du harnais disait **20 échappés** : il cherchait des lignes TAP
+  (`not ok`) dans la sortie du rapporteur par défaut. Instrument muet, pris par son
+  propre compte ; corrigé (`--test-reporter=tap`, témoin qui compte les `ok`) avant
+  tout verdict.
+
+### Bancs
+
+`npm run check` ; `npm test` **565/565** (dont `test/osrm-local.test.js` 14, `test/osrm-routage-local.test.js` 4, `test/dockerfile-osrm.test.js` 2). E2E par `pw-lot.config.js` (port 3326) :
+`calcul-routier`, `carte-telephone`, `ecran-livreur`, `hors-ligne`,
+`integration-lots-1-5`, `livreur-ne-perd-rien`, `meilleur-trajet`, `operations`,
+`parametres`, `parametres-mobile`, `tournee`, `tournee-mobile`, `tabs`. Premier passage
+86/88 : rouges `carte-telephone:140` et `ecran-livreur:65`, verts au passage suivant
+(19/19), cause non lue. Second passage 77/80 : les trois rouges sont des **ports pris
+par un autre processus** (3188, 3175, et 3118 pour `operations.spec.js`, qui ne vérifie
+pas le sien) pendant que d'autres agents lançaient les mêmes bancs ; repassés seuls,
+verts (tournee-mobile, operations, livreur-ne-perd-rien 11/11).
+
+### Écarts nommés
+
+- La vérification Docker a porté sur l'arbre de `6ad728d` ; le correctif d'écriture
+  (`f27206a`) n'a été éprouvé que par les bancs, pas rejoué dans une image.
+- **Seuils de zone estimés**, pas mesurés : la première préparation chez Thomas sera la
+  première mesure réelle d'une région. La ligne de Paramètres et `docker logs` diront
+  la zone choisie, la durée de chaque étape et l'espace pris.
+- **Bascule mensuelle : quelques secondes de coupure.** `osrm-routed` est arrêté puis
+  relancé sur la nouvelle carte (un seul port, 5000). Pendant ce temps, tant que la
+  première carte n'est pas prête, et pour un point hors zone, le calcul passe par le
+  repli du lot 7 : les coordonnées de ces tournées-là sortent chez le serveur public.
+- **Rayon de 3 km** : un point hors zone mais à moins de 3 km d'une route de la zone est
+  accroché à cette route (calcul approché) au lieu d'aller au serveur public.
+- **Mémoire vue** : sans limite de mémoire sur le conteneur, `os.totalmem()` voit la
+  machine entière, y compris la part prise par les autres services de l'OMV. Les seuils
+  sont prudents pour cela ; `SEREO_OSRM_ZONE=region` le règle si besoin.
+- **Nouvelle dépendance de construction** : l'image OSRM vient de `ghcr.io`. Si le
+  serveur ne l'atteint pas pendant une reconstruction, le build échoue et le conteneur
+  reste sur l'ancienne image (repli non destructif de `sereo-updater`).
+- La zone `voisins` prend les anciennes régions ENTIÈRES (tout Rhône-Alpes, tout le
+  Centre…) : plus large que le rayon de 150 km, c'est voulu (« zone plus large que la
+  région pour tout couvrir »).
+- Hors Docker, si Node est tué par un signal, `osrm-routed` peut lui survivre (le
+  gestionnaire ne le tue que sur `exit`) ; dans Docker, il disparaît avec le conteneur
+  (mesuré : `docker stop` 0,37 s).
+- Le crochet « hawkscan » proposé après le commit n'a pas été lancé (aucune clé, aucune
+  application exposée pour lui).
+- Docker Desktop a été démarré sur ce poste pour la vérification (il était arrêté) ; il
+  reste démarré.
+
+### Ce qui reste
+
+- Relever, après la release, sur la ligne de Paramètres et dans `docker logs sereo`
+  (lignes `[osrm-local]`) : zone choisie, durée de la première préparation, espace
+  pris ; ajuster les seuils et le tableau de `DEPLOYMENT.md`.
+- Mesurer l'ordre du lot 7 sur de vraies matrices OSRM, et relever la limite de 50
+  commandes, qui protégeait le serveur public (lot 7, « ce qui reste »).
+- Bascule sans coupure (deuxième port, puis échange) si les quelques secondes
+  mensuelles comptent.
+
+### Relecture adverse (23/09) : le sort des cinq défauts
+
+Relecture de `bc26295`. Les cinq défauts ont été vérifiés sur le code : **tous vrais**, tous
+corrigés dans `lib/osrm-local.js`, chacun avec un banc de `test/osrm-local.test.js`
+rouge sur `bc26295` (cause lue), puis vert.
+
+1. **Important : la bascule supprimait l'ancienne carte avant que la nouvelle soit
+   chargée.** Vrai : pointeur réécrit, `osrm-routed` relancé et anciennes versions
+   supprimées sans attendre la première réponse. Une carte refusée tournait en boucle
+   jusqu'à 30 jours, sans aucune erreur affichée.
+   *Correctif* : le premier lancement d'une carte neuve est un **essai**. La bascule
+   attend sa première réponse, et l'ancienne version n'est supprimée qu'après. Si la
+   carte est refusée ou ne répond pas : le pointeur revient à l'ancienne carte, la
+   version neuve est supprimée, l'ancienne est relancée, et l'erreur est notée
+   (« osrm-routed refuse la nouvelle carte (code 1 : …) »). Pour une carte **déjà en
+   place** qu'`osrm-routed` refuse (nouvelle version d'OSRM dans l'image, fichiers
+   abîmés) : après trois arrêts de suite sans une seule réponse, la carte est notée
+   refusée (`suivi.carteRefusee`). L'erreur apparaît alors dans Paramètres, et la carte
+   est refaite la nuit suivante à 3 h, sans attendre ses 30 jours. Si la carte finit par
+   répondre (un port qui se libère), la note est levée. Le commentaire du `Dockerfile`
+   dit maintenant ce qui se passe vraiment. Rouges : « une carte que osrm-routed refuse
+   est gardee comme carte en service » (actual true) ; « carte refusee relancee en boucle
+   sans erreur visible : Serveur public le temps que la carte locale … démarre. ».
+2. **Important : aucun plancher d'espace libre pour la base SQLite, sur le même
+   volume.** Vrai. *Correctif* : un plancher de **2 Go** (défaut, non mesuré chez Thomas)
+   est retiré du disque disponible dans le choix de la zone. Il est vérifié avant chaque
+   téléchargement et chaque étape, puis relu toutes les 30 s pendant qu'ils tournent. En
+   dessous, le téléchargement est interrompu ou l'étape est tuée (`SIGKILL`) : la
+   préparation échoue proprement et l'ancienne carte reste. Les extraits d'une autre zone
+   (ceux que le choix comptait comme de la place disponible) sont supprimés au début de
+   la préparation. Rouges : « 7 Go libres : la region (6 Go) prendrait la place de la
+   base » (actual 'region') ; « osrm-extract continue d'ecrire sous le plancher » (la
+   préparation ne finissait jamais) ; « telechargement mene a son terme sous le
+   plancher ».
+3. **Mineur : aucune étape n'avait de délai maximal.** Vrai. *Correctif* : **24 h** par
+   étape (la France en priorité basse est estimée à « plusieurs heures »). Au-delà :
+   `SIGKILL`, et la promesse se rejette sans attendre la sortie (un processus bloqué en
+   E/S peut ne jamais sortir), ce qui libère le gestionnaire. Rouge : « une etape bloquee
+   fige le gestionnaire ».
+4. **Mineur : supprimer `/app/data/osrm` faisait perdre la trace de l'essai.** Vrai :
+   `suivi.json` était écrit avant la recréation du dossier (ENOENT, simple
+   avertissement). *Correctif* : `noterSuivi` recrée le dossier. Rouge : « essai non
+   note ». `DEPLOYMENT.md` le dit.
+5. **Mineur : une release pendant la première préparation repoussait l'essai au
+   surlendemain.** Vrai. *Correctif* : la fin de chaque essai est notée (`derniereFin`).
+   Un essai commencé et jamais fini a été **interrompu** (conteneur recréé) : il reprend
+   tout de suite (2 min après le démarrage), sans la règle des 20 h. Cette tolérance
+   s'arrête après **trois interruptions de suite** : une préparation qui ferait tomber
+   le conteneur ne doit pas tourner en boucle. Rouge : « preparation interrompue par un
+   redemarrage : repoussee au surlendemain comme un echec ».
+
+**Harnais de mutation** sur le correctif : **18 mutants, 18 rouges**, chacun sur son
+propre banc ; témoin non muté : 24 `ok`. Le premier passage a laissé trois mutants
+**échappés** : l'essai relancé comme un service, la note de refus jamais levée, une
+version orpheline gardée si le pointeur ne s'écrit pas. Trois bancs ont été ajoutés pour
+eux (`b32f85b`), et ils sont maintenant rouges. Deux instruments étaient faux et ont été
+corrigés avant tout verdict. Le mutant « sans délai maximal », écrit `1e12`, dépassait le
+maximum de `setTimeout`, qui se déclenchait alors tout de suite : ses rouges avaient la
+mauvaise cause, et il a été réécrit (« une etape bloquee fige le gestionnaire »). Le banc
+du téléchargement, lui, s'appuyait sur l'abandon du `fetch`, que le faux réseau
+n'honore pas : la boucle d'écriture s'arrête donc aussi d'elle-même sous le plancher.
+
+**Bancs** : `test/osrm-local.test.js` 24/24 ; `npm test` **575/575** ; `npm run check`.
+E2E par `pw-lot.config.js` (port 3326), en un passage : `calcul-routier`, `parametres`,
+`tournee`, `tournee-mobile`, `ecran-livreur`, `carte-telephone`, `meilleur-trajet`,
+`livreur-ne-perd-rien`, `integration-lots-1-5`, `operations`, `hors-ligne` : **91/91**.
+
+**Écarts nommés (relecture)**
+- Le plancher (2 Go), le délai d'étape (24 h), le seuil de refus (3 arrêts) et la
+  tolérance aux interruptions (3 de suite) sont des **défauts**, pas des mesures.
+- La version d'OSRM n'est pas inscrite dans `courante.json` : l'incompatibilité se voit
+  au refus d'`osrm-routed`, pas avant. Quand l'image change de version, il y a donc
+  trois arrêts (relances à 2 s puis 5 s, environ 7 s en tout) avant la note, puis le serveur public jusqu'à 3 h.
+- Une carte refusée est refaite la **nuit suivante**, pas tout de suite (même règle
+  qu'un échec, 3 h), sauf si aucune tentative n'a jamais été notée.
+- Rien de ce correctif n'a été rejoué dans une image Docker : il n'est éprouvé que par
+  les bancs (binaires et réseau simulés).
+- Le crochet « hawkscan » proposé après chaque commit citait `dc78e54`, un commit qui
+  n'est pas de ce lot. Il n'a pas été lancé (aucune clé, aucune application exposée).
+
+## Intégration de la vague 2 du 23/09
+
+Branche `integration/vague2`, partie de `c05e6f1` (release 1.42.0 ; la branche locale
+`main` est en retard, elle n'a servi de base à rien). Fusions `--no-ff`, dans l'ordre :
+`fix/numerotation-admin` (`d30c543`, gardé tel quel : la PR #172 porte le même commit),
+`feat/tournees-annulables` (lot 2), `feat/tournee-pratique` (lot 6),
+`feat/tournee-hors-ligne` (décision 4), `feat/osrm-integre`.
+
+### Conflits et leur résolution
+
+- **Ajouts en fin de fichier des deux côtés** (`design/DESIGN.md` ×3, `public/css/style.css`
+  ×2) : reconstruits depuis les trois versions de l'index (`ajouts.py`), jamais en ôtant
+  les marqueurs. Deux fois, `DESIGN.md` portait aussi un changement au milieu (la note
+  « Tranché le 23/09 » du lot hors ligne) : `ajouts3.py`, fusion à trois voies du reste
+  (propre), puis les ajouts bout à bout. **Contrôle, dans les deux sens, pour chaque
+  fichier touché des deux côtés** : les lignes du diff du résultat contre HEAD égalent
+  celles du lot contre `c05e6f1`, et celles du résultat contre le lot égalent celles de
+  HEAD contre `c05e6f1` ; seuls les écarts voulus restent (ci-dessous).
+- `public/index.html` (lots 2 et 6) : l'ancien panneau « Clients tournée » reste retiré
+  (décision 7) ; l'historique des tournées du lot 6 prend sa place.
+- `public/js/app.js` (lots 2 et 6) : l'encart de l'arrêt traité (lot 2) puis « Faire
+  maintenant » (lot 6) dans le cockpit — jamais affichés ensemble (arrêt traité / arrêt
+  à faire hors de l'ordre) ; `JAMAIS_EN_FILE` réunit annuler, clôturer (lot 2) et
+  réoptimiser (lot 6).
+- `package.json` (lots 6 et OSRM) : le script `check` vérifie les deux nouveaux modules
+  du lot 6 et `lib/osrm-local.js`.
+- Fusionnés sans conflit, relus par les mêmes contrôles : `server.js`, `lib/routing.js`,
+  `public/service-worker.js` (le module du lot 6 est dans `APP_SHELL`, la page gardée du
+  lot hors ligne aussi), `test/e2e/tournee-mobile.spec.js`.
+
+### Réconciliations (commit `43f3533`)
+
+- **« déjà dans une tournée active »** : la relecture du lot 6 avait vu que `createRoute`
+  sans départ ne la vérifiait pas. Le lot 2 l'a posée **pour tous les chemins** (boucle
+  sur les commandes avant `options.plan`) ; son banc « une commande n'entre pas dans DEUX
+  tournées actives, même sans départ » est vert sur l'arbre fusionné. « Ajouter à la
+  tournée en cours » (lot 6) gardait sa propre définition (prête ou en livraison) et un
+  refus anonyme : il passe par `tourneeActiveDeLaCommande` du lot 2 (brouillon compris)
+  et nomme la commande et la tournée, comme les autres refus du lot 2.
+- **Les fins de tournée du lot 2 dans le lot 6** : aucune heure d'arrivée pour une
+  tournée clôturée ou annulée (une annulée garde des arrêts « prêts » et ses tronçons :
+  elle annonçait des heures « si tu pars maintenant ») ; l'historique compte une clôturée
+  (elle a roulé), jamais une annulée. Banc ajouté, rouge sur chacune des deux gardes
+  retirée (`actual: []` ; un objet d'heures au lieu de `null`).
+- Vérifié sans rien changer : les gestes serveur du lot 6 (réoptimiser, faire
+  maintenant, ajouter) n'acceptent que « prête » / « en livraison », donc refusent une
+  tournée clôturée ou annulée ; `tableDesDurees` (lot 6) et `roadPlan` passent par
+  `osrm()`, donc par la carte locale quand elle est prête ; le `Dockerfile` copie tout
+  `lib/` (`lib/tournee-pratique.js` est dans l'image, vérifié).
+
+### Bancs (sur `0cd24b0`, le code final)
+
+`node --check` (server.js, app.js, operations.js) ; `npm run check` ; `npm test`
+**656/656** (dont feuille-equilibree, ports-e2e). E2E ciblés (lots, tournee,
+tournee-mobile, ecran-livreur, carte-telephone, meilleur-trajet, livreur-ne-perd-rien,
+integration-lots-1-5, operations, hors-ligne, parametres, parametres-mobile,
+numerotation-admin, connexion, rapidite-tournee) : **150/150**. Suite e2e complète :
+1ʳᵉ passe 496 verts, **1 rouge**, 8 non lancés (mode `serial` du même fichier) ;
+2ᵉ passe **505/505**. Le rouge : `chargement-instantane.spec.js:118`, préalable
+« les requêtes d'API doivent être retenues » (reçu 0) — vert seul 3/3 (9/9 chaque
+fois), et déjà vu rouge sous charge, pour la même précondition, au lot 1 (section de la
+file hors ligne). **Instable, antérieur à la vague 2**, non corrigé.
+
+### Docker (Docker Desktop 29.7.2, builder legacy `DOCKER_BUILDKIT=0`, 23/09)
+
+Images construites depuis `git archive` (le dossier de travail contient des worktrees
+que `.dockerignore` ne connaît pas) : `c05e6f1` (`node:24-alpine`) **312 Mo sur disque,
+76,4 Mo de contenu** ; `0cd24b0` (`node:24-trixie-slim` + OSRM) **465 Mo, 113 Mo**.
+Lancée avec un volume neuf sur `/app/data`, sans authentification,
+`SEREO_SKIP_RELEASE_FETCH=1`, `SEREO_OSRM_ZONE=europe/monaco`, port 3399 :
+
+- `/healthz` 200 **1,3 s** après `docker run` ; HEALTHCHECK `healthy` au premier essai
+  (code 0) ; `GET /` 200, la page de l'application avec les éléments des lots.
+- `docker exec … id` : `uid=1000(node)` ; tini et node tournent sous `node`.
+- 2 min après le démarrage : téléchargement (1 Mo), « somme MD5 vérifiée », extract,
+  partition, customize, bascule, « carte locale prête », **en 2 s** ; `courante.json`,
+  une version, extraits supprimés, 1,3 Mo ; `osrm-routed --ip 127.0.0.1 --port 5000`
+  répond (`/route` Ok, 1 460 m) ; un point à Paris : 400 `NoSegment`.
+- Tournée sur deux commandes semées à Monaco : 201, `road`, 4,6 km. **Preuve du chemin
+  local** : même volume, `SEREO_ROUTING_URL=http://127.0.0.1:9` et
+  `SEREO_ROUTING_REPLI_URL=` (seule la carte locale est joignable) : 201, `road`,
+  4,6 km. Contre-témoin : le même montage avec `SEREO_OSRM_LOCAL=0` : 400 « Le service
+  de calcul routier … est indisponible ».
+- État : `/api/storage/status` → `calculRoutier.resume` « Sur carte locale
+  « europe/monaco », données du 23/09/2026, 1 Mo. », et la même phrase dans Paramètres
+  (`#calculRoutierEtat`, lue par un navigateur, 0 erreur de page).
+- `docker restart` : « carte en place », osrm-routed relancé et prêt en 31 ms, **aucune**
+  ligne de téléchargement ou de préparation ; ni 2 min 30 après un nouveau démarrage
+  (le planning passe à 2 min) ; même version, fichiers datés de la première préparation.
+- `SEREO_OSRM_LOCAL=0` (volume neuf) : « coupé », ni dossier `osrm`, ni processus OSRM
+  ou osmium, `actif: false`, 2 min 30 après le démarrage.
+
+Conteneurs, volumes et images de l'essai supprimés ensuite (dont `node:24-trixie-slim`
+et l'image OSRM, absents avant ; `node:24-alpine`, présente avant, gardée).
+
+### Ce qui reste
+
+- `chargement-instantane.spec.js:118` : sa précondition se lit trop tôt sous charge.
+- La priorité basse (`nice`, `ionice`) n'est pas observable sur Monaco (étapes de 0 s) :
+  elle reste éprouvée par les seuls bancs ; les seuils de zone restent des estimations
+  (lot OSRM).
+- Sur un grand écran, l'historique des tournées (lot 6) occupe la colonne de gauche d'une
+  rangée implicite de la grille du bureau (comme sur la branche du lot 6, où il suivait
+  l'ancien panneau) : une rangée pleine largeur serait un choix de mise en page.
+- Les écarts nommés par chaque lot restent les leurs.
+- Le crochet « hawkscan » proposé après chaque commit n'a pas été lancé (aucune clé
+  `HAWK_API_KEY`, aucune application exposée pour lui).

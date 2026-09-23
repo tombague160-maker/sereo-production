@@ -14702,3 +14702,286 @@ textarea {
 :root {
   --focus-ring: 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus);
 }
+
+/* ==========================================================================
+   LOT 2 DE L'AUDIT GEO : DEBLOQUER LES TOURNEES (23/09)
+   --------------------------------------------------------------------------
+   Le signal d'une tournee passee non soldee (H9), le choix « Tournees du
+   jour », « Annuler la tournee » a cote du depart (H8), la note « remis a… »
+   (decision 10), l'arret deja traite en lecture seule (M2), et les commandes
+   deja en tournee grisees. Jetons V8 seulement : le sombre suit. Contrastes
+   des paires utilisees (valeurs de :root) : avertissement sur son fond 4,89
+   (clair) ; secondaire sur surface basse 4,56 (clair), 9,28 (sombre).
+   ========================================================================== */
+
+/* [hidden] gagne toujours, meme sur un display pose plus haut. */
+.tournee-retard[hidden],
+.tournee-choix[hidden],
+.remis-a[hidden],
+.arret-traite-raison[hidden] {
+  display: none !important;
+}
+
+/* H9 : une tournee d'un jour passe, pas soldee. En tete de page, au
+   telephone comme au bureau. */
+.tournee-retard {
+  display: grid;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid var(--v8-avertissement);
+  border-radius: 18px;
+  background: var(--v8-avertissement-fond);
+  color: var(--v8-avertissement);
+  order: -3;
+}
+.tournee-retard-ligne {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin: 0;
+}
+.tournee-retard-texte strong { color: inherit; }
+.tournee-retard-gestes { display: flex; flex-wrap: wrap; gap: 8px; }
+:root[data-color-scheme] .tournee-retard .button,
+:root:not([data-color-scheme]) .tournee-retard .button {
+  min-height: 44px;
+}
+
+/* H9 : « Tournees du jour ». */
+.tournee-choix {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 12px;
+  color: var(--v8-texte-secondaire);
+  font-size: 0.9rem;
+}
+.tournee-choix select {
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid var(--v8-vert-eau);
+  border-radius: 14px;
+  background: var(--v8-surface-basse);
+  color: var(--v8-texte);
+  font: inherit;
+  font-size: 16px;
+}
+.tournee-choix select:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* H8 : « Annuler la tournee » a cote de « Demarrer ». */
+.tournee-depart-gestes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+:root[data-color-scheme] .tournee-depart-gestes .button,
+:root:not([data-color-scheme]) .tournee-depart-gestes .button {
+  min-height: 44px;
+}
+
+/* Decision 10 : « remis a… », une ligne au-dessus des gestes. */
+.remis-a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+  color: var(--v8-texte-secondaire);
+  font-size: 0.9rem;
+}
+.remis-a span { flex: 0 0 auto; }
+.remis-a input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--v8-vert-eau);
+  border-radius: 14px;
+  background: var(--v8-surface-basse);
+  color: var(--v8-texte);
+  font: inherit;
+  font-size: 16px;
+}
+.remis-a input:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* M2 : l'arret deja traite, en lecture seule. */
+.arret-traite {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0 4px;
+  padding: 12px 14px;
+  border: 1px dashed var(--v8-vert-eau);
+  border-radius: 16px;
+  background: var(--v8-surface-basse);
+  color: var(--v8-texte);
+}
+.arret-traite-texte { margin: 0; }
+.arret-traite-texte span { color: var(--v8-texte-secondaire); }
+.arret-traite-gestes { display: flex; flex-wrap: wrap; gap: 8px; }
+:root[data-color-scheme] .arret-traite .button,
+:root:not([data-color-scheme]) .arret-traite .button {
+  min-height: 44px;
+}
+.arret-traite-raison {
+  margin: 0;
+  color: var(--v8-texte-secondaire);
+  font-size: 0.85rem;
+}
+
+/* Les commandes deja dans une tournee active : grisees par le FOND et le
+   trait (jamais par l'opacite du texte, qui ferait tomber le contraste). */
+:root[data-color-scheme] .delivery-card.delivery-card--en-tournee,
+:root:not([data-color-scheme]) .delivery-card.delivery-card--en-tournee {
+  border-style: dashed;
+  background: var(--v8-surface-basse);
+  cursor: not-allowed;
+}
+.delivery-card-tournee {
+  display: block;
+  color: var(--v8-texte-secondaire);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+/* Decision 10 : « remis a… » dans le detail d'une commande livree. */
+.bdc-detail-remis {
+  display: block;
+  color: var(--v8-texte-secondaire);
+  font-size: 0.9rem;
+}
+
+/* La grille du bureau, sans la rangee de l'ancien panneau « Clients tournee »
+   (retire, decision 7), et avec celle du signal quand il y en a un. */
+@media (min-width: 1181px) {
+  #livreur .driver-page {
+    grid-template-areas: "carte tournee" "carte liste" "plan plan" "cand cand";
+  }
+  #livreur .driver-page.sans-tournee {
+    grid-template-areas: "plan plan" "cand cand" "carte liste";
+  }
+  #livreur .driver-page.avec-retard {
+    grid-template-areas: "retard retard" "carte tournee" "carte liste" "plan plan" "cand cand";
+  }
+  #livreur .driver-page.sans-tournee.avec-retard {
+    grid-template-areas: "retard retard" "plan plan" "cand cand" "carte liste";
+  }
+  #livreur .driver-page.avec-retard > #tourneesNonSoldees { grid-area: retard; }
+}
+
+/* ==========================================================================
+   LOT 6 DE L'AUDIT GEO : PRATIQUE AU QUOTIDIEN (23/09)
+   --------------------------------------------------------------------------
+   Heures d'arrivee (discretes : texte secondaire, dans la ligne de detail),
+   « Prevenir », « Reoptimiser », « Faire maintenant », « Ajouter a la tournee
+   en cours », le depot des Parametres, l'historique des tournees. Cibles de
+   44 px au moins, anneau clavier du theme, jetons v8 (clair et sombre).
+   Banc : test/e2e/tournee-pratique.spec.js.
+   ========================================================================== */
+
+/* L'heure d'arrivee d'un arret, a la suite du detail de la ligne. */
+.route-stop-heure { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Le cockpit : l'heure d'arrivee de l'arret affiche, et le trajet jusqu'au
+   prochain (planche 4b : « 6,2 km · environ 14 min »). */
+:root[data-color-scheme] .panel p.arret-heure,
+:root:not([data-color-scheme]) .panel p.arret-heure {
+  margin: 2px 0 0; font-size: 14px; color: var(--v8-texte-secondaire);
+  font-variant-numeric: tabular-nums;
+}
+:root[data-color-scheme] .panel p.arret-heure strong,
+:root:not([data-color-scheme]) .panel p.arret-heure strong { color: var(--v8-texte); font-weight: 650; }
+:root[data-color-scheme] .panel .arret-prochain-trajet,
+:root:not([data-color-scheme]) .panel .arret-prochain-trajet {
+  flex-basis: 100%; font-size: 13.5px; font-weight: 500; color: var(--v8-texte-secondaire);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Un arret choisi hors de l'ordre : une phrase et « Faire maintenant ». */
+.arret-hors-ordre {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px;
+  margin: 12px 0 0; padding: 10px 12px 10px 16px; border-radius: 18px;
+  border: 1px solid var(--v8-vert-eau); background: var(--v8-surface-basse);
+  color: var(--v8-texte); font-size: 14px;
+}
+
+/* Les boutons du lot : 44 px au moins partout (48 au telephone, regle commune). */
+:root[data-color-scheme] :is(.trn-maintenant, .trn-ajouter, .trn-reoptimiser, .trn-prevenir, #parametres .par-depot .button),
+:root:not([data-color-scheme]) :is(.trn-maintenant, .trn-ajouter, .trn-reoptimiser, .trn-prevenir, #parametres .par-depot .button) {
+  min-height: 44px; min-width: 44px;
+}
+:root[data-color-scheme] :is(.trn-maintenant, .trn-ajouter, .trn-reoptimiser, .trn-prevenir):focus-visible,
+:root:not([data-color-scheme]) :is(.trn-maintenant, .trn-ajouter, .trn-reoptimiser, .trn-prevenir):focus-visible {
+  outline: none; box-shadow: var(--focus-ring);
+}
+/* « Ajouter a la tournee en cours » sous la carte de la commande, a sa largeur. */
+.delivery-card-ligne > .trn-ajouter { justify-self: start; }
+/* « Prevenir » est un lien (l'application SMS du telephone) : hors d'usage,
+   il se montre comme un bouton desactive, et le toucher dit pourquoi. */
+.trn-prevenir { text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
+.trn-prevenir[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
+
+/* Le dialogue « Reoptimiser » : des choix pleine largeur a 48 px. */
+.reopt-choix-liste { margin: 14px 0; padding: 0; border: 0; }
+.reopt-choix-liste legend { margin-bottom: 8px; font-weight: 600; color: var(--v8-texte); }
+.reopt-choix-liste > div { display: grid; gap: 8px; }
+.reopt-choix {
+  display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 10px 14px;
+  border: 1px solid var(--v8-vert-eau); border-radius: 14px;
+  background: var(--v8-surface-basse); color: var(--v8-texte); cursor: pointer;
+}
+.reopt-choix input { width: 20px; height: 20px; margin: 0; accent-color: var(--v8-principal); }
+.reopt-choix:has(input:checked) { border-color: var(--v8-principal); background: var(--v8-vert-clair); font-weight: 650; }
+.reopt-choix:has(input:focus-visible) { box-shadow: var(--focus-ring); }
+
+/* Parametres : le depot par defaut. */
+#parametres .par-depot-recherche { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
+#parametres .par-depot-recherche .par-champ { flex: 1 1 220px; min-width: 0; }
+#parametres .par-depot-actuel { margin: 4px 0 8px; font-weight: 600; color: var(--v8-texte); }
+#parametres .par-depot select,
+#parametres #parMessagePrevenir {
+  width: 100%; min-height: 44px; margin-top: 8px; padding: 8px 12px;
+  border: 1px solid var(--v8-vert-eau); border-radius: 14px;
+  background: var(--v8-surface-basse); color: var(--v8-texte); font: inherit;
+}
+#parametres #parMessagePrevenir { resize: vertical; }
+#parametres .par-depot select:focus-visible,
+#parametres #parMessagePrevenir:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+#parametres .par-depot .par-case { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+
+/* L'historique des tournees : repliable, sous la preparation. */
+.trn-historique-titre { display: flex; align-items: center; min-height: 44px; cursor: pointer; }
+.trn-historique-titre h3 { margin: 0; }
+.trn-historique-titre:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 12px; }
+.trn-historique-contenu { display: grid; gap: 12px; margin-top: 8px; }
+.trn-historique-mois h4 { margin: 8px 0 2px; }
+:root[data-color-scheme] .panel p.trn-historique-total,
+:root:not([data-color-scheme]) .panel p.trn-historique-total { margin: 0 0 8px; color: var(--v8-texte-secondaire); font-variant-numeric: tabular-nums; }
+.trn-historique-defile { overflow-x: auto; max-width: 100%; }
+.trn-historique-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.trn-historique-table :is(th, td) { padding: 8px 10px; border-bottom: 1px solid var(--v8-vert-eau); text-align: left; color: var(--v8-texte); }
+.trn-historique-table thead th { font-size: 13px; font-weight: 600; color: var(--v8-texte-secondaire); }
+.trn-historique-note { color: var(--v8-texte-secondaire); font-size: 12.5px; }
+.trn-historique-liste { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.trn-historique-liste li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; padding: 8px 0; border-bottom: 1px solid var(--v8-vert-eau); color: var(--v8-texte); }
+
+/* [hidden] gagne sur tout ce qui precede. */
+:is(#reoptimiserButton, #parDepotResultats, #parDepotEffacer, .trn-ajouter)[hidden] { display: none !important; }
+
+/* ==========================================================================
+   L'ECRAN TOURNEE SE ROUVRE SANS RESEAU (decision 4, 23/09)
+   --------------------------------------------------------------------------
+   Le service worker rend la page depuis son cache pour la seule navigation
+   vers la tournee, et marque <html data-ouverte-hors-ligne>. Tant que le
+   reseau n'a pas repondu, les autres ecrans ne montrent pas leurs donnees de
+   secours : #ecranDemandeReseau le dit a leur place. L'etat vide et son
+   bouton (44 px, focus, sombre) sont ceux de la charte (.empty-state).
+   ========================================================================== */
+html[data-ouverte-hors-ligne] .content > .page:not(#livreur) { display: none !important; }
+.ecran-demande-reseau { margin: 0 0 16px; }
+.ecran-demande-reseau[hidden] { display: none !important; }

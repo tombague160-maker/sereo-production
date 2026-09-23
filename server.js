@@ -12,6 +12,7 @@ const { zipSync, strToU8 } = require("fflate");
 const { createSqliteStore } = require("./storage/sqliteStore");
 const { empreinteDesSources, shellEmpreinte } = require("./lib/empreinte-shell");
 const { fondDeCarte } = require("./lib/fond-de-carte");
+const { GestionnaireOsrm } = require("./lib/osrm-local");
 
 loadEnvFile(path.join(__dirname, ".env"));
 
@@ -132,6 +133,15 @@ const BACKUP_DIR = path.resolve(process.env.SEREO_BACKUP_DIR || path.join(path.d
 // retelechargement et audit. Sous-dossier du data dir, donc persistant sur
 // le volume Docker comme la SQLite.
 const IMPORTS_ARCHIVES_DIR = path.resolve(process.env.SEREO_IMPORTS_ARCHIVES_DIR || path.join(path.dirname(SQLITE_PATH), "imports-archives"));
+// Calcul routier OSRM integre a l'image (23/09) : cartes dans le volume de
+// donnees (/app/data/osrm en production). Le gestionnaire ne fait rien tant
+// que startServer() ne l'a pas demarre, et rien du tout sans les binaires
+// OSRM (poste de developpement, CI). lib/routing.js lui demande a chaque
+// calcul si la carte locale est prete.
+const osrmLocal = new GestionnaireOsrm({
+  dossier: path.resolve(process.env.SEREO_OSRM_DIR || path.join(path.dirname(SQLITE_PATH), "osrm"))
+});
+routing.definirServeurLocal(() => osrmLocal.urlSiPret());
 const LEAFLET_DIST = path.join(__dirname, "node_modules", "leaflet", "dist");
 // Le nom du shell, calcule une fois au demarrage : CACHE_NAME du service
 // worker SUIVI de l'empreinte du contenu de public/ et de Leaflet
@@ -288,7 +298,21 @@ function isValidOrderStatusTransition(fromStatus, toStatus) {
   const allowed = ORDER_STATUS_TRANSITIONS[fromStatus];
   return Array.isArray(allowed) && allowed.includes(toStatus);
 }
-const ROUTE_STATUSES = new Set(["brouillon", "prete", "en_livraison", "terminee"]);
+// Lot 2 de l'audit geo (23/09) : une tournee se ferme de TROIS facons. Avant,
+// seule la fin naturelle existait (`terminee`, tous les arrets soldes) : une
+// tournee mal creee bloquait ses commandes, et une tournee finie a moitie
+// restait « en livraison » pour toujours (H8).
+//   - `annulee`  : une tournee PRETE defaite avant le depart ; ses commandes
+//                  redeviennent pretes, rien n'a bouge dans le stock ;
+//   - `cloturee` : une tournee EN COURS arretee ; les arrets restants passent
+//                  « A reprogrammer », les livres restent livres. Irreversible.
+// Un statut inconnu est ramene a « prete » par normalizeRoute : les deux
+// nouveaux DOIVENT etre ici, sinon la premiere ecriture les ressusciterait.
+const ROUTE_STATUSES = new Set(["brouillon", "prete", "en_livraison", "terminee", "cloturee", "annulee"]);
+// Une tournee ACTIVE retient ses commandes ; une tournee FINIE ne se rouvre
+// plus par un geste d'arret (seulement par « Corriger le statut »).
+const STATUTS_TOURNEE_ACTIVE = new Set(["brouillon", "prete", "en_livraison"]);
+const STATUTS_TOURNEE_FINIE = new Set(["terminee", "cloturee", "annulee"]);
 const STOP_STATUSES = new Set(["pret_livraison", "en_livraison", "livre", "absent", "probleme", "a_reprogrammer"]);
 
 // --- LE MOTIF D'UN ARRET EN ECHEC -------------------------------------------
@@ -466,9 +490,31 @@ app.use(express.static(path.join(__dirname, "public"), {
   // les fichiers statiques depuis son cache, et s'il est plus vieux que la page,
   // il doit le savoir AVANT qu'elle demande ses scripts (public/service-worker.js).
   setHeaders(res, chemin) {
-    if (SHELL_ANNONCE && path.basename(chemin) === "index.html") res.setHeader("X-Sereo-Shell", SHELL_ANNONCE);
+    if (path.basename(chemin) !== "index.html") return;
+    if (SHELL_ANNONCE) res.setHeader("X-Sereo-Shell", SHELL_ANNONCE);
+    const fin = finDeSessionConnue(res.req);
+    if (fin !== null) res.setHeader("X-Sereo-Session-Fin", String(fin));
   }
 }));
+
+/**
+ * Decision 4 (23/09) : jusqu'a quand la page de l'application peut etre
+ * rouverte HORS LIGNE (ecran Tournee seulement, public/service-worker.js).
+ * La fin de la session du cookie (emission + 12 h), jamais plus : hors ligne,
+ * personne ne peut la prolonger. Rien n'est annonce (null : la page ne se
+ * garde pas, et ne s'oublie pas non plus) quand il n'y a pas de session du
+ * tout : authentification desactivee (developpement, bancs -- « sans session
+ * valide connue, on ne montre rien »), ou acces par l'en-tete Basic, sans
+ * cookie.
+ */
+function finDeSessionConnue(req, now = Date.now()) {
+  const duree = AUTH_COOKIE_MAX_AGE_SECONDS * 1000;
+  if (!isAccessAuthEnabled()) return null;
+  const valeur = getAccessSessionCookie(req);
+  if (!valeur || !isValidAccessSessionValue(valeur, now)) return null;
+  const session = readAccessSession(valeur, now);
+  return session ? session.issuedAt + duree : null;
+}
 app.use("/api", requireTrustedApiRequest);
 app.use("/api", gesteIdempotent);
 
@@ -1983,6 +2029,9 @@ function renderLoginPage(req, res) {
 
   const hasError = req.query.error === "1";
   const next = getSafeRedirectTarget(req.query.next);
+  // Decision 4 (23/09) : la page de connexion dit « aucune session ». Le
+  // service worker oublie alors la copie de la tournee ET ses donnees.
+  res.setHeader("X-Sereo-Session-Fin", "0");
 
   // Etat du rate limit pour cette IP, calcule a chaque GET /login.
   // Source de verite serveur (la query ?locked=1 peut etre obsolete si le
@@ -2349,7 +2398,9 @@ function defaultDb() {
       },
       // Revue R1 NIT-18 : alignement avec normalizeSettings (defaut prod).
       orderNumbering: { prefix: "CMD", resetAnnually: true },
-      tournee: { averageSpeedKmh: 28, stopDurationMin: 6 }
+      // Lot 6 (audit geo) : pas de depot tant qu'on ne l'a pas choisi, retour
+      // au depot coche, texte du SMS « Prevenir » par defaut.
+      tournee: { averageSpeedKmh: 28, stopDurationMin: 6, depot: null, retourAuDepot: true, messagePrevenir: MESSAGE_PREVENIR_DEFAUT }
     }
   };
 }
@@ -2790,6 +2841,12 @@ function ensureOrderNumbers(db) {
   });
 }
 
+// Lot 6 (audit geo) : le depot par defaut. Un libelle (200 caracteres au plus :
+// l'audit a vu 200 000 acceptes pour un depart) et une position valide, ou rien.
+const DEPOT_LIBELLE_MAX = 200;
+const MESSAGE_PREVENIR_MAX = 300;
+const MESSAGE_PREVENIR_DEFAUT = "Bonjour, je passe vers {heure} pour votre livraison.";
+
 function normalizeSettings(settings = {}) {
   const appearance = settings && typeof settings === "object" && settings.appearance && typeof settings.appearance === "object"
     ? settings.appearance
@@ -2820,6 +2877,13 @@ function normalizeSettings(settings = {}) {
   const averageSpeedKmh = Number.isFinite(rawSpeed) && rawSpeed >= 10 && rawSpeed <= 60 ? rawSpeed : 28;
   const rawStop = Number(tourneeRaw.stopDurationMin);
   const stopDurationMin = Number.isFinite(rawStop) && rawStop >= 0 && rawStop <= 30 ? rawStop : 6;
+  // Lot 6 (audit geo) : le depot par defaut (le depart prerempli d'une tournee),
+  // « retour au depot » coche par defaut, et le texte du SMS « Prevenir ».
+  const depot = normaliserDepot(tourneeRaw.depot);
+  const retourAuDepot = tourneeRaw.retourAuDepot !== false;
+  const messagePrevenir = typeof tourneeRaw.messagePrevenir === "string" && tourneeRaw.messagePrevenir.trim()
+    ? tourneeRaw.messagePrevenir.trim().slice(0, MESSAGE_PREVENIR_MAX)
+    : MESSAGE_PREVENIR_DEFAUT;
 
   // Revue R1 NIT-15 + R2 minor : si `settings` est une string corrompue,
   // `...settings` spread les indices de caracteres ("0":"a", "1":"b", ...).
@@ -2839,9 +2903,21 @@ function normalizeSettings(settings = {}) {
     },
     tournee: {
       averageSpeedKmh,
-      stopDurationMin
+      stopDurationMin,
+      depot,
+      retourAuDepot,
+      messagePrevenir
     }
   };
+}
+
+
+function normaliserDepot(brut) {
+  if (!brut || typeof brut !== "object" || Array.isArray(brut)) return null;
+  const point = routing.coordinates(brut);
+  const label = clean(brut.label).slice(0, DEPOT_LIBELLE_MAX);
+  if (!point || !label) return null;
+  return { label, lat: point.lat, lng: point.lng };
 }
 
 function getAppearanceSettings(db) {
@@ -4115,7 +4191,9 @@ function getDashboardSummary(db) {
     routes: {
       draft: db.routes.filter(route => ["brouillon", "prete"].includes(route.status)).length,
       active: db.routes.filter(route => route.status === "en_livraison").length,
-      completed: db.routes.filter(route => route.status === "terminee").length
+      // Lot 2 : une tournee cloturee est finie, comme une terminee ; une
+      // annulee n'a jamais roule, elle ne compte nulle part.
+      completed: db.routes.filter(route => ["terminee", "cloturee"].includes(route.status)).length
     }
   };
 }
@@ -4511,6 +4589,9 @@ function normalizeOrder(order) {
     routeId: order.routeId || null,
     importedAsLivre: order.importedAsLivre || false,
     deliveredAt: order.deliveredAt || "",
+    // Decision 10 (lot 2 de l'audit geo) : « remis a… », note facultative du
+    // geste « Livre ». Sans cette ligne, syncWorkflow l'effacerait a l'ecriture.
+    remisA: clean(order.remisA),
     subscriptionId: order.subscriptionId || "",
     subscriptionDate: order.subscriptionDate || "",
     source: clean(order.source || order.orderSource || order.sourceExcel),
@@ -5643,6 +5724,15 @@ function notFound(message) {
   return error;
 }
 
+// Lot 2 : un geste qui arrive sur un etat qui ne l'admet plus (arret deja
+// traite, tournee finie). 409 : la demande est bien formee, c'est l'etat qui
+// a change. La file hors ligne la traite comme tout refus 4xx (retiree, nommee).
+function conflit(message) {
+  const error = new Error(message);
+  error.statusCode = 409;
+  return error;
+}
+
 function getSectors(db) {
   const map = new Map();
 
@@ -5747,6 +5837,82 @@ function memoriserPositionDuCalcul(db, order, item) {
 // calcul « sans depart » (lot 5).
 const MAX_COMMANDES_PAR_TOURNEE = 50;
 
+// --- LOT 2 DE L'AUDIT GEO (23/09) : DEBLOQUER LES TOURNEES --------------------
+
+/** « Tournée Dole du 23/09 » : le nom qu'un message montre. */
+function nomDeTournee(route) {
+  const secteur = route && route.sector && route.sector !== "Tous" ? ` ${route.sector}` : "";
+  // Sans date de livraison (creee sans filtre de date) : le jour de sa
+  // creation, a Paris -- celui que l'ecran lui donne aussi.
+  const creee = route && Number.isFinite(Date.parse(route.createdAt || ""))
+    ? new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris" }).format(new Date(route.createdAt))
+    : "";
+  const jour = normalizeDateInput(route && route.deliveryDate) || creee;
+  const date = jour ? ` du ${jour.slice(8, 10)}/${jour.slice(5, 7)}` : "";
+  return `Tournée${secteur}${date}`;
+}
+
+/** « CMD-2026-012 (EHPAD Les Tilleuls) » : la commande qu'un message nomme. */
+function nomDeCommande(order) {
+  if (!order) return "inconnue";
+  const client = clean(order.clientName);
+  const numero = clean(order.numero);
+  if (numero && client) return `${numero} (${client})`;
+  return numero || client || String(order.id);
+}
+
+// Seul un arret ENCORE A FAIRE retient la commande (lot 1) : un absent de ce
+// matin, revenu « A reprogrammer », se replanifie meme si sa tournee n'est pas
+// finie.
+function arretEncoreAFaire(stop) {
+  return !STATUTS_ARRET_SOLDE.has(stop.status);
+}
+
+/**
+ * La tournee ACTIVE (prete ou en cours) ou la commande attend encore son
+ * arret, sinon null. `sauf` : l'id d'une tournee a ne pas compter.
+ */
+function tourneeActiveDeLaCommande(db, orderId, sauf = null) {
+  return db.routes.find(route => STATUTS_TOURNEE_ACTIVE.has(route.status)
+    && String(route.id) !== String(sauf)
+    && (route.stops || []).some(stop => String(stop.orderId) === String(orderId) && arretEncoreAFaire(stop))) || null;
+}
+
+/**
+ * Pourquoi une commande choisie ne peut pas entrer dans la tournee. Avant, le
+ * message disait « Certaines commandes ne sont plus prêtes » ou « appartient
+ * déjà à une tournée active » sans dire LAQUELLE : sur 30 commandes cochees,
+ * il fallait deviner. Rend null si elle peut entrer.
+ */
+function raisonDeRefusEnTournee(db, orderId, filtres = {}) {
+  const order = db.commandes.find(item => String(item.id) === String(orderId));
+  if (!order) return `La commande ${orderId} est introuvable : recharge la liste.`;
+  const nom = nomDeCommande(order);
+  const occupee = tourneeActiveDeLaCommande(db, order.id);
+  if (occupee) return `La commande ${nom} est déjà dans la tournée « ${nomDeTournee(occupee)} » : annule cette tournée ou choisis une autre commande.`;
+  if (!STATUTS_A_PLANIFIER.includes(order.status)) return `La commande ${nom} n'est plus prête à livrer : recharge la liste.`;
+  const sector = clean(filtres.sector);
+  if (sector && sector !== "Tous" && normalizeTextKey(order.sector) !== normalizeTextKey(sector)) {
+    return `La commande ${nom} n'est pas du secteur ${sector}.`;
+  }
+  const city = normalizeCity(filtres.city || "");
+  if (city && normalizeTextKey(order.city) !== normalizeTextKey(city)) return `La commande ${nom} n'est pas à ${city}.`;
+  const jour = normalizeDateInput(filtres.deliveryDate);
+  if (jour && order.deliveryDate !== jour && !STATUTS_A_RELIVRER.includes(order.status)) {
+    const prevue = order.deliveryDate ? `le ${order.deliveryDate.slice(8, 10)}/${order.deliveryDate.slice(5, 7)}` : "sans date";
+    return `La commande ${nom} est prévue ${prevue}, pas le ${jour.slice(8, 10)}/${jour.slice(5, 7)}.`;
+  }
+  return null;
+}
+
+/** Leve un 400 qui nomme la premiere commande choisie qui ne peut pas entrer. */
+function refuserCommandesHorsTournee(db, orderIds, filtres = {}) {
+  for (const id of orderIds || []) {
+    const raison = raisonDeRefusEnTournee(db, id, filtres);
+    if (raison) throw badRequest(raison);
+  }
+}
+
 function createRoute(db, options = {}) {
   const selectedOrderIds = Array.isArray(options.orderIds) ? options.orderIds.map(String) : [];
   const sector = clean(options.sector || "Tous");
@@ -5764,6 +5930,10 @@ function createRoute(db, options = {}) {
   });
 
   if (selectedOrderIds.length) {
+    // Lot 2 : une commande choisie qui ne peut pas entrer est NOMMEE. Avant,
+    // elle etait retiree en silence (5 cochees, 4 livrees), ou toute la
+    // tournee etait refusee sans dire laquelle.
+    refuserCommandesHorsTournee(db, selectedOrderIds, { sector, city, deliveryDate });
     const selected = new Set(selectedOrderIds);
     orders = orders.filter(order => selected.has(String(order.id)));
   }
@@ -5779,11 +5949,15 @@ function createRoute(db, options = {}) {
     throw badRequest(`Sélectionne entre 1 et ${MAX_COMMANDES_PAR_TOURNEE} commandes par tournée.`);
   }
 
-  // Seul un arret ENCORE A FAIRE retient la commande : un absent de ce matin,
-  // revenu « A reprogrammer », se replanifie meme si sa tournee n'est pas finie.
-  const arretEncoreAFaire = stop => !["livre", "absent", "probleme", "a_reprogrammer"].includes(stop.status);
-  if (options.plan && orders.some(order => db.routes.some(route => ["prete", "en_livraison"].includes(route.status) && route.stops.some(stop => String(stop.orderId) === String(order.id) && arretEncoreAFaire(stop))))) {
-    throw badRequest("Une commande sélectionnée appartient déjà à une tournée active.");
+  // Lot 2 : une commande n'entre JAMAIS dans deux tournees actives. La garde ne
+  // valait qu'en mode routier (`options.plan`) : sans depart, une commande
+  // d'une tournee prete (toujours « pret_livraison ») entrait dans une seconde.
+  // Seul un arret encore a faire la retient (lot 1).
+  for (const order of orders) {
+    const occupee = tourneeActiveDeLaCommande(db, order.id);
+    if (occupee) {
+      throw badRequest(`La commande ${nomDeCommande(order)} est déjà dans la tournée « ${nomDeTournee(occupee)} » : annule cette tournée ou choisis une autre commande.`);
+    }
   }
   const optimizedOrders = options.plan ? options.plan.ordered.map(item => {
     const original = orders.find(order => String(order.id) === String(item.id));
@@ -5912,7 +6086,8 @@ const STATUTS_ARRET_SOLDE = new Set(["livre", "absent", "probleme", "a_reprogram
  */
 function arretVivant(route, stop, order) {
   if (!order) return stop;
-  if (route.status === "terminee" || STATUTS_ARRET_SOLDE.has(stop.status)) return stop;
+  // Lot 2 : une tournee cloturee ou annulee est de l'historique, comme une terminee.
+  if (STATUTS_TOURNEE_FINIE.has(route.status) || STATUTS_ARRET_SOLDE.has(stop.status)) return stop;
   return {
     ...stop,
     clientName: order.clientName || stop.clientName,
@@ -5942,8 +6117,12 @@ function retirerDesTourneesSiReportee(db, order) {
     if (!["prete", "en_livraison"].includes(route.status)) continue;
     const dateTournee = normalizeDateInput(route.deliveryDate);
     if (!dateTournee || !order.deliveryDate || order.deliveryDate === dateTournee) continue;
-    const index = route.stops.findIndex(stop => String(stop.orderId) === String(order.id));
-    if (index < 0 || STATUTS_ARRET_SOLDE.has(route.stops[index].status)) continue;
+    // L'arret ENCORE A FAIRE de la commande. Lot 6 (relecture adverse) : un
+    // absent du matin, rajoute a sa propre tournee (« Ajouter a la tournee en
+    // cours »), y a DEUX arrets -- le solde d'abord. Prendre le premier
+    // laissait l'arret actif en place.
+    const index = route.stops.findIndex(stop => String(stop.orderId) === String(order.id) && !STATUTS_ARRET_SOLDE.has(stop.status));
+    if (index < 0) continue;
     route.stops.splice(index, 1);
     route.stops.forEach((stop, i) => { stop.orderIndex = i + 1; });
     route.selectedOrderIds = route.stops.map(stop => stop.orderId);
@@ -6109,6 +6288,10 @@ function startRoute(db, routeId) {
   if (!route) throw notFound("Tournee introuvable");
 
   if (route.status === "terminee") throw badRequest("Cette tournée est terminée.");
+  // Lot 2 : une tournee cloturee ou annulee ne repart pas (ses commandes sont
+  // peut-etre deja dans une autre).
+  if (route.status === "cloturee") throw badRequest("Cette tournée est clôturée.");
+  if (route.status === "annulee") throw badRequest("Cette tournée est annulée.");
   if (route.status === "en_livraison") return route;
   const now = new Date().toISOString();
   route.status = "en_livraison";
@@ -6167,7 +6350,7 @@ function horodatageDuGeste(brut, { maintenant = new Date(), plancher = null } = 
  * qu'on corrige : passer le motif dans `notes` ecraserait l'instruction de
  * livraison de la commande, et la perdrait pour la prochaine tournee.
  */
-function updateRouteStop(db, routeId, stopId, status, notes = "", motif = null, faitLe = null) {
+function updateRouteStop(db, routeId, stopId, status, notes = "", motif = null, faitLe = null, remisA = "") {
   if (!STOP_STATUSES.has(status)) {
     throw badRequest("Statut arret invalide");
   }
@@ -6190,9 +6373,44 @@ function updateRouteStop(db, routeId, stopId, status, notes = "", motif = null, 
   const stop = route.stops.find(item => String(item.id) === String(stopId));
   if (!stop) throw notFound("Arret introuvable");
 
+  // Lot 2 (M2 et gardes de l'API) : un geste ne rouvre plus ce qui est fini.
+  // Avant, « Absent » tape sur un arret livre, ou sur une tournee terminee,
+  // passait (ou echouait sur une transition de commande, sans rien dire
+  // d'utile). La correction a desormais son chemin : « Corriger le statut »
+  // (corrigerArret), journalise, qui garde les stocks justes.
+  const retard = gesteArriveApresCloture(db, route, stop, status, faitLe);
+  if (!retard) {
+    if (STATUTS_TOURNEE_FINIE.has(route.status)) {
+      const etat = { terminee: "terminée", cloturee: "clôturée", annulee: "annulée" }[route.status];
+      throw conflit(`${nomDeTournee(route)} est ${etat} : ${stop.clientName || "cet arrêt"} ne se modifie plus que par « Corriger le statut ».`);
+    }
+    // Une tournee pas encore partie : ses arrets attendent le depart (qui les
+    // met en livraison). Un « Absent » y passait sur une commande a
+    // reprogrammer, et l'annulation de la tournee laissait cet arret solde.
+    if (route.status !== "en_livraison") {
+      throw conflit(`${nomDeTournee(route)} n'est pas partie : démarre-la avant de marquer un arrêt.`);
+    }
+    if (STATUTS_ARRET_SOLDE.has(stop.status)) {
+      // Le meme geste deux fois (un renvoi sans cle d'idempotence) : rien a
+      // faire, et ce n'est pas une erreur.
+      if (stop.status === status) return { route, stop, order: findOrder(db, stop.orderId), inchange: true };
+      throw conflit(`${stop.clientName || "Cet arrêt"} est déjà « ${libelleStatutArret(stop.status)} » : utilise « Corriger le statut ».`);
+    }
+  }
+
   // L'heure du GESTE, pas celle de l'arrivee ici (M6) : une livraison faite
   // hors ligne a 9 h 10 et envoyee a 11 h 30 est datee de 9 h 10.
   const now = horodatageDuGeste(faitLe, { plancher: route.startedAt });
+  if (retard && status === "livre") reprendreStockLibere(db, findOrder(db, stop.orderId));
+  if (retard) {
+    // Le livreur l'a fait AVANT la cloture : c'est la verite du terrain, la
+    // cloture avait devine « a reprogrammer ». L'arret n'est plus une
+    // supposition de la cloture.
+    delete stop.clotureAuto;
+    stop.deliveredAt = null;
+    stop.problemReason = "";
+    stop.problemReasonKey = "";
+  }
   stop.status = status;
   stop.notes = clean(notes || stop.notes);
   // La version de la tournee : la page ne remplace jamais sa tournee par une
@@ -6212,8 +6430,16 @@ function updateRouteStop(db, routeId, stopId, status, notes = "", motif = null, 
   // compte a_reprogrammer) : ni libere, ni reserve une seconde fois -- la
   // tournee suivante ne reserve rien, et la livraison consomme la reservation.
   if (status === "livre") {
+    // Un « Livre » arrive apres la cloture : la commande est « a reprogrammer »,
+    // qui n'a pas de sortie directe vers « livre ».
+    if (retard && STATUTS_A_RELIVRER.includes(order.status)) setOrderStatus(order, "en_livraison");
     setOrderStatus(order, "livre", now);
     if (client) client.statut = "livree";
+    // Decision 10 de Thomas (23/09) : « remis a… », facultatif. Sur l'arret ET
+    // la commande : le detail de la commande le montre, l'historique aussi.
+    const remis = clean(remisA).slice(0, REMIS_A_MAX);
+    stop.remisA = remis;
+    order.remisA = remis;
   } else if (status === "absent") {
     setOrderStatus(order, "a_reprogrammer");
     order.deliveryStatus = "absent";
@@ -6247,12 +6473,293 @@ function updateRouteStop(db, routeId, stopId, status, notes = "", motif = null, 
   const activeStatuses = new Set(["pret_livraison", "en_livraison"]);
   const isComplete = route.stops.every(item => !activeStatuses.has(item.status));
 
-  if (isComplete) {
+  // Une tournee cloturee le reste (un geste arrive en retard ne la « termine » pas).
+  if (isComplete && route.status === "en_livraison") {
     route.status = "terminee";
     route.completedAt = route.completedAt || new Date().toISOString();
   }
 
-  return { route, stop, order };
+  return { route, stop, order, retard };
+}
+
+// Decision 10 : la note « remis a… » tient en une ligne.
+const REMIS_A_MAX = 80;
+
+/**
+ * H8 : « Annuler » une tournee PRETE (pas encore partie). Ses commandes
+ * redeviennent pretes a livrer : elles n'avaient pas quitte ce statut (la
+ * creation d'une tournee ne change ni le statut ni le stock d'une commande),
+ * seul leur rattachement a la tournee les retenait. Le stock est donc a
+ * l'etat d'avant la creation, sans rien rendre. La tournee reste, annulee,
+ * pour l'historique ; elle ne retient plus rien.
+ */
+function annulerTournee(db, routeId) {
+  const route = db.routes.find(item => String(item.id) === String(routeId));
+  if (!route) throw notFound("Tournée introuvable");
+  if (route.status === "annulee") return { route, commandes: [], deja: true };
+  if (route.status === "en_livraison") {
+    throw conflit(`${nomDeTournee(route)} est partie : clôture-la au lieu de l'annuler.`);
+  }
+  if (route.status === "terminee" || route.status === "cloturee") {
+    throw conflit(`${nomDeTournee(route)} est déjà finie : il n'y a plus rien à annuler.`);
+  }
+  const now = new Date().toISOString();
+  const commandes = [];
+  for (const stop of route.stops || []) {
+    const order = db.commandes.find(item => String(item.id) === String(stop.orderId));
+    if (!order) continue;
+    if (String(order.routeId || "") === String(route.id)) order.routeId = null;
+    order.updatedAt = now;
+    commandes.push(order);
+  }
+  route.status = "annulee";
+  route.annuleeLe = now;
+  // La date de fin : celle que la purge des 12 mois lit (dateDeFinTournee).
+  route.completedAt = now;
+  route.updatedAt = now;
+  return { route, commandes };
+}
+
+/**
+ * H8 : « Cloturer » une tournee EN COURS. Les arrets restants passent « A
+ * reprogrammer », comme un absent (lot 1) : leur commande revient d'elle-meme
+ * dans les commandes pretes, stock toujours reserve pour la relivraison. Les
+ * arrets deja traites ne bougent pas : un livre reste livre. Irreversible : la
+ * tournee ne repart plus, et un arret ne s'y rouvre plus (seulement « Corriger
+ * le statut » vers livre, absent ou probleme).
+ */
+function cloturerTournee(db, routeId) {
+  const route = db.routes.find(item => String(item.id) === String(routeId));
+  if (!route) throw notFound("Tournée introuvable");
+  if (route.status === "cloturee") return { route, commandes: [], deja: true };
+  if (route.status === "terminee") throw conflit(`${nomDeTournee(route)} est déjà terminée : tous ses arrêts sont traités.`);
+  if (route.status === "annulee") throw conflit(`${nomDeTournee(route)} est annulée.`);
+  if (route.status !== "en_livraison") {
+    throw conflit(`${nomDeTournee(route)} n'est pas partie : annule-la au lieu de la clôturer.`);
+  }
+  const now = new Date().toISOString();
+  const commandes = [];
+  for (const stop of route.stops || []) {
+    if (STATUTS_ARRET_SOLDE.has(stop.status)) continue;
+    stop.status = "a_reprogrammer";
+    // Soldé PAR la cloture, pas par le livreur : un geste fait avant elle et
+    // arrive apres (file hors ligne) peut encore dire la verite
+    // (gesteArriveApresCloture).
+    stop.clotureAuto = true;
+    stop.problemReason = "Tournée clôturée avant cet arrêt";
+    stop.problemReasonKey = "";
+    const order = db.commandes.find(item => String(item.id) === String(stop.orderId));
+    if (!order) continue;
+    if (order.status === "en_livraison") setOrderStatus(order, "a_reprogrammer");
+    const client = findClient(db, order.clientId);
+    if (client) client.statut = "non_livre";
+    commandes.push(order);
+  }
+  route.status = "cloturee";
+  route.clotureeLe = now;
+  route.completedAt = now;
+  route.updatedAt = now;
+  return { route, commandes };
+}
+
+// M2 : ce qu'une correction peut dire. « en_livraison » est « a faire » : le
+// livreur y repassera.
+const CORRECTIONS_ADMISES = new Set(["livre", "absent", "probleme", "en_livraison"]);
+const CAUSE_CORRECTION_MAX = 160;
+
+/**
+ * M2 : « Corriger le statut » d'un arret deja traite (livre <-> absent <->
+ * probleme <-> a faire). Avant, un « Absent » saisi par erreur ne se
+ * corrigeait ni a l'ecran ni au serveur : `a_reprogrammer -> livre` n'existe
+ * pas dans la machine d'etat des commandes, et `livre` n'a aucune sortie.
+ *
+ * La correction est un geste A PART, jamais un geste ordinaire rejoue :
+ *  - elle exige sa cause, gardee sur l'arret (`corrections`) et dans
+ *    l'historique (type « Correction »), avec qui l'a faite ;
+ *  - elle garde les STOCKS justes. Le stock en rayon a ete deduit a la
+ *    preparation, pas a la livraison : il ne bouge jamais ici. Seule la
+ *    reservation suit : « Livre » la consomme, defaire une livraison la
+ *    redonne (la marchandise n'est pas chez le client : elle attend sa
+ *    relivraison, comme apres un absent) ;
+ *  - elle refuse une commande repartie ailleurs (dans une autre tournee, ou
+ *    passee par un autre ecran) : ce qu'elle corrigerait n'est plus la.
+ * Vers « a faire » : la tournee terminee se rouvre (le livreur y repassera) ;
+ * une tournee cloturee, jamais (la cloture est irreversible).
+ */
+function corrigerArret(db, routeId, stopId, { status, cause } = {}, par = "") {
+  if (!CORRECTIONS_ADMISES.has(status)) {
+    throw badRequest("Correction possible vers : livré, absent, problème ou à faire.");
+  }
+  const pourquoi = clean(cause).slice(0, CAUSE_CORRECTION_MAX);
+  if (!pourquoi) throw badRequest("Dis pourquoi tu corriges ce statut : la raison est gardée dans l'historique.");
+
+  const route = db.routes.find(item => String(item.id) === String(routeId));
+  if (!route) throw notFound("Tournee introuvable");
+  const stop = (route.stops || []).find(item => String(item.id) === String(stopId));
+  if (!stop) throw notFound("Arret introuvable");
+
+  if (route.status === "annulee") throw conflit(`${nomDeTournee(route)} est annulée : aucun arrêt n'y a été traité.`);
+  if (!STATUTS_ARRET_SOLDE.has(stop.status)) {
+    throw conflit(`${stop.clientName || "Cet arrêt"} n'est pas encore traité : utilise les gestes de la tournée.`);
+  }
+  if (stop.status === status) throw badRequest(`${stop.clientName || "Cet arrêt"} est déjà « ${libelleStatutArret(status)} ».`);
+  if (status === "en_livraison" && route.status === "cloturee") {
+    throw conflit(`${nomDeTournee(route)} est clôturée : un arrêt n'y redevient pas « à faire ». La commande est dans les commandes prêtes.`);
+  }
+
+  const order = findOrder(db, stop.orderId);
+  const nom = nomDeCommande(order);
+  // Sans `routeId` (donnee d'avant createRoute, ou semee a la main), seule la
+  // presence dans une autre tournee active compte.
+  if ((order.routeId && String(order.routeId) !== String(route.id)) || tourneeActiveDeLaCommande(db, order.id, route.id)) {
+    throw conflit(`La commande ${nom} est repartie dans une autre tournée : corrige-la là-bas.`);
+  }
+  // Un arret en echec dont la commande est restee « en livraison » (donnee
+  // d'avant le lot 1, ou semee ainsi) se corrige aussi : rien n'est reparti.
+  const attendus = stop.status === "livre" ? ["livre"] : [...STATUTS_A_RELIVRER, "en_livraison"];
+  if (!attendus.includes(order.status)) {
+    throw conflit(`La commande ${nom} a changé depuis ce geste : corrige-la depuis l'écran Commandes.`);
+  }
+  // Une reservation liberee a la main (release-stock) a rendu le stock au
+  // rayon : dire la commande livree la ferait sortir du stock sans la deduire.
+  if (status === "livre" && !order.stockReservedAt && order.stockReleaseReason && order.stockReleaseReason !== "consumed_by_delivery") {
+    throw conflit(`Le stock de la commande ${nom} a été libéré : elle ne peut plus être dite livrée ici.`);
+  }
+
+  const avant = stop.status;
+  const now = new Date().toISOString();
+  const client = findClient(db, order.clientId);
+
+  // 1. La commande quitte son etat, vers « en livraison ».
+  if (order.status === "livre") {
+    // Hors de la machine d'etat, deliberement : `livre` n'a aucune sortie pour
+    // les gestes ordinaires (ni le livreur ni un import ne defont une
+    // livraison). Seule cette correction, journalisee, le fait.
+    order.status = "en_livraison";
+    order.preparationStatus = inferPreparationStatus("en_livraison");
+    order.deliveryStatus = inferDeliveryStatus("en_livraison");
+    order.deliveredAt = "";
+    order.remisA = "";
+    if (order.stockReleaseReason === "consumed_by_delivery") {
+      order.stockReservedAt = order.stockReleasedAt || now;
+      order.stockReleasedAt = null;
+      order.stockReleaseReason = null;
+    }
+    order.updatedAt = now;
+  } else {
+    setOrderStatus(order, "en_livraison");
+  }
+
+  // 2. Vers le statut corrige.
+  if (status === "livre") {
+    // L'heure du geste d'origine : c'est la que le livreur etait sur place.
+    const quand = Number.isFinite(Date.parse(stop.deliveredAt || "")) ? stop.deliveredAt : now;
+    setOrderStatus(order, "livre", quand);
+    stop.deliveredAt = quand;
+    stop.problemReason = "";
+    stop.problemReasonKey = "";
+    if (client) client.statut = "livree";
+  } else if (status === "absent" || status === "probleme") {
+    setOrderStatus(order, "a_reprogrammer");
+    order.deliveryStatus = status;
+    stop.deliveredAt = stop.deliveredAt || now;
+    stop.problemReason = `${libelleStatutArret(status)} (correction : ${pourquoi})`;
+    stop.problemReasonKey = "";
+    if (client) client.statut = status;
+  } else {
+    stop.deliveredAt = null;
+    stop.problemReason = "";
+    stop.problemReasonKey = "";
+    if (client) client.statut = "en_cours";
+    // Le livreur y repasse : la tournee terminee se rouvre.
+    if (route.status === "terminee") {
+      route.status = "en_livraison";
+      route.completedAt = null;
+    }
+  }
+  if (status !== "livre") stop.remisA = "";
+  stop.status = status;
+  delete stop.clotureAuto;
+  stop.corrections = [
+    ...(Array.isArray(stop.corrections) ? stop.corrections : []),
+    { de: avant, vers: status, cause: pourquoi, le: now, par: clean(par) }
+  ];
+  route.updatedAt = now;
+  return { route, stop, order, avant, cause: pourquoi };
+}
+
+/**
+ * Lot 2 : une commande d'une tournee active ne change pas d'etat par un autre
+ * ecran (repasser en preparation, par exemple) sans quitter la tournee : la
+ * tournee ne demarrait plus (« Transition non autorisee »), et le livreur
+ * aurait eu un arret dont la commande est au depot.
+ */
+function refuserSiDansUneTournee(db, order, geste) {
+  const route = tourneeActiveDeLaCommande(db, order.id);
+  if (route) {
+    throw conflit(`La commande ${nomDeCommande(order)} est dans la tournée « ${nomDeTournee(route)} » : annule ou clôture cette tournée avant de ${geste}.`);
+  }
+}
+
+/** Le mot de la charte pour un statut d'arret (les memes que l'ecran). */
+function libelleStatutArret(status) {
+  return {
+    pret_livraison: "Prêt",
+    en_livraison: "En livraison",
+    livre: "Livré",
+    absent: "Absent",
+    probleme: "Problème",
+    a_reprogrammer: "À reprogrammer"
+  }[status] || String(status || "");
+}
+
+/**
+ * Un geste fait AVANT la cloture de sa tournee, et qui n'arrive qu'apres (file
+ * hors ligne : le livreur sans reseau, le bureau qui cloture). La cloture a mis
+ * l'arret « A reprogrammer » par supposition ; le geste dit ce qui s'est
+ * vraiment passe. Il est applique si, et seulement si :
+ *  - la tournee est cloturee et l'arret a ete solde PAR la cloture ;
+ *  - le geste est un geste du livreur (livre, absent, probleme) date d'avant
+ *    la cloture (faitLe, l'heure de l'appui) ;
+ *  - la commande n'est pas repartie : toujours rattachee a cette tournee,
+ *    toujours a reprogrammer, dans aucune autre tournee active.
+ * Sinon, refuse comme tout geste sur une tournee finie. Sans cette exception,
+ * cloturer pendant qu'un « Livre » attend dans la file le jetterait : la
+ * livraison, faite, serait perdue (lot 1 : « le livreur ne perd plus rien »).
+ */
+function gesteArriveApresCloture(db, route, stop, status, faitLe) {
+  if (route.status !== "cloturee" || !stop.clotureAuto) return false;
+  if (!["livre", "absent", "probleme"].includes(status)) return false;
+  const fait = typeof faitLe === "string" ? Date.parse(faitLe) : NaN;
+  const cloture = Date.parse(route.clotureeLe || route.completedAt || "");
+  if (!Number.isFinite(fait) || !Number.isFinite(cloture) || fait > cloture) return false;
+  const order = db.commandes.find(item => String(item.id) === String(stop.orderId));
+  if (!order || (order.routeId && String(order.routeId) !== String(route.id))) return false;
+  if (!STATUTS_A_RELIVRER.includes(order.status)) return false;
+  return !tourneeActiveDeLaCommande(db, order.id, route.id);
+}
+
+/**
+ * Relecture adverse du lot 2 : un « Livre » arrive apres la cloture, alors que
+ * le bureau a libere entre-temps la reservation de la commande (release-stock,
+ * admis sur « a reprogrammer ») -- le rayon recompte une marchandise qui est
+ * chez le client. La livraison reste la verite du terrain : la reservation est
+ * reprise (le rayon est deduit de nouveau), puis consommee par la livraison
+ * (setOrderStatus). Si le rayon n'en a plus assez, le geste est refuse, en le
+ * disant : le stock ne passe jamais sous zero en silence.
+ * A appeler AVANT toute ecriture de l'arret (un refus ne laisse rien).
+ */
+function reprendreStockLibere(db, order) {
+  if (order.stockReservedAt || !order.stockReleaseReason || order.stockReleaseReason === "consumed_by_delivery") return;
+  try {
+    reserveStockForOrder(db, order);
+  } catch {
+    throw conflit(`Le stock de la commande ${nomDeCommande(order)} a été libéré après la clôture, et le rayon n'en a plus assez : la livraison n'est pas enregistrée, la commande reste à reprogrammer.`);
+  }
+  addHistory(db, "Stock deduit", `Commande ${order.numero || order.id} : livree apres la liberation de son stock (geste arrive apres la cloture)`, {
+    orderId: order.id,
+    numero: order.numero
+  });
 }
 
 /**
@@ -6442,7 +6949,11 @@ app.get("/api/storage/status", (req, res) => {
     // backup async a echoue (disque plein/permissions) : a surveiller.
     backupsSuspended: backupsSuspendedFreshEmpty,
     lastBackupAt,
-    lastBackupError
+    lastBackupError,
+    // Calcul routier (23/09) : carte locale ou serveur public, zone, date de
+    // la carte, derniere erreur, espace utilise ; `resume` est la ligne de
+    // l'ecran Parametres.
+    calculRoutier: osrmLocal.etat()
   });
 });
 
@@ -6678,8 +7189,37 @@ app.patch("/api/settings/tournee", async (req, res) => {
         db.settings.tournee.stopDurationMin = Math.round(raw);
       }
 
+      // Lot 6 (audit geo) : le depot par defaut. `null` l'efface ; sinon un
+      // libelle et une position valides, refuses plutot que tronques en silence.
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "depot")) {
+        const brut = req.body.depot;
+        if (brut === null) {
+          db.settings.tournee.depot = null;
+        } else {
+          if (!brut || typeof brut !== "object" || Array.isArray(brut)) throw badRequest("Dépôt invalide.");
+          if (typeof brut.label !== "string" || !brut.label.trim()) throw badRequest("Donne un nom ou une adresse au dépôt.");
+          if (brut.label.trim().length > DEPOT_LIBELLE_MAX) throw badRequest(`Nom du dépôt trop long (${DEPOT_LIBELLE_MAX} caractères au plus).`);
+          if (!routing.coordinates(brut)) throw badRequest("Position du dépôt invalide : confirme une adresse.");
+          db.settings.tournee.depot = normaliserDepot(brut);
+        }
+      }
+
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "retourAuDepot")) {
+        if (typeof req.body.retourAuDepot !== "boolean") throw badRequest("retourAuDepot doit etre vrai ou faux");
+        db.settings.tournee.retourAuDepot = req.body.retourAuDepot;
+      }
+
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "messagePrevenir")) {
+        if (typeof req.body.messagePrevenir !== "string") throw badRequest("Message invalide.");
+        if (req.body.messagePrevenir.trim().length > MESSAGE_PREVENIR_MAX) {
+          throw badRequest(`Message trop long (${MESSAGE_PREVENIR_MAX} caractères au plus).`);
+        }
+        // Vide : le texte par defaut revient (normalizeSettings).
+        db.settings.tournee.messagePrevenir = req.body.messagePrevenir.trim();
+      }
+
       writeDb(db);
-      return db.settings.tournee;
+      return normalizeSettings(db.settings).tournee;
     });
     res.json(result);
   } catch (error) {
@@ -7076,7 +7616,9 @@ app.get("/api/exports/commandes-annexes.xlsx", (req, res) => {
 // terminees (87 % des 5 Mo relus a chaque chargement apres un an). Le trace
 // reste en base ; `traceOmise` le dit, et GET /api/routes/:id le rend a la
 // demande. En stockage SQLite, readDb ne l'a meme pas charge.
-const STATUTS_TOURNEE_SANS_TRACE_EN_LISTE = new Set(["terminee"]);
+// Lot 2 : cloturee et annulee aussi (ecart nomme du lot 5 : les deux ensembles,
+// ici et storage/sqliteStore.js).
+const STATUTS_TOURNEE_SANS_TRACE_EN_LISTE = new Set(["terminee", "cloturee", "annulee"]);
 
 function routePourListe(route) {
   if (!STATUTS_TOURNEE_SANS_TRACE_EN_LISTE.has(route.status)) return route;
@@ -8107,6 +8649,8 @@ app.post("/api/orders/:id/start-preparation", async (req, res) => {
       if (["planifiee", "a_confirmer"].includes(order.status)) {
         throw badRequest("Confirme la commande planifiee avant de lancer la preparation");
       }
+      // Lot 2 : pas en preparation tant qu'elle attend dans une tournee.
+      refuserSiDansUneTournee(db, order, "la remettre en préparation");
       reserveStockForOrder(db, order);
       setOrderStatus(order, "en_preparation");
 
@@ -8166,6 +8710,10 @@ app.patch("/api/orders/:id", async (req, res) => {
         retirerDesTourneesSiReportee(db, order);
       }
       if (req.body.status !== undefined) {
+        // Lot 2 : une commande d'une tournee active ne change pas d'etat ici
+        // (« pret_livraison -> en_preparation » passait, et la tournee ne
+        // demarrait plus). Le meme statut reste accepte (rien ne change).
+        if (clean(req.body.status) !== order.status) refuserSiDansUneTournee(db, order, "changer son statut");
         if (clean(req.body.status) === "annulee" && order.stockReservedAt) {
           releaseOrderStockReservation(db, order, "order_cancelled");
         }
@@ -8249,6 +8797,10 @@ app.post("/api/routes", async (req, res) => {
       if (!Array.isArray(req.body.orderIds) || !req.body.orderIds.length) throw badRequest("Sélectionne les commandes de la tournée.");
       const snapshot = readDb();
       const ids = new Set((req.body.orderIds || []).map(String));
+      // Lot 2 : AVANT le calcul routier (plusieurs secondes), et en nommant la
+      // commande : « Certaines commandes ne sont plus prêtes » ne disait pas
+      // laquelle, et une commande deja dans une tournee prete passait ici.
+      refuserCommandesHorsTournee(snapshot, [...ids], { sector: req.body.sector, city: req.body.city, deliveryDate: req.body.deliveryDate });
       const selected = getDeliverableOrders(snapshot, req.body).filter(o => ids.has(String(o.id)) && STATUTS_A_PLANIFIER.includes(o.status));
       if (selected.length !== ids.size) throw badRequest("Certaines commandes ne sont plus prêtes.");
       // H6 : la position du client vaut pour ses commandes livrees chez lui ;
@@ -8308,6 +8860,75 @@ app.post("/api/routes/:id/start", async (req, res) => {
   }
 });
 
+// Lot 2 de l'audit geo (H8) : annuler une tournee prete, cloturer une tournee
+// en cours. L'ecran demande une confirmation explicite pour les deux ; le
+// serveur n'en suppose aucune et garde ses propres refus (etat de la tournee).
+app.post("/api/routes/:id/annuler", async (req, res) => {
+  try {
+    const route = await withWriteLock(async () => {
+      const db = readDb();
+      const r = annulerTournee(db, req.params.id);
+      if (r.deja) return routeAvecTrace(db, r.route.id) || r.route;
+      addHistory(db, "Tournee", `${nomDeTournee(r.route)} annulée : ${r.commandes.length} commande(s) rendue(s) aux commandes prêtes`, {
+        routeId: r.route.id,
+        orderIds: r.commandes.map(order => order.id),
+        par: getRequestIdentity(req)?.identifiant || ""
+      });
+      writeDb(db);
+      return routeAvecTrace(db, r.route.id) || r.route;
+    });
+    res.json(route);
+  } catch (error) {
+    handleRouteError(error, res, "Erreur annulation tournee");
+  }
+});
+
+app.post("/api/routes/:id/cloturer", async (req, res) => {
+  try {
+    const route = await withWriteLock(async () => {
+      const db = readDb();
+      const r = cloturerTournee(db, req.params.id);
+      if (r.deja) return routeAvecTrace(db, r.route.id) || r.route;
+      const noms = r.commandes.map(order => order.clientName).filter(Boolean);
+      addHistory(db, "Tournee", `${nomDeTournee(r.route)} clôturée : ${noms.length ? `${noms.join(", ")} à reprogrammer` : "aucun arrêt restant"}`, {
+        routeId: r.route.id,
+        orderIds: r.commandes.map(order => order.id),
+        par: getRequestIdentity(req)?.identifiant || ""
+      });
+      writeDb(db);
+      return routeAvecTrace(db, r.route.id) || r.route;
+    });
+    res.json(route);
+  } catch (error) {
+    handleRouteError(error, res, "Erreur cloture tournee");
+  }
+});
+
+// M2 : « Corriger le statut » d'un arret deja traite. Un geste a part, avec sa
+// cause : jamais un « Livre » ou un « Absent » rejoue sur un arret solde.
+app.post("/api/routes/:routeId/stops/:stopId/correction", async (req, res) => {
+  try {
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      const par = getRequestIdentity(req)?.identifiant || "";
+      const r = corrigerArret(db, req.params.routeId, req.params.stopId, req.body || {}, par);
+      addHistory(db, "Correction", `${r.stop.clientName} : ${libelleStatutArret(r.avant)} → ${libelleStatutArret(r.stop.status)} — ${r.cause}`, {
+        routeId: r.route.id,
+        stopId: r.stop.id,
+        orderId: r.order.id,
+        de: r.avant,
+        vers: r.stop.status,
+        par
+      });
+      writeDb(db);
+      return etatApresGesteArret(db, r);
+    });
+    res.json(result);
+  } catch (error) {
+    handleRouteError(error, res, "Erreur correction statut");
+  }
+});
+
 // La liste des motifs vient du SERVEUR. La dupliquer dans le client ferait deux
 // verites qui derivent : le client proposerait un motif que le serveur refuse,
 // et l'ecart ne se verrait qu'au premier refus, sur le telephone d'un livreur.
@@ -8324,15 +8945,21 @@ app.patch("/api/routes/:routeId/stops/:stopId", async (req, res) => {
     const result = await withWriteLock(async () => {
       const db = readDb();
       const r = updateRouteStop(db, req.params.routeId, req.params.stopId,
-        req.body.status, req.body.notes, req.body.motif, req.body.faitLe);
+        req.body.status, req.body.notes, req.body.motif, req.body.faitLe, req.body.remisA);
+      // Le meme geste deux fois : rien n'a change, rien a ecrire (lot 2).
+      if (r.inchange) return etatApresGesteArret(db, r);
 
       // La cause DANS le libelle : l'historique est le seul endroit ou une
       // tournee passee se relit, et un statut sans sa cause n'y apprend rien.
-      const cause = r.stop.problemReason ? ` — ${r.stop.problemReason}` : "";
-      addHistory(db, "Livraison", `${r.stop.clientName} : ${r.stop.status}${cause}`, {
+      const cause = r.stop.status !== "livre" && r.stop.problemReason ? ` — ${r.stop.problemReason}` : "";
+      // Decision 10 : « remis a… » s'y lit aussi.
+      const remis = r.stop.status === "livre" && r.stop.remisA ? ` — remis à ${r.stop.remisA}` : "";
+      const tard = r.retard ? " (geste fait avant la clôture de la tournée)" : "";
+      addHistory(db, "Livraison", `${r.stop.clientName} : ${r.stop.status}${cause}${remis}${tard}`, {
         routeId: r.route.id,
         stopId: r.stop.id,
-        orderId: r.order.id
+        orderId: r.order.id,
+        ...(r.stop.status === "livre" && r.stop.remisA ? { remisA: r.stop.remisA } : {})
       });
 
       writeDb(db);
@@ -8385,7 +9012,6 @@ app.post("/api/livraison", async (req, res) => {
       if (!c) {
         throw notFound("Client introuvable");
       }
-      c.statut = statut;
 
       // Filtre des commandes a affecter :
       // - si orderId est fourni : juste cette commande (precis)
@@ -8396,6 +9022,17 @@ app.post("/api/livraison", async (req, res) => {
             String(item.clientId) === String(clientId)
             && !["livre"].includes(item.status)
           );
+      // Relecture adverse du lot 2 (M7) : une commande qui attend son arret
+      // dans une tournee active ne se livre que par cet arret. Avant, ce
+      // chemin la passait « livre » et l'arret restait « en livraison » : la
+      // tournee ne se terminait jamais.
+      for (const order of candidateOrders) {
+        const tournee = tourneeActiveDeLaCommande(db, order.id);
+        if (tournee) {
+          throw conflit(`La commande ${nomDeCommande(order)} attend son arrêt dans la tournée « ${nomDeTournee(tournee)} » : marque-la depuis l'écran Tournée.`);
+        }
+      }
+      c.statut = statut;
 
       let ordersUpdated = 0;
       candidateOrders.forEach(order => {
@@ -8462,66 +9099,11 @@ app.post("/api/reset-tournee", async (req, res) => {
   }
 });
 
-app.post("/api/optimize-route", async (req, res) => {
-  try {
-    const optimizedClients = await withWriteLock(async () => {
-      const db = readDb();
-      const requestedIds = Array.isArray(req.body?.clientIds) ? new Set(req.body.clientIds.map(String)) : null;
-
-      const source = requestedIds
-        ? db.clients.filter(client => requestedIds.has(String(client.id)))
-        : db.clients.filter(client => ["restant", "en_cours"].includes(client.statut || "restant"));
-
-      const withCoords = source.filter(client => getCoordinates(client));
-      const withoutCoords = source.filter(client => !getCoordinates(client));
-
-      let remaining = [...withCoords];
-      const optimized = [];
-
-      if (remaining.length > 0) {
-        let current = remaining.shift();
-        optimized.push(current);
-
-        while (remaining.length > 0) {
-          remaining.sort((a, b) => distance(current, a) - distance(current, b));
-          current = remaining.shift();
-          optimized.push(current);
-        }
-      }
-
-      const result = [...optimized, ...withoutCoords.sort((a, b) => fallbackOrderSort(
-        {
-          sector: a.secteur,
-          city: a.ville,
-          postalCode: a.codePostal,
-          address: a.rue,
-          clientName: a.nom
-        },
-        {
-          sector: b.secteur,
-          city: b.ville,
-          postalCode: b.codePostal,
-          address: b.rue,
-          clientName: b.nom
-        }
-      ))];
-
-      if (!requestedIds) {
-        const optimizedIds = new Set(result.map(client => String(client.id)));
-        db.clients = [
-          ...result,
-          ...db.clients.filter(client => !optimizedIds.has(String(client.id)))
-        ];
-        addHistory(db, "Tournee", "Tournee optimisee");
-        writeDb(db);
-      }
-      return result;
-    });
-    res.json({ success: true, route: optimizedClients });
-  } catch (error) {
-    handleRouteError(error, res, "Erreur optimisation tournee");
-  }
-});
+// Lot 2 de l'audit geo, decision 7 de Thomas (23/09) : l'ancienne route
+// POST /api/optimize-route est retiree. Elle ordonnait les CLIENTS (et non les
+// commandes) au plus proche voisin, et, appelee sans liste, REECRIVAIT l'ordre
+// de toute la table des clients. Aucun ecran ni banc ne l'appelait (grep du
+// 23/09) ; le calcul d'une tournee passe par POST /api/routes.
 
 require("./lib/operations-api").registerOperations(app, {
   readDb, writeDb, withWriteLock, badRequest, notFound, handleRouteError, findClient,
@@ -8530,6 +9112,18 @@ require("./lib/operations-api").registerOperations(app, {
   geocoderAdresse, positionPourTournee, memoriserPositionDuCalcul,
   // Lot 5 : la limite de debit du relais de recherche d'adresse, par compte et par IP.
   cleDeDebit: req => `${getRequestIdentity(req)?.identifiant || "anonyme"}|${getClientIp(req)}`
+});
+
+// Lot 6 de l'audit geo (pratique au quotidien) : reoptimiser, « Faire
+// maintenant », « Ajouter a la tournee en cours ».
+require("./lib/tournee-pratique").registerTourneePratique(app, {
+  readDb, writeDb, withWriteLock, badRequest, notFound, handleRouteError, findClient,
+  addHistory, setOrderStatus, createStop, routeAvecTrace, positionPourTournee,
+  memoriserPositionDuCalcul, geocoderAdresse, distanceKm: distance,
+  statutsAPlanifier: STATUTS_A_PLANIFIER, maxArrets: MAX_COMMANDES_PAR_TOURNEE,
+  // Integration de la vague 2 : la garde « deja dans une tournee active » du
+  // lot 2, et ses noms, pour « Ajouter a la tournee en cours ».
+  tourneeActiveDeLaCommande, nomDeCommande, nomDeTournee
 });
 
 // --- API des comptes utilisateurs (V8 phase 1) -----------------------------
@@ -8730,7 +9324,9 @@ const PURGE_TOURNEES_MOIS = (() => {
   return Number.isFinite(n) && n >= 0 ? n : 12;
 })();
 const PURGE_TOURNEES_INTERVALLE_MS = 24 * 60 * 60 * 1000;
-const STATUTS_TOURNEE_PURGEABLES = new Set(["terminee"]);
+// Lot 2 : une tournee cloturee ou annulee est finie : elle part apres 12 mois
+// comme une terminee (sa date de fin : completedAt, pose aux deux gestes).
+const STATUTS_TOURNEE_PURGEABLES = new Set(["terminee", "cloturee", "annulee"]);
 
 /** La date ou la tournee s'est terminee, sinon celle de sa livraison, sinon de sa creation. */
 function dateDeFinTournee(route) {
@@ -8832,12 +9428,23 @@ function startServer(port = PORT, host = HOST) {
   // (notamment apres restauration d'un backup ou montee de version)
   healDatabaseAtBoot();
   planifierPurgeDesTournees();
-  return app.listen(port, host, () => {
+  const serveur = app.listen(port, host, () => {
     console.log(`Sereo lance sur http://${host}:${port}`);
     if (host === "0.0.0.0" || host === "::") {
       console.log("Acces reseau local active. A utiliser seulement sur un reseau de confiance.");
     }
   });
+  // Carte OSRM locale : APRES l'ecoute, et sans l'attendre. demarrer() rend
+  // la main tout de suite et ne jette jamais ; le travail lourd
+  // (telechargement, preparation) tourne en arriere-plan et en processus fils.
+  setImmediate(() => {
+    try {
+      osrmLocal.demarrer();
+    } catch (error) {
+      console.warn(`[osrm-local] ${error?.message || error}`);
+    }
+  });
+  return serveur;
 }
 
 if (require.main === module) {
@@ -8858,6 +9465,8 @@ module.exports = {
   nextSectorDeliveryDate,
   decorerSecteurPourAffichage,
   startServer,
+  // Calcul routier OSRM integre (23/09)
+  _osrmLocal: osrmLocal,
   closeStorage,
   defaultDb,
   readDb,
