@@ -32,7 +32,7 @@ process.env.SEREO_BACKUP_DIR = path.join(tmpRoot, "data", "backups");
 process.env.SEREO_AUTH_USER = "";
 process.env.SEREO_AUTH_PASSWORD = "";
 
-const { app, closeStorage, defaultDb, readDb, writeDb } = require("../server");
+const { app, closeStorage, defaultDb, readDb, writeDb, tourneesAPurger } = require("../server");
 
 let server;
 let baseUrl;
@@ -237,6 +237,26 @@ test("H8 — un geste en retard ne s'applique plus si la commande est repartie d
   const tard = await patcher("/api/routes/r-cours/stops/s-o-b", { status: "livre", faitLe: avantCloture });
   assert.equal(tard.res.status, 409, JSON.stringify(tard.body));
   assert.equal(commandeLue("o-b").status, "a_reprogrammer");
+});
+
+test("H8 — une tournee cloturee est FINIE partout : liste sans trace (rendu a la demande), purgeable a 12 mois", async () => {
+  ensemencer();
+  const db = readDb();
+  const trace = { type: "LineString", coordinates: [[5.49, 47.09], [5.5, 47.1]] };
+  db.routes[0].geometry = trace;
+  writeDb(db, { backup: false });
+  assert.ok((await tourneeLue("r-cours")).geometry, "prealable : la tournee en cours envoie son trace");
+  await poster("/api/routes/r-cours/cloturer");
+  const lue = await tourneeLue("r-cours");
+  assert.equal(lue.traceOmise, true, "la liste envoie encore le trace d'une tournee cloturee");
+  assert.equal(lue.geometry, undefined);
+  // storage/sqliteStore.js : readDb ne le charge plus, mais il reste en base.
+  assert.equal(Object.prototype.hasOwnProperty.call(readDb().routes.find(r => r.id === "r-cours"), "geometry"), false,
+    "readDb charge encore le trace d'une tournee cloturee");
+  assert.deepEqual((await demander("/api/routes/r-cours")).body.geometry, trace, "le trace est perdu");
+  // La purge des 12 mois la prend comme une terminee.
+  const plusTard = new Date(Date.now() + 400 * 24 * 3600 * 1000);
+  assert.deepEqual(tourneesAPurger(readDb(), plusTard, 12).map(r => r.id), ["r-cours"], "une tournee cloturee n'est jamais purgee");
 });
 
 // --- Gardes de l'API --------------------------------------------------------------
