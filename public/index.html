@@ -16,6 +16,18 @@
   <meta name="apple-mobile-web-app-title" content="Séréo" />
   <meta name="format-detection" content="telephone=yes" />
 
+  <!-- Polices du premier rendu, prechargees : sans cela le navigateur ne les
+       decouvre qu'apres avoir telecharge ET analyse style.css, puis construit
+       la page. Mesure du 23/09 (tableau de bord, 1440 et 390 px) : les quatre
+       graisses latin servent, aucune latin-ext. `crossorigin` est obligatoire,
+       meme a la meme origine : une police se charge en mode CORS, et un
+       prechargement sans lui est telecharge deux fois. Tenu par
+       test/e2e/chargement-instantane.spec.js. -->
+  <link rel="preload" href="/fonts/poppins-400-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="/fonts/poppins-500-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="/fonts/poppins-600-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="/fonts/poppins-700-latin.woff2" as="font" type="font/woff2" crossorigin />
+
   <!-- Anti-FART (Flash of inAccurate Resolved Theme) : externalise dans un fichier
        separe car la CSP `script-src 'self'` bloque les scripts inline. Charge en
        synchrone (sans defer/async) dans <head> avant le <link> CSS bloquant pour

@@ -962,9 +962,118 @@ function retirerSquelettes() {
   }
 }
 
+// --- CHARGEMENT INSTANTANE (lot du 23/09) ------------------------------------
+//
+// A l'ouverture, la page montre TOUT DE SUITE les dernieres donnees connues --
+// celles que le service worker a mises en cache au dernier passage -- puis les
+// remplace par celles du reseau. Pendant ce temps la pastille dit « Mise a
+// jour… » : une copie n'est jamais annoncee comme fraiche.
+//
+// Ce cache n'est lu qu'ici, au PREMIER chargement de la page. Apres une
+// ecriture, loadData() recharge : relire la copie d'avant l'ecriture ferait
+// reculer l'ecran.
+//
+// Ce que le service worker met en cache n'a pas change de nature : les memes
+// reponses d'API, communes a tous les comptes (aucune ne depend de
+// l'identite ; /api/me et /api/comptes restent exclus). Le cache part a la
+// deconnexion (service worker, POST /logout) et a l'expiration de session
+// (apiFetch, 401).
+const PREFIXE_CACHE_DONNEES = "sereo-api-";
+let premierChargementDesDonnees = true;
+// Les URL auxquelles le service worker a repondu par une COPIE (en-tete
+// X-Sereo-Cache : le reseau n'a pas repondu a temps), avec la date de la copie.
+const reponsesCopiees = new Map();
+
+async function viderCacheDeDonnees() {
+  try {
+    if (typeof caches === "undefined") return;
+    const noms = (await caches.keys()).filter(nom => nom.startsWith(PREFIXE_CACHE_DONNEES));
+    await Promise.all(noms.map(nom => caches.delete(nom)));
+  } catch { /* stockage indisponible : rien a vider */ }
+}
+
+/**
+ * Les dernieres donnees connues, lues dans le cache du service worker.
+ * Rend { data, date } ou null. Tout ou presque : une copie a moitie montrerait
+ * des listes vides qui ne le sont pas. Seul l'endpoint date du jour (`jour`)
+ * peut manquer (au premier jour d'ouverture, son URL a change) ; il garde
+ * alors sa valeur courante.
+ */
+async function lireDernieresDonnees(endpoints) {
+  try {
+    if (typeof caches === "undefined") return null;
+    const noms = (await caches.keys()).filter(nom => nom.startsWith(PREFIXE_CACHE_DONNEES));
+    if (!noms.length) return null;
+    const cache = await caches.open(noms[0]);
+    const lus = await Promise.all(endpoints.map(async e => {
+      const reponse = await cache.match(e.path);
+      if (!reponse || !reponse.ok) return null;
+      return { key: e.key, valeur: await reponse.json(), date: Date.parse(reponse.headers.get("Date") || "") };
+    }));
+    const data = {};
+    let date = NaN;
+    for (let i = 0; i < endpoints.length; i++) {
+      const lu = lus[i];
+      if (!lu) {
+        if (endpoints[i].jour) continue;
+        return null;
+      }
+      data[lu.key] = lu.valeur;
+      if (Number.isFinite(lu.date) && !(lu.date >= date)) date = lu.date;
+    }
+    return { data, date };
+  } catch {
+    return null;
+  }
+}
+
+/** « Données de 14:32 » (aujourd'hui) ou « Données du 21/09 ». Sans date lisible : « Données en cache ». */
+function libelleCopie(date) {
+  if (!Number.isFinite(date)) return "Données en cache";
+  const d = new Date(date);
+  const memeJour = d.toDateString() === new Date().toDateString();
+  return memeJour
+    ? `Données de ${d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`
+    : `Données du ${d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })}`;
+}
+
+/** Recopie dans l'etat de la page les cles PRESENTES de `data`. */
+function appliquerDonnees(data) {
+  const a = key => Object.prototype.hasOwnProperty.call(data, key);
+  if (a("clients")) {
+    clients = (data.clients || []).map(client => ({
+      ...client,
+      statut: client.statut || "restant"
+    }));
+  }
+  if (a("stock")) stock = data.stock;
+  if (a("ventes")) ventes = data.ventes;
+  if (a("historique")) historique = data.historique;
+  if (a("orders")) orders = data.orders;
+  if (a("crmClients")) crmClients = data.crmClients;
+  if (a("subscriptions")) abonnementsDonnees = data.subscriptions || { items: [], occurrences: [] };
+  if (a("crmRelances")) crmRelances = data.crmRelances;
+  if (a("todayCustomerOrders")) todayCustomerOrders = data.todayCustomerOrders;
+  if (a("plannedOrders")) plannedOrders = data.plannedOrders;
+  if (a("statistics")) statistics = data.statistics;
+  if (a("sectors")) sectors = data.sectors;
+  if (a("deliverySectors")) deliverySectors = data.deliverySectors;
+  if (a("routes")) deliveryRoutes = data.routes;
+  if (a("stockMovements")) stockMovements = data.stockMovements;
+  if (a("dashboard")) dashboard = data.dashboard;
+
+  refreshActiveRoute();
+  route = activeRoute ? activeRoute.stops : (currentIndex >= 0 ? route : [...clients]);
+
+  renderAll();
+  renderOperations({operations:data.operations,subscriptions:data.subscriptions,crmClients,stock,orders});
+}
+
 async function loadData() {
   setStatus("Chargement...");
   poserSquelettes();
+  const premier = premierChargementDesDonnees;
+  premierChargementDesDonnees = false;
 
   // Chantier 2 (audit 2026-06-04) : Promise.allSettled au lieu de Promise.all.
   // Avant : si UN seul endpoint timeout (30s), tout etait wipe (clients=[],
@@ -981,7 +1090,7 @@ async function loadData() {
     { key: "orders", path: "/api/orders", fallback: [] },
     { key: "crmClients", path: "/api/crm/clients", fallback: [] },
     { key: "crmRelances", path: "/api/reminders", fallback: [] },
-    { key: "todayCustomerOrders", path: `/api/customer-orders/today?date=${encodeURIComponent(getTodayOrdersDate())}`, fallback: [] },
+    { key: "todayCustomerOrders", path: `/api/customer-orders/today?date=${encodeURIComponent(getTodayOrdersDate())}`, fallback: [], jour: true },
     { key: "plannedOrders", path: "/api/planned-orders", fallback: [] },
     { key: "statistics", path: "/api/statistics", fallback: null },
     { key: "sectors", path: "/api/sectors", fallback: [] },
@@ -991,7 +1100,22 @@ async function loadData() {
     { key: "dashboard", path: "/api/dashboard", fallback: null }
   ];
 
-  const results = await Promise.allSettled(endpoints.map(e => apiFetch(e.path)));
+  for (const e of endpoints) reponsesCopiees.delete(e.path);
+  // Le reseau part D'ABORD : lire le cache ne doit rien lui couter.
+  let reseauFini = false;
+  const reseau = Promise.allSettled(endpoints.map(e => apiFetch(e.path)));
+  reseau.then(() => { reseauFini = true; });
+
+  let copie = null;
+  if (premier) {
+    copie = await lireDernieresDonnees(endpoints);
+    if (copie && !reseauFini) {
+      appliquerDonnees(copie.data);
+      setStatus("Mise à jour…");
+    }
+  }
+
+  const results = await reseau;
 
   // Revue R1 P0 #3 : si un endpoint renvoie 401, apiFetch a deja declenche
   // window.location.href = /login. On abandonne loadData proprement (la
@@ -1007,45 +1131,36 @@ async function loadData() {
   }
 
   const failed = [];
+  // Les cles dont la valeur affichee est une COPIE : rendue par le cache du
+  // service worker (reseau trop lent ou coupe), ou reprise de la copie lue au
+  // demarrage quand le reseau a echoue. Elles interdisent « A jour ».
+  const copiees = [];
+  let dateCopie = NaN;
+  const noterCopie = (key, date) => {
+    copiees.push(key);
+    if (Number.isFinite(date) && !(date >= dateCopie)) dateCopie = date;
+  };
   const data = {};
   results.forEach((r, i) => {
     const e = endpoints[i];
     if (r.status === "fulfilled") {
       data[e.key] = r.value;
+      if (reponsesCopiees.has(e.path)) noterCopie(e.key, reponsesCopiees.get(e.path));
+    } else if (copie && Object.prototype.hasOwnProperty.call(copie.data, e.key)) {
+      data[e.key] = copie.data[e.key];
+      noterCopie(e.key, copie.date);
     } else {
       data[e.key] = e.fallback;
       failed.push(e.key);
     }
   });
 
-  clients = (data.clients || []).map(client => ({
-    ...client,
-    statut: client.statut || "restant"
-  }));
-  stock = data.stock;
-  ventes = data.ventes;
-  historique = data.historique;
-  orders = data.orders;
-  crmClients = data.crmClients;
-  abonnementsDonnees = data.subscriptions || { items: [], occurrences: [] };
-  crmRelances = data.crmRelances;
-  todayCustomerOrders = data.todayCustomerOrders;
-  plannedOrders = data.plannedOrders;
-  statistics = data.statistics;
-  sectors = data.sectors;
-  deliverySectors = data.deliverySectors;
-  deliveryRoutes = data.routes;
-  stockMovements = data.stockMovements;
-  dashboard = data.dashboard;
+  appliquerDonnees(data);
 
-  refreshActiveRoute();
-  route = activeRoute ? activeRoute.stops : (currentIndex >= 0 ? route : [...clients]);
-
-  renderAll();
-  renderOperations({operations:data.operations,subscriptions:data.subscriptions,crmClients,stock,orders});
-
-  if (failed.length === 0) {
+  if (failed.length === 0 && copiees.length === 0) {
     setStatus("À jour");
+  } else if (failed.length === 0) {
+    setStatus(libelleCopie(dateCopie));
   } else if (failed.length === endpoints.length) {
     setStatus("Erreur");
     notify("Impossible de joindre le serveur — les données affichées sont vides.", "error");
@@ -1059,7 +1174,9 @@ async function loadData() {
       stockMovements: "mouvements stock", dashboard: "tableau de bord"
     };
     const friendly = failed.map(k => labels[k] || k).join(", ");
-    notify(`Sections indisponibles : ${friendly}. Le reste est à jour.`, "warning");
+    notify(copiees.length
+      ? `Sections indisponibles : ${friendly}. Le reste vient des dernières données connues.`
+      : `Sections indisponibles : ${friendly}. Le reste est à jour.`, "warning");
   }
 
   // TOUJOURS, quel que soit le sort des endpoints. Les zones remplies par leur
@@ -6119,6 +6236,12 @@ async function apiFetch(url, options = {}) {
   }
   clearTimeout(timer);
 
+  // Une reponse rendue par le cache du service worker (le reseau n'a pas
+  // repondu a temps) : loadData() ne l'annoncera pas « A jour ».
+  if (res.headers && res.headers.get("X-Sereo-Cache")) {
+    reponsesCopiees.set(url, Date.parse(res.headers.get("Date") || ""));
+  }
+
   // Session expiree (cookie 12h) -> redirige vers /login en preservant l'URL courante.
   // 429 = IP verrouillee (rate-limit auth) : on redirige aussi vers /login, qui
   // affiche le compte a rebours de lockout (sinon l'app afficherait un toast
@@ -6126,6 +6249,10 @@ async function apiFetch(url, options = {}) {
   // re-redirige pas (boucle infinie possible sur certains navigateurs).
   if ((res.status === 401 || res.status === 429) && !window.location.pathname.startsWith("/login")) {
     const next = window.location.pathname + window.location.search + window.location.hash;
+    // La session est finie : ses donnees ne doivent pas s'afficher a la
+    // prochaine ouverture, avant que le serveur ait reconnu quelqu'un.
+    // (Un 429 n'est pas une fin de session : on ne vide que sur 401.)
+    if (res.status === 401) await viderCacheDeDonnees();
     window.location.href = `/login?next=${encodeURIComponent(next)}`;
     // On throw quand meme pour interrompre proprement le code appelant.
     throw new Error("Session expiree, redirection vers /login");

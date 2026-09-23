@@ -130,6 +130,18 @@ const BACKUP_DIR = path.resolve(process.env.SEREO_BACKUP_DIR || path.join(path.d
 // le volume Docker comme la SQLite.
 const IMPORTS_ARCHIVES_DIR = path.resolve(process.env.SEREO_IMPORTS_ARCHIVES_DIR || path.join(path.dirname(SQLITE_PATH), "imports-archives"));
 const LEAFLET_DIST = path.join(__dirname, "node_modules", "leaflet", "dist");
+// Le nom du shell (CACHE_NAME du service worker), lu une fois au demarrage et
+// annonce par la page (en-tete X-Sereo-Shell). Illisible : rien n'est annonce,
+// et le service worker garde son cache d'abord -- jamais d'erreur au demarrage.
+const SHELL_ANNONCE = (() => {
+  try {
+    const source = fs.readFileSync(path.join(__dirname, "public", "service-worker.js"), "utf8");
+    const trouve = source.match(/const CACHE_NAME = "([^"]+)"/);
+    return trouve ? trouve[1] : "";
+  } catch {
+    return "";
+  }
+})();
 const ENABLE_DB_EXPORT = process.env.SEREO_ENABLE_DB_EXPORT === "1";
 const AUTH_USER = cleanEnv(process.env.SEREO_AUTH_USER);
 const AUTH_PASSWORD = cleanEnv(process.env.SEREO_AUTH_PASSWORD);
@@ -394,7 +406,14 @@ app.post("/logout", handleLogout);
 app.use(requireAccessAuth);
 app.use(express.json({ limit: "5mb" }));
 app.use("/vendor/leaflet", express.static(LEAFLET_DIST, { immutable: true, maxAge: "7d" }));
-app.use(express.static(path.join(__dirname, "public")));
+app.use(express.static(path.join(__dirname, "public"), {
+  // La page annonce le shell qu'elle attend : le service worker en place sert
+  // les fichiers statiques depuis son cache, et s'il est plus vieux que la page,
+  // il doit le savoir AVANT qu'elle demande ses scripts (public/service-worker.js).
+  setHeaders(res, chemin) {
+    if (SHELL_ANNONCE && path.basename(chemin) === "index.html") res.setHeader("X-Sereo-Shell", SHELL_ANNONCE);
+  }
+}));
 app.use("/api", requireTrustedApiRequest);
 
 function cleanEnv(value) {

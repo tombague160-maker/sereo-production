@@ -1293,6 +1293,24 @@ test("PWA and brand assets are served locally", async () => {
   assert.match(await logo.text(), /SEREO/);
 });
 
+test("la page annonce le shell du service worker (X-Sereo-Shell)", async () => {
+  // Le service worker sert les fichiers statiques depuis son cache ; c'est cet
+  // en-tete qui lui dit qu'une page est plus recente que lui. S'il manque ou
+  // s'il differe de CACHE_NAME alors que rien n'a change, chaque chargement
+  // passerait par le reseau, ou aucun ne verrait arriver la nouvelle version.
+  const sw = await (await fetch(`${baseUrl}/service-worker.js`)).text();
+  const nom = sw.match(/const CACHE_NAME = "([^"]+)"/);
+  assert.ok(nom, "CACHE_NAME introuvable dans le service worker");
+  for (const chemin of ["/", "/index.html"]) {
+    const page = await fetch(`${baseUrl}${chemin}`);
+    assert.equal(page.status, 200, chemin);
+    assert.equal(page.headers.get("x-sereo-shell"), nom[1], chemin);
+  }
+  // Et pas sur le reste : ce n'est pas une page.
+  const css = await fetch(`${baseUrl}/css/style.css`);
+  assert.equal(css.headers.get("x-sereo-shell"), null);
+});
+
 test("stock import deduplicates rows with same code (keeps first occurrence)", async () => {
   seedDb(defaultDb());
 
