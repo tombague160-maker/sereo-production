@@ -623,7 +623,9 @@ function initializeFromJsonIfNeeded(database, options) {
 // Les tournees dont readDb ne charge PAS le trace (la geometrie OSRM, ~87 % du
 // volume). Tout statut absent d'ici charge son trace : le defaut sur est le
 // plus lent, jamais le faux.
-const STATUTS_TOURNEE_SANS_TRACE = new Set(["terminee"]);
+// Lot 2 de l'audit geo : les tournees cloturees et annulees sont finies aussi
+// (meme ensemble que STATUTS_TOURNEE_SANS_TRACE_EN_LISTE, server.js).
+const STATUTS_TOURNEE_SANS_TRACE = new Set(["terminee", "cloturee", "annulee"]);
 
 function tableSpecs() {
   return [
