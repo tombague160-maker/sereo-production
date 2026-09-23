@@ -37,8 +37,20 @@ function semeTournee() {
   seed.commandes.push(o11);
   const r = seed.routes[0];
   r.stops.push({ ...structuredClone(r.stops[2]), id: "s-o-11", orderId: "o-11", status: "pret_livraison", lat: tilleuls.lat, lng: tilleuls.lng });
+  // La precision du point, dans le SEUL champ qui la porte (geoPrecision, lot
+  // 3) : la carte en derive « approximatif » (rue, lieu-dit, commune). Posee
+  // sur la COMMANDE et sur l'arret, comme createStop l'ecrit : un arret en
+  // cours relit sa commande (arretVivant, M4 du lot 3).
   // Le sixieme arret (Dupont) : une rue sans numero, le point est au milieu.
-  r.stops[5].positionPrecision = "approximative";
+  // Le cinquieme (Pharmacie) : place a la main -- pas approximatif. Le
+  // deuxieme (SSIAD) : au numero -- exact.
+  const preciser = (i, precision) => {
+    r.stops[i].geoPrecision = precision;
+    seed.commandes.find(o => o.id === r.stops[i].orderId).geoPrecision = precision;
+  };
+  preciser(5, "rue");
+  preciser(4, "manuel");
+  preciser(1, "numero");
   r.departure = { lat: 46.747, lng: 5.915, label: "Dépôt de Champagnole" };
   r.arrival = { lat: 47.10, lng: 5.51, label: "Retour Dole" };
   r.geometry = { type: "LineString", coordinates: [[r.departure.lng, r.departure.lat], ...CLIENTS.map(c => [c.lng, c.lat]), [r.arrival.lng, r.arrival.lat]] };
@@ -52,10 +64,14 @@ function semeSansTournee() {
     id: `c-${i}`, nom: `Client numero ${i}`, rue: `${i + 1} rue des Essais`, ville: "Champagnole", codePostal: "39300",
     lat: 46.70 + (i % 6) * 0.05, lng: 5.60 + Math.floor(i / 6) * 0.08, crmStatus: "client_actif"
   }));
+  // Precisions (geoPrecision, lot 3) : au numero, placee a la main, au centre
+  // de la commune -- seule la derniere est approximative sur la carte.
+  const precisions = ["numero", "manuel", "commune"];
   const pretes = [0, 7, 14].map((i, k) => ({
     id: `p-${k}`, clientId: clients[i].id, clientName: clients[i].nom, status: "pret_livraison",
     address: clients[i].rue, city: clients[i].ville, postalCode: clients[i].codePostal,
     lat: clients[i].lat, lng: clients[i].lng, deliveryDate: AUJOURDHUI, dateCommande: AUJOURDHUI,
+    geoPrecision: precisions[k],
     products: [{ code: "CH-L", nom: "Changes taille L", prixUnitaire: 12, quantite: 1 }]
   }));
   return { ...seed, clients, commandes: pretes, routes: [], subscriptions: [] };
@@ -302,7 +318,10 @@ test("sans tournee — des points sans numero ni trajet, nommes par le client", 
   expect(traits, "un faux trajet relie les commandes").toBe(0);
   expect(r.filter(m => /\d/.test(m.texte)).map(m => m.texte), "des points portent un numero d'arret").toEqual([]);
   expect(r.filter(m => /^Arrêt/.test(m.nom)).length, "des points se disent « Arret N »").toBe(0);
-  expect(r.map(m => m.nom).sort()).toEqual(["Client numero 0", "Client numero 14", "Client numero 7"].map(n => `${n}, non sélectionnée`));
+  expect(r.map(m => m.nom).sort()).toEqual(["Client numero 0, non sélectionnée", "Client numero 14, non sélectionnée, position approximative", "Client numero 7, non sélectionnée"]);
+  // Le point « au centre de la commune » est dessine autrement ; ni celui au
+  // numero ni celui place a la main.
+  expect(r.filter(m => /marqueur--approx/.test(m.classes)).map(m => m.nom)).toEqual(["Client numero 14, non sélectionnée, position approximative"]);
   expect(erreurs).toEqual([]);
   await ctx.close();
 });
@@ -391,6 +410,8 @@ test("meme adresse regroupee, point approximatif distingue, libelles en francais
   expect(groupe.nom).toContain("EHPAD Les Tilleuls du Val de Loue");
 
   const approx = arrets.find(m => m.texte === "6");
+  // geoPrecision « rue » (lot 3) : approximatif. « manuel » (arret 5) et
+  // « numero » (arret 2) : non -- le compte a 1 ci-dessous le juge.
   expect(approx.classes).toContain("marqueur--approx");
   expect(approx.nom).toContain("position approximative");
   expect(arrets.filter(m => /marqueur--approx/.test(m.classes)).length).toBe(1);

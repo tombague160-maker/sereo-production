@@ -1079,26 +1079,38 @@ function clientAGeocoder(client) {
   return !getCoordinates(client) && adresseGeocodable(adresseDuClient(client));
 }
 
-/** « adresse » pour un numero trouve, « approximative » pour une rue seule. */
-function precisionDuType(type) {
-  return type === "housenumber" ? "adresse" : "approximative";
-}
-
 /**
- * La precision d'un client DEJA place mais sans precision (geocode avant le
- * lot 4 de l'audit geo) : elle se relit dans le cache du geocodeur, sans appel
- * reseau, et seulement si le point du cache EST celui du client. Un point pose
- * a la main ou venu du fichier ne correspond pas : il reste sans mention.
+ * Lot 4 de l'audit geo, porte sur le champ du lot 3 (geoPrecision) : un client
+ * DEJA place mais sans precision ni origine (geocode avant que la precision
+ * existe) la retrouve dans le cache du geocodeur, sans appel reseau, et
+ * seulement si le point du cache EST le sien. Un point pose a la main ou venu
+ * du fichier ne correspond pas (et porte deja une origine) : il reste tel quel.
+ * Ses commandes qui le suivent AU MEME point prennent la precision ; une
+ * commande livree ailleurs (EHPAD, proche) ou placee a la main, non.
+ * Rend true si le client a ete rattrape.
  */
-function precisionDepuisLeCache(client) {
-  if (client.positionPrecision) return "";
+function rattraperPrecisionDepuisLeCache(db, client) {
+  if (client.geoPrecision || client.geoSource) return false;
   const point = getCoordinates(client);
   const adresse = adresseDuClient(client);
-  if (!point || !adresseGeocodable(adresse)) return "";
-  const entree = getSqliteStore().getGeocodage(cleGeocodage(adresse));
-  if (!entree || entree.statut !== GEOCODAGE_STATUTS.TROUVE) return "";
-  if (Number(entree.lat) !== point.lat || Number(entree.lng) !== point.lng) return "";
-  return precisionDuType(entree.type);
+  if (!point || !adresseGeocodable(adresse)) return false;
+  const cle = cleGeocodage(adresse);
+  const entree = getSqliteStore().getGeocodage(cle);
+  if (!entree || entree.statut !== GEOCODAGE_STATUTS.TROUVE) return false;
+  if (Number(entree.lat) !== point.lat || Number(entree.lng) !== point.lng) return false;
+  const precision = geocodage.precisionDuType(entree.type);
+  if (!precision) return false;
+  client.geoPrecision = precision;
+  client.geoSource = "ban";
+  client.geoCle = cle;
+  client.geoLibelle = clean(entree.libelle);
+  for (const order of db.commandes) {
+    if (order.geoPrecision || order.geoSource === "manuel") continue;
+    if (!commandeSuitLeClient(order, client, cle) || !memePoint(order, client)) continue;
+    order.geoPrecision = precision;
+    order.geoSource = "client";
+  }
+  return true;
 }
 
 /** Meme point, a 1e-7 pres : une commande livree ailleurs (EHPAD, proche) n'est pas le client. */
@@ -1164,7 +1176,13 @@ async function geocoderClients({ forcer = false, max = GEOCODER_MAX_PAR_LOT } = 
 
     for (const client of db.clients) {
       const entree = resultats.get(String(client.id));
-      if (!entree || entree.statut !== GEOCODAGE_STATUTS.TROUVE) continue;
+      if (!entree || entree.statut !== GEOCODAGE_STATUTS.TROUVE) {
+        // Lot 4 (audit geo), porte sur le champ du lot 3 : un client place
+        // avant que la precision existe n'en a aucune, et son point
+        // « approximatif » ne se voyait pas. Rattrape depuis le cache.
+        if (rattraperPrecisionDepuisLeCache(db, client)) rattrapes += 1;
+        continue;
+      }
       // L'adresse a change pendant le lot : ce point est celui de l'ancienne.
       if (cleGeocodage(adresseDuClient(client)) !== entree.cle) continue;
       // Une position manuelle n'est jamais ecrasee, meme par `forcer`.
@@ -4157,7 +4175,9 @@ function syncWorkflow(db) {
       products: client.produits,
       lat: client.lat,
       lng: client.lng,
-      positionPrecision: client.positionPrecision,
+      // Le point du client, et ce qu'il vaut (lots 3 et 4 de l'audit geo).
+      geoPrecision: getCoordinates(client) ? client.geoPrecision || "" : "",
+      geoSource: getCoordinates(client) ? "client" : "",
       notes: client.notes,
       priority: client.priority,
       dateCommande: today,

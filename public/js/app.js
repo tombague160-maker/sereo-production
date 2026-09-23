@@ -7358,7 +7358,16 @@ function renderMap() {
   }
 }
 
-const positionApproximative = entity => entity?.positionPrecision === "approximative";
+// Lot 4 (carte) sur le champ du lot 3 : la carte ne lit que geoPrecision.
+// Approximatif = rue, lieu-dit, commune (le point n'est pas a la porte) ;
+// « numero » est exact ; « manuel » (pose par une personne ou venu du
+// fichier) n'est pas dit approximatif. Meme partition que
+// geocodage.precisionApproximative cote serveur.
+const POSITION_APPROXIMATIVE = { rue: "au milieu de la rue", "lieu-dit": "au centre du lieu-dit", commune: "au centre de la commune" };
+const positionApproximative = entity => Object.hasOwn(POSITION_APPROXIMATIVE, entity?.geoPrecision || "");
+const mentionApproximative = entity => positionApproximative(entity)
+  ? `<br><em>Position approximative : le point est ${POSITION_APPROXIMATIVE[entity.geoPrecision]}.</em>`
+  : "";
 
 /** « 3 et 7 », « 3, 5 et 7 ». */
 function listeRangs(rangs) {
@@ -7375,7 +7384,7 @@ function iconeCarte(html) {
 function bulleArret(stop, index) {
   return `<strong>Arrêt ${index + 1} · ${escapeHtml(getEntityName(stop))}</strong><br>
       ${escapeHtml(formatEntityAddress(stop))}<br>
-      ${escapeHtml(formatEntityStatus(stop))}${positionApproximative(stop) ? "<br><em>Position approximative : le point est au milieu de la rue.</em>" : ""}`;
+      ${escapeHtml(formatEntityStatus(stop))}${mentionApproximative(stop)}`;
 }
 
 /**
@@ -7468,7 +7477,7 @@ function marqueursDePreparation() {
       cle: `c:${order.id}`,
       latlng: [coords.lat, coords.lng],
       html: `<span class="marqueur marqueur--point${choisi ? " marqueur--choisi" : ""}${approx ? " marqueur--approx" : ""}" role="img" aria-label="${escapeAttribute(libelle)}"></span>`,
-      bulle: `<strong>${escapeHtml(getEntityName(order))}</strong><br>${escapeHtml(formatEntityAddress(order))}${approx ? "<br><em>Position approximative : le point est au milieu de la rue.</em>" : ""}`,
+      bulle: `<strong>${escapeHtml(getEntityName(order))}</strong><br>${escapeHtml(formatEntityAddress(order))}${mentionApproximative(order)}`,
       zIndexOffset: choisi ? 500 : 0,
       // La liste des commandes est l'equivalent clavier : sans cela, Tab
       // traversait chacun des points avant la suite de la page.

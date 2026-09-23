@@ -11,7 +11,11 @@
 //    exige l'un et l'autre (constat de l'auditeur carte, mesure le 23/09 :
 //    21 tuiles sur 21 sans Referer, attribution sans lien).
 // 3. Un point « approximatif » (la BAN ne rend que la rue, pas le numero) est
-//    DIT comme tel, pour que la carte le distingue.
+//    DIT comme tel, pour que la carte le distingue. Depuis l'integration des
+//    lots 3, 4 et 7, il n'y a qu'UN champ : geoPrecision (lot 3 : « numero »,
+//    « rue », « lieu-dit », « commune », « manuel ») et son origine geoSource.
+//    La carte en derive « approximatif » (rue, lieu-dit, commune). Le champ
+//    positionPrecision du lot 4 n'existe plus.
 //
 // Aucun appel reseau externe : un faux geocodeur local, le port 3392.
 
@@ -161,10 +165,13 @@ test("position approximative : un point au milieu de la rue est DIT approximatif
   const rue = apres.clients.find(c => c.id === "c-rue");
   const num = apres.clients.find(c => c.id === "c-num");
   assert.ok(rue.lat && num.lat, "prealable : les deux clients devaient etre geolocalises");
-  assert.equal(rue.positionPrecision, "approximative");
-  assert.equal(num.positionPrecision, "adresse");
+  assert.equal(rue.geoPrecision, "rue");
+  assert.equal(rue.geoSource, "ban");
+  assert.equal(num.geoPrecision, "numero");
   // La commande du client suit, comme ses coordonnees.
-  assert.equal(apres.commandes.find(o => o.id === "o-rue").positionPrecision, "approximative");
+  assert.equal(apres.commandes.find(o => o.id === "o-rue").geoPrecision, "rue");
+  // Un seul champ : l'ancien du lot 4 n'est plus ecrit nulle part.
+  for (const e of [rue, num, ...apres.commandes]) assert.equal(e.positionPrecision, undefined, `positionPrecision reapparu sur ${e.id}`);
 
   // Une correction a la main n'est plus approximative.
   const res = await fetch(`${baseUrl}/api/clients/c-rue/coordinates`, {
@@ -172,8 +179,9 @@ test("position approximative : un point au milieu de la rue est DIT approximatif
   });
   assert.equal(res.status, 200);
   const corrige = readDb();
-  assert.equal(corrige.clients.find(c => c.id === "c-rue").positionPrecision, "manuelle");
-  assert.equal(corrige.commandes.find(o => o.id === "o-rue").positionPrecision, "manuelle");
+  assert.equal(corrige.clients.find(c => c.id === "c-rue").geoPrecision, "manuel");
+  assert.equal(corrige.clients.find(c => c.id === "c-rue").geoSource, "manuel");
+  assert.equal(corrige.commandes.find(o => o.id === "o-rue").geoPrecision, "manuel");
 });
 
 // Relecture adverse du 23/09 : le « approximatif » ne vivait que sur les
@@ -185,12 +193,12 @@ test("position approximative : la commande importee APRES le geocodage garde le 
   const db = defaultDb();
   db.clients = [{
     id: "c-gare", nom: "Client gare", rue: "rue de la Gare", ville: "Besancon", codePostal: "25000",
-    lat: 47.2378, lng: 5.9806, positionPrecision: "approximative"
+    lat: 47.2378, lng: 5.9806, geoPrecision: "rue", geoSource: "ban"
   }];
   db.commandes = [{
     id: "o-lundi", clientId: "c-gare", clientName: "Client gare", status: "pret_livraison", dateCommande: "2026-09-21",
     address: "rue de la Gare", city: "Besancon", postalCode: "25000", lat: 47.2378, lng: 5.9806,
-    positionPrecision: "approximative", products: []
+    geoPrecision: "rue", geoSource: "client", products: []
   }];
   writeDb(db, { backup: false });
 
@@ -207,8 +215,8 @@ test("position approximative : la commande importee APRES le geocodage garde le 
   const mardi = commandes.find(o => o.id !== "o-lundi");
   assert.ok(mardi, `prealable : l'import devait creer la commande de mardi (${commandes.map(o => o.id).join(", ")})`);
   assert.equal(String(mardi.lat), "47.2378", "prealable : la commande de mardi prend le point du client");
-  assert.equal(apres.clients.find(c => c.id === "c-gare").positionPrecision, "approximative", "le client reimporte a perdu sa precision");
-  assert.equal(mardi.positionPrecision, "approximative", "la commande de mardi s'affiche comme une adresse exacte");
+  assert.equal(apres.clients.find(c => c.id === "c-gare").geoPrecision, "rue", "le client reimporte a perdu sa precision");
+  assert.equal(mardi.geoPrecision, "rue", "la commande de mardi s'affiche comme une adresse exacte");
 });
 
 test("position approximative : un client geocode AVANT le lot est rattrape depuis le cache, pas ses commandes livrees ailleurs", async () => {
@@ -219,23 +227,27 @@ test("position approximative : un client geocode AVANT le lot est rattrape depui
   typeRendu = "street";
   await geocoderClients({ max: 5 });
 
-  // L'etat d'une base d'avant le lot : les points, sans precision. Une
-  // seconde commande est livree AILLEURS (un EHPAD) : elle n'est pas le client.
+  // L'etat d'une base d'avant le lot : les points, sans precision ni origine
+  // (aucun champ geo*). Une seconde commande est livree AILLEURS (un EHPAD) :
+  // elle n'est pas le client.
+  const sansGeo = e => { for (const k of Object.keys(e)) if (/^geo/.test(k)) delete e[k]; };
   const avant = readDb();
-  delete avant.clients.find(c => c.id === "c-ancien").positionPrecision;
+  sansGeo(avant.clients.find(c => c.id === "c-ancien"));
   const ancienne = avant.commandes.find(o => o.id === "o-ancien");
-  delete ancienne.positionPrecision;
-  avant.commandes.push({ ...ancienne, id: "o-ehpad", numero: "", lat: 47.1, lng: 5.8, positionPrecision: "" });
+  sansGeo(ancienne);
+  avant.commandes.push({ ...ancienne, id: "o-ehpad", numero: "", lat: 47.1, lng: 5.8, geoPrecision: "" });
   writeDb(avant, { backup: false });
   const place = readDb().clients.find(c => c.id === "c-ancien");
   assert.ok(place.lat, "prealable : le client devait etre place");
-  assert.equal(place.positionPrecision || "", "", "prealable : sans precision, comme avant le lot");
+  assert.equal(place.geoPrecision || "", "", "prealable : sans precision, comme avant le lot");
+  assert.equal(readDb().commandes.find(o => o.id === "o-ancien").geoPrecision || "", "", "prealable : commande sans precision");
 
   await geocoderClients({ max: 5 });
   const apres = readDb();
-  assert.equal(apres.clients.find(c => c.id === "c-ancien").positionPrecision, "approximative", "le client d'avant le lot n'est jamais rattrape");
-  assert.equal(apres.commandes.find(o => o.id === "o-ancien").positionPrecision, "approximative");
-  assert.equal(apres.commandes.find(o => o.id === "o-ehpad").positionPrecision || "", "", "la commande livree ailleurs a pris la precision du client");
+  assert.equal(apres.clients.find(c => c.id === "c-ancien").geoPrecision, "rue", "le client d'avant le lot n'est jamais rattrape");
+  assert.equal(apres.clients.find(c => c.id === "c-ancien").geoSource, "ban", "le point rattrape vient du cache BAN");
+  assert.equal(apres.commandes.find(o => o.id === "o-ancien").geoPrecision, "rue");
+  assert.equal(apres.commandes.find(o => o.id === "o-ehpad").geoPrecision || "", "", "la commande livree ailleurs a pris la precision du client");
 });
 
 test("fond de carte : un fournisseur sans attribution garde la mention d'OpenStreetMap, et le demarrage le dit", () => {
