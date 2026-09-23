@@ -67,7 +67,12 @@ beforeEach(() => {
 });
 async function request(url, body, method = "POST") {
   const r = await fetch(base + url, body ? { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
-  return { status: r.status, body: await r.json() };
+  // Une route absente rend une page HTML : le statut doit le dire, pas un
+  // JSON.parse qui plante.
+  const texte = await r.text();
+  let corps;
+  try { corps = JSON.parse(texte); } catch { corps = texte; }
+  return { status: r.status, body: corps };
 }
 const DEPART = { lat: 47.2, lng: 6.0, label: "Dépôt" };
 
@@ -147,6 +152,7 @@ test("troncons : la duree de chaque trajet est gardee dans la tournee, et efface
   const r = await request("/api/routes", { orderIds: ["a", "b", "c"], departure: DEPART, arrival: DEPART });
   assert.equal(r.status, 201);
   const gardee = readDb().routes.find((x) => x.id === r.body.id);
+  assert.ok(Array.isArray(gardee.troncons), `la tournee n'a pas garde ses troncons (${gardee.troncons})`);
   assert.equal(gardee.troncons.length, 4, "depart -> a -> b -> c -> arrivee : 4 troncons");
   assert.ok(gardee.troncons.every((t) => Number.isInteger(t.duree) && t.duree > 0 && Number.isInteger(t.distance)));
   // Un ordre change a la main rend les troncons faux : ils partent avec le trace.
