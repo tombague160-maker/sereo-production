@@ -33,6 +33,9 @@ import {
 import { mainTabs, MOBILE_OVERFLOW_TABS, titles, GROUPES_NAV, REDIRECTIONS, ECRANS_SECONDAIRES } from "./config/tabs.js";
 import {
   gabaritTableauComptes,
+  gabaritLignesComptes,
+  gabaritFeuilleCompte,
+  CHEVRON_LIGNE,
   gabaritAccesRefuse,
   gabaritAuthDesactivee,
   optionsRoles,
@@ -511,6 +514,7 @@ function bindUi() {
   document.addEventListener("change", event => {
     const select = event.target.closest('[data-action="changer-role-compte"]');
     if (!select) return;
+    if (select.closest("#parCompteFeuille")) fermerFeuillesParametres();
     runAction(null, null, () => changerRoleCompte(select.dataset.compteId, select.value));
   });
 
@@ -731,6 +735,18 @@ function bindUi() {
     }
     if (action === "supprimer-compte") {
       runAction(actionButton, "Suppression...", () => supprimerCompte(actionButton.dataset.compteId, actionButton.dataset.compteIdentifiant));
+    }
+    // Parametres au telephone (planche 8d).
+    if (action === "par-ouvrir-compte") ouvrirFeuilleCompte(actionButton.dataset.compteId);
+    if (action === "par-ouvrir-imports") ouvrirFeuilleImports(actionButton.dataset.type || "");
+    if (action === "par-fermer-feuille") fermerFeuillesParametres();
+    if (action === "par-ajouter-compte") basculerFormulaireCompte(actionButton);
+    if (action === "par-ajouter-secteur") ouvrirAjoutSecteur();
+    // Un geste de la feuille d'un compte la referme : le tableau et les lignes
+    // se redessinent, la feuille montrerait un etat perime.
+    if (["basculer-compte", "changer-mot-de-passe-compte", "supprimer-compte"].includes(action)
+      && actionButton.closest("#parCompteFeuille")) {
+      fermerFeuillesParametres();
     }
   });
 
@@ -5393,15 +5409,20 @@ async function renderComptes() {
   // /api/me n'a pas encore repondu : on laisse le message de chargement.
   if (!moi) return;
 
+  // « Ajouter un compte » (telephone) suit le formulaire qu'il deplie.
+  const ajouter = document.getElementById("parAjouterCompte");
+
   if (!moi.administration) {
     container.innerHTML = gabaritAccesRefuse(moi.roleLibelle || libelleRole(moi.role));
     if (form) form.hidden = true;
+    if (ajouter) ajouter.hidden = true;
     return;
   }
 
   const select = document.getElementById("compteFormRole");
   if (select && !select.options.length) select.innerHTML = optionsRoles("livreur");
   if (form) form.hidden = false;
+  if (ajouter) ajouter.hidden = false;
 
   try {
     comptes = await apiFetch("/api/comptes");
@@ -5414,7 +5435,62 @@ async function renderComptes() {
     ? gabaritAuthDesactivee()
     : "";
 
-  container.innerHTML = entete + gabaritTableauComptes(comptes, { identifiantCourant: moi.identifiant });
+  // Le tableau pour le bureau, les lignes pour le telephone : la feuille de
+  // style n'en montre qu'un (planche 8d).
+  const tableau = gabaritTableauComptes(comptes, { identifiantCourant: moi.identifiant });
+  const lignes = gabaritLignesComptes(comptes, { identifiantCourant: moi.identifiant });
+  // Une ligne du telephone avait le focus -- la feuille d'un compte le lui
+  // rend en se fermant apres un geste. Le rechargement la redessine : on rend
+  // le focus a la meme ligne (ou a sa voisine si le compte a ete supprime),
+  // sinon il tombe sur <body> et le clavier repart du haut.
+  const anciennes = [...container.querySelectorAll(".par-compte-ligne")];
+  const rangFocus = anciennes.indexOf(document.activeElement);
+  const idFocus = rangFocus >= 0 ? document.activeElement.dataset.compteId : null;
+  container.innerHTML = entete + (lignes
+    ? `<div class="par-bureau">${tableau}</div><div class="par-telephone par-comptes-tel">${lignes}</div>`
+    : tableau);
+  if (rangFocus >= 0) {
+    const nouvelles = [...container.querySelectorAll(".par-compte-ligne")];
+    const cible = nouvelles.find(l => l.dataset.compteId === idFocus)
+      || nouvelles[Math.min(rangFocus, nouvelles.length - 1)]
+      || document.getElementById("parAjouterCompte");
+    cible?.focus();
+  }
+}
+
+// La feuille d'un compte (telephone, planche 8d) : ses gestes, un par ligne.
+function ouvrirFeuilleCompte(id) {
+  const dialogue = document.getElementById("parCompteFeuille");
+  const corps = document.getElementById("parCompteFeuilleCorps");
+  const compte = comptes.find(c => String(c.id) === String(id));
+  if (!dialogue || !corps || !compte || typeof dialogue.showModal !== "function") return;
+  setText("parCompteFeuilleTitre", compte.identifiant);
+  corps.innerHTML = gabaritFeuilleCompte(compte, { identifiantCourant: moi?.identifiant });
+  dialogue.showModal();
+}
+
+function fermerFeuillesParametres() {
+  for (const id of ["parCompteFeuille", "parImportsFeuille"]) {
+    const dialogue = document.getElementById(id);
+    if (dialogue?.open) dialogue.close();
+  }
+}
+
+// « Ajouter un compte » (telephone) : deplie ou replie le formulaire.
+function basculerFormulaireCompte(bouton) {
+  const bloc = document.getElementById("comptesBlock");
+  if (!bloc) return;
+  const ouvert = bloc.classList.toggle("par-form-ouvert");
+  bouton.setAttribute("aria-expanded", ouvert ? "true" : "false");
+  if (ouvert) document.querySelector('#compteForm input[name="identifiant"]')?.focus();
+}
+
+// « Ajouter » des secteurs (telephone) : ouvre la fiche et son formulaire.
+function ouvrirAjoutSecteur() {
+  const details = document.getElementById("parSecteursDetails");
+  if (!details) return;
+  details.open = true;
+  document.querySelector('#deliverySectorForm input[name="secteur"]')?.focus();
 }
 
 async function creerCompte(form) {
@@ -5489,13 +5565,15 @@ async function renderImportsArchives() {
   try {
     const archives = await apiFetch("/api/imports/archives");
 
+    archivesImports = archives;
+
     if (!archives.length) {
       container.innerHTML = `<p class="muted">Aucun import archivé pour l'instant. Tes prochains imports apparaitront ici.</p>`;
       return;
     }
 
-    container.innerHTML = `
-      <div class="imports-archives-table-wrap">
+    container.innerHTML = gabaritLignesImports(archives) + `
+      <div class="imports-archives-table-wrap par-bureau">
         <table class="imports-archives-table">
           <thead>
             <tr>
@@ -5531,6 +5609,80 @@ async function renderImportsArchives() {
   } catch (error) {
     container.innerHTML = `<p class="muted">Impossible de charger l'historique : ${escapeHtml(error.message || "erreur réseau")}</p>`;
   }
+}
+
+// Les archives lues au dernier rendu : la feuille du telephone s'en sert.
+let archivesImports = [];
+
+// « 16 septembre à 8 h 42 » (planche 8d) -- l'annee en cours se tait. Une
+// autre annee se dit : les archives ne sont jamais purgees, et un import d'il
+// y a un an, sans son annee, se lirait comme un import de la semaine.
+function formatDateLongue(iso) {
+  const d = new Date(iso);
+  if (!iso || Number.isNaN(d.getTime())) return "—";
+  const options = { day: "numeric", month: "long" };
+  if (d.getFullYear() !== new Date().getFullYear()) options.year = "numeric";
+  const jour = d.toLocaleDateString("fr-FR", options);
+  return `${jour} à ${d.getHours()} h ${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+// « 1 ligne », « 38 lignes » ; un nombre inconnu garde « — lignes ».
+function nombreDeLignes(n) {
+  if (n === null || n === undefined || n === "" || !Number.isFinite(Number(n))) return "— lignes";
+  return `${n} ligne${Number(n) > 1 ? "s" : ""}`;
+}
+
+// Au telephone (planche 8d), des lignes a la place du tableau : le dernier
+// import de ventes, le dernier de stock, les archives. Chacune ouvre la
+// feuille qui liste les fichiers et les rend telechargeables.
+function gabaritLignesImports(archives) {
+  const ligne = (type, titre, meta) => `
+    <li>
+      <button type="button" class="par-ligne" data-action="par-ouvrir-imports" data-type="${type}">
+        <span class="par-ligne-texte">
+          <span class="par-ligne-titre">${titre}</span>
+          <span class="par-ligne-meta">${escapeHtml(meta)}</span>
+        </span>
+        ${CHEVRON_LIGNE}
+      </button>
+    </li>`;
+  const dernier = type => archives.find(a => a.type === type);
+  const ventes = dernier("ventes");
+  const stock = dernier("stock");
+  const n = archives.length;
+  return `
+    <ul class="par-imports-lignes par-telephone" aria-label="Imports et archives">
+      ${ventes ? ligne("ventes", "Dernier import de ventes", `${formatDateLongue(ventes.importedAt)} · ${nombreDeLignes(ventes.rowsCount ?? 0)}`) : ""}
+      ${stock ? ligne("stock", "Dernier import de stock", `${formatDateLongue(stock.importedAt)} · ${nombreDeLignes(stock.rowsCount ?? 0)}`) : ""}
+      ${ligne("", "Archives", `${n} fichier${n > 1 ? "s" : ""} conservé${n > 1 ? "s" : ""}`)}
+    </ul>
+  `;
+}
+
+// La feuille des imports : les fichiers d'un type (ou tous), du plus recent au
+// plus ancien, chacun telechargeable -- ce que porte le tableau du bureau.
+function ouvrirFeuilleImports(type) {
+  const dialogue = document.getElementById("parImportsFeuille");
+  const corps = document.getElementById("parImportsFeuilleCorps");
+  if (!dialogue || !corps || typeof dialogue.showModal !== "function") return;
+  const liste = type ? archivesImports.filter(a => a.type === type) : archivesImports;
+  setText("parImportsFeuilleTitre", type === "ventes" ? "Imports de ventes" : type === "stock" ? "Imports de stock" : "Archives");
+  corps.innerHTML = `
+    <p class="par-aide">Chaque fichier .xlsx importé est archivé et reste téléchargeable.</p>
+    <ul class="par-archives">
+      ${liste.map(a => `
+        <li class="par-archive">
+          <span class="par-ligne-texte">
+            <span class="par-ligne-titre par-archive-nom">${escapeHtml(a.filename || "—")}</span>
+            <span class="par-ligne-meta">${escapeHtml(formatDateLongue(a.importedAt))} · ${a.type === "ventes" ? "Ventes" : "Stock"} · ${escapeHtml(nombreDeLignes(a.rowsCount))} ·${formatFileSize(a.fileSize)}</span>
+            <span class="par-ligne-meta">${formatImportStats(a.stats, a.type)}</span>
+          </span>
+          <a class="button secondary compact" href="/api/imports/archives/${encodeURIComponent(a.id)}/download" download="${escapeAttribute(a.filename || "import.xlsx")}" aria-label="Télécharger ${escapeAttribute(a.filename || "le fichier")}">Télécharger</a>
+        </li>
+      `).join("")}
+    </ul>
+  `;
+  dialogue.showModal();
 }
 
 function formatDateTimeShort(iso) {
@@ -7627,10 +7779,14 @@ async function loadVersionInfo() {
   // version n'avait pas pu etre lue. /api/version ne connait pas la derniere
   // version publiee ; elle ne peut donc dire qu'une chose vraie -- la page
   // tourne sur la version du serveur -- et seulement si elle l'a lue.
-  const etat = document.getElementById("sidebarVersionEtat");
-  if (etat && !swUpdateNotificationShown) {
-    etat.textContent = "À jour";
-    etat.hidden = !versionInfoCache?.version;
+  setText("parVersionValeur", versionInfoCache?.version || "—");
+  if (!swUpdateNotificationShown) {
+    // La barre laterale au bureau, le pied de Parametres au telephone.
+    for (const etat of [document.getElementById("sidebarVersionEtat"), document.getElementById("parVersionEtat")]) {
+      if (!etat) continue;
+      etat.textContent = "À jour";
+      etat.hidden = !versionInfoCache?.version;
+    }
   }
 }
 
@@ -7775,8 +7931,8 @@ function showSwUpdateNotification() {
   swUpdateNotificationShown = true;
   // Une nouvelle version attend un rechargement : la pastille cesse de dire
   // « A jour », ce qui serait faux, et le dit.
-  const etat = document.getElementById("sidebarVersionEtat");
-  if (etat) {
+  for (const etat of [document.getElementById("sidebarVersionEtat"), document.getElementById("parVersionEtat")]) {
+    if (!etat) continue;
     etat.textContent = "Mise à jour";
     etat.hidden = false;
   }

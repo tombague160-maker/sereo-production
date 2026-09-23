@@ -1416,6 +1416,9 @@
           <article class="par-carte par-span-4" aria-labelledby="parSecteursTitre">
             <div class="par-carte-tete">
               <h3 id="parSecteursTitre">Secteurs</h3>
+              <!-- « Ajouter » de la planche 8d : au telephone seulement (le
+                   bureau ne change pas). Il ouvre la fiche et son formulaire. -->
+              <button type="button" class="par-lien par-telephone" data-action="par-ajouter-secteur" aria-controls="parSecteursDetails">Ajouter</button>
             </div>
             <div id="parSecteursPilules" class="par-pilules"></div>
             <p class="par-aide">Le secteur d'une commande se déduit de sa ville. Il range la préparation et la tournée.</p>
@@ -1462,6 +1465,9 @@
             <div id="comptesList" aria-live="polite">
               <p class="muted">Chargement des comptes…</p>
             </div>
+            <!-- Au telephone (planche 8d) : le formulaire se replie derriere
+                 « Ajouter un compte ». Au bureau, ce bouton n'est pas rendu. -->
+            <button type="button" id="parAjouterCompte" class="button secondary par-telephone" data-action="par-ajouter-compte" aria-controls="compteForm" aria-expanded="false" hidden>Ajouter un compte</button>
 
             <form id="compteForm" class="comptes-form" hidden autocomplete="off">
               <div class="form-grid two">
@@ -1486,7 +1492,7 @@
 
           <article class="par-carte par-span-6 par-imports" aria-labelledby="parImportsTitre">
             <h3 id="parImportsTitre">Imports et archives</h3>
-            <p class="par-aide">Chaque fichier .xlsx importé est archivé et reste téléchargeable.</p>
+            <p class="par-aide par-bureau">Chaque fichier .xlsx importé est archivé et reste téléchargeable.</p>
             <div id="importsArchivesList" class="imports-archives-list" aria-live="polite">
               <p class="muted">Chargement de l'historique…</p>
             </div>
@@ -1559,6 +1565,12 @@
             </div>
           </article>
         </div>
+        <!-- La version, au pied de l'ecran (planche 8d) : au telephone, la
+             barre laterale qui la porte n'est pas rendue. -->
+        <button type="button" class="par-version par-telephone" data-action="open-version-modal" aria-label="Voir la version et les nouveautés">
+          <span>Version <span id="parVersionValeur">…</span></span>
+          <span class="par-badge" id="parVersionEtat" hidden>À jour</span>
+        </button>
       </section>
     </main>
 
@@ -1626,6 +1638,27 @@
       <button class="button secondary compact sheet-fermer" type="button" data-op="close-sub-detail" aria-label="Fermer">✕</button>
     </div>
     <div id="abonnementDetailCorps" class="sheet-corps"></div>
+  </dialog>
+
+  <!-- Parametres au telephone (planche 8d) : la feuille d'un compte, et celle
+       des imports et archives. Des <dialog class="sheet"> comme le detail d'une
+       commande. -->
+  <dialog id="parCompteFeuille" class="sheet" aria-labelledby="parCompteFeuilleTitre">
+    <div class="sheet-poignee" aria-hidden="true"></div>
+    <div class="sheet-entete">
+      <h3 id="parCompteFeuilleTitre">Compte</h3>
+      <button class="button secondary compact sheet-fermer" type="button" data-action="par-fermer-feuille" aria-label="Fermer">✕</button>
+    </div>
+    <div id="parCompteFeuilleCorps" class="sheet-corps par-feuille-corps"></div>
+  </dialog>
+
+  <dialog id="parImportsFeuille" class="sheet" aria-labelledby="parImportsFeuilleTitre">
+    <div class="sheet-poignee" aria-hidden="true"></div>
+    <div class="sheet-entete">
+      <h3 id="parImportsFeuilleTitre">Archives</h3>
+      <button class="button secondary compact sheet-fermer" type="button" data-action="par-fermer-feuille" aria-label="Fermer">✕</button>
+    </div>
+    <div id="parImportsFeuilleCorps" class="sheet-corps par-feuille-corps"></div>
   </dialog>
 
   <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
