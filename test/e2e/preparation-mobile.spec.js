@@ -26,8 +26,9 @@ let srv;
 test.beforeAll(async () => { srv = await demarrer({ port: 3176 }); });
 test.afterAll(async () => { if (srv) await srv.arreter(); });
 
-async function ouvrir(browser, base, { viewport = MOBILE, colorScheme = "light" } = {}) {
+async function ouvrir(browser, base, { viewport = MOBILE, colorScheme = "light", avantChargement = null } = {}) {
   const ctx = await browser.newContext({ viewport, colorScheme });
+  if (avantChargement) await ctx.addInitScript(avantChargement);
   const page = await ctx.newPage();
   const erreurs = [];
   page.on("pageerror", e => erreurs.push(e.message));
@@ -323,6 +324,101 @@ test("franchir 820 px : au bureau les groupes et les filtres du panneau revienne
   await page.setViewportSize(MOBILE);
   await page.waitForTimeout(500);
   expect(await lire()).toMatchObject({ groupes: 0, liste: 1, filtresDansPanneau: false, loupe: true, recherche: false });
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+const BUREAU = { width: 1440, height: 900 };
+const nomsDeLaListe = page => page.evaluate(() =>
+  [...document.querySelectorAll("#preparationList .commande-ligne-corps strong")].map(s => s.textContent.trim()));
+
+// Une recherche tapee au bureau, puis la rotation : sous 820 px la recherche
+// est repliee derriere la loupe. Si elle restait repliee, la liste resterait
+// filtree sans que rien ne le montre.
+test("franchir 820 px avec une recherche tapee au bureau : la loupe la montre depliee", async ({ browser }) => {
+  test.setTimeout(180000);
+  const { ctx, page, erreurs } = await ouvrir(browser, srv.base, { viewport: BUREAU });
+  await page.locator("#preparationSearch").fill("Pharma");
+  await page.waitForTimeout(600);
+  expect(await nomsDeLaListe(page)).toEqual(["Pharmacie Centrale de la Gare"]);
+  await page.setViewportSize(MOBILE);
+  await page.waitForTimeout(500);
+  const r = await page.evaluate(() => ({
+    visible: document.getElementById("preparationSearch").checkVisibility(),
+    valeur: document.getElementById("preparationSearch").value,
+    deplie: document.getElementById("preparationLoupe").getAttribute("aria-expanded"),
+    focus: document.activeElement && document.activeElement.id
+  }));
+  console.log(`[820/recherche] ${JSON.stringify(r)}`);
+  expect(await nomsDeLaListe(page)).toEqual(["Pharmacie Centrale de la Gare"]);
+  expect(r.visible, "la liste est filtree : la recherche doit se voir").toBe(true);
+  expect(r.valeur).toBe("Pharma");
+  expect(r.deplie).toBe("true");
+  expect(r.focus, "une rotation n'ouvre pas le clavier").not.toBe("preparationSearch");
+  // Refermer la loupe l'efface, comme d'habitude.
+  await page.locator("#preparationLoupe").click();
+  await page.waitForTimeout(300);
+  expect((await nomsDeLaListe(page)).length).toBeGreaterThan(1);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+// La frappe attend 200 ms avant de filtrer. Refermer la loupe PENDANT cette
+// attente : le filtre efface ne doit pas revenir quand le minuteur tombe.
+test("refermer la loupe moins de 200 ms apres la frappe : la recherche ne revient pas", async ({ browser }) => {
+  test.setTimeout(180000);
+  const { ctx, page, erreurs } = await ouvrir(browser, srv.base);
+  const avant = (await nomsDeLaListe(page)).length;
+  expect(avant).toBeGreaterThan(1);
+  await page.evaluate(() => {
+    document.getElementById("preparationLoupe").click();
+    const champ = document.getElementById("preparationSearch");
+    champ.value = "Pharma";
+    champ.dispatchEvent(new Event("input", { bubbles: true }));
+    // Dans la meme tache : bien avant les 200 ms du minuteur.
+    document.getElementById("preparationLoupe").click();
+  });
+  await page.waitForTimeout(600);
+  expect(await page.locator("#preparationSearch").inputValue()).toBe("");
+  expect((await nomsDeLaListe(page)).length, "le minuteur a reapplique la recherche effacee").toBe(avant);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+// Safari < 14 : MediaQueryList sans addEventListener. Le module ne doit pas
+// lever a son evaluation (sinon l'application entiere ne demarre pas), et le
+// franchissement de 820 px doit encore etre entendu (addListener).
+test("sans MediaQueryList.addEventListener (Safari < 14) : l'application demarre et entend 820 px", async ({ browser }) => {
+  test.setTimeout(180000);
+  const { ctx, page, erreurs } = await ouvrir(browser, srv.base, {
+    avantChargement: () => {
+      Object.defineProperty(MediaQueryList.prototype, "addEventListener", { value: undefined, configurable: true, writable: true });
+    }
+  });
+  expect(await page.evaluate(() => typeof MediaQueryList.prototype.addEventListener)).toBe("undefined");
+  expect(erreurs).toEqual([]);
+  expect(await page.evaluate(() => document.querySelectorAll("#preparationList .prep-liste").length)).toBe(1);
+  await page.setViewportSize(BUREAU);
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => document.querySelectorAll("#preparationList .commandes-groupe").length)).toBeGreaterThanOrEqual(3);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+// Le sous-titre-compte est celui de la planche 7a, qui est une planche
+// TELEPHONE : au bureau, le sous-titre reste celui de tabs.js.
+test("le sous-titre « N commandes a preparer » au telephone seulement ; le bureau garde le sien", async ({ browser }) => {
+  test.setTimeout(180000);
+  const GENERIQUE = "Contrôle le stock, prépare les commandes et les envoie en livraison.";
+  const sousTitre = p => p.evaluate(() => document.getElementById("pageSubtitle").textContent.trim());
+  const { ctx, page, erreurs } = await ouvrir(browser, srv.base, { viewport: BUREAU });
+  expect(await sousTitre(page)).toBe(GENERIQUE);
+  await page.setViewportSize(MOBILE);
+  await page.waitForTimeout(500);
+  expect(await sousTitre(page)).toMatch(/^(\d+ commandes? à préparer|Aucune commande à préparer)$/);
+  await page.setViewportSize(BUREAU);
+  await page.waitForTimeout(500);
+  expect(await sousTitre(page)).toBe(GENERIQUE);
   expect(erreurs).toEqual([]);
   await ctx.close();
 });

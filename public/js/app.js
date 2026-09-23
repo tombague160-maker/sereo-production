@@ -438,7 +438,6 @@ function bindUi() {
     renderStock();
   });
 
-  let preparationSearchTimer = null;
   document.getElementById("preparationSearch")?.addEventListener("input", event => {
     const value = event.target.value;
     clearTimeout(preparationSearchTimer);
@@ -3116,6 +3115,9 @@ function ajusterRepliDesSecteurs() {
  * pour cet ecran).
  */
 const PREPARATION_MOBILE = window.matchMedia("(max-width: 820px)");
+// Le minuteur de frappe de la recherche (bindUi) : au niveau du module pour
+// que refermer la loupe puisse l'annuler.
+let preparationSearchTimer = null;
 
 function preparationEnListeUnique() {
   return PREPARATION_MOBILE.matches;
@@ -3162,6 +3164,10 @@ function placerFiltresPreparation() {
   if (preparationEnListeUnique()) {
     if (filtres.parentElement !== fente) fente.appendChild(filtres);
     filtres.hidden = !document.getElementById("preparation")?.classList.contains("active");
+    // Une recherche tapee au bureau survit au passage sous 820 px : la loupe
+    // la montre depliee (sans focus : une rotation n'ouvre pas le clavier).
+    // Repliee, elle filtrerait la liste sans rien en dire.
+    if (document.getElementById("preparationSearch")?.value) basculerRecherchePreparation(true, { focus: false });
   } else {
     if (filtres.parentElement !== panneau) panneau.insertBefore(filtres, liste);
     filtres.hidden = false;
@@ -3170,7 +3176,7 @@ function placerFiltresPreparation() {
 }
 
 /** La loupe de la planche 7a : la recherche se deplie a la demande. */
-function basculerRecherchePreparation(ouvrir) {
+function basculerRecherchePreparation(ouvrir, { focus = true } = {}) {
   const filtres = document.getElementById("preparationFiltres");
   const loupe = document.getElementById("preparationLoupe");
   const champ = document.getElementById("preparationSearch");
@@ -3179,19 +3185,27 @@ function basculerRecherchePreparation(ouvrir) {
   filtres.classList.toggle("prep-filtres--recherche", ouverte);
   loupe.setAttribute("aria-expanded", String(ouverte));
   if (ouverte) {
-    champ.focus();
-  } else if (champ.value) {
+    if (focus) champ.focus();
+  } else if (champ.value || preparationFilter.query) {
     // Refermer la loupe efface la recherche : un filtre qu'on ne voit plus
-    // cacherait des commandes sans le dire.
+    // cacherait des commandes sans le dire. La frappe encore en attente
+    // (200 ms) est annulee, sinon elle reappliquerait le filtre efface.
+    clearTimeout(preparationSearchTimer);
     champ.value = "";
     preparationFilter.query = "";
     renderPreparation();
   }
 }
 
-// Le sous-titre de la planche 7a : « 3 commandes a preparer ».
+// Le sous-titre de la planche 7a : « 3 commandes a preparer ». Au telephone
+// seulement : au bureau (aucune planche, aucune decision), le sous-titre reste
+// celui de tabs.js.
 function majSousTitrePreparation() {
   if (!document.getElementById("preparation")?.classList.contains("active")) return;
+  if (!preparationEnListeUnique()) {
+    setText("pageSubtitle", titles.preparation.subtitle);
+    return;
+  }
   const restantes = (orders || []).filter(order => ["importe", "stock_a_verifier", "en_preparation"].includes(order.status)).length;
   setText("pageSubtitle", restantes
     ? `${restantes} commande${restantes > 1 ? "s" : ""} à préparer`
@@ -3199,12 +3213,16 @@ function majSousTitrePreparation() {
 }
 
 // Franchir 820 px (rotation, fenetre redimensionnee) : la liste change de
-// forme et les filtres changent de place.
-PREPARATION_MOBILE.addEventListener("change", () => {
+// forme et les filtres changent de place. Garde « legacy Safari » (< 14, sans
+// MediaQueryList.addEventListener) comme watchSystemColorScheme : au premier
+// niveau du module, l'appel nu leverait et l'application ne demarrerait pas.
+function surFranchissementPreparation() {
   closeCommandeDetail();
   placerFiltresPreparation();
   renderPreparation();
-});
+}
+if (PREPARATION_MOBILE.addEventListener) PREPARATION_MOBILE.addEventListener("change", surFranchissementPreparation);
+else if (PREPARATION_MOBILE.addListener) PREPARATION_MOBILE.addListener(surFranchissementPreparation);
 
 function renderPreparation() {
   renderPreparationStats();

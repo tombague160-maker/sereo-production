@@ -1763,9 +1763,11 @@ le détail d'une commande suit la planche **7b**. Tout vaut **sous 820 px**.
 | Filtres | pilules sur le vert, loupe en haut à droite | pilules et recherche dans un panneau blanc sous l'en-tête | le même bloc **déplacé** dans la fente de l'en-tête ; la loupe déplie la recherche |
 | Détail | une page : retour, « CMD-… · date », nom, puces secteur + statut, produits, adresse, un geste en bas | un sheet à trois boutons, deux grisés sans raison | la page 7b (le même `<dialog>`, plein écran) ; **un** geste selon le statut, et sa raison quand il est désactivé |
 
-*Bancs : `preparation-mobile.spec.js`, 7 cas (ports 3176 et 3182) — liste et tri,
+*Bancs : `preparation-mobile.spec.js`, 11 cas (ports 3176 et 3182) — liste et tri,
 en-tête et loupe, sombre, page 7b, geste depuis la page, franchissement de 820 px, tri à
-statut égal. `preparation-lignes.spec.js` : ses cas « mobile » passent à **900 px**
+statut égal ; et, après relecture adverse : recherche tapée au bureau puis rotation,
+loupe refermée avant les 200 ms, Safari < 14 (sans `MediaQueryList.addEventListener`),
+sous-titre au téléphone seulement. `preparation-lignes.spec.js` : ses cas « mobile » passent à **900 px**
 (entre 821 et 920 px, la liste garde ses groupes et le détail reste un sheet collé en
 bas) — la couverture du sheet n'est pas perdue, elle change de largeur.
 `navigation-mobile.spec.js` : l'en-tête de la Préparation rejoint les six en-têtes
@@ -1791,15 +1793,23 @@ jugés « vert, rien n'y déborde ».*
   (importées, bloquées comprises, et en préparation), le même nombre que « 3
   restantes » du résumé. La planche écrit « 5 commandes à préparer aujourd'hui » en
   comptant les prêtes, et « aujourd'hui » serait faux : la liste n'est pas bornée au
-  jour. Posé à toutes les largeurs, comme le sous-titre-compte des autres écrans
-  (Commandes, Stock, Clients, Abonnements) — c'est le **seul** changement visible au
-  bureau.
+  jour. Posé **au téléphone seulement** (sous 820 px) : au bureau, le sous-titre reste
+  celui de `tabs.js` (« Contrôle le stock, prépare les commandes… »), et franchir 820 px
+  le remet. Les autres écrans (Commandes, Stock, Clients, Abonnements) gardent leur
+  sous-titre-compte à toutes les largeurs ; celui-ci vient de la planche 7a, une
+  planche **téléphone**, et la Préparation n'a pas de planche bureau. (Une première
+  version le posait partout et la documentation disait à la fois « rien ne change au
+  bureau » et « seul changement visible au bureau » : relevé en relecture, tranché
+  pour « rien ne change ».)
 - **Le nom passe sur deux lignes** au lieu de l'ellipse de la planche : à 390 px, avec
   « En préparation » à côté, il restait « Pharmacie Centra… » et « Champagnole · 6
   artic… ». La ligne fait 72 px et monte à 96 au plus ; le détail n'est jamais coupé.
 - **La loupe** replie la recherche (gardée : la planche ne la dessine pas) ; la
   refermer **efface** la recherche — un filtre qu'on ne voit plus cacherait des
-  commandes sans le dire.
+  commandes sans le dire. Même règle dans les deux cas limites : une recherche tapée
+  **au bureau** qui passe sous 820 px (rotation d'une tablette) arrive **dépliée**
+  derrière la loupe, sans focus (une rotation n'ouvre pas le clavier) ; refermer la
+  loupe **pendant** les 200 ms d'attente de la frappe annule cette frappe.
 - **Un seul geste** en bas de la page 7b, celui du statut : « Passer en préparation »
   (à préparer, à vérifier), « Préparation terminée » (en préparation), rien pour une
   prête (une phrase le dit). Bloquée : le bouton est **désactivé et dit pourquoi**
