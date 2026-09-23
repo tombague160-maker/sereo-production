@@ -209,6 +209,9 @@ document.addEventListener("DOMContentLoaded", () => {
   // Avant showTab : au telephone, les filtres de la Preparation vivent dans
   // la fente d'en-tete, que showTab montre ou cache par ecran.
   placerFiltresPreparation();
+  // Avant showTab aussi : il range les boutons de #gestesBas comme ceux de la fente.
+  placerGestesBas();
+  ecranTelephone.addEventListener?.("change", placerGestesBas);
   showTab(getInitialTab(), { updateHash: false });
   loadAppearance();
   loadVersionInfo();
@@ -972,7 +975,8 @@ function showTab(tabName, options = {}) {
   // La fente d'en-tete ne montre que les commandes de l'ecran ouvert. Chaque
   // ecran y depose les siennes en balisage, avec data-ecran : rien a deplacer
   // dans le DOM, donc rien a casser quand on change d'onglet.
-  document.querySelectorAll("#enteteActions [data-ecran]").forEach(commande => {
+  // (#gestesBas : les boutons fixes en bas au telephone, placerGestesBas.)
+  document.querySelectorAll("#enteteActions [data-ecran], #gestesBas [data-ecran]").forEach(commande => {
     commande.hidden = commande.dataset.ecran !== nextTab;
   });
   majEnteteTableauDeBord(nextTab);
@@ -2309,6 +2313,37 @@ function placerPilulesCommandes() {
   } else if (pilules.parentElement !== filtres) {
     filtres.prepend(pilules);
     pilules.hidden = false;
+  }
+}
+
+// « Nouveau client » et « Nouvel abonnement » : au telephone, fixes en bas de
+// l'ecran (planches 9a, 3a), mais ranges dans la fente d'en-tete -- Tab les
+// atteignait AVANT leur liste. On DEPLACE le bouton (meme element, memes
+// ecouteurs : les clics sont delegues au document) dans #gestesBas, apres les
+// ecrans dans l'ordre du document ; au bureau, il revient a sa place dans
+// l'en-tete, marquee par un commentaire. Decision de Thomas, 23/09.
+const GESTES_BAS = [".cli-nouveau", ".abo-nouveau"];
+const placesEnTete = new Map();
+function placerGestesBas() {
+  const bas = document.getElementById("gestesBas");
+  if (!bas) return;
+  const actif = document.querySelector(".page.active")?.id;
+  for (const selecteur of GESTES_BAS) {
+    const bouton = document.querySelector(`#enteteActions ${selecteur}, #gestesBas ${selecteur}`);
+    if (!bouton) continue;
+    if (!placesEnTete.has(selecteur)) {
+      placesEnTete.set(selecteur, document.createComment(`place de ${selecteur} au bureau`));
+      bouton.before(placesEnTete.get(selecteur));
+    }
+    const place = placesEnTete.get(selecteur);
+    const cible = ecranTelephone.matches ? bas : place.parentElement;
+    if (bouton.parentElement === cible) continue;
+    const avaitLeFocus = document.activeElement === bouton;
+    if (ecranTelephone.matches) bas.appendChild(bouton);
+    else place.after(bouton);
+    // showTab ne range les commandes qu'en changeant d'ecran : ici, on s'y range seul.
+    bouton.hidden = bouton.dataset.ecran !== actif;
+    if (avaitLeFocus) bouton.focus({ preventScroll: true });
   }
 }
 

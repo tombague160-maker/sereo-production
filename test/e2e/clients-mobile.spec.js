@@ -265,10 +265,10 @@ test("liste (9a) : la ligne « N clients », et le tri « Dernière livraison »
 
 test("liste (9a) : « Nouveau client » fixé au-dessus de la barre basse, sans recouvrir le dernier client", async ({ page }) => {
   await ouvrir(page);
-  const bouton = page.locator(".ecran-entete .cli-nouveau");
+  const bouton = page.locator("#gestesBas .cli-nouveau");
   await expect(bouton).toBeVisible();
   const mesure = () => page.evaluate(() => {
-    const b = document.querySelector(".ecran-entete .cli-nouveau").getBoundingClientRect();
+    const b = document.querySelector("#gestesBas .cli-nouveau").getBoundingClientRect();
     const barre = document.querySelector("nav.mobile-tabbar").getBoundingClientRect();
     const toutes = [...document.querySelectorAll("#crmList .cli-ligne")];
     const derniere = toutes[toutes.length - 1].getBoundingClientRect();
@@ -369,11 +369,11 @@ test("fiche : la flèche, puis le retour du téléphone, ramènent la liste ; le
   await expect(page.locator("#crmList")).toBeVisible();
   await expect(page.locator("#cliFiche")).toBeHidden();
   await expect(page.locator("#pageTitle")).toBeVisible();
-  await expect(page.locator(".ecran-entete .cli-nouveau")).toBeVisible();
+  await expect(page.locator("#gestesBas .cli-nouveau")).toBeVisible();
   // Le retour du telephone : pareil, depuis une autre fiche.
   await ligne(page, "Bellevue").click();
   await expect(page.locator("#cliFiche .cli-fiche-nom")).toHaveText("EHPAD Résidence Bellevue");
-  await expect(page.locator(".ecran-entete .cli-nouveau")).toBeHidden();
+  await expect(page.locator("#gestesBas .cli-nouveau")).toBeHidden();
   await page.goBack();
   await expect(page.locator("#crmList")).toBeVisible();
   await expect(page.locator("#cliFiche")).toBeHidden();
@@ -422,8 +422,8 @@ for (const schema of ["light", "dark"]) {
     const vus = {};
     await page.locator("#cliTri").focus();
     vus.tri = await anneau("#crm .cli-tri");
-    await page.locator(".ecran-entete .cli-nouveau").focus();
-    vus.nouveau = await anneau(".ecran-entete .cli-nouveau");
+    await page.locator("#gestesBas .cli-nouveau").focus();
+    vus.nouveau = await anneau("#gestesBas .cli-nouveau");
     await page.locator("#crmList .cli-ligne").first().focus();
     vus.ligne = await anneau("#crmList .cli-ligne");
     await ligne(page, "Tilleuls").click();

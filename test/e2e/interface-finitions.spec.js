@@ -325,12 +325,11 @@ function stockLong() {
 }
 
 test("3 — au bureau, le panier est à côté du catalogue, pas dessous, et rien de collant ne dépasse la fenêtre", async ({ browser }) => {
-  // Le panier ne peut pas « suivre » le defilement : le collant est inerte
-  // sur toute la page (html, body et .content en `overflow-x: hidden` --
-  // DESIGN.md, « Finitions d interface »). Ce qu'on exige est donc sa PLACE :
-  // a cote du catalogue, en haut, comme avant le lot -- et non apres quarante
-  // produits. Et aucun panneau declare collant plus haut que la fenetre : le
-  // jour ou le collant revivra, sa fin serait inatteignable.
+  // Ce qu'on exige ici est la PLACE du panier : a cote du catalogue, en
+  // haut, comme avant le lot -- et non apres quarante produits. Et aucun
+  // panneau declare collant plus haut que la fenetre : sa fin serait
+  // inatteignable. (Le collant, inerte quand ce banc a ete ecrit, agit depuis
+  // le 23/09 : qu'il SUIVE le defilement est juge par collant-et-clavier.spec.js.)
   test.setTimeout(180000);
   const defauts = [];
   for (const largeur of [1181, 1280, 1366, 1440, 1599, 1600, 1920]) {

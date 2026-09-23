@@ -13666,11 +13666,10 @@ textarea {
       - 1600 px et plus : les trois colonnes, formulaire d'au moins 360 px.
       - A partir de 1181 px, le formulaire n'est plus « collant ». Un par
         ligne, il mesure ~1 200 px : colle, sa fin (« Valider la commande »)
-        resterait hors de la fenetre. Le « collant » est de toute facon
-        INERTE aujourd'hui : html, body et .content ont `overflow-x: hidden`,
-        ce qui fait de .content le conteneur de defilement de reference, et
-        il ne defile jamais (mesure du 23/09, avant comme apres le lot). Ce
-        `static` evite le piege le jour ou ils passeront a `clip`.
+        resterait hors de la fenetre. (Le « collant » etait alors INERTE :
+        html, body et .content avaient `overflow-x: hidden`. Ils sont passes
+        a `clip` le 23/09 -- bloc « PANIER COLLANT ET ORDRE DU CLAVIER » en
+        fin de feuille : ce `static` y garde le formulaire.)
       - 821-1180 px : une colonne. La colonne unique ne commencait qu'a
         920 px ; de 921 a 1180, les trois colonnes minimales (280 + 360 +
         280) ne tenaient pas dans les ~700 px du contenu.
@@ -14998,3 +14997,105 @@ html[data-ouverte-hors-ligne] .content > .page:not(#livreur) { display: none !im
    bureau, et le badge a sa suite disparaissait avec lui. */
 .stk-nom .stk-negatif { display: block; font-size: 12.5px; font-weight: 600; color: var(--v8-alerte); overflow: hidden; text-overflow: ellipsis; }
 .stk-negatif[hidden] { display: none !important; }
+
+/* ==========================================================================
+   PANIER COLLANT ET ORDRE DU CLAVIER (23/09)
+   --------------------------------------------------------------------------
+   1. LA CAUSE. `overflow-x: hidden` sur html, body et .content fait de body
+      et de .content des conteneurs de defilement (l'autre axe passe a
+      `auto`) -- qui ne defilent jamais : c'est la fenetre qui defile. Tout
+      `position: sticky` de la feuille collait donc a un conteneur immobile,
+      et partait avec la page (le panier de Commande client, a toutes les
+      largeurs). `clip` rogne pareil au repos, sans creer de conteneur --
+      mais le focus ne fait plus defiler de cote ce qui depasse (la rangee
+      d'actions de l'en-tete : bloc « RELECTURE » plus bas).
+   2. L'INVENTAIRE des `position: sticky` que `clip` reveille (DESIGN.md) :
+      - le panier (>= 1181 px) : colle, c'est le but -- ci-dessous ;
+      - la barre laterale au bureau : neutralisee (bloc « RELECTURE » plus
+        bas) -- elle n'avait jamais colle, personne ne l'a decide ;
+      - le bandeau de marque au telephone : il ne collait que sur Tournee
+        (lot mobile, `clip` pose sur cet ecran seul). Neutralise ailleurs :
+        76 px de plus, tenus en haut sur 844, ne sont pas une decision prise ;
+      - la banniere de recuperation de la base : neutralisee, elle
+        recouvrait le haut de la barre laterale en collant ;
+      - le formulaire client : deja `static` a toutes les largeurs ;
+      - les gestes de Tournee et de la page de commande : inchanges (deja
+        actifs, ou colles a leur propre conteneur qui defile) ;
+      - `.topbar` et `.bdc-table thead` : aucun element ne les porte.
+   ========================================================================== */
+html, body, main.content { overflow-x: clip; }
+
+@media (max-width: 820px) {
+  /* `relative` et non `static` : l'etage 950 (au-dessus des volets de la
+     carte) reste le sien. */
+  body:not(:has(#livreur.active)) .sidebar { position: relative; }
+}
+.storage-recovery-banner { position: relative; }
+
+/* Le panier colle a 24 px du haut (la marge du contenu) dans les deux themes.
+   Le clair disait 84 px : la hauteur d'une barre du haut qui n'existe plus.
+   Borne a la fenetre : un long panier fait defiler sa LISTE, et l'en-tete et
+   le total restent a l'ecran -- sinon le total serait inatteignable tant
+   que le catalogue defile. */
+@media (min-width: 1181px) {
+  #commande-client .customer-cart-panel {
+    top: 24px; display: flex; flex-direction: column; max-height: calc(100vh - 48px);
+  }
+  #commande-client .customer-cart-panel > .customer-cart { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+}
+
+/* Au telephone, « Nouveau client » et « Nouvel abonnement » vivent dans
+   #gestesBas, APRES les ecrans (placerGestesBas) : Tab parcourt la liste
+   d'abord. Les regles de leur place d'en-tete ne les atteignent plus ; elles
+   sont reprises ici, a l'identique (mesure : memes boites, memes couleurs).
+   L'anneau ecrit ses deux tons en clair, comme celui de Clients. */
+@media (max-width: 820px) {
+  #gestesBas :is(.cli-nouveau, .abo-nouveau) { display: inline-flex; align-items: center; gap: 8px; }
+  :root[data-color-scheme] body:has(#crm.active:not([data-vue="fiche"])) #gestesBas .cli-nouveau,
+  :root:not([data-color-scheme]) body:has(#crm.active:not([data-vue="fiche"])) #gestesBas .cli-nouveau,
+  :root[data-color-scheme] body:has(#abonnements.active:not([data-vue="agenda"])) #gestesBas .abo-nouveau,
+  :root:not([data-color-scheme]) body:has(#abonnements.active:not([data-vue="agenda"])) #gestesBas .abo-nouveau {
+    position: fixed; left: 16px; right: 16px; bottom: calc(104px + env(safe-area-inset-bottom)); z-index: 1000;
+    width: auto; height: 48px; justify-content: center; padding: 0 24px;
+    background: var(--v8-principal); color: var(--v8-texte-sur-principal); border: 0;
+    font-size: 15.5px; font-weight: 600; box-shadow: 0 8px 24px rgba(15, 61, 61, 0.22);
+  }
+  :root[data-color-scheme] body:has(#crm.active:not([data-vue="fiche"])) #gestesBas .cli-nouveau:focus-visible,
+  :root:not([data-color-scheme]) body:has(#crm.active:not([data-vue="fiche"])) #gestesBas .cli-nouveau:focus-visible,
+  :root[data-color-scheme] body:has(#abonnements.active:not([data-vue="agenda"])) #gestesBas .abo-nouveau:focus-visible,
+  :root:not([data-color-scheme]) body:has(#abonnements.active:not([data-vue="agenda"])) #gestesBas .abo-nouveau:focus-visible {
+    outline: none; box-shadow: 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus), 0 8px 24px rgba(15, 61, 61, 0.22);
+  }
+  /* La fiche d'un client, l'agenda des abonnements : pas de bouton (8c, 3c). */
+  body:has(#crm.active[data-vue="fiche"]) #gestesBas .cli-nouveau,
+  body:has(#abonnements.active[data-vue="agenda"]) #gestesBas .abo-nouveau { display: none; }
+}
+/* [hidden] gagne sur tout ce qui precede. */
+#gestesBas [hidden] { display: none !important; }
+
+/* ==========================================================================
+   PANIER COLLANT, RELECTURE DU 23/09
+   --------------------------------------------------------------------------
+   1. La rangee d'actions de l'en-tete depassait le bord de 921 a 1225 px
+      (Clients, Commandes, Stock, Abonnements) : `flex: none` la gardait a sa
+      largeur d'une ligne, et son `flex-wrap: wrap` ne servait jamais. Avec
+      `hidden`, le focus faisait parfois defiler .content de cote ; `clip`
+      l'interdit : « Actualiser » recevait le focus hors de l'ecran. Bornee a
+      la largeur de l'en-tete, la rangee passe a la ligne, alignee a droite.
+      Sous 921 px, l'en-tete est deja en colonne. Mesure (11 ecrans, 921 a
+      1920 px) : seules changent les rangees qui depassaient l'en-tete -- dans
+      la marge du contenu, ou au-dela du bord.
+   2. La barre laterale du bureau declare `position: sticky` depuis juillet
+      et n'a jamais colle (le `hidden` de body etait deja la) : `clip` la
+      faisait coller partout. Un changement que tout utilisateur de bureau
+      voit, que personne n'a decide -- le meme cas que le bandeau du
+      telephone. Neutralisee comme lui (`relative` : l'etage 40 reste) ; a
+      trancher par Thomas (DESIGN.md).
+   ========================================================================== */
+@media (min-width: 921px) {
+  .ecran-entete-actions { max-width: 100%; }
+  .ecran-entete-fente { flex-wrap: wrap; justify-content: flex-end; max-width: 100%; }
+}
+@media (min-width: 821px) {
+  .sidebar { position: relative; }
+}
