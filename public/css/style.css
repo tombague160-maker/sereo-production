@@ -13203,3 +13203,31 @@ body:has(#journee.active) .ecran-entete #pageSubtitle { min-height: 2lh; }
   :root:not([data-color-scheme]) #stock .stk-categories-tete h3 { margin: 0; font-size: 14.5px; font-weight: 600; color: var(--v8-principal); }
   #stock .stk-categories-tete p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--v8-texte-secondaire); }
 }
+
+/* ==========================================================================
+   LOT 7 DE L'AUDIT GEO (23/09) -- MEILLEUR TRAJET : « A livrer en premier ».
+   Sous chaque commande choisie, une case a part (hors du <label> de la carte).
+   Pilule de 44 px de haut, texte en --v8-texte sur --v8-surface-basse
+   (5,6:1 en clair, 15:1 en sombre) ; cochee, --v8-principal-appuye sur
+   --v8-peche-claire (7,04:1 en clair). [hidden] gagne sur display.
+   ========================================================================== */
+.delivery-card-ligne { display: grid; gap: 6px; min-width: 0; }
+:root[data-color-scheme] .delivery-premier,
+:root:not([data-color-scheme]) .delivery-premier {
+  display: inline-flex; align-items: center; gap: 10px; justify-self: start;
+  min-height: 44px; padding: 0 16px 0 12px; border-radius: 999px;
+  background: var(--v8-surface-basse); color: var(--v8-texte);
+  font-size: 14px; font-weight: 600; cursor: pointer;
+}
+:root[data-color-scheme] .delivery-premier[hidden],
+:root:not([data-color-scheme]) .delivery-premier[hidden] { display: none; }
+:root[data-color-scheme] .delivery-premier:has(input:checked),
+:root:not([data-color-scheme]) .delivery-premier:has(input:checked) {
+  background: var(--v8-peche-claire); color: var(--v8-principal-appuye);
+}
+.delivery-premier input[type="checkbox"] {
+  flex: none; width: 20px; height: 20px; min-height: 20px; margin: 0;
+  accent-color: var(--v8-principal);
+}
+.delivery-premier:has(input:focus-visible) { box-shadow: var(--focus-ring); }
+.delivery-premier input:focus-visible { outline: none; }

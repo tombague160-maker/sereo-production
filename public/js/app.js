@@ -72,6 +72,8 @@ let markers = [];
 let routeLine = null;
 let routeLineLisere = null;
 let deliverySelection = new Set();
+// Lot 7 : les commandes cochees « A livrer en premier » (parmi la selection).
+let deliveryFirst = new Set();
 // Faux tant que le PREMIER loadData() n'a pas rendu les commandes. Avant, la
 // liste « vide » ne veut rien dire : ni « aucune commande », ni une selection
 // possible (voir renderDeliveryCandidates et activerSelectionLivraison).
@@ -780,6 +782,12 @@ function bindUi() {
     const deliveryCheckbox = event.target.closest("[data-delivery-order]");
     if (deliveryCheckbox) {
       setDeliverySelection(deliveryCheckbox.dataset.deliveryOrder, deliveryCheckbox.checked);
+    }
+
+    const firstCheckbox = event.target.closest("[data-delivery-first]");
+    if (firstCheckbox) {
+      if (firstCheckbox.checked) deliveryFirst.add(String(firstCheckbox.dataset.deliveryFirst));
+      else deliveryFirst.delete(String(firstCheckbox.dataset.deliveryFirst));
     }
 
     const todayOrderCheckbox = event.target.closest("[data-today-order]");
@@ -6038,6 +6046,12 @@ function renderDeliveryCandidates() {
 
   container.innerHTML = "";
   filtered.forEach(order => {
+    // Lot 7 : la carte et, dessous, « A livrer en premier » -- une case a
+    // part, hors du <label> de la carte (deux cases dans un meme label, le nom
+    // accessible de la premiere avalait le texte de la seconde). Visible des
+    // que la commande est choisie.
+    const ligne = document.createElement("div");
+    ligne.className = "delivery-card-ligne";
     const label = document.createElement("label");
     label.className = "delivery-card";
     label.innerHTML = `
@@ -6058,7 +6072,15 @@ function renderDeliveryCandidates() {
       </span>
       <span class="pill ${getOrderPill(order.status)}">${escapeHtml(formatOrderStatus(order.status))}</span>
     `;
-    container.appendChild(label);
+    const premier = document.createElement("label");
+    premier.className = "delivery-premier";
+    premier.hidden = !deliverySelection.has(String(order.id));
+    premier.innerHTML = `
+      <input type="checkbox" data-delivery-first="${escapeAttribute(order.id)}" ${deliveryFirst.has(String(order.id)) ? "checked" : ""}>
+      <span>À livrer en premier<span class="sr-only"> : ${escapeHtml(order.clientName)}</span></span>
+    `;
+    ligne.append(label, premier);
+    container.appendChild(ligne);
   });
 }
 
@@ -6081,7 +6103,16 @@ function contexteDeCommandePrete(order) {
 
 function setDeliverySelection(orderId, checked) {
   if (checked) deliverySelection.add(String(orderId));
-  else deliverySelection.delete(String(orderId));
+  else {
+    deliverySelection.delete(String(orderId));
+    deliveryFirst.delete(String(orderId));
+  }
+  // « A livrer en premier » suit la selection, sans redessiner la liste.
+  const premier = document.querySelector(`[data-delivery-first="${cssEscape(String(orderId))}"]`);
+  if (premier) {
+    premier.closest(".delivery-premier").hidden = !checked;
+    if (!checked) premier.checked = false;
+  }
 
   updateSelectedDeliveryCount();
   renderMap();
@@ -6114,6 +6145,7 @@ function selectAllDelivery(checked) {
     getFilteredDeliveryOrders().forEach(order => deliverySelection.add(String(order.id)));
   } else {
     deliverySelection.clear();
+    deliveryFirst.clear();
   }
 
   renderDeliveryCandidates();
@@ -6136,6 +6168,31 @@ async function createDeliveryRoute() {
   }
 
   const points = getRoutePoints();
+
+  // Lot 7 : au-dela de 50 commandes (plafond d'une tournee), le serveur
+  // propose un decoupage par direction depuis le depart. On cree la premiere
+  // tournee ; les autres commandes restent choisies pour la suivante.
+  let tournee = orderIds;
+  let pourLaSuite = [];
+  if (orderIds.length > 50) {
+    // La proposition de decoupage n'ecrit rien : hors ligne, apiFetch la
+    // mettrait en file et l'ecran dirait « enregistre », alors qu'aucune
+    // tournee ne serait jamais creee (revue du 23/09).
+    if (estDefinitivementHorsLigne()) {
+      throw new Error("Hors ligne : au-delà de 50 commandes, le découpage en tournées demande le réseau. Rien n’a été enregistré.");
+    }
+    const { groupes } = await apiFetch("/api/routes/decoupage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // Les commandes « À livrer en premier » partent dans la premiere tournee.
+      body: JSON.stringify({ orderIds, departure: points.departure, premiers: orderIds.filter(id => deliveryFirst.has(String(id))) })
+    });
+    const tailles = groupes.map(groupe => groupe.length).join(" + ");
+    if (!window.confirm(`${orderIds.length} commandes : une tournée en compte 50 au plus. Séréo propose ${groupes.length} tournées (${tailles}), regroupées par direction depuis le départ.\n\nCréer la première maintenant (${groupes[0].length} commandes) ? Les autres resteront sélectionnées pour la suivante.`)) return;
+    tournee = groupes[0];
+    pourLaSuite = groupes.slice(1).flat();
+  }
+
   activeRoute = await apiFetch("/api/routes", {
     method: "POST",
     timeoutMs: 90000,
@@ -6147,15 +6204,29 @@ async function createDeliveryRoute() {
       sector: deliveryFilter.sector,
       city: deliveryFilter.city,
       deliveryDate: deliveryFilter.date,
-      orderIds
+      orderIds: tournee,
+      premiers: tournee.filter(id => deliveryFirst.has(String(id))),
+      // Un arret injoignable par la route ne bloque plus toute la tournee : il
+      // en est retire, et nomme ci-dessous.
+      retirerInjoignables: true
     })
   });
 
   activeStopIndex = 0;
-  deliverySelection.clear();
+  deliverySelection = new Set(pourLaSuite.map(String));
+  deliveryFirst = new Set([...deliveryFirst].filter(id => deliverySelection.has(id)));
   await loadData();
   showTab("livreur");
-  notify("Tournée optimisée créée.", "success");
+  const retires = (activeRoute.injoignablesRetires || []).map(o => o.clientName).filter(Boolean);
+  // Les deux nouvelles peuvent arriver ensemble : aucune ne masque l'autre.
+  const suite = pourLaSuite.length ? ` ${pourLaSuite.length} commande(s) restent sélectionnées pour la tournée suivante.` : "";
+  if (retires.length) {
+    notify(`Tournée créée sans ${retires.join(", ")} : injoignable par la route. Vérifie l’adresse ; la commande reste prête à livrer.${suite}`, "warning");
+  } else if (pourLaSuite.length) {
+    notify(`Tournée optimisée créée.${suite}`, "success");
+  } else {
+    notify("Tournée optimisée créée.", "success");
+  }
 }
 
 async function startActiveRoute() {

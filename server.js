@@ -5298,6 +5298,10 @@ function createRoute(db, options = {}) {
   const sector = clean(options.sector || "Tous");
   const city = normalizeCity(options.city || "");
   const deliveryDate = normalizeDateInput(options.deliveryDate);
+  // Lot 7 : « a livrer en premier ». En mode routier, l'ordre du plan le
+  // respecte deja (lib/routing.js) ; ici on le garde sur l'arret, pour qu'un
+  // recalcul le respecte aussi.
+  const premiers = new Set((Array.isArray(options.premiers) ? options.premiers : []).map(String));
 
   let orders = getDeliverableOrders(db, { sector, city }).filter(order => {
     if (!["pret_livraison", "a_reprogrammer"].includes(order.status)) return false;
@@ -5313,6 +5317,12 @@ function createRoute(db, options = {}) {
   if (!orders.length) {
     throw badRequest("Aucune commande prete selectionnee pour la tournee");
   }
+  // Revue du 23/09 : 50 commandes au plus, dans les deux modes. Sans depart,
+  // rien ne bornait l'optimiseur, synchrone et sous le verrou d'ecriture
+  // (2 s a 400 commandes, 18 s avec des epingles : le serveur fige).
+  if (orders.length > 50) {
+    throw badRequest("Sélectionne entre 1 et 50 commandes par tournée.");
+  }
 
   if (options.plan && orders.some(order => db.routes.some(route => ["prete", "en_livraison"].includes(route.status) && route.stops.some(stop => String(stop.orderId) === String(order.id))))) {
     throw badRequest("Une commande sélectionnée appartient déjà à une tournée active.");
@@ -5323,7 +5333,7 @@ function createRoute(db, options = {}) {
     if (["address", "city", "postalCode", "status", "clientId"].some(key => original[key] !== item[key])) throw badRequest("Une adresse ou une commande a changé pendant le calcul. Recommence.");
     original.lat = item.lat; original.lng = item.lng;
     return original;
-  }) : optimizeOrders(orders);
+  }) : optimizeOrders(orders, premiers);
   if (optimizedOrders.length !== orders.length) throw badRequest("La sélection a changé. Recalcule la tournée.");
   const routeId = `route-${crypto.randomUUID()}`;
   const now = new Date().toISOString();
@@ -5339,7 +5349,7 @@ function createRoute(db, options = {}) {
     city,
     deliveryDate,
     selectedOrderIds: optimizedOrders.map(order => order.id),
-    stops: optimizedOrders.map((order, index) => createStop(routeId, order, index)),
+    stops: optimizedOrders.map((order, index) => createStop(routeId, order, index, premiers.has(String(order.id)))),
     status: "prete",
     departure: options.plan?.departure || null,
     arrival: options.plan?.arrival || null,
@@ -5348,6 +5358,9 @@ function createRoute(db, options = {}) {
     calculatedAt: options.plan?.calculatedAt || null,
     totalDistance: options.plan?.totalDistance ?? metrics.totalDistance,
     estimatedDuration: options.plan?.estimatedDuration ?? metrics.estimatedDuration,
+    // Lot 7 : une duree (s) et une distance (m) par trajet, depart -> 1er arret
+    // -> ... -> arrivee, telles qu'OSRM les rend. Pour les heures d'arrivee.
+    troncons: options.plan?.troncons || null,
     createdAt: now,
     startedAt: null,
     completedAt: null
@@ -5362,24 +5375,35 @@ function createRoute(db, options = {}) {
   return route;
 }
 
-function optimizeOrders(orders) {
+// Mode « sans depart » (tournee creee sans point de depart ni d'arrivee). Lot 7
+// de l'audit geo (23/09) : il partait du premier client dans l'ordre ALPHABETIQUE
+// et enchainait les plus proches voisins, sans rien ameliorer -- 16 % au-dessus
+// de l'optimum en mediane. Sans depot connu, le meilleur trajet est le plus
+// court CHEMIN OUVERT entre les arrets (c'est ce que mesure
+// estimateRouteMetrics) : deux noeuds fictifs a cout nul servent de depart et
+// d'arrivee libres, et l'optimiseur du mode routier fait le reste, a vol
+// d'oiseau. `premiers` : ids des commandes a livrer en premier.
+function optimizeOrders(orders, premiers = new Set()) {
   const withCoords = orders.filter(order => getCoordinates(order));
   const withoutCoords = orders.filter(order => !getCoordinates(order));
+  const enPremier = order => premiers.has(String(order.id));
 
   if (withCoords.length <= 1) {
-    return [...orders].sort(fallbackOrderSort);
+    return [...orders].sort((a, b) => enPremier(b) - enPremier(a) || fallbackOrderSort(a, b));
   }
 
-  const remaining = [...withCoords].sort(fallbackOrderSort);
-  const optimized = [remaining.shift()];
-
-  while (remaining.length) {
-    const current = optimized[optimized.length - 1];
-    remaining.sort((a, b) => distance(current, a) - distance(current, b));
-    optimized.push(remaining.shift());
-  }
-
-  return [...optimized, ...withoutCoords.sort(fallbackOrderSort)];
+  const sorted = [...withCoords].sort(fallbackOrderSort);
+  const n = sorted.length;
+  // Les arcs VERS le depart fictif et DEPUIS l'arrivee fictive ne sont jamais
+  // parcourus : 0 aussi. Pas d'« infini » : une somme de tres grands nombres
+  // perd sa precision, et l'optimiseur y voyait des gains qui n'existent pas.
+  const matrix = Array.from({ length: n + 2 }, (_, i) => Array.from({ length: n + 2 }, (_, j) =>
+    i === 0 || j === 0 || i === n + 1 || j === n + 1 || i === j ? 0 : distance(sorted[i - 1], sorted[j - 1])));
+  const indices = sorted.map((order, i) => (enPremier(order) ? i : -1)).filter(i => i >= 0);
+  const optimized = routing.optimizeMatrix(matrix, n, { premiers: indices }).map(i => sorted[i]);
+  // Une commande « en premier » sans coordonnees passe quand meme devant.
+  const sansCoords = [...withoutCoords].sort(fallbackOrderSort);
+  return [...sansCoords.filter(enPremier), ...optimized, ...sansCoords.filter(order => !enPremier(order))];
 }
 
 function fallbackOrderSort(a, b) {
@@ -5392,7 +5416,7 @@ function fallbackOrderSort(a, b) {
   ].find(result => result !== 0) || 0;
 }
 
-function createStop(routeId, order, index) {
+function createStop(routeId, order, index, livrerEnPremier = false) {
   return {
     id: `stop-${routeId}-${index + 1}`,
     routeId,
@@ -5408,6 +5432,7 @@ function createStop(routeId, order, index) {
     deliveryDate: order.deliveryDate || "",
     products: order.products,
     status: "pret_livraison",
+    livrerEnPremier: Boolean(livrerEnPremier),
     notes: order.notes || "",
     lat: order.lat,
     lng: order.lng
@@ -5596,6 +5621,7 @@ function reorderRouteStops(db, routeId, stopIds) {
   route.geometry = null;
   route.totalDistance = null;
   route.estimatedDuration = null;
+  route.troncons = null;
   route.routingMode = "manual";
   route.stops = reordered.map((stop, index) => ({
     ...stop,
@@ -7346,16 +7372,43 @@ app.post("/api/orders/:id/release-stock", async (req, res) => {
   }
 });
 
+// Lot 7 : au-dela de 50 commandes, une proposition de decoupage en tournees de
+// 50 au plus, par direction depuis le depart (lib/routing.js). Rien n'est ecrit.
+app.post("/api/routes/decoupage", (req, res) => {
+  try {
+    const ids = new Set((Array.isArray(req.body.orderIds) ? req.body.orderIds : []).map(String));
+    const selected = getDeliverableOrders(readDb(), {}).filter(o => ids.has(String(o.id)));
+    // Les commandes « a livrer en premier » partent dans la premiere tournee.
+    const premiers = Array.isArray(req.body.premiers) ? req.body.premiers.map(String) : [];
+    const groupes = routing.decouperEnTournees(selected, req.body.departure, 50, premiers);
+    res.json({ max: 50, groupes: groupes.map(groupe => groupe.map(o => String(o.id))) });
+  } catch (error) {
+    handleRouteError(error, res, "Erreur decoupage tournee");
+  }
+});
+
 app.post("/api/routes", async (req, res) => {
   try {
     let plan = null;
+    // Lot 7 : les commandes « a livrer en premier », parmi celles de la tournee.
+    const premiers = (Array.isArray(req.body.premiers) ? req.body.premiers : []).map(String);
+    let orderIds = req.body.orderIds;
     if (req.body.departure || req.body.arrival) {
       if (!Array.isArray(req.body.orderIds) || !req.body.orderIds.length) throw badRequest("Sélectionne les commandes de la tournée.");
       const snapshot = readDb();
       const ids = new Set((req.body.orderIds || []).map(String));
       const selected = getDeliverableOrders(snapshot, req.body).filter(o => ids.has(String(o.id)) && ["pret_livraison", "a_reprogrammer"].includes(o.status));
       if (selected.length !== ids.size) throw badRequest("Certaines commandes ne sont plus prêtes.");
-      plan = await routing.roadPlan(selected, req.body.departure, req.body.arrival, snapshot.settings.tournee.stopDurationMin);
+      const enPremier = new Set(premiers);
+      plan = await routing.roadPlan(
+        selected.map(o => ({ ...o, livrerEnPremier: enPremier.has(String(o.id)) })),
+        req.body.departure, req.body.arrival, snapshot.settings.tournee.stopDurationMin, false,
+        { retirerInjoignables: req.body.retirerInjoignables === true }
+      );
+      // Un arret injoignable par la route, retire a la demande : sa commande
+      // reste « prete », hors de cette tournee, et la reponse le nomme.
+      const retires = new Set((plan.injoignablesRetires || []).map(o => String(o.id)));
+      if (retires.size) orderIds = req.body.orderIds.filter(id => !retires.has(String(id)));
     }
     const route = await withWriteLock(async () => {
       const db = readDb();
@@ -7363,7 +7416,8 @@ app.post("/api/routes", async (req, res) => {
         sector: req.body.sector,
         city: req.body.city,
         deliveryDate: req.body.deliveryDate,
-        orderIds: req.body.orderIds,
+        orderIds,
+        premiers,
         plan
       });
 
@@ -7375,7 +7429,7 @@ app.post("/api/routes", async (req, res) => {
       writeDb(db);
       return r;
     });
-    res.status(201).json(route);
+    res.status(201).json(plan?.injoignablesRetires ? { ...route, injoignablesRetires: plan.injoignablesRetires } : route);
   } catch (error) {
     handleRouteError(error, res, "Erreur creation tournee");
   }
