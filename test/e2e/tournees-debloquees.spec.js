@@ -219,6 +219,32 @@ test("H8 — « Clôturer la tournée » (en cours) est dans « Autres actions �
   await ctx.close();
 });
 
+test("H8 — hors ligne, « Clôturer » echoue franchement : jamais mis en file (rejoue plus tard, il arreterait une tournee reprise)", async ({ browser }) => {
+  test.setTimeout(120000);
+  const { ctx, page } = await ouvrir(browser, srv.base);
+  await page.locator(".gestes-plus summary").click();
+  await ctx.setOffline(true);
+  page.once("dialog", d => d.accept());
+  await page.locator("#cloturerTourneeButton").click();
+  await expect(page.locator(".toast").last()).toContainText("Impossible de joindre le serveur");
+  const file = await page.evaluate(() => new Promise(resolve => {
+    const d = indexedDB.open("sereo-file-attente", 1);
+    d.onerror = () => resolve([]);
+    d.onsuccess = () => {
+      const db = d.result;
+      if (!db.objectStoreNames.contains("ecritures")) { db.close(); resolve([]); return; }
+      const r = db.transaction("ecritures", "readonly").objectStore("ecritures").getAll();
+      r.onsuccess = () => { const v = r.result; db.close(); resolve(v); };
+      r.onerror = () => { db.close(); resolve([]); };
+    };
+  }));
+  expect(file.map(e => e.url), "la cloture attend dans la file").toEqual([]);
+  await ctx.setOffline(false);
+  await page.waitForTimeout(1500);
+  expect((await tournee(srv.base, "r-1")).status).toBe("en_livraison");
+  await ctx.close();
+});
+
 // --- M2 -------------------------------------------------------------------------
 
 test("M2 — un arret deja traite s'ouvre en LECTURE SEULE ; « Corriger le statut » le corrige, avec sa cause", async ({ browser }) => {
@@ -308,5 +334,26 @@ test("D10 — hors ligne, « Remis à » attend dans la FILE avec le geste, puis
   expect((await tournee(srv2.base, "r-1")).stops[ici].status, "le geste est parti hors ligne").not.toBe("livre");
   await ctx.setOffline(false);
   await expect.poll(async () => (await tournee(srv2.base, "r-1")).stops[ici].remisA, { timeout: 30000 }).toBe("l'accueil");
+  await ctx.close();
+});
+
+test("M2 — hors ligne, une correction attend dans la file, montree faite (« En attente d'envoi »), puis part", async ({ browser }) => {
+  test.setTimeout(120000);
+  const { ctx, page } = await ouvrir(browser, srv2.base);
+  const ici = (await tournee(srv2.base, "r-1")).stops.findIndex(s => s.remisA === "l'accueil");
+  expect(ici, "prealable : l'arret livre hors ligne au cas precedent").toBeGreaterThan(2);
+  await ctx.setOffline(true);
+  const ligne = page.locator("#routeStopsList .route-stop").nth(ici);
+  await ligne.locator(".route-stop-main").click();
+  await page.locator('#currentClient [data-action="corriger-statut"]').click();
+  const dialogue = page.locator("#correctionDialog");
+  await dialogue.locator('[data-correction="absent"]').click();
+  await dialogue.locator("#correctionCause").fill("Pas livré : personne à l'accueil");
+  await dialogue.locator('[data-action="correction-valider"]').click();
+  await expect(ligne.locator(".pill"), "la correction en file n'est pas montree").toHaveText("Absent");
+  await expect(ligne).toContainText("En attente d’envoi");
+  expect((await tournee(srv2.base, "r-1")).stops[ici].status).toBe("livre");
+  await ctx.setOffline(false);
+  await expect.poll(async () => (await tournee(srv2.base, "r-1")).stops[ici].status, { timeout: 30000 }).toBe("absent");
   await ctx.close();
 });
