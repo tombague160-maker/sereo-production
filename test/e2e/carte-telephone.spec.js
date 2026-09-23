@@ -342,6 +342,8 @@ test("sans tournee ni commande prete — aucun client en « Arret N », un messa
   const c = await ouvrir(browser, sansTournee, { avant: p => p.route("**/api/orders", r => r.fulfill({ json: [] })) });
   const r = await lireMarqueurs(c.page);
   expect(r.filter(m => /^Arrêt/.test(m.nom)).length, "les clients de la base sont numerotes en arrets").toBe(0);
+  // Ni numerotes ni autrement : sans commande prete, aucun client n'est dessine.
+  expect(r.length, "les clients de la base sont dessines sans commande prete").toBe(0);
   expect(await c.page.locator("#map .leaflet-overlay-pane path").count(), "un faux trajet relie les clients").toBe(0);
   await c.ctx.close();
 });
