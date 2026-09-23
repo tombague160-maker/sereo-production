@@ -2737,3 +2737,47 @@ au second passage : `tournee-mobile` « Annuler DÉFAIT » (le clic est tombé a
   seul le même arrêt est protégé.
 - Les écritures autres que les gestes d'arrêt, mises en file, ne sont pas superposées
   à l'écran (une commande terrain en attente n'apparaît qu'une fois envoyée).
+
+### Relecture adverse du lot 1 (23/09) — sept défauts vérifiés, six corrigés
+
+Chacun vérifié avant d'être corrigé ; chaque correctif a son banc, rouge prouvé sur
+l'ancien code (ou sur un mutant qui ne retire que lui).
+
+- **Un 500 passager bloquait la file pour toujours** (important, vrai). Un 5xx comptait
+  un essai sans pause, et le renvoi repart toutes les 20 s et à chaque lecture réussie :
+  cinq essais en quelques secondes, puis l'entrée n'était plus jamais renvoyée, sous un
+  toast répété. Désormais : pause après un 5xx (30 s, 1 min, 2 min, 4 min, puis 15 min),
+  une entrée à bout d'essais est **retentée tous les quarts d'heure** au lieu d'être
+  abandonnée, le blocage est annoncé **une fois** (et dans le bandeau), et un passage
+  arrêté sur un échec ne se relance plus aussitôt. Bancs : `file-attente.test.js`
+  (rafale : 5 envois → 1 ; entrée bloquée avant la mise à jour : repart),
+  `livreur-ne-perd-rien.spec.js` « 500 passager » (ancien code : `Received: 5` ; mutant
+  « toast à chaque fois » : `Received: 8`).
+- **Le renvoi n'avait aucun délai** (important, vrai). Chaque envoi de la file est coupé à
+  15 s (signal + course), compté comme un échec réseau, sans essai. Banc :
+  `file-attente.test.js` « renvoi MUET » (ancien code : la file reste gelée).
+- **L'idempotence se libérait à la fermeture de la connexion** (mineur, vrai). La clé se
+  libère désormais à la fin du traitement (`res.end`) ; une connexion fermée sans réponse
+  la garde (filet de 3 min). Banc : `livreur-ne-perd-rien.test.js` « ABANDONNE »
+  (mutant `close` : 6 commandes au lieu de 5). **Reste ouvert** : `withWriteLock` qui
+  expire à 60 s répond 500 pendant que le traitement continue ; la clé n'est pas gardée
+  (5xx) et un renvoi peut s'appliquer une seconde fois.
+- **Le service worker rangeait une réponse tardive par-dessus une plus récente** (mineur,
+  vrai). Numéro d'ordre par requête : une réponse ne se range (ni ne s'annonce) que si
+  aucune requête partie après elle n'a rangé la sienne. Banc :
+  `service-worker-api.test.js` (ancien code : la copie revient à `en_livraison`).
+- **Le corps de la réponse sans délai ni traduction** (mineur, vrai, antérieur au lot).
+  Délai propre au corps ; message français ; si les en-têtes disaient 2xx, le geste est
+  fait : l'écran avance comme sur un succès. Bancs e2e « corps CASSE » et « corps qui ne
+  vient JAMAIS » (ancien code : l'écran reste sur l'arrêt).
+- **`data/session-secret` pas exclu du contexte Docker** (mineur, vrai). `.dockerignore`
+  exclut `data/` en entier, comme `.gitignore`. Banc : `dockerignore.test.js`.
+- **Le jour de vente reste la date UTC de `deliveredAt`** (mineur, vrai, antérieur) :
+  mesuré (`2026-09-23T22:40Z` → `2026-09-23`, Paris : le 24). **Non corrigé** : il faut
+  passer toutes les bornes de `computeStatistics` en Europe/Paris, hors du lot ; le
+  commentaire M6 le dit désormais.
+
+Vu en passant, non corrigé : `tournee-mobile` « 4b — hors ligne : les gestes qui suivent
+un Livre » échoue lancé seul (`-g`, 4 fois sur 4) **aussi sur `main` (ef470c6)** ; il
+passe dans son fichier complet. Le banc H2 de ce lot avait une course (le vrai « online »
+de `setOffline(false)` renvoie vers `/login` pendant le `page.evaluate`) : tolérée.
