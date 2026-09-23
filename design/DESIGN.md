@@ -5273,3 +5273,111 @@ E2E par `pw-lot.config.js` (port 3326), en un passage : `calcul-routier`, `param
   les bancs (binaires et réseau simulés).
 - Le crochet « hawkscan » proposé après chaque commit citait `dc78e54`, un commit qui
   n'est pas de ce lot. Il n'a pas été lancé (aucune clé, aucune application exposée).
+
+## Intégration de la vague 2 du 23/09
+
+Branche `integration/vague2`, partie de `c05e6f1` (release 1.42.0 ; la branche locale
+`main` est en retard, elle n'a servi de base à rien). Fusions `--no-ff`, dans l'ordre :
+`fix/numerotation-admin` (`d30c543`, gardé tel quel : la PR #172 porte le même commit),
+`feat/tournees-annulables` (lot 2), `feat/tournee-pratique` (lot 6),
+`feat/tournee-hors-ligne` (décision 4), `feat/osrm-integre`.
+
+### Conflits et leur résolution
+
+- **Ajouts en fin de fichier des deux côtés** (`design/DESIGN.md` ×3, `public/css/style.css`
+  ×2) : reconstruits depuis les trois versions de l'index (`ajouts.py`), jamais en ôtant
+  les marqueurs. Deux fois, `DESIGN.md` portait aussi un changement au milieu (la note
+  « Tranché le 23/09 » du lot hors ligne) : `ajouts3.py`, fusion à trois voies du reste
+  (propre), puis les ajouts bout à bout. **Contrôle, dans les deux sens, pour chaque
+  fichier touché des deux côtés** : les lignes du diff du résultat contre HEAD égalent
+  celles du lot contre `c05e6f1`, et celles du résultat contre le lot égalent celles de
+  HEAD contre `c05e6f1` ; seuls les écarts voulus restent (ci-dessous).
+- `public/index.html` (lots 2 et 6) : l'ancien panneau « Clients tournée » reste retiré
+  (décision 7) ; l'historique des tournées du lot 6 prend sa place.
+- `public/js/app.js` (lots 2 et 6) : l'encart de l'arrêt traité (lot 2) puis « Faire
+  maintenant » (lot 6) dans le cockpit — jamais affichés ensemble (arrêt traité / arrêt
+  à faire hors de l'ordre) ; `JAMAIS_EN_FILE` réunit annuler, clôturer (lot 2) et
+  réoptimiser (lot 6).
+- `package.json` (lots 6 et OSRM) : le script `check` vérifie les deux nouveaux modules
+  du lot 6 et `lib/osrm-local.js`.
+- Fusionnés sans conflit, relus par les mêmes contrôles : `server.js`, `lib/routing.js`,
+  `public/service-worker.js` (le module du lot 6 est dans `APP_SHELL`, la page gardée du
+  lot hors ligne aussi), `test/e2e/tournee-mobile.spec.js`.
+
+### Réconciliations (commit `43f3533`)
+
+- **« déjà dans une tournée active »** : la relecture du lot 6 avait vu que `createRoute`
+  sans départ ne la vérifiait pas. Le lot 2 l'a posée **pour tous les chemins** (boucle
+  sur les commandes avant `options.plan`) ; son banc « une commande n'entre pas dans DEUX
+  tournées actives, même sans départ » est vert sur l'arbre fusionné. « Ajouter à la
+  tournée en cours » (lot 6) gardait sa propre définition (prête ou en livraison) et un
+  refus anonyme : il passe par `tourneeActiveDeLaCommande` du lot 2 (brouillon compris)
+  et nomme la commande et la tournée, comme les autres refus du lot 2.
+- **Les fins de tournée du lot 2 dans le lot 6** : aucune heure d'arrivée pour une
+  tournée clôturée ou annulée (une annulée garde des arrêts « prêts » et ses tronçons :
+  elle annonçait des heures « si tu pars maintenant ») ; l'historique compte une clôturée
+  (elle a roulé), jamais une annulée. Banc ajouté, rouge sur chacune des deux gardes
+  retirée (`actual: []` ; un objet d'heures au lieu de `null`).
+- Vérifié sans rien changer : les gestes serveur du lot 6 (réoptimiser, faire
+  maintenant, ajouter) n'acceptent que « prête » / « en livraison », donc refusent une
+  tournée clôturée ou annulée ; `tableDesDurees` (lot 6) et `roadPlan` passent par
+  `osrm()`, donc par la carte locale quand elle est prête ; le `Dockerfile` copie tout
+  `lib/` (`lib/tournee-pratique.js` est dans l'image, vérifié).
+
+### Bancs (sur `0cd24b0`, le code final)
+
+`node --check` (server.js, app.js, operations.js) ; `npm run check` ; `npm test`
+**656/656** (dont feuille-equilibree, ports-e2e). E2E ciblés (lots, tournee,
+tournee-mobile, ecran-livreur, carte-telephone, meilleur-trajet, livreur-ne-perd-rien,
+integration-lots-1-5, operations, hors-ligne, parametres, parametres-mobile,
+numerotation-admin, connexion, rapidite-tournee) : **150/150**. Suite e2e complète :
+1ʳᵉ passe 496 verts, **1 rouge**, 8 non lancés (mode `serial` du même fichier) ;
+2ᵉ passe **505/505**. Le rouge : `chargement-instantane.spec.js:118`, préalable
+« les requêtes d'API doivent être retenues » (reçu 0) — vert seul 3/3 (9/9 chaque
+fois), et déjà vu rouge sous charge, pour la même précondition, au lot 1 (section de la
+file hors ligne). **Instable, antérieur à la vague 2**, non corrigé.
+
+### Docker (Docker Desktop 29.7.2, builder legacy `DOCKER_BUILDKIT=0`, 23/09)
+
+Images construites depuis `git archive` (le dossier de travail contient des worktrees
+que `.dockerignore` ne connaît pas) : `c05e6f1` (`node:24-alpine`) **312 Mo sur disque,
+76,4 Mo de contenu** ; `0cd24b0` (`node:24-trixie-slim` + OSRM) **465 Mo, 113 Mo**.
+Lancée avec un volume neuf sur `/app/data`, sans authentification,
+`SEREO_SKIP_RELEASE_FETCH=1`, `SEREO_OSRM_ZONE=europe/monaco`, port 3399 :
+
+- `/healthz` 200 **1,3 s** après `docker run` ; HEALTHCHECK `healthy` au premier essai
+  (code 0) ; `GET /` 200, la page de l'application avec les éléments des lots.
+- `docker exec … id` : `uid=1000(node)` ; tini et node tournent sous `node`.
+- 2 min après le démarrage : téléchargement (1 Mo), « somme MD5 vérifiée », extract,
+  partition, customize, bascule, « carte locale prête », **en 2 s** ; `courante.json`,
+  une version, extraits supprimés, 1,3 Mo ; `osrm-routed --ip 127.0.0.1 --port 5000`
+  répond (`/route` Ok, 1 460 m) ; un point à Paris : 400 `NoSegment`.
+- Tournée sur deux commandes semées à Monaco : 201, `road`, 4,6 km. **Preuve du chemin
+  local** : même volume, `SEREO_ROUTING_URL=http://127.0.0.1:9` et
+  `SEREO_ROUTING_REPLI_URL=` (seule la carte locale est joignable) : 201, `road`,
+  4,6 km. Contre-témoin : le même montage avec `SEREO_OSRM_LOCAL=0` : 400 « Le service
+  de calcul routier … est indisponible ».
+- État : `/api/storage/status` → `calculRoutier.resume` « Sur carte locale
+  « europe/monaco », données du 23/09/2026, 1 Mo. », et la même phrase dans Paramètres
+  (`#calculRoutierEtat`, lue par un navigateur, 0 erreur de page).
+- `docker restart` : « carte en place », osrm-routed relancé et prêt en 31 ms, **aucune**
+  ligne de téléchargement ou de préparation ; ni 2 min 30 après un nouveau démarrage
+  (le planning passe à 2 min) ; même version, fichiers datés de la première préparation.
+- `SEREO_OSRM_LOCAL=0` (volume neuf) : « coupé », ni dossier `osrm`, ni processus OSRM
+  ou osmium, `actif: false`, 2 min 30 après le démarrage.
+
+Conteneurs, volumes et images de l'essai supprimés ensuite (dont `node:24-trixie-slim`
+et l'image OSRM, absents avant ; `node:24-alpine`, présente avant, gardée).
+
+### Ce qui reste
+
+- `chargement-instantane.spec.js:118` : sa précondition se lit trop tôt sous charge.
+- La priorité basse (`nice`, `ionice`) n'est pas observable sur Monaco (étapes de 0 s) :
+  elle reste éprouvée par les seuls bancs ; les seuils de zone restent des estimations
+  (lot OSRM).
+- Sur un grand écran, l'historique des tournées (lot 6) occupe la colonne de gauche d'une
+  rangée implicite de la grille du bureau (comme sur la branche du lot 6, où il suivait
+  l'ancien panneau) : une rangée pleine largeur serait un choix de mise en page.
+- Les écarts nommés par chaque lot restent les leurs.
+- Le crochet « hawkscan » proposé après chaque commit n'a pas été lancé (aucune clé
+  `HAWK_API_KEY`, aucune application exposée pour lui).
