@@ -5394,7 +5394,7 @@ et l'image OSRM, absents avant ; `node:24-alpine`, présente avant, gardée).
 
 Branche `fix/collant-et-clavier`, partie de `67c382e` (release 1.43.0). CSS : le bloc
 « PANIER COLLANT ET ORDRE DU CLAVIER » en fin de `style.css`. Banc :
-`test/e2e/collant-et-clavier.spec.js` (11 cas, serveur semé sur 3350). Ferme deux écarts
+`test/e2e/collant-et-clavier.spec.js` (13 cas, serveur semé sur 3350). Ferme deux écarts
 nommés plus haut : « le collant inerte » (Finitions d'interface) et « Nouveau client tôt
 dans l'ordre du clavier » (Clients au téléphone).
 
@@ -5425,18 +5425,19 @@ catalogue, et la barre panier fixe sous 560 px.
 |---|---|---|---|---|
 | 1388, 13729 | panier (`.customer-cart-panel`) ≥ 1181 px | inerte | colle à 24 px | **le but** ; top commun, hauteur bornée |
 | 1388 | formulaire client (`.customer-client-panel`) | déjà `static` à toutes les largeurs | idem | rien à faire |
-| 9747 | barre latérale, bureau | inerte : partait avec la page (−800 px) | colle en haut, 100 vh, sa propre barre de défilement | **gardé** : c'est sa déclaration (« c'est la barre qui défile ») ; ne recouvre rien (colonne à part, mesuré) |
+| 9747 | barre latérale, bureau | inerte : partait avec la page (−800 px) — depuis juillet, jamais collée | idem | **neutralisé** (`position: relative`, l'étage 40 reste). D'abord gardé (« c'est sa déclaration ») ; la relecture adverse l'a pris : le même cas que le bandeau du téléphone, un changement que tout utilisateur de bureau verrait, jamais décidé. Question à Thomas (écarts) |
 | 10101 | bandeau de marque, téléphone (76 px) | ne collait que sur Tournée | idem | **neutralisé** hors Tournée (`position: relative`, l'étage 950 reste) : 76 px tenus en haut sur 844 n'étaient pas une décision prise |
-| 4022 | bannière de récupération de la base | inerte | aurait collé en haut, par-dessus la barre latérale (mesuré : 0..101 px sur la barre collée) | **neutralisé** (`position: relative`, l'étage 1500 reste) |
+| 4022 | bannière de récupération de la base | inerte | aurait collé en haut, par-dessus la barre latérale (mesuré : 0..101 px, quand la barre collait) | **neutralisé** (`position: relative`, l'étage 1500 reste) |
 | 2700, 12353 | gestes de l'arrêt, Tournée (≤ 820 px) | déjà actifs (le `clip` de Tournée) | idem | inchangé (mesuré) |
 | 12679 | gestes de la page de commande (dialogue) | collés à `.sheet-corps`, qui défile | idem | hors d'atteinte du changement |
 | 3567 | `.bdc-table thead` | — | — | aucun élément ne porte `.bdc-table` (dans un `overflow-x: auto` de toute façon) |
 | 4249, 5261 | `.topbar` (thème clair) | — | — | aucun élément ne porte `.topbar` |
 
-**Pas de débordement nouveau.** À 360, 390, 820, 1024 et 1440 px, sur onze écrans (données
-semées) : aucune page ne défile de côté, et la liste des éléments qui dépassent le bord
-est **identique** avant et après (`clip` rogne exactement ce que `hidden` rognait). Elle
-n'est pas vide : voir les écarts.
+**Pas de débordement.** À 360, 390, 820, 921, 1024, 1200 et 1440 px, sur onze écrans
+(données semées) : aucun élément ne dépasse le bord, hors des conteneurs qui défilent
+d'eux-mêmes. La première version de ce lot disait « identique avant et après » et
+excluait la rangée d'actions de l'en-tête, qui dépassait : c'était faux au clavier (voir
+la relecture adverse, ci-dessous).
 
 ### 2. L'ordre du clavier au téléphone
 
@@ -5497,10 +5498,15 @@ du lot, restauré par copie :
 
 ### Écarts nommés
 
-- **« Actualiser » coupé à 1024 px** sur Clients et Commandes (antérieur, hors de ce lot) :
-  la rangée d'actions de l'en-tête dépasse le bord (jusqu'à 1 091 et 1 226 px).
-  `hidden` la coupait déjà, `clip` à l'identique ; le banc de débordement l'exclut
-  nommément.
+- ~~« Actualiser » coupé à 1024 px~~ : **fermé** par la relecture adverse (ci-dessous).
+  La rangée passe à la ligne ; plus aucune exclusion dans le banc.
+- **La barre latérale du bureau** ne colle pas, comme depuis juillet : sa règle déclare
+  `sticky`, mais `hidden` l'avait toujours rendue inerte. La faire coller (100 vh, sa
+  propre barre de défilement, la navigation toujours à portée) est une décision de mise
+  en page, visible de tout utilisateur de bureau : **à trancher par Thomas**, avec le
+  bandeau du téléphone. Défaut proposé : la laisser coller au bureau (une ligne à
+  retirer, `@media (min-width: 821px) { .sidebar { position: relative; } }`), le
+  bandeau du téléphone restant neutralisé (76 px sur 844).
 - **Le bandeau de marque du téléphone** ne colle toujours que sur Tournée. Le faire
   coller partout (ce que sa règle déclare) est une décision de mise en page, pas une
   réparation : à trancher par Thomas.
@@ -5508,3 +5514,42 @@ du lot, restauré par copie :
   focalisable, et le clavier compte sur le navigateur (Chrome rend focalisable un
   conteneur qui défile sans enfant focalisable). Aucun `tabindex` ajouté.
 - Sous 1181 px, le panier ne colle pas (une colonne) : voulu, inchangé.
+
+### Relecture adverse (23/09) : quatre défauts, quatre vrais
+
+Quatre défauts relevés sur `626bc59`, chacun mesuré avant d'être jugé. CSS : le bloc
+« PANIER COLLANT, RELECTURE DU 23/09 » en fin de `style.css`.
+
+1. **« `clip` coupe à l'identique » n'était vrai qu'au repos — vrai.** Mesuré : sous
+   `hidden`, le focus faisait défiler `.content` de côté et montrait « Actualiser »
+   (Commandes à 1024 et 1100 px, `scrollLeft` 202 et 126) ; sous `clip`, il le recevait
+   hors de l'écran (1105..1226 à 1024 px). Et la rangée dépassait plus largement que dit :
+   de **921 à 1225 px**, sur Clients, Commandes, **Stock et Abonnements** (pas « 821 à
+   ~1180, Clients et Commandes »). Même sous `hidden`, le focus restait invisible dans
+   certains cas (Clients à 1024). La cause : `.ecran-entete-actions { flex: none }` la
+   gardait à sa largeur d'une ligne, son `flex-wrap: wrap` ne servait jamais. **Remède**
+   (≥ 921 px) : la rangée et la fente sont bornées à la largeur de l'en-tête et passent
+   à la ligne, alignées à droite. Mesuré, 11 écrans de 921 à 1920 px, boîtes de
+   l'en-tête avec et sans le remède : seules changent les rangées qui dépassaient
+   l'en-tête (dans la marge du contenu, ou au-delà du bord). Clair et sombre regardés.
+2. **Le banc de débordement excluait la rangée partout, et `scrollWidth` ne pouvait
+   presque plus échouer — vrai.** L'exclusion est retirée ; 921, 1024 et 1200 px
+   s'ajoutent ; le commentaire dit que c'est la liste des éléments hors du bord qui
+   juge. Nouveau cas : Tab parcourt l'en-tête de six écrans à 921, 1024, 1200 et
+   1440 px, et chaque élément focalisé doit être dans la fenêtre (136 focus).
+3. **texte-coupe ne voyait plus les deux boutons déplacés au téléphone — vrai.**
+   `#gestesBas *` rejoint son sélecteur (442 textes jugés au téléphone, contre 440).
+4. **La barre latérale du bureau collait sans décision — vrai.** Neutralisée comme le
+   bandeau du téléphone ; la question est dans les écarts, avec un défaut proposé.
+
+**Preuves rouges**, les bancs de ce commit sur le code de `626bc59` :
+
+- « aucun débordement » : 21 défauts, dont `1024px #commandes : button.button
+  [1105..1226] depasse le bord` et `921px #stock : button.button [835..956]` ;
+- « au clavier, chaque commande de l'en-tête » : 8 défauts, dont `1024px #crm :
+  « refreshButton » a le focus hors de l'ecran (970..1091, fenetre 1024)` ;
+- « la barre latérale défile avec la page » : `stock`, Expected −400, Received 0.
+
+texte-coupe, par mutant (le libellé de « Nouveau client » rogné à 40 px dans
+`#gestesBas`, restauré par copie) : le banc d'avant reste **vert** (440 textes, 0 coupé) ;
+celui-ci rougit, `[crm] SPAN « Nouveau client » : 79px de trop`.

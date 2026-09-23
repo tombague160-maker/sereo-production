@@ -14993,12 +14993,13 @@ html[data-ouverte-hors-ligne] .content > .page:not(#livreur) { display: none !im
       `auto`) -- qui ne defilent jamais : c'est la fenetre qui defile. Tout
       `position: sticky` de la feuille collait donc a un conteneur immobile,
       et partait avec la page (le panier de Commande client, a toutes les
-      largeurs). `clip` rogne pareil, sans creer de conteneur. Mesure : rien
-      de plus n'est coupe a 360, 390, 820, 1024 et 1440 px.
+      largeurs). `clip` rogne pareil au repos, sans creer de conteneur --
+      mais le focus ne fait plus defiler de cote ce qui depasse (la rangee
+      d'actions de l'en-tete : bloc « RELECTURE » plus bas).
    2. L'INVENTAIRE des `position: sticky` que `clip` reveille (DESIGN.md) :
       - le panier (>= 1181 px) : colle, c'est le but -- ci-dessous ;
-      - la barre laterale au bureau : colle, voulu (elle a sa propre barre de
-        defilement, « c'est la barre qui defile ») -- rien a faire ;
+      - la barre laterale au bureau : neutralisee (bloc « RELECTURE » plus
+        bas) -- elle n'avait jamais colle, personne ne l'a decide ;
       - le bandeau de marque au telephone : il ne collait que sur Tournee
         (lot mobile, `clip` pose sur cet ecran seul). Neutralise ailleurs :
         76 px de plus, tenus en haut sur 844, ne sont pas une decision prise ;
