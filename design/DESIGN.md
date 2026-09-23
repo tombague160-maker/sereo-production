@@ -1673,6 +1673,19 @@ l'idiome de la planche, et nommé) :
 
 **Retiré** : le bloc « Application mobile » (deux phrases statiques, aucun réglage).
 
+**Écarts assumés** : Comptes et Imports prennent chacun **toute la largeur** (la planche :
+côte à côte) — à demi-largeur, le tableau des comptes (cinq colonnes) cassait ses libellés
+lettre par lettre, défaut déjà mesuré et corrigé une fois. « Prochain bon » affiche le
+**vrai** prochain numéro, par la règle du serveur (le plus grand de ce préfixe — et de
+cette année — plus un ; trois chiffres par année, cinq en compteur continu) : un
+« CMD-2026-001 » d'exemple aurait promis un numéro que le serveur ne donnera jamais sur
+une base qui a des commandes.
+
+**Réserve nommée** : `GET / PATCH /api/settings/order-numbering` n'exige pas le rôle
+d'administration ; la carte rend le réglage atteignable pour tout compte connecté.
+Tant que la séparation des rôles est éteinte, tout le monde voit tout ; le jour où elle
+s'allume, ce point est à fermer côté serveur.
+
 ## 10. Guide pour l'agent
 
 - Toujours produire les deux modes (clair et sombre) avec les mêmes tokens ; lister les contrastes calculés.
