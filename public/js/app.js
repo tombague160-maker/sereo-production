@@ -90,7 +90,10 @@ let crmFilter = {
   query: "",
   status: "all",
   // Le secteur (planche 13e) : "" = tous, "__abonnes" = les abonnes.
-  secteur: ""
+  secteur: "",
+  // Le tri du telephone (planche 9a) : la derniere livraison d'abord, ou le
+  // nom. Au bureau (planche 13e), la liste reste par nom.
+  tri: "livraison"
 };
 // Le client dont la fiche est ouverte (planche 13e : une ligne selectionnee).
 let clientChoisi = null;
@@ -476,6 +479,11 @@ function bindUi() {
 
   document.getElementById("crmStatusFilter")?.addEventListener("change", event => {
     crmFilter.status = event.target.value;
+    renderCrm();
+  });
+
+  document.getElementById("cliTri")?.addEventListener("change", event => {
+    crmFilter.tri = event.target.value;
     renderCrm();
   });
 
@@ -2139,7 +2147,11 @@ const ICONE_CLI = {
   lieu: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path></svg>',
   tel: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6.5 4h3l2 5-2.5 1.5a11 11 0 0 0 4.5 4.5L15 12.5l5 2v3a2 2 0 0 1-2.2 2A15 15 0 0 1 4.5 6.2 2 2 0 0 1 6.5 4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path></svg>',
   retard: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5"></circle><path d="M12 8v4m0 3.5v.5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg>',
-  chevron: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m9 6 6 6-6 6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>'
+  chevron: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m9 6 6 6-6 6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>',
+  // Planche 8c : la fleche de navigation d'« Itineraire » (celle de « Y aller »)
+  // et le crayon de « Modifier », rendus au telephone seulement.
+  trajet: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 4 4 11l7 2 2 7z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path></svg>',
+  crayon: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>'
 };
 
 function nomDuClient(client) {
@@ -2209,6 +2221,18 @@ function clientsFiltres() {
   }).sort((a, b) => nomDuClient(a).localeCompare(nomDuClient(b), "fr"));
 }
 
+// L'ordre de la liste. Au telephone, le tri de la planche 9a : la derniere
+// livraison d'abord (les clients jamais livres ensuite, par nom). Au bureau,
+// le tri n'est pas rendu : la liste reste par nom, comme avant.
+function clientsTries() {
+  const liste = clientsFiltres();
+  if (!ecranTelephone.matches || crmFilter.tri !== "livraison") return liste;
+  // Une fois par client : derniereLivraison parcourt toutes les commandes.
+  const dates = new Map(liste.map(c => [c, derniereLivraison(c.id) || ""]));
+  // Tri stable : a date egale, l'ordre par nom de clientsFiltres reste.
+  return liste.sort((a, b) => dates.get(b).localeCompare(dates.get(a)));
+}
+
 // « 47 clients · 6 abonnes · 1 adresse a corriger » (planche 13e).
 function majSousTitreClients() {
   if (!document.getElementById("crm")?.classList.contains("active")) return;
@@ -2244,8 +2268,12 @@ function renderCrm() {
   setText("cliRappelsCompte", rappels ? ` · ${rappels}` : "");
   majSousTitreClients();
 
-  const list = clientsFiltres();
+  const list = clientsTries();
   if (!list.some(c => String(c.id) === String(clientChoisi))) clientChoisi = list[0] ? String(list[0].id) : null;
+  // La ligne du telephone (planche 9a) : le compte de la liste FILTREE.
+  setText("cliCompte", `${list.length} client${list.length > 1 ? "s" : ""}`);
+  const tri = document.getElementById("cliTri");
+  if (tri && tri.value !== crmFilter.tri) tri.value = crmFilter.tri;
 
   if (!list.length) {
     container.innerHTML = emptyState("Aucun client", crmClients.length
@@ -2278,8 +2306,12 @@ function renderFicheClient() {
     return;
   }
   const abonnement = abonnementDuClient(client.id);
-  const puces = [client.secteur ? formatSectorLabel(client.secteur) : client.ville, abonnement ? (abonnement.status === "active" ? "Abonné" : "En pause") : ""]
-    .filter(Boolean).map((p, i) => `<span class="cli-badge cli-badge--${i === 1 && abonnement?.status !== "active" ? "tiede" : "froid"} cli-puce">${escapeHtml(p)}</span>`).join("");
+  // Deux puces : le lieu (secteur, sinon ville) et l'abonnement. Leur role est
+  // nomme (cli-puce--lieu / --abonnement) : sur le vert du telephone (planche
+  // 8c), l'une prend la surface sur vert, l'autre le blanc.
+  const lieu = client.secteur ? formatSectorLabel(client.secteur) : client.ville;
+  const puces = (lieu ? `<span class="cli-badge cli-badge--froid cli-puce cli-puce--lieu">${escapeHtml(lieu)}</span>` : "")
+    + (abonnement ? `<span class="cli-badge cli-badge--${abonnement.status === "active" ? "froid" : "tiede"} cli-puce cli-puce--abonnement">${abonnement.status === "active" ? "Abonné" : "En pause"}</span>` : "");
   const appeler = client.telephone
     ? `<a class="button primary cli-appeler" href="tel:${escapeAttribute(String(client.telephone).replace(/[^\d+]/g, ""))}">${ICONE_CLI.tel}<span>Appeler</span></a>`
     : "";
@@ -2287,7 +2319,7 @@ function renderFicheClient() {
   // l'adresse permet un trajet (rue ET ville) -- sinon le lien serait vide.
   const trajet = buildGoogleMapsUrl(client);
   const itineraire = trajet
-    ? `<a class="cli-bouton-contour cli-itineraire" href="${escapeAttribute(trajet)}" target="_blank" rel="noopener noreferrer">Itinéraire</a>`
+    ? `<a class="cli-bouton-contour cli-itineraire" href="${escapeAttribute(trajet)}" target="_blank" rel="noopener noreferrer">${ICONE_CLI.trajet}<span>Itinéraire</span></a>`
     : "";
   const adresse = adresseClientACorriger(client)
     ? `<p class="cli-valeur cli-alerte">Adresse à corriger</p><p class="cli-note">${escapeHtml([client.rue, client.codePostal, client.ville].filter(Boolean).join(" ") || "Aucune adresse")}</p>`
@@ -2331,18 +2363,21 @@ function renderFicheClient() {
     client.notes || ""
   ].filter(Boolean);
 
+  // Au telephone (planches 8c / 12c), l'en-tete de la fiche est le bloc vert :
+  // la fleche de retour y entre, a gauche du nom. Au bureau elle n'est pas
+  // rendue, et les icones des gestes et des champs non plus.
   fiche.innerHTML = `
-    <button class="cli-retour" type="button" data-action="cli-retour" aria-label="Retour à la liste des clients"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m15 18-6-6 6-6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg><span>Clients</span></button>
     <header class="cli-fiche-tete">
+      <button class="cli-retour" type="button" data-action="cli-retour" aria-label="Retour à la liste des clients"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m15 18-6-6 6-6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg><span>Clients</span></button>
       <div class="cli-fiche-identite">
         <h2 class="cli-fiche-nom">${escapeHtml(nomDuClient(client))}</h2>
         <div class="cli-puces">${puces}</div>
       </div>
-      <div class="cli-fiche-gestes">${appeler}${itineraire}<button class="cli-bouton-contour" type="button" data-action="cli-modifier" data-client-id="${escapeAttribute(client.id)}">Modifier</button></div>
+      <div class="cli-fiche-gestes">${appeler}${itineraire}<button class="cli-bouton-contour cli-modifier" type="button" data-action="cli-modifier" data-client-id="${escapeAttribute(client.id)}">${ICONE_CLI.crayon}<span class="cli-modifier-mot">Modifier</span></button></div>
     </header>
     <div class="cli-champs">
-      <div><p class="cli-libelle">Adresse</p>${adresse}</div>
-      <div><p class="cli-libelle">Contact</p>${contact}</div>
+      <div><span class="cli-champ-icone" aria-hidden="true">${ICONE_CLI.lieu}</span><p class="cli-libelle">Adresse</p>${adresse}</div>
+      <div><span class="cli-champ-icone" aria-hidden="true">${ICONE_CLI.tel}</span><p class="cli-libelle">Contact</p>${contact}</div>
     </div>
     ${extras.length ? `<div class="cli-notes">${extras.map(e => `<p class="cli-note">${escapeHtml(e)}</p>`).join("")}</div>` : ""}
     <label class="cli-statut">
@@ -2407,6 +2442,9 @@ function ouvrirVueClient(vue, { depuisHistorique = false } = {}) {
 function bindClients() {
   const ecran = document.getElementById("crm");
   if (!ecran) return;
+  // Le tri du telephone ne vaut pas au bureau : passer le seuil (une tablette
+  // qu'on tourne) redessine la liste dans l'ordre de la largeur.
+  ecranTelephone.addEventListener?.("change", () => renderCrm());
   ecran.addEventListener("click", event => {
     const pilule = event.target.closest("[data-cli-secteur]");
     if (pilule) {

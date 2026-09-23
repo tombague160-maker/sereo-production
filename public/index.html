@@ -665,6 +665,18 @@
                 </select>
               </label>
             </div>
+            <!-- Au telephone seulement (planche 9a) : le compte de la liste
+                 filtree et le tri. Au bureau la liste reste par nom. -->
+            <div class="cli-resume-ligne">
+              <span id="cliCompte" class="cli-compte" aria-live="polite"></span>
+              <label class="cmd-tri cli-tri">
+                <span class="sr-only">Trier</span>
+                <select id="cliTri" aria-label="Trier les clients">
+                  <option value="livraison">Dernière livraison</option>
+                  <option value="nom">Nom</option>
+                </select>
+              </label>
+            </div>
             <div class="cli-carte cli-liste-carte">
               <div id="crmList" class="cli-liste" role="list" aria-label="Clients"></div>
             </div>
