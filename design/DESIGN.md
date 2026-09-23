@@ -3337,6 +3337,7 @@ au second passage. Au premier, à deux ouvriers, deux rouges non reproduits seul
 au second passage : `tournee-mobile` « Annuler DÉFAIT » (le clic est tombé après les
 4 s du toast : l'envoi est parti) et `chargement-instantane` « requêtes retenues »
 (précondition : aucune requête encore arrivée au mandataire). Dits, non corrigés.
+*(Le second est fermé le 23/09 : voir « Banc chargement-instantane stabilisé ».)*
 
 ### Écarts nommés, hors de ce lot
 
@@ -5335,7 +5336,8 @@ numerotation-admin, connexion, rapidite-tournee) : **150/150**. Suite e2e compl�
 2ᵉ passe **505/505**. Le rouge : `chargement-instantane.spec.js:118`, préalable
 « les requêtes d'API doivent être retenues » (reçu 0) — vert seul 3/3 (9/9 chaque
 fois), et déjà vu rouge sous charge, pour la même précondition, au lot 1 (section de la
-file hors ligne). **Instable, antérieur à la vague 2**, non corrigé.
+file hors ligne). **Instable, antérieur à la vague 2**, non corrigé ici — *fermé le 23/09 : voir
+« Banc chargement-instantane stabilisé ».*
 
 ### Docker (Docker Desktop 29.7.2, builder legacy `DOCKER_BUILDKIT=0`, 23/09)
 
@@ -5371,7 +5373,8 @@ et l'image OSRM, absents avant ; `node:24-alpine`, présente avant, gardée).
 
 ### Ce qui reste
 
-- `chargement-instantane.spec.js:118` : sa précondition se lit trop tôt sous charge.
+- ~~`chargement-instantane.spec.js:118` : sa précondition se lit trop tôt sous charge.~~ Fermé le
+  23/09 : voir « Banc chargement-instantane stabilisé ».
 - La priorité basse (`nice`, `ionice`) n'est pas observable sur Monaco (étapes de 0 s) :
   elle reste éprouvée par les seuls bancs ; les seuils de zone restent des estimations
   (lot OSRM).
@@ -5381,3 +5384,82 @@ et l'image OSRM, absents avant ; `node:24-alpine`, présente avant, gardée).
 - Les écarts nommés par chaque lot restent les leurs.
 - Le crochet « hawkscan » proposé après chaque commit n'a pas été lancé (aucune clé
   `HAWK_API_KEY`, aucune application exposée pour lui).
+
+## Banc chargement-instantane stabilisé (23/09)
+
+`test/e2e/chargement-instantane.spec.js:118` (« les chiffres du tableau de bord s'affichent
+AVANT la réponse du réseau, sous « Mise à jour » ») rougissait par intermittence sous charge
+sur son préalable « les requêtes d'API doivent être retenues », reçu 0. Vu trois fois le
+23/09, jamais seul. **Défaut du banc, pas de l'application** : l'application tient sa
+promesse, et c'est elle qui rend le zéro possible.
+
+### Reproduction et cause
+
+Charge : une configuration non suivie dérivée de `pw-lot.config.js` (même serveur 3344,
+même base), `--workers=12`. Ce fichier démarre un serveur semé sur un port **fixe** (3174) :
+un seul ouvrier pour lui, 20 répétitions ; les onze autres tournent en boucle des bancs
+lourds sur le serveur commun (contraste-application, themes, navigation-mobile, tabs,
+charte-composants, typographie, texte-coupe, cibles-tactiles, focus-clavier,
+barre-laterale-finitions, nav-plate). À `--workers=4`, 0 rouge sur 20 : cette machine
+(20 cœurs) n'était pas assez chargée.
+
+- Code de `main` (`67c382e`), sans instrument : **3 rouges sur 20**, tous `prealable : les
+  requetes d'API doivent etre retenues`, `Expected: > 0`, `Received: 0`.
+- Même code, instrumenté (journal du mandataire : chaque requête, son instant, retenue ou
+  passée ; côté page, l'instant de chaque appel `fetch` vers `/api/` et celui du chiffre
+  peint) : **2 rouges sur 20**. Sur le rouge n° 1, en millisecondes depuis le
+  rechargement : la page appelle l'API à **99**, peint le chiffre du cache à **150**, le
+  banc le voit à 216, et la première requête d'API n'arrive au mandataire qu'à **263**.
+  Entre-temps, les fichiers statiques y arrivent en cascade (134, 175, 194, 261 pour
+  `/js/config/tabs.js`) : ce sont les revalidations en arrière-plan du service worker
+  (`cacheDabord`), et chacune attend que la précédente libère une connexion. Relu après
+  un tour de boucle d'événements du banc (qui lit les entrées en attente) : toujours 0 ; et
+  le témoin ci-dessous produit le même zéro en ne faisant qu'occuper les connexions.
+- Le compte des verts le confirme : au chiffre, le mandataire tient **exactement 6**
+  requêtes d'API, jamais plus, alors que la page en appelle 25. Chrome n'ouvre que six
+  connexions par hôte en HTTP/1.1 ; les requêtes retenues les gardent, les autres attendent
+  dans le navigateur.
+
+La page lance le réseau d'abord (`loadData`), lit le cache ensuite, et peint : sur une
+machine calme, les requêtes sont parties avant le chiffre ; sous charge, les six
+connexions sont prises par les revalidations, et le chiffre du cache est à l'écran avant
+qu'une seule requête d'API ait quitté le navigateur. Lire le préalable **à l'instant du
+chiffre** confondait « pas encore partie » avec « pas retenue ».
+
+### Correction (dans le banc seul)
+
+- Le préalable attend l'**arrivée** des requêtes au mandataire (`expect.poll`, délai
+  d'`expect` par défaut) : un événement, pas une durée ; ni nouvel essai, ni attente
+  allongée. Il garde ce qu'il gardait : une requête servie par le cache HTTP ou qui
+  contourne le mandataire n'arrive jamais, et il rougit.
+- La pastille se lit **à l'instant du chiffre** (une lecture, pas une attente) : `loadData`
+  pose « Mise à jour… » dans la même tâche que la copie, et le repli de 3 s du service
+  worker la changerait si on la lisait après l'attente du préalable.
+- **Témoin** (nouveau test du même fichier) : le mandataire **bloque** les revalidations des
+  fichiers statiques (une seconde file, que `retenues()` ne compte pas) jusqu'après le
+  chiffre. Les six connexions sont prises : l'API ne peut pas partir avant le chiffre. Le
+  cas du rouge, produit à coup sûr, sur une machine calme. Son propre préalable exige 0
+  requête arrivée au chiffre (sinon « le cas n'est pas produit »). Aucun port nouveau.
+
+Le test reste le même ; il est désormais à la ligne 181 (son corps est passé dans
+`chiffreAvantLeReseau`, partagé avec le témoin).
+
+### Preuves
+
+| Mutation | Banc | Résultat |
+|---|---|---|
+| Ancien code : préalable lu à l'instant du chiffre | témoin, 5 fois, machine calme | **5/5 rouges**, `prealable : les requetes d'API doivent etre retenues`, `Expected: > 0`, `Received: 0` |
+| La retenue ne prend plus l'API (`/^\/rien\//`) | le test (ligne 181), 2 fois | 2/2 rouges sur le nouveau préalable (`expect.poll`), `Received: 0` |
+| Le témoin ne bloque plus rien | témoin, 2 fois | 2/2 rouges, `prealable du temoin … le cas n'est pas produit`, `Expected: 0`, `Received: 6` |
+
+Après correction, **même charge** (12 ouvriers, mêmes bancs lourds) : le test **60/60**, témoin
+**60/60** ; 1 035 tests passés, 0 rouge (12,6 min). Le fichier seul : 10/10. `npm test`
+656/656.
+
+### Ce qui reste
+
+- **Côté application, non traité (hors périmètre)** : en HTTP/1.1, les requêtes d'API de
+  l'ouverture attendent derrière les revalidations en arrière-plan des fichiers statiques
+  (six connexions par hôte). La promesse (le chiffre avant le réseau) n'en souffre pas ;
+  la fraîcheur, si. Non mesuré sur le déploiement réel : cela dépend du protocole entre le
+  navigateur et le serveur.
