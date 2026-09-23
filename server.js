@@ -6608,7 +6608,10 @@ app.get("/api/carte/fond", (req, res) => {
   res.json({ url, attribution, zoomMax, referrerPolicy });
 });
 
-app.patch("/api/settings/order-numbering", async (req, res) => {
+// Decision de Thomas du 23/09 : changer la numerotation des bons est un geste
+// d'administration (la lecture reste ouverte : l'exemple du prochain bon
+// s'affiche a tous). Sans authentification (dev), tout le monde est admin.
+app.patch("/api/settings/order-numbering", requireAdministration, async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
       const db = readDb();

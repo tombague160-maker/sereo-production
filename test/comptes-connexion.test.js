@@ -439,3 +439,38 @@ test("api — une creation invalide renvoie un message exploitable", async () =>
   const corps = await reponse.json();
   assert.match(corps.error, /10 caracteres/);
 });
+
+// Decision de Thomas du 23/09 : la numerotation des bons est un reglage
+// d'administration. Un compte non administrateur la LIT (l'exemple du prochain
+// bon s'affiche partout) mais ne la change pas.
+async function patchNumerotation(cookie, corps) {
+  return fetch(`${baseUrl}/api/settings/order-numbering`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", cookie },
+    body: JSON.stringify(corps),
+    redirect: "manual"
+  });
+}
+
+test("numerotation des bons — reservee a l'administration", async () => {
+  const bureau = await createUserAccount({ identifiant: "bureau-num", motDePasse: "mot-de-passe-valide-2026", role: "bureau" });
+  const admin = sessionCookieFrom(await postLogin("admin-env", "mot-de-passe-environnement"));
+  const cookieLivreur = sessionCookieFrom(await postLogin("julie", "tournee-du-matin-2026"));
+  const cookieBureau = sessionCookieFrom(await postLogin("bureau-num", "mot-de-passe-valide-2026"));
+  assert.ok(admin && cookieLivreur && cookieBureau, "une connexion a echoue");
+
+  // Temoin positif : l'administrateur change le prefixe.
+  const ok = await patchNumerotation(admin, { prefix: "BC" });
+  assert.equal(ok.status, 200);
+  assert.equal((await ok.json()).prefix, "BC");
+
+  for (const cookie of [cookieLivreur, cookieBureau]) {
+    const refus = await patchNumerotation(cookie, { prefix: "ZZ" });
+    assert.equal(refus.status, 403);
+    // Lire reste permis, et le reglage n'a pas bouge.
+    const lu = await getWithCookie("/api/settings/order-numbering", cookie);
+    assert.equal(lu.status, 200);
+    assert.equal((await lu.json()).prefix, "BC");
+  }
+  deleteUserAccount(bureau.id);
+});
