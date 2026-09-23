@@ -7,7 +7,7 @@ import { initOperations, renderOperations, getRoutePoints, majSousTitreAbonnemen
 // rendu, qui seront decoupes par domaine dans les increments suivants.
 
 import { escapeHtml, escapeAttribute, cssEscape, emptyState, squelette } from "./utils/dom.js";
-import { mettreEnAttente, lireFile, rejouer } from "./utils/file-attente.js";
+import { mettreEnAttente, lireFile, rejouer, ESSAIS_MAX } from "./utils/file-attente.js";
 import {
   normalizeTextKey,
   normalizePhoneNumber,
@@ -6683,6 +6683,18 @@ async function updateCurrentDeliveryStatus(status, motif = null, faitLe = new Da
         resume: resumeDeGeste(activeRoute.id, stop, status)
       });
     } catch (error) {
+      if (error?.recuParLeServeur) {
+        // Le serveur a applique le geste ; seul le corps de sa reponse s'est
+        // perdu. L'ecran avance comme sur un succes -- sinon le livreur,
+        // devant un echec, referait le geste.
+        const ici = activeRoute.stops.findIndex(s => String(s.id) === String(stop.id));
+        if (ici >= 0) { activeRoute.stops[ici].status = status; activeStopIndex = ici; }
+        avancerALArretSuivant();
+        rafraichirTournee();
+        notify("Statut livraison enregistré.", "success");
+        await loadData();
+        return;
+      }
       if (!error?.enFile) throw error;
       // H3 : en file, le geste est FAIT pour le livreur. L'ecran avance comme
       // en ligne ; avant, il restait sur le meme arret, et le « Livre » suivant
@@ -6895,6 +6907,8 @@ function envoyerLivraisonEnSuspens(attendu = null) {
       // depuis le cache le defairait.
       if (error && error.enFile) throw error;
       await loadData();
+      // Livree au serveur, seule sa reponse s'est perdue : pas un echec.
+      if (error && error.recuParLeServeur) return;
       throw error;
     }
     await loadData();
@@ -7363,6 +7377,22 @@ function erreurMiseEnFile() {
   return attente;
 }
 
+/** Lit le corps d'une reponse ; abandonne au-dela de `delaiMs` (le flux est coupe). */
+function lireCorpsAvecDelai(res, delaiMs, abandonner) {
+  return new Promise((ok, ko) => {
+    const minuteur = setTimeout(() => {
+      // Coupe la requete (libere la connexion) ; la course tient meme si le
+      // flux ne reagit pas a l'annulation.
+      try { abandonner(); } catch { /* deja fini */ }
+      ko(new Error("Réponse trop lente."));
+    }, delaiMs);
+    res.text().then(
+      texte => { clearTimeout(minuteur); ok(texte); },
+      erreur => { clearTimeout(minuteur); ko(erreur); }
+    );
+  });
+}
+
 async function apiFetch(url, options = {}) {
   const isUpload = options.body instanceof FormData;
   const methode = String(options.method || "GET").toUpperCase();
@@ -7445,7 +7475,22 @@ async function apiFetch(url, options = {}) {
     throw new Error("Session expiree, redirection vers /login");
   }
 
-  const text = await res.text();
+  // Le CORPS a son propre delai (relecture adverse du lot 1). Premier jet :
+  // `await res.text()` sans delai ni traduction. En 4G faible, les en-tetes
+  // arrivaient (le serveur avait APPLIQUE le geste), puis le corps calait :
+  // le bouton restait sur « Envoi... » sans fin ; ou il cassait, et le message
+  // brut du navigateur (« network error », « Load failed ») s'affichait.
+  let text;
+  try {
+    text = await lireCorpsAvecDelai(res, timeoutMs, () => ac.abort());
+  } catch {
+    const coupe = new Error(res.ok
+      ? "Le serveur a bien reçu la demande, mais sa réponse a été coupée en route."
+      : "Impossible de joindre le serveur. Vérifie ta connexion.");
+    // Les en-tetes disent 2xx : l'ecriture EST faite. L'appelant peut avancer.
+    if (res.ok) coupe.recuParLeServeur = true;
+    throw coupe;
+  }
   let body = null;
 
   if (text) {
@@ -7567,11 +7612,22 @@ function gesteArretDeLEntree(entree) {
   };
 }
 
+// La tete de file a bout d'essais (5xx repetes) : elle n'est plus renvoyee
+// qu'une fois par quart d'heure (PAUSE_MAX_MS, file-attente.js). Annoncee UNE
+// fois, quand elle le devient -- premier jet : un toast a chaque renvoi, donc
+// toutes les 20 s, pour une situation que le livreur ne peut pas changer.
+let fileBloquee = false;
+
 /** Relit la file et la porte a l'ecran : compteur, bandeau, arrets en attente. */
 async function rafraichirEtatFile() {
   const file = await lireFile();
   ecrituresEnAttente = file.length;
   resumesEnFile = file.map(entree => entree.resume || null);
+  const bloquee = file.length > 0 && (file[0].essais || 0) >= ESSAIS_MAX;
+  if (bloquee && !fileBloquee) {
+    notify("Des modifications ne passent pas : le serveur répond en erreur. Elles sont gardées et renvoyées tous les quarts d'heure.", "warning");
+  }
+  fileBloquee = bloquee;
   gestesArretEnFile = new Map();
   for (const entree of file) {
     const geste = gesteArretDeLEntree(entree);
@@ -7629,7 +7685,11 @@ function viderLaFile() {
         bilan = await rejouer((u, o) => fetch(u, { ...o, credentials: "same-origin" }));
         await rafraichirEtatFile();
         annoncerBilanDeRenvoi(bilan);
-      } while (viderRedemande && !bilan.authRequise);
+        // Un passage arrete sur un echec (reseau, 5xx en pause, session) ne se
+        // relance pas aussitot : il s'arreterait au meme endroit. Premier jet :
+        // chaque lecture reussie pendant le passage en redemandait un, et un
+        // 500 passager epuisait les essais en quelques secondes.
+      } while (viderRedemande && !bilan.arrete && !bilan.authRequise);
     } finally {
       viderEnCours = null;
     }
@@ -7654,9 +7714,7 @@ function annoncerBilanDeRenvoi(bilan) {
       ? `1 modification a été refusée par le serveur et abandonnée${qui}.`
       : `${bilan.refusees} modifications ont été refusées par le serveur et abandonnées${qui}.`, "warning");
   }
-  if (bilan.bloquee) {
-    notify("Des modifications ne passent pas. Elles sont conservées, mais plus renvoyées.", "warning");
-  }
+  // Le blocage (bilan.bloquee) est annonce par rafraichirEtatFile, une fois.
   if (bilan.authRequise) renvoyerVersConnexionPourLaFile();
 }
 
@@ -7759,8 +7817,11 @@ function majBandeauHorsLigne() {
     : "";
   setText("bandeauHorsLigneTitre", horsLigne ? (heure ? `Hors ligne depuis ${heure}` : "Hors ligne") : "Envoi en attente");
   const n = ecrituresEnAttente;
+  const suite = horsLigne ? "Envoi au retour du réseau."
+    : fileBloquee ? "Le serveur répond en erreur : nouvel essai tous les quarts d'heure."
+      : "Envoi dès que le serveur répond.";
   setText("bandeauHorsLigneDetail", n
-    ? `${decrireAttente()} ${horsLigne ? "Envoi au retour du réseau." : "Envoi dès que le serveur répond."}`
+    ? `${decrireAttente()} ${suite}`
     : "Vos modifications seront gardées et envoyées au retour du réseau. Les imports de fichiers attendront le réseau.");
 }
 

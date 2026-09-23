@@ -31,7 +31,10 @@ function semeAvecArrets() {
   const seme = jeuDeDonnees();
   const copie = (depuis, id, extra) => ({ ...structuredClone(seme.commandes.find(c => c.id === depuis)), id, ...extra });
   const enPlus = [copie("o-8", "o-11", { status: "en_livraison" }), copie("o-2", "o-12", { status: "en_livraison", deliveredAt: undefined }),
-    copie("o-3", "o-13", { status: "en_livraison" })];
+    copie("o-3", "o-13", { status: "en_livraison" }),
+    // Pour les cas de la relecture adverse (23/09), un arret chacun.
+    copie("o-5", "o-16", { status: "en_livraison" }), copie("o-6", "o-17", { status: "en_livraison" }),
+    copie("o-3", "o-18", { status: "en_livraison" })];
   seme.commandes.push(...enPlus);
   // Une commande BLOQUEE avant le 23/09 : un absent d'il y a trois semaines,
   // reste en probleme_livraison, que rien ne proposait plus.
@@ -234,7 +237,10 @@ test("H2 + M6 — une session expiree GARDE la file et renvoie a la connexion ; 
   const documentAvant = await page.evaluate(() => performance.timeOrigin);
   await page.waitForTimeout(3000);   // le geste et son envoi datent de 3 s de plus
   await ctx.setOffline(false);
-  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  // setOffline(false) emet deja un vrai « online » : le renvoi vers /login
+  // peut detruire la page PENDANT cet evaluate. Ce n'est pas un echec -- c'est
+  // exactement ce que la suite verifie.
+  await page.evaluate(() => window.dispatchEvent(new Event("online"))).catch(() => {});
 
   // Renvoyee vers /login (le serveur seme n'a pas d'authentification : /login
   // la rend aussitot a l'application -- un NOUVEAU document).
@@ -314,6 +320,119 @@ test("H1 — une ecriture qu'on ne differe JAMAIS (la purge) echoue en francais,
   expect((await (await fetch(srv.base + "/api/orders")).json()).length, "prealable : la purge ne devait pas partir").toBe(commandesAvant);
   await ctx.close();
 });
+
+// --- Relecture adverse du lot 1 (23/09) -------------------------------------------
+
+/** Modifie la tete de file (essais, heure du dernier echec : maintenant - `depuisMs`). */
+function modifierTeteDeFile(page, { essais, depuisMs }) {
+  return page.evaluate(({ essais, depuisMs }) => new Promise((ok, ko) => {
+    const d = indexedDB.open("sereo-file-attente", 1);
+    d.onerror = () => ko(d.error);
+    d.onsuccess = () => {
+      const db = d.result;
+      const magasin = db.transaction("ecritures", "readwrite").objectStore("ecritures");
+      const r = magasin.getAll();
+      r.onsuccess = () => {
+        const [tete] = r.result.sort((a, b) => String(a.depose).localeCompare(String(b.depose)));
+        magasin.put({ ...tete, essais, dernierEchec: Date.now() - depuisMs });
+        magasin.transaction.oncomplete = () => { db.close(); ok(); };
+      };
+    };
+  }), { essais, depuisMs });
+}
+
+test("relecture — un 500 passager ne bloque pas la file en rafale ; bloquee, elle s'annonce UNE fois et repart", async ({ browser }) => {
+  // Avant : chaque renvoi (20 s, chaque lecture reussie, chaque « online »)
+  // comptait un essai sans pause ; cinq 500 en quelques secondes, et l'entree
+  // n'etait plus jamais renvoyee, sous un toast repete toutes les 20 s.
+  test.setTimeout(150000);
+  const { ctx, page, erreurs } = await ouvrir(browser, srv.base);
+  const [[a, nomA]] = await prochains(srv.base);
+  await expect(page.locator("#currentClient .arret-nom")).toHaveText(nomA);
+
+  let mode = "coupe";
+  let patchs500 = 0;
+  await page.route("**/api/routes/*/stops/*", route => {
+    if (route.request().method() !== "PATCH" || mode === "ok") return route.continue();
+    if (mode === "coupe") return route.abort("connectionrefused");
+    patchs500++;
+    return route.fulfill({ status: 500, contentType: "application/json", body: '{"error":"Erreur interne"}' });
+  });
+  await page.locator("#markDeliveredButton").click();
+  await expect.poll(async () => (await lireFile(page)).length, { timeout: 15000, message: "prealable : le « Livre » doit attendre en file" }).toBe(1);
+
+  // Le serveur repond, mais 500 a l'ecriture ; le reseau clignote.
+  mode = "500";
+  for (let i = 0; i < 10; i++) {
+    await page.evaluate(() => window.dispatchEvent(new Event("online")));
+    await page.waitForTimeout(300);
+  }
+  await expect.poll(() => patchs500, { timeout: 5000, message: "prealable : le renvoi doit avoir rencontre le 500" }).toBeGreaterThanOrEqual(1);
+  await page.waitForTimeout(1500);
+  expect(patchs500, `${patchs500} renvois en 5 s contre un 500 passager : les essais s'epuisent en rafale`).toBe(1);
+  expect((await lireFile(page))[0].essais).toBe(1);
+
+  // A bout d'essais (un 500 qui dure) : annonce UNE fois, pas a chaque renvoi.
+  const toastsAvant = (await page.evaluate(() => window.__toasts)).length;
+  await modifierTeteDeFile(page, { essais: 5, depuisMs: 0 });
+  for (let i = 0; i < 4; i++) {
+    await page.evaluate(() => window.dispatchEvent(new Event("online")));
+    await page.waitForTimeout(400);
+  }
+  const nouveaux = (await page.evaluate(() => window.__toasts)).slice(toastsAvant);
+  expect(nouveaux.filter(t => /ne passent pas/.test(t)).length, `le blocage est annonce a chaque renvoi : ${nouveaux.join(" | ")}`).toBe(1);
+  await expect(page.locator("#bandeauHorsLigneDetail")).toContainText("nouvel essai tous les quarts d'heure");
+  expect(patchs500, "une entree bloquee, en pause, a ete renvoyee").toBe(1);
+
+  // Le serveur est repare ; au terme de la pause lente, l'entree REPART.
+  mode = "ok";
+  await modifierTeteDeFile(page, { essais: 5, depuisMs: 16 * 60_000 });
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect.poll(async () => (await arretsServeur(srv.base))[a].status, { timeout: 15000, message: "une entree bloquee n'est plus JAMAIS renvoyee" }).toBe("livre");
+  await expect.poll(async () => (await lireFile(page)).length, { timeout: 10000 }).toBe(0);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+/** La reponse des gestes d'arret : en-tetes recus (le serveur a applique), corps casse ou muet. */
+function corpsDesGestes(page, maniere) {
+  return page.evaluate(maniere => {
+    const vrai = window.fetch.bind(window);
+    window.fetch = async (url, options = {}) => {
+      const r = await vrai(url, options);
+      if (String(options.method || "").toUpperCase() !== "PATCH" || !/\/stops\//.test(String(url))) return r;
+      const flux = maniere === "casse"
+        ? new ReadableStream({ start(c) { c.error(new TypeError("network error")); } })
+        : new ReadableStream({ start() { /* rien ne vient jamais */ } });
+      return new Response(flux, { status: r.status, headers: r.headers });
+    };
+  }, maniere);
+}
+
+for (const maniere of ["casse", "muet"]) {
+  test(`relecture — le corps de la reponse d'un geste ${maniere === "casse" ? "CASSE en route" : "qui ne vient JAMAIS"} : l'ecran avance, en francais`, async ({ browser }) => {
+    // Avant : `await res.text()` sans delai ni traduction. Le serveur avait
+    // applique « Client absent », mais l'ecran restait sur l'arret, sous
+    // « network error » (ou sans fin, bouton sur « Envoi... »).
+    test.setTimeout(120000);
+    const { ctx, page, erreurs } = await ouvrir(browser, srv.base);
+    const [[a, nomA], [, nomB]] = await prochains(srv.base);
+    await expect(page.locator("#currentClient .arret-nom")).toHaveText(nomA);
+    await corpsDesGestes(page, maniere);
+
+    await page.locator("#markAbsentButton").click();
+    await page.waitForTimeout(800);
+    await choisirMotifSiDemande(page);
+    await expect.poll(async () => (await arretsServeur(srv.base))[a].status, { timeout: 10000, message: "prealable : le serveur doit avoir applique le geste" }).toBe("absent");
+    await expect(page.locator("#currentClient .arret-nom"), "le geste est fait, l'ecran n'est pas passe a l'arret suivant")
+      .toHaveText(nomB, { timeout: 20000 });
+    const toasts = await page.evaluate(() => window.__toasts.join(" | "));
+    expect(toasts, "un message brut du navigateur est montre").not.toMatch(/network error|Failed to fetch|NetworkError|Load failed/i);
+    expect(await lireFile(page), "un geste applique a ete mis en file").toEqual([]);
+    expect(erreurs).toEqual([]);
+    await ctx.close();
+  });
+}
 
 // --- H4, par le mandataire ------------------------------------------------------
 

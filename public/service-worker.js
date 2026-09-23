@@ -138,10 +138,28 @@ function copieEnCache(request) {
 // - X-Sereo-Frais : la page vient d'ecrire ; la copie date d'avant le geste.
 //   Pas de repli : on attend le reseau, et son echec reste un echec (la page
 //   garde alors ce qu'elle montre).
+// LA COPIE NE RECULE PAS (relecture adverse du lot 1). Deux chargements de la
+// meme adresse se croisent sur un reseau lent : L1 part avant « Livre », L2
+// (frais) apres. Si la reponse de L1 arrive la derniere, `cache.put` rangeait
+// l'etat d'AVANT le geste par-dessus celui d'apres -- et la copie servie a la
+// prochaine ouverture remontrait l'arret « En livraison ». Chaque requete prend
+// un numero d'ordre ; une reponse ne se range que si aucune requete partie
+// APRES elle n'a deja range la sienne. (En memoire : un service worker
+// redemarre n'a plus de requete en vol a comparer.)
+let numeroDeRequete = 0;
+const rangements = new Map();
+
+function rangerSiPlusRecente(url, numero, request, copy) {
+  if ((rangements.get(url) || 0) > numero) return Promise.resolve(false);
+  rangements.set(url, numero);
+  return caches.open(API_CACHE_NAME).then(cache => cache.put(request, copy)).then(() => true);
+}
+
 function networkFirstApi(event) {
   const { request } = event;
   const frais = request.headers.get("X-Sereo-Frais") === "1";
   const debut = Date.now();
+  const numero = ++numeroDeRequete;
   return new Promise((resolve, reject) => {
     let settled = false;
 
@@ -158,8 +176,9 @@ function networkFirstApi(event) {
       const tardive = settled;
       if (response.ok && response.type === "basic") {
         const copy = response.clone();
-        const miseEnCache = caches.open(API_CACHE_NAME).then(cache => cache.put(request, copy));
-        if (tardive) return miseEnCache.then(() => annoncerReponseTardive(event, request.url, debut));
+        const miseEnCache = rangerSiPlusRecente(request.url, numero, request, copy);
+        // Perimee (une requete plus recente a deja range) : ni rangee, ni annoncee.
+        if (tardive) return miseEnCache.then(rangee => (rangee ? annoncerReponseTardive(event, request.url, debut) : undefined));
       }
       if (tardive) return undefined;
       settled = true;

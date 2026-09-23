@@ -136,17 +136,72 @@ async function retirer(id) {
   db.close();
 }
 
-async function incrementerEssais(entree) {
+async function incrementerEssais(entree, maintenant) {
   const db = await ouvrir();
-  await attendre(transaction(db, "readwrite").put({ ...entree, essais: (entree.essais || 0) + 1 }));
+  await attendre(transaction(db, "readwrite").put({ ...entree, essais: (entree.essais || 0) + 1, dernierEchec: maintenant }));
   db.close();
 }
 
 /**
- * Au-dela, on cesse de rejouer : l'ecriture est conservee mais plus retentee.
- * Ne compte QUE les refus 5xx du serveur, jamais les echecs reseau.
+ * Au-dela, l'ecriture est dite BLOQUEE : conservee, annoncee, et retentee
+ * lentement (PAUSE_MAX_MS). Ne compte QUE les refus 5xx du serveur, jamais
+ * les echecs reseau.
  */
 export const ESSAIS_MAX = 5;
+
+// LA PAUSE APRES UN 5xx (relecture adverse du lot 1, 23/09). Premier jet : un
+// 5xx incrementait le compteur, et le renvoi suivant repartait aussitot -- or
+// il en part un toutes les 20 s, plus un a chaque lecture reussie. Un 500
+// PASSAGER (verrou d'ecriture, deploiement) epuisait les cinq essais en moins
+// de deux minutes, parfois en quelques secondes, et l'entree restait bloquee
+// POUR TOUJOURS : rien dans l'application ne la debloquait. Desormais :
+//  - apres un 5xx, l'entree attend avant d'etre renvoyee : 30 s, 1 min,
+//    2 min, 4 min, puis PAUSE_MAX_MS. Un renvoi demande pendant la pause
+//    n'envoie rien (l'ordre est garde : la suite attend derriere elle) ;
+//  - a bout d'essais, elle n'est plus abandonnee : elle est retentee toutes
+//    les PAUSE_MAX_MS. Un 500 corrige au deploiement suivant finit par passer ;
+//    une entree vraiment empoisonnee coute une requete par quart d'heure, et
+//    la cle X-Sereo-Geste rend chaque renvoi inoffensif.
+export const PAUSE_BASE_MS = 30_000;
+export const PAUSE_MAX_MS = 15 * 60_000;
+
+/** La pause a respecter apres `essais` refus 5xx. */
+export function pauseApresEchecs(essais) {
+  const n = Number(essais) || 0;
+  if (n <= 0) return 0;
+  if (n >= ESSAIS_MAX) return PAUSE_MAX_MS;
+  return Math.min(PAUSE_BASE_MS * 2 ** (n - 1), PAUSE_MAX_MS);
+}
+
+// LE DELAI D'UN RENVOI (relecture adverse du lot 1). Premier jet : `fetch`
+// nu, sans delai. En 4G sans debit, la connexion reste ouverte sans donnees
+// jusqu'a ce que la pile TCP abandonne (plusieurs minutes, plus de dix sous
+// Android) ; pendant ce temps, le verrou du renvoi -- et celui des autres
+// onglets -- restait tenu, et chaque essai toutes les 20 s ne faisait rien.
+// Un renvoi qui depasse ce delai est ABANDONNE (le signal coupe la requete)
+// et compte comme un echec reseau : on s'arrete, sans incrementer. S'il avait
+// ete applique, la cle X-Sereo-Geste le fera reconnaitre au renvoi suivant.
+export const DELAI_RENVOI_MS = 15_000;
+
+function envoyerAvecDelai(envoyer, entree, delaiMs) {
+  const ac = typeof AbortController !== "undefined" ? new AbortController() : null;
+  let minuteur;
+  const delai = new Promise((_, ko) => {
+    minuteur = setTimeout(() => {
+      if (ac) ac.abort();
+      ko(new Error("Renvoi abandonne : delai depasse."));
+    }, delaiMs);
+  });
+  // La course, en plus du signal : un `envoyer` qui ignorerait le signal ne
+  // tiendrait pas la file pour autant.
+  const envoi = Promise.resolve().then(() => envoyer(entree.url, {
+    method: entree.methode,
+    headers: entree.entetes,
+    body: entree.corps,
+    ...(ac ? { signal: ac.signal } : {})
+  }));
+  return Promise.race([envoi, delai]).finally(() => clearTimeout(minuteur));
+}
 
 /**
  * Rejoue la file, dans l'ORDRE DE DEPOT.
@@ -168,6 +223,8 @@ export const ESSAIS_MAX = 5;
  * plafond la premiere. La sauter enverrait la deuxieme ecriture avant la
  * premiere : "livree" avant "en preparation". Bloquer est le comportement
  * correct, et il rend le probleme VISIBLE au lieu de reordonner en silence.
+ * (Depuis le 23/09, bloquer n'est plus abandonner : l'entree est retentee
+ * toutes les PAUSE_MAX_MS, voir plus haut.)
  *
  * CE QUI N'EST PAS UN REFUS (lot 1 de l'audit geo, 23/09) :
  *  - 401 (session expiree) et 429 (connexion verrouillee) : ce n'est pas
@@ -190,8 +247,15 @@ export const ESSAIS_MAX = 5;
  * la meme chose quand il existe ; la cle X-Sereo-Geste rend de toute facon un
  * double envoi inoffensif cote serveur.
  *
- * @param {Function} envoyer  (url, options) => Response
+ * Un 5xx met l'entree en PAUSE (pauseApresEchecs) ; `enPause` le dit, et
+ * `arrete` dit que le passage s'est arrete sur un echec -- l'appelant ne doit
+ * pas relancer aussitot un passage qui s'arreterait au meme endroit.
+ *
+ * @param {Function} envoyer  (url, options) => Response ; options.signal coupe l'envoi
+ * @param {{maintenant?: Function, delaiEnvoiMs?: number}} [reglages]  l'horloge et le
+ *        delai d'un envoi (DELAI_RENVOI_MS) ; les bancs les remplacent
  * @returns {{envoyees: number, refusees: number, restantes: number, bloquee: boolean,
+ *            enPause: boolean, arrete: boolean,
  *            authRequise: boolean, refus: Array<{resume: object|null, statut: number}>}}
  */
 const STATUTS_AUTH = new Set([401, 429]);
@@ -200,22 +264,26 @@ const STATUTS_TRANSPORT = new Set([408, 502, 503, 504]);
 let rejeuEnCours = null;
 let rejeuRedemande = false;
 
-export function rejouer(envoyer) {
+export function rejouer(envoyer, reglages = {}) {
   if (rejeuEnCours) {
     rejeuRedemande = true;
     return rejeuEnCours;
   }
+  const maintenant = typeof reglages.maintenant === "function" ? reglages.maintenant : () => Date.now();
+  const delaiEnvoiMs = Number(reglages.delaiEnvoiMs) > 0 ? Number(reglages.delaiEnvoiMs) : DELAI_RENVOI_MS;
   rejeuEnCours = (async () => {
-    const bilan = { envoyees: 0, refusees: 0, restantes: 0, bloquee: false, authRequise: false, refus: [] };
+    const bilan = { envoyees: 0, refusees: 0, restantes: 0, bloquee: false, enPause: false, arrete: false, authRequise: false, refus: [] };
     try {
       let passage;
       do {
         rejeuRedemande = false;
-        passage = await sousVerrou(() => unPassage(envoyer));
+        passage = await sousVerrou(() => unPassage(envoyer, maintenant, delaiEnvoiMs));
         bilan.envoyees += passage.envoyees;
         bilan.refusees += passage.refusees;
         bilan.refus.push(...passage.refus);
         bilan.bloquee = passage.bloquee;
+        bilan.enPause = passage.enPause;
+        bilan.arrete = passage.arrete;
         bilan.authRequise = passage.authRequise;
       } while (rejeuRedemande && !passage.arrete);
       bilan.restantes = (await lireFile()).length;
@@ -235,19 +303,23 @@ function sousVerrou(travail) {
   return travail();
 }
 
-async function unPassage(envoyer) {
+async function unPassage(envoyer, maintenant, delaiEnvoiMs) {
   const file = await lireFile();
-  const passage = { envoyees: 0, refusees: 0, bloquee: false, authRequise: false, arrete: false, refus: [] };
+  const passage = { envoyees: 0, refusees: 0, bloquee: false, enPause: false, authRequise: false, arrete: false, refus: [] };
 
   for (const entree of file) {
-    if ((entree.essais || 0) >= ESSAIS_MAX) { passage.bloquee = true; passage.arrete = true; break; }
+    const essais = entree.essais || 0;
+    // En pause apres un 5xx : rien ne part, la suite attend derriere elle.
+    // Une entree bloquee sans heure d'echec (deposee avant la pause) repart.
+    if (essais > 0 && maintenant() - (Number(entree.dernierEchec) || 0) < pauseApresEchecs(essais)) {
+      passage.bloquee = essais >= ESSAIS_MAX;
+      passage.enPause = true;
+      passage.arrete = true;
+      break;
+    }
     let reponse;
     try {
-      reponse = await envoyer(entree.url, {
-        method: entree.methode,
-        headers: entree.entetes,
-        body: entree.corps
-      });
+      reponse = await envoyerAvecDelai(envoyer, entree, delaiEnvoiMs);
     } catch {
       // Reseau toujours coupe. On s'arrete, l'ordre est preserve -- et on
       // N'INCREMENTE PAS. Le compteur existe pour arreter une entree EMPOISONNEE,
@@ -276,7 +348,9 @@ async function unPassage(envoyer) {
       passage.refusees++;
       passage.refus.push({ resume: entree.resume || null, statut });
     } else {
-      await incrementerEssais(entree);
+      await incrementerEssais(entree, maintenant());
+      passage.bloquee = essais + 1 >= ESSAIS_MAX;
+      passage.enPause = true;
       passage.arrete = true;
       break;
     }

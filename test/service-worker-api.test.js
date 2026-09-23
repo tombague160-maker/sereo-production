@@ -160,3 +160,44 @@ test("sw — apres une ecriture, un reseau en panne reste un ECHEC, pas une copi
   const { reponse } = demander(sw, "/api/routes", { "X-Sereo-Frais": "1" });
   await assert.rejects(reponse, /Failed to fetch/, "la copie d'avant le geste a ete servie");
 });
+
+// Relecture adverse du lot 1 : une reponse TARDIVE rangeait l'etat d'avant le
+// geste PAR-DESSUS la reponse fraiche d'une requete partie apres elle.
+function reseauScripte(etapes) {
+  let i = 0;
+  return () => {
+    const { ms, corps } = etapes[Math.min(i++, etapes.length - 1)];
+    return reseauLent(ms, corps)();
+  };
+}
+
+test("sw — une reponse tardive ne range JAMAIS un etat plus vieux que la copie", async () => {
+  // L1 part avant « Livre » (reponse a 250 ms) ; L2, frais, part apres et
+  // repond a 20 ms. La reponse de L1 arrive la derniere.
+  const sw = chargerServiceWorker(reseauScripte([
+    { ms: 250, corps: { arret: "en_livraison" } },
+    { ms: 20, corps: { arret: "livre" } }
+  ]));
+  await semerCopie(sw, "/api/routes", { arret: "en_livraison" });
+  const l1 = demander(sw, "/api/routes");
+  await attendre(60);                        // le repli de L1 est pris (30 ms)
+  const l2 = demander(sw, "/api/routes", { "X-Sereo-Frais": "1" });
+  assert.deepEqual(await (await l2.reponse).json(), { arret: "livre" }, "prealable : L2 rend l'etat d'apres le geste");
+  await attendre(20);
+  assert.deepEqual(await lireCopie(sw, "/api/routes"), { arret: "livre" }, "prealable : L2 a range l'etat d'apres le geste");
+  await Promise.all([...l1.attentes, ...l2.attentes]);
+  await attendre(20);
+  assert.deepEqual(await lireCopie(sw, "/api/routes"), { arret: "livre" },
+    "la reponse tardive de L1 a ecrase la copie : l'arret livre reapparaitra « En livraison »");
+  assert.equal(sw.messages.length, 0, "une reponse perimee a ete annoncee a la page");
+});
+
+test("sw — temoin : une reponse tardive SANS requete plus recente est bien rangee", async () => {
+  const sw = chargerServiceWorker(reseauScripte([{ ms: 150, corps: { arret: "livre" } }]));
+  await semerCopie(sw, "/api/routes", { arret: "en_livraison" });
+  const l1 = demander(sw, "/api/routes");
+  await l1.reponse;
+  await Promise.all(l1.attentes);
+  await attendre(20);
+  assert.deepEqual(await lireCopie(sw, "/api/routes"), { arret: "livre" });
+});
