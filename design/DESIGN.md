@@ -1808,8 +1808,9 @@ défiler. Pas de puce « 18 km restants » : le reste n'est calculé nulle part.
 
 **Préparer (4a).** Au téléphone, la commande prête se lit comme la planche : le client, puis
 « CMD-2026-009 · 2 articles » (articles = lignes, le même mot que « n articles à décharger »).
-L'adresse, la date, le téléphone et le badge quittent la ligne ; l'avertissement d'adresse
-incomplète reste. **Gardés hors planche** : les filtres date / secteur / ville et les trois
+L'adresse, le téléphone et le badge quittent la ligne ; l'avertissement d'adresse
+incomplète reste. Le jour et le secteur restent, dessous (corrigé par la revue du 23/09, voir
+plus bas). **Gardés hors planche** : les filtres date / secteur / ville et les trois
 boutons de sélection. **Omis** : « 38 km · 1 h 25 » recalculés à chaque coche (aucun calcul
 avant la création de la tournée), les pilules de secteur de la planche (le filtre « Secteur »
 existe), et le pied collant « n arrêts sélectionnés · Créer la tournée » (le compte et le
@@ -1842,3 +1843,43 @@ l'arrêt). Gardés : « Retour accueil », « Voir à recommander ».
 *Bancs : `tournee-mobile.spec.js` (9 cas, ports 3175 et 3181) ; `ecran-livreur.spec.js` et
 `carte-et-lignes.spec.js` mis à jour (libellés et 56 px ; 44 px, 7 px et liseré) ;
 `operations.spec.js` attend l'envoi différé (10 s au lieu de 5).*
+
+### Tournée mobile — revue adverse, corrigée le 23/09
+
+Une relecture adverse du lot a nommé cinq défauts. Les cinq sont vrais ; les cinq sont
+corrigés, chacun avec un banc qui échoue sans le correctif.
+
+- **« Livré » en réseau lent livrait un arrêt jamais vu.** L'envoi d'une livraison en
+  suspens attendait le `PATCH` et le rechargement sans rien bloquer : un appui impatient
+  posait B en suspens, l'appui précédent reprenait, lisait l'arrêt de l'écran (devenu C)
+  et écrasait B ; au terme du toast de B, c'est C qui partait. **Décision** : le geste vise
+  l'arrêt de l'écran **à l'appui** ; après l'attente, il n'agit que si cet arrêt est encore
+  à l'écran et qu'aucune autre livraison n'est en suspens. Pendant l'attente, les gestes
+  d'arrêt sont **désactivés** (le livreur voit que l'appui est pris). Le terme d'un toast
+  n'envoie que **sa** livraison. Le garde de 700 ms du double appui reste.
+- **Hors ligne, le geste qui suivait un « Livré » était perdu sous « enregistré ».** La mise
+  en file de la livraison en suspens arrêtait le geste suivant (Livré, Client absent,
+  Problème). **Décision** : une mise en file n'est pas un échec — elle est annoncée, et le
+  geste continue ; il rejoint la file à son tour. Un refus du serveur, lui, arrête toujours
+  le geste (l'écran vient d'être rechargé).
+- **Préparer (4a) : la ligne ne disait plus le jour.** Le filtre par défaut mélange les dates
+  et les secteurs, et la carte n'a **aucun détail** (une case à cocher) : deux commandes du
+  même EHPAD, aujourd'hui et demain, se lisaient pareil. **Décision** : sous « CMD-… · n
+  articles », une ligne de contexte, 13 px, texte secondaire : le **jour** et le **secteur**
+  toujours, la **priorité** si elle n'est pas la normale, « **À reprogrammer** » (le seul
+  statut qui n'est pas « Prêt »). **Écart nommé** : la planche n'a pas cette ligne — son
+  en-tête dit le jour, et ses pilules de secteur, non posées, disaient le secteur.
+- **« Recalculer le tracé » cerclé sur une tournée partie.** Le serveur refuse le recalcul
+  dès le départ (« Recalcule avant le départ. ») : le cercle invitait à un refus. Il ne se
+  pose plus que sur une tournée **prête** sans tracé — le cas de la planche (réordonner
+  n'est possible qu'avant le départ).
+- **Fin de tournée (4d) : les gestes d'arrêt restaient collés.** Six boutons inertes, ~200 px
+  au-dessus de la barre basse, sur la lecture des chiffres. Au téléphone, ils disparaissent
+  quand l'écran de fin est rendu ; « Retour accueil » et « Voir à recommander » restent.
+  **Gardé** : au bureau (ils n'y collent pas), les gestes désactivés restent visibles, comme
+  avant ce lot.
+
+*Bancs : `tournee-mobile.spec.js`, 12 cas (ports 3175 et 3181, inchangés) — deux neufs
+(réseau lent : `PATCH` retardé de 2,5 s ; hors ligne : la file indexedDB réelle, puis le
+rejeu), trois renforcés (4a : le jour et deux commandes du même client ; 4c : une tournée
+« prête » lue par interception, et la tournée partie ; 4d : les gestes masqués).*

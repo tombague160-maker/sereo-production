@@ -59,6 +59,12 @@ let route = [];
 let activeRoute = null;
 let currentIndex = -1;
 let activeStopIndex = 0;
+// Nombre d'attentes d'envoi d'une livraison en cours (voir solderLivraisonEnSuspens) :
+// les gestes d'arret sont desactives pendant ce temps. Le livreur voit que son
+// appui est pris, et ne relance pas « Livre » sur un ecran qui n'a pas encore
+// bouge (revue du 23/09 : en reseau lent, l'appui impatient livrait l'arret
+// SUIVANT, jamais vu).
+let gestesVerrouilles = 0;
 let markers = [];
 let routeLine = null;
 let routeLineLisere = null;
@@ -5260,6 +5266,7 @@ function renderDeliveryCandidates() {
       <span class="delivery-card-body">
         <span class="delivery-card-title">${escapeHtml(order.clientName)}</span>
         <span class="delivery-card-court">${escapeHtml([order.numero, articlesDeCommande(order)].filter(Boolean).join(" · "))}</span>
+        <span class="delivery-card-contexte">${escapeHtml(contexteDeCommandePrete(order))}</span>
         <span class="delivery-card-adresse">${escapeHtml(formatOrderAddress(order))}</span>
         <span class="order-meta">
           <span>${escapeHtml(formatSectorLabel(order.sector))}</span>
@@ -5274,6 +5281,23 @@ function renderDeliveryCandidates() {
     `;
     container.appendChild(label);
   });
+}
+
+/**
+ * Planche 4a, au telephone : ce qui DISTINGUE deux commandes pretes du meme
+ * client. La planche n'en a pas besoin (son en-tete dit le jour) ; ici le
+ * filtre par defaut melange les dates et les secteurs, et la ligne n'a pas de
+ * detail ou les lire. Le jour et le secteur toujours ; la priorite si elle
+ * n'est pas la normale ; « A reprogrammer », seul statut qui n'est pas « Pret ».
+ */
+function contexteDeCommandePrete(order) {
+  const priorite = String(order.priority || "").trim();
+  return [
+    order.deliveryDate ? formatDeliveryDate(order.deliveryDate) : "Sans date",
+    formatSectorLabel(order.sector),
+    priorite && !/normal/i.test(priorite) ? priorite : "",
+    order.status === "a_reprogrammer" ? formatOrderStatus(order.status) : ""
+  ].filter(Boolean).join(" · ");
 }
 
 function setDeliverySelection(orderId, checked) {
@@ -5381,7 +5405,9 @@ function renderRoute() {
   // Planche 4c : sans trace routier (reordonnee a la main, ou jamais calculee),
   // la carte dessine un pointille ; « Recalculer le trace » se signale alors,
   // cercle d'accent. Meme critere que renderMap : la geometrie.
-  const traceARefaire = !activeRoute.geometry?.coordinates && !isRouteComplete(activeRoute);
+  // Seulement AVANT le depart : le serveur refuse le recalcul d'une tournee
+  // partie (« Recalcule avant le départ. ») -- un cercle y inviterait a un refus.
+  const traceARefaire = activeRoute.status === "prete" && !activeRoute.geometry?.coordinates;
   document.querySelectorAll('[data-op="recalculate-route"]').forEach(bouton =>
     bouton.classList.toggle("trn-recalculer--requis", traceARefaire));
   setButtonDisabled("startRouteButton", activeRoute.status === "en_livraison" || isRouteComplete(activeRoute));
@@ -5687,7 +5713,11 @@ function demanderMotif(status, motifs) {
 /** Le geste complet : demander la raison, puis envoyer. */
 async function marquerArret(status) {
   // Une livraison en suspens part d'abord : jamais deux gestes en attente.
-  await envoyerLivraisonEnSuspens();
+  // Le geste vise l'arret de l'ecran a l'appui ; si l'attente l'a change, on
+  // n'agit pas sur un autre.
+  const vise = activeRoute ? arretVise() : null;
+  await solderLivraisonEnSuspens();
+  if (vise && !arretToujoursVise(vise)) return;
   let motif = null;
   if (STATUTS_DEMANDANT_UN_MOTIF.has(status)) {
     let motifs = [];
@@ -5749,10 +5779,54 @@ async function updateCurrentDeliveryStatus(status, motif = null) {
 // jamais deux livraisons en suspens), et la page qui passe en arriere-plan
 // (verrouillage du telephone, appel, Google Maps ouvert par « Y aller »).
 let livraisonEnSuspens = null;
+// L'envoi en route d'une livraison (sa promesse), du PATCH a la fin du
+// rechargement. Un geste d'arret l'attend avant d'agir.
+let envoiLivraison = null;
+// Pendant cette attente, les gestes d'arret sont desactives (gestesVerrouilles,
+// declare en tete : updateDriverActionButtons le lit des le premier rendu).
 // Le bouton ne se desactive pas (l'arret suivant le reprend aussitot) : un
 // double appui livrerait DEUX arrets. Un second appui trop proche est ignore.
 const LIVRE_DOUBLE_APPUI_MS = 700;
 let dernierAppuiLivre = 0;
+
+/** L'arret que le livreur a sous les yeux au moment de son geste. */
+function arretVise() {
+  const stop = activeRoute?.stops[activeStopIndex];
+  return stop ? { routeId: String(activeRoute.id), stopId: String(stop.id) } : null;
+}
+
+/** Cet arret est-il encore celui de l'ecran ? (apres une attente reseau) */
+function arretToujoursVise(vise) {
+  const stop = activeRoute?.stops[activeStopIndex];
+  return Boolean(vise && stop && String(activeRoute.id) === vise.routeId && String(stop.id) === vise.stopId);
+}
+
+/**
+ * Avant un geste d'arret : la livraison en suspens part, et tout envoi deja en
+ * route est attendu. Hors ligne, la livraison est mise en file -- ce n'est pas
+ * un echec : on l'annonce, et le geste continue (il n'etait pas perdu, le
+ * suivant non plus). Un refus du serveur, lui, arrete le geste : l'ecran vient
+ * d'etre recharge.
+ */
+async function solderLivraisonEnSuspens() {
+  const lanceIci = Boolean(livraisonEnSuspens);
+  const envoi = lanceIci ? envoyerLivraisonEnSuspens() : envoiLivraison;
+  if (!envoi) return;
+  gestesVerrouilles++;
+  updateDriverActionButtons();
+  try {
+    await envoi;
+  } catch (error) {
+    // Un envoi lance ailleurs (terme du toast) annonce lui-meme son echec.
+    if (lanceIci) {
+      if (error && error.enFile) notifyEchec(error);
+      else throw error;
+    }
+  } finally {
+    gestesVerrouilles--;
+    updateDriverActionButtons();
+  }
+}
 
 async function livrerAvecAnnulation() {
   const maintenant = Date.now();
@@ -5762,12 +5836,19 @@ async function livrerAvecAnnulation() {
     await updateCurrentDeliveryStatus("livre");
     return;
   }
-  await envoyerLivraisonEnSuspens();
-  const stop = activeRoute.stops[activeStopIndex];
-  if (!stop) {
+  // L'arret livre est celui de l'ecran A L'APPUI, jamais celui qu'on trouve
+  // apres l'attente reseau.
+  const vise = arretVise();
+  if (!vise) {
     notify("Aucun arrêt sélectionné.", "warning");
     return;
   }
+  await solderLivraisonEnSuspens();
+  // Pendant l'attente, l'ecran a pu avancer (un autre appui, un rechargement) :
+  // on ne livre que l'arret vise, s'il est encore a l'ecran, et jamais
+  // par-dessus une autre livraison en suspens.
+  if (livraisonEnSuspens || !arretToujoursVise(vise)) return;
+  const stop = activeRoute.stops[activeStopIndex];
   if (activeRoute.status !== "en_livraison" || isStopTerminal(stop.status)) return;
 
   const suspens = {
@@ -5788,7 +5869,8 @@ async function livrerAvecAnnulation() {
 
   suspens.toast = notify(`Livré — ${stop.clientName || "arrêt"}`, "success", {
     action: { libelle: "Annuler", surClic: () => annulerLivraisonEnSuspens(suspens) },
-    auTerme: () => { envoyerLivraisonEnSuspens().catch(notifyEchec); }
+    // Au terme, c'est CETTE livraison qui part, pas celle du moment.
+    auTerme: () => { envoyerLivraisonEnSuspens(suspens).catch(notifyEchec); }
   });
 }
 
@@ -5818,28 +5900,37 @@ function annulerLivraisonEnSuspens(suspens) {
   document.getElementById("markDeliveredButton")?.focus({ preventScroll: true });
 }
 
-/** Envoie la livraison en suspens, s'il y en a une. Rend quand c'est fait. */
-async function envoyerLivraisonEnSuspens() {
+/**
+ * Envoie la livraison en suspens, s'il y en a une (et, si `attendu` est donne,
+ * seulement si c'est encore elle). Rend quand c'est fait.
+ */
+function envoyerLivraisonEnSuspens(attendu = null) {
   const s = livraisonEnSuspens;
-  if (!s) return;
+  if (!s || (attendu && s !== attendu)) return Promise.resolve();
   livraisonEnSuspens = null;
   retirerToast(s.toast);
-  try {
-    await apiFetch(`/api/routes/${encodeURIComponent(s.routeId)}/stops/${encodeURIComponent(s.stopId)}`, {
-      method: "PATCH",
-      // keepalive : l'envoi declenche par `pagehide` survit a la page.
-      keepalive: true,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "livre", motif: null })
-    });
-  } catch (error) {
-    // Mise en file hors ligne : l'ecriture partira au retour du reseau.
-    // L'ecran garde « Livre » -- recharger depuis le cache le defairait.
-    if (error && error.enFile) throw error;
+  const envoi = (async () => {
+    try {
+      await apiFetch(`/api/routes/${encodeURIComponent(s.routeId)}/stops/${encodeURIComponent(s.stopId)}`, {
+        method: "PATCH",
+        // keepalive : l'envoi declenche par `pagehide` survit a la page.
+        keepalive: true,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "livre", motif: null })
+      });
+    } catch (error) {
+      // Mise en file hors ligne : l'ecriture partira au retour du reseau.
+      // L'ecran garde « Livre » -- recharger depuis le cache le defairait.
+      if (error && error.enFile) throw error;
+      await loadData();
+      throw error;
+    }
     await loadData();
-    throw error;
-  }
-  await loadData();
+  })();
+  envoiLivraison = envoi;
+  const liberer = () => { if (envoiLivraison === envoi) envoiLivraison = null; };
+  envoi.then(liberer, liberer);
+  return envoi;
 }
 
 document.addEventListener("visibilitychange", () => {
@@ -6095,7 +6186,8 @@ function updateDriverActionButtons(target = getCurrentDeliveryTarget()) {
   const hasTarget = Boolean(target);
   const routeStarted = activeRoute ? activeRoute.status === "en_livraison" : hasTarget;
   const terminalStop = activeRoute ? isStopTerminal(target?.status) : false;
-  const canChangeStatus = hasTarget && routeStarted && !terminalStop;
+  // Pendant l'envoi d'une livraison, les gestes d'arret attendent (solderLivraisonEnSuspens).
+  const canChangeStatus = hasTarget && routeStarted && !terminalStop && !gestesVerrouilles;
   const hasNextStop = activeRoute
     ? activeRoute.stops.some((stop, index) => index > activeStopIndex && !isStopTerminal(stop.status))
     : currentIndex >= 0 && currentIndex < route.length - 1;
