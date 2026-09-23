@@ -71,7 +71,10 @@ test("la ligne fait 96 px : client et état, échéance et fréquence, panier et
     };
   }));
   expect(r.length).toBe(6);
-  expect(r.filter(l => l.lignesDeNom === 1).map(l => l.h)).toEqual(r.filter(l => l.lignesDeNom === 1).map(() => 96));
+  // Temoin : des noms tiennent sur une ligne (sinon le cas suivant ne jugerait rien).
+  const simples = r.filter(l => l.lignesDeNom === 1);
+  expect(simples.length).toBeGreaterThanOrEqual(3);
+  expect(simples.map(l => l.h)).toEqual(simples.map(() => 96));
   expect(r.filter(l => l.lignesDeNom > 1 && l.h > 117)).toEqual([]);
   expect(r.every(l => l.rythme && l.panier && !l.disque && l.badgeEnHaut)).toBe(true);
   // Le retard : « Echeance du ... » en couleur d'alerte.
