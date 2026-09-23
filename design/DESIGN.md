@@ -5876,3 +5876,96 @@ Quatre défauts relevés sur `626bc59`, chacun mesuré avant d'être jugé. CSS 
 texte-coupe, par mutant (le libellé de « Nouveau client » rogné à 40 px dans
 `#gestesBas`, restauré par copie) : le banc d'avant reste **vert** (440 textes, 0 coupé) ;
 celui-ci rougit, `[crm] SPAN « Nouveau client » : 79px de trop`.
+
+## 24/09 — Le jour calendaire est celui de Paris
+
+Branche `integration/derniers-points`, commit `78679b0` sur `d80eadf`.
+
+**Le défaut** (le « défaut 7 », laissé ouvert au lot 1 de l'audit géo). Mesuré en CI le
+23/09 à 22:10 UTC (00:10 à Paris le 24) : `ecrans-sans-planche.spec.js:142` rouge 3 fois
+sur 3, « barres avec vente : Expected > 0, Received 0 ». En production le conteneur n'a
+pas de `TZ` : le processus tourne en **UTC**. `computeStatistics` prenait « aujourd'hui »
+par `getDate()` et le jour d'une vente en tronquant `deliveredAt` (ISO en UTC) : entre
+minuit et 2 h (1 h l'hiver), heure de Paris, le serveur vivait **la veille**. Reproduit en
+local le 23/09 à 22:45 UTC en lançant le banc avec `TZ=UTC` (rouge identique ; sans `TZ`,
+vert : le poste est à Paris).
+
+**La règle.** Tout jour calendaire tiré d'un **instant** (maintenant, `deliveredAt`,
+`createdAt`, `confirmedAt`, `dateImport`) est le jour **à Paris**, quel que soit le fuseau
+du processus. Une **date sans heure** (`deliveryDate`, `dateCommande`, `datePrevue`,
+`startDate`, une date Excel) ne se décale jamais. Un seul module, `lib/jour-paris.js` :
+`jourParis(instant)` (Intl, `Europe/Paris`, par `formatToParts`) ; `jourDeLInstant(v)`
+(un ISO **avec fuseau** est un instant ; sans fuseau, c'est l'heure du mur, lue telle
+quelle) ; l'arithmétique des clés `YYYY-MM-DD` en UTC pur (`ajouterJours`,
+`debutSemaine` au lundi, `debutMois`, `moisSuivant`, `moisPrecedent`).
+`lib/operations-api.js` (qui lisait déjà Paris) délègue désormais à ce module.
+`startOfLocalDay` et `startOfWeekMonday` sont retirées : elles n'existaient que pour ce
+calcul faux.
+
+**Les occurrences, classées.** (a) = instant → jour : passe par `jourParis` ;
+(b) = date sans heure déjà, ou arithmétique symétrique : inchangée.
+
+| Où (`server.js` sauf mention) | Quoi | Classe |
+|---|---|---|
+| `computeStatistics` | aujourd'hui, semaine, mois, mois précédent, 14 jours, nouveaux clients (`createdAt`), convertis (`crmConvertedAt`) ; jour d'une vente = `jourParis(deliveredAt)`, sinon `deliveryDate`, sinon `dateCommande` | (a) |
+| `orderDate` | `createdAt` quand `dateCommande` manque ; `dateCommande` telle quelle | (a) / (b) |
+| `normalizeOrder` | défaut « aujourd'hui », et le jour de `dateImport`/`createdAt` si `dateCommande` manque ; une `dateCommande` ISO avec heure reste tronquée (banc `p1-verify` Lot2.c) | (a) / (b) |
+| `ensureOrderNumbers` | `dateCommande` manquante tirée de `dateImport`/`createdAt` | (a) |
+| `extractYear` | année de repli (le 31/12 à 23:30 UTC, c'est déjà l'an neuf) | (a) |
+| `getDashboardSummary`, `getReminderViews` (+ « 7 jours »), `GET /api/crm/clients` | « aujourd'hui » | (a) |
+| `normalizeCrmReminder`, `validateCrmClientPayload`, `createCustomerOrder`, `createPlannedOrder`, commande de repli d'un client, import des ventes sans date, validation de préparation sans `deliveryDate`, `getCustomerOrdersForDate` | date du jour **par défaut** | (a) |
+| `confirmPlannedOrder` | `dateRealisation` du rappel et `lastVisitDate` tirés de `confirmedAt` | (a) |
+| `nextSectorDeliveryDate` | le point de départ (« aujourd'hui ») ; le reste en clés UTC | (a) |
+| purge des tournées | la date du **libellé** (la borne compare des instants, sans jour) | (a) |
+| `nomDeTournee` | jour de `createdAt` | déjà Paris |
+| `lib/operations-api.js` | `todayParis`, jour d'une vente | déjà Paris (délègue) |
+| `lib/subscriptions.js` | `ymd`, `occurrenceDate`, `schedule`, `isOccurrence` : clés ancrées à `T12:00:00Z`, `today` reçu de l'appelant | (b) |
+| `dimancheDePaques`, `joursFeriesFrance`, `alerteDateNonOuvree` | clés construites en heure locale **et relues** en heure locale : aucun instant ne traverse un fuseau | (b) |
+| `createAutomaticOrderReminder` (`dateFromYmd`, `addDays`, `toYmd`) | J-7 d'une `deliveryDate` : même symétrie | (b) |
+| `normalizeDateInput(Date)`, `excelDate` | dates Excel (minuit UTC) : lues en UTC | (b) |
+| `computeOrderHash`, `normalizeClient` (`firstContactDate`, `datePremierContact`, `dateCreation`), `crmClientView` | dates sans heure | (b) |
+| `storage/sqliteStore.js` | horodatages seulement, jamais un jour | hors classe |
+
+**Bancs.** `test/jour-paris.test.js` (13 cas) : le processus passe en UTC avant tout
+calcul (`process.env.TZ = "UTC"` : Node le prend en cours de route, Windows compris) et
+un **témoin** le vérifie (décalage 0 l'été et l'hiver, `getDate()` rend la veille de
+Paris) ; l'instant est **injecté** (`mock.timers` sur `Date`) : le banc ne dépend pas de
+l'heure où on le lance. Cas : 23:30 UTC le 23/09 (livraison de la nuit comptée le 24,
+« aujourd'hui » = 24, commande, rappel et premier contact sans date = 24, tableau de bord,
+secteur) ; hiver, lundi 02/11 00:30 (+1 h seulement : 22:30 UTC reste dimanche ; la
+semaine commence le lundi de Paris) ; réveillon 31/12 23:30 UTC (mois, année, numéro de
+commande 2027, nouveaux clients de janvier, année de repli).
+
+**Preuves rouges** (le banc sur le `server.js` de `d80eadf`, restauré par copie) : 9 cas
+sur 13 rouges, chacun de la bonne cause — `'2026-09-23'` au lieu de `'2026-09-24'`
+(dernière barre, commande sans date, rappel sans date), `'2026-11-01'` au lieu de
+`'2026-11-02'`, `'2026-12-31'` au lieu de `'2027-01-01'` (barre et commande),
+`deliveryToday` 0 au lieu de 1, secteur `'2026-09-23'` au lieu de `'2026-10-23'`, année
+2026 au lieu de 2027. Les 4 verts sont le témoin et le module (neuf). **Mutants** sur le
+nouveau code : décalage fixe « +2 h » → rouge (hiver : `'2026-11-02'` au lieu de
+`'2026-11-01'`, `today` 2 commandes au lieu d'1) ; nouveaux clients par troncature UTC →
+rouge (0 au lieu de 1) ; `deliveredAt` tronqué en UTC → rouge (la livraison de 01:15 :
+0 au lieu d'1). **Contre-témoin** : sans la ligne `TZ`, le témoin rougit (décalage −120),
+les 12 autres passent — le nouveau code ne dépend plus du fuseau.
+
+**Deux oracles de bancs existants** calculaient « aujourd'hui » en heure du processus :
+`api.test.js` (deux cas de statistiques, `getDate()`) et `p1-verify.test.js` Lot2.b/d
+(`toISOString`). Lancés en UTC entre 22 h et minuit UTC, ils rougissaient **avec** le
+correctif (ils encodaient le défaut) ; ils calculent désormais le jour de Paris, sans
+passer par le module (un oracle ne se valide pas avec le code qu'il juge).
+
+**e2e, serveur en `TZ=UTC`, dans la fenêtre** (le 23/09 entre 22:45 et 23:21 UTC, soit
+00:45–01:21 à Paris) : ancien code, `ecrans-sans-planche:142` rouge (`Expected > 0,
+Received 0`), vert sans `TZ` ; nouveau code, les dix fichiers qui montrent des dates
+(143 cas) verts — au second passage : le premier, lancé juste après le correctif, en
+avait 5 rouges et 76 non joués (dont un dialogue d'abonnement pas ouvert en 5 s), et
+ces cinq fichiers repassent tous seuls en UTC (81 cas). Suite complète : un premier passage à 524/525 (`parametres-mobile:309`,
+un tableau pas encore rendu sous charge : 16/16 dans son fichier et 5/5 seul, en UTC —
+pas une date), puis, sur l'arbre final, **525/525** (23:17–23:21 UTC).
+
+**Ce qui reste.** Côté navigateur (hors de ce lot) : `public/js/app.js` nomme le CSV
+exporté par `toISOString().slice(0, 10)`, et `public/js/domains/tournee-pratique.js`
+`jourDe()` range une tournée sans `deliveryDate` au jour UTC de `completedAt` — même
+classe, entre minuit et 2 h. Deux oracles e2e prennent l'année par `getFullYear()`
+(`parametres.spec.js`, `parametres-mobile.spec.js`) : faux une heure par an, le
+31/12 après 23 h UTC.
