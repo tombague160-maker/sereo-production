@@ -1648,6 +1648,61 @@ planifier la suite, suivant) — ils existent et servent sur la route.
 - pas de distance par arrêt ni de « km restants » : la planche ne dit pas de quoi c'est la
   distance, et rien ne la calcule côté navigateur.
 
+### Paramètres des planches 13f/14f, posé le 23/09 — une grille de cartes
+
+La grille de la planche : **Thème**, **Secteurs**, **Numérotation des bons** (4 colonnes
+chacune), puis **Comptes** et **Imports et archives** (6 colonnes). Le thème devient une
+bascule à trois segments « Clair · Sombre · Système » (44 px, la planche : 40). Les
+secteurs se montrent en pilules de nom. « Numérotation des bons » est **neuve à
+l'écran** mais pas au serveur : `GET / PATCH /api/settings/order-numbering` existait
+sans interface ; la carte montre le prochain numéro (« CMD-2026-001 »).
+
+**Gardés, hors planche** (règle : ce qui existe et n'est pas dessiné est gardé, dans
+l'idiome de la planche, et nommé) :
+
+- le **logo**, dans la carte Thème, derrière « Logo de l'application » ;
+- la **fiche de chaque secteur** (ville, jour, départ, fréquence) et son formulaire,
+  derrière « Gérer les secteurs » ;
+- le **tableau des comptes** complet (rôle, état, mot de passe, suppression) — la planche
+  n'en montre qu'une ligne ;
+- le **tableau des imports** et ses téléchargements ;
+- les **réglages de tournée** (vitesse, durée d'arrêt) et le **diagnostic des dates**, en
+  cartes de même forme ;
+- la **zone dangereuse** : la planche la réduit à une incise ; une purge définitive garde
+  son bloc, son contour d'alerte et sa liste de ce qui part et de ce qui reste.
+
+**Retiré** : le bloc « Application mobile » (deux phrases statiques, aucun réglage).
+
+**Écarts assumés** : Comptes et Imports prennent chacun **toute la largeur** (la planche :
+côte à côte) — à demi-largeur, le tableau des comptes (cinq colonnes) cassait ses libellés
+lettre par lettre, défaut déjà mesuré et corrigé une fois. « Prochain bon » affiche le
+**vrai** prochain numéro, par la règle du serveur (le plus grand de ce préfixe — et de
+cette année — plus un ; trois chiffres par année, cinq en compteur continu) : un
+« CMD-2026-001 » d'exemple aurait promis un numéro que le serveur ne donnera jamais sur
+une base qui a des commandes.
+
+**Réserve nommée** : `GET / PATCH /api/settings/order-numbering` n'exige pas le rôle
+d'administration ; la carte rend le réglage atteignable pour tout compte connecté.
+Tant que la séparation des rôles est éteinte, tout le monde voit tout ; le jour où elle
+s'allume, ce point est à fermer côté serveur.
+
+### Connexion des planches 9b/9c/9d, posé le 23/09
+
+Une carte centrée sur le fond de la charte et ses deux taches floues : la marque
+(« séréo » et son sourire), la phrase « Livraison de matériel médical et d'hygiène, Doubs et
+Jura. », Identifiant, Mot de passe (avec « afficher », qui n'apparaît que si le script
+tourne), « Se connecter » ; dessous, « Mot de passe oublié : voir Tom. » et la version. Clair
+et sombre suivent l'appareil (la page n'a pas encore le choix de l'utilisateur).
+Un échec (9c) passe le champ **mot de passe** en contour d'alerte avec le message dessous,
+relié au champ (`aria-describedby`), sans dire lequel des deux est faux ; le blocage (9d)
+garde son compte à rebours. Les polices sont servies **avant** la session (`/fonts`).
+
+**Écarts assumés** : « séréo » est au principal en clair (l'orange de la planche tombe à
+2,34:1 sur blanc) et à l'orange en sombre (7:1) ; le sourire garde l'orange. Pas de case
+« Rester connecté » : aucune option ne la porterait (la session dure 12 h pour tous). La
+planche écrit « Un seul compte, partagé par l'équipe » : ce n'est plus vrai depuis les
+comptes par personne, la phrase est retirée.
+
 ## 10. Guide pour l'agent
 
 - Toujours produire les deux modes (clair et sombre) avec les mêmes tokens ; lister les contrastes calculés.

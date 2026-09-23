@@ -1334,44 +1334,24 @@
       </section>
 
       <section id="parametres" class="page" role="tabpanel" aria-label="Paramètres">
-        <div class="settings-grid">
-          <div class="panel">
-            <div class="panel-heading">
-              <h3>Personnalisation de l'interface</h3>
-              <span class="muted">Mode d'affichage et logo</span>
+        <!-- PARAMETRES -- planches 13f (clair) / 14f (sombre). Une grille de
+             cartes. La planche en dessine cinq (theme, secteurs, numerotation,
+             comptes, imports) ; les reglages qu'elle ne dessine pas existent,
+             servent, et sont GARDES en cartes de meme forme (DESIGN.md). -->
+        <div class="par-grille">
+          <article class="par-carte par-span-4" aria-labelledby="parThemeTitre">
+            <h3 id="parThemeTitre">Thème</h3>
+            <div id="colorSchemeToggle" class="par-segments" role="group" aria-label="Mode d'affichage">
+              <button type="button" class="par-segment" data-action="select-color-scheme" data-color-scheme="light" aria-pressed="false">Clair</button>
+              <button type="button" class="par-segment" data-action="select-color-scheme" data-color-scheme="dark" aria-pressed="false">Sombre</button>
+              <button type="button" class="par-segment" data-action="select-color-scheme" data-color-scheme="auto" aria-pressed="true">Système</button>
             </div>
-            <div class="brand-preview">
-              <img id="brandPreviewImage" src="/brand/sereo-logo.svg?v=20260701" alt="Logo SEREO" data-brand-preview />
-
-              <div class="settings-block">
-                <div>
-                  <h4>Mode d'affichage</h4>
-                  <p class="muted">Choisis entre le mode clair, sombre, ou suivre l'appareil. Réglage par appareil.</p>
-                </div>
-                <div id="colorSchemeToggle" class="color-scheme-toggle" role="group" aria-label="Mode d'affichage">
-                  <button type="button" class="color-scheme-option" data-action="select-color-scheme" data-color-scheme="auto" aria-pressed="true">
-                    <span class="color-scheme-icon" aria-hidden="true">◐</span>
-                    <span class="color-scheme-label">Auto</span>
-                    <span class="color-scheme-hint">Suit votre appareil</span>
-                  </button>
-                  <button type="button" class="color-scheme-option" data-action="select-color-scheme" data-color-scheme="light" aria-pressed="false">
-                    <span class="color-scheme-icon" aria-hidden="true">☀</span>
-                    <span class="color-scheme-label">Clair</span>
-                    <span class="color-scheme-hint">Lumineux, journée</span>
-                  </button>
-                  <button type="button" class="color-scheme-option" data-action="select-color-scheme" data-color-scheme="dark" aria-pressed="false">
-                    <span class="color-scheme-icon" aria-hidden="true">🌙</span>
-                    <span class="color-scheme-label">Sombre</span>
-                    <span class="color-scheme-hint">Repos visuel, soir</span>
-                  </button>
-                </div>
-              </div>
-
-              <div class="settings-block">
-                <div>
-                  <h4>Photo en haut à gauche</h4>
-                  <p class="muted">Importe un logo ou une photo. Elle est enregistrée pour l'application.</p>
-                </div>
+            <p class="par-aide">Réglage de cet appareil. « Système » suit le mode clair ou sombre de l'appareil.</p>
+            <!-- Le logo : hors planche, garde. -->
+            <details class="par-details">
+              <summary>Logo de l'application</summary>
+              <div class="par-logo">
+                <img id="brandPreviewImage" src="/brand/sereo-logo.svg?v=20260701" alt="Logo SEREO" data-brand-preview />
                 <label class="file-control" for="brandImageInput">
                   Importer une image
                   <input id="brandImageInput" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" />
@@ -1379,16 +1359,22 @@
                 <p id="brandImageStatus" class="muted">Logo séréo par défaut.</p>
                 <button class="button secondary compact" type="button" data-action="reset-brand-image">Remettre le logo séréo</button>
               </div>
-            </div>
-          </div>
+            </details>
+          </article>
 
-          <div class="panel">
-            <div class="panel-heading">
-              <h3>Secteurs livraison</h3>
-              <span class="muted">Déduction automatique</span>
+          <article class="par-carte par-span-4" aria-labelledby="parSecteursTitre">
+            <div class="par-carte-tete">
+              <h3 id="parSecteursTitre">Secteurs</h3>
             </div>
-            <div id="settingsSectors" class="settings-list"></div>
-            <form id="deliverySectorForm" class="sector-form">
+            <div id="parSecteursPilules" class="par-pilules"></div>
+            <p class="par-aide">Le secteur d'une commande se déduit de sa ville. Il range la préparation et la tournée.</p>
+            <!-- La fiche de chaque secteur (ville, jour, depart, frequence) et
+                 son formulaire : hors planche (elle n'en montre que le nom),
+                 gardes derriere « Gerer ». -->
+            <details class="par-details" id="parSecteursDetails">
+              <summary>Gérer les secteurs</summary>
+              <div id="settingsSectors" class="settings-list"></div>
+              <form id="deliverySectorForm" class="sector-form">
               <div class="form-grid two">
                 <label>Secteur<input name="secteur" required /></label>
                 <label>Ville principale<input name="villePrincipale" required /></label>
@@ -1405,84 +1391,23 @@
               </div>
               <button class="button primary" type="submit">Ajouter le secteur</button>
             </form>
-          </div>
+            </details>
+          </article>
 
-          <div class="panel">
-            <div class="panel-heading">
-              <h3>Application mobile</h3>
-              <span class="muted">Base PWA</span>
-            </div>
-            <div class="settings-list">
-              <article class="item status-ok">
-                <h4>Manifest installé</h4>
-                <p>L'application peut être ajoutée à l'écran d'accueil sur les navigateurs compatibles.</p>
-              </article>
-              <article class="item status-neutral">
-                <h4>Mode livreur prioritaire</h4>
-                <p>Les boutons Appeler, Google Maps, Livré et Suivant restent accessibles sur mobile.</p>
-              </article>
-            </div>
-          </div>
+          <article class="par-carte par-span-4" aria-labelledby="parNumeroTitre">
+            <h3 id="parNumeroTitre">Numérotation des bons</h3>
+            <form id="numerotationForm" class="par-numerotation">
+              <label class="par-champ">Préfixe
+                <input id="parPrefixe" name="prefix" maxlength="8" pattern="\s*[A-Za-z0-9]{2,8}\s*" title="2 à 8 lettres ou chiffres, sans espace ni tiret" autocomplete="off" required />
+              </label>
+              <label class="par-case"><input id="parRemiseAnnuelle" name="resetAnnually" type="checkbox" /> Repartir de 1 chaque année</label>
+              <p class="par-aide" aria-live="polite">Prochain bon : <strong id="parExemple">—</strong></p>
+              <button class="button primary" type="submit">Enregistrer</button>
+            </form>
+          </article>
 
-          <!-- v1.17.1 : reglages tournee (vitesse + duree d'arret) calibrables -->
-          <div class="panel">
-            <div class="panel-heading">
-              <h3>🚚 Réglages tournée</h3>
-              <span class="muted">Estimation durée de tournée</span>
-            </div>
-            <div class="settings-list">
-              <article class="item">
-                <h4>Vitesse moyenne</h4>
-                <p class="muted">Vitesse moyenne entre deux arrêts. Ajuste après quelques tournées si l'estimation est à côté.</p>
-                <div class="settings-slider-row">
-                  <input id="tourneeSpeedSlider" type="range" min="10" max="60" step="1" value="28"
-                         aria-label="Vitesse moyenne en km/h" />
-                  <span id="tourneeSpeedValue" class="settings-slider-value">28 km/h</span>
-                </div>
-              </article>
-              <article class="item">
-                <h4>Durée d'arrêt par livraison</h4>
-                <p class="muted">Temps moyen passé chez chaque client (déchargement + tampon + signature).</p>
-                <div class="settings-slider-row">
-                  <input id="tourneeStopSlider" type="range" min="0" max="30" step="1" value="6"
-                         aria-label="Durée d'arrêt en minutes" />
-                  <span id="tourneeStopValue" class="settings-slider-value">6 min</span>
-                </div>
-              </article>
-              <p id="tourneeSettingsStatus" class="muted" aria-live="polite">Chargement…</p>
-            </div>
-          </div>
-
-          <!-- v1.17.1 : diagnostic dates suspectes en base -->
-          <div class="panel">
-            <div class="panel-heading">
-              <h3>🔍 Diagnostic dates</h3>
-              <span class="muted">Détection des dates aberrantes</span>
-            </div>
-            <div class="settings-list">
-              <article class="item">
-                <h4>Scanner les commandes</h4>
-                <p class="muted">Compte les dates en base qui ne respectent pas le format ISO ou qui contiennent un mois/jour invalide.</p>
-                <button class="button secondary compact" type="button" data-action="diagnostic-suspicious-dates">
-                  Lancer le scan
-                </button>
-                <p id="diagnosticDatesStatus" class="muted" aria-live="polite"></p>
-                <pre id="diagnosticDatesSample" class="settings-pre" hidden></pre>
-              </article>
-            </div>
-          </div>
-
-          <!-- V8 phase 1 : comptes utilisateurs.
-               Volontairement un .settings-block et NON un .panel : style.css
-               positionne les panneaux de .settings-grid par :nth-of-type(1..5),
-               qui compte les <div> et non la classe. Un 6e .panel decalerait
-               toutes les regles de placement au-dela de 1400px. -->
-          <div class="settings-block" id="comptesBlock">
-            <header class="block-header">
-              <h3>👥 Comptes utilisateurs</h3>
-              <span class="muted">Un identifiant par personne, plutôt qu'un mot de passe partagé</span>
-            </header>
-
+          <article class="par-carte par-span-6" id="comptesBlock" aria-labelledby="parComptesTitre">
+            <h3 id="parComptesTitre">Comptes</h3>
             <div id="comptesList" aria-live="polite">
               <p class="muted">Chargement des comptes…</p>
             </div>
@@ -1506,25 +1431,60 @@
               </div>
               <button class="button primary" type="submit">Créer le compte</button>
             </form>
-          </div>
+          </article>
 
-          <!-- v1.12.0 : historique des fichiers Excel importes (archives auto). -->
-          <div class="settings-block">
-            <header class="block-header">
-              <h3>📥 Historique des imports Excel</h3>
-              <span class="muted">Tous les fichiers .xlsx importés sont archivés automatiquement et téléchargeables</span>
-            </header>
+          <article class="par-carte par-span-6 par-imports" aria-labelledby="parImportsTitre">
+            <h3 id="parImportsTitre">Imports et archives</h3>
+            <p class="par-aide">Chaque fichier .xlsx importé est archivé et reste téléchargeable.</p>
             <div id="importsArchivesList" class="imports-archives-list" aria-live="polite">
               <p class="muted">Chargement de l'historique…</p>
             </div>
-          </div>
+          </article>
 
-          <!-- v1.12.0 : zone dangereuse - reset des bons de commande. -->
-          <div class="settings-block settings-block-danger">
-            <header class="block-header">
-              <h3>⚠️ Zone dangereuse — Réinitialiser les bons de commande</h3>
-              <span class="muted">À utiliser après une migration ou pour repartir propre avec un re-import</span>
-            </header>
+          <article class="par-carte par-span-6" aria-labelledby="parTourneeTitre">
+            <h3 id="parTourneeTitre">Réglages tournée</h3>
+            <div class="settings-list">
+              <article class="item">
+                <h4>Vitesse moyenne</h4>
+                <p class="muted">Vitesse moyenne entre deux arrêts. Ajuste après quelques tournées si l'estimation est à côté.</p>
+                <div class="settings-slider-row">
+                  <input id="tourneeSpeedSlider" type="range" min="10" max="60" step="1" value="28"
+                         aria-label="Vitesse moyenne en km/h" />
+                  <span id="tourneeSpeedValue" class="settings-slider-value">28 km/h</span>
+                </div>
+              </article>
+              <article class="item">
+                <h4>Durée d'arrêt par livraison</h4>
+                <p class="muted">Temps moyen passé chez chaque client (déchargement + tampon + signature).</p>
+                <div class="settings-slider-row">
+                  <input id="tourneeStopSlider" type="range" min="0" max="30" step="1" value="6"
+                         aria-label="Durée d'arrêt en minutes" />
+                  <span id="tourneeStopValue" class="settings-slider-value">6 min</span>
+                </div>
+              </article>
+              <p id="tourneeSettingsStatus" class="muted" aria-live="polite">Chargement…</p>
+            </div>
+          </article>
+
+          <article class="par-carte par-span-6" aria-labelledby="parDiagnosticTitre">
+            <h3 id="parDiagnosticTitre">Diagnostic dates</h3>
+            <div class="settings-list">
+              <article class="item">
+                <h4>Scanner les commandes</h4>
+                <p class="muted">Compte les dates en base qui ne respectent pas le format ISO ou qui contiennent un mois/jour invalide.</p>
+                <button class="button secondary compact" type="button" data-action="diagnostic-suspicious-dates">
+                  Lancer le scan
+                </button>
+                <p id="diagnosticDatesStatus" class="muted" aria-live="polite"></p>
+                <pre id="diagnosticDatesSample" class="settings-pre" hidden></pre>
+              </article>
+            </div>
+          </article>
+
+          <!-- Zone dangereuse : la planche la reduit a une incise ; une purge
+               definitive garde son bloc, son contour d'alerte et sa liste. -->
+          <article class="par-carte par-span-12 par-danger settings-block-danger" aria-labelledby="parDangerTitre">
+            <h3 id="parDangerTitre">Zone dangereuse — Réinitialiser les bons de commande</h3>
             <div class="danger-zone">
               <p>Cette action <strong>supprime définitivement</strong> :</p>
               <ul class="danger-list">
@@ -1544,9 +1504,9 @@
               <button class="button danger" type="button" data-action="purge-orders">
                 🗑️ Purger les bons de commande
               </button>
-              <p class="muted danger-note">Après purge, va dans <strong>Historique des imports</strong> ci-dessus pour re-télécharger tes Excel et les ré-importer depuis le Tableau de bord.</p>
+              <p class="muted danger-note">Après purge, va dans <strong>Imports et archives</strong> ci-dessus pour re-télécharger tes Excel et les ré-importer depuis le Tableau de bord.</p>
             </div>
-          </div>
+          </article>
         </div>
       </section>
     </main>

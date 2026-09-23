@@ -49,3 +49,29 @@
   var intervalId = setInterval(tick, 250);
   window.addEventListener("pagehide", function () { clearInterval(intervalId); });
 })();
+
+// Afficher / masquer le mot de passe (planche 9b). Le bouton est cache sans
+// JS : il n'apparait que s'il fonctionne.
+(function () {
+  var bouton = document.querySelector(".voir");
+  var champ = document.getElementById("password");
+  if (!bouton || !champ) return;
+  bouton.hidden = false;
+  bouton.addEventListener("click", function () {
+    var visible = champ.type === "password";
+    champ.type = visible ? "text" : "password";
+    bouton.setAttribute("aria-pressed", visible ? "true" : "false");
+    bouton.setAttribute("aria-label", visible ? "Masquer le mot de passe" : "Afficher le mot de passe");
+    champ.focus();
+  });
+  // Le mot de passe ne reste jamais en clair : ni a l'envoi, ni au retour
+  // arriere (la page peut revenir du cache du navigateur).
+  function masquer() {
+    champ.type = "password";
+    bouton.setAttribute("aria-pressed", "false");
+    bouton.setAttribute("aria-label", "Afficher le mot de passe");
+  }
+  var formulaire = champ.form;
+  if (formulaire) formulaire.addEventListener("submit", masquer);
+  window.addEventListener("pageshow", masquer);
+})();

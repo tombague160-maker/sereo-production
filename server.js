@@ -318,6 +318,10 @@ app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use(securityHeaders);
 app.use("/brand", express.static(path.join(__dirname, "public", "brand"), { immutable: true, maxAge: "1d" }));
+// Les polices : la page de connexion les charge avant toute session. Rien de
+// sensible (des fichiers de police libres, OFL).
+// Pas d'« immutable » : les noms de fichiers n'ont pas d'empreinte.
+app.use("/fonts", express.static(path.join(__dirname, "public", "fonts"), { maxAge: "7d" }));
 app.get("/favicon.svg", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "favicon.svg"));
 });
@@ -1593,541 +1597,144 @@ function renderLoginPage(req, res) {
   <title>Connexion - s&eacute;r&eacute;o</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <style>
-    /* Palette strictement brand sereo : teal, vert pastel, orange pastel. */
+    /* CONNEXION -- planches 9b (normal), 9c (3e echec), 9d (bloquee).
+       Les jetons de la charte, en clair et en sombre (l'appareil decide : la
+       page de connexion n'a pas encore le choix enregistre de l'utilisateur).
+       AUCUN BACKTICK ICI : ce bloc vit dans un litteral de gabarit JS. */
+    @font-face { font-family: "Poppins"; font-weight: 400; font-display: swap; src: url("/fonts/poppins-400-latin.woff2") format("woff2"); }
+    @font-face { font-family: "Poppins"; font-weight: 500; font-display: swap; src: url("/fonts/poppins-500-latin.woff2") format("woff2"); }
+    @font-face { font-family: "Poppins"; font-weight: 600; font-display: swap; src: url("/fonts/poppins-600-latin.woff2") format("woff2"); }
+    @font-face { font-family: "Poppins"; font-weight: 700; font-display: swap; src: url("/fonts/poppins-700-latin.woff2") format("woff2"); }
     :root {
-      --brand-teal: #0e6b63;
-      --brand-teal-dark: #0f3d3d;
-      --brand-teal-glow: rgba(14, 107, 99, 0.18);
-      --pastel-green: #cfe9e1;
-      --pastel-green-light: #e8f4ef;
-      --pastel-orange: #ffc4a3;
-      --pastel-orange-light: #fff0e8;
-      /* L'accent de la charte. Cet orange-ci etait a distance sRGB 37 --
-         VISIBLEMENT autre -- et c'etait le seul des trois dans ce cas.
-         Son unique usage est la couleur des icones de .brand-features, qui
-         sont DOUBLEES D'UN MOT : exemptees de WCAG 1.4.11.
-         ⛔ AUCUN BACKTICK ICI : ce bloc vit dans un litteral de gabarit
-            JavaScript, et un backtick y TERMINE la chaine. Premiere redaction :
-            "SyntaxError: missing ) after argument list", a 200 lignes de la. */
-      --pastel-orange-strong: #EF9177;
-      --pastel-orange-glow: rgba(244, 122, 90, 0.22);
-      --surface: #ffffff;
-      --surface-soft: #fbfefd;
-      --text: #102a2f;
-      --text-soft: #4f686b;
+      --fond: #FBF7F5; --surface: #FFFFFF; --texte: #386B6D; --secondaire: #4F7477;
+      --principal: #386B6D; --sur-principal: #FFFFFF; --surface-basse: #F5F1EE;
+      --alerte: #C02B0A; --accent: #EF9177; --marque: #386B6D;
+      --tache-1: #EDC8C3; --tache-2: #A1C4C0; --focus: 0 0 0 3px #FBF7F5, 0 0 0 5px #386B6D;
+      --ombre: 0 1px 2px rgba(15, 61, 61, .05), 0 12px 28px rgba(15, 61, 61, .05);
+      color-scheme: light dark;
     }
-
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --fond: #0D1518; --surface: #132224; --texte: #E6F2EE; --secondaire: #A8C4BE;
+        --principal: #93CBC9; --sur-principal: #0D1518; --surface-basse: #101D20;
+        --alerte: #F2635A; --marque: #EF9177;
+        --tache-1: #3A2A28; --tache-2: #1D3B3C; --focus: 0 0 0 3px #0D1518, 0 0 0 5px #93CBC9;
+        --ombre: 0 1px 2px rgba(0, 0, 0, .4), 0 12px 28px rgba(0, 0, 0, .3);
+      }
+    }
     * { box-sizing: border-box; }
-
     html, body { margin: 0; min-height: 100vh; }
-
-    /* =========================================================================
-       Layout split-screen (pattern B2B SaaS 2026)
-       - Desktop >= 1024px : 1.15fr (brand) / 1fr (form), full viewport
-       - Tablet 768-1023px : single column, hero band en haut compact
-       - Mobile  < 768px   : single column, pas de hero
-       ========================================================================= */
-    .login-page {
-      display: grid;
-      grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
-      min-height: 100vh;
-    }
-    @media (max-width: 1023px) {
-      .login-page { grid-template-columns: 1fr; }
-    }
-
     body {
-      font-family: Inter, "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
-      color: var(--text);
-      background: #fafaf8;
-      overflow-x: hidden;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 32px 16px 24px; overflow-x: hidden; position: relative;
+      font-family: "Poppins", system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: var(--fond); color: var(--texte);
     }
-
-    /* =========================================================================
-       Panel BRAND (gauche desktop / haut tablet)
-       ========================================================================= */
-    .brand-panel {
-      position: relative;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      padding: 64px 56px;
-      overflow: hidden;
-      background:
-        radial-gradient(620px circle at var(--bg-x1, 18%) var(--bg-y1, 22%), rgba(255, 196, 163, 0.55), transparent 62%),
-        radial-gradient(720px circle at var(--bg-x2, 82%) var(--bg-y2, 78%), rgba(207, 233, 225, 0.85), transparent 60%),
-        linear-gradient(135deg, var(--pastel-green-light) 0%, #ffffff 50%, var(--pastel-orange-light) 100%);
-      animation: bg-drift 42s ease-in-out infinite alternate;
+    /* Deux taches de couleur, floues, derriere la carte (planche 9b). */
+    .tache { position: fixed; border-radius: 999px; filter: blur(10px); pointer-events: none; z-index: 0; }
+    .tache-1 { top: -120px; right: -100px; width: 320px; height: 320px; background: var(--tache-1); opacity: .5; }
+    .tache-2 { bottom: 120px; left: -140px; width: 300px; height: 300px; background: var(--tache-2); opacity: .3; }
+    .carte {
+      position: relative; z-index: 1; width: 100%; max-width: 420px;
+      display: flex; flex-direction: column; gap: 32px;
+      padding: 32px 24px; border-radius: 28px; background: var(--surface); box-shadow: var(--ombre);
     }
-    @media (max-width: 1023px) {
-      .brand-panel { padding: 32px 28px 20px; min-height: 0; }
+    .marque { display: flex; flex-direction: column; gap: 14px; }
+    .mot { display: flex; align-items: flex-end; gap: 4px; margin: 0; }
+    /* Le mot « sereo » : en clair, dans le principal -- l'orange de la planche
+       tombe a 2,34:1 sur blanc, sous les 3:1 d'un grand texte ; en sombre,
+       l'orange de la planche (7:1). Le sourire garde l'orange. */
+    .mot span { font-size: 52px; font-weight: 700; letter-spacing: -0.03em; line-height: 1; color: var(--marque); }
+    .mot svg { width: 36px; height: 20px; margin-bottom: 7px; flex: none; }
+    .accroche { margin: 0; font-size: 15.5px; line-height: 1.5; color: var(--secondaire); }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+    form { display: flex; flex-direction: column; gap: 14px; }
+    .champ { display: flex; flex-direction: column; gap: 6px; }
+    .champ label { font-size: 13px; font-weight: 500; color: var(--secondaire); }
+    .saisie {
+      display: flex; align-items: center; height: 48px; border-radius: 18px;
+      background: var(--surface-basse); box-shadow: inset 0 0 0 1.5px transparent;
     }
-    @media (max-width: 640px) {
-      .brand-panel { padding: 24px 22px 16px; min-height: 0; }
+    .saisie:focus-within { background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--principal); }
+    .saisie input {
+      flex: 1; min-width: 0; height: 100%; padding: 0 18px; border: 0; background: transparent;
+      font: inherit; font-size: 15.5px; font-weight: 500; color: var(--texte); outline: none;
     }
-
-    @property --bg-x1 { syntax: "<percentage>"; inherits: true; initial-value: 18%; }
-    @property --bg-y1 { syntax: "<percentage>"; inherits: true; initial-value: 22%; }
-    @property --bg-x2 { syntax: "<percentage>"; inherits: true; initial-value: 82%; }
-    @property --bg-y2 { syntax: "<percentage>"; inherits: true; initial-value: 78%; }
-
-    @keyframes bg-drift {
-      0%   { --bg-x1: 18%; --bg-y1: 22%; --bg-x2: 82%; --bg-y2: 78%; }
-      50%  { --bg-x1: 32%; --bg-y1: 12%; --bg-x2: 68%; --bg-y2: 88%; }
-      100% { --bg-x1: 22%; --bg-y1: 35%; --bg-x2: 78%; --bg-y2: 65%; }
+    .saisie input:disabled { opacity: .6; }
+    .saisie--mdp input { padding-right: 4px; }
+    /* 3e echec (planche 9c) : le champ mot de passe passe en contour alerte,
+       sans dire lequel des deux est faux. */
+    .champ--erreur .saisie { background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--alerte); }
+    .voir {
+      width: 44px; height: 44px; margin-right: 2px; flex: none; display: flex; align-items: center; justify-content: center;
+      border: 0; border-radius: 999px; background: transparent; color: var(--secondaire); cursor: pointer;
     }
-
-    /* 2 blobs decoratifs qui respirent dans le panel brand */
-    .brand-panel::before, .brand-panel::after {
-      content: "";
-      position: absolute;
-      border-radius: 50%;
-      filter: blur(72px);
-      pointer-events: none;
-      z-index: 0;
-      mix-blend-mode: multiply;
-    }
-    .brand-panel::before {
-      width: 420px;
-      height: 420px;
-      background: var(--pastel-green);
-      top: -110px;
-      left: -120px;
-      animation: blob-breathe-1 14s ease-in-out infinite;
-    }
-    .brand-panel::after {
-      width: 460px;
-      height: 460px;
-      background: var(--pastel-orange);
-      bottom: -140px;
-      right: -130px;
-      animation: blob-breathe-2 16s ease-in-out infinite;
-    }
-    @keyframes blob-breathe-1 {
-      0%, 100% { transform: scale(1) translate(0, 0);          opacity: 0.5; }
-      50%      { transform: scale(1.12) translate(30px, 40px); opacity: 0.7; }
-    }
-    @keyframes blob-breathe-2 {
-      0%, 100% { transform: scale(1) translate(0, 0);            opacity: 0.42; }
-      50%      { transform: scale(1.08) translate(-40px, -30px); opacity: 0.58; }
-    }
-
-    .brand-content {
-      position: relative;
-      z-index: 1;
-      max-width: 480px;
-      margin: 0 auto;
-      text-align: center;
-      animation: card-in 600ms cubic-bezier(0.16, 1, 0.3, 1);
-    }
-
-    .brand-logo-frame {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      padding: 18px 30px;
-      margin-bottom: 32px;
-      border-radius: 24px;
-      background: rgba(255, 255, 255, 0.85);
-      backdrop-filter: blur(12px) saturate(120%);
-      box-shadow:
-        0 24px 48px rgba(14, 107, 99, 0.1),
-        inset 0 0 0 1px rgba(14, 107, 99, 0.08);
-      animation: logo-pulse 6s ease-in-out infinite alternate;
-    }
-    @keyframes logo-pulse {
-      0%   { box-shadow: 0 24px 48px rgba(14, 107, 99, 0.1), inset 0 0 0 1px rgba(14, 107, 99, 0.08); transform: scale(1); }
-      100% { box-shadow: 0 28px 56px rgba(14, 107, 99, 0.14), 0 0 60px -10px var(--brand-teal-glow), inset 0 0 0 1px rgba(14, 107, 99, 0.12); transform: scale(1.015); }
-    }
-    .brand-logo-frame img {
-      width: clamp(160px, 22vw, 240px);
-      height: auto;
-      object-fit: contain;
-    }
-
-    .brand-tagline {
-      margin: 0 0 36px;
-      color: var(--brand-teal-dark);
-      font-size: clamp(17px, 1.4vw, 21px);
-      line-height: 1.45;
-      font-weight: 600;
-      letter-spacing: -0.005em;
-    }
-
-    .brand-features {
-      list-style: none;
-      padding: 0;
-      margin: 0;
-      display: grid;
-      gap: 14px;
-      text-align: left;
-    }
-    .brand-features li {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      padding: 14px 18px;
-      border-radius: 14px;
-      background: rgba(255, 255, 255, 0.72);
-      backdrop-filter: blur(8px);
-      color: var(--brand-teal-dark);
-      font-size: 14.5px;
-      font-weight: 500;
-      box-shadow: inset 0 0 0 1px rgba(14, 107, 99, 0.06);
-    }
-    .brand-features svg {
-      flex-shrink: 0;
-      width: 22px;
-      height: 22px;
-      color: var(--pastel-orange-strong);
-    }
-
-    @media (max-width: 1023px) {
-      .brand-tagline { font-size: 16px; margin-bottom: 0; }
-      .brand-features { display: none; }
-      .brand-logo-frame { padding: 14px 22px; margin-bottom: 20px; }
-    }
-
-    /* =========================================================================
-       Panel FORM (droite desktop / bas tablet)
-       ========================================================================= */
-    .form-panel {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 56px 32px;
-      background: var(--surface);
-      position: relative;
-    }
-    /* Sur desktop, un trait de gradient brand sur le bord gauche separe les 2 panels */
-    @media (min-width: 1024px) {
-      .form-panel::before {
-        content: "";
-        position: absolute;
-        top: 12%;
-        bottom: 12%;
-        left: 0;
-        width: 1px;
-        background: linear-gradient(180deg, transparent, rgba(14, 107, 99, 0.18), rgba(244, 122, 90, 0.18), transparent);
-        pointer-events: none;
-      }
-    }
-    @media (max-width: 1023px) {
-      /* Sur tablet/mobile, le form-panel se contente de remplir l'espace
-         restant sous le brand-panel. align-items:start evite le gros gap
-         vertical quand le viewport est tres haut (mobile portrait). */
-      .form-panel {
-        align-items: flex-start;
-        padding: 24px 24px 32px;
-      }
-    }
-    @media (max-width: 640px) {
-      .form-panel { padding: 20px 20px 28px; }
-    }
-
-    .login-card {
-      width: 100%;
-      max-width: 420px;
-      padding: 12px 4px;
-      animation: card-in 480ms cubic-bezier(0.16, 1, 0.3, 1);
-    }
-    @keyframes card-in {
-      from { opacity: 0; transform: translateY(14px); }
-      to   { opacity: 1; transform: translateY(0); }
-    }
-
-    /* Titre + icone cadenas : icone dans un disque pastel */
-    .title-row {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      margin-bottom: 10px;
-    }
-    .title-row svg {
-      flex-shrink: 0;
-      width: 34px;
-      height: 34px;
-      padding: 8px;
-      border-radius: 12px;
-      background: linear-gradient(135deg, var(--pastel-green-light), var(--pastel-orange-light));
-      color: var(--brand-teal);
-      box-shadow: inset 0 0 0 1px rgba(14, 107, 99, 0.12);
-    }
-    h1 {
-      margin: 0;
-      color: var(--brand-teal);
-      font-size: clamp(26px, 2.2vw, 32px);
-      font-weight: 800;
-      line-height: 1.15;
-      letter-spacing: -0.015em;
-    }
-
-    .intro {
-      margin: 0 0 32px;
-      color: var(--text-soft);
-      line-height: 1.55;
-      font-size: 15.5px;
-    }
-
-    .field { margin-bottom: 16px; }
-
-    label {
-      display: block;
-      margin: 0 0 7px;
-      color: var(--brand-teal-dark);
-      font-weight: 700;
-      font-size: 12.5px;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-    }
-
-    input {
-      width: 100%;
-      min-height: 52px;
-      padding: 14px 16px;
-      border: 1.5px solid rgba(14, 107, 99, 0.12);
-      border-radius: 14px;
-      background: var(--surface-soft);
-      color: var(--text);
-      font: inherit;
-      font-size: 15.5px;
-      outline: none;
-      transition: border-color 180ms ease, box-shadow 220ms ease, background-color 180ms ease;
-    }
-    input:hover:not(:disabled) {
-      border-color: rgba(14, 107, 99, 0.22);
-      background: var(--surface);
-    }
-    input:focus {
-      border-color: var(--pastel-orange-strong);
-      background: var(--surface);
-      box-shadow:
-        0 0 0 4px rgba(255, 196, 163, 0.34),
-        0 0 24px -4px rgba(244, 122, 90, 0.22);
-    }
-    input:disabled { opacity: 0.6; cursor: not-allowed; }
-    /* Autofill : le navigateur applique un fond jaune horrible. On override
-       avec un inset box-shadow qui simule notre fond pastel cohérent
-       (technique standard car background ne peut pas etre override en
-       autofill). Couleur cible : surface blanc + une touche pastel green. */
-    input:-webkit-autofill,
-    input:-webkit-autofill:hover,
-    input:-webkit-autofill:focus {
-      -webkit-box-shadow: 0 0 0 100px var(--surface) inset, 0 0 0 4px rgba(255, 196, 163, 0.18);
-      -webkit-text-fill-color: var(--text);
-      caret-color: var(--text);
-      transition: background-color 5000s ease-in-out 0s;
-    }
-    /* Variante focus pour conserver le ring orange brand */
-    input:-webkit-autofill:focus {
-      -webkit-box-shadow:
-        0 0 0 100px var(--surface) inset,
-        0 0 0 4px rgba(255, 196, 163, 0.34),
-        0 0 24px -4px rgba(244, 122, 90, 0.22);
-    }
-
-    /* Bouton : gradient teal->orange (signature brand sereo), shine sweep
-       sur hover pour un effet "haut de gamme" subtil */
-    button[type="submit"] {
-      position: relative;
-      width: 100%;
-      min-height: 54px;
-      margin-top: 10px;
-      border: 0;
-      border-radius: 14px;
-      background: linear-gradient(135deg, var(--brand-teal) 0%, var(--pastel-orange-strong) 100%);
-      background-size: 180% 180%;
-      background-position: 0% 50%;
-      color: white;
-      font: inherit;
-      font-size: 15.5px;
-      font-weight: 800;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      cursor: pointer;
-      overflow: hidden;
-      isolation: isolate;
-      box-shadow:
-        0 16px 32px rgba(244, 122, 90, 0.26),
-        0 4px 12px rgba(14, 107, 99, 0.14);
-      transition: transform 160ms ease, box-shadow 240ms ease, background-position 600ms ease;
-    }
-    /* Shine sweep effet luxe au hover */
-    button[type="submit"]::after {
-      content: "";
-      position: absolute;
-      top: 0; left: -100%;
-      width: 60%;
-      height: 100%;
-      background: linear-gradient(120deg,
-        transparent 0%,
-        rgba(255, 255, 255, 0.32) 50%,
-        transparent 100%);
-      transform: skewX(-22deg);
-      transition: left 700ms ease;
-      pointer-events: none;
-      z-index: 1;
-    }
-    button[type="submit"]:hover:not(:disabled) {
-      transform: translateY(-2px);
-      background-position: 100% 50%;
-      box-shadow:
-        0 22px 40px rgba(244, 122, 90, 0.34),
-        0 6px 16px rgba(14, 107, 99, 0.18),
-        0 0 0 1px rgba(255, 255, 255, 0.4) inset;
-    }
-    button[type="submit"]:hover:not(:disabled)::after {
-      left: 140%;
-    }
-    button[type="submit"]:active:not(:disabled) { transform: translateY(-1px); }
-    button[type="submit"]:disabled {
-      opacity: 0.55;
-      cursor: not-allowed;
-      box-shadow: none;
-    }
-
+    .voir svg { width: 20px; height: 20px; }
+    .voir[hidden] { display: none; }
+    .voir:focus-visible, .saisie input:focus-visible { outline: none; }
+    .voir:focus-visible { box-shadow: var(--focus); }
     .login-error {
-      margin: 0 0 20px;
-      padding: 14px 16px;
-      border: 1px solid rgba(244, 122, 90, 0.28);
-      border-radius: 14px;
-      background: linear-gradient(135deg, rgba(255, 196, 163, 0.28), rgba(255, 240, 232, 0.18));
-      color: #9c341f;
-      font-weight: 600;
-      font-size: 14px;
-      line-height: 1.45;
-      animation: error-in 360ms cubic-bezier(0.16, 1, 0.3, 1);
+      display: flex; gap: 8px; margin: 0; font-size: 13.5px; font-weight: 500; line-height: 1.45; color: var(--alerte);
     }
-    @keyframes error-in {
-      from { opacity: 0; transform: translateY(-6px); }
-      to   { opacity: 1; transform: translateY(0); }
+    .login-error::before {
+      content: ""; flex: none; width: 16px; height: 16px; margin-top: 2px; border-radius: 999px;
+      box-shadow: inset 0 0 0 2px var(--alerte);
     }
-    .login-error-attempts {
-      display: block;
-      margin-top: 6px;
-      font-weight: 500;
-      font-size: 13px;
-      color: rgba(156, 52, 31, 0.86);
+    .login-error-attempts { display: block; color: var(--secondaire); font-weight: 400; }
+    button[type="submit"] {
+      width: 100%; height: 48px; margin-top: 6px; border: 0; border-radius: 999px;
+      background: var(--principal); color: var(--sur-principal);
+      font: inherit; font-size: 15.5px; font-weight: 600; cursor: pointer; transition: transform 100ms ease-out;
     }
-
-    #lockout-countdown {
-      display: inline-block;
-      min-width: 1.4em;
-      padding: 2px 8px;
-      margin: 0 3px;
-      border-radius: 10px;
-      background: rgba(156, 52, 31, 0.14);
-      font-variant-numeric: tabular-nums;
-      font-weight: 800;
+    button[type="submit"]:active:not(:disabled) { transform: scale(.97); }
+    button[type="submit"]:disabled { opacity: .55; cursor: not-allowed; }
+    button[type="submit"]:focus-visible { outline: none; box-shadow: var(--focus); }
+    /* Le pied a son fond (planche 9b) : sur les taches floues, le texte
+       secondaire tombait sous 4,5:1 au telephone. */
+    .pied {
+      position: relative; z-index: 1; width: 100%; max-width: 420px; margin-top: 24px; padding: 8px 12px;
+      display: flex; flex-direction: column; gap: 6px; background: var(--fond); border-radius: 16px;
     }
-
-    .footer-hint {
-      margin: 26px 0 0;
-      text-align: center;
-      font-size: 12px;
-      color: var(--text-soft);
-      letter-spacing: 0.02em;
+    .pied p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--secondaire); }
+    .pied a {
+      display: inline-flex; align-items: center; min-height: 44px; padding: 0 10px; margin: -12px -10px;
+      font-size: 12.5px; font-weight: 500; color: var(--secondaire); text-decoration: underline; text-underline-offset: 3px;
     }
-    .footer-hint a {
-      /* Mesure du 18/09 : ce lien faisait 16 px de haut. Sous le plancher LEGAL
-         de 24 px (WCAG 2.5.8) et tres loin des 44 de la charte. Il avait tenu
-         parce que la page de connexion n'etait balayee par AUCUN banc : le
-         serveur des tests e2e tourne sans authentification, si bien que /login
-         y repond 200 en servant l'APPLICATION.
-         Les marges negatives compensent le rembourrage : la cible grandit, la
-         mise en page ne bouge pas. */
-      display: inline-flex;
-      align-items: center;
-      min-height: 44px;
-      padding: 0 10px;
-      margin: -12px -10px;
-      color: var(--brand-teal);
-      text-decoration: none;
-      font-weight: 600;
-      transition: color 160ms ease;
-    }
-    .footer-hint a:hover { color: var(--pastel-orange-strong); }
-
-    @media (max-width: 640px) {
-      h1 { font-size: 24px; }
-      .title-row svg { width: 30px; height: 30px; padding: 7px; }
-      .intro { font-size: 14.5px; margin-bottom: 24px; }
-    }
-
-    /* Accessibilite : on coupe TOUTES les animations decoratives si demande */
-    @media (prefers-reduced-motion: reduce) {
-      .brand-panel, .brand-panel::before, .brand-panel::after,
-      .brand-logo-frame, .brand-content, .login-card { animation: none; }
-      button[type="submit"]:hover:not(:disabled) { transform: none; }
-      button[type="submit"]::after { display: none; }
-    }
+    .pied a:focus-visible { outline: none; box-shadow: var(--focus); border-radius: 12px; }
+    @media (prefers-reduced-motion: reduce) { button[type="submit"] { transition: none; } }
   </style>
 </head>
 <body${bodyLockedAttr}>
-  <div class="login-page">
-    <aside class="brand-panel" aria-hidden="true">
-      <div class="brand-content">
-        <div class="brand-logo-frame">
-          <img src="/brand/sereo-logo.svg" alt="s&eacute;r&eacute;o" />
-        </div>
-        <p class="brand-tagline">Gestion locale du stock, des pr&eacute;parations et des livraisons.</p>
-        <ul class="brand-features">
-          <li>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z" />
-              <path d="m4 7.5 8 4.5 8-4.5" />
-              <path d="M12 12v9" />
-            </svg>
-            <span>Stock et inventaire en temps r&eacute;el</span>
-          </li>
-          <li>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M9 4h6l1 2h3v15H5V6h3l1-2Z" />
-              <path d="M9 11h6" />
-              <path d="M9 15h6" />
-              <path d="M9 19h4" />
-            </svg>
-            <span>Pr&eacute;paration de commandes simplifi&eacute;e</span>
-          </li>
-          <li>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M3 6h11v10H3V6Z" />
-              <path d="M14 10h4l3 3v3h-7v-6Z" />
-              <path d="M6.5 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" />
-              <path d="M17.5 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" />
-            </svg>
-            <span>Tourn&eacute;es de livraison optimis&eacute;es</span>
-          </li>
-        </ul>
+  <div class="tache tache-1" aria-hidden="true"></div>
+  <div class="tache tache-2" aria-hidden="true"></div>
+  <main class="carte" aria-labelledby="login-title">
+    <div class="marque">
+      <h1 id="login-title" class="mot"><span>s&eacute;r&eacute;o</span><svg viewBox="0 0 30 16" fill="none" aria-hidden="true"><path d="M4 4c6 8 16 8 22 0" stroke="#EF9177" stroke-width="5" stroke-linecap="round"/></svg><span class="sr-only"> &mdash; connexion</span></h1>
+      <p class="accroche">Livraison de mat&eacute;riel m&eacute;dical et d'hygi&egrave;ne, Doubs et Jura.</p>
+    </div>
+    <form method="post" action="/login">
+      <input type="hidden" name="next" value="${escapeHtml(next)}">
+      <div class="champ">
+        <label for="username">Identifiant</label>
+        <div class="saisie"><input id="username" name="username" autocomplete="username" autofocus ${isLocked ? "disabled" : "required"}></div>
       </div>
-    </aside>
-    <main class="form-panel">
-      <div class="login-card" aria-labelledby="login-title">
-        <div class="title-row">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect x="4" y="11" width="16" height="10" rx="2" />
-            <path d="M8 11V7a4 4 0 0 1 8 0v4" />
-          </svg>
-          <h1 id="login-title">Bonjour</h1>
+      <div class="champ${(hasError || isLocked) ? " champ--erreur" : ""}">
+        <label for="password">Mot de passe</label>
+        <div class="saisie saisie--mdp">
+          <input id="password" name="password" type="password" autocomplete="current-password" ${isLocked ? "disabled" : "required"}${(hasError || isLocked) ? ' aria-describedby="login-erreur"' : ""}${hasError && !isLocked ? ' aria-invalid="true"' : ""}>
+          <button class="voir" type="button" aria-label="Afficher le mot de passe" aria-pressed="false" hidden>
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/></svg>
+          </button>
         </div>
-        <p class="intro">Connecte-toi pour ouvrir l'application.</p>
-        ${errorMarkup}
-        <form method="post" action="/login">
-          <input type="hidden" name="next" value="${escapeHtml(next)}">
-          <div class="field">
-            <label for="username">Identifiant</label>
-            <input id="username" name="username" autocomplete="username" autofocus ${isLocked ? "disabled" : "required"}>
-          </div>
-          <div class="field">
-            <label for="password">Mot de passe</label>
-            <input id="password" name="password" type="password" autocomplete="current-password" ${isLocked ? "disabled" : "required"}>
-          </div>
-          <button type="submit"${isLocked ? " disabled" : ""}>Se connecter</button>
-        </form>
-        <p class="footer-hint">Application priv&eacute;e &middot; <a href="https://github.com/${GITHUB_REPO}/releases" target="_blank" rel="noopener noreferrer">v${APP_VERSION}</a></p>
       </div>
-    </main>
-  </div>
+      ${errorMarkup.replace('class="login-error"', 'id="login-erreur" class="login-error"')}
+      <button type="submit"${isLocked ? " disabled" : ""}>Se connecter</button>
+    </form>
+  </main>
+  <footer class="pied">
+    <p>Mot de passe oubli&eacute; : voir Tom.</p>
+    <p><a href="https://github.com/${GITHUB_REPO}/releases" target="_blank" rel="noopener noreferrer">Version ${APP_VERSION}</a></p>
+  </footer>
   <script src="/login.js"></script>
 </body>
 </html>`);

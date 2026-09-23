@@ -176,7 +176,7 @@ function showStorageRecoveryBanner(recovery) {
       <strong>${escapeHtml(titre)}</strong>
       <p>${escapeHtml(recovery.message || "Une récupération de la base de données a eu lieu.")}</p>
       <p class="muted">Vérifie tes données avant de continuer. ${isFresh
-        ? "Tu peux ré-importer tes fichiers Excel depuis Paramètres → Historique des imports."
+        ? "Tu peux ré-importer tes fichiers Excel depuis Paramètres → Imports et archives."
         : "Les saisies les plus récentes (avant la dernière sauvegarde) peuvent manquer."}</p>
     </div>
     <button class="storage-recovery-dismiss" type="button" aria-label="Fermer">×</button>
@@ -469,6 +469,13 @@ function bindUi() {
   });
 
   bindClients();
+
+  const numerotation = document.getElementById("numerotationForm");
+  numerotation?.addEventListener("submit", event => {
+    event.preventDefault();
+    runAction(event.submitter, "Enregistrement...", () => enregistrerNumerotation(numerotation));
+  });
+  numerotation?.addEventListener("input", majExempleNumero);
 
   document.getElementById("relanceForm")?.addEventListener("submit", event => {
     event.preventDefault();
@@ -4420,7 +4427,7 @@ function applyColorScheme(scheme, options = {}) {
   }
 
   if (notifyUser) {
-    const label = next === "auto" ? "automatique" : (next === "dark" ? "sombre" : "clair");
+    const label = next === "auto" ? "système" : (next === "dark" ? "sombre" : "clair");
     notify(`Mode d'affichage : ${label}.`, "success");
   }
 
@@ -4714,9 +4721,74 @@ function avertissementSecteur(sector) {
   return `<p class="sector-alerte"><span class="pill pill-warning">À vérifier</span> ${escapeHtml(parts.join(" "))}</p>`;
 }
 
+// Planche 13f : les secteurs en pilules de nom seul. La fiche complete reste
+// derriere « Gerer les secteurs ».
+function renderParSecteursPilules() {
+  const pilules = document.getElementById("parSecteursPilules");
+  if (!pilules) return;
+  const noms = (deliverySectors.length ? deliverySectors : [])
+    .map(s => formatSectorLabel(s.secteur || s.name || ""))
+    .filter(Boolean);
+  pilules.innerHTML = noms.length
+    ? noms.map(nom => `<span class="par-pilule">${escapeHtml(nom)}</span>`).join("")
+    : `<span class="par-aide">Aucun secteur enregistré.</span>`;
+}
+
+// Numerotation des bons (planche 13f) : GET / PATCH /api/settings/order-numbering.
+let numerotationChargee = false;
+// Le VRAI prochain numero, par la regle du serveur (generateOrderNumber) : le
+// plus grand numero existant de ce prefixe (et de cette annee), plus un --
+// 3 chiffres par annee, 5 en compteur continu. « -001 » aurait promis un
+// numero que le serveur ne donnera jamais sur une base qui a des commandes.
+function exempleDeNumero(prefix, resetAnnually) {
+  // Le prefixe n'a que des lettres et des chiffres (serveur : ^[A-Z0-9]{2,8}$) :
+  // on retire le reste plutot que de l'echapper dans l'expression.
+  const p = String(prefix || "CMD").toUpperCase().replace(/[^A-Z0-9]/g, "") || "CMD";
+  const annee = String(new Date().getFullYear());
+  const motif = resetAnnually ? new RegExp(`^${p}-${annee}-(\\d+)$`) : new RegExp(`^${p}-(\\d+)$`);
+  const max = (orders || []).reduce((m, o) => {
+    const trouve = String(o.numero || "").match(motif);
+    const n = trouve ? Number(trouve[1]) : 0;
+    return Number.isFinite(n) && n > m ? n : m;
+  }, 0);
+  return resetAnnually ? `${p}-${annee}-${String(max + 1).padStart(3, "0")}` : `${p}-${String(max + 1).padStart(5, "0")}`;
+}
+function majExempleNumero() {
+  const prefixe = document.getElementById("parPrefixe")?.value || "";
+  const remise = document.getElementById("parRemiseAnnuelle")?.checked;
+  setText("parExemple", exempleDeNumero(prefixe || "CMD", remise));
+}
+async function chargerNumerotation() {
+  if (numerotationChargee) return;
+  numerotationChargee = true;
+  try {
+    const reglage = await apiFetch("/api/settings/order-numbering");
+    const prefixe = document.getElementById("parPrefixe");
+    const remise = document.getElementById("parRemiseAnnuelle");
+    if (prefixe) prefixe.value = reglage.prefix || "CMD";
+    if (remise) remise.checked = reglage.resetAnnually !== false;
+    majExempleNumero();
+  } catch {
+    numerotationChargee = false;
+  }
+}
+async function enregistrerNumerotation(form) {
+  const reglage = await apiFetch("/api/settings/order-numbering", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prefix: form.elements.prefix.value.trim(), resetAnnually: form.elements.resetAnnually.checked })
+  });
+  form.elements.prefix.value = reglage.prefix;
+  form.elements.resetAnnually.checked = reglage.resetAnnually;
+  majExempleNumero();
+  notify("Numérotation enregistrée.", "success");
+}
+
 function renderSettings() {
   updateBrandImageStatus();
   renderTourneeSettings();
+  renderParSecteursPilules();
+  chargerNumerotation();
 
   const sectorsContainer = document.getElementById("settingsSectors");
   if (!sectorsContainer) return;
@@ -5014,7 +5086,7 @@ async function purgeOrdersHandler(btn) {
   await runAction(btn, "Purge en cours...", async () => {
     const result = await apiFetch("/api/orders/purge", { method: "POST" });
     notify(
-      `Purge OK : ${result.purged.commandes} bon(s), ${result.purged.clients} client(s), ${result.purged.ventes} vente(s), ${result.purged.routes} tournée(s) supprimés. Va dans Historique des imports ci-dessus pour ré-importer tes Excel.`,
+      `Purge OK : ${result.purged.commandes} bon(s), ${result.purged.clients} client(s), ${result.purged.ventes} vente(s), ${result.purged.routes} tournée(s) supprimés. Va dans Imports et archives ci-dessus pour ré-importer tes Excel.`,
       "success"
     );
     await loadData();
