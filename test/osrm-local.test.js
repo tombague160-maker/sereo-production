@@ -437,6 +437,28 @@ test("demarrer() rend la main tout de suite ; une panne dans le gestionnaire ne 
   assert.equal(g.urlSiPret(), "");
 });
 
+// --- 10 bis. Ecriture impossible (disque plein, droits) --------------------------
+test("ecriture impossible pendant le telechargement : la preparation echoue, Sereo ne tombe pas", async (t) => {
+  const inst = installation();
+  const chutes = [];
+  const surChute = (e) => chutes.push(e?.code || e?.message);
+  process.prependListener("uncaughtException", surChute);
+  t.after(() => process.off("uncaughtException", surChute));
+  const reseau = fauxReseau({ "europe/a": "extrait A", "europe/b": "extrait B" });
+  const processus = fauxProcessus();
+  const g = gestionnaire(inst, { reseau, processus });
+  g.demarrer();
+  await g.demarrage;
+  // Un dossier a la place du fichier partiel : l'ouverture en ecriture echoue
+  // (EISDIR), comme sur un disque plein ou sans droits.
+  fs.mkdirSync(path.join(inst.dossier, "telechargements", "europe_a.osm.pbf.part"), { recursive: true });
+  assert.equal(await g.preparer(ZONE_TEST), false);
+  await attendre(20);
+  assert.deepEqual(chutes, [], "une erreur d'ecriture a fait tomber le processus");
+  assert.match(g.etat().derniereErreur?.message || "", /écriture de europe\/a impossible \(EISDIR\)/);
+  assert.deepEqual(processus.appels, []);
+});
+
 // --- 11. La ligne de l'ecran Parametres ----------------------------------------
 test("resume : une phrase par etat, tailles lisibles (Mo sous 1 Go)", () => {
   const { resumer } = require("../lib/osrm-local");
