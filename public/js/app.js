@@ -1008,6 +1008,8 @@ function initMap() {
   document.addEventListener("keydown", event => {
     if (event.key === "Escape" && carteEnPleinEcran()) basculerPleinEcranCarte(false);
   });
+  // Le reseau revient : le fond de carte, s'il manque, est redemande tout de suite.
+  window.addEventListener("online", () => chargerFondDeCarte());
   chargerFondDeCarte();
 }
 
@@ -1020,8 +1022,15 @@ const PRECISION_SUSPECTE_M = 150;
 // Tuiles en echec d'affilee avant de dire le fond de carte indisponible.
 const TUILES_EN_ECHEC_MAX = 4;
 
+// Relances de /api/carte/fond apres un echec (ms), la derniere se repete.
+const FOND_RELANCES_MS = [3000, 10000, 30000, 60000];
+
 let carteTactile = false;
 let tuilesEnEchec = 0;
+let coucheFond = null;
+let fondEnCours = false;
+let fondRelance = null;
+let fondEchecs = 0;
 let positionLivreur = null;
 let astuceMinuterie = null;
 let declencheurPleinEcran = null;
@@ -1038,10 +1047,26 @@ let declencheurPleinEcran = null;
  * de la ; le fournisseur pour la PRODUCTION reste un arbitrage (charte).
  */
 async function chargerFondDeCarte() {
+  if (!map || coucheFond || fondEnCours) return;
+  fondEnCours = true;
+  clearTimeout(fondRelance);
+  fondRelance = null;
   let fond = null;
   try { fond = await apiFetch("/api/carte/fond"); } catch { fond = null; }
-  if (!map) return;
-  if (!fond?.url) { signalerFondDeCarte(true); return; }
+  fondEnCours = false;
+  if (!map || coucheFond) return;
+  if (!fond?.url) {
+    signalerFondDeCarte(true);
+    // Un seul echec (reseau lent au premier chargement, redeploiement)
+    // laissait la carte grise jusqu'au rechargement de la page : l'URL des
+    // tuiles etait fixe avant, elle vient du serveur depuis ce lot. On
+    // redemande, de plus en plus espace, et des que le reseau revient.
+    const delai = FOND_RELANCES_MS[Math.min(fondEchecs, FOND_RELANCES_MS.length - 1)];
+    fondEchecs += 1;
+    fondRelance = setTimeout(chargerFondDeCarte, delai);
+    return;
+  }
+  fondEchecs = 0;
   const couche = L.tileLayer(fond.url, {
     maxZoom: fond.zoomMax || 19,
     attribution: fond.attribution || "",
@@ -1058,6 +1083,7 @@ async function chargerFondDeCarte() {
     tuilesEnEchec = 0;
     signalerFondDeCarte(false);
   });
+  coucheFond = couche;
   couche.addTo(map);
 }
 

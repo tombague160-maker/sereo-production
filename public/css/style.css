@@ -13395,3 +13395,44 @@ body.carte-plein-ecran-ouverte { overflow: hidden; }
    d'empilement. La carte « plein ecran » restait dans la page, sous la barre
    basse -- mesure du 23/09 : 358 x 2106 px a y = -1273. */
 body.carte-plein-ecran-ouverte #livreur.page.active { animation: none; transform: none; }
+
+/* ==========================================================================
+   LOT 4 DE L'AUDIT GEO (23/09) -- relecture : la legende et le bas de la carte.
+   ========================================================================== */
+
+/* La legende « Livre / En cours / A venir » ne vaut que pour une tournee :
+   majLegendeCarte la cache en preparation, mais `.legend.vertical`
+   (display: grid) et `.marqueur-legende` (display: flex) battaient le
+   display: none que le navigateur donne a [hidden]. */
+#carteLegende[hidden] { display: none; }
+
+/* Le bas de la carte : la precision de « Ma position » et le message
+   « N arrets sans position » sont EMPILES. Poses chacun en absolu, le premier
+   recouvrait le debut du second tant que le suivi etait actif. Au-dessus de
+   l'attribution (en bas a droite), comme la precision l'etait deja. */
+.carte-bas {
+  position: absolute;
+  z-index: 1001;
+  left: 16px;
+  right: 16px;
+  bottom: 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  pointer-events: none;
+}
+.carte-bas > * { pointer-events: auto; }
+.carte-bas > .carte-precision {
+  position: static;
+  max-width: 100%;
+}
+.carte-bas > .map-empty {
+  position: static;
+  inset: auto;
+  align-self: stretch;
+}
+.carte-bas > [hidden] { display: none; }
+#livreur .tournee-carte-panel.carte-plein-ecran .carte-bas {
+  bottom: calc(28px + env(safe-area-inset-bottom));
+}

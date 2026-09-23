@@ -475,3 +475,75 @@ test("telephone — un doigt fait defiler la PAGE, deux doigts deplacent la cart
   expect(erreurs).toEqual([]);
   await ctx.close();
 });
+
+/* ------------------------------------------------------------------------ */
+/* Relecture adverse du 23/09                                               */
+/* ------------------------------------------------------------------------ */
+
+test("relecture — la legende « Livre / En cours / A venir » disparait en preparation, reste avec une tournee", async ({ browser }) => {
+  test.setTimeout(120000);
+  // Au telephone, l'en-tete de la carte (et sa legende) est affiche.
+  const prep = await ouvrir(browser, sansTournee, { vue: TELEPHONE });
+  expect(await prep.page.evaluate(() => document.getElementById("carteLegende")?.hidden), "prealable : majLegendeCarte n'a pas cache la legende").toBe(true);
+  await expect(prep.page.locator("#carteLegende"), "la legende des arrets numerotes reste peinte sur des points sans numero").toBeHidden();
+  await prep.ctx.close();
+  // Temoin positif : avec une tournee, elle est la.
+  const avec = await ouvrir(browser, tournee, { vue: TELEPHONE });
+  await expect(avec.page.locator("#carteLegende")).toBeVisible();
+  await avec.ctx.close();
+});
+
+test("relecture — /api/carte/fond echoue une fois : le fond revient sans recharger la page", async ({ browser }) => {
+  test.setTimeout(120000);
+  let appels = 0;
+  const { ctx, page, erreurs } = await ouvrir(browser, tournee, {
+    avant: p => p.route("**/api/carte/fond", route => {
+      appels += 1;
+      if (appels === 1) return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "redeploiement" }) });
+      return route.fallback();
+    })
+  });
+  // Le premier appel a echoue (503, par construction) ; la relance est a 3 s.
+  expect(appels, "prealable : /api/carte/fond n'a pas ete demande").toBeGreaterThanOrEqual(1);
+  // Le fond revient, sans rechargement.
+  // (La relance ne se compte pas ici : une fois le service worker en place, elle
+  // passe par lui, que `page.route` ne voit pas. Les tuiles, elles, se voient.)
+  await expect.poll(() => page.locator("#map img.leaflet-tile").count(), { timeout: 12000, message: "la carte reste sans fond jusqu'au rechargement" }).toBeGreaterThan(0);
+  await expect(page.locator("#carteMessage")).toBeHidden();
+  expect(await page.locator("#map .leaflet-tile-pane .leaflet-layer").count(), "le fond a ete pose deux fois").toBe(1);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+test("relecture — la precision GPS ne recouvre pas « N commandes sans position »", async ({ browser }) => {
+  test.setTimeout(120000);
+  const { ctx, page, erreurs } = await ouvrir(browser, sansTournee, {
+    vue: TELEPHONE,
+    contexte: { hasTouch: true, isMobile: true, permissions: ["geolocation"], geolocation: { latitude: 46.75, longitude: 5.9, accuracy: 1200 } },
+    avant: p => p.route("**/api/orders", async route => {
+      const rep = await route.fetch();
+      const commandes = await rep.json();
+      commandes.push({ ...commandes[0], id: "p-sans", clientId: "c-1", clientName: "Client sans position", lat: "", lng: "" });
+      await route.fulfill({ response: rep, json: commandes });
+    })
+  });
+  await expect(page.locator("#mapEmpty"), "prealable : le message des commandes sans position").toContainText("sans position");
+  await page.getByRole("button", { name: "Ma position" }).click();
+  await expect(page.locator("#cartePrecision"), "prealable : la precision est affichee").toContainText("± 1,2 km");
+  const r = await page.evaluate(() => {
+    const a = document.getElementById("mapEmpty").getBoundingClientRect();
+    const b = document.getElementById("cartePrecision").getBoundingClientRect();
+    const vide = document.getElementById("mapEmpty");
+    // Ce qui est PEINT au debut du message : lui, pas la precision.
+    const dessus = document.elementFromPoint(a.left + 20, a.top + a.height / 2);
+    return {
+      croise: a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom,
+      peint: vide.contains(dessus),
+      a: [a.left, a.top, a.width, a.height].map(Math.round), b: [b.left, b.top, b.width, b.height].map(Math.round)
+    };
+  });
+  expect(r.croise, `la precision (${r.b}) recouvre le message (${r.a})`).toBe(false);
+  expect(r.peint, "le debut du message n'est pas visible").toBe(true);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});

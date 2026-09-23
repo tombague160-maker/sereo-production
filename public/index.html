@@ -1216,9 +1216,13 @@
                 </button>
               </div>
               <p id="carteMessage" class="carte-message" role="status" hidden></p>
-              <p id="cartePrecision" class="carte-precision" role="status" hidden></p>
               <p id="carteAstuce" class="carte-astuce" aria-hidden="true" hidden>Deux doigts pour déplacer la carte</p>
-              <div id="mapEmpty" class="map-empty" hidden>Aucun client avec coordonnées.</div>
+              <!-- Le bas de la carte : la precision GPS AU-DESSUS du message
+                   « N arrets sans position », empiles, jamais l'un sur l'autre. -->
+              <div class="carte-bas">
+                <p id="cartePrecision" class="carte-precision" role="status" hidden></p>
+                <div id="mapEmpty" class="map-empty" hidden>Aucun client avec coordonnées.</div>
+              </div>
             </div>
           </div>
 
