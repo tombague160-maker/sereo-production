@@ -32,7 +32,7 @@ process.env.SEREO_BACKUP_DIR = path.join(tmpRoot, "data", "backups");
 process.env.SEREO_AUTH_USER = "";
 process.env.SEREO_AUTH_PASSWORD = "";
 
-const { app, closeStorage, defaultDb, readDb, writeDb, tourneesAPurger } = require("../server");
+const { app, closeStorage, defaultDb, readDb, writeDb, tourneesAPurger, createRoute } = require("../server");
 
 let server;
 let baseUrl;
@@ -268,6 +268,14 @@ test("API — une commande n'entre pas dans DEUX tournees actives, meme sans dep
   assert.equal(seconde.res.status, 400, `une commande est entree dans deux tournees : ${JSON.stringify(seconde.body)}`);
   assert.match(seconde.body.error, /CMD-2026-P1 \(EHPAD Les Tilleuls\)/, "le refus ne nomme pas la commande");
   assert.match(seconde.body.error, /Tournée Dole du 23\/09/, "le refus ne nomme pas la tournee");
+});
+
+test("API — createRoute appele SANS selection (chemin interne) ne prend pas non plus une commande deja en tournee", async () => {
+  ensemencer();
+  await creerTournee(["o-p1"]);
+  // POST /api/routes exige une selection (lot 5) ; createRoute reste exporte et
+  // appele sans elle : la garde tient aussi la.
+  assert.throws(() => createRoute(readDb(), {}), /CMD-2026-P1 \(EHPAD Les Tilleuls\) est déjà dans la tournée/);
 });
 
 test("API — une commande choisie qui n'est pas prete est NOMMEE (avant : retiree en silence)", async () => {
