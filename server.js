@@ -10,6 +10,7 @@ const zlib = require("zlib");
 const { zipSync, strToU8 } = require("fflate");
 const { createSqliteStore } = require("./storage/sqliteStore");
 const { empreinteDesSources, shellEmpreinte } = require("./lib/empreinte-shell");
+const { fondDeCarte } = require("./lib/fond-de-carte");
 
 loadEnvFile(path.join(__dirname, ".env"));
 
@@ -556,13 +557,13 @@ function securityHeaders(req, res, next) {
       "default-src 'self'",
       "script-src 'self'",
       "style-src 'self' 'unsafe-inline'",
-      // Les DEUX formes, et c'est necessaire : un joker CSP `*.exemple.org`
-      // ne couvre PAS `exemple.org` lui-meme. En retirant le sous-domaine {s}
-      // de l'URL des tuiles (deconseille par la politique d'usage d'OSM), le
-      // nouvel hote `tile.openstreetmap.org` tombait hors de cette liste et
-      // toutes les tuiles etaient refusees par la CSP -- une carte vide, sans
-      // qu'aucune erreur ne remonte a l'application.
-      "img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org",
+      // L'hote des tuiles vient de lib/fond-de-carte.js, le MEME que celui que
+      // la page recoit par /api/carte/fond (lot 4 de l'audit geo, 23/09). Il
+      // etait ecrit ici en dur, en double de app.js : changer de fournisseur
+      // d'un seul cote donnait une carte vide, sans erreur remontee. Un joker
+      // CSP `*.exemple.org` ne couvre pas `exemple.org` : le module rend
+      // l'hote exact, ou le joker quand le gabarit porte {s}.
+      `img-src 'self' data: ${fondDeCarte().origineCsp}`,
       "connect-src 'self'",
       "font-src 'self' data:",
       "object-src 'none'",
@@ -1064,6 +1065,10 @@ async function geocoderClients({ forcer = false, max = GEOCODER_MAX_PAR_LOT } = 
 
       client.lat = entree.lat;
       client.lng = entree.lng;
+      // Lot 4 (audit geo) : un point « street » est pose au milieu de la rue,
+      // parfois a des centaines de metres de la porte. La carte le distingue.
+      const precision = entree.type === "housenumber" ? "adresse" : "approximative";
+      client.positionPrecision = precision;
       appliques += 1;
 
       // Propagation aux commandes du client : sans cela, les bons deja
@@ -1072,6 +1077,7 @@ async function geocoderClients({ forcer = false, max = GEOCODER_MAX_PAR_LOT } = 
         if (String(order.clientId) !== String(client.id)) continue;
         order.lat = entree.lat;
         order.lng = entree.lng;
+        order.positionPrecision = precision;
       }
     }
 
@@ -4103,6 +4109,9 @@ function normalizeOrder(order) {
     phone: clean(order.phone || order.telephone),
     lat: order.lat ?? order.latitude ?? "",
     lng: order.lng ?? order.longitude ?? "",
+    // « adresse », « approximative » ou « manuelle » (lot 4 de l'audit geo) :
+    // la carte distingue un point pose au milieu de la rue.
+    positionPrecision: clean(order.positionPrecision),
     deliveryDate: normalizeDateInput(order.deliveryDate || order.dateLivraison || order.livraisonDate),
     stockReservedAt: order.stockReservedAt || null,
     // Chantier 1 (2026-06-04) : preserver l'historique des liberations de stock
@@ -5322,6 +5331,7 @@ function createRoute(db, options = {}) {
     if (!original) throw badRequest("La sélection a changé. Recalcule la tournée.");
     if (["address", "city", "postalCode", "status", "clientId"].some(key => original[key] !== item[key])) throw badRequest("Une adresse ou une commande a changé pendant le calcul. Recommence.");
     original.lat = item.lat; original.lng = item.lng;
+    if (item.positionPrecision) original.positionPrecision = item.positionPrecision;
     return original;
   }) : optimizeOrders(orders);
   if (optimizedOrders.length !== orders.length) throw badRequest("La sélection a changé. Recalcule la tournée.");
@@ -5410,7 +5420,9 @@ function createStop(routeId, order, index) {
     status: "pret_livraison",
     notes: order.notes || "",
     lat: order.lat,
-    lng: order.lng
+    lng: order.lng,
+    // La carte distingue un point approximatif (lot 4 de l'audit geo).
+    positionPrecision: order.positionPrecision || ""
   };
 }
 
@@ -5885,6 +5897,14 @@ app.get("/api/settings/order-numbering", (req, res) => {
 app.get("/api/settings/tournee", (req, res) => {
   const db = readDb();
   res.json(normalizeSettings(db.settings || {}).tournee);
+});
+
+// Le fond de carte choisi par l'environnement (lib/fond-de-carte.js). La page
+// le lit avant de poser les tuiles ; la CSP lit le meme. Sans l'origine CSP :
+// la page n'en a pas l'usage.
+app.get("/api/carte/fond", (req, res) => {
+  const { url, attribution, zoomMax, referrerPolicy } = fondDeCarte();
+  res.json({ url, attribution, zoomMax, referrerPolicy });
 });
 
 app.patch("/api/settings/order-numbering", async (req, res) => {
@@ -7189,6 +7209,8 @@ app.patch("/api/clients/:id/coordinates", async (req, res) => {
 
       client.lat = lat.value;
       client.lng = lng.value;
+      // Posee a la main : plus « approximative » (lot 4 de l'audit geo).
+      client.positionPrecision = "manuelle";
 
       // .filter et non .find : depuis le bucketing par (client, dateCommande)
       // de la v1.9.0, un client a couramment PLUSIEURS bons de commande. Avec
@@ -7199,6 +7221,7 @@ app.patch("/api/clients/:id/coordinates", async (req, res) => {
       for (const order of orders) {
         order.lat = lat.value;
         order.lng = lng.value;
+        order.positionPrecision = "manuelle";
         order.updatedAt = new Date().toISOString();
       }
 
