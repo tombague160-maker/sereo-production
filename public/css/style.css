@@ -13329,7 +13329,7 @@ textarea {
 
 /* 12. Une liste de commandes dont le chargement a ECHOUE le dit : ce n'est
        pas « Aucune commande ». Le titre en alerte (#C02B0A sur surface :
-       5,86 ; #F2635A en sombre). */
+       5,85 ; #F2635A en sombre). */
 :root[data-color-scheme] .empty-state--erreur h4,
 :root:not([data-color-scheme]) .empty-state--erreur h4 {
   color: var(--v8-alerte);

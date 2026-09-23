@@ -9,7 +9,7 @@
 // et un serveur seme (port 3301) pour ce qui ne se juge que sur des donnees --
 // une pastille, des toasts, une page assez longue pour defiler.
 
-const { test, expect } = require("./tuiles");
+const { test, expect, MOTIF_TUILES } = require("./tuiles");
 const { demarrer, jeuDeDonnees, AUJOURDHUI } = require("./serveur-seme");
 
 const LENTEUR_MS = 2500;
@@ -177,8 +177,19 @@ test("12 — la page ne remonte pas toute seule si on a défilé pendant le char
   const ctx = await contexte(browser, { viewport: { width: 390, height: 844 } });
   const page = await ctx.newPage();
   await ralentirApi(page);
+  // `load` attend les tuiles de la carte. Servies localement et tout de suite
+  // (tuiles.js), elles le font tomber a ~140 ms, AVANT tout geste : le banc
+  // passait alors sur le defaut (mesure du 23/09). Au telephone, sur le vrai
+  // reseau, il tombait a ~3 s. On rend aux tuiles leur lenteur, puis on les
+  // laisse a la route locale (fallback) -- aucune ne sort.
+  await page.route(MOTIF_TUILES, async route => {
+    await new Promise(r => setTimeout(r, 3000));
+    route.fallback().catch(() => { /* page fermee */ });
+  });
   await page.goto(srv.base + "/#journee", { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(800);
+  const charge = await page.evaluate(() => document.readyState);
+  expect(charge, "prealable : `load` ne doit pas etre deja passe au moment du geste").not.toBe("complete");
   await page.mouse.move(195, 400);
   await page.mouse.wheel(0, 400);
   await page.waitForTimeout(300);
