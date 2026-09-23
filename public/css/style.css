@@ -12416,3 +12416,9 @@ textarea::placeholder {
 .par-archive + .par-archive { box-shadow: 0 -1px 0 var(--v8-surface-basse); }
 :root[data-color-scheme] .par-archive .button,
 :root:not([data-color-scheme]) .par-archive .button { flex: none; width: auto; min-height: 44px; text-decoration: none; }
+/* Le titre d'une feuille est l'identifiant du compte : jusqu'a 60 caracteres
+   sans espace (une adresse e-mail). `.sheet-entete h3` ne se coupe pas et,
+   dans son flex, poussait le ✕ hors de la feuille a 360 px. (1,1,1) bat
+   `.sheet-entete h3` (0,1,1). */
+#parCompteFeuille .sheet-entete h3,
+#parImportsFeuille .sheet-entete h3 { min-width: 0; overflow-wrap: anywhere; }

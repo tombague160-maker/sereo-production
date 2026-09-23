@@ -5002,9 +5002,23 @@ async function renderComptes() {
   // style n'en montre qu'un (planche 8d).
   const tableau = gabaritTableauComptes(comptes, { identifiantCourant: moi.identifiant });
   const lignes = gabaritLignesComptes(comptes, { identifiantCourant: moi.identifiant });
+  // Une ligne du telephone avait le focus -- la feuille d'un compte le lui
+  // rend en se fermant apres un geste. Le rechargement la redessine : on rend
+  // le focus a la meme ligne (ou a sa voisine si le compte a ete supprime),
+  // sinon il tombe sur <body> et le clavier repart du haut.
+  const anciennes = [...container.querySelectorAll(".par-compte-ligne")];
+  const rangFocus = anciennes.indexOf(document.activeElement);
+  const idFocus = rangFocus >= 0 ? document.activeElement.dataset.compteId : null;
   container.innerHTML = entete + (lignes
     ? `<div class="par-bureau">${tableau}</div><div class="par-telephone par-comptes-tel">${lignes}</div>`
     : tableau);
+  if (rangFocus >= 0) {
+    const nouvelles = [...container.querySelectorAll(".par-compte-ligne")];
+    const cible = nouvelles.find(l => l.dataset.compteId === idFocus)
+      || nouvelles[Math.min(rangFocus, nouvelles.length - 1)]
+      || document.getElementById("parAjouterCompte");
+    cible?.focus();
+  }
 }
 
 // La feuille d'un compte (telephone, planche 8d) : ses gestes, un par ligne.
@@ -5163,12 +5177,22 @@ async function renderImportsArchives() {
 // Les archives lues au dernier rendu : la feuille du telephone s'en sert.
 let archivesImports = [];
 
-// « 16 septembre à 8 h 42 » (planche 8d).
+// « 16 septembre à 8 h 42 » (planche 8d) -- l'annee en cours se tait. Une
+// autre annee se dit : les archives ne sont jamais purgees, et un import d'il
+// y a un an, sans son annee, se lirait comme un import de la semaine.
 function formatDateLongue(iso) {
   const d = new Date(iso);
   if (!iso || Number.isNaN(d.getTime())) return "—";
-  const jour = d.toLocaleDateString("fr-FR", { day: "numeric", month: "long" });
+  const options = { day: "numeric", month: "long" };
+  if (d.getFullYear() !== new Date().getFullYear()) options.year = "numeric";
+  const jour = d.toLocaleDateString("fr-FR", options);
   return `${jour} à ${d.getHours()} h ${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+// « 1 ligne », « 38 lignes » ; un nombre inconnu garde « — lignes ».
+function nombreDeLignes(n) {
+  if (n === null || n === undefined || n === "" || !Number.isFinite(Number(n))) return "— lignes";
+  return `${n} ligne${Number(n) > 1 ? "s" : ""}`;
 }
 
 // Au telephone (planche 8d), des lignes a la place du tableau : le dernier
@@ -5191,8 +5215,8 @@ function gabaritLignesImports(archives) {
   const n = archives.length;
   return `
     <ul class="par-imports-lignes par-telephone" aria-label="Imports et archives">
-      ${ventes ? ligne("ventes", "Dernier import de ventes", `${formatDateLongue(ventes.importedAt)} · ${ventes.rowsCount ?? 0} lignes`) : ""}
-      ${stock ? ligne("stock", "Dernier import de stock", `${formatDateLongue(stock.importedAt)} · ${stock.rowsCount ?? 0} lignes`) : ""}
+      ${ventes ? ligne("ventes", "Dernier import de ventes", `${formatDateLongue(ventes.importedAt)} · ${nombreDeLignes(ventes.rowsCount ?? 0)}`) : ""}
+      ${stock ? ligne("stock", "Dernier import de stock", `${formatDateLongue(stock.importedAt)} · ${nombreDeLignes(stock.rowsCount ?? 0)}`) : ""}
       ${ligne("", "Archives", `${n} fichier${n > 1 ? "s" : ""} conservé${n > 1 ? "s" : ""}`)}
     </ul>
   `;
@@ -5213,7 +5237,7 @@ function ouvrirFeuilleImports(type) {
         <li class="par-archive">
           <span class="par-ligne-texte">
             <span class="par-ligne-titre par-archive-nom">${escapeHtml(a.filename || "—")}</span>
-            <span class="par-ligne-meta">${escapeHtml(formatDateLongue(a.importedAt))} · ${a.type === "ventes" ? "Ventes" : "Stock"} · ${escapeHtml(a.rowsCount ?? "—")} lignes · ${formatFileSize(a.fileSize)}</span>
+            <span class="par-ligne-meta">${escapeHtml(formatDateLongue(a.importedAt))} · ${a.type === "ventes" ? "Ventes" : "Stock"} · ${escapeHtml(nombreDeLignes(a.rowsCount))} ·${formatFileSize(a.fileSize)}</span>
             <span class="par-ligne-meta">${formatImportStats(a.stats, a.type)}</span>
           </span>
           <a class="button secondary compact" href="/api/imports/archives/${encodeURIComponent(a.id)}/download" download="${escapeAttribute(a.filename || "import.xlsx")}" aria-label="Télécharger ${escapeAttribute(a.filename || "le fichier")}">Télécharger</a>
