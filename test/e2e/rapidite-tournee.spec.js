@@ -165,6 +165,13 @@ test("lot 5 — la derniere livraison termine la tournee : l'ecran recharge une 
 
 test("lot 5 — « Me localiser » : la position part arrondie a ~100 m (3 decimales)", async ({ browser }) => {
   test.setTimeout(60000);
+  // Plus de tournee en cours sur ce serveur (lance seul, ce test la termine
+  // lui-meme) : l'ecran propose alors de preparer la suivante.
+  for (const s of await arrets(fin.base)) {
+    if (["livre", "absent", "probleme"].includes(s.status)) continue;
+    const r = await fetch(`${fin.base}/api/routes/r-1/stops/${s.id}`, { method: "PATCH", headers: { "Content-Type": "application/json", Origin: fin.base }, body: JSON.stringify({ status: "livre" }) });
+    expect(r.status).toBe(200);
+  }
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, timezoneId: "Europe/Paris" });
   const page = await ctx.newPage();
   await page.addInitScript(() => {
