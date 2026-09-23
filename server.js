@@ -1,5 +1,6 @@
 const routing = require("./lib/routing");
 const express = require("express");
+const compression = require("compression");
 const multer = require("multer");
 const readXlsxFile = require("read-excel-file/node");
 const crypto = require("crypto");
@@ -317,6 +318,11 @@ app.disable("x-powered-by");
 // sur l'IP unique du reverse proxy.
 app.set("trust proxy", 1);
 app.use(securityHeaders);
+// Compression des reponses texte (HTML, CSS, JS, JSON de l'API). Mesure du
+// 23/09 : Node envoyait tout brut -- 750 Ko a chaque chargement (175 Ko une fois
+// compresses), et le JSON des commandes grossit avec la base. Les formats deja
+// compresses (polices, images, .xlsx) sont ecartes par le filtre par defaut.
+app.use(compression());
 app.use("/brand", express.static(path.join(__dirname, "public", "brand"), { immutable: true, maxAge: "1d" }));
 // Les polices : la page de connexion les charge avant toute session. Rien de
 // sensible (des fichiers de police libres, OFL).
