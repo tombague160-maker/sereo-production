@@ -305,6 +305,16 @@ for (const schema of ["light", "dark"]) {
   });
 }
 
+test("Analyse : l'ancien nom « Statistiques » mène encore à l'écran par la recherche du menu", async ({ page }) => {
+  // Le titre est devenu « Analyse » : sans ANCIENS_NOMS, un utilisateur qui
+  // tape le nom qu'il connaissait ne trouverait plus rien.
+  await ouvrir(page, "journee");
+  await page.fill("#menuSearch", "statistiques");
+  await page.press("#menuSearch", "Enter");
+  await expect(page.locator("#statistiques")).toHaveClass(/active/);
+  await expect(page.locator("#pageTitle")).toHaveText("Analyse");
+});
+
 test("dette 7 : les quatre anciennes listes ont quitté la page, leurs adresses redirigent", async ({ page }) => {
   await ouvrir(page, "commandes");
   const presentes = await page.evaluate(() => ["commandes-jour", "commandes-planifiees", "bons-commande", "commandes-livrees",

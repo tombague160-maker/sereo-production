@@ -973,7 +973,9 @@ function poserSquelettes() {
     "crmList", "stockList", "cmdLignes"]);
   const zones = [
     ["dashboardPreparing", 3], ["dashboardDelivering", 3], ["dashboardSubscriptions", 2],
-    ["crmList", 4], ["stockList", 4], ["todayOrdersList", 4], ["plannedOrdersList", 4],
+    // Plus de todayOrdersList ni de plannedOrdersList : ces deux listes ont
+    // quitte la page le 23/09 (dette 7), la zone cmdLignes les porte.
+    ["crmList", 4], ["stockList", 4],
     ["relanceList", 3], ["exportsList", 3], ["historiqueList", 3], ["stockMovementList", 4],
     // Ajoutes apres mesure : la premiere liste avait ete ecrite de memoire, et
     // le graphique du tableau de bord -- le plus grand vide de l'ecran, 556x184
