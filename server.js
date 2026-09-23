@@ -7925,22 +7925,43 @@ function tourneesAPurger(db, maintenant = new Date(), mois = PURGE_TOURNEES_MOIS
  * @returns {{ purgees: number, sauvegarde?: string, raison?: string }}
  */
 async function purgerTourneesAnciennes({ maintenant = new Date(), mois = PURGE_TOURNEES_MOIS, sauvegarder = writeBackupNowAsync } = {}) {
-  return withWriteLock(async () => {
-    const db = readDb();
-    const cibles = tourneesAPurger(db, maintenant, mois);
-    if (!cibles.length) return { purgees: 0 };
+  // Revue du 23/09 : la sauvegarde se fait HORS du verrou d'ecriture, comme les
+  // sauvegardes automatiques de writeDb. Sous le verrou, les « Livre » des
+  // livreurs attendaient la compression de toute la base (plusieurs dizaines
+  // de Mo), chaque jour a l'heure du demarrage plus une minute.
+  const candidates = tourneesAPurger(readDb(), maintenant, mois);
+  if (!candidates.length) return { purgees: 0 };
+  // Chaque tournee telle que la sauvegarde va la contenir.
+  const sauvees = new Map(candidates.map(route => [String(route.id), JSON.stringify(route)]));
 
-    let sauvegarde = null;
-    try {
-      sauvegarde = await sauvegarder("avant-purge");
-    } catch (error) {
-      console.error(`[purge] sauvegarde impossible, purge annulee : ${error.message || error}`);
-      return { purgees: 0, raison: "sauvegarde impossible" };
-    }
-    if (!sauvegarde) {
-      console.error("[purge] aucune sauvegarde ecrite, purge annulee");
-      return { purgees: 0, raison: "sauvegarde impossible" };
-    }
+  // Une sauvegarde automatique deja en vol lirait la base en meme temps : on
+  // la laisse finir, puis la notre tient sa place (writeDb n'en lance pas
+  // d'autre tant qu'elle court). Revue #84 : deux sauvegardes concurrentes.
+  await flushPendingBackup();
+  let sauvegarde = null;
+  try {
+    const enVol = Promise.resolve().then(() => sauvegarder("avant-purge"));
+    const place = enVol.then(() => {}, () => {});
+    pendingBackup = place;
+    place.then(() => { if (pendingBackup === place) pendingBackup = null; });
+    sauvegarde = await enVol;
+  } catch (error) {
+    console.error(`[purge] sauvegarde impossible, purge annulee : ${error.message || error}`);
+    return { purgees: 0, raison: "sauvegarde impossible" };
+  }
+  if (!sauvegarde) {
+    console.error("[purge] aucune sauvegarde ecrite, purge annulee");
+    return { purgees: 0, raison: "sauvegarde impossible" };
+  }
+
+  return withWriteLock(async () => {
+    // Relue sous le verrou : les gestes faits pendant la sauvegarde restent.
+    // Ne part qu'une tournee que la sauvegarde contient sous sa forme actuelle ;
+    // une tournee modifiee entre-temps attend la purge du lendemain.
+    const db = readDb();
+    const cibles = tourneesAPurger(db, maintenant, mois)
+      .filter(route => sauvees.get(String(route.id)) === JSON.stringify(route));
+    if (!cibles.length) return { purgees: 0 };
 
     const ids = new Set(cibles.map(route => String(route.id)));
     const arrets = cibles.reduce((n, route) => n + (route.stops || []).length, 0);

@@ -484,6 +484,65 @@ test("lot 5 : sans sauvegarde, pas de purge", async () => {
   assert.equal((await S.purgerTourneesAnciennes({ maintenant: MAINTENANT })).purgees, 1);
 });
 
+/** Une sauvegarde qui ne finit que quand on la libere. */
+function sauvegardeRetenue() {
+  let liberer, appelee = false;
+  const fin = new Promise(r => { liberer = r; });
+  return {
+    sauvegarder: async () => { appelee = true; await fin; return "db-test-avant-purge.sqlite.gz"; },
+    appelee: () => appelee,
+    liberer: () => liberer()
+  };
+}
+
+async function attendre(condition, message) {
+  const limite = Date.now() + 5000;
+  while (!condition()) {
+    if (Date.now() > limite) throw new Error(message);
+    await new Promise(r => setTimeout(r, 10));
+  }
+}
+
+test("lot 5 : pendant la sauvegarde d'avant purge, un « Livré » ne l'attend pas, et la purge ne l'efface pas", async () => {
+  semerPourPurge();
+  const retenue = sauvegardeRetenue();
+  const purge = S.purgerTourneesAnciennes({ maintenant: MAINTENANT, sauvegarder: retenue.sauvegarder });
+  try {
+    await attendre(retenue.appelee, "prealable : la sauvegarde n'a pas ete demandee");
+    const geste = api("/api/routes/active/stops/stop-active-1", { method: "PATCH", body: JSON.stringify({ status: "livre" }) });
+    const issue = await Promise.race([geste, new Promise(r => setTimeout(() => r("attente"), 2000))]);
+    assert.notEqual(issue, "attente", "le geste a attendu la fin de la sauvegarde d'avant purge");
+    assert.equal(issue.status, 200, JSON.stringify(issue.body));
+  } finally {
+    retenue.liberer();
+  }
+  const resultat = await purge;
+  assert.equal(resultat.purgees, 1, "temoin : la purge n'est pas partie");
+  const apres = readDb();
+  assert.ok(!apres.routes.some(r => r.id === "vieille"));
+  const active = apres.routes.find(r => r.id === "active");
+  assert.equal(active.stops[0].status, "livre", "la purge a ecrase le geste fait pendant sa sauvegarde");
+});
+
+test("lot 5 : une tournee modifiee pendant la sauvegarde d'avant purge n'est pas purgee (la sauvegarde n'a pas sa derniere version)", async () => {
+  semerPourPurge();
+  const retenue = sauvegardeRetenue();
+  const purge = S.purgerTourneesAnciennes({ maintenant: MAINTENANT, sauvegarder: retenue.sauvegarder });
+  try {
+    await attendre(retenue.appelee, "prealable : la sauvegarde n'a pas ete demandee");
+    const db = readDb();
+    db.routes.find(r => r.id === "vieille").notes = "corrigee pendant la sauvegarde";
+    writeDb(db, { backup: false });
+  } finally {
+    retenue.liberer();
+  }
+  const resultat = await purge;
+  assert.equal(resultat.purgees, 0, "une tournee absente de la sauvegarde sous sa derniere forme a ete purgee");
+  assert.ok(readDb().routes.some(r => r.id === "vieille"));
+  // Temoin : le lendemain, la meme tournee part.
+  assert.equal((await S.purgerTourneesAnciennes({ maintenant: MAINTENANT })).purgees, 1);
+});
+
 // --- 9. Plafond du calcul « sans depart » ------------------------------------
 
 test("lot 5 : une tournee « sans depart » exige une selection de 1 a 50 commandes", async () => {
