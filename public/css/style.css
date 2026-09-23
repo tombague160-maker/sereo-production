@@ -13666,11 +13666,10 @@ textarea {
       - 1600 px et plus : les trois colonnes, formulaire d'au moins 360 px.
       - A partir de 1181 px, le formulaire n'est plus « collant ». Un par
         ligne, il mesure ~1 200 px : colle, sa fin (« Valider la commande »)
-        resterait hors de la fenetre. Le « collant » est de toute facon
-        INERTE aujourd'hui : html, body et .content ont `overflow-x: hidden`,
-        ce qui fait de .content le conteneur de defilement de reference, et
-        il ne defile jamais (mesure du 23/09, avant comme apres le lot). Ce
-        `static` evite le piege le jour ou ils passeront a `clip`.
+        resterait hors de la fenetre. (Le « collant » etait alors INERTE :
+        html, body et .content avaient `overflow-x: hidden`. Ils sont passes
+        a `clip` le 23/09 -- bloc « PANIER COLLANT ET ORDRE DU CLAVIER » en
+        fin de feuille : ce `static` y garde le formulaire.)
       - 821-1180 px : une colonne. La colonne unique ne commencait qu'a
         920 px ; de 921 a 1180, les trois colonnes minimales (280 + 360 +
         280) ne tenaient pas dans les ~700 px du contenu.

@@ -1891,7 +1891,9 @@ le mécanisme reste. Au bureau, les gestes gardent 44 px (planche 13b).
   au bas de l'écran, au-dessus de la barre (`position: sticky`), tant que la carte de l'arrêt
   est à l'écran. Il a fallu `overflow-x: clip` au lieu de `hidden` sur `<body>` et `<main>`
   (sur cet écran seul) : `hidden` en fait des conteneurs de défilement, et le collage se
-  faisait au bas de la page entière, jamais à celui de l'écran.
+  faisait au bas de la page entière, jamais à celui de l'écran. (Depuis le 23/09, `clip`
+  vaut pour toute l'application : « Panier collant et ordre du clavier », en fin de
+  fichier.)
 - **« Autres actions »** (À reprogrammer, Planifier suite, Suivant) sort du bloc des gestes :
   gardée, repliée, sous la carte de l'arrêt — elle n'a pas à coller au pouce.
 - **« Prochain : <client> · ville »** sous les articles. **Omis** : « 6,2 km · environ
@@ -3715,7 +3717,9 @@ correction a un banc qui rougit sans elle.
   le réparer (`overflow-x: clip` au lieu de `hidden` sur `html`, `body` et
   `.content`) réveillerait **tous** les `position: sticky` de la feuille à la
   fois. C'est un lot à part, qui les passerait tous en revue. Tant qu'il n'est
-  pas fait, le panier ne suit pas le défilement, à aucune largeur.
+  pas fait, le panier ne suit pas le défilement, à aucune largeur. **Fermé le
+  23/09** : ce lot est fait (« Panier collant et ordre du clavier », en fin de
+  fichier).
 - **De 1181 à 1599 px, le premier écran est le formulaire** : catalogue et
   panier commencent sous la ligne de flottaison, comme dans la colonne unique.
   C'est le prix d'un panier au niveau du catalogue sans casser les champs.
@@ -3922,7 +3926,9 @@ corrigé.
   téléphone déplacerait aussi le bouton du bureau, ou le dédoublerait : pas un correctif
   bon marché. Même motif, déjà en place, que « Nouvel abonnement » (Abonnements, 3a). À
   trancher avec lui : l'action principale reste atteinte tôt (le motif du bouton flottant),
-  ou les deux boutons passent après leur liste.
+  ou les deux boutons passent après leur liste. **Fermé le 23/09** : Thomas a retenu la
+  seconde ; au téléphone, les deux boutons sont déplacés après les écrans dans le DOM, et
+  le bureau garde le sien dans l'en-tête (« Panier collant et ordre du clavier »).
 
 ### Création d'abonnement (planches 3b, 5b), posé le 23/09
 
@@ -4294,7 +4300,9 @@ authentifié, que le lot écrans n'avait pas rejoués sur l'arbre fusionné).
   écrans).
 - Les écarts nommés par chaque lot restent les leurs (le collant inerte de Commande
   client, « Se déconnecter » sans authentification, « Nouveau client » tôt dans
-  l'ordre du clavier, « Itinéraire » visible au bureau…).
+  l'ordre du clavier, « Itinéraire » visible au bureau…). Le collant inerte et
+  l'ordre du clavier sont fermés depuis (« Panier collant et ordre du clavier »,
+  23/09).
 
 ## Lot 2 de l audit géo : débloquer les tournées (23/09)
 
@@ -5381,3 +5389,122 @@ et l'image OSRM, absents avant ; `node:24-alpine`, présente avant, gardée).
 - Les écarts nommés par chaque lot restent les leurs.
 - Le crochet « hawkscan » proposé après chaque commit n'a pas été lancé (aucune clé
   `HAWK_API_KEY`, aucune application exposée pour lui).
+
+## Panier collant et ordre du clavier (23/09)
+
+Branche `fix/collant-et-clavier`, partie de `67c382e` (release 1.43.0). CSS : le bloc
+« PANIER COLLANT ET ORDRE DU CLAVIER » en fin de `style.css`. Banc :
+`test/e2e/collant-et-clavier.spec.js` (11 cas, serveur semé sur 3350). Ferme deux écarts
+nommés plus haut : « le collant inerte » (Finitions d'interface) et « Nouveau client tôt
+dans l'ordre du clavier » (Clients au téléphone).
+
+### 1. Le panier collant, réparé à la cause
+
+**La cause, mesurée.** Aucun ancêtre du panier n'était en `overflow: auto` : c'était
+`overflow-x: hidden` sur `html`, `body` et `.content`. `hidden` sur un axe met l'autre en
+`auto` : `body` et `.content` devenaient des conteneurs de défilement (mesuré :
+`hidden/auto` sur les trois) — qui ne défilent jamais, puisque c'est la fenêtre qui défile.
+Tout `position: sticky` de la feuille collait à un conteneur immobile et partait avec la
+page. Le remède : `overflow-x: clip` sur les trois. `clip` rogne pareil, sans créer de
+conteneur (mesuré : `clip/visible`). La règle propre à Tournée (`clip` sur cet écran seul)
+reste, désormais redondante.
+
+**Le panier.** Il colle à **24 px** du haut (la marge du contenu), dans les deux thèmes, de
+1181 à 1920 px. Le thème clair disait 84 px (la hauteur d'une barre du haut qui n'existe
+plus), le sombre 18. Il est **borné à la fenêtre** : un long panier fait défiler sa liste,
+l'en-tête « Panier » et le total restent à l'écran. Sans cette borne, 24 produits font un
+panier de 1 870 px pour 800 px de fenêtre, et le total resterait hors de l'écran tant que
+le catalogue défile. Sous 1181 px, rien ne change : une colonne, le panier après le
+catalogue, et la barre panier fixe sous 560 px.
+
+**L'inventaire des `position: sticky`** (grep, 11 déclarations), chacune mesurée à 1440 et
+390 px, clair et sombre, en défilant (300, 800, 1600, 3000 px et le bas) sur les treize
+écrans, avant et après :
+
+| Ligne | Élément | Avant | Après | Verdict |
+|---|---|---|---|---|
+| 1388, 13729 | panier (`.customer-cart-panel`) ≥ 1181 px | inerte | colle à 24 px | **le but** ; top commun, hauteur bornée |
+| 1388 | formulaire client (`.customer-client-panel`) | déjà `static` à toutes les largeurs | idem | rien à faire |
+| 9747 | barre latérale, bureau | inerte : partait avec la page (−800 px) | colle en haut, 100 vh, sa propre barre de défilement | **gardé** : c'est sa déclaration (« c'est la barre qui défile ») ; ne recouvre rien (colonne à part, mesuré) |
+| 10101 | bandeau de marque, téléphone (76 px) | ne collait que sur Tournée | idem | **neutralisé** hors Tournée (`position: relative`, l'étage 950 reste) : 76 px tenus en haut sur 844 n'étaient pas une décision prise |
+| 4022 | bannière de récupération de la base | inerte | aurait collé en haut, par-dessus la barre latérale (mesuré : 0..101 px sur la barre collée) | **neutralisé** (`position: relative`, l'étage 1500 reste) |
+| 2700, 12353 | gestes de l'arrêt, Tournée (≤ 820 px) | déjà actifs (le `clip` de Tournée) | idem | inchangé (mesuré) |
+| 12679 | gestes de la page de commande (dialogue) | collés à `.sheet-corps`, qui défile | idem | hors d'atteinte du changement |
+| 3567 | `.bdc-table thead` | — | — | aucun élément ne porte `.bdc-table` (dans un `overflow-x: auto` de toute façon) |
+| 4249, 5261 | `.topbar` (thème clair) | — | — | aucun élément ne porte `.topbar` |
+
+**Pas de débordement nouveau.** À 360, 390, 820, 1024 et 1440 px, sur onze écrans (données
+semées) : aucune page ne défile de côté, et la liste des éléments qui dépassent le bord
+est **identique** avant et après (`clip` rogne exactement ce que `hidden` rognait). Elle
+n'est pas vide : voir les écarts.
+
+### 2. L'ordre du clavier au téléphone
+
+Décision de Thomas (défauts validés) : le bouton reste fixé en bas, mais passe **après sa
+liste** dans l'ordre du document. `placerGestesBas` (app.js) **déplace** « Nouveau client »
+et « Nouvel abonnement » — mêmes éléments, mêmes écouteurs (les clics sont délégués au
+document) — dans `#gestesBas`, un conteneur vide placé après les écrans, dans `<main>`
+mais hors des `.page` (leur transform résiduel piégerait `position: fixed`). Au bureau (et
+en franchissant 820 px dans un sens ou dans l'autre), chacun revient à sa place exacte
+dans l'en-tête, marquée par un commentaire. `showTab` range les boutons de `#gestesBas`
+comme ceux de la fente. Les règles du bouton fixe sont reprises pour `#gestesBas` à
+l'identique : 27 propriétés calculées comparées avant/après (boîte 16,692 358 × 48,
+couleurs, ombre, anneau au repos et au focus), clair et sombre, **identiques**.
+
+Mesuré à 390 px, en partant du début du document :
+
+- avant : … recherche, « Rappels », **« Nouveau client »**, « Actualiser », les pilules,
+  le statut, le tri, puis les six clients ;
+- après : … recherche, « Rappels », « Actualiser », les pilules, le statut, le tri, les
+  six clients, **« Nouveau client »**. Même chose pour « Nouvel abonnement » (après les
+  trois abonnements).
+
+Au bureau, rien ne change : le bouton reste dans l'en-tête, `static`, avant la liste.
+`clients-mobile.spec.js` et `abonnements-mobile.spec.js` visent le bouton du téléphone à
+sa nouvelle place (`#gestesBas …`) ; le cas « caché dans l'agenda » vérifie d'abord que
+le bouton existe (un « caché » introuvable passait sans rien juger).
+
+### Preuves rouges
+
+Le banc, sur le code de `67c382e` (avant) :
+
+- « le panier suit le défilement » : `panier hors de la fenetre (haut -1654, bas -1285,
+  fenetre 900)`, dix fois (clair et sombre, 1181 à 1920 px) ;
+- « un long panier garde son total » : `total hors de la fenetre (1140..1193, fenetre
+  800)`, `panier de 1870px pour 800px de fenetre` ;
+- « rien ne se chevauche » : `barre laterale de -2642 a -1742 pour 900px` ;
+- « Tab parcourt la liste AVANT » : `« Nouveau client » atteint au pas 8, la derniere
+  ligne au pas 22` (Expected > 22, Received 8) ; `« Nouvel abonnement » atteint au pas 7,
+  la derniere ligne au pas 16` ;
+- « revient dans l'en-tête » : `#enteteActions .abo-nouveau` au téléphone, Expected 0,
+  Received 1.
+
+Les gardes (verts avant : ils protègent de l'effet du remède), mutés un à un sur le code
+du lot, restauré par copie :
+
+- sans la neutralisation du bandeau : `stock : le bandeau part avec la page`, Expected
+  −250, Received 0 ;
+- sans celle de la bannière : `la banniere part avec la page`, Expected ≤ 0, Received 101 ;
+- `overflow-x: visible` au lieu de `clip` : `1024px #crm : la page defile de cote (1091
+  pour 1024)` ;
+- sans la borne du panier : `total hors de la fenetre (1816..1869, fenetre 800)` ;
+- sans le `top` commun : `panier colle a 84px du haut (attendu 24, top 84px)` (clair) et
+  18 px (sombre) ;
+- `showTab` sans `#gestesBas` : le bouton reste caché sur son écran (`toBeVisible`,
+  Received hidden) ;
+- le bouton déplacé à toutes les largeurs : les deux cas « au bureau » rougissent
+  (`element(s) not found` dans l'en-tête).
+
+### Écarts nommés
+
+- **« Actualiser » coupé à 1024 px** sur Clients et Commandes (antérieur, hors de ce lot) :
+  la rangée d'actions de l'en-tête dépasse le bord (jusqu'à 1 091 et 1 226 px).
+  `hidden` la coupait déjà, `clip` à l'identique ; le banc de débordement l'exclut
+  nommément.
+- **Le bandeau de marque du téléphone** ne colle toujours que sur Tournée. Le faire
+  coller partout (ce que sa règle déclare) est une décision de mise en page, pas une
+  réparation : à trancher par Thomas.
+- **La liste d'un long panier** défile à la souris ou au doigt ; ses lignes n'ont rien de
+  focalisable, et le clavier compte sur le navigateur (Chrome rend focalisable un
+  conteneur qui défile sans enfant focalisable). Aucun `tabindex` ajouté.
+- Sous 1181 px, le panier ne colle pas (une colonne) : voulu, inchangé.
