@@ -66,8 +66,14 @@ for (const mode of ["light", "dark"]) {
       const badge = ligneDe(page, "Alèses").locator(".stk-negatif");
       await expect(badge).toBeVisible();
       await expect(badge).toHaveText("Stock négatif · à recompter");
-      // Entier : ni coupe par l'ellipse du nom, ni hors de l'ecran.
-      const coupe = await badge.evaluate(el => el.scrollWidth > el.clientWidth + 1);
+      // Entier : ni coupe par l'ellipse du nom, ni hors de l'ecran. Mesure par
+      // les BOITES : sur un badge en ligne (inline), scrollWidth et clientWidth
+      // valent 0, et le premier jet de ce controle ne pouvait pas echouer.
+      const coupe = await badge.evaluate(el => {
+        const nom = el.closest(".stk-nom").getBoundingClientRect();
+        const b = el.getBoundingClientRect();
+        return b.right > nom.right + 1 || b.bottom > nom.bottom + 1 || el.scrollWidth > el.clientWidth + 1;
+      });
       expect(coupe, "le badge est coupe").toBe(false);
       const boite = await badge.boundingBox();
       expect(boite.x + boite.width).toBeLessThanOrEqual(largeur);
