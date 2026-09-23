@@ -149,8 +149,25 @@ function copieEnCache(request) {
 // redemarre n'a plus de requete en vol a comparer.)
 let numeroDeRequete = 0;
 const rangements = new Map();
+// Integration des lots 1 et 5 (23/09). Depuis le lot 5, aucune lecture ne suit
+// un geste d'arret : la PAGE recopie elle-meme dans ce cache ce que l'ecran
+// montre (recopierApresGeste, app.js). Cette recopie n'est pas une requete :
+// la garde ci-dessus ne la voyait pas, et la reponse d'un chargement parti
+// AVANT le geste, arrivee apres, rangeait l'etat d'avant par-dessus. La page
+// annonce donc chaque ecriture (« sereo-ecriture », au depart de l'ecriture) :
+// une requete partie avant ne range plus rien -- la meme regle que la page
+// applique a l'ecran (message.debut < derniereEcritureA). Ce qu'elle aurait
+// range est au mieux l'etat d'avant le geste ; le rechargement frais qui suit
+// une ecriture (X-Sereo-Frais) rangera le suivant.
+let barriereEcriture = 0;
+
+self.addEventListener("message", event => {
+  const message = event.data;
+  if (message && message.type === "sereo-ecriture") barriereEcriture = ++numeroDeRequete;
+});
 
 function rangerSiPlusRecente(url, numero, request, copy) {
+  if (numero < barriereEcriture) return Promise.resolve(false);
   if ((rangements.get(url) || 0) > numero) return Promise.resolve(false);
   rangements.set(url, numero);
   return caches.open(API_CACHE_NAME).then(cache => cache.put(request, copy)).then(() => true);

@@ -201,3 +201,41 @@ test("sw — temoin : une reponse tardive SANS requete plus recente est bien ran
   await attendre(20);
   assert.deepEqual(await lireCopie(sw, "/api/routes"), { arret: "livre" });
 });
+
+// Integration des lots 1 et 5 (23/09). Le lot 5 ne relit plus rien apres un
+// geste d'arret : la PAGE recopie dans le cache ce que l'ecran montre
+// (recopierApresGeste). Or la garde du lot 1 ci-dessus compare des REQUETES :
+// une recopie de la page n'en est pas une. Un chargement parti AVANT le geste,
+// dont la reponse arrive apres la recopie, rangeait l'etat d'avant le geste
+// par-dessus -- et la prochaine ouverture remontrait l'arret « En livraison ».
+// La page annonce donc chaque ecriture au service worker (« sereo-ecriture ») :
+// une reponse a une requete partie AVANT ne se range plus.
+function annoncerEcriture(sw) {
+  if (sw.ecouteurs.message) sw.ecouteurs.message({ data: { type: "sereo-ecriture" } });
+}
+
+test("sw — lots 1+5 : une reponse partie AVANT une ecriture ne range pas l'etat d'avant par-dessus la recopie de la page", async () => {
+  const sw = chargerServiceWorker(reseauScripte([{ ms: 200, corps: { arret: "en_livraison" } }]));
+  await semerCopie(sw, "/api/routes", { arret: "en_livraison" });
+  const l1 = demander(sw, "/api/routes");     // un chargement en cours, reseau lent
+  await l1.reponse;                            // la page a recu la copie (repli de 30 ms)
+  annoncerEcriture(sw);                        // « Livre » part (apiFetch)
+  await attendre(40);
+  await semerCopie(sw, "/api/routes", { arret: "livre" });   // recopierApresGeste
+  await Promise.all(l1.attentes);
+  await attendre(20);
+  assert.deepEqual(await lireCopie(sw, "/api/routes"), { arret: "livre" },
+    "la reponse d'un chargement parti avant le geste a ecrase la recopie : la prochaine ouverture remontrera l'arret « En livraison »");
+  assert.equal(sw.messages.length, 0, "une reponse d'avant le geste a ete annoncee a la page");
+});
+
+test("sw — lots 1+5, temoin : une requete partie APRES l'ecriture range bien sa reponse", async () => {
+  const sw = chargerServiceWorker(reseauScripte([{ ms: 20, corps: { arret: "livre", suite: true } }]));
+  await semerCopie(sw, "/api/routes", { arret: "en_livraison" });
+  annoncerEcriture(sw);
+  const l2 = demander(sw, "/api/routes", { "X-Sereo-Frais": "1" });
+  assert.deepEqual(await (await l2.reponse).json(), { arret: "livre", suite: true });
+  await Promise.all(l2.attentes);
+  await attendre(20);
+  assert.deepEqual(await lireCopie(sw, "/api/routes"), { arret: "livre", suite: true }, "la barriere d'ecriture bloque aussi les requetes d'apres");
+});

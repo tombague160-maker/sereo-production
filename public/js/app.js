@@ -1366,6 +1366,21 @@ let derniereEcritureA = 0;
 // chargement : une reponse tardive les rafraichit (ecouterReponsesTardives).
 const clesEnCopie = new Set();
 
+/**
+ * Une ecriture part (ou vient d'etre renvoyee par la file). Integration des
+ * lots 1 et 5 (23/09) : le service worker l'apprend aussi. Depuis le lot 5,
+ * aucune lecture ne suit un geste d'arret ; la page recopie l'ecran dans le
+ * cache (recopierApresGeste), et le service worker ne doit plus y ranger la
+ * reponse d'une requete partie AVANT l'ecriture (voir barriereEcriture).
+ */
+function noterEcriture() {
+  ecritureNonRelue = true;
+  derniereEcritureA = Date.now();
+  try {
+    navigator.serviceWorker?.controller?.postMessage({ type: "sereo-ecriture" });
+  } catch { /* pas de service worker : rien a prevenir */ }
+}
+
 async function viderCacheDeDonnees() {
   try {
     if (typeof caches === "undefined") return;
@@ -1595,6 +1610,9 @@ async function loadData() {
   // Apres : chaque endpoint a son sort. Si le stock timeout, on garde la prep,
   // les clients, etc. Le user voit "Stock indisponible" sans tout perdre.
   const endpoints = endpointsDeChargement();
+  // Integration des lots 1 et 5 : une ecriture partie PENDANT ce chargement
+  // (voir la fin de la fonction).
+  const ecritureAuDepart = derniereEcritureA;
 
   // H4 (lot 1 de l'audit geo) : apres une ecriture, JAMAIS la copie de secours.
   // Mesure de l'audit : 250 tournees d'historique, « Livre » enregistre (200),
@@ -1666,7 +1684,8 @@ async function loadData() {
 
   clesEnCopie.clear();
   for (const cle of copiees) clesEnCopie.add(cle);
-  if (frais && gardees.length === 0 && failed.length === 0) ecritureNonRelue = false;
+  const ecritureCroisee = derniereEcritureA !== ecritureAuDepart;
+  if (frais && gardees.length === 0 && failed.length === 0 && !ecritureCroisee) ecritureNonRelue = false;
 
   appliquerDonnees(data);
 
@@ -1703,6 +1722,15 @@ async function loadData() {
   // blocs gris : un squelette qui ne finit jamais promet quelque chose qui
   // n'arrive pas.
   retirerSquelettes();
+
+  // Integration des lots 1 et 5 (23/09). Une ecriture est partie PENDANT ce
+  // chargement : ses reponses peuvent dater d'avant elle. Avant le lot 5, le
+  // rechargement qui suivait chaque geste les remplacait ; depuis, la mise a
+  // jour ciblee du geste (appliquerGesteArret) vient d'etre recouverte par les
+  // commandes et les clients d'avant -- la tournee, elle, est gardee par
+  // updatedAt (refreshActiveRoute). Un second chargement, frais, suit : il
+  // n'a lieu que dans ce croisement, jamais apres un geste seul.
+  if (ecritureCroisee) loadData();
 }
 
 function refreshActiveRoute() {
@@ -1791,20 +1819,32 @@ function chargerTraceOmise() {
  * qu'on veut le tableau de bord et les statistiques a jour, une fois.
  */
 async function appliquerGesteArret(resultat) {
-  const tournee = resultat && resultat.route;
-  if (!tournee || !Array.isArray(tournee.stops)) {
+  const recue = resultat && resultat.route;
+  if (!recue || !Array.isArray(recue.stops)) {
     await loadData();
     return;
   }
+  const affichee = activeRoute && String(activeRoute.id) === String(recue.id) ? activeRoute : null;
+  // Integration des lots 1 et 5 (23/09) : les deux gardes que le lot 1 posait
+  // sur le rechargement qui suivait le geste (refreshActiveRoute), et que la
+  // mise a jour ciblee contournait.
+  //  - Jamais une tournee PLUS ANCIENNE que celle de l'ecran (H4, updatedAt) :
+  //    deux reponses de gestes peuvent se croiser, et celle du premier,
+  //    arrivee la derniere, ramenait le second arret « En livraison ».
+  const perimee = Boolean(affichee && affichee.updatedAt && (!recue.updatedAt || recue.updatedAt < affichee.updatedAt));
+  const tournee = perimee ? affichee : recue;
   deliveryRoutes = remplacerParId(deliveryRoutes, tournee);
   if (resultat.order) orders = remplacerParId(orders, resultat.order);
   if (resultat.client) {
     clients = remplacerParId(clients, { ...resultat.client, statut: resultat.client.statut || "restant" });
   }
-  if (activeRoute && String(activeRoute.id) === String(tournee.id)) {
-    activeRoute = garderTrace(tournee, activeRoute);
+  if (affichee) {
+    activeRoute = perimee ? affichee : garderTrace(recue, affichee);
     if (activeStopIndex >= activeRoute.stops.length) activeStopIndex = 0;
     appliquerLivraisonEnSuspens();
+    //  - Les gestes qui attendent dans la FILE restent a l'ecran : le serveur
+    //    ne les connait pas encore, sa reponse les effacait.
+    appliquerGestesEnFile();
     route = activeRoute.stops;
   }
   if (tournee.status === "terminee") {
@@ -7165,9 +7205,13 @@ async function updateCurrentDeliveryStatus(status, motif = null, faitLe = new Da
       return;
     }
 
-    activeRoute = result.route;
-    if (activeStopIndex < activeRoute.stops.length - 1) activeStopIndex++;
-    // Lot 5 : mise a jour ciblee, plus le rechargement complet.
+    // L'ecran avance d'un arret s'il montre encore celui du geste : pendant
+    // l'envoi, le livreur a pu en choisir un autre, et une reponse qui arrive
+    // tard ne le deplace pas (integration des lots 1 et 5).
+    const ici = activeRoute.stops.findIndex(s => String(s.id) === String(stop.id));
+    if (ici === activeStopIndex && activeStopIndex < activeRoute.stops.length - 1) activeStopIndex++;
+    // Lot 5 : mise a jour ciblee, plus le rechargement complet. La tournee de
+    // la reponse n'y remplace l'ecran que si elle n'est pas plus ancienne (H4).
     await appliquerGesteArret(result);
     notify("Statut livraison enregistré.", "success");
     return;
@@ -8002,8 +8046,7 @@ async function apiFetch(url, options = {}) {
   if (ecriture) {
     // Tout rechargement qui suit une ecriture passe par le reseau, jamais par
     // la copie de secours du service worker (H4, voir loadData).
-    ecritureNonRelue = true;
-    derniereEcritureA = Date.now();
+    noterEcriture();
     // La cle d'idempotence : gardee dans la file avec l'ecriture, elle fait
     // qu'un renvoi n'est applique qu'une fois (gesteIdempotent, server.js).
     if (!isUpload) options = { ...options, headers: { ...entetesEnObjet(options.headers), "X-Sereo-Geste": nouvelleCleDeGeste() } };
@@ -8308,8 +8351,7 @@ function annoncerBilanDeRenvoi(bilan) {
       ? "1 modification envoyée au serveur."
       : `${bilan.envoyees} modifications envoyées au serveur.`, "success");
     // Le serveur a change : le rechargement qui suit passe par le reseau (H4).
-    ecritureNonRelue = true;
-    derniereEcritureA = Date.now();
+    noterEcriture();
     loadData();
   }
   if (bilan.refusees > 0) {
