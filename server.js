@@ -3993,7 +3993,11 @@ function syncWorkflow(db) {
     };
   });
 
-  db.routes = db.routes.map(route => normalizeRoute(route, db.commandes));
+  // Lot 5 (audit geo, 23/09) : l'index des commandes se construit UNE fois pour
+  // toutes les tournees. Avant, normalizeRoute le reconstruisait pour chacune :
+  // O(tournees x commandes), 134 ms a 250 tournees, a chaque ecriture.
+  const orderMap = new Map(db.commandes.map(order => [String(order.id), order]));
+  db.routes = db.routes.map(route => normalizeRoute(route, orderMap));
 }
 
 function normalizeClient(client) {
@@ -5414,10 +5418,11 @@ function createStop(routeId, order, index) {
   };
 }
 
+/** @param orders tableau des commandes, ou deja leur index (Map id -> commande). */
 function normalizeRoute(route, orders) {
   const routeStatus = ROUTE_STATUSES.has(route.status) ? route.status : "prete";
   const stops = Array.isArray(route.stops) ? route.stops : [];
-  const orderMap = new Map(orders.map(order => [String(order.id), order]));
+  const orderMap = orders instanceof Map ? orders : new Map(orders.map(order => [String(order.id), order]));
 
   const normalizedStops = stops.map((stop, index) => {
     const order = orderMap.get(String(stop.orderId));
