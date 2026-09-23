@@ -1921,7 +1921,12 @@ function majGestionDesTournees() {
       return `${passee} · ${MOTS_STATUT_TOURNEE[t.status] || t.status} · ${faits(t)}/${(t.stops || []).length}`;
     };
     const html = options.map(t => `<option value="${escapeAttribute(t.id)}" ${activeRoute && String(t.id) === String(activeRoute.id) ? "selected" : ""}>${escapeHtml(libelle(t))}</option>`).join("");
-    if (select.innerHTML !== html) select.innerHTML = html;
+    // Reecrit seulement si le contenu change : le sondage de 60 s ne fait pas
+    // perdre le focus (la serialisation d'innerHTML ne se compare pas).
+    if (majGestionDesTournees.choix !== html) {
+      select.innerHTML = html;
+      majGestionDesTournees.choix = html;
+    }
     bloc.hidden = options.length < 2;
   }
 
@@ -1941,7 +1946,10 @@ function majGestionDesTournees() {
         </span>
       </p>`;
     }).join("");
-    if (signal.innerHTML !== html) signal.innerHTML = html;
+    if (majGestionDesTournees.signal !== html) {
+      signal.innerHTML = html;
+      majGestionDesTournees.signal = html;
+    }
     signal.hidden = !passees.length;
     document.querySelector("#livreur .driver-page")?.classList.toggle("avec-retard", passees.length > 0);
   }
