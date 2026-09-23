@@ -12474,7 +12474,9 @@ textarea::placeholder {
   /* Fin de tournee (4d) : les gestes d'arret, tous inertes, ne collent plus
      200 px au-dessus de la barre basse -- il n'y a plus d'arret. */
   #livreur .current-driver-card:has(.fin-tournee) .gestes { display: none; }
+}
 
+/* ==========================================================================
    MOBILE, PREPARATION -- planches 7a (la liste) et 7b (une commande), pose
    le 23/09. Decision de Thomas : au telephone, UNE liste avec des mots de
    statut, les filtres dans l'en-tete vert, et le detail en page (7b).
@@ -12698,133 +12700,6 @@ textarea::placeholder {
   /* En sombre : la pilule choisie en plein clair sur le vert sombre, comme les
      boutons pleins de l'en-tete (lot 1). */
   :root[data-color-scheme="dark"] #preparationFiltres .filtre-pilules .button.filtre-pilule[aria-pressed="true"] {
-
-   COMMANDES + STOCK MOBILE + SQUELETTES -- planches 8a, 8b, 10a, 10b (23/09)
-   ========================================================================== */
-
-/* --- Squelettes : des LIGNES a la hauteur des lignes reelles (planche 10b) --
-   La hauteur vient de la zone : c'est la feuille qui sait ce que mesure une
-   ligne de commande ou de stock, au bureau et au telephone. Un banc compare
-   la ligne grise a la ligne reelle (squelette.spec.js). */
-.squelette.squelette-lignes { gap: 0; padding: 0; }
-.squelette-ligne {
-  display: flex; flex-direction: column; justify-content: center; gap: 8px;
-  box-sizing: border-box; height: var(--squelette-ligne, 56px); padding: 0 16px;
-}
-.squelette-ligne .squelette-bloc { height: 12px; border-radius: 6px; }
-.squelette-ligne .squelette-bloc--detail { height: 10px; border-radius: 5px; }
-#cmdLignes, #stockList, #dashboardPreparing, #dashboardDelivering { --squelette-ligne: 56px; }
-#crmList { --squelette-ligne: 60px; }
-#opAlerts { --squelette-ligne: 64px; }
-#dashboardSubscriptions { --squelette-ligne: 74px; }
-/* Entre 821 et 1280 px, Commandes et Stock sont des CARTES a trois rangs
-   (« la relecture » : des 1280 px ; Commandes aussi sous 920 px). La ligne
-   grise de 56 px y attendait une ligne de tableau : la liste sautait de 170
-   (Commandes) a 290 px (Stock) a l'arrivee des donnees. Mesures du 23/09 :
-   carte de commande 95 px, carte de stock 129 px (pas de 36 px), 141 px sous
-   920 px (pas de 44 px). */
-@media (min-width: 821px) and (max-width: 1280px) {
-  #cmdLignes { --squelette-ligne: 95px; }
-}
-@media (min-width: 921px) and (max-width: 1280px) {
-  #stockList { --squelette-ligne: 129px; }
-}
-@media (max-width: 920px) {
-  #stockList { --squelette-ligne: 141px; }
-}
-@media (max-width: 820px) {
-  #cmdLignes, #crmList { --squelette-ligne: 72px; }
-}
-
-/* --- Squelettes : les CHIFFRES (planche 10b, haut) --------------------------
-   « Seuls les chiffres sont des blocs, aux dimensions du chiffre attendu. »
-   L'element est VIDE pendant le chargement (app.js) : un espace sans chasse,
-   en pseudo-element, lui garde sa hauteur de ligne -- donc sa place, au pixel
-   -- et le bloc est dessine par dessus, a la largeur du chiffre attendu. Rien
-   n'est ecrit : la regle « jamais de texte dessus » tient. */
-.squelette-chiffre { position: relative; min-width: var(--squelette-l, 2em); }
-.squelette-chiffre::before { content: "\200b"; }
-.squelette-chiffre::after {
-  content: ""; position: absolute; left: 0; top: 50%;
-  width: var(--squelette-l, 2em); height: var(--squelette-h, 0.8em);
-  transform: translateY(-50%); border-radius: 0.22em; background: var(--v8-squelette);
-}
-.tb-ca-panier .squelette-chiffre::after { left: auto; right: 0; }
-#opRevenue { --squelette-l: 3.8em; --squelette-h: 0.86em; }
-#opBasket { --squelette-l: 2.9em; --squelette-h: 0.8em; }
-#opDelivered { --squelette-l: 9em; --squelette-h: 0.9em; }
-#dashboardPreparingCount, #dashboardDeliveringCount { --squelette-l: 1.1em; --squelette-h: 0.85em; }
-#dashboardPreparingDetail, #dashboardDeliveringDetail { --squelette-l: 5.4em; --squelette-h: 0.9em; }
-/* Une pulsation d'opacite a 1,6 s (planche 10b), coupee sous reduced-motion. */
-@media (prefers-reduced-motion: no-preference) {
-  .squelette-chiffre::after { animation: squelette-pouls 1.6s ease-in-out infinite; }
-}
-@keyframes squelette-pouls {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
-/* Le sous-titre du tableau de bord se complete a l'arrivee des donnees (« · 3
-   commandes a preparer · une tournee en cours ») et passait alors sur deux
-   lignes : tout l'ecran descendait de 20 a 22 px. Il reserve ses deux lignes. */
-body:has(#journee.active) .ecran-entete #pageSubtitle { min-height: 2lh; }
-
-/* --- Commandes au telephone (planche 8a) ------------------------------------ */
-.cmd-resume, .cmd-filtres-bouton { display: none; }
-#enteteActions #cmdPilules[hidden] { display: none; }
-@media (max-width: 820px) {
-  /* Les pilules de statut dans l'en-tete vert, sous la recherche. */
-  :root[data-color-scheme] #enteteActions #cmdPilules,
-  :root:not([data-color-scheme]) #enteteActions #cmdPilules { flex: 1 1 100%; flex-wrap: wrap; gap: 8px; margin: 0; }
-  :root[data-color-scheme] #enteteActions #cmdPilules .button.compact.filtre-pilule,
-  :root:not([data-color-scheme]) #enteteActions #cmdPilules .button.compact.filtre-pilule {
-    height: 44px; min-height: 44px; padding: 0 18px; border: 0; border-radius: 999px; box-shadow: none;
-    background: var(--v8-surface-sur-vert); color: var(--v8-texte-sur-carte-tournee);
-    font-size: 15px; font-weight: 500;
-  }
-  :root[data-color-scheme] #enteteActions #cmdPilules .button.compact.filtre-pilule.active-filter,
-  :root:not([data-color-scheme]) #enteteActions #cmdPilules .button.compact.filtre-pilule.active-filter {
-    background: var(--v8-surface); color: var(--v8-principal); font-weight: 600;
-  }
-  :root[data-color-scheme] #enteteActions #cmdPilules .button.compact.filtre-pilule:focus-visible,
-  :root:not([data-color-scheme]) #enteteActions #cmdPilules .button.compact.filtre-pilule:focus-visible {
-    outline: none; box-shadow: 0 0 0 3px var(--v8-carte-tournee), 0 0 0 5px var(--v8-texte-sur-carte-tournee);
-  }
-  #enteteActions #cmdPilules[hidden] { display: none; }
-
-  /* Sous l'en-tete : le compte a gauche, le tri a droite (planche 8a). Les
-     filtres hors planche se replient derriere « Filtres ». */
-  #commandes .cmd-filtres { margin: 0 0 12px; row-gap: 8px; }
-  #commandes .cmd-filtres > .cmd-separateur,
-  #commandes .cmd-filtres > .cmd-ressort,
-  #commandes .cmd-filtres:not(.cmd-filtres--ouverts) > .cmd-filtre-second { display: none; }
-  #commandes .cmd-filtres > .cmd-resume { order: 1; }
-  #commandes .cmd-filtres > .cmd-filtres-bouton { order: 2; }
-  #commandes .cmd-filtres > .cmd-tri:not(.cmd-filtre-second) { order: 3; }
-  #commandes .cmd-filtres > .cmd-filtre-second,
-  #commandes .cmd-filtres > .cmd-client-filtre { order: 4; }
-  :root[data-color-scheme] #commandes .cmd-resume,
-  :root:not([data-color-scheme]) #commandes .cmd-resume {
-    display: block; flex: 1 1 auto; min-width: 0; padding-left: 6px;
-    font-size: 13.5px; font-weight: 500; color: var(--v8-texte-secondaire); font-variant-numeric: tabular-nums;
-  }
-  :root[data-color-scheme] #commandes .cmd-filtres-bouton,
-  :root:not([data-color-scheme]) #commandes .cmd-filtres-bouton {
-    display: inline-flex; align-items: center; flex: none; width: auto;
-    height: 44px; min-height: 44px; padding: 0 16px; border: 0; border-radius: 999px;
-    background: var(--v8-surface); color: var(--v8-principal); box-shadow: 0 1px 2px rgba(15, 61, 61, 0.05);
-    font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; white-space: nowrap;
-  }
-  :root[data-color-scheme] #commandes .cmd-filtres-bouton[aria-expanded="true"],
-  :root:not([data-color-scheme]) #commandes .cmd-filtres-bouton[aria-expanded="true"] {
-    background: var(--v8-principal); color: var(--v8-texte-sur-principal);
-  }
-  :root[data-color-scheme] #commandes .cmd-filtres-bouton:focus-visible,
-  :root:not([data-color-scheme]) #commandes .cmd-filtres-bouton:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-}
-@media (max-width: 820px) {
-  /* En sombre (planche 12a) : la pilule choisie en plein clair. */
-  :root[data-color-scheme="dark"] #enteteActions #cmdPilules .button.compact.filtre-pilule.active-filter {
     background: var(--v8-principal); color: var(--v8-texte-sur-principal);
   }
 }
@@ -12832,7 +12707,9 @@ body:has(#journee.active) .ecran-entete #pageSubtitle { min-height: 2lh; }
   :root:not([data-color-scheme="light"]) #preparationFiltres .filtre-pilules .button.filtre-pilule[aria-pressed="true"] {
     background: var(--v8-principal); color: var(--v8-texte-sur-principal);
   }
+}
 
+/* ==========================================================================
    MOBILE, ABONNEMENTS -- planches 3a (liste), 3c (les 90 jours), 5a (sombre).
    Sous 820 px. Decisions du 23/09 (DESIGN.md) : la ligne fait 96 px (trois
    rangees : client et etat, echeance et frequence, panier et rappel) ;
@@ -13037,6 +12914,7 @@ body:has(#journee.active) .ecran-entete #pageSubtitle { min-height: 2lh; }
   :root:not([data-color-scheme="light"]) #abonnements .abo-filtres .abo-pilule.abo-pilule--active { background: var(--v8-principal); color: var(--v8-texte-sur-principal); }
 }
 
+/* ==========================================================================
    MOBILE, PARAMETRES -- planche 8d (clair) / 12d (sombre). Sous 820 px :
    les comptes en LIGNES (initiale, nom, role, etat ; la ligne ouvre la
    feuille du compte), les imports en trois lignes qui ouvrent une feuille,
@@ -13154,6 +13032,137 @@ body:has(#journee.active) .ecran-entete #pageSubtitle { min-height: 2lh; }
 #parCompteFeuille .sheet-entete h3,
 #parImportsFeuille .sheet-entete h3 { min-width: 0; overflow-wrap: anywhere; }
 
+/* ==========================================================================
+   COMMANDES + STOCK MOBILE + SQUELETTES -- planches 8a, 8b, 10a, 10b (23/09)
+   ========================================================================== */
+
+/* --- Squelettes : des LIGNES a la hauteur des lignes reelles (planche 10b) --
+   La hauteur vient de la zone : c'est la feuille qui sait ce que mesure une
+   ligne de commande ou de stock, au bureau et au telephone. Un banc compare
+   la ligne grise a la ligne reelle (squelette.spec.js). */
+.squelette.squelette-lignes { gap: 0; padding: 0; }
+.squelette-ligne {
+  display: flex; flex-direction: column; justify-content: center; gap: 8px;
+  box-sizing: border-box; height: var(--squelette-ligne, 56px); padding: 0 16px;
+}
+.squelette-ligne .squelette-bloc { height: 12px; border-radius: 6px; }
+.squelette-ligne .squelette-bloc--detail { height: 10px; border-radius: 5px; }
+#cmdLignes, #stockList, #dashboardPreparing, #dashboardDelivering { --squelette-ligne: 56px; }
+#crmList { --squelette-ligne: 60px; }
+#opAlerts { --squelette-ligne: 64px; }
+#dashboardSubscriptions { --squelette-ligne: 74px; }
+/* Entre 821 et 1280 px, Commandes et Stock sont des CARTES a trois rangs
+   (« la relecture » : des 1280 px ; Commandes aussi sous 920 px). La ligne
+   grise de 56 px y attendait une ligne de tableau : la liste sautait de 170
+   (Commandes) a 290 px (Stock) a l'arrivee des donnees. Mesures du 23/09 :
+   carte de commande 95 px, carte de stock 129 px (pas de 36 px), 141 px sous
+   920 px (pas de 44 px). */
+@media (min-width: 821px) and (max-width: 1280px) {
+  #cmdLignes { --squelette-ligne: 95px; }
+}
+@media (min-width: 921px) and (max-width: 1280px) {
+  #stockList { --squelette-ligne: 129px; }
+}
+@media (max-width: 920px) {
+  #stockList { --squelette-ligne: 141px; }
+}
+@media (max-width: 820px) {
+  #cmdLignes, #crmList { --squelette-ligne: 72px; }
+}
+
+/* --- Squelettes : les CHIFFRES (planche 10b, haut) --------------------------
+   « Seuls les chiffres sont des blocs, aux dimensions du chiffre attendu. »
+   L'element est VIDE pendant le chargement (app.js) : un espace sans chasse,
+   en pseudo-element, lui garde sa hauteur de ligne -- donc sa place, au pixel
+   -- et le bloc est dessine par dessus, a la largeur du chiffre attendu. Rien
+   n'est ecrit : la regle « jamais de texte dessus » tient. */
+.squelette-chiffre { position: relative; min-width: var(--squelette-l, 2em); }
+.squelette-chiffre::before { content: "\200b"; }
+.squelette-chiffre::after {
+  content: ""; position: absolute; left: 0; top: 50%;
+  width: var(--squelette-l, 2em); height: var(--squelette-h, 0.8em);
+  transform: translateY(-50%); border-radius: 0.22em; background: var(--v8-squelette);
+}
+.tb-ca-panier .squelette-chiffre::after { left: auto; right: 0; }
+#opRevenue { --squelette-l: 3.8em; --squelette-h: 0.86em; }
+#opBasket { --squelette-l: 2.9em; --squelette-h: 0.8em; }
+#opDelivered { --squelette-l: 9em; --squelette-h: 0.9em; }
+#dashboardPreparingCount, #dashboardDeliveringCount { --squelette-l: 1.1em; --squelette-h: 0.85em; }
+#dashboardPreparingDetail, #dashboardDeliveringDetail { --squelette-l: 5.4em; --squelette-h: 0.9em; }
+/* Une pulsation d'opacite a 1,6 s (planche 10b), coupee sous reduced-motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .squelette-chiffre::after { animation: squelette-pouls 1.6s ease-in-out infinite; }
+}
+@keyframes squelette-pouls {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Le sous-titre du tableau de bord se complete a l'arrivee des donnees (« · 3
+   commandes a preparer · une tournee en cours ») et passait alors sur deux
+   lignes : tout l'ecran descendait de 20 a 22 px. Il reserve ses deux lignes. */
+body:has(#journee.active) .ecran-entete #pageSubtitle { min-height: 2lh; }
+
+/* --- Commandes au telephone (planche 8a) ------------------------------------ */
+.cmd-resume, .cmd-filtres-bouton { display: none; }
+#enteteActions #cmdPilules[hidden] { display: none; }
+@media (max-width: 820px) {
+  /* Les pilules de statut dans l'en-tete vert, sous la recherche. */
+  :root[data-color-scheme] #enteteActions #cmdPilules,
+  :root:not([data-color-scheme]) #enteteActions #cmdPilules { flex: 1 1 100%; flex-wrap: wrap; gap: 8px; margin: 0; }
+  :root[data-color-scheme] #enteteActions #cmdPilules .button.compact.filtre-pilule,
+  :root:not([data-color-scheme]) #enteteActions #cmdPilules .button.compact.filtre-pilule {
+    height: 44px; min-height: 44px; padding: 0 18px; border: 0; border-radius: 999px; box-shadow: none;
+    background: var(--v8-surface-sur-vert); color: var(--v8-texte-sur-carte-tournee);
+    font-size: 15px; font-weight: 500;
+  }
+  :root[data-color-scheme] #enteteActions #cmdPilules .button.compact.filtre-pilule.active-filter,
+  :root:not([data-color-scheme]) #enteteActions #cmdPilules .button.compact.filtre-pilule.active-filter {
+    background: var(--v8-surface); color: var(--v8-principal); font-weight: 600;
+  }
+  :root[data-color-scheme] #enteteActions #cmdPilules .button.compact.filtre-pilule:focus-visible,
+  :root:not([data-color-scheme]) #enteteActions #cmdPilules .button.compact.filtre-pilule:focus-visible {
+    outline: none; box-shadow: 0 0 0 3px var(--v8-carte-tournee), 0 0 0 5px var(--v8-texte-sur-carte-tournee);
+  }
+  #enteteActions #cmdPilules[hidden] { display: none; }
+
+  /* Sous l'en-tete : le compte a gauche, le tri a droite (planche 8a). Les
+     filtres hors planche se replient derriere « Filtres ». */
+  #commandes .cmd-filtres { margin: 0 0 12px; row-gap: 8px; }
+  #commandes .cmd-filtres > .cmd-separateur,
+  #commandes .cmd-filtres > .cmd-ressort,
+  #commandes .cmd-filtres:not(.cmd-filtres--ouverts) > .cmd-filtre-second { display: none; }
+  #commandes .cmd-filtres > .cmd-resume { order: 1; }
+  #commandes .cmd-filtres > .cmd-filtres-bouton { order: 2; }
+  #commandes .cmd-filtres > .cmd-tri:not(.cmd-filtre-second) { order: 3; }
+  #commandes .cmd-filtres > .cmd-filtre-second,
+  #commandes .cmd-filtres > .cmd-client-filtre { order: 4; }
+  :root[data-color-scheme] #commandes .cmd-resume,
+  :root:not([data-color-scheme]) #commandes .cmd-resume {
+    display: block; flex: 1 1 auto; min-width: 0; padding-left: 6px;
+    font-size: 13.5px; font-weight: 500; color: var(--v8-texte-secondaire); font-variant-numeric: tabular-nums;
+  }
+  :root[data-color-scheme] #commandes .cmd-filtres-bouton,
+  :root:not([data-color-scheme]) #commandes .cmd-filtres-bouton {
+    display: inline-flex; align-items: center; flex: none; width: auto;
+    height: 44px; min-height: 44px; padding: 0 16px; border: 0; border-radius: 999px;
+    background: var(--v8-surface); color: var(--v8-principal); box-shadow: 0 1px 2px rgba(15, 61, 61, 0.05);
+    font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  }
+  :root[data-color-scheme] #commandes .cmd-filtres-bouton[aria-expanded="true"],
+  :root:not([data-color-scheme]) #commandes .cmd-filtres-bouton[aria-expanded="true"] {
+    background: var(--v8-principal); color: var(--v8-texte-sur-principal);
+  }
+  :root[data-color-scheme] #commandes .cmd-filtres-bouton:focus-visible,
+  :root:not([data-color-scheme]) #commandes .cmd-filtres-bouton:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+}
+@media (max-width: 820px) {
+  /* En sombre (planche 12a) : la pilule choisie en plein clair. */
+  :root[data-color-scheme="dark"] #enteteActions #cmdPilules .button.compact.filtre-pilule.active-filter {
+    background: var(--v8-principal); color: var(--v8-texte-sur-principal);
+  }
+}
+@media (max-width: 820px) and (prefers-color-scheme: dark) {
   :root:not([data-color-scheme="light"]) #enteteActions #cmdPilules .button.compact.filtre-pilule.active-filter {
     background: var(--v8-principal); color: var(--v8-texte-sur-principal);
   }
