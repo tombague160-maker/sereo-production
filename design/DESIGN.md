@@ -2107,3 +2107,90 @@ dans la carte d'adresse de 7b ; la pastille de synchro et « Actualiser » de l'
 **Relevé, hors lot** : entre 821 et 920 px, les pilules font 44 px mais le plafond de
 repli est calculé sur 48 (`calc(2 * 48px + 8px)`) — un demi-rang de trop visible. Pas
 touché : ni téléphone ni bureau.
+
+### Mobile, Abonnements (planches 3a, 3c, 5a), posé le 23/09
+
+Sous **820 px**. `abonnements-mobile.spec.js` (12 cas, port 3177) ; `abonnements-lignes.spec.js`
+et `abonnements.spec.js` suivent la nouvelle ligne.
+
+**Posé**
+
+- **La ligne de 96 px** (décision de Thomas) : trois rangées — le client et son badge d'état ;
+  l'échéance et la fréquence (« Mercredi 23 septembre · tous les 14 j », ou « Échéance du
+  13 septembre » en couleur d'alerte quand elle est en retard) ; le panier et le rappel
+  (« 4 Changes taille L · rappel 2 j »). Carte blanche de 24 px de rayon, 12 × 18 px de marge
+  intérieure : 12 + 24 (badge) + 6 + 19 + 6 + 17 + 12 = 96. Le disque d'état se retire : le badge
+  porte l'état, comme sur la planche. Le tap ouvre toujours le sheet de détail.
+- **« Nouvel abonnement » fixé en bas**, pleine largeur moins 16 px de chaque côté, 48 px, à 14 px
+  au-dessus de la barre basse. La liste lui **réserve sa place** (172 px sous le dernier
+  abonnement, zone sûre en plus) : tout en bas, le dernier abonnement est entièrement au-dessus
+  du bouton — mesuré. Le bouton reste le même élément que celui de l'en-tête du bureau (un seul
+  geste, deux positions). Il disparaît dans l'agenda (3c n'en a pas).
+- **L'en-tête vert** prolongé dans le bloc des filtres : les pilules Tous / Actifs / En pause
+  sur le vert (inactives en surface sur vert, active en blanc à texte vert ; en sombre, plein
+  clair), un seul bloc arrondi de 28 px sous les pilules.
+- **Le calendrier** rond de 44 px en haut à droite de l'en-tête ouvre **« Les 90 jours »** (3c) :
+  l'en-tête dit « Les 90 jours » et « N livraisons prévues », une flèche de retour à gauche du
+  titre ; chaque semaine est une carte, chaque échéance a son jour en deux étages (« MER » / 23)
+  et son **« + » rond de 44 px** (nom accessible : « Créer la commande du … pour … »). Le
+  retour du téléphone, la flèche, ou tout changement d'écran ramènent la liste.
+
+**Décisions prises (questions ouvertes de la planche)**
+
+- La fréquence prend, **au téléphone seulement**, la forme courte de la planche (« tous les
+  15 j », « mensuel », « tous les 2 mois ») : la forme longue (« toutes les 2 semaines ») était
+  coupée derrière l'échéance à 390 px. Le bureau, le sheet et l'éditeur gardent la forme longue.
+- Un nom sur deux lignes est gardé (deux lignes au plus, puis ellipse) : la ligne passe alors à
+  112 px. Couper un nom de client pour tenir 96 px aurait caché ce qui distingue deux EHPAD.
+- Une ligne **en pause** dit « Livraisons suspendues » et descend la fréquence au panier ; une
+  ligne **arrêtée** dit « Plus de livraison ». Un abonnement actif sans échéance dans l'horizon :
+  « Aucune échéance prévue ».
+- **« La prochaine échéance »** ne compte plus une échéance passée déjà commandée : commander le
+  plus ancien de deux retards faisait afficher sa date passée, sans alerte, comme « prochaine ».
+  Le correctif vaut aussi pour la colonne « Prochaine » du bureau, le tri, **et le sheet de
+  détail** que la ligne ouvre (il gardait l'ancien calcul : la ligne disait « Échéance du 20 »,
+  le sheet « Prochaine échéance : 13 », une date passée déjà commandée). Le sheet dit aussi le
+  retard comme la ligne : « … · en retard », en couleur d'alerte.
+- **Le bandeau « Hors ligne » / « Envoi en attente »** s'intercale dans le DOM entre l'en-tête et
+  les filtres. Tant qu'il est là, l'en-tête garde son arrondi de 28 px et les filtres deviennent
+  une carte verte fermée (28 px, dans la gouttière) sous le bandeau : deux verts fermés plutôt
+  qu'un vert coupé à angles droits. Le réseau revenu, l'en-tête se prolonge à nouveau.
+- **L'écran passe au-dessus de 820 px, l'agenda ouvert** (tablette qu'on tourne) : la vue revient
+  à la liste, le titre « Abonnements » et son compte, et l'entrée d'historique de l'agenda est
+  neutralisée (sinon la flèche, revenu au téléphone, aurait demandé deux touchers).
+- **Un rechargement depuis l'agenda** repart sur la liste et efface l'état `{ aboVue: "agenda" }`
+  de l'entrée courante : la flèche ramène la liste du premier toucher. Le même motif existe pour
+  la fiche client (`app.js`), hors de ce lot, non corrigé ici.
+- **Au bureau**, l'emballage des échéances d'une semaine (`.abo-semaine-lignes`, la carte du
+  téléphone) est en `display: contents` : les échéances retrouvent leurs 8 px d'écart (elles se
+  touchaient sur la première version du lot).
+
+**Gardés, hors planche** : la recherche (dans l'en-tête), le tri « Prochaine livraison /
+Client » (pilule sur le vert, à côté des filtres), la pastille de synchronisation et
+« Actualiser », le statut de commande d'une échéance déjà commandée (il mène à Commandes).
+
+**Écarts nommés**
+
+- pas d'opacité sur la ligne en pause (la planche : 0,78) — même raison qu'au bureau, le
+  contraste tombait sous 4,5 ;
+- les titres de semaine gardent le vocabulaire du bureau (« Cette semaine · 3 », « Semaine du
+  28 septembre · 2 ») au lieu de « Semaine du 21 septembre » + « 3 livraisons » ;
+- « En retard · N » reste en tête de l'agenda (la planche 3c n'en montre pas ; décision du bureau
+  maintenue) ;
+- le bouton fixe est à 14 px de la barre basse telle qu'elle est rendue (90 px à 390, « Tableau de
+  bord » sur deux lignes) — pas des 88 px de la planche ;
+- un retour arrière depuis l'agenda, après un changement d'écran, consomme une entrée
+  d'historique vide (l'agenda pose une entrée pour que le retour du téléphone le ferme).
+
+**Omis, faute de données**
+
+- « En pause depuis le 4 septembre » : aucun champ ne date la pause ;
+- le toast « Bon CMD-2026-0xx créé » avec **Annuler** : la création reste celle de l'application
+  (une notification, sans annulation — aucune route ne supprime une commande d'abonnement) ;
+- la création 3b (sélecteur client en carte, catalogue avec stock, pilules de fréquence, aperçu
+  des trois dates) : l'éditeur actuel est gardé tel quel, c'est un lot à part ;
+- la tache floue rose derrière la liste (décor).
+
+**Non fait dans ce lot** : `CACHE_NAME` (`public/service-worker.js`) n'est pas changé alors que
+`style.css`, `app.js` et `operations.js` sont dans `APP_SHELL` — la consigne du lot confie ce
+changement à l'intégrateur, qui le fait une fois pour tous les lots fusionnés.

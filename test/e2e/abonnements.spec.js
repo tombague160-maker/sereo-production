@@ -1,8 +1,9 @@
 // E2E : l'ecran Abonnements des planches 13a / 14a.
 //
 // Au bureau : un tableau (client et panier, frequence, prochaine livraison,
-// etat) et « Les 90 jours ». Au telephone : la ligne de la charte, inchangee
-// (abonnements-lignes.spec.js). Ce banc verifie ce que la planche ajoute.
+// etat) et « Les 90 jours ». Au telephone : la ligne de 96 px de la planche 3a
+// (abonnements-lignes.spec.js, abonnements-mobile.spec.js). Ce banc verifie ce
+// que la planche 13a ajoute.
 
 const { test, expect } = require("./tuiles");
 const { demarrer, jeuDeDonnees } = require("./serveur-seme");
@@ -132,11 +133,13 @@ test("la recherche de l'en-tête filtre, et n'apparaît que sur Abonnements", as
   await expect(page.locator("#subscriptionSearch")).toBeHidden();
 });
 
-test("au téléphone, la ligne de la charte reste (disque d'état, sans colonnes)", async ({ page }) => {
+test("au téléphone, la ligne de la planche 3a (trois rangées, sans colonnes)", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await ouvrir(page);
   const premiere = lignes(page).first();
-  await expect(premiere.locator(".etat-commande")).toBeVisible();
+  await expect(premiere.locator(".abo-rythme")).toBeVisible();
+  await expect(premiere.locator(".abo-rythme-date")).toHaveText(/^Échéance du /);
+  await expect(premiere.locator(".etat-commande")).toBeHidden();
   await expect(premiere.locator(".abo-frequence")).toBeHidden();
   const deborde = await page.evaluate(() => [...document.querySelectorAll("#abonnements *")]
     .filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.right > window.innerWidth + 0.5; })
