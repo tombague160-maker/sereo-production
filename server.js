@@ -5969,8 +5969,12 @@ function retirerDesTourneesSiReportee(db, order) {
     if (!["prete", "en_livraison"].includes(route.status)) continue;
     const dateTournee = normalizeDateInput(route.deliveryDate);
     if (!dateTournee || !order.deliveryDate || order.deliveryDate === dateTournee) continue;
-    const index = route.stops.findIndex(stop => String(stop.orderId) === String(order.id));
-    if (index < 0 || STATUTS_ARRET_SOLDE.has(route.stops[index].status)) continue;
+    // L'arret ENCORE A FAIRE de la commande. Lot 6 (relecture adverse) : un
+    // absent du matin, rajoute a sa propre tournee (« Ajouter a la tournee en
+    // cours »), y a DEUX arrets -- le solde d'abord. Prendre le premier
+    // laissait l'arret actif en place.
+    const index = route.stops.findIndex(stop => String(stop.orderId) === String(order.id) && !STATUTS_ARRET_SOLDE.has(stop.status));
+    if (index < 0) continue;
     route.stops.splice(index, 1);
     route.stops.forEach((stop, i) => { stop.orderIndex = i + 1; });
     route.selectedOrderIds = route.stops.map(stop => stop.orderId);
