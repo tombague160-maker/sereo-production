@@ -194,6 +194,7 @@ test("sw — la page de CONNEXION (fin « 0 ») vide le cache de donnees : page 
 test("sw — sans en-tete de session (acces Basic) : ni gardee, ni oubliee", async () => {
   const sw = await semerPage();
   const avant = await pageGardee(sw);
+  assert.ok(avant, "prealable : la page n'a pas ete gardee");
   sw.reseau(() => Promise.resolve(pageServeur({ fin: null, html: "<html>autre</html>" })));
   const { reponse, attentes } = naviguer(sw, "/");
   await reponse;
@@ -207,16 +208,17 @@ test("sw — sans en-tete de session (acces Basic) : ni gardee, ni oubliee", asy
   assert.equal(await pageGardee(neuf), null);
 });
 
-test("sw — une page en erreur ou redirigee n'est pas gardee", async () => {
-  for (const faire of [
-    () => pageServeur({ status: 500 }),
-    () => { const r = pageServeur(); Object.defineProperty(r, "redirected", { value: true }); return r; }
+test("sw — une page en erreur ou redirigee n'est pas gardee (temoin : la meme, en 200, l'est)", async () => {
+  for (const [nom, faire, gardee] of [
+    ["temoin", () => pageServeur(), true],
+    ["500", () => pageServeur({ status: 500 }), false],
+    ["redirigee", () => { const r = pageServeur(); Object.defineProperty(r, "redirected", { value: true }); return r; }, false]
   ]) {
     const sw = chargerServiceWorker(() => Promise.resolve(faire()));
     const { reponse, attentes } = naviguer(sw, "/");
     await reponse;
     await Promise.all(attentes);
-    assert.equal(await pageGardee(sw), null);
+    assert.equal(Boolean(await pageGardee(sw)), gardee, nom);
   }
 });
 
@@ -254,6 +256,7 @@ test("sw — en ligne, la tournee vient du RESEAU, jamais de la copie", async ()
 
 test("sw — la deconnexion (POST /logout) emporte la page gardee", async () => {
   const sw = await semerPage();
+  assert.ok(await pageGardee(sw), "prealable : la page n'a pas ete gardee");
   const attentes = [];
   sw.ecouteurs.fetch({
     request: { url: ORIGINE + "/logout", method: "POST", mode: "navigate", headers: new Headers() },
