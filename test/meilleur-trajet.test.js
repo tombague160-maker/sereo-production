@@ -151,8 +151,10 @@ test("ordre des arrets : une matrice aberrante ne fige pas le calcul", () => {
   const code = `
     const { optimizeMatrix } = require(${JSON.stringify(require.resolve("../lib/routing"))});
     let s = 7; const r = () => (s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296;
+    // Le cas vu : un « infini » sur les arcs jamais parcourus (vers le depart,
+    // depuis l'arrivee), des distances en km a virgule ailleurs.
     const n = 30, m = Array.from({ length: n + 2 }, (_, i) => Array.from({ length: n + 2 }, (_, j) =>
-      i === j ? 0 : r() < 0.5 ? Number.MAX_SAFE_INTEGER - Math.floor(r() * 1000) : Math.floor(r() * 5000)));
+      i === j ? 0 : j === 0 || i === n + 1 ? Number.MAX_SAFE_INTEGER : r() * 40));
     const o = optimizeMatrix(m, n);
     process.stdout.write(o.length === n && new Set(o).size === n ? "ok" : "ko");`;
   const sortie = spawnSync(process.execPath, ["-e", code], { timeout: 20000, encoding: "utf8" });
