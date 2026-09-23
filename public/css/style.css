@@ -198,7 +198,7 @@
   --info: #2d76a8;
   --info-dark: #1e557d;
   --warning-soft: #fff1d8;
-  --warning: #f1a447;
+  --warning: var(--v8-avertissement);
   --warning-dark: #9a5a18;
   --danger-soft: #ffe3df;
   --danger: #e45c4b;
@@ -282,7 +282,7 @@
     --info: #74b7df;
     --info-dark: #a5d4ef;
     --warning-soft: rgba(237, 157, 114, 0.2);
-    --warning: #ed9d72;
+    --warning: var(--v8-avertissement);
     --warning-dark: #ffd0aa;
     --danger-soft: rgba(201, 100, 88, 0.2);
     --danger: #e47f71;
@@ -348,7 +348,7 @@
   --info: #74b7df;
   --info-dark: #a5d4ef;
   --warning-soft: rgba(237, 157, 114, 0.2);
-  --warning: #ed9d72;
+  --warning: var(--v8-avertissement);
   --warning-dark: #ffd0aa;
   --danger-soft: rgba(201, 100, 88, 0.2);
   --danger: #e47f71;
@@ -4162,7 +4162,7 @@ label {
   --info: var(--v8-principal);
   --info-dark: var(--v8-principal-appuye);
   --warning-soft: var(--v8-peche-claire);
-  --warning: var(--v8-accent);
+  --warning: var(--v8-avertissement);
   --warning-dark: #7d4037;
   --danger-soft: var(--v8-peche-claire);
   --danger: var(--v8-principal-appuye);
@@ -5163,15 +5163,13 @@ html[data-color-scheme="light"] body {
   --info: #3b7374;
   --info-dark: #285a5b;
   --warning-soft: #fbefed;
-  /* ⛔ NON BRANCHE, DELIBEREMENT -- et ce n'est pas un oubli.
-     `--warning` est declare CINQ fois avec CINQ valeurs : #f1a447,
-     #ed9d72 (x2), var(--v8-accent), et celle-ci. Deux sont des AMBRES,
-     pas le corail : ce n'est pas « un troisieme orange », c'est une
-     famille qui a derive. Et la charte porte un role AVERTISSEMENT
-     dedie (--v8-avertissement / --v8-avertissement-fond) : y brancher
-     --warning changerait un fond orange en creme pale, et tout texte
-     pose dessus serait a remesurer. Lot a part. */
-  --warning: #f18c79;
+  /* BRANCHE le 23/09 (audit d'interface, defaut 8). `--warning` etait
+     declare CINQ fois avec CINQ valeurs (#f1a447, #ed9d72 x2,
+     var(--v8-accent), #f18c79) : une famille qui avait derive. Les cinq
+     declarations disent maintenant le role de la charte, et lui seul :
+     --v8-avertissement. Contraste remesure la ou il se lit -- detail dans
+     le bloc « FINITIONS D'INTERFACE » en fin de fichier. */
+  --warning: var(--v8-avertissement);
   --warning-dark: #8f463a;
   --danger-soft: #fde2dc;
   --danger: #b95649;
@@ -13632,4 +13630,199 @@ body.carte-plein-ecran-ouverte #livreur.page.active { animation: none; transform
 :root:not([data-color-scheme]) .route-stop-corps > .route-stop-attente {
   color: var(--v8-texte);
   font-weight: 600;
+}
+
+/* ==========================================================================
+   FINITIONS D'INTERFACE -- audit du 23/09 (DESIGN.md, « Finitions d
+   interface (audit du 23/09) »). Les numeros sont ceux du rapport d'audit.
+   Chaque regle a un banc qui rougissait avant elle :
+   test/e2e/interface-finitions.spec.js, sauf mention.
+   ========================================================================== */
+
+/* 2. Les zones de texte multilignes (notes client, notes de commande,
+      commentaire de rappel, notes d'abonnement). La regle qui donne la police
+      aux champs -- « button, input, select { font: inherit } » -- oubliait
+      `textarea` : le navigateur y posait sa police a chasse fixe. Elles
+      heritent maintenant comme leurs voisins : Poppins, meme taille, meme
+      graisse. Selecteur nu : les regles plus precises (taille des notes du
+      bon de commande, par exemple) gardent la main. */
+textarea {
+  font: inherit;
+}
+
+/* 3. « Commande client » au bureau. Trois colonnes de 280 / 360 / 280 px
+      laissaient au formulaire 288 px a 1440 : « Type » et « Date » cote a
+      cote tombaient a 112 px, et on lisait « Commande▾ » et « dd/mm/y ».
+      - Les champs vont par deux SEULEMENT s'ils tiennent (13,5 rem chacun) ;
+        sinon un par ligne. Rien ne se coupe, a aucune largeur. Et jamais
+        plus de deux (relecture du 23/09) : `auto-fit` seul ouvrait trois
+        pistes des qu'il y avait la place -- « Type | Date | (vide) »,
+        « Code postal » seul sur sa ligne. Le minimum de chaque piste est
+        donc la MOITIE de la grille, 13,5 rem au moins.
+      - 1181-1599 px : le formulaire en haut sur toute la largeur, puis le
+        catalogue et, A COTE, le panier -- comme avant le lot. Le premier
+        dessin (formulaire a gauche, catalogue PUIS panier a droite) mettait
+        le panier sous tout le catalogue (relecture du 23/09).
+      - 1600 px et plus : les trois colonnes, formulaire d'au moins 360 px.
+      - A partir de 1181 px, le formulaire n'est plus « collant ». Un par
+        ligne, il mesure ~1 200 px : colle, sa fin (« Valider la commande »)
+        resterait hors de la fenetre. Le « collant » est de toute facon
+        INERTE aujourd'hui : html, body et .content ont `overflow-x: hidden`,
+        ce qui fait de .content le conteneur de defilement de reference, et
+        il ne defile jamais (mesure du 23/09, avant comme apres le lot). Ce
+        `static` evite le piege le jour ou ils passeront a `clip`.
+      - 821-1180 px : une colonne. La colonne unique ne commencait qu'a
+        920 px ; de 921 a 1180, les trois colonnes minimales (280 + 360 +
+        280) ne tenaient pas dans les ~700 px du contenu.
+      - La saisie en 500 : les valeurs heritaient du 800 des libelles. */
+:root[data-color-scheme] .customer-client-panel :is(input, select, textarea),
+:root:not([data-color-scheme]) .customer-client-panel :is(input, select, textarea) {
+  font-weight: 500;
+}
+:root[data-color-scheme] .customer-client-panel .form-grid.two,
+:root:not([data-color-scheme]) .customer-client-panel .form-grid.two {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, max(13.5rem, calc((100% - 12px) / 2))), 1fr));
+  gap: 16px 12px;
+}
+/* Le formulaire empilait ses blocs sans aucun interligne : le libelle
+   suivant touchait le champ du dessus (« Type » a 4 px de « Client
+   existant »). */
+#commande-client .customer-client-panel {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+#commande-client .customer-client-panel > .button {
+  justify-self: start;
+}
+@media (min-width: 821px) {
+  #commande-client .customer-catalog-panel .crm-toolbar {
+    grid-template-columns: minmax(0, 1fr) minmax(12.5rem, auto);
+  }
+}
+@media (min-width: 821px) and (max-width: 1180px) {
+  :root[data-color-scheme] .customer-order-layout,
+  :root:not([data-color-scheme]) .customer-order-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #commande-client .customer-client-panel,
+  #commande-client .customer-cart-panel { position: static; }
+}
+@media (min-width: 1181px) {
+  :root[data-color-scheme] .customer-order-layout,
+  :root:not([data-color-scheme]) .customer-order-layout {
+    grid-template-columns: minmax(0, 1.6fr) minmax(300px, 0.9fr);
+    grid-template-rows: auto auto;
+    grid-template-areas: "client client" "catalogue panier";
+    gap: 24px;
+  }
+  #commande-client .customer-client-panel { grid-area: client; position: static; }
+  #commande-client .customer-catalog-panel { grid-area: catalogue; }
+  #commande-client .customer-cart-panel { grid-area: panier; }
+}
+@media (min-width: 1600px) {
+  :root[data-color-scheme] .customer-order-layout,
+  :root:not([data-color-scheme]) .customer-order-layout {
+    grid-template-columns: minmax(360px, 1fr) minmax(0, 1.6fr) minmax(300px, 0.9fr);
+    grid-template-rows: auto;
+    grid-template-areas: "client catalogue panier";
+  }
+  #commande-client .customer-cart-panel { position: sticky; }
+}
+
+/* 13. Entre 821 et 920 px, les pilules font 44 px (bureau) mais le plafond
+       du repli etait calcule sur 48 (celui du telephone) : 8 px d'un
+       troisieme rang depassaient sous les deux rangs promis. Le plafond du
+       telephone ne vaut que sous 820 px. Banc : preparation-lignes.spec.js
+       (« tablette »). */
+@media (min-width: 821px) and (max-width: 920px) {
+  /* :not(depliee) : la rangee depliee garde ses deux classes, et cette
+     regle, ecrite apres « .filtre-pilules--depliee », la replierait. */
+  .filtre-pilules--repliee:not(.filtre-pilules--depliee) {
+    max-height: calc(2 * 44px + 8px);
+  }
+}
+
+/* 8. L'avertissement. `--warning` est maintenant --v8-avertissement dans
+      les cinq declarations (plus haut). Le bouton « warning » (« Reporte »
+      des rappels) etait le seul texte pose sur cette famille, et aucun de
+      ses etats ne tenait 4,5:1 :
+        clair, repos   #9A5A18 sur peche claire #F7E4E0 : 4,45
+        clair, survol  #9A5A18 sur peche #EDC8C3        : 3,55
+        sombre, repos  #FFD0AA sur un degrade qui finit en #FFD39D : ~1,0
+        sombre, survol #FFD0AA sur --warning            : 1,0 depuis le
+                       branchement (1,5 avant)
+      Il prend la paire que la charte donne a ce role : texte
+      --v8-avertissement sur --v8-avertissement-fond -- 4,89 en clair, 4,56
+      en sombre. Le survol ne change plus les couleurs : il pose un contour,
+      et le contraste ne bouge pas. */
+:root[data-color-scheme] .button.warning,
+:root:not([data-color-scheme]) .button.warning,
+:root[data-color-scheme] .button.warning:hover,
+:root:not([data-color-scheme]) .button.warning:hover {
+  background: var(--v8-avertissement-fond);
+  border-color: transparent;
+  color: var(--v8-avertissement);
+  box-shadow: none;
+}
+:root[data-color-scheme] .button.warning:hover,
+:root:not([data-color-scheme]) .button.warning:hover {
+  box-shadow: inset 0 0 0 1.5px var(--v8-avertissement);
+}
+
+/* 12. Une liste de commandes dont le chargement a ECHOUE le dit : ce n'est
+       pas « Aucune commande ». Le titre en alerte (#C02B0A sur surface :
+       5,85 ; #F2635A en sombre). */
+:root[data-color-scheme] .empty-state--erreur h4,
+:root:not([data-color-scheme]) .empty-state--erreur h4 {
+  color: var(--v8-alerte);
+}
+
+/* 14. Se deconnecter. Aucune planche ne le dessine : au bureau, sous le
+       bloc compte, dans la voix de la ligne de version (texte secondaire
+       de la barre, 4,63:1 sur son vert ; 44 px) ; au telephone, dans le
+       menu « Plus », apres un filet, comme une action et non une
+       destination. */
+:root .sidebar .sidebar-deconnexion {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  margin-top: -12px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--bl-secondaire);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+:root .sidebar .sidebar-deconnexion:hover {
+  background: var(--bl-champ);
+  color: var(--bl-texte);
+}
+.sidebar-deconnexion-icone {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+@media (max-width: 820px) {
+  :root .sidebar .sidebar-deconnexion { display: none; }
+}
+#mobile-more-sheet .more-sheet-deconnexion {
+  position: relative;
+  margin-top: 13px;
+}
+#mobile-more-sheet .more-sheet-deconnexion::before {
+  content: "";
+  position: absolute;
+  top: -8px;
+  left: 12px;
+  right: 12px;
+  height: 1px;
+  background: var(--border);
 }

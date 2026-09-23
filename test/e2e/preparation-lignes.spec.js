@@ -121,9 +121,13 @@ for (const vue of ["tablette", "desktop"]) {
     expect(hex(parMot["Bloquée"].etatFond)).toBe(tokens.pecheClaire);
     expect(r.lignes.map(l => l.etatTaille)).toEqual([40, 40, 40, 40]);
     // Le manque REMPLACE le detail, en alerte -- « Il manque 2 articles ».
-    expect(parMot["Bloquée"].detail).toBe("Il manque 1 article");
+    // En ARTICLES, comme au telephone (audit du 23/09, defaut 11) : cinq gants
+    // absents font « 5 articles », pas « 1 » (une ligne de produit). Et le
+    // detail compte les quantites (2 produits x 3) : l'ancien motif « \d
+    // articles » acceptait aussi bien 2 que 6, et ne distinguait rien.
+    expect(parMot["Bloquée"].detail).toBe("Il manque 5 articles");
     expect(hex(parMot["Bloquée"].detailCouleur)).toBe(tokens.alerte);
-    expect(parMot["À faire"].detail).toMatch(/^Besançon · \d articles$/);
+    expect(parMot["À faire"].detail).toBe("Besançon · 6 articles");
 
     // LES PILULES : 44/48, rondes, et pas etirees sur la largeur.
     expect(r.pilules.map(p => p.texte)).toEqual(["Tous", "Besançon", "Champagnole", "Dole"]);
@@ -258,10 +262,13 @@ test("le bouton de repli ne PARAÎT PAS quand la rangée ne dépasse pas", async
   await ctx.close();
 });
 
-for (const [vue, attendu] of [["mobile", { plafond: 104 }], ["desktop", { plafond: 96 }]]) {
+// « tablette » (821-920 px) ajoutee le 23/09 : les pilules y font 44 px, mais
+// le plafond etait celui du telephone (2 x 48 + 8 = 104) -- 8 px d'un
+// troisieme rang depassaient sous les deux rangs promis.
+for (const [vue, attendu] of [["mobile", { plafond: 104 }], ["desktop", { plafond: 96 }], ["tablette", { plafond: 96 }]]) {
   test(`charte §4 — avec dix secteurs, la rangée se REPLIE à deux rangs, en ${vue}`, async ({ browser }) => {
     test.setTimeout(180000);
-    const nombreux = await demarrer({ port: vue === "mobile" ? 3154 : 3155, seed: semeMultiSecteurs() });
+    const nombreux = await demarrer({ port: vue === "mobile" ? 3154 : vue === "tablette" ? 3300 : 3155, seed: semeMultiSecteurs() });
     try {
       const ctx = await browser.newContext({ viewport: VUES[vue] });
       const page = await ctx.newPage();

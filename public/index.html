@@ -233,6 +233,13 @@
         </svg>
       </button>
 
+      <!-- Aucune planche ne dessine la deconnexion : elle suit le compte, dans
+           la voix de la ligne de version (texte secondaire, 44 px). -->
+      <button class="sidebar-deconnexion" type="submit" form="formDeconnexion">
+        <svg class="sidebar-deconnexion-icone" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M10 16l-4-4 4-4M6 12h10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+        <span>Se déconnecter</span>
+      </button>
+
       <button class="sidebar-version" type="button" data-action="open-version-modal" aria-label="Voir la version et les nouveautes" title="Cliquer pour voir les nouveautés">
         <span class="sidebar-version-label">Version <span class="sidebar-version-value" id="sidebar-version-value">…</span></span>
         <span class="sidebar-version-etat" id="sidebarVersionEtat" hidden>À jour</span>
@@ -292,6 +299,13 @@
         <button class="more-sheet-item" type="button" role="menuitem" data-tab="parametres" data-action="more-menu-pick">
           <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-settings"></use></svg></span>
           <span class="more-sheet-label">Paramètres</span>
+        </button>
+        <!-- Une ACTION, pas une destination : les cinq destinations de la
+             passation restent cinq (.more-sheet-label) ; la deconnexion vient
+             apres un filet, avec son propre libelle. -->
+        <button class="more-sheet-item more-sheet-deconnexion" type="submit" form="formDeconnexion" role="menuitem">
+          <span class="more-sheet-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M10 16l-4-4 4-4M6 12h10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></span>
+          <span class="more-sheet-action">Se déconnecter</span>
         </button>
       </div>
     </div>
@@ -876,8 +890,13 @@
             <label class="compact-date">Date<input id="todayOrdersDate" type="date" /></label>
           </div>
           <div class="delivery-actions">
-            <button class="button secondary" type="button" data-action="select-all-today-orders">Tout sélectionner</button>
-            <button class="button secondary" type="button" data-action="clear-today-orders">Tout désélectionner</button>
+            <!-- Desactives jusqu'a LEUR liste, comme ceux de la tournee
+                 attendent les commandes : touches avant, ils selectionnaient
+                 une liste vide. Ils agissent sur todayCustomerOrders, pas sur
+                 `orders` : une copie du cache peut avoir l'une sans l'autre
+                 (data-attend-commandes-du-jour, activerSelectionDuJour). -->
+            <button class="button secondary" type="button" data-action="select-all-today-orders" data-attend-commandes-du-jour disabled>Tout sélectionner</button>
+            <button class="button secondary" type="button" data-action="clear-today-orders" data-attend-commandes-du-jour disabled>Tout désélectionner</button>
             <button class="button primary" type="button" data-action="send-today-orders-preparation">Envoyer en préparation</button>
           </div>
           <div id="todayOrdersList" class="list"></div>
@@ -1735,6 +1754,12 @@
   </dialog>
 
   <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+
+  <!-- SE DECONNECTER (audit du 23/09) : UN formulaire, vise par ses boutons
+       (attribut form) -- celui de la barre laterale au bureau, celui du menu
+       « Plus » au telephone. Un vrai POST /logout qui NAVIGUE : le service
+       worker y vide le cache de donnees (chargement-instantane.spec.js). -->
+  <form id="formDeconnexion" method="post" action="/logout" hidden></form>
 
   <!-- Modal version : affiche les nouveautes de la release courante en clair.
        Pilote par app.js (data-action="open-version-modal"). Aria-hidden tant
