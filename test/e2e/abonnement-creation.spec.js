@@ -70,9 +70,27 @@ test("le client se choisit en carte, par une recherche ; la carte choisie devien
   await recherche.fill("zzz");
   await expect(cartes).toHaveCount(0);
   await expect(page.locator("#subClientReste")).toHaveText("Aucun client ne correspond : crée sa fiche.");
-  // Entree sur un resultat unique le choisit, sans envoyer le formulaire.
+  // Entree n'envoie jamais le formulaire depuis une recherche. Le dialogue reste
+  // ouvert meme quand il part (l'envoi s'arrete sur « Ajoute au moins un
+  // produit. ») : on compte les envois eux-memes (relecture adverse du 23/09).
+  await page.evaluate(() => {
+    window.__envois = 0;
+    document.getElementById("subscriptionForm").addEventListener("submit", () => window.__envois++, true);
+  });
+  const envois = () => page.evaluate(() => window.__envois);
+  // Plusieurs resultats : Entree ne choisit rien, et n'envoie rien.
+  await recherche.fill("ehpad");
+  await expect(cartes).toHaveCount(2);
+  await recherche.press("Enter");
+  await expect(page.locator("#subClient")).toHaveValue("");
+  // Dans la recherche du catalogue non plus.
+  await page.getByRole("searchbox", { name: "Chercher dans le catalogue" }).fill("gants");
+  await page.getByRole("searchbox", { name: "Chercher dans le catalogue" }).press("Enter");
+  // Un resultat unique : Entree le choisit.
   await recherche.fill("bellevue");
   await recherche.press("Enter");
+  expect(await envois()).toBe(0);
+  await expect(page.locator("#subError")).toHaveText("");
   await expect(dialogue(page)).toHaveAttribute("open", "");
   await expect(page.locator("#subClientNom")).toHaveText("EHPAD Résidence Bellevue");
   await expect(page.locator("#subClient")).toHaveValue("c-bellevue");
