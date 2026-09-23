@@ -45,7 +45,9 @@ test.describe("Tournée — « À livrer en premier »", () => {
     const cases = page.locator("#deliveryCandidates [data-delivery-order]");
     await expect(cases).toHaveCount(4);
     const premier = page.locator('.delivery-premier:has([data-delivery-first="p-4"])');
-    // Non choisie : pas de case « en premier ».
+    // Non choisie : la case existe, mais cachee (« cachee » seul serait vrai
+    // d'une case absente).
+    await expect(premier).toHaveCount(1);
     await expect(premier).toBeHidden();
     await page.locator('[data-delivery-order="p-4"]').check();
     await expect(premier).toBeVisible();
