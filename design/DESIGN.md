@@ -2681,28 +2681,49 @@ Commandes filtre `orders` (`/api/orders`) par son propre jour (`#cmdJour`). La r
 serveur reste (`test/api.test.js` la tient) ; la porte « endpoint du jour » de
 `lireDernieresDonnees` aussi, sans occupant.
 
-**Croisement avec `fix/interface-finitions`** (relecture du 23/09). Ce lot-là, point 12
-de l'audit, pose `data-attend-commandes disabled` sur « Tout sélectionner » / « Tout
-désélectionner » de `#commandes-jour` — la section que celui-ci retire. Les deux lots
-entrent en conflit dans `public/index.html` (et, sans enjeu, en fin de `style.css` et de
-ce fichier : deux ajouts à garder tous deux). **Résolution** : garder la **suppression**
-(les gestionnaires `select-all-today-orders` / `clear-today-orders` ont quitté `app.js` ;
-reprendre la section ramènerait deux boutons inertes, et
-`test/ecrans-sans-planche.test.js` le refuse). Le test « 12 » de
-`test/e2e/interface-finitions.spec.js` perd alors son objet (il attend 2 boutons, en
-trouve 0) : le **réécrire**, pas le supprimer — ce qu'il protège (aucun « Tout
-sélectionner » actif avant les commandes) vaut pour les boutons qui restent, ceux de la
-tournée :
+**Croisement avec `fix/interface-finitions`** (relecture du 23/09 ; mesuré sur
+`bff9ee7`, branche encore mouvante). Ce lot-là, point 12 de l'audit, fait attendre
+leurs commandes à « Tout sélectionner » / « Tout désélectionner » de `#commandes-jour`
+(`data-attend-commandes-du-jour disabled`, `activerSelectionDuJour()` quand
+`todayCustomerOrders` arrive) — la section et la liste que celui-ci retire. Conflit dans
+`public/index.html`, `style.css` et ce fichier ; `app.js` fusionne **sans** conflit, et
+c'est le piège. **Résolution, éprouvée** sur un arbre fusionné :
 
-```js
-// « Tout sélectionner » des commandes du jour est parti avec son écran (lot
-// « écrans sans planche ») ; la règle vaut pour ceux qui restent.
-const boutons = page.locator("[data-attend-commandes]");
-expect(await boutons.count()).toBeGreaterThan(0);
-await expect(page.locator('[data-action="select-all-today-orders"]')).toHaveCount(0);
-for (const b of await boutons.all()) await expect(b).toBeDisabled();
-for (const b of await boutons.all()) await expect(b).toBeEnabled({ timeout: 15000 });
-```
+1. `index.html` : garder la **suppression**. Reprendre la section ramènerait deux
+   boutons inertes (leurs gestionnaires ont quitté `app.js`), et
+   `test/ecrans-sans-planche.test.js` le refuse.
+2. `app.js` : retirer `if (a("todayCustomerOrders")) activerSelectionDuJour();` et
+   `activerSelectionDuJour()` — plus aucune clé ni aucun bouton à activer ; code mort
+   que la fusion automatique laisse passer.
+3. `style.css` et ce fichier : deux ajouts en fin de fichier, à garder **entiers**. Ôter
+   les seuls marqueurs ne suffit pas : git a sorti du conflit des lignes communes, et le
+   résultat perd le `}` qui ferme le `@media` de ce lot et l'ouverture du commentaire
+   d'en-tête des finitions (CSS cassée : cinq bancs des finitions et de
+   `preparation-lignes.spec.js` rouges). Reconstruire : les deux fins de fichier bout à
+   bout, 13 629 lignes pour `style.css`.
+4. `test/e2e/interface-finitions.spec.js` : le test « 12 — Tout sélectionner des
+   commandes du jour attend les commandes » attend 2 boutons et en trouve 0 : le
+   **réécrire**, ce qu'il protège vaut pour les boutons qui restent (ceux de la
+   tournée) :
+
+   ```js
+   // « Tout sélectionner » des commandes du jour est parti avec son écran (lot
+   // « écrans sans planche ») ; la règle vaut pour ceux qui restent.
+   const boutons = page.locator("[data-attend-commandes]");
+   expect(await boutons.count()).toBeGreaterThan(0);
+   await expect(page.locator('[data-action="select-all-today-orders"]')).toHaveCount(0);
+   for (const b of await boutons.all()) await expect(b).toBeDisabled();
+   for (const b of await boutons.all()) await expect(b).toBeEnabled({ timeout: 15000 });
+   ```
+
+   Et **supprimer** « 12 — une copie du cache sans la liste du jour n'active pas… » :
+   après la fusion il reste **vert sans rien juger** (ses boucles portent sur zéro
+   bouton), et la liste du jour qu'il protégeait n'est plus chargée.
+
+Sur l'arbre ainsi résolu : `interface-finitions.spec.js`, `ecrans-sans-planche.spec.js`,
+`performance.spec.js`, `preparation-lignes.spec.js` — 43 verts ; les bancs Node des deux
+lots (`ecrans-sans-planche`, `interface-finitions`, `etats-vides`, `jetons-v8`, `auth`)
+verts. `connexion.spec.js` (serveur authentifié) n'y a pas été rejoué.
 
 **Non fait, nommé** : les règles CSS des anciennes listes (`.bdc-list`, `.bdc-search`,
 `.stats-hero`, `.commandes-livrees-card`…) restent dans `style.css`, sans élément à
