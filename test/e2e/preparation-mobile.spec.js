@@ -18,6 +18,8 @@ const { demarrer, jeuDeDonnees, CLIENTS, AUJOURDHUI } = require("./serveur-seme"
 const MOBILE = { width: 390, height: 844 };
 const TOL = 1;
 
+// En serie : le geste « Passer en preparation » ECRIT sur le serveur seme, et
+// vient apres les cas qui lisent l'etat seme.
 test.describe.configure({ mode: "serial" });
 
 let srv;
@@ -312,8 +314,10 @@ test("franchir 820 px : au bureau les groupes et les filtres du panneau revienne
   await page.waitForTimeout(500);
   const bureau = await lire();
   console.log(`[820] bureau : ${JSON.stringify(bureau)}`);
-  // Trois groupes : le cas precedent a passe « A preparer » en preparation.
-  expect(bureau).toEqual({ groupes: 3, liste: 0, filtresDansPanneau: true, filtresVisibles: true, loupe: false, recherche: true });
+  // Trois ou quatre groupes : le cas precedent a passe « A preparer » en
+  // preparation, sauf si ce cas est lance seul (-g).
+  expect(bureau).toMatchObject({ liste: 0, filtresDansPanneau: true, filtresVisibles: true, loupe: false, recherche: true });
+  expect(bureau.groupes).toBeGreaterThanOrEqual(3);
   await page.setViewportSize(MOBILE);
   await page.waitForTimeout(500);
   expect(await lire()).toMatchObject({ groupes: 0, liste: 1, filtresDansPanneau: false, loupe: true, recherche: false });
