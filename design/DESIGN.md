@@ -2710,3 +2710,52 @@ défaut OSM avec licence, URL invalide, `positionPrecision`. Verts aussi :
 `carte-et-lignes`, `tournee`, `tournee-mobile`, `ecran-livreur`, `operations`,
 `tuiles-bloquees`, `tabs`, `cibles-tactiles`, `focus-clavier`, `contraste-application`,
 `etats-limites`, `hors-ligne`, `chargement-instantane`, `navigation-mobile`.*
+
+### Relecture adverse du 23/09 — cinq défauts, cinq vrais
+
+Relecture de `f7eed6d`. Chaque défaut a été vérifié avant d'être corrigé ; chaque correctif
+a un banc rouge sur le code relu, pour la cause nommée.
+
+- **Important — le « approximatif » disparaissait sur les commandes suivantes.** Vrai, et
+  plus large que dit : le client est **reconstruit** à chaque import (`clientsMap`), sa
+  précision était perdue ; la commande créée ensuite (chemin 3), la commande de secours de
+  `syncWorkflow` et la mise à jour (chemin 2) copiaient le point sans elle. Corrigé : l'import
+  garde la précision du point qu'il conserve (un point venu du fichier n'en porte pas) et la
+  copie sur les commandes. **Données d'avant le lot** : `geocoderClients` relit la précision
+  dans le cache du géocodeur, sans appel réseau, **seulement si le point du cache est celui
+  du client** (un point posé à la main ou venu du fichier reste sans mention), et la pose
+  sur ses commandes **au même point** — pas sur celles livrées ailleurs (EHPAD, proche).
+  Le rattrapage a lieu au prochain géocodage (après un import, ou « Lancer » à la main).
+  Rouges : « le client réimporté a perdu sa précision » (`undefined`), « la commande de
+  mardi s'affiche comme une adresse exacte » (`''`, chemin 3 seul retiré), « le client
+  d'avant le lot n'est jamais rattrapé », « la commande livrée ailleurs a pris la précision
+  du client » (garde du même point retirée).
+  *Partie fausse du constat* : les commandes terrain et planifiées ne copient **pas** le
+  point du client (`createCustomerOrder`, `createPlannedOrder` : ni `lat` ni `lng`) ; le
+  calcul de tournée les géocode lui-même et pose la précision (`lib/routing.js`).
+- **Mineur — la légende restait en préparation.** Vrai : `.legend.vertical` (grid) et
+  `.marqueur-legende` (flex) battaient `[hidden]`. Corrigé par `#carteLegende[hidden]`.
+  Rouge : `toBeHidden()` → « visible » au téléphone, sans tournée. Témoin positif : visible
+  avec une tournée.
+- **Mineur — un échec de `/api/carte/fond` laissait la carte grise.** Vrai. Corrigé : le
+  fond est redemandé à 3 s, 10 s, 30 s puis toutes les 60 s, et dès l'événement `online` ;
+  une seule couche posée (garde contre deux appels croisés). Rouge : 0 tuile après 12 s.
+- **Mineur — la précision GPS recouvrait « N arrêts sans position ».** Vrai (mesure :
+  précision 45,610 246×60 sur message 51,612 288×70). Corrigé : les deux sont **empilés** dans
+  `.carte-bas` (flex en colonne, précision au-dessus), à 28 px du bas comme l'était la
+  précision (le message était à 16 px). Rouge : rectangles qui se croisent.
+- **Mineur — un fournisseur sans `SEREO_TUILES_ATTRIBUTION` perdait la licence.** Vrai.
+  Décision : la mention d'OpenStreetMap (ODbL, avec le lien) s'affiche à sa place — les fonds
+  courants sont faits de ses données — et le démarrage l'écrit dans le journal. Rouge :
+  attribution `''`.
+
+**Écarts nommés.** Le géocodage par lot (`geocoderClients`, antérieur au lot 4) réécrit
+toujours le point de **toutes** les commandes du client quand il le géocode, y compris
+celles livrées ailleurs : la décision « sauf celles livrées ailleurs » relève du lot des
+adresses (lot 3), non fait ici. Un arrêt de tournée déjà créé garde sa copie (M4). Si le
+service worker a déjà mis `/api/carte/fond` en cache, la relance peut le servir de là :
+c'est voulu (hors ligne), et le banc ne compte donc pas les relances, il compte les tuiles.
+
+*Bancs ajoutés : `test/carte-telephone.test.js` (+3 cas : import après géocodage, rattrapage
+depuis le cache et commande livrée ailleurs, attribution absente) ;
+`test/e2e/carte-telephone.spec.js` (+3 cas « relecture », ports 3194 et 3195).*
