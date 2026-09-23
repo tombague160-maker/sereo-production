@@ -1196,8 +1196,8 @@
           <div class="panel tournee-carte-panel">
             <div class="panel-heading">
               <h3>Carte tournée</h3>
-              <span class="muted">Trajet routier · départ → clients → arrivée</span>
-              <div class="legend vertical marqueur-legende" aria-label="Légende des marqueurs">
+              <span class="muted" id="carteSousTitre">Trajet routier · départ → clients → arrivée</span>
+              <div class="legend vertical marqueur-legende" id="carteLegende" aria-label="Légende des marqueurs">
                 <span><i class="marqueur marqueur--fait" aria-hidden="true"></i><span>Livré</span></span>
                 <span><i class="marqueur marqueur--en-cours marqueur--calme" aria-hidden="true">3</i><span>En cours</span></span>
                 <span><i class="marqueur marqueur--a-venir" aria-hidden="true">4</i><span>À venir</span></span>
@@ -1206,7 +1206,27 @@
             </div>
             <div class="map-shell">
               <div id="map" aria-label="Carte de la tournée"></div>
-              <div id="mapEmpty" class="map-empty" hidden>Aucun client avec coordonnées.</div>
+              <!-- Lot 4 de l'audit geo (23/09) : les outils de la carte. Des
+                   boutons HORS de #map : Leaflet n'intercepte pas leurs gestes. -->
+              <div class="carte-outils" role="toolbar" aria-label="Outils de la carte">
+                <button type="button" class="carte-outil" id="carteRecentrer" data-action="carte-recentrer" aria-label="Recentrer" title="Recentrer sur toute la tournée">
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v5M12 16v5M3 12h5M16 12h5M9.5 5.5 12 8l2.5-2.5M9.5 18.5 12 16l2.5 2.5M5.5 9.5 8 12l-2.5 2.5M18.5 9.5 16 12l2.5 2.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <button type="button" class="carte-outil" id="cartePosition" data-action="carte-position" aria-label="Ma position" aria-pressed="false" title="Afficher ma position (rien n'est envoyé)">
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="7.5" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+                </button>
+                <button type="button" class="carte-outil" id="cartePleinEcran" data-action="carte-plein-ecran" aria-label="Plein écran" aria-pressed="false" title="Plein écran">
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+              </div>
+              <p id="carteMessage" class="carte-message" role="status" hidden></p>
+              <p id="carteAstuce" class="carte-astuce" aria-hidden="true" hidden>Deux doigts pour déplacer la carte</p>
+              <!-- Le bas de la carte : la precision GPS AU-DESSUS du message
+                   « N arrets sans position », empiles, jamais l'un sur l'autre. -->
+              <div class="carte-bas">
+                <p id="cartePrecision" class="carte-precision" role="status" hidden></p>
+                <div id="mapEmpty" class="map-empty" hidden>Aucun client avec coordonnées.</div>
+              </div>
             </div>
           </div>
 

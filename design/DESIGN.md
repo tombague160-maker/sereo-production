@@ -2909,3 +2909,164 @@ après. Aucun n'était faux.
   non traité ici.
 - « Bâtiment C 3 rue de Dole » (complément en tête, SANS virgule) n'est pas nettoyé (le motif
   « en ligne » exige une espace avant) : inchangé, la BAN le trouve souvent quand même.
+
+## Lot 4 de l audit géo : une carte utilisable au téléphone — 23/09
+
+Source : rapport d'audit géo du 23/09 (commit audité `019788c`), §2 H10 et M3, §5 « carte
+au téléphone », « sans tournée », petites finitions, §6 fond de carte. Décisions de Thomas
+du 23/09 appliquées ici : garder les tuiles OpenStreetMap une fois le Referer corrigé.
+
+### Fait
+
+- **Fond de carte en UN endroit.** `lib/fond-de-carte.js` lit `SEREO_TUILES_URL`,
+  `SEREO_TUILES_ATTRIBUTION`, `SEREO_TUILES_ZOOM_MAX` (documentés dans `.env.example`) ;
+  OpenStreetMap par défaut. La page le reçoit par `GET /api/carte/fond` ; la CSP
+  (`img-src`) lit le même module. L'URL était écrite en dur deux fois (`app.js` et la CSP).
+  Une URL invalide (pas https, pas de `{z}/{x}/{y}`, jeton inconnu dans l'hôte) retombe sur
+  OSM **avec l'attribution d'OSM**.
+- **Referer et licence.** Les tuiles portent `referrerPolicy:
+  "strict-origin-when-cross-origin"` : l'origine seule part (mesure : `http://127.0.0.1:3194/`
+  sur chaque tuile, `null` avant). Le document garde `Referrer-Policy: no-referrer`.
+  L'attribution porte le lien `https://www.openstreetmap.org/copyright` (« © les
+  contributeurs d'OpenStreetMap »).
+- **Fond indisponible.** Quatre tuiles refusées d'affilée affichent « Fond de carte
+  indisponible — la liste des arrêts reste utilisable. » ; une tuile qui revient l'efface.
+- **H10.** On ne cadre plus qu'au **changement de tournée affichée** (autre tournée, arrêts
+  ajoutés ou retirés ; l'ordre n'en fait pas partie). Le rechargement qui suit « Livré »,
+  « Absent », et le changement d'onglet gardent le zoom et le cadre du livreur (mesure avant :
+  996 px de déplacement des marqueurs après un rechargement). Quand l'arrêt en cours
+  **change**, la carte glisse vers lui (`panTo`), au zoom du livreur. Bouton **Recentrer**.
+- **M3.** Choisir un arrêt (ligne ou marqueur) met à jour le marqueur « en cours » de la
+  carte (avant : la carte gardait l'anneau sur l'arrêt 3 quand la liste disait 5).
+- **Mise à jour ciblée.** Un marqueur par clé ; seul ce qui change est touché (`setIcon`,
+  qui réutilise l'élément, `setLatLng`, bulle, `zIndexOffset`). Le tracé ne se redessine
+  que si la tournée ou sa géométrie changent. Un rechargement ne recrée plus aucun marqueur.
+- **Ma position.** Bouton à bascule (`aria-pressed`) : `watchPosition`, point bleu et cercle
+  de précision, « Ma position : ± 30 m » ; au-delà de 150 m, « — position imprécise » sur fond
+  d'avertissement. **Rien n'est envoyé au serveur** (le banc écoute toutes les requêtes).
+  Quitter l'écran Tournée arrête le suivi.
+- **Sans tournée.** Plus de pointillé ni de « Arrêt N » : la carte montre les commandes
+  prêtes à livrer (filtrées, plus la sélection) par des **points sans numéro**, pleins si
+  cochés, nommés « <client>, sélectionnée / non sélectionnée », hors de la tabulation (la
+  liste est l'équivalent clavier). **Jamais les clients de la base.** Le sous-titre et la
+  légende suivent le mode.
+- **Centre par défaut** sur le Jura et le Doubs (Champagnole, Dole, Besançon), plus Beaune.
+- **Téléphone.** Un doigt fait défiler la page, deux doigts déplacent et zooment la carte
+  (mesure avant : page 0 px, carte 160 px ; après : page 145 px, carte 0 px). Une astuce
+  « Deux doigts pour déplacer la carte » apparaît 1,5 s. **Plein écran** : bouton de la
+  carte, et « Carte » du cockpit au téléphone ; le doigt seul y déplace la carte ; Échap ou
+  le bouton en sortent, le focus revient à ce qui l'avait ouvert.
+- **Départ et arrivée** : repères carrés « D » et « A » (« D·A » au même point), nommés
+  « Départ : <libellé> ». Ils sont dessinés **même sans tracé** — ils disparaissaient après un
+  réordonnancement (le serveur efface la géométrie, pas le départ). Le pointillé de repli
+  relie désormais départ, arrêts et arrivée dans l'ordre de la tournée.
+- **Arrêts à la même adresse regroupés** : un marqueur « 3·7 » (au-delà de deux, « 3+2 »),
+  nommé « Arrêts 3 et 7, en cours : <client> » ; l'état montré est le plus urgent.
+- **Point approximatif** : anneau en tirets, « position approximative » dans le nom et la
+  bulle. Le serveur le dit : `positionPrecision` (`adresse`, `approximative`, `manuelle`)
+  posé par le géocodage par lot (type BAN `street` = approximatif), par le calcul de tournée,
+  et « manuelle » par la correction à la main ; copié dans l'arrêt.
+- **Libellés en français** : « Zoomer », « Dézoomer », « Fermer » (bulle) ; chaque marqueur
+  d'arrêt dit son client.
+- **Décisions gardées** : marqueurs de 44 px, tracé de 7 px et liseré blanc.
+
+### Décisions prises
+
+- **Suivre sans zoomer.** Choisir un arrêt faisait `setView(…, 15)` ; le zoom du livreur
+  est maintenant gardé partout (il avait rezoomé à la main, on ne le lui reprend pas).
+- **Le fond vient d'une requête.** Un fond qui ne se charge pas (requête refusée) affiche le
+  même message qu'une panne de tuiles. `/api/carte/fond` passe par la copie de secours du
+  service worker comme les autres `GET /api`.
+- **Seuil de 4 tuiles** en échec d'affilée : un échec isolé (tuile hors zone) ne dit rien.
+- **Plein écran sans l'API Fullscreen** : une classe sur le panneau (`position: fixed`,
+  z-index 1150 : au-dessus de la barre basse, sous les feuilles et les messages). L'entrée
+  d'écran `pageFadeIn` (`both`) laissait un `transform` identité sur `#livreur`, qui faisait
+  de la page le cadre du `fixed` : la carte restait dans la page (358 × 2 106 px à
+  y = −1 273). Le plein écran coupe l'animation de `#livreur`. Le banc garde les animations
+  pour ce cas : les figer masquait le défaut.
+- **Point bleu** `--carte-position` (#1A73E8, #8AB4F8 en sombre) : la convention des cartes ;
+  aucun jeton v8 n'est bleu.
+
+### Écarts nommés
+
+- **Le Referer ne prouve pas la levée des blocages** « Access blocked » du 18/09 : à
+  vérifier une fois depuis la production (décision 3 : observer une semaine).
+- **Une tuile 403 servie AVEC une image** (l'« Access blocked » d'OSM) peut s'afficher sans
+  déclencher `tileerror` : le message ne couvre que les refus sans image et les coupures.
+- **En préparation**, deux commandes au même point ne sont pas regroupées, et toucher un
+  point ne coche pas la commande (constat « moyenne » de l'audit, non fait).
+- **« Me localiser » du départ** (arrondi à ~100 m, décision 5) et la purge à 12 mois ne sont
+  pas dans ce lot : la position en direct, elle, ne quitte jamais le navigateur.
+- **Les arrêts restent des copies** (M4, lot 3) : un arrêt créé avant ce lot n'a pas de
+  `positionPrecision` ; un client corrigé ensuite ne met pas à jour l'arrêt existant.
+- **Hors ligne**, les tuiles ne sont pas en cache (service worker : autre origine ignorée ;
+  selon l'audit, la politique d'OSM l'interdit). La carte devrait rester grise, avec le
+  message : **déduit, non rejoué**.
+- **Sans banc** : l'astuce « Deux doigts », le repère « D·A » au même point, le « 3+2 »
+  au-delà de deux arrêts, le retour du message quand une tuile revient.
+
+### Ce qui reste
+
+- Mesurer depuis la production que les tuiles passent (Referer) ; trancher le fournisseur si
+  les blocages continuent (un changement se fait par `SEREO_TUILES_URL`, sans code).
+- Carte de préparation : cocher en touchant un point ; regrouper au-delà de ~50 points.
+- Le lot 3 (bonnes adresses) peut s'appuyer sur `positionPrecision` et la remplir aussi pour
+  les adresses corrigées depuis l'écran « Adresses à vérifier ».
+
+*Bancs : `test/e2e/carte-telephone.spec.js` (12 cas, ports 3194 et 3195) — tous rouges sur
+la carte d'avant, chacun pour sa cause ; cinq mutants tués (repères sans tracé, recadrage au
+changement d'onglet, `panTo` retiré, position envoyée, repli sur les clients).
+`test/carte-telephone.test.js` (5 cas, faux géocodeur 3392) : `/api/carte/fond`, CSP,
+défaut OSM avec licence, URL invalide, `positionPrecision`. Verts aussi :
+`carte-et-lignes`, `tournee`, `tournee-mobile`, `ecran-livreur`, `operations`,
+`tuiles-bloquees`, `tabs`, `cibles-tactiles`, `focus-clavier`, `contraste-application`,
+`etats-limites`, `hors-ligne`, `chargement-instantane`, `navigation-mobile`.*
+
+### Relecture adverse du 23/09 — cinq défauts, cinq vrais
+
+Relecture de `f7eed6d`. Chaque défaut a été vérifié avant d'être corrigé ; chaque correctif
+a un banc rouge sur le code relu, pour la cause nommée.
+
+- **Important — le « approximatif » disparaissait sur les commandes suivantes.** Vrai, et
+  plus large que dit : le client est **reconstruit** à chaque import (`clientsMap`), sa
+  précision était perdue ; la commande créée ensuite (chemin 3), la commande de secours de
+  `syncWorkflow` et la mise à jour (chemin 2) copiaient le point sans elle. Corrigé : l'import
+  garde la précision du point qu'il conserve (un point venu du fichier n'en porte pas) et la
+  copie sur les commandes. **Données d'avant le lot** : `geocoderClients` relit la précision
+  dans le cache du géocodeur, sans appel réseau, **seulement si le point du cache est celui
+  du client** (un point posé à la main ou venu du fichier reste sans mention), et la pose
+  sur ses commandes **au même point** — pas sur celles livrées ailleurs (EHPAD, proche).
+  Le rattrapage a lieu au prochain géocodage (après un import, ou « Lancer » à la main).
+  Rouges : « le client réimporté a perdu sa précision » (`undefined`), « la commande de
+  mardi s'affiche comme une adresse exacte » (`''`, chemin 3 seul retiré), « le client
+  d'avant le lot n'est jamais rattrapé », « la commande livrée ailleurs a pris la précision
+  du client » (garde du même point retirée).
+  *Partie fausse du constat* : les commandes terrain et planifiées ne copient **pas** le
+  point du client (`createCustomerOrder`, `createPlannedOrder` : ni `lat` ni `lng`) ; le
+  calcul de tournée les géocode lui-même et pose la précision (`lib/routing.js`).
+- **Mineur — la légende restait en préparation.** Vrai : `.legend.vertical` (grid) et
+  `.marqueur-legende` (flex) battaient `[hidden]`. Corrigé par `#carteLegende[hidden]`.
+  Rouge : `toBeHidden()` → « visible » au téléphone, sans tournée. Témoin positif : visible
+  avec une tournée.
+- **Mineur — un échec de `/api/carte/fond` laissait la carte grise.** Vrai. Corrigé : le
+  fond est redemandé à 3 s, 10 s, 30 s puis toutes les 60 s, et dès l'événement `online` ;
+  une seule couche posée (garde contre deux appels croisés). Rouge : 0 tuile après 12 s.
+- **Mineur — la précision GPS recouvrait « N arrêts sans position ».** Vrai (mesure :
+  précision 45,610 246×60 sur message 51,612 288×70). Corrigé : les deux sont **empilés** dans
+  `.carte-bas` (flex en colonne, précision au-dessus), à 28 px du bas comme l'était la
+  précision (le message était à 16 px). Rouge : rectangles qui se croisent.
+- **Mineur — un fournisseur sans `SEREO_TUILES_ATTRIBUTION` perdait la licence.** Vrai.
+  Décision : la mention d'OpenStreetMap (ODbL, avec le lien) s'affiche à sa place — les fonds
+  courants sont faits de ses données — et le démarrage l'écrit dans le journal. Rouge :
+  attribution `''`.
+
+**Écarts nommés.** Le géocodage par lot (`geocoderClients`, antérieur au lot 4) réécrit
+toujours le point de **toutes** les commandes du client quand il le géocode, y compris
+celles livrées ailleurs : la décision « sauf celles livrées ailleurs » relève du lot des
+adresses (lot 3), non fait ici. Un arrêt de tournée déjà créé garde sa copie (M4). Si le
+service worker a déjà mis `/api/carte/fond` en cache, la relance peut le servir de là :
+c'est voulu (hors ligne), et le banc ne compte donc pas les relances, il compte les tuiles.
+
+*Bancs ajoutés : `test/carte-telephone.test.js` (+3 cas : import après géocodage, rattrapage
+depuis le cache et commande livrée ailleurs, attribution absente) ;
+`test/e2e/carte-telephone.spec.js` (+3 cas « relecture », ports 3194 et 3195).*

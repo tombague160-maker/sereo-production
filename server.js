@@ -11,6 +11,7 @@ const zlib = require("zlib");
 const { zipSync, strToU8 } = require("fflate");
 const { createSqliteStore } = require("./storage/sqliteStore");
 const { empreinteDesSources, shellEmpreinte } = require("./lib/empreinte-shell");
+const { fondDeCarte } = require("./lib/fond-de-carte");
 
 loadEnvFile(path.join(__dirname, ".env"));
 
@@ -557,13 +558,13 @@ function securityHeaders(req, res, next) {
       "default-src 'self'",
       "script-src 'self'",
       "style-src 'self' 'unsafe-inline'",
-      // Les DEUX formes, et c'est necessaire : un joker CSP `*.exemple.org`
-      // ne couvre PAS `exemple.org` lui-meme. En retirant le sous-domaine {s}
-      // de l'URL des tuiles (deconseille par la politique d'usage d'OSM), le
-      // nouvel hote `tile.openstreetmap.org` tombait hors de cette liste et
-      // toutes les tuiles etaient refusees par la CSP -- une carte vide, sans
-      // qu'aucune erreur ne remonte a l'application.
-      "img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org",
+      // L'hote des tuiles vient de lib/fond-de-carte.js, le MEME que celui que
+      // la page recoit par /api/carte/fond (lot 4 de l'audit geo, 23/09). Il
+      // etait ecrit ici en dur, en double de app.js : changer de fournisseur
+      // d'un seul cote donnait une carte vide, sans erreur remontee. Un joker
+      // CSP `*.exemple.org` ne couvre pas `exemple.org` : le module rend
+      // l'hote exact, ou le joker quand le gabarit porte {s}.
+      `img-src 'self' data: ${fondDeCarte().origineCsp}`,
       "connect-src 'self'",
       "font-src 'self' data:",
       "object-src 'none'",
@@ -1078,6 +1079,35 @@ function clientAGeocoder(client) {
   return !getCoordinates(client) && adresseGeocodable(adresseDuClient(client));
 }
 
+/** « adresse » pour un numero trouve, « approximative » pour une rue seule. */
+function precisionDuType(type) {
+  return type === "housenumber" ? "adresse" : "approximative";
+}
+
+/**
+ * La precision d'un client DEJA place mais sans precision (geocode avant le
+ * lot 4 de l'audit geo) : elle se relit dans le cache du geocodeur, sans appel
+ * reseau, et seulement si le point du cache EST celui du client. Un point pose
+ * a la main ou venu du fichier ne correspond pas : il reste sans mention.
+ */
+function precisionDepuisLeCache(client) {
+  if (client.positionPrecision) return "";
+  const point = getCoordinates(client);
+  const adresse = adresseDuClient(client);
+  if (!point || !adresseGeocodable(adresse)) return "";
+  const entree = getSqliteStore().getGeocodage(cleGeocodage(adresse));
+  if (!entree || entree.statut !== GEOCODAGE_STATUTS.TROUVE) return "";
+  if (Number(entree.lat) !== point.lat || Number(entree.lng) !== point.lng) return "";
+  return precisionDuType(entree.type);
+}
+
+/** Meme point, a 1e-7 pres : une commande livree ailleurs (EHPAD, proche) n'est pas le client. */
+function memePoint(a, b) {
+  const pa = getCoordinates(a);
+  const pb = getCoordinates(b);
+  return Boolean(pa && pb) && Math.abs(pa.lat - pb.lat) < 1e-7 && Math.abs(pa.lng - pb.lng) < 1e-7;
+}
+
 /**
  * Geocode les clients depourvus de coordonnees.
  *
@@ -1130,6 +1160,7 @@ async function geocoderClients({ forcer = false, max = GEOCODER_MAX_PAR_LOT } = 
   const bilan = await withWriteLock(async () => {
     const db = readDb();
     let appliques = 0;
+    let rattrapes = 0;
 
     for (const client of db.clients) {
       const entree = resultats.get(String(client.id));
@@ -1152,10 +1183,8 @@ async function geocoderClients({ forcer = false, max = GEOCODER_MAX_PAR_LOT } = 
       appliques += 1;
     }
 
-    if (appliques > 0) {
-      addHistory(db, "Geocodage", `${appliques} client(s) geolocalise(s) automatiquement`);
-      writeDb(db);
-    }
+    if (appliques > 0) addHistory(db, "Geocodage", `${appliques} client(s) geolocalise(s) automatiquement`);
+    if (appliques > 0 || rattrapes > 0) writeDb(db);
 
     return appliques;
   });
@@ -4128,6 +4157,7 @@ function syncWorkflow(db) {
       products: client.produits,
       lat: client.lat,
       lng: client.lng,
+      positionPrecision: client.positionPrecision,
       notes: client.notes,
       priority: client.priority,
       dateCommande: today,
@@ -6188,6 +6218,14 @@ app.get("/api/settings/order-numbering", (req, res) => {
 app.get("/api/settings/tournee", (req, res) => {
   const db = readDb();
   res.json(normalizeSettings(db.settings || {}).tournee);
+});
+
+// Le fond de carte choisi par l'environnement (lib/fond-de-carte.js). La page
+// le lit avant de poser les tuiles ; la CSP lit le meme. Sans l'origine CSP :
+// la page n'en a pas l'usage.
+app.get("/api/carte/fond", (req, res) => {
+  const { url, attribution, zoomMax, referrerPolicy } = fondDeCarte();
+  res.json({ url, attribution, zoomMax, referrerPolicy });
 });
 
 app.patch("/api/settings/order-numbering", async (req, res) => {
