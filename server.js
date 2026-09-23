@@ -6401,7 +6401,7 @@ function updateRouteStop(db, routeId, stopId, status, notes = "", motif = null, 
   // L'heure du GESTE, pas celle de l'arrivee ici (M6) : une livraison faite
   // hors ligne a 9 h 10 et envoyee a 11 h 30 est datee de 9 h 10.
   const now = horodatageDuGeste(faitLe, { plancher: route.startedAt });
-  if (retard && status === "livre") reprendreStockLibere(db, findOrder(db, stop.orderId));
+  if (retard && status === "livre") reprendreStockLibere(db, findOrder(db, stop.orderId), "geste arrivé après la clôture");
   if (retard) {
     // Le livreur l'a fait AVANT la cloture : c'est la verite du terrain, la
     // cloture avait devine « a reprogrammer ». L'arret n'est plus une
@@ -6577,10 +6577,12 @@ const CAUSE_CORRECTION_MAX = 160;
  *  - elle exige sa cause, gardee sur l'arret (`corrections`) et dans
  *    l'historique (type « Correction »), avec qui l'a faite ;
  *  - elle garde les STOCKS justes. Le stock en rayon a ete deduit a la
- *    preparation, pas a la livraison : il ne bouge jamais ici. Seule la
+ *    preparation, pas a la livraison : il ne bouge pas ici. Seule la
  *    reservation suit : « Livre » la consomme, defaire une livraison la
  *    redonne (la marchandise n'est pas chez le client : elle attend sa
- *    relivraison, comme apres un absent) ;
+ *    relivraison, comme apres un absent). Une exception : vers « Livre »,
+ *    une reservation liberee a la main est d'abord reprise sur le rayon,
+ *    meme insuffisant (reprendreStockLibere, decision du 23/09) ;
  *  - elle refuse une commande repartie ailleurs (dans une autre tournee, ou
  *    passee par un autre ecran) : ce qu'elle corrigerait n'est plus la.
  * Vers « a faire » : la tournee terminee se rouvre (le livreur y repassera) ;
@@ -6622,9 +6624,10 @@ function corrigerArret(db, routeId, stopId, { status, cause } = {}, par = "") {
   }
   // Une reservation liberee a la main (release-stock) a rendu le stock au
   // rayon : dire la commande livree la ferait sortir du stock sans la deduire.
-  if (status === "livre" && !order.stockReservedAt && order.stockReleaseReason && order.stockReleaseReason !== "consumed_by_delivery") {
-    throw conflit(`Le stock de la commande ${nom} a été libéré : elle ne peut plus être dite livrée ici.`);
-  }
+  // Avant, la correction etait refusee ; depuis la decision de Thomas (23/09),
+  // la reservation est reprise, meme sur un rayon insuffisant, comme pour le
+  // geste arrive apres la cloture (reprendreStockLibere, qui le journalise).
+  if (status === "livre") reprendreStockLibere(db, order, "correction du statut");
 
   const avant = stop.status;
   const now = new Date().toISOString();
@@ -6740,25 +6743,62 @@ function gesteArriveApresCloture(db, route, stop, status, faitLe) {
 }
 
 /**
- * Relecture adverse du lot 2 : un « Livre » arrive apres la cloture, alors que
- * le bureau a libere entre-temps la reservation de la commande (release-stock,
- * admis sur « a reprogrammer ») -- le rayon recompte une marchandise qui est
- * chez le client. La livraison reste la verite du terrain : la reservation est
- * reprise (le rayon est deduit de nouveau), puis consommee par la livraison
- * (setOrderStatus). Si le rayon n'en a plus assez, le geste est refuse, en le
- * disant : le stock ne passe jamais sous zero en silence.
- * A appeler AVANT toute ecriture de l'arret (un refus ne laisse rien).
+ * Relecture adverse du lot 2 : un « Livre » arrive EN RETARD (apres la
+ * cloture, par la file ; ou par « Corriger le statut ») alors que le bureau a
+ * libere entre-temps la reservation de la commande (release-stock, admis sur
+ * « a reprogrammer ») -- le rayon recompte une marchandise qui est chez le
+ * client. La livraison reste la verite du terrain : la reservation est reprise
+ * (le rayon est deduit de nouveau), puis consommee par la livraison
+ * (setOrderStatus).
+ *
+ * Decision de Thomas (23/09, « Livre en retard sur un stock a zero ») : si le
+ * rayon n'en a plus assez, la livraison est QUAND MEME acceptee -- elle a eu
+ * lieu. Avant, elle etait refusee (409), et rien ne permettait de
+ * l'enregistrer. Le rayon passe alors en negatif, et c'est DIT : une entree
+ * « Livraison acceptée sur stock insuffisant » dans l'historique, le produit
+ * en rupture (quantite negative) au Stock et dans « A regler ». Jamais ramene
+ * a zero en silence : setStockQuantity le ferait, d'ou l'ecriture directe.
+ * Un produit absent du stock, ou sans quantite, n'est pas deduit : il est
+ * nomme dans la meme entree.
+ *
+ * `origine` : d'ou vient la livraison, pour l'historique.
+ * A appeler APRES les refus du geste et AVANT l'ecriture de l'arret.
  */
-function reprendreStockLibere(db, order) {
+function reprendreStockLibere(db, order, origine) {
   if (order.stockReservedAt || !order.stockReleaseReason || order.stockReleaseReason === "consumed_by_delivery") return;
-  try {
+  const verification = analyzeOrderStock(order, db.stock);
+  if (verification.canPrepare) {
     reserveStockForOrder(db, order);
-  } catch {
-    throw conflit(`Le stock de la commande ${nomDeCommande(order)} a été libéré après la clôture, et le rayon n'en a plus assez : la livraison n'est pas enregistrée, la commande reste à reprogrammer.`);
+    addHistory(db, "Stock deduit", `Commande ${order.numero || order.id} : livree apres la liberation de son stock (${origine})`, {
+      orderId: order.id,
+      numero: order.numero
+    });
+    return;
   }
-  addHistory(db, "Stock deduit", `Commande ${order.numero || order.id} : livree apres la liberation de son stock (geste arrive apres la cloture)`, {
+
+  const manques = [];
+  verification.lines.forEach(line => {
+    if (!line.required || line.required <= 0) return;
+    const nom = clean(line.nom || line.code) || "Produit";
+    const product = line.stockId === null ? null : db.stock.find(item => String(item.id) === String(line.stockId));
+    if (!product) {
+      manques.push(`${nom} : absent du stock, rien déduit`);
+      return;
+    }
+    const avant = getStockQuantity(product);
+    if (avant === null) {
+      manques.push(`${getProductName(product)} : stock non renseigné, rien déduit`);
+      return;
+    }
+    const apres = Math.round((avant - line.required) * 100) / 100;
+    product.quantite = apres;
+    if (apres < 0) manques.push(`${getProductName(product)} : ${avant} en rayon pour ${line.required} livrés, stock à ${apres}`);
+  });
+  order.stockReservedAt = new Date().toISOString();
+  addHistory(db, "Stock", `Livraison acceptée sur stock insuffisant : commande ${nomDeCommande(order)} (${origine}) — ${manques.join(" ; ")}`, {
     orderId: order.id,
-    numero: order.numero
+    numero: order.numero,
+    manques
   });
 }
 
