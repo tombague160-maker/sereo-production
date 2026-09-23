@@ -103,3 +103,21 @@ test("« livraison » dans la recherche du menu trouve encore la Tournée", asyn
   await page.press("#menuSearch", "Enter");
   await expect(page.locator("#livreur")).toHaveClass(/active/);
 });
+
+test("en sombre, le bandeau de la tournée est vert profond, pas pâle (planche 5c)", async ({ browser }) => {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: "dark" });
+  await ctx.addInitScript(() => { try { localStorage.setItem("sereo:colorScheme", "dark"); } catch {} });
+  const page = await ctx.newPage();
+  await page.goto(srv.base + "/#livreur", { waitUntil: "networkidle" });
+  await page.waitForTimeout(600);
+  const r = await page.evaluate(() => {
+    const sonde = document.createElement("span");
+    sonde.style.color = "var(--v8-carte-tournee)";
+    document.body.append(sonde);
+    const vert = getComputedStyle(sonde).color;
+    sonde.remove();
+    return { fond: getComputedStyle(document.querySelector(".tournee-entete")).backgroundColor, vert };
+  });
+  expect(r.fond).toBe(r.vert);
+  await ctx.close();
+});

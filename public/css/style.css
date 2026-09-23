@@ -12287,3 +12287,20 @@ textarea::placeholder {
 /* [hidden] doit gagner sur le display: flex (1,2,1) de la carte d'accueil. */
 :root[data-color-scheme] #journee .tb-premier[hidden],
 :root:not([data-color-scheme]) #journee .tb-premier[hidden] { display: none; }
+
+/* --- Tournee : le bandeau en sombre (planche 5c) ---------------------------
+   Le bandeau prenait le PRINCIPAL : identique au vert de carte en clair
+   (#386B6D), mais #93CBC9 -- un bandeau pale -- en sombre, ou la planche le
+   veut vert profond (#182E31). Il prend le role « carte de tournee ». */
+:root[data-color-scheme] .tournee-entete,
+:root:not([data-color-scheme]) .tournee-entete {
+  background: var(--v8-carte-tournee); color: var(--v8-texte-sur-carte-tournee);
+}
+:root[data-color-scheme] .tournee-entete .tournee-jour,
+:root:not([data-color-scheme]) .tournee-entete .tournee-jour,
+:root[data-color-scheme] .tournee-entete .tournee-anneau small,
+:root:not([data-color-scheme]) .tournee-entete .tournee-anneau small { color: var(--v8-secondaire-sur-carte-tournee); }
+:root[data-color-scheme] .tournee-entete .tournee-progression,
+:root:not([data-color-scheme]) .tournee-entete .tournee-progression {
+  background: color-mix(in srgb, var(--v8-texte-sur-carte-tournee) 18%, transparent);
+}
