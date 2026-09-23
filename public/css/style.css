@@ -13546,3 +13546,11 @@ body:has(#journee.active) .ecran-entete #pageSubtitle { min-height: 2lh; }
   #subscriptionDialog .abo-cr-pied .button.secondary { flex: none; }
   #subscriptionDialog .abo-cr-pied .button.primary { flex: 1; }
 }
+
+/* « Retirer » sur chaque ligne du panier (relecture adverse du 23/09) : le geste
+   d'un clic de l'ancien formulaire, quelle que soit la quantite. Un lien de la
+   carte (principal, 600) ; sa cible garde 44 px. Pas de marge haute negative :
+   l'anneau de focus couvrait « code · stock » (mesure en capture). */
+#subscriptionDialog .abo-cr-lien.abo-cr-retirer {
+  align-self: flex-start; margin: 0 0 -8px -4px; font-size: 13px;
+}

@@ -142,6 +142,7 @@ export function initOperations(api) {
     }
     if (action === "sub-moins" || action === "sub-plus")
       return changerQuantite(el.closest(".sub-product-line"), action === "sub-plus" ? 1 : -1);
+    if (action === "sub-retirer") return retirerLigne(el.closest(".sub-product-line"), "sub-retirer");
     if (action === "abo-filtre") {
       aboFiltre = el.dataset.filtre || "tous";
       renderSubscriptions();
@@ -891,7 +892,9 @@ function ligneProduit(produit, quantite, secours) {
   ligne.dataset.productId = produit ? String(produit.id) : String(secours?.stockId || "");
   const nom = produit ? nomProduit(produit) : secours?.nom || "Produit";
   const stock = produit ? texteStock(produit) : [secours?.code, "retiré du catalogue"].filter(Boolean).join(" · ");
-  ligne.innerHTML = `<span class="abo-cr-produit-texte"><span class="abo-cr-produit-nom">${h(nom)}</span><span class="abo-cr-produit-stock">${h(stock)}</span></span><span class="abo-cr-pas"><button type="button" class="abo-cr-pas-bouton abo-cr-pas--moins" data-op="sub-moins"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button><input class="sub-quantity abo-cr-quantite" type="number" min="1" max="10000" step="1" inputmode="numeric" required value="${h(quantite)}" aria-label="Quantité de ${h(nom)}"><button type="button" class="abo-cr-pas-bouton abo-cr-pas--plus" data-op="sub-plus" aria-label="Un de plus : ${h(nom)}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button></span>`;
+  // « Retirer » : l'ancien formulaire retirait une ligne d'un geste, quelle que
+  // soit sa quantite ; « − » ne le fait qu'a un.
+  ligne.innerHTML = `<span class="abo-cr-produit-texte"><span class="abo-cr-produit-nom">${h(nom)}</span><span class="abo-cr-produit-stock">${h(stock)}</span><button type="button" class="abo-cr-lien abo-cr-retirer" data-op="sub-retirer" aria-label="Retirer ${h(nom)} du panier">Retirer</button></span><span class="abo-cr-pas"><button type="button" class="abo-cr-pas-bouton abo-cr-pas--moins" data-op="sub-moins"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button><input class="sub-quantity abo-cr-quantite" type="number" min="1" max="10000" step="1" inputmode="numeric" required value="${h(quantite)}" aria-label="Quantité de ${h(nom)}"><button type="button" class="abo-cr-pas-bouton abo-cr-pas--plus" data-op="sub-plus" aria-label="Un de plus : ${h(nom)}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button></span>`;
   majLigne(ligne);
   return ligne;
 }
@@ -910,17 +913,18 @@ function ajouterProduit(id) {
   }
   majPanier();
 }
+// Le focus ne tombe pas sur <body> : le meme geste sur la ligne suivante,
+// sinon le catalogue.
+function retirerLigne(ligne, geste) {
+  const suivante = ligne.nextElementSibling || ligne.previousElementSibling;
+  ligne.remove();
+  majPanier();
+  (suivante?.querySelector(`[data-op="${geste}"]`) || $("subCatalogueBouton")).focus();
+}
 function changerQuantite(ligne, pas) {
   const input = ligne.querySelector(".sub-quantity");
   const q = (Number(input.value) || 0) + pas;
-  if (q < 1) {
-    // Le focus ne tombe pas sur <body> : la ligne suivante, sinon le catalogue.
-    const suivante = ligne.nextElementSibling || ligne.previousElementSibling;
-    ligne.remove();
-    majPanier();
-    (suivante?.querySelector('[data-op="sub-moins"]') || $("subCatalogueBouton")).focus();
-    return;
-  }
+  if (q < 1) return retirerLigne(ligne, "sub-moins");
   input.value = Math.min(10000, q);
   majLigne(ligne);
   if (!$("subCatalogue").hidden) rendreCatalogue();

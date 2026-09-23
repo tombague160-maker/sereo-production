@@ -114,7 +114,7 @@ test("le catalogue montre le stock disponible et compose le panier en pas de un"
   await expect(changes.getByRole("button", { name: "Un de moins : Changes taille L" })).toBeVisible();
   // A un, « moins » retire la ligne.
   const aleses = panier.filter({ hasText: "Alèses" });
-  await aleses.getByRole("button", { name: "Retirer Alèses" }).click();
+  await aleses.getByRole("button", { name: "Retirer Alèses", exact: true }).click();
   await expect(panier).toHaveCount(1);
   // La recherche du catalogue filtre par nom ou par code.
   await page.getByRole("searchbox", { name: "Chercher dans le catalogue" }).fill("gants");
@@ -143,6 +143,25 @@ test("une quantité tapée, puis « + » du catalogue : le premier clic ajoute l
   await page.keyboard.type("30");
   await page.keyboard.press("Tab");
   await expect(page.locator("#subCatalogueListe .abo-cr-produit").filter({ hasText: "Changes taille L" })).toContainText("CH-L · 100 en stock · 30 au panier");
+});
+
+// Relecture adverse du 23/09 : l'ancien formulaire avait « Retirer » sur chaque
+// ligne ; « − » ne retire qu'a un. Une ligne de 120 se retire d'un seul geste.
+test("une ligne de 120 se retire d'un seul geste, comme avec l'ancien « Retirer »", async ({ page }) => {
+  await ouvrirEditeur(page);
+  await page.getByRole("button", { name: "Ajouter Changes taille L au panier" }).click();
+  await page.getByRole("button", { name: "Ajouter Alèses au panier" }).click();
+  const panier = page.locator("#subProducts .sub-product-line");
+  await panier.filter({ hasText: "Changes taille L" }).locator(".sub-quantity").fill("120");
+  await page.getByRole("button", { name: "Retirer Changes taille L du panier" }).click();
+  await expect(panier).toHaveCount(1);
+  await expect(panier).toContainText("Alèses");
+  // Le focus ne tombe pas sur <body> : le « Retirer » de la ligne voisine.
+  await expect(page.getByRole("button", { name: "Retirer Alèses du panier" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(panier).toHaveCount(0);
+  await expect(page.locator("#subPanierVide")).toBeVisible();
+  await expect(page.locator("#subCatalogueBouton")).toBeFocused();
 });
 
 test("les pilules de fréquence recalculent les trois prochaines dates, sans rien valider", async ({ page }) => {
@@ -284,7 +303,7 @@ for (const schema of ["light", "dark"]) {
         ".abo-cr-libelle", ".abo-cr-client-nom", ".abo-cr-client-adresse", ".abo-cr-produit-stock",
         ".abo-cr-pilule", ".abo-cr-pilule:has(input:checked)", ".abo-cr-apercu-ecart", ".abo-cr-note",
         ".abo-cr-options summary", ".abo-cr-pied .button.primary", ".abo-cr-pied .button.secondary", ".abo-cr-entete h2",
-        ".abo-cr-produit-nom", ".abo-cr-quantite", ".abo-cr-lien", "#subStatus"
+        ".abo-cr-produit-nom", ".abo-cr-quantite", ".abo-cr-lien", ".abo-cr-retirer", "#subStatus"
       ].map(sel => { const el = [...d.querySelectorAll(sel)].find(vus); return el ? { sel, texte: getComputedStyle(el).color, fond: fond(el) } : { sel, absent: true }; });
       return { petits, paires };
     });
