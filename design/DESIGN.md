@@ -3070,3 +3070,54 @@ c'est voulu (hors ligne), et le banc ne compte donc pas les relances, il compte 
 *Bancs ajoutés : `test/carte-telephone.test.js` (+3 cas : import après géocodage, rattrapage
 depuis le cache et commande livrée ailleurs, attribution absente) ;
 `test/e2e/carte-telephone.spec.js` (+3 cas « relecture », ports 3194 et 3195).*
+
+## Intégration des lots 3, 4 et 7 (branche integration/geo-vague1) — 23/09
+
+Ordre : lot 7 (meilleur trajet), lot 3 (adresses justes), puis lot 4 (carte au téléphone).
+
+**Un seul champ pour la précision d'un point : `geoPrecision`** (lot 3), avec son origine
+`geoSource`, portés par le client, la commande et l'arrêt. Le lot 4 avait inventé
+`positionPrecision` (`adresse`, `approximative`, `manuelle`) pour la même idée : il est
+**retiré partout** (serveur, `app.js`, bancs). Ce que la carte en tire :
+
+| `geoPrecision` | Sur la carte |
+| --- | --- |
+| `numero` | exact (disque plein) |
+| `rue`, `lieu-dit`, `commune` | **approximatif** (`marqueur--approx`, « position approximative » dans le nom, la bulle dit où est le point) |
+| `manuel` (posé à la main, ou venu du fichier) | exact — pas dit approximatif |
+| vide (point d'avant la précision, non rattrapé) | exact, sans mention |
+
+La partition est celle de `geocodage.precisionApproximative` (écran « Adresses à vérifier »).
+Une proposition « rue » acceptée à la main garde `geoPrecision: "rue"` : l'écran ne la
+redemande plus (`geoSource: "manuel"`), mais la carte la dit toujours approximative — le
+point reste au milieu de la rue.
+
+**Ce qui a été réconcilié.**
+- `lib/routing.js` : `resoudrePositions` du lot 3 (décision 150 km, `geoPrecision` déjà portée
+  jusqu'à l'arrêt) remplace la boucle de géocodage du lot 4.
+- `server.js` : géocodage par lot, normalisation, `createRoute`, `createStop`, import (×3) et
+  saisie des coordonnées suivent le lot 3. Le **rattrapage** du lot 4 (client placé avant que
+  la précision existe, relu dans le cache BAN s'il est au même point) est gardé, porté sur
+  `geoPrecision` : il écrit aussi `geoSource: "ban"`, et ne touche que les commandes qui
+  suivent le client **au même point** (ni livrées ailleurs, ni placées à la main). La commande
+  de repli de `syncWorkflow` hérite `geoPrecision` comme l'import.
+- Un arrêt en cours relit sa commande (`arretVivant`, M4 du lot 3) : la précision se pose sur
+  la commande, l'arrêt suit. Le banc e2e du lot 4 la posait sur l'arrêt seul ; il la pose
+  maintenant sur les deux, comme `createStop`.
+- Les deux « écarts nommés » du lot 4 sont soldés par le lot 3 : le géocodage par lot ne
+  réécrit plus les commandes livrées ailleurs (`commandeSuitLeClient`), et une commande née
+  dans l'application hérite du point de son client (`heriterPositionDuClient`).
+- Conflits en fin de fichier (`DESIGN.md`, `style.css`) : base + ajout de chaque côté,
+  reconstruits depuis les trois versions, jamais en ôtant les marqueurs.
+
+**Bancs adaptés, sans les affaiblir.** `test/carte-telephone.test.js` : mêmes cas, mesurés sur
+`rue` / `numero` / `manuel`, plus l'absence de `positionPrecision`. `test/e2e/carte-telephone.spec.js` :
+arrêt 6 `rue` (approximatif), arrêt 5 `manuel` et arrêt 2 `numero` (non), et en préparation un
+point `commune` (approximatif) à côté d'un `numero` et d'un `manuel`. Mutations, chacune rouge
+pour sa cause : la carte relit `positionPrecision` (le défaut d'intégration même) ; seule
+`rue` approximative ; `manuel` ou `numero` dits approximatifs ; rattrapage coupé ; garde du
+même point retirée ; import qui perd la précision ; saisie manuelle dite `numero` ;
+`street` rendu `numero`.
+
+*Non couvert par un banc : la commande de repli de `syncWorkflow` (héritage de
+`geoPrecision`).*
