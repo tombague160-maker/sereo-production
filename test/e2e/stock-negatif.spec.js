@@ -16,11 +16,17 @@ const { demarrer, jeuDeDonnees } = require("./serveur-seme");
 
 test.describe.configure({ mode: "serial" });
 
+const NOM_LONG = "Alèses jetables de protection 60 × 90 cm, boîte de trente";
+
 let srv;
 test.beforeAll(async () => {
   const seed = jeuDeDonnees();
   // Les Aleses a -2 (livrees sur un rayon qui n'en avait plus) ; les gants a 0.
-  seed.stock.find(p => p.code === "ALE").quantite = -2;
+  // Un nom LONG : au bureau, le nom est coupe par une ellipse, et un badge
+  // pose a sa suite disparaissait avec lui.
+  const alese = seed.stock.find(p => p.code === "ALE");
+  alese.quantite = -2;
+  alese.nom = NOM_LONG;
   srv = await demarrer({ port: 3352, seed });
 });
 test.afterAll(async () => { if (srv) await srv.arreter(); });
@@ -70,7 +76,7 @@ for (const mode of ["light", "dark"]) {
       expect(ratio).toBeGreaterThanOrEqual(4.5);
       // Le champ du stock dit -2, et son nom accessible le dit negatif.
       await expect(ligneDe(page, "Alèses").locator("[data-stock-input]")).toHaveValue("-2");
-      await expect(page.getByLabel("Stock de Alèses, négatif, à recompter")).toHaveCount(1);
+      await expect(page.getByLabel(`Stock de ${NOM_LONG}, négatif, à recompter`)).toHaveCount(1);
       // Temoin : les gants, a zero, n'ont pas le badge.
       await expect(ligneDe(page, "Gants nitrile")).toHaveCount(1);
       await expect(ligneDe(page, "Gants nitrile").locator(".stk-negatif")).toHaveCount(0);
@@ -85,7 +91,7 @@ test("« À régler » : le stock négatif a sa ligne, et n'est pas compté deux
   const negatif = alertes.filter({ hasText: "en stock négatif" });
   await expect(negatif).toHaveCount(1);
   await expect(negatif.locator(".tb-anomalie-titre")).toHaveText("1 produit en stock négatif");
-  await expect(negatif.locator(".tb-anomalie-detail")).toHaveText("Livré sur stock insuffisant, à recompter : Alèses (-2)");
+  await expect(negatif.locator(".tb-anomalie-detail")).toHaveText(`Livré sur stock insuffisant, à recompter : ${NOM_LONG} (-2)`);
   await expect(negatif).toHaveAttribute("data-target-tab", "stock");
   // Temoin : la rupture ordinaire reste comptee, seule.
   const rupture = alertes.filter({ hasText: "en rupture" });
@@ -102,10 +108,12 @@ test("les boutons −/+ ne ramènent pas un stock négatif à zéro : ils disent
   const ecritures = [];
   page.on("request", r => { if (r.method() === "PATCH" && /\/api\/stock\//.test(r.url())) ecritures.push(r.url()); });
   await ligneDe(page, "Alèses").locator('[data-stock-delta="-1"]').click();
+  await page.waitForTimeout(500);
+  expect(ecritures, "« − » a ecrit le stock").toEqual([]);
   await expect(page.getByText("Stock négatif (-2) : recompte le rayon et saisis la quantité comptée.")).toBeVisible();
   await ligneDe(page, "Alèses").locator('[data-stock-delta="1"]').click();
   await page.waitForTimeout(500);
-  expect(ecritures, "un −/+ a ecrit le stock").toEqual([]);
+  expect(ecritures, "« + » a ecrit le stock").toEqual([]);
   const produit = (await (await page.request.get(`${srv.base}/api/stock`)).json()).find(p => p.code === "ALE");
   expect(produit.quantityAvailable).toBe(-2);
   // Temoin : sur un produit positif, « + » ecrit toujours.
