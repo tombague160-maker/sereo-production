@@ -117,6 +117,7 @@ export function initOperations(api) {
       document.querySelector(`[data-op="abo-filtre"][data-filtre="${aboFiltre}"]`)?.focus();
       return;
     }
+    if (action === "abo-vue") return ouvrirVueAbonnements(el.dataset.vue || "liste");
     if (action === "agenda-deplier") {
       agendaDeplie = !agendaDeplie;
       renderAgenda();
@@ -186,6 +187,10 @@ export function initOperations(api) {
       selectedMonth = event.target.value;
       renderDashboard();
     });
+  // Le bouton retour du telephone, depuis l'agenda : la liste.
+  window.addEventListener("popstate", () => {
+    if (vueAbonnements() === "agenda" && history.state?.aboVue !== "agenda") ouvrirVueAbonnements("liste", { depuisHistorique: true });
+  });
   document.getElementById("aboTri")?.addEventListener("change", (event) => {
     aboTri = event.target.value;
     renderSubscriptions();
@@ -488,15 +493,66 @@ const jourCourt = (value) => {
   const t = d.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short", ...(autre ? { year: "numeric" } : {}) });
   return t.charAt(0).toUpperCase() + t.slice(1);
 };
+// « Mercredi 23 septembre », ou « 12 septembre » sans le jour (planche 3a) ;
+// « 1er » pour le premier du mois, l'annee si ce n'est pas celle-ci.
+const dateLongue = (value, avecJour = true) => {
+  const d = new Date(`${value}T12:00:00`);
+  const mois = d.toLocaleDateString("fr-FR", { month: "long" });
+  const annee = d.getFullYear() !== new Date().getFullYear() ? ` ${d.getFullYear()}` : "";
+  const jour = d.toLocaleDateString("fr-FR", { weekday: "long" });
+  const t = `${avecJour ? jour + " " : ""}${d.getDate() === 1 ? "1er" : d.getDate()} ${mois}${annee}`;
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
+// « Mar » : le jour de la semaine d'une echeance de l'agenda (planche 3c).
+const jourSemaine = (value) => {
+  const t = new Date(`${value}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "short" }).replace(".", "");
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
+// Au telephone, la liste ou l'agenda (planches 3a / 3c). Au bureau, les deux
+// se voient cote a cote et la vue ne change rien (CSS).
+const vueAbonnements = () => document.getElementById("abonnements")?.dataset.vue || "liste";
+function ouvrirVueAbonnements(vue, { depuisHistorique = false } = {}) {
+  const ecran = document.getElementById("abonnements");
+  if (!ecran) return;
+  if (vue === "agenda" && ecran.dataset.vue !== "agenda") history.pushState({ aboVue: "agenda" }, "", location.hash || "#abonnements");
+  if (vue === "liste" && ecran.dataset.vue === "agenda" && !depuisHistorique && history.state?.aboVue === "agenda") {
+    // Le retour de la page et celui du telephone font la meme chose : un pas
+    // en arriere dans l'historique, que popstate ramene ici.
+    history.back();
+    return;
+  }
+  ecran.dataset.vue = vue;
+  majSousTitreAbonnements();
+  window.scrollTo(0, 0);
+  const cible = vue === "agenda" ? document.getElementById("aboAgendaRetour") : document.querySelector(".abo-agenda-ouvrir");
+  if (cible?.checkVisibility()) cible.focus();
+}
 // La prochaine echeance d'un abonnement ; en retard si elle n'a pas de
 // commande et que sa date est passee.
+// Une echeance PASSEE et deja commandee n'est plus « la prochaine » : la ligne
+// affichait sa date (passee, sans alerte) des qu'on commandait le plus ancien
+// de deux retards.
 const prochaineEcheance = (sub) =>
-  data.subscriptions.occurrences.find((o) => o.subscriptionId === sub.id) || null;
+  data.subscriptions.occurrences.find((o) => o.subscriptionId === sub.id
+    && (!o.orderId || o.date >= data.subscriptions.today)) || null;
 const enRetard = (o) => Boolean(o && o.overdue && !o.orderId);
+// Les livraisons que l'agenda compte : a venir, ou deja commandees.
+const aVenirAgenda = () =>
+  data.subscriptions.occurrences.filter((o) => o.date >= data.subscriptions.today || o.orderId);
 
 /** Le sous-titre de l'ecran : « 6 actifs · 1 en pause · 2 echeances en retard ». */
 export function majSousTitreAbonnements() {
   if (!data.subscriptions || !document.getElementById("abonnements")?.classList.contains("active")) return;
+  // L'agenda du telephone (planche 3c) : son titre et son compte dans l'en-tete.
+  const titre = document.getElementById("pageTitle");
+  if (vueAbonnements() === "agenda") {
+    const n = aVenirAgenda().length;
+    if (titre) titre.textContent = "Les 90 jours";
+    const sous = document.getElementById("pageSubtitle");
+    if (sous) sous.textContent = `${n} livraison${n > 1 ? "s" : ""} prévue${n > 1 ? "s" : ""}`;
+    return;
+  }
+  if (titre) titre.textContent = "Abonnements";
   const items = data.subscriptions.items;
   const actifs = items.filter((s) => s.status === "active").length;
   const pause = items.filter((s) => s.status === "paused").length;
@@ -546,7 +602,21 @@ function renderSubscriptions() {
           ? `<span class="pill abo-badge abo-badge--retard"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5"></circle><path d="M12 8v4m0 3.5v.5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg>En retard</span>`
           : `<span class="pill abo-badge abo-badge--${etat.cle} ${etat.pill}">${h(etat.mot)}</span>`;
         const nomClient = h(name(client || {}) || "Client introuvable");
-        return `<article class="commande-ligne abonnement-ligne abonnement-ligne--${etat.cle}"><button class="commande-ligne-main" type="button" data-op="open-sub-detail" data-id="${h(s.id)}" aria-label="Ouvrir ${nomClient}, ${h(retard ? "en retard" : etat.mot)}, ${h(frequency(s))}${s.status === "active" && next ? `, prochaine livraison ${h(jourCourt(next.date))}` : ""}"><span class="etat-commande etat-commande--${etat.cle}" aria-hidden="true"></span><span class="commande-ligne-corps"><strong>${nomClient}</strong><span class="abo-detail">${h(detail || "Adresse à compléter")}</span><span class="abo-panier">${h(panier(s.products) || "Panier vide")}</span></span><span class="abo-cellule abo-frequence">${h(frequency(s))}</span><span class="abo-cellule abo-prochaine${retard ? " abo-alerte" : ""}">${prochaine}</span>${badge}</button></article>`;
+        // Au telephone (planche 3a, ligne de 96 px decidee le 23/09) : trois
+        // rangees -- client et etat ; echeance et frequence ; panier et rappel.
+        // Une pause n'a ni echeance ni rappel : la frequence descend au panier.
+        // La forme courte de la planche (« tous les 15 j », « mensuel ») : la
+        // longue (« toutes les 2 semaines ») etait coupee derriere l'echeance.
+        const frequenceMin = s.frequency.unit === "months"
+          ? s.frequency.interval === 1 ? "mensuel" : `tous les ${s.frequency.interval} mois`
+          : `tous les ${s.frequency.interval} j`;
+        const rythme = s.status === "paused" ? "Livraisons suspendues"
+          : s.status !== "active" ? "Plus de livraison"
+            : !next ? "Aucune échéance prévue"
+              : retard ? `Échéance du ${dateLongue(next.date, false)}` : dateLongue(next.date);
+        const rangeeRythme = `<span class="abo-rythme"><span class="abo-rythme-date${retard ? " abo-alerte" : ""}">${h(rythme)}</span>${s.status === "active" ? ` <span class="abo-rythme-frequence">· ${h(frequenceMin)}</span>` : ""}</span>`;
+        const rangeePanier = `<span class="abo-panier-rappel">${h([panier(s.products) || "Panier vide", s.status === "active" ? `rappel ${s.reminderDays ?? 0} j` : frequenceMin].join(" · "))}</span>`;
+        return `<article class="commande-ligne abonnement-ligne abonnement-ligne--${etat.cle}"><button class="commande-ligne-main" type="button" data-op="open-sub-detail" data-id="${h(s.id)}" aria-label="Ouvrir ${nomClient}, ${h(retard ? "en retard" : etat.mot)}, ${h(frequency(s))}${s.status === "active" && next ? `, prochaine livraison ${h(jourCourt(next.date))}` : ""}"><span class="etat-commande etat-commande--${etat.cle}" aria-hidden="true"></span><span class="commande-ligne-corps"><strong>${nomClient}</strong><span class="abo-detail">${h(detail || "Adresse à compléter")}</span><span class="abo-panier">${h(panier(s.products) || "Panier vide")}</span>${rangeeRythme}${rangeePanier}</span><span class="abo-cellule abo-frequence">${h(frequency(s))}</span><span class="abo-cellule abo-prochaine${retard ? " abo-alerte" : ""}">${prochaine}</span>${badge}</button></article>`;
       })
       .join("") ||
     empty(
@@ -569,7 +639,7 @@ function renderAgenda() {
   const today = data.subscriptions.today;
   const occurrences = data.subscriptions.occurrences;
   const retards = occurrences.filter(enRetard);
-  const aVenir = occurrences.filter((o) => o.date >= today || o.orderId);
+  const aVenir = aVenirAgenda();
   const compte = document.getElementById("aboAgendaCompte");
   if (compte) compte.textContent = `${aVenir.length} livraison${aVenir.length > 1 ? "s" : ""}`;
   const lundiDe = (date) => {
@@ -602,16 +672,16 @@ function renderAgenda() {
     const rappel = !retard && o.due && !o.orderId;
     const geste = o.orderId
       ? `<button class="pill abo-badge abo-badge--commande" type="button" data-action="go-tab" data-target-tab="commandes-planifiees" aria-label="${h(status(o.orderStatus))} : voir dans Commandes">${h(status(o.orderStatus))}</button>`
-      : `<button class="abo-creer" type="button" data-op="generate-sub" data-id="${h(o.subscriptionId)}" data-date="${h(o.date)}" aria-label="Créer la commande du ${h(jourCourt(o.date))} pour ${h(o.clientName)}">Créer la commande</button>`;
-    return `<div class="abo-echeance subscription-card${retard ? " abo-echeance--retard" : ""}"><span class="abo-jour" title="${h(jourCourt(o.date))}">${numero(o.date)}</span><span class="abo-echeance-texte"><strong>${h(o.clientName)}</strong><span>${h(panier(o.products))}${retard ? ` · échue le ${h(jourCourt(o.date).replace(/^\S+ /, ""))}` : rappel ? " · rappel arrivé" : ""}</span></span>${geste}</div>`;
+      : `<button class="abo-creer" type="button" data-op="generate-sub" data-id="${h(o.subscriptionId)}" data-date="${h(o.date)}" aria-label="Créer la commande du ${h(jourCourt(o.date))} pour ${h(o.clientName)}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg><span class="abo-creer-mot">Créer la commande</span></button>`;
+    return `<div class="abo-echeance subscription-card${retard ? " abo-echeance--retard" : ""}"><span class="abo-jour" title="${h(jourCourt(o.date))}"><span class="abo-jour-semaine">${h(jourSemaine(o.date))}</span>${numero(o.date)}</span><span class="abo-echeance-texte"><strong>${h(o.clientName)}</strong><span>${h(panier(o.products))}${retard ? ` · échue le ${h(jourCourt(o.date).replace(/^\S+ /, ""))}` : rappel ? " · rappel arrivé" : ""}</span></span>${geste}</div>`;
   };
   const blocs = [];
   if (retards.length) {
-    blocs.push(`<section class="abo-semaine abo-semaine--retard" aria-label="En retard"><p class="abo-semaine-titre abo-alerte">En retard · ${retards.length}</p>${retards.map(ligne).join("")}</section>`);
+    blocs.push(`<section class="abo-semaine abo-semaine--retard" aria-label="En retard"><p class="abo-semaine-titre abo-alerte">En retard · ${retards.length}</p><div class="abo-semaine-lignes">${retards.map(ligne).join("")}</div></section>`);
   }
   for (const [lundi, liste] of visibles) {
     const titre = lundi === cetteSemaine ? "Cette semaine" : `Semaine du ${jourLong(lundi)}`;
-    blocs.push(`<section class="abo-semaine" aria-label="${h(titre)}"><p class="abo-semaine-titre">${h(titre)} · ${liste.length}</p>${liste.map(ligne).join("")}</section>`);
+    blocs.push(`<section class="abo-semaine" aria-label="${h(titre)}"><p class="abo-semaine-titre">${h(titre)} · ${liste.length}</p><div class="abo-semaine-lignes">${liste.map(ligne).join("")}</div></section>`);
   }
   corps.innerHTML = blocs.length
     ? blocs.join('<div class="abo-separateur" aria-hidden="true"></div>')

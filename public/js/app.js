@@ -770,6 +770,10 @@ function showTab(tabName, options = {}) {
   // Quitter Clients referme la fiche : y revenir montre la liste (planche 9a).
   const ecranClients = document.getElementById("crm");
   if (ecranClients && ecranClients.dataset.vue === "fiche" && tabName !== "crm") ecranClients.dataset.vue = "liste";
+  // De meme, l'agenda des abonnements (planche 3c) : tout changement d'ecran,
+  // y compris un toucher sur « Abonnements », ramene la liste.
+  const ecranAbonnements = document.getElementById("abonnements");
+  if (ecranAbonnements && ecranAbonnements.dataset.vue === "agenda") ecranAbonnements.dataset.vue = "liste";
   const { updateHash = true } = options;
   // Les quatre anciens ecrans-listes de commandes : ils ne sont plus des
   // ecrans, mais on les honore -- l'ecran unique s'ouvre sur LEUR filtre.

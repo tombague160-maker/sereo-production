@@ -356,6 +356,15 @@
               <svg class="icon button-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg>
               <span>Nouvel abonnement</span>
             </button>
+            <!-- Au telephone (planches 3a / 3c) : le calendrier ouvre « Les 90
+                 jours », la fleche revient a la liste. Au bureau, les deux se
+                 voient cote a cote : ces boutons n'y sont pas rendus (CSS). -->
+            <button class="abo-agenda-ouvrir" type="button" data-ecran="abonnements" data-op="abo-vue" data-vue="agenda" aria-label="Les 90 jours" hidden>
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="3" stroke="currentColor" stroke-width="2"></rect><path d="M8 3v4M16 3v4M3.5 10h17" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>
+            </button>
+            <button id="aboAgendaRetour" class="abo-agenda-retour" type="button" data-ecran="abonnements" data-op="abo-vue" data-vue="liste" aria-label="Retour aux abonnements" hidden>
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m14 6-6 6 6 6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            </button>
             <!-- Tournee (planche 13b) : « Nouvelle tournee » ouvre la planification
                  (l'action existe, repliee pendant la livraison) ; « Recalculer le
                  trace » remonte du panneau. -->
@@ -1019,7 +1028,7 @@
         </div>
       </section>
 
-      <section id="abonnements" class="page" role="tabpanel" aria-label="Abonnements">
+      <section id="abonnements" class="page" role="tabpanel" aria-label="Abonnements" data-vue="liste">
         <div class="abo-grille">
           <div class="abo-colonne">
             <div class="abo-filtres">
