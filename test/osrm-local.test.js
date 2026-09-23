@@ -56,7 +56,19 @@ function installation() {
 }
 
 /** Faux Geofabrik : extraits, sommes MD5 (fausses sur demande), reprise. */
-function fauxReseau(extraits, { md5Faux = [] } = {}) {
+// `lent` : le corps arrive en deux morceaux, 50 ms d'ecart (un vrai reseau).
+function corpsLent(contenu) {
+  let envoye = 0;
+  return new ReadableStream({
+    async pull(ctrl) {
+      if (envoye >= 2) return ctrl.close();
+      if (envoye++) await attendre(50);
+      const moitie = Math.ceil(contenu.length / 2);
+      ctrl.enqueue(new Uint8Array(envoye === 1 ? contenu.subarray(0, moitie) : contenu.subarray(moitie)));
+    },
+  });
+}
+function fauxReseau(extraits, { md5Faux = [], lent = false } = {}) {
   const appels = [];
   const fetch = async (url, init = {}) => {
     url = String(url);
@@ -80,7 +92,7 @@ function fauxReseau(extraits, { md5Faux = [] } = {}) {
         headers: { ...base, "content-length": String(contenu.length - debut) },
       });
     }
-    return new Response(contenu, { status: 200, headers: { ...base, "content-length": String(contenu.length) } });
+    return new Response(lent ? corpsLent(contenu) : contenu, { status: 200, headers: { ...base, "content-length": String(contenu.length) } });
   };
   return { fetch, appels };
 }
@@ -444,7 +456,9 @@ test("ecriture impossible pendant le telechargement : la preparation echoue, Ser
   const surChute = (e) => chutes.push(e?.code || e?.message);
   process.prependListener("uncaughtException", surChute);
   t.after(() => process.off("uncaughtException", surChute));
-  const reseau = fauxReseau({ "europe/a": "extrait A", "europe/b": "extrait B" });
+  // Reseau lent : l'erreur d'ecriture tombe PENDANT l'attente des donnees, le
+  // moment ou personne d'autre n'ecoute le flux (disque plein en cours de route).
+  const reseau = fauxReseau({ "europe/a": "extrait A", "europe/b": "extrait B" }, { lent: true });
   const processus = fauxProcessus();
   const g = gestionnaire(inst, { reseau, processus });
   g.demarrer();
