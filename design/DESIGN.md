@@ -2622,8 +2622,10 @@ de Thomas (« oui » : position « Me localiser » à ~100 m, purge à 12 mois).
   JSON d'une base neuve passe par le même).
 - **§4, tracés hors de la liste** — le tracé d'une tournée vit dans
   `traces_tournees`, hors du payload ; `readDb` ne le charge que pour les
-  tournées non terminées ; migration à l'ouverture (drapeau DANS la base : une
-  sauvegarde d'avant repasse par elle). `GET /api/routes` n'envoie plus le tracé
+  tournées non terminées ; migration à CHAQUE ouverture, sur les seuls payloads
+  qui portent encore un tracé (une sauvegarde d'avant, ou un retour à une version
+  d'avant puis une remontée : ce tracé-là est le plus récent, il remplace celui
+  de la table). `GET /api/routes` n'envoie plus le tracé
   des tournées terminées (`traceOmise: true`) ; `GET /api/routes/:id` le rend.
 - **§4, mise à jour ciblée** — la réponse d'un geste d'arrêt porte la tournée,
   l'arrêt, la commande et le client tels que les listes les rendent
@@ -2637,11 +2639,17 @@ de Thomas (« oui » : position « Me localiser » à ~100 m, purge à 12 mois).
 - **Décision 5, position** — « Me localiser » arrondit à 3 décimales sur le
   téléphone (la position exacte ne part plus, ni au serveur ni au calcul routier) ;
   `normalizeRoute` arrondit aussi à chaque écriture ce qui porte le libellé
-  « Ma position actuelle », y compris les tournées déjà enregistrées.
+  « Ma position actuelle », y compris les tournées déjà enregistrées. Leur
+  **tracé** aussi : les sommets à moins de 150 m de la position arrondie sont
+  remplacés par elle (`rognerTraceGps`, dans `normalizeRoute` ; au démarrage pour
+  les tournées terminées, dont `readDb` ne charge pas le tracé).
 - **Décision 5, purge** — chaque jour (une minute après le démarrage, puis toutes
   les 24 h), les tournées **terminées** depuis plus de 12 mois partent avec leurs
   arrêts et leur tracé. Avant : `writeBackupNowAsync("avant-purge")`, forcée ; si
-  elle échoue ou n'écrit rien, pas de purge. Les commandes restent (chiffre
+  elle échoue ou n'écrit rien, pas de purge. La sauvegarde se fait HORS du verrou
+  d'écriture (les « Livré » ne l'attendent pas) ; la base est relue sous le
+  verrou, et seule part une tournée que la sauvegarde contient sous sa forme
+  actuelle. Les commandes restent (chiffre
   d'affaires et statistiques se calculent sur elles : banc « statistiques
   identiques avant/après »). Journalisée (historique, type « Purge »).
   `SEREO_PURGE_TOURNEES_MOIS` (0 = coupée), documentée dans `.env.example`.
@@ -2679,8 +2687,8 @@ store seul, 290-470 ms → 150-210 ms.
 
 ### Bancs et preuves
 
-`test/lot5-rapidite.test.js` (12 cas) et `test/e2e/rapidite-tournee.spec.js`
-(5 cas, serveurs semés 3196 et 3197). Rouges sur le code d'avant, de la bonne cause :
+`test/lot5-rapidite.test.js` (16 cas depuis la revue) et
+`test/e2e/rapidite-tournee.spec.js` (6 cas, serveurs semés 3196 et 3197). Rouges sur le code d'avant, de la bonne cause :
 index des commandes (201 010 insertions) ; écriture ciblée (journal par
 déclencheurs SQLite : « les tournées terminées ont été réécrites ») ; migration
 (« le tracé d'une tournée terminée est encore relu ») ; liste (« la liste envoie le
@@ -2716,7 +2724,24 @@ purgée) ; relais pris par 2 sur 2 (sans limite, sans cache).
   l'écran ; `shouldPreserveClientAfterImport` s'en sert encore, dans le bon sens).
 - **Revenir à une version d'avant** : elle ne lit pas `traces_tournees`, les tracés
   des tournées en cours ne s'y affichent pas (recalculables) ; en remontant, les
-  tracés reviennent, et un tracé resté dans un payload est déplacé à l'écriture.
+  tracés reviennent, et un tracé écrit entre-temps dans un payload (recalculé, ou
+  effacé : `geometry: null`) gagne sur celui de la table, à l'ouverture.
+- **La copie « dernières données » après un geste** est recopiée par la page
+  (tournées, commandes, clients), pas relue au serveur : elle dit ce que l'écran
+  affiche. Son en-tête `Date` reste celui de la copie d'avant : l'étiquette
+  « Données de 08:00 » peut sous-estimer sa fraîcheur, jamais la surestimer. Les
+  autres données (tableau de bord, statistiques) y gardent leur retard.
+- **Un geste sur un arrêt déjà terminé** (« Absent » tapé sur un arrêt livré)
+  reste accepté par le serveur : c'est aussi le chemin d'une correction légitime
+  (« Livré » tapé par erreur). Pas de garde ajoutée ici (lot 1, gestes du livreur).
+- **Tracé rogné autour de « Me localiser »** : le tracé part d'un segment droit
+  depuis la position arrondie (au plus 150 m de route invisibles), aussi pour les
+  tournées calculées après le lot.
+- **Sauvegarde « avant-purge » hors verrou** : comme les sauvegardes automatiques
+  de `writeDb`, elle lit le fichier pendant que des écritures peuvent passer par le
+  WAL ; un checkpoint automatique (1 000 pages) pendant la compression la rendrait
+  incohérente — risque partagé avec toutes les sauvegardes existantes, non mesuré.
+  Une autre sauvegarde automatique ne court jamais en même temps (`pendingBackup`).
 - **`sort_order` de `lignes_commande` et `livraisons`** devient un rang global
   (c'était l'indice de ligne) ; aucune lecture ne s'en sert (grep).
 - Sous charge (autres agents sur le poste), trois rouges vus une fois et non
@@ -2724,6 +2749,28 @@ purgée) ; relais pris par 2 sur 2 (sans limite, sans cache).
   `tournee-mobile` « sous le pouce » (1 sur 3), `carte-et-lignes`
   `ERR_CONNECTION_REFUSED` sur 3141 (port fixe, partagé entre worktrees). Aucune
   cause affirmée.
+
+### Revue adverse (23/09)
+
+Quatre défauts relevés sur `73cc8de`, tous vérifiés vrais, tous corrigés :
+
+- **Important — la copie du service worker ne suivait plus les gestes.** Plus
+  aucune lecture après un geste : `/api/routes` et `/api/orders` restaient ceux
+  du matin dans le cache ; un écran rouvert avant le réseau montrait des arrêts
+  livrés « à livrer ». Correctif : `recopierApresGeste` (écritures en série).
+  Banc e2e : geste, réseau retenu, réouverture — « En livraison » au lieu de
+  « Livré » avant, « Livré » après.
+- **Mineur — le tracé d'avant le lot gardait la position exacte.** Correctif :
+  `rognerTraceGps` (idempotent : 20 000 cas au hasard, une deuxième passe ne
+  change rien). Banc : rouge « le tracé stocké d'une tournée terminée part encore
+  de la position exacte » ; chaque site d'appel pris par son mutant.
+- **Mineur — aller-retour de version.** Le drapeau de migration empêchait de
+  relire un tracé écrit entre-temps dans le payload. Banc : rouge « le tracé
+  d'avant le retour a écrasé celui recalculé » ; l'effacement pris par mutant.
+- **Mineur — la purge tenait le verrou pendant la sauvegarde.** Banc : une
+  sauvegarde retenue, un « Livré » pendant — rouge « le geste a attendu », puis
+  vert, et la purge n'efface pas le geste. Garde neuve (une tournée modifiée
+  pendant la sauvegarde attend le lendemain) prise par son mutant.
 
 ### Ce qui reste
 
