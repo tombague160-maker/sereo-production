@@ -3073,9 +3073,10 @@ c'est voulu (hors ligne), et le banc ne compte donc pas les relances, il compte 
 depuis le cache et commande livrée ailleurs, attribution absente) ;
 `test/e2e/carte-telephone.spec.js` (+3 cas « relecture », ports 3194 et 3195).*
 
-## Intégration des lots 3, 4 et 7 (branche integration/geo-vague1) — 23/09
+## Intégration des lots 1, 3, 4, 5 et 7 (branche integration/geo-vague1) — 23/09
 
-Ordre : lot 7 (meilleur trajet), lot 3 (adresses justes), puis lot 4 (carte au téléphone).
+Ordre : lot 7 (meilleur trajet), lot 3 (adresses justes), puis lot 4 (carte au téléphone) ;
+ensuite lot 1 (le livreur ne perd plus rien) et lot 5 (rapidité), en fin de section.
 
 **Un seul champ pour la précision d'un point : `geoPrecision`** (lot 3), avec son origine
 `geoSource`, portés par le client, la commande et l'arrêt. Le lot 4 avait inventé
@@ -3123,6 +3124,95 @@ même point retirée ; import qui perd la précision ; saisie manuelle dite `num
 
 *Non couvert par un banc : la commande de repli de `syncWorkflow` (héritage de
 `geoPrecision`).*
+
+### Lots 1 et 5, fusionnés ensuite (23/09)
+
+Ordre : lot 1 (`fix/livreur-ne-perd-rien`, fusion `1486edc`), puis lot 5
+(`perf/tournees-rapides`, fusion `c2dfa87`), puis la réconciliation (`19f399b`).
+
+**Conflits de texte.**
+- `DESIGN.md` : ajouts en fin des deux côtés, et pour le lot 1 une note au milieu
+  (§ file hors ligne, « la garde est tombée ») : `ajouts.py` refuse (code 2) ;
+  reconstruit depuis les trois versions — notre version, la note du lot 1, puis la
+  section de chaque lot (219 et 186 lignes, exactement leurs diffs).
+- `style.css` : ajouts en fin (`ajouts.py`).
+- `app.js` : la carte « À livrer en premier » (lot 7) et le statut affiché
+  « À reprogrammer » (lot 1), indépendants : les deux ; l'écoute des réponses
+  tardives (lot 1) et `recopierApresGeste` (lot 5) : les deux ; `refreshActiveRoute`
+  garde la garde `updatedAt` du lot 1 et `garderTrace`/`chargerTraceOmise` du lot 5.
+- `sqliteStore.js` : `gestes_recus` (lot 1) et `traces_tournees` (lot 5), les deux.
+- `server.js` : le plafond de 50 commandes posé deux fois (revue du lot 7, lot 5) : un
+  seul, sur `MAX_COMMANDES_PAR_TOURNEE` ; `arretVivant` (lot 4) et l'index `Map` des
+  commandes (lot 5) dans `normalizeRoute` ; `premiers` (lot 7) et la sélection exigée
+  (lot 5) dans `POST /api/routes`.
+- `operations-api.js` : `/api/geocode` garde le cache et la limite de débit du lot 5
+  devant le géocodeur du lot 3 (`geocodage.rechercher`, BAN). Conflit sémantique : le
+  banc du relais bouchonnait `data.geopf.fr` ; la recherche part désormais vers
+  `api-adresse.data.gouv.fr` et le banc échouait. Le bouchon prend les deux.
+
+**Le chemin des gestes d'arrêt : les deux garanties.** Le lot 1 tenait l'écran après
+un geste PAR le rechargement complet qui le suivait (`refreshActiveRoute` : jamais une
+tournée plus ancienne, gestes en file superposés ; `X-Sereo-Frais` ; copie du service
+worker rafraîchie par ce rechargement). Le lot 5 a remplacé ce rechargement par la mise
+à jour ciblée (`appliquerGesteArret`), qui ne passait par aucune de ces gardes. Sur la
+fusion brute, quatre trous, chacun corrigé :
+
+| Trou (fusion brute `c2dfa87`) | Correctif | Banc |
+|---|---|---|
+| la réponse d'un geste effaçait de l'écran un geste qui attend dans la file | `appliquerGesteArret` appelle `appliquerGestesEnFile` | e2e « un geste EN FILE reste à l'écran » |
+| deux réponses croisées : la plus ancienne ramenait l'arrêt suivant « Prêt » | garde `updatedAt` dans `appliquerGesteArret` ; une réponse tardive ne déplace plus l'écran si le livreur a choisi un autre arrêt | e2e « se CROISENT » |
+| un chargement parti avant un geste et fini après remettait les commandes d'avant, et plus rien ne les relisait | ce croisement (et lui seul) relance un chargement frais ; il n'efface plus le drapeau « écriture non relue » | e2e « chargement parti AVANT » |
+| le service worker rangeait, par-dessus la recopie de la page, la réponse d'une requête partie avant le geste | la page annonce chaque écriture (`sereo-ecriture`) ; le service worker ne range plus une réponse à une requête partie avant | `service-worker-api.test.js` + e2e « annonce chaque écriture » |
+
+Les bancs e2e : `test/e2e/integration-lots-1-5.spec.js` (port 3190, service worker
+bloqué sauf pour le dernier cas). Chacun rouge sur la fusion brute, lancé seul (le mode
+`serial` laisse les suivants « did not run » après un premier rouge), et sur chaque
+correctif retiré seul (mutation par copie, restauration vérifiée par empreinte) : 5
+mutants sur 5, chacun de sa cause.
+
+**Côté serveur, rien à corriger — prouvé.** L'écriture ciblée du lot 5 écrit ce que le
+lot 1 ajoute : `test/integration-lots-1-5.test.js` relit le FICHIER par une seconde
+connexion (ni cache du store, ni `readDb`) après « Absent » (`a_reprogrammer` en colonne
+et en payload, la cause, `updatedAt` de la tournée), après « Livré » avec `faitLe`
+(`deliveredAt` de la commande et de l'arrêt), et après d'autres écritures ciblées puis
+une réécriture complète (`gestes_recus` intact, le renvoi n'applique rien). Pris par 4
+mutants sur 4 : mise à jour sautée (seules les insertions), empreinte aveugle au
+payload, écriture qui vide `gestes_recus`, `faitLe` non transmis par la route.
+
+**`meilleur-trajet.spec.js:45` — cause trouvée, au banc.** « Impossible de calculer le
+trajet routier. » (400), en suite complète seulement. Rejoué 25 fois sous la charge de la
+suite : vert. Journal du serveur semé et de `lib/routing.js` pendant un rouge : la table
+du routage simulé faisait **8 × 8** pour une tournée de 6 points. `jeuDeDonnees()` rendait
+le tableau `CLIENTS` du module comme `clients` du semé ; `adresses-a-verifier.spec.js` et
+`clients.spec.js` y ajoutent deux clients chacun : les bancs lancés ensuite dans le même
+ouvrier héritaient d'un `CLIENTS` allongé, et `demarrerRoutage()` dimensionne sa table
+dessus. Reproduit 3/3 (`adresses-a-verifier.spec.js meilleur-trajet.spec.js
+--workers=1`) ; corrigé (clients gelés, chaque semé reçoit sa copie) : 3/3 vert ; banc
+`test/serveur-seme.test.js`. Vu en chemin, défaut distinct et corrigé aussi : un port déjà
+pris faisait parler `demarrer()` au serveur d'un autre (le 200 de `/healthz` d'autrui) —
+reproduit en occupant 3198, il refuse désormais de démarrer. Ce n'était pas la cause de
+ce rouge : le commit `f1fd819` le présente comme mécanisme possible, la cause est dans
+`18f299c`.
+
+**Vérifié** sur `18f299c` : `npm run check` ; `npm test` 538/538 ; e2e des bancs des lots
+1, 3, 4, 5, 7 et de l'intégration + tournee, tournee-mobile, ecran-livreur, hors-ligne,
+operations, livraison-chargement, chargement-instantane : 97/97 (sur `19f399b`) ; suite
+e2e complète deux fois : 401/401 et 401/401.
+
+**Écarts nommés.**
+- La recopie du lot 5 écrit dans le cache ce que l'écran montre, gestes en file
+  superposés compris (avec « En attente d'envoi ») : rouverte, la copie les montre faits.
+  La file les superpose de toute façon et retire la mention s'ils sont partis ; un geste
+  refusé au renvoi reste montré fait jusqu'au prochain chargement — comme l'écran.
+- La barrière du service worker est en mémoire : un service worker redémarré entre le
+  geste et l'arrivée d'une réponse d'avant ne la connaît plus (même limite que la garde
+  du lot 1, dite dans sa section).
+- `demarrer()` : un port pris dans les millisecondes entre son contrôle et le lancement
+  n'est pas vu (`/healthz` ne dit pas qui répond). Les ports sont uniques dans ce dépôt,
+  pas entre les worktrees qui lancent les mêmes bancs en même temps.
+- `service-worker.js` : `CACHE_NAME` n'a pas été changé (lots 1, 3, 5) ; le nom servi
+  suit l'empreinte du contenu de `public/` (`lib/empreinte-shell.js`), le changement est
+  donc pris sans lui.
 
 ## Lot 1 de l'audit géo — « le livreur ne perd plus rien », posé le 23/09
 
