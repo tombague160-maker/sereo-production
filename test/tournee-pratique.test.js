@@ -214,3 +214,32 @@ test("inserer : la place qui allonge le moins le trajet, egale a la force brute"
     assert.ok(Math.abs(obtenu - meilleur) < 1e-9, `essai ${essai} : place ${k}, ${obtenu} au lieu de ${meilleur}`);
   }
 });
+
+// --- Relecture adverse du lot 6 ------------------------------------------------------
+
+test("Y aller : une position APPROXIMATIVE (rue, lieu-dit, commune) laisse la main a l'adresse complete", async () => {
+  const { lienNavigation } = await charger();
+  const adresse = { address: "48 route de Lons", postalCode: "39300", city: "Champagnole", lat: 46.75, lng: 5.91 };
+  const texte = "48%20route%20de%20Lons%2039300%20Champagnole";
+  // « au milieu de la rue », « au centre du lieu-dit / de la commune » : le
+  // texte (numero compris) mene a la porte, le point non.
+  for (const geoPrecision of ["rue", "lieu-dit", "commune"]) {
+    assert.equal(lienNavigation({ ...adresse, geoPrecision }, "google"), `https://www.google.com/maps/dir/?api=1&destination=${texte}`, geoPrecision);
+    assert.equal(lienNavigation({ ...adresse, geoPrecision }, "waze"), `https://waze.com/ul?q=${texte}&navigate=yes`, geoPrecision);
+    assert.equal(lienNavigation({ ...adresse, geoPrecision }, "apple", { apple: true }), `https://maps.apple.com/?daddr=${texte}&dirflg=d`, geoPrecision);
+  }
+  // Temoins : au numero, placee a la main, ou d'origine inconnue, le point reste.
+  for (const geoPrecision of ["numero", "manuel", ""]) {
+    assert.equal(lienNavigation({ ...adresse, geoPrecision }, "google"), "https://www.google.com/maps/dir/?api=1&destination=46.75,5.91", geoPrecision || "(vide)");
+  }
+  // Approximative SANS rue : le texte ne ferait pas mieux, le point reste.
+  assert.equal(lienNavigation({ address: "", city: "Foncine-le-Haut", lat: 46.6581, lng: 6.0712, geoPrecision: "lieu-dit" }, "google"),
+    "https://www.google.com/maps/dir/?api=1&destination=46.6581,6.0712");
+});
+
+test("heures : une tournee SANS arrivee (chemin ouvert) finit, elle ne « revient » pas", async () => {
+  const { horairesDeTournee } = await charger();
+  const base = { status: "prete", stops: [arret("a"), arret("b")], troncons: [troncon(10, 8), troncon(15, 12), troncon(0, 0)] };
+  assert.equal(horairesDeTournee({ ...base, arrival: null }, { maintenant: T0 }).avecRetour, false);
+  assert.equal(horairesDeTournee({ ...base, arrival: { lat: 47.2, lng: 6 } }, { maintenant: T0 }).avecRetour, true);
+});

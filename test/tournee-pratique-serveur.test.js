@@ -32,9 +32,17 @@ const routing = require("../lib/routing");
 let server, base, osrm;
 const panne = { route: false, table: false };
 const appels = [];
+// Un geste fait AILLEURS pendant le calcul (hors verrou) : joue une fois, a la
+// premiere requete OSRM, avant la reponse.
+let pendantLeCalcul = null;
 before(async () => {
-  osrm = http.createServer((req, res) => {
+  osrm = http.createServer(async (req, res) => {
     appels.push(req.url);
+    if (pendantLeCalcul) {
+      const geste = pendantLeCalcul;
+      pendantLeCalcul = null;
+      await geste(req.url);
+    }
     const pts = req.url.split("/driving/")[1].split("?")[0].split(";");
     const xy = pts.map((p) => p.split(",").map(Number));
     // Une duree (s) proportionnelle a la distance ; 1 degre ~ 100 km.
@@ -77,6 +85,7 @@ beforeEach(() => {
   panne.route = false;
   panne.table = false;
   appels.length = 0;
+  pendantLeCalcul = null;
   routing._reinitialiserRepli();
   writeDb({
     ...defaultDb(),
@@ -346,4 +355,134 @@ test("ajouter : refuse une commande qui n'est pas prete, et une tournee terminee
   const fini = await request(`/api/routes/${route.id}/ajouter`, { orderId: "b" });
   assert.equal(fini.status, 400);
   assert.match(fini.body.error, /terminée/);
+});
+
+// --- Relecture adverse du lot 6 ----------------------------------------------------------
+
+const ajouterU = (lng) => {
+  const db = readDb();
+  db.commandes.push(commande("u", lng, { clientId: "c-u", clientName: "Client u" }));
+  writeDb(db, { backup: false });
+};
+const toutRemettre = () => writeDb({ ...readDb(), routes: [], commandes: readDb().commandes.filter((o) => o.id !== "u").map((o) => ({ ...o, routeId: "", status: "pret_livraison" })) }, { backup: false });
+
+test("ajouter en route : jamais devant un arret « a livrer en premier »", async () => {
+  // Temoin : sans epingle, u (tout pres du depot) passe en tete des restants.
+  const libre = await tourneeEnRoute();
+  ajouterU(6.005);
+  const r0 = await request(`/api/routes/${libre.id}/ajouter`, { orderId: "u" });
+  assert.equal(r0.status, 201, JSON.stringify(r0.body));
+  assert.equal(ordre(r0.body.route)[0], "u");
+  toutRemettre();
+  // d est « a livrer en premier » : la tournee part par d (a l'est) et revient.
+  const route = await tourneeEnRoute(["a", "b", "c", "d"], { premiers: ["d"] });
+  assert.deepEqual(ordre(route), ["d", "c", "b", "a"]);
+  ajouterU(6.005);
+  const r = await request(`/api/routes/${route.id}/ajouter`, { orderId: "u" });
+  assert.equal(r.status, 201, JSON.stringify(r.body));
+  assert.equal(ordre(r.body.route)[0], "d");
+  assert.equal(r.body.route.stops[0].livrerEnPremier, true);
+  // A cout egal (au retour, pres du depot), u finit la tournee.
+  assert.deepEqual(ordre(r.body.route), ["d", "c", "b", "a", "u"]);
+  assert.equal(r.body.rang, 5);
+});
+
+test("reoptimiser les restants : tournee creee SANS depart -- chemin ouvert, pas de retour fictif", async () => {
+  const cree = await request("/api/routes", { orderIds: ["a", "b", "c", "d"] });
+  assert.equal(cree.status, 201, JSON.stringify(cree.body));
+  assert.equal(cree.body.arrival, null);
+  assert.equal((await request(`/api/routes/${cree.body.id}/start`, {})).status, 200);
+  // Depuis 6.035 : d (500 m) puis c, b, a (3 km) = 3,5 km. La boucle qui
+  // revenait a la position comptait 6 km.
+  const r = await request(`/api/routes/${cree.body.id}/reoptimiser`, { position: { lat: 47.2, lng: 6.035 } });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.route.totalDistance, 3.5);
+  assert.deepEqual(ordre(r.body.route), ["d", "c", "b", "a"]);
+  // Un troncon par arret, et le dernier (vers une arrivee qui n'existe pas) est nul.
+  assert.equal(r.body.route.troncons.length, 5);
+  assert.deepEqual(r.body.route.troncons[4], { duree: 0, distance: 0 });
+  assert.equal(r.body.route.arrival, null);
+  // Le trace s'arrete au dernier arret : il ne revient pas a la position.
+  assert.match(appels.filter((u) => u.includes("/route/")).at(-1), /driving\/6\.035,47\.2;6\.04,47\.2;6\.03,47\.2;6\.02,47\.2;6\.01,47\.2\?/);
+});
+
+test("reoptimiser (prete) : tournee sans arrivee, nouveau depart SANS arrivee -- chemin ouvert", async () => {
+  const cree = await request("/api/routes", { orderIds: ["a", "b", "c", "d"] });
+  assert.equal(cree.status, 201);
+  const r = await request(`/api/routes/${cree.body.id}/reoptimiser`, { departure: EST });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.deepEqual(ordre(r.body.route), ["d", "c", "b", "a"]);
+  assert.equal(r.body.route.departure.label, "Domicile");
+  assert.equal(r.body.route.arrival, null);
+  assert.equal(r.body.route.totalDistance, 4);
+  assert.deepEqual(r.body.route.troncons[4], { duree: 0, distance: 0 });
+  // Temoin : avec une arrivee demandee, la boucle revient.
+  const boucle = await request(`/api/routes/${cree.body.id}/reoptimiser`, { departure: EST, arrival: EST });
+  assert.equal(boucle.status, 200, JSON.stringify(boucle.body));
+  assert.equal(boucle.body.route.arrival.label, "Domicile");
+  assert.equal(boucle.body.route.totalDistance, 8);
+});
+
+test("reoptimiser les restants : une position corrigee PENDANT le calcul n'est pas ecrasee", async () => {
+  const route = await tourneeEnRoute();
+  pendantLeCalcul = () => {
+    const db = readDb();
+    const b = db.commandes.find((o) => o.id === "b");
+    Object.assign(b, { lat: 47.21, lng: 6.022, geoSource: "manuel", geoPrecision: "manuel" });
+    writeDb(db, { backup: false });
+  };
+  const r = await request(`/api/routes/${route.id}/reoptimiser`, { position: { lat: 47.2, lng: 6.05 } });
+  const b = readDb().commandes.find((o) => o.id === "b");
+  assert.deepEqual([b.lat, b.lng, b.geoSource], [47.21, 6.022, "manuel"]);
+  assert.equal(r.status, 400, JSON.stringify(r.body).slice(0, 200));
+  assert.match(r.body.error, /position a été corrigée pendant le calcul/);
+});
+
+test("ajouter : une position corrigee PENDANT le calcul n'est pas ecrasee", async () => {
+  const route = await tourneeEnRoute(["a", "b"]);
+  ajouterU(6.015);
+  pendantLeCalcul = () => {
+    const db = readDb();
+    Object.assign(db.commandes.find((o) => o.id === "u"), { lat: 47.21, lng: 6.016, geoSource: "manuel", geoPrecision: "manuel" });
+    writeDb(db, { backup: false });
+  };
+  const r = await request(`/api/routes/${route.id}/ajouter`, { orderId: "u" });
+  const u = readDb().commandes.find((o) => o.id === "u");
+  assert.deepEqual([u.lat, u.lng, u.geoSource], [47.21, 6.016, "manuel"]);
+  assert.equal(r.status, 400, JSON.stringify(r.body).slice(0, 200));
+  assert.match(r.body.error, /position a été corrigée pendant le calcul/);
+});
+
+test("ajouter : une tournee creee PENDANT le calcul avec la meme commande -- refuse sous le verrou", async () => {
+  const route = await tourneeEnRoute(["a", "b"]);
+  ajouterU(6.015);
+  let autre = null;
+  pendantLeCalcul = async () => { autre = await request("/api/routes", { orderIds: ["u"] }); };
+  const r = await request(`/api/routes/${route.id}/ajouter`, { orderId: "u" });
+  assert.equal(autre?.status, 201, "la tournee concurrente a bien ete creee");
+  assert.equal(r.status, 400, JSON.stringify(r.body).slice(0, 200));
+  assert.match(r.body.error, /déjà à une tournée active/);
+  const tournees = readDb().routes.filter((x) => ["prete", "en_livraison"].includes(x.status) && x.stops.some((s) => s.orderId === "u"));
+  assert.deepEqual(tournees.map((x) => x.id), [autre.body.id]);
+});
+
+test("report : une commande absente puis rajoutee a la MEME tournee -- le report retire l'arret ACTIF", async () => {
+  const J = "2030-01-15";
+  writeDb({ ...readDb(), commandes: readDb().commandes.map((o) => ({ ...o, deliveryDate: J })) }, { backup: false });
+  const route = await tourneeEnRoute(["a", "b"], { deliveryDate: J });
+  const sa = route.stops.find((s) => s.orderId === "a");
+  assert.equal((await request(`/api/routes/${route.id}/stops/${sa.id}`, { status: "absent" }, "PATCH")).status, 200);
+  assert.equal(readDb().commandes.find((o) => o.id === "a").status, "a_reprogrammer");
+  // Le livreur repasse plus tard : la commande revient dans SA tournee.
+  const ajout = await request(`/api/routes/${route.id}/ajouter`, { orderId: "a" });
+  assert.equal(ajout.status, 201, JSON.stringify(ajout.body).slice(0, 200));
+  assert.deepEqual(ajout.body.route.stops.filter((s) => s.orderId === "a").map((s) => s.status), ["absent", "en_livraison"]);
+  // Puis le client demande demain : l'arret ACTIF sort, l'absent reste (historique).
+  const report = await request("/api/orders/a", { deliveryDate: "2030-01-16" }, "PATCH");
+  assert.equal(report.status, 200, JSON.stringify(report.body).slice(0, 200));
+  const apres = readDb().routes.find((x) => x.id === route.id);
+  assert.deepEqual(apres.stops.filter((s) => s.orderId === "a").map((s) => s.status), ["absent"]);
+  const a = readDb().commandes.find((o) => o.id === "a");
+  assert.equal(a.status, "pret_livraison");
+  assert.ok(!a.routeId);
 });
