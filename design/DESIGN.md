@@ -4546,5 +4546,5 @@ Ce qui reste après la relecture :
 - `corrigerArret` refuse toujours « Livré » sur une commande dont le stock a été libéré
   (choix du lot) ; le geste en retard, lui, reprend le stock. Aligner les deux est une
   décision.
-- Un « Livré » en retard refusé faute de stock n'a pas d'autre chemin que de corriger le
-  stock puis la commande depuis l'écran Commandes.
+- Un « Livré » en retard refusé faute de stock n'a aujourd'hui aucun chemin pour être
+  enregistré (`corrigerArret` le refuse aussi) : la commande reste à reprogrammer. À décider.
