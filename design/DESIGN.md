@@ -1785,11 +1785,21 @@ plat (10a) : posés le 23/09, voir « Commandes + Stock mobile + squelettes » e
   renseigner » (une quantité inconnue appelle aussi un geste), puis le reste, chaque
   groupe par quantité croissante. Le sous-titre dit « sans catégorie » au lieu de
   « 1 catégorie ».
+- **L'ordre à plat est figé tant qu'on reste sur l'écran** (relecture du 23/09). Chaque
+  − / + et chaque seuil rechargent la liste ; retriée sur la quantité du moment, la ligne
+  touchée changeait de place sous le doigt, et le tap suivant, au même endroit, ajustait
+  **un autre produit** (Gants à 2, Désinfectant à 7 : au 6ᵉ « + », le doigt tombait sur
+  Désinfectant). L'ordre se refait en **rouvrant l'écran** ou quand un produit inconnu
+  arrive (un import). Prix nommé : un produit réassorti reste en tête jusque-là.
+- La carte dit **ce qui se voit** : « Aucun produit de ce fichier n'a de catégorie ». Le
+  premier jet affirmait « le fichier n'a pas de colonne « Catégorie » », or l'import lit
+  une colonne absente et une colonne vide de la même façon ; il disait « ajoutez » à qui
+  l'avait déjà. Elle dit maintenant « Remplissez la colonne… (ajoutez-la si elle manque) ».
 - Deux catégories ou plus : les tuiles, et au téléphone leur **titre** « Catégories » et
   leur compte (planche 8b).
 - **Décision** : la carte « à plat » s'applique aussi au bureau. Le cas est une propriété
   des données, pas de l'écran ; et une tuile unique était aussi vide de sens à 1440 px.
-- **Décision** : vouvoiement dans la carte (« Ajoutez la colonne… »), comme la carte de
+- **Décision** : vouvoiement dans la carte (« Remplissez la colonne… »), comme la carte de
   premier lancement ; la planche tutoie.
 - **Omis faute de données** : « Commander » (aucune route ne commande à un fournisseur,
   déjà nommé au 23/09) ; « trouvées dans le dernier import » (rien ne rattache une
@@ -1820,10 +1830,21 @@ plat (10a) : posés le 23/09, voir « Commandes + Stock mobile + squelettes » e
   la hauteur de la ligne réelle — 56 / 72 px pour une commande, 56 / 141 px pour un
   produit, 60 / 72 px pour un client, au bureau / au téléphone. La liste des Commandes,
   vide pendant le chargement, a maintenant les siennes.
+- **Entre 821 et 1280 px**, Commandes et Stock sont des **cartes à trois rangs** : la ligne
+  grise y mesure **95 px** (commande, de 821 à 1280 px) et **129 px** (produit, de 921 à
+  1280 px). Le premier jet gardait 56 px et la liste sautait de ~170 à ~290 px ; son banc
+  ne mesurait qu'à 1440 et 390 px, il ne pouvait pas le voir (relecture du 23/09).
+- **Un libellé n'est pas un chiffre** : « Commandes livrées » est vidé pendant le
+  chargement comme les chiffres (le rendu y écrit « 12 commandes livrées »). Si
+  `/api/operations` échoue, le libellé revient ; les chiffres, eux, disent « — ». Le premier
+  jet montrait « — » au-dessus de « — ».
 - Banc : les chiffres et ce qui les suit bougent de **0 px** à l'arrivée des données, à
-  1440 et à 390 px (tolérance 2 px) ; une ligne grise mesure la ligne réelle à 2 px près.
+  1440 et à 390 px (tolérance 2 px) ; une ligne grise mesure la ligne réelle à 2 px près, à
+  1440, 1280, 1024, 880 et 390 px.
 - **Non fait, nommé** : le **nombre** de lignes grises reste une estimation (on ne le sait
   qu'avec les données) — ce qui est **sous** une liste peut encore bouger. La colonne
   droite du tableau de bord change de carte à l'arrivée des données (« À livrer » laisse
   la place à la tournée du jour) : un changement de contenu, pas un squelette. Le compte
-  « Cette semaine » affiche encore « 0 » pendant le chargement.
+  « Cette semaine » affiche encore « 0 » pendant le chargement. Au téléphone, les toasts
+  « Stock mis à jour » s'empilent depuis le bas et peuvent couvrir un bouton − / + après
+  cinq ou six ajustements rapides (constat du banc, antérieur à ce lot, non traité).
