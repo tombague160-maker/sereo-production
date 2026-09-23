@@ -1311,6 +1311,31 @@ test("la page annonce le shell du service worker (X-Sereo-Shell)", async () => {
   assert.equal(css.headers.get("x-sereo-shell"), null);
 });
 
+test("le nom du shell porte l'empreinte des fichiers statiques (livraison sans bump)", async () => {
+  // Le defaut vise : une livraison modifie app.js, style.css, index.html sans
+  // bumper CACHE_NAME. Si le nom du shell ne dependait que de CACHE_NAME, le
+  // service worker en place ne verrait rien et servirait l'ancien app.js a la
+  // nouvelle page. Le nom annonce doit donc etre CACHE_NAME du fichier SUIVI de
+  // l'empreinte du contenu -- et le service worker servi doit porter ce meme nom.
+  const { empreinteDesSources } = require("../lib/empreinte-shell");
+  const racine = path.join(__dirname, "..");
+  const surDisque = fs.readFileSync(path.join(racine, "public", "service-worker.js"), "utf8")
+    .match(/const CACHE_NAME = "([^"]+)"/)[1];
+  const empreinte = empreinteDesSources([
+    { nom: "public", racine: path.join(racine, "public") },
+    { nom: "leaflet", racine: path.join(racine, "node_modules", "leaflet", "dist") }
+  ]);
+  const attendu = `${surDisque}-${empreinte}`;
+  const page = await fetch(`${baseUrl}/`);
+  assert.equal(page.headers.get("x-sereo-shell"), attendu, "le nom annonce ne suit pas le contenu");
+  const sw = await fetch(`${baseUrl}/service-worker.js`);
+  assert.equal(sw.status, 200);
+  assert.match(sw.headers.get("content-type") || "", /javascript/);
+  const servi = (await sw.text()).match(/const CACHE_NAME = "([^"]+)"/);
+  assert.ok(servi, "CACHE_NAME introuvable dans le service worker servi");
+  assert.equal(servi[1], attendu, "le service worker servi ne porte pas le nom annonce");
+});
+
 test("stock import deduplicates rows with same code (keeps first occurrence)", async () => {
   seedDb(defaultDb());
 

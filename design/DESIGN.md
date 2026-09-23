@@ -1772,11 +1772,14 @@ synchro (`#syncStatus`).
   jamais « À jour ». Avant ce lot, le repli sur le cache était annoncé « À jour ».
 - **Polices préchargées** : `<link rel="preload">` des quatre graisses `poppins-{400,500,600,700}-latin.woff2`,
   les seules que le tableau de bord charge à 1440 et 390 px (mesuré ; aucune `latin-ext`).
-- **La nouvelle version arrive** : le serveur lit `CACHE_NAME` dans `service-worker.js` au
-  démarrage et l'annonce dans l'en-tête `X-Sereo-Shell` de la page. Un service worker plus
-  vieux que la page sert CE chargement par le réseau (l'ancienne stratégie) et demande sa
-  mise à jour : une page neuve ne tourne jamais sur un vieux script. Sans bump, la
-  revalidation remplace le fichier et le chargement suivant le montre : rien n'est figé.
+- **La nouvelle version arrive** : au démarrage, le serveur calcule le nom du shell =
+  `CACHE_NAME` de `service-worker.js` **suivi de l'empreinte du contenu** de `public/` et de
+  Leaflet (`lib/empreinte-shell.js`, SHA-256 tronqué à 12). Il l'annonce dans l'en-tête
+  `X-Sereo-Shell` de la page et sert `service-worker.js` avec ce nom à la place de
+  `CACHE_NAME`. Un octet change dans `public/` : le nom change, le navigateur installe un
+  nouveau service worker, et l'ancien, plus vieux que la page, sert CE chargement par le
+  réseau (l'ancienne stratégie). Aucun bump à la main n'est requis (voir « Relecture
+  adverse » plus bas).
 - **Fin de session** : `POST /logout` vide le cache de données (dans le service worker, quelle
   que soit la page qui déconnecte) ; un 401 le vide aussi avant de renvoyer vers `/login`.
 
@@ -1803,12 +1806,13 @@ synchro (`#syncStatus`).
 
 ### Écarts nommés
 
-- Sans bump de `CACHE_NAME`, un fichier modifié est servi une fois dans son ancienne version
-  (le temps de la revalidation). La règle de bump, en tête de `service-worker.js`, est
-  réécrite en conséquence.
 - `X-Sereo-Shell` repose sur une mémoire du service worker : si le navigateur l'arrête entre
   la page et ses scripts (rare, quelques secondes), ce chargement-là retombe sur le cache
-  d'abord — le cas « sans bump », jamais pire.
+  d'abord, donc sur l'ancienne version une fois ; le chargement suivant a la nouvelle.
+- L'empreinte est calculée **au démarrage** : un fichier de `public/` modifié à chaud, sans
+  redémarrer le serveur, n'est pas vu (en production, chaque livraison redémarre le
+  conteneur). Toute livraison qui touche `public/` réinstalle le shell complet chez chaque
+  utilisateur (≈ 1 Mo, polices comprises), ce que faisait déjà un bump.
 - Aucune déconnexion n'existe dans l'interface aujourd'hui (seulement la route `POST /logout`) ;
   le vidage est posé dans le service worker pour qu'il vaille pour tout futur bouton.
 
@@ -1838,5 +1842,27 @@ font trois vagues, et le chiffre attend la plus lente.
 qui sait retenir, retarder ou réécrire les réponses) : chiffres affichés avant le réseau
 sous « Mise à jour… » · repli sur le cache jamais « À jour » · statique servi quand le réseau
 se tait · nouveau shell dès le premier chargement · revalidation au chargement suivant ·
-déconnexion et 401 vident le cache · polices préchargées = polices du premier rendu.
-`test/api.test.js` : la page annonce `X-Sereo-Shell` = `CACHE_NAME`, et seulement la page.
+déconnexion et 401 vident le cache · polices préchargées = polices du premier rendu (mesurées
+sur la même page **sans** ses préchargements).
+`test/api.test.js` : la page annonce `X-Sereo-Shell` = le `CACHE_NAME` du service worker servi,
+et seulement la page ; ce nom = `CACHE_NAME` du fichier + empreinte du contenu.
+`test/empreinte-shell.test.js` : un octet modifié, un fichier ajouté ou renommé changent
+l'empreinte ; un dossier absent ne fait pas échouer le démarrage.
+
+### Relecture adverse, 23/09
+
+1. **Livraison sans bump de `CACHE_NAME` — vrai, corrigé.** Le nom du shell ne changeait
+   qu'à la main ; or 8 des 15 derniers commits de `main` touchant `public/js` ne touchent pas
+   `service-worker.js` (ex. 19fa441 : nouvel export `GROUPES_NAV` importé par `app.js`, sans
+   bump). Au premier chargement après une telle livraison, la page neuve (réseau) tournait sur
+   l'`app.js` et le `style.css` de l'ancien cache. Décision : le nom est désormais dérivé du
+   contenu par le serveur (voir « La nouvelle version arrive »), plutôt qu'un garde de CI qui
+   exigerait le bump : un garde se contourne ou s'oublie, une empreinte ne demande aucun geste.
+   L'ancienne phrase « une page neuve ne tourne jamais sur un vieux script » est vraie
+   désormais, à l'exception nommée plus haut (service worker arrêté entre la page et ses
+   fichiers).
+2. **Banc des polices, moitié « et seulement elles » — vrai, corrigé.** Une police préchargée
+   est toujours téléchargée, donc toujours dans les ressources mesurées : l'inclusion était
+   vraie par construction. Le banc mesure maintenant les polices utilisées sur la même page
+   dont les `<link rel="preload" as="font">` sont retirés (route Playwright), et exige
+   l'égalité des deux ensembles.

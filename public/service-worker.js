@@ -1,17 +1,19 @@
-// IMPORTANT : bumper CACHE_NAME a chaque modification d'un fichier d'APP_SHELL.
-//
-// Ce qui se passe, depuis le lot « chargement instantane » du 23/09 : les
-// ressources statiques sont servies DEPUIS LE CACHE D'ABORD, puis revalidees en
-// arriere-plan (stale-while-revalidate). Le bump n'est donc plus un luxe :
-//  - AVEC bump, le serveur annonce le nouveau nom dans l'en-tete X-Sereo-Shell
-//    de la page (server.js le lit dans CE fichier au demarrage). Le service
-//    worker en place voit que la page est plus recente que lui et sert CE
-//    chargement-la par le reseau : une page neuve ne tourne jamais sur un vieux
-//    script. Le nouveau service worker s'installe et remplace l'ancien cache.
-//  - SANS bump, un utilisateur recoit l'ancienne copie UNE fois (pendant que la
-//    revalidation la remplace), et la nouvelle au chargement suivant. Rien ne
-//    reste fige pour toujours, mais une page neuve et un vieux script peuvent
-//    se croiser une fois : d'ou la regle.
+// CACHE_NAME n'est plus a bumper a la main (lot « chargement instantane »,
+// 23/09). Les ressources statiques sont servies DEPUIS LE CACHE D'ABORD, puis
+// revalidees en arriere-plan (stale-while-revalidate). Pour qu'une page neuve
+// ne tourne jamais sur un vieux script, le nom du shell doit changer a chaque
+// livraison qui touche un fichier statique. Il change seul :
+//  - server.js NE SERT PAS ce fichier tel quel : il y remplace CACHE_NAME par
+//    CACHE_NAME suivi de l'empreinte du contenu de public/ et de Leaflet
+//    (lib/empreinte-shell.js), et annonce ce meme nom dans l'en-tete
+//    X-Sereo-Shell de la page.
+//  - Un octet change dans public/ : le nom change, le navigateur voit un
+//    nouveau service worker et l'installe ; l'ancien, lui, voit que la page est
+//    plus recente que lui et sert CE chargement-la par le reseau.
+// Bumper la valeur ci-dessous reste permis (le nom change aussi), jamais requis.
+// Seule exception connue : le navigateur arrete le service worker entre la page
+// et ses fichiers (voir clientsEnRetard) ; ce chargement-la prend alors le
+// cache, et le suivant la nouvelle version.
 const CACHE_NAME = "sereo-shell-20260923-instantane";
 const API_CACHE_NAME = "sereo-api-20260514";
 const APP_SHELL = [
