@@ -1748,3 +1748,121 @@ squelettes actuels remplacent des zones entières), et le Stock sans catégorie 
 - Réutiliser le vocabulaire des six planches jointes (`design/maquettes-v8/captures/*.png`) : pilules, grands rayons, sourire de la marque, une ligne par commande, trois gestes sous le pouce.
 - Données réelles plutôt que du faux texte : secteurs Besançon / Champagnole / Dole ; clients de démonstration EHPAD Les Tilleuls du Val de Loue, SSIAD de la Haute Vallée, Clinique Vétérinaire ; produits changes molletonnés taille L, alèses ; numéros de commande `CMD-2026-001`.
 - Le résultat sera codé à la main en HTML, CSS et JavaScript natifs, sans framework : composants simples, tokens en variables CSS, aucune bibliothèque d'animation.
+
+## Chargement instantané, posé le 23/09
+
+But : le moins d'attente possible à l'ouverture. Aucune planche ne dessine ce lot ; il ne
+change aucun écran, seulement **quand** ils se remplissent et ce que dit la pastille de
+synchro (`#syncStatus`).
+
+### Ce qui est posé
+
+- **Fichiers statiques depuis le cache** (CSS, JS, polices, icônes, Leaflet) : le service
+  worker répond depuis son cache puis revalide en arrière-plan (*stale-while-revalidate*).
+  Shell renommé `sereo-shell-20260923-instantane`. `file-attente.js` (importé par `app.js`,
+  absent de la liste) et les quatre graisses Poppins entrent dans la liste préchargée.
+- **Dernières données connues tout de suite** : au premier chargement de la page, `app.js`
+  lit le cache de données du service worker et dessine tout ce qu'il contient, **pendant**
+  que le réseau part (il part d'abord ; lire le cache ne lui coûte rien). La pastille dit
+  « Mise à jour… » jusqu'à la réponse, puis « À jour ». Relu seulement au premier
+  chargement : après une écriture, relire la copie d'avant ferait reculer l'écran.
+- **Une copie n'est jamais dite fraîche** : toute réponse que le service worker tire de son
+  cache (réseau coupé ou plus lent que 3 s) porte l'en-tête `X-Sereo-Cache`. La pastille
+  dit alors « Données de 14:32 » (« Données du 21/09 » si ce n'est pas le jour même) et
+  jamais « À jour ». Avant ce lot, le repli sur le cache était annoncé « À jour ».
+- **Polices préchargées** : `<link rel="preload">` des quatre graisses `poppins-{400,500,600,700}-latin.woff2`,
+  les seules que le tableau de bord charge à 1440 et 390 px (mesuré ; aucune `latin-ext`).
+- **La nouvelle version arrive** : au démarrage, le serveur calcule le nom du shell =
+  `CACHE_NAME` de `service-worker.js` **suivi de l'empreinte du contenu** de `public/` et de
+  Leaflet (`lib/empreinte-shell.js`, SHA-256 tronqué à 12). Il l'annonce dans l'en-tête
+  `X-Sereo-Shell` de la page et sert `service-worker.js` avec ce nom à la place de
+  `CACHE_NAME`. Un octet change dans `public/` : le nom change, le navigateur installe un
+  nouveau service worker, et l'ancien, plus vieux que la page, sert CE chargement par le
+  réseau (l'ancienne stratégie). Aucun bump à la main n'est requis (voir « Relecture
+  adverse » plus bas).
+- **Fin de session** : `POST /logout` vide le cache de données (dans le service worker, quelle
+  que soit la page qui déconnecte) ; un 401 le vide aussi avant de renvoyer vers `/login`.
+
+### Décisions prises
+
+1. **`/api/operations` et `/api/subscriptions` entrent dans le cache de données.** Ils
+   étaient exclus depuis le 16/09 sans raison écrite, et ils portent les chiffres du tableau
+   de bord : sans eux, rien d'instantané. Justification : aucun des deux ne lit l'identité
+   (comme `/api/orders`, déjà en cache) ; le défaut que l'exclusion évitait — une copie
+   montrée comme fraîche — est tenu désormais par `X-Sereo-Cache`. `/api/me`,
+   `/api/comptes`, `/api/version`, `/api/storage/status`, `/api/geocode` restent exclus.
+2. **Le HTML reste servi par le réseau, jamais du cache.** C'est la requête de la page qui
+   porte le contrôle de session : sans session, le serveur rend la page de connexion et
+   l'application ne tourne pas, donc aucune donnée en cache ne s'affiche avant que le
+   serveur ait reconnu quelqu'un. Le coût : l'application ne se rouvre toujours pas hors
+   ligne (dette déjà nommée, inchangée).
+3. **Tout ou rien** pour l'affichage immédiat : une copie partielle montrerait des listes
+   vides qui ne le sont pas. Seule exception, les commandes du jour (leur URL porte la
+   date : à la première ouverture du jour, elle manque ; elles gardent alors leur valeur).
+4. **« Mise à jour… » et non un horodatage** pendant la mise à jour : elle dure moins d'une
+   seconde en ligne. L'heure de la copie n'apparaît que si la copie **reste** affichée.
+5. **Pas de *navigation preload*** : il aurait doublé la requête de `/login`, que le service
+   worker laisse passer. Gain possible, à mesurer sur téléphone.
+
+### Écarts nommés
+
+- `X-Sereo-Shell` repose sur une mémoire du service worker : si le navigateur l'arrête entre
+  la page et ses scripts (rare, quelques secondes), ce chargement-là retombe sur le cache
+  d'abord, donc sur l'ancienne version une fois ; le chargement suivant a la nouvelle.
+- L'empreinte est calculée **au démarrage** : un fichier de `public/` modifié à chaud, sans
+  redémarrer le serveur, n'est pas vu (en production, chaque livraison redémarre le
+  conteneur). Toute livraison qui touche `public/` réinstalle le shell complet chez chaque
+  utilisateur (≈ 1 Mo, polices comprises), ce que faisait déjà un bump.
+- Aucune déconnexion n'existe dans l'interface aujourd'hui (seulement la route `POST /logout`) ;
+  le vidage est posé dans le service worker pour qu'il vaille pour tout futur bouton.
+
+### Mesure, avant / après
+
+Banc `test/e2e/chargement-instantane.spec.js`, test « mesure » : serveur semé, second
+chargement à cache chaud, temps depuis le début de la navigation jusqu'au premier chiffre du
+tableau de bord (`#opRevenue`), médiane de 5 (min–max), machine partagée par plusieurs
+agents — les écarts absolus bougent, l'ordre de grandeur non.
+
+| Réseau simulé sur l'API | Avant (main, 3 passes) | Après (ce lot, 3 passes) |
+|---|---|---|
+| aucun (localhost) | médianes 320, 245, 220 ms | médianes 277, 242, 269 ms |
+| +300 ms par réponse | médianes 1 470, 1 435, 1 461 ms | médianes 223, 333, 208 ms |
+
+Sur localhost, **aucun gain mesurable** : le réseau y est instantané, les deux colonnes
+sont dans le bruit. Avec 300 ms par réponse (un téléphone en 4G moyenne), le premier chiffre
+passe d'environ 1,45 s à environ 0,25 s : il ne dépend plus du réseau. Une première passe
+« avant », machine plus chargée, avait donné 551 ms et 1 753 ms.
+
+Pourquoi 1,45 s pour 300 ms de latence, avant : dix-sept appels sur six connexions HTTP/1.1
+font trois vagues, et le chiffre attend la plus lente.
+
+### Bancs
+
+`test/e2e/chargement-instantane.spec.js` (port 3174 et un mandataire HTTP sur port libre,
+qui sait retenir, retarder ou réécrire les réponses) : chiffres affichés avant le réseau
+sous « Mise à jour… » · repli sur le cache jamais « À jour » · statique servi quand le réseau
+se tait · nouveau shell dès le premier chargement · revalidation au chargement suivant ·
+déconnexion et 401 vident le cache · polices préchargées = polices du premier rendu (mesurées
+sur la même page **sans** ses préchargements).
+`test/api.test.js` : la page annonce `X-Sereo-Shell` = le `CACHE_NAME` du service worker servi,
+et seulement la page ; ce nom = `CACHE_NAME` du fichier + empreinte du contenu.
+`test/empreinte-shell.test.js` : un octet modifié, un fichier ajouté ou renommé changent
+l'empreinte ; un dossier absent ne fait pas échouer le démarrage.
+
+### Relecture adverse, 23/09
+
+1. **Livraison sans bump de `CACHE_NAME` — vrai, corrigé.** Le nom du shell ne changeait
+   qu'à la main ; or 8 des 15 derniers commits de `main` touchant `public/js` ne touchent pas
+   `service-worker.js` (ex. 19fa441 : nouvel export `GROUPES_NAV` importé par `app.js`, sans
+   bump). Au premier chargement après une telle livraison, la page neuve (réseau) tournait sur
+   l'`app.js` et le `style.css` de l'ancien cache. Décision : le nom est désormais dérivé du
+   contenu par le serveur (voir « La nouvelle version arrive »), plutôt qu'un garde de CI qui
+   exigerait le bump : un garde se contourne ou s'oublie, une empreinte ne demande aucun geste.
+   L'ancienne phrase « une page neuve ne tourne jamais sur un vieux script » est vraie
+   désormais, à l'exception nommée plus haut (service worker arrêté entre la page et ses
+   fichiers).
+2. **Banc des polices, moitié « et seulement elles » — vrai, corrigé.** Une police préchargée
+   est toujours téléchargée, donc toujours dans les ressources mesurées : l'inclusion était
+   vraie par construction. Le banc mesure maintenant les polices utilisées sur la même page
+   dont les `<link rel="preload" as="font">` sont retirés (route Playwright), et exige
+   l'égalité des deux ensembles.

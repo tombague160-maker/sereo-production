@@ -9,6 +9,7 @@ const path = require("path");
 const zlib = require("zlib");
 const { zipSync, strToU8 } = require("fflate");
 const { createSqliteStore } = require("./storage/sqliteStore");
+const { empreinteDesSources, shellEmpreinte } = require("./lib/empreinte-shell");
 
 loadEnvFile(path.join(__dirname, ".env"));
 
@@ -130,6 +131,27 @@ const BACKUP_DIR = path.resolve(process.env.SEREO_BACKUP_DIR || path.join(path.d
 // le volume Docker comme la SQLite.
 const IMPORTS_ARCHIVES_DIR = path.resolve(process.env.SEREO_IMPORTS_ARCHIVES_DIR || path.join(path.dirname(SQLITE_PATH), "imports-archives"));
 const LEAFLET_DIST = path.join(__dirname, "node_modules", "leaflet", "dist");
+// Le nom du shell, calcule une fois au demarrage : CACHE_NAME du service
+// worker SUIVI de l'empreinte du contenu de public/ et de Leaflet
+// (lib/empreinte-shell.js). La page l'annonce (en-tete X-Sereo-Shell) et le
+// service worker est servi avec CE nom a la place de CACHE_NAME : toute
+// modification d'un fichier statique change le nom, donc installe un nouveau
+// service worker et fait passer par le reseau le premier chargement d'une page
+// neuve -- meme si personne n'a bumpe CACHE_NAME. Illisible : rien n'est
+// annonce, le fichier est servi tel quel -- jamais d'erreur au demarrage.
+const SHELL = (() => {
+  try {
+    const source = fs.readFileSync(path.join(__dirname, "public", "service-worker.js"), "utf8");
+    const empreinte = empreinteDesSources([
+      { nom: "public", racine: path.join(__dirname, "public") },
+      { nom: "leaflet", racine: LEAFLET_DIST }
+    ]);
+    return shellEmpreinte(source, empreinte);
+  } catch {
+    return null;
+  }
+})();
+const SHELL_ANNONCE = SHELL ? SHELL.nom : "";
 const ENABLE_DB_EXPORT = process.env.SEREO_ENABLE_DB_EXPORT === "1";
 const AUTH_USER = cleanEnv(process.env.SEREO_AUTH_USER);
 const AUTH_PASSWORD = cleanEnv(process.env.SEREO_AUTH_PASSWORD);
@@ -394,7 +416,23 @@ app.post("/logout", handleLogout);
 app.use(requireAccessAuth);
 app.use(express.json({ limit: "5mb" }));
 app.use("/vendor/leaflet", express.static(LEAFLET_DIST, { immutable: true, maxAge: "7d" }));
-app.use(express.static(path.join(__dirname, "public")));
+// Le service worker, servi avec le nom de shell a empreinte (voir SHELL plus
+// haut). « no-cache » : le navigateur revalide a chaque controle de mise a jour,
+// comme pour le fichier statique qu'il remplace.
+app.get("/service-worker.js", (req, res, next) => {
+  if (!SHELL) return next();
+  res.set("Content-Type", "application/javascript; charset=UTF-8");
+  res.set("Cache-Control", "no-cache");
+  res.send(SHELL.source);
+});
+app.use(express.static(path.join(__dirname, "public"), {
+  // La page annonce le shell qu'elle attend : le service worker en place sert
+  // les fichiers statiques depuis son cache, et s'il est plus vieux que la page,
+  // il doit le savoir AVANT qu'elle demande ses scripts (public/service-worker.js).
+  setHeaders(res, chemin) {
+    if (SHELL_ANNONCE && path.basename(chemin) === "index.html") res.setHeader("X-Sereo-Shell", SHELL_ANNONCE);
+  }
+}));
 app.use("/api", requireTrustedApiRequest);
 
 function cleanEnv(value) {
