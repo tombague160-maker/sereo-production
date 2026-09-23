@@ -867,8 +867,15 @@ function premiereCoordonnee(...valeurs) {
  * s'impose une pause qu'apres un vrai appel).
  */
 async function geocoderAdresse(adresse, { forcer = false } = {}) {
-  if (!useSqliteStorage()) return null;
   if (!adresseGeocodable(adresse)) return null;
+  if (!useSqliteStorage()) {
+    // Stockage JSON : pas de table de cache, mais la tournee doit toujours
+    // geocoder (avant le lot, routing.geocode le faisait sans condition ;
+    // rendre null ici la refusait pour « adresse incomplete », relecture du
+    // lot 3). Le lot de fond, lui, reste reserve a SQLite.
+    const resultat = await geocodage.interroger(adresse);
+    return { ...resultat, cle: cleGeocodage(adresse), precision: geocodage.precisionDuType(resultat.type), reseau: true };
+  }
 
   const cle = cleGeocodage(adresse);
   const store = getSqliteStore();
@@ -999,9 +1006,27 @@ function heriterPositionDuClient(order, client) {
 function demenagerClient(db, client, avant) {
   const cleAvant = cleGeocodage(avant);
   const cleApres = cleGeocodage(adresseDuClient(client));
-  if (cleAvant === cleApres) return { demenage: false, commandes: 0 };
-
   const suivent = db.commandes.filter(order => commandeSuitLeClient(order, client, cleAvant));
+
+  if (cleAvant === cleApres) {
+    // Meme voie, autre ecriture : un complement change ("Apt 12" -> "Apt 14"),
+    // la casse, une virgule. La position reste juste, mais le livreur lit le
+    // TEXTE de la commande : il suit (relecture du lot 3).
+    const apres = adresseDuClient(client);
+    const memeTexte = ["rue", "codePostal", "ville"].every(champ => clean(avant[champ]) === clean(apres[champ]));
+    if (memeTexte) return { demenage: false, commandes: 0 };
+    let touchees = 0;
+    for (const order of suivent) {
+      if (clean(order.address) === clean(apres.rue) && clean(order.postalCode) === clean(apres.codePostal)
+        && clean(order.city) === clean(apres.ville)) continue;
+      order.address = apres.rue;
+      order.postalCode = apres.codePostal;
+      order.city = apres.ville;
+      order.updatedAt = new Date().toISOString();
+      touchees += 1;
+    }
+    return { demenage: false, commandes: touchees };
+  }
 
   if (client.geoSource === "manuel" && getCoordinates(client)) {
     client.geoAVerifier = "adresse-modifiee";
@@ -6813,6 +6838,8 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
   // qty negative dans Ximi est souvent un retour/avoir, le clamp silencieux
   // pourrait masquer cette info metier.
   let clampedNegativeQtyCount = 0;
+  // Positions Latitude/Longitude du fichier ignorees : (0,0), inversees, hors zone.
+  let positionsImportRefusees = 0;
 
   try {
     const rows = await readExcelRows(uploadedPath);
@@ -6921,6 +6948,14 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       const venteFactureLivree = isFactureStatusLivre(vente.statutFacture);
 
       if (!clientsMap[key]) {
+        // Relecture du lot 3 : la position du fichier ne remplace jamais une
+        // position placee a la main (M8), et elle passe le meme controle
+        // qu'une saisie (M5) : (0,0), inversee ou hors zone, elle est ignoree.
+        const manuelle = existingClient.geoSource === "manuel" && Boolean(getCoordinates(existingClient));
+        const positionFichier = vente.lat !== "" && vente.lng !== "";
+        const fichierRefuse = positionFichier && !geocodage.verifierPosition({ lat: vente.lat, lng: vente.lng }).ok;
+        if (fichierRefuse) positionsImportRefusees += 1;
+        const prendFichier = positionFichier && !manuelle && !fichierRefuse;
         clientsMap[key] = {
           id: existingClient.id || crypto.randomUUID(),
           nom: vente.client || "Client sans nom",
@@ -6931,12 +6966,12 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
           statut: existingClient.statut || "restant",
           // Liste flat (legacy compat pour syncWorkflow et anciennes UIs)
           produits: [],
-          lat: vente.lat !== "" ? vente.lat : (existingClient.lat || ""),
-          lng: vente.lng !== "" ? vente.lng : (existingClient.lng || ""),
+          lat: prendFichier ? vente.lat : (existingClient.lat || ""),
+          lng: prendFichier ? vente.lng : (existingClient.lng || ""),
           // Lot 3 (audit geo) : l'origine et la precision de la position
           // suivent la position. Sans elles, une saisie manuelle redevenait
           // anonyme a chaque import, et le lot `forcer` pouvait l'ecraser.
-          ...(vente.lat !== "" && vente.lng !== ""
+          ...(prendFichier
             ? { geoSource: "import", geoPrecision: "manuel", geoCle: "", geoLibelle: "", geoAVerifier: "" }
             : {
               geoSource: existingClient.geoSource || "",
@@ -7119,10 +7154,13 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     const clampedMessage = clampedNegativeQtyCount > 0
       ? `, ⚠ ${clampedNegativeQtyCount} quantite(s) negative(s) clampee(s) a 0 (verifier retours/avoirs Ximi)`
       : "";
+    const positionsMessage = positionsImportRefusees > 0
+      ? `, ${positionsImportRefusees} position(s) du fichier ignoree(s) (0,0, inversee ou hors zone)`
+      : "";
     addHistory(
       db,
       "Import ventes",
-      `${db.ventes.length} vente(s) importee(s), ${importedClients.length} client(s) detecte(s), ${commandeStats}${preservedMessage}${mergedMessage}${livreMessage}${clampedMessage}`,
+      `${db.ventes.length} vente(s) importee(s), ${importedClients.length} client(s) detecte(s), ${commandeStats}${preservedMessage}${mergedMessage}${livreMessage}${clampedMessage}${positionsMessage}`,
       {
         fichier: req.file.originalname
       }
@@ -7153,6 +7191,7 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       updated: updatedCount,
       skippedIdentical: skippedIdenticalCount,
       clampedNegativeQuantities: clampedNegativeQtyCount,
+      positionsRefusees: positionsImportRefusees,
       archive
     };
     }); // fin withWriteLock
@@ -7425,6 +7464,7 @@ app.patch("/api/clients/:id", async (req, res) => {
 
       const avant = adresseDuClient(client);
       const notesAvant = clean(client.notes);
+      const telephoneAvant = clean(client.telephone);
       const updates = {};
       if (req.body.nom !== undefined) updates.nom = clean(req.body.nom);
       if (req.body.rue !== undefined) updates.rue = clean(req.body.rue);
@@ -7455,7 +7495,14 @@ app.patch("/api/clients/:id", async (req, res) => {
       const now = new Date().toISOString();
       matchingOrders.forEach(order => {
         if (updates.nom !== undefined) order.clientName = updates.nom;
-        if (updates.telephone !== undefined) order.phone = updates.telephone;
+        // Comme la consigne : le telephone d'une commande livree ailleurs
+        // (EHPAD, proche) est le sien. Seul celui qui etait le numero du client
+        // (ou vide) suit ; le formulaire renvoie le telephone a chaque
+        // enregistrement, meme quand seules les notes changent.
+        if (updates.telephone !== undefined
+          && (!clean(order.phone) || clean(order.phone) === telephoneAvant)) {
+          order.phone = updates.telephone;
+        }
         if (updates.notes !== undefined && suivent.has(String(order.id))
           && (!clean(order.notes) || clean(order.notes) === notesAvant)) {
           order.notes = updates.notes;
@@ -8062,6 +8109,10 @@ app.post("/api/geocodage/lancer", async (req, res) => {
       });
     } finally {
       geocodageEnCours = false;
+      // Un client cree ou demenage pendant ce lot a demande un geocodage de
+      // fond, refuse car un lot tournait : il est relance maintenant, comme
+      // apres un lot de fond (relecture du lot 3).
+      if (geocodageARelancer) declencherGeocodageEnFond("relance apres le lot manuel");
     }
     res.json(bilan);
   } catch (error) {

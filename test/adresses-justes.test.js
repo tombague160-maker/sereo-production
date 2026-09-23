@@ -463,3 +463,108 @@ test("un client cree au CRM est geocode, et sa precision est gardee", async () =
   assert.ok(geocode, "le client cree au CRM n'a pas ete geocode");
   assert.equal(readDb().clients.find(c => c.nom === "Nouveau").geoPrecision, "rue");
 });
+
+// --- Relecture adverse du lot 3 (23/09) ---------------------------------------------
+
+test("relecture — « 12, rue de Dole » devient « 12, avenue Foch » : c'est un demenagement", async () => {
+  // Avant : la virgule faisait de « 12 » la voie ; les deux adresses avaient la
+  // meme cle, et le changement passait inapercu (position et commandes figees).
+  const c1 = client("c1", { rue: "12, rue de Dole", lat: 47.2301, lng: 6.0102 });
+  semer({ clients: [c1], commandes: [commande("o-suit", c1, { lat: 47.2301, lng: 6.0102 })] });
+  const r = await api("/api/clients/c1", { rue: "12, avenue Foch" }, "PATCH");
+  assert.equal(r.status, 200);
+  assert.equal(commandeLue("o-suit").address, "12, avenue Foch", "la commande a livrer garde l'ancienne adresse");
+  assert.equal(clientLu("c1").lat, "", "la position de l'ancienne adresse est restee");
+});
+
+test("relecture — un complement change (Apt 12 -> Apt 14) atteint la commande, la position reste", async () => {
+  const c1 = client("c1", { rue: "3 rue de Dole Apt 12", lat: 47.2301, lng: 6.0102 });
+  semer({ clients: [c1], commandes: [commande("o-suit", c1, { lat: 47.2301, lng: 6.0102 })] });
+  const r = await api("/api/clients/c1", { rue: "3 rue de Dole Apt 14" }, "PATCH");
+  assert.equal(r.status, 200);
+  assert.equal(commandeLue("o-suit").address, "3 rue de Dole Apt 14", "le livreur lit encore l'ancien appartement");
+  assert.equal(commandeLue("o-suit").lat, 47.2301);
+  assert.equal(clientLu("c1").lat, 47.2301);
+});
+
+test("relecture — « Modifier le profil » ne remplace pas le telephone d'une commande livree ailleurs", async () => {
+  const c1 = client("c1", { nom: "Hotel", telephone: "06 00 00 00 01", lat: 47.2301, lng: 6.0102 });
+  semer({
+    clients: [c1],
+    commandes: [
+      commande("o-suit", c1, { phone: "06 00 00 00 01", lat: 47.2301, lng: 6.0102 }),
+      commande("o-ehpad", c1, { address: "50 route de Lyon", postalCode: "39000", city: "Lons-le-Saunier", phone: "03 84 00 00 00", lat: 46.67, lng: 5.55 })
+    ]
+  });
+  // Le formulaire envoie TOUS les champs, telephone compris, a chaque enregistrement.
+  const r = await api("/api/clients/c1", { telephone: "06 11 22 33 44", notes: "Sonner deux fois" }, "PATCH");
+  assert.equal(r.status, 200);
+  assert.equal(commandeLue("o-ehpad").phone, "03 84 00 00 00", "le livreur appellerait le client au lieu de l'EHPAD");
+  assert.equal(commandeLue("o-suit").phone, "06 11 22 33 44");
+});
+
+// Un classeur minimal (une feuille, texte en ligne), comme dans api.test.js.
+function classeur(lignes) {
+  const { zipSync, strToU8 } = require("fflate");
+  const echapper = v => String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const colonne = i => String.fromCharCode(65 + i);
+  const feuille = `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${lignes.map((l, r) => `<row r="${r + 1}">${l.map((c, i) => `<c r="${colonne(i)}${r + 1}" t="inlineStr"><is><t>${echapper(c)}</t></is></c>`).join("")}</row>`).join("")}</sheetData></worksheet>`;
+  const fichiers = {
+    "[Content_Types].xml": strToU8(`<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`),
+    "_rels/.rels": strToU8(`<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`),
+    "xl/workbook.xml": strToU8(`<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Feuille1" sheetId="1" r:id="rId1"/></sheets></workbook>`),
+    "xl/_rels/workbook.xml.rels": strToU8(`<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`),
+    "xl/worksheets/sheet1.xml": strToU8(feuille)
+  };
+  return new Blob([Buffer.from(zipSync(fichiers))], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+}
+
+async function importerVentes(lat, lng) {
+  const form = new FormData();
+  form.append("file", classeur([
+    ["Statut", "Code", "Client", "Quantite", "Produit", "Rue", "Code Postal", "Ville", "Date", "Latitude", "Longitude"],
+    ["", "CH-L", "Client c1", "1", "Changes L", "4 rue des Arènes", "39100", "Dole", "", lat, lng]
+  ]), "ventes.xlsx");
+  const reponse = await fetch(`${base}/api/import/ventes`, { method: "POST", body: form });
+  return { status: reponse.status, body: await reponse.json() };
+}
+
+test("relecture — un import Excel n'ecrase pas une position placee a la main", async () => {
+  semer({ clients: [client("c1", { rue: "4 rue des Arènes", codePostal: "39100", ville: "Dole", lat: 47.0922, lng: 5.4911, geoSource: "manuel", geoPrecision: "manuel" })] });
+  const r = await importerVentes("47.1", "5.5");
+  assert.equal(r.status, 200, r.body?.error);
+  assert.equal(clientLu("c1").lat, 47.0922, "la correction faite a la main est perdue");
+  assert.equal(clientLu("c1").geoSource, "manuel");
+});
+
+test("relecture — un import Excel refuse une position inversee ; une position plausible est prise (temoin)", async () => {
+  semer({ clients: [client("c1", { rue: "4 rue des Arènes", codePostal: "39100", ville: "Dole" })] });
+  const inversee = await importerVentes("5.4911", "47.0922");
+  assert.equal(inversee.status, 200, inversee.body?.error);
+  assert.equal(clientLu("c1").lat, "", "la position inversee du fichier a ete prise");
+  assert.equal(inversee.body.positionsRefusees, 1);
+
+  semer({ clients: [client("c1", { rue: "4 rue des Arènes", codePostal: "39100", ville: "Dole" })] });
+  const juste = await importerVentes("47.0922", "5.4911");
+  assert.equal(juste.status, 200, juste.body?.error);
+  assert.equal(clientLu("c1").lat, 47.0922);
+  assert.equal(clientLu("c1").geoSource, "import");
+});
+
+test("relecture — une demande arrivee pendant un lot lance a la main est relancee ensuite", async () => {
+  // Une adresse qu'aucun autre test n'a mise en cache : le lot doit vraiment
+  // attendre la BAN, sinon il finit avant la creation et rien n'est « pendant ».
+  semer({ clients: [client("c1", { rue: "7 impasse du Lot Manuel" })] });
+  ban(q => q.includes("8 rue pendant"), () => ({ features: [trait({ lat: 46.75, lng: 5.905, postcode: "39300", city: "Champagnole" })] }));
+  ban(() => true, () => ({ features: [trait({ lat: 47.30, lng: 6.10 })] }));
+  delaiBanMs = 400;
+  let lotFini = false;
+  const lot = api("/api/geocodage/lancer", { max: 10 }).then(r => { lotFini = true; return r; });
+  await new Promise(r => setTimeout(r, 120));
+  const cree = await api("/api/crm/clients", { nom: "Pendant", rue: "8 rue Pendant", codePostal: "39300", ville: "Champagnole" });
+  assert.equal(cree.status, 201);
+  assert.equal(lotFini, false, "temoin : le lot manuel etait deja fini a la creation");
+  assert.equal((await lot).status, 200);
+  const geocode = await attendre(() => readDb().clients.some(c => c.nom === "Pendant" && c.lat === 46.75));
+  assert.ok(geocode, "le client cree pendant le lot manuel n'a jamais ete geocode");
+});
