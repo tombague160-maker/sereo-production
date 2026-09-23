@@ -1703,6 +1703,27 @@ garde son compte à rebours. Les polices sont servies **avant** la session (`/fo
 planche écrit « Un seul compte, partagé par l'équipe » : ce n'est plus vrai depuis les
 comptes par personne, la phrase est retirée.
 
+### Mobile, lot 1 — le cadre commun, posé le 23/09
+
+Sous **820 px** (le seuil réel de la barre basse — pas 920) :
+
+- **l'en-tête vert** de toutes les planches mobiles : le titre de l'écran (28 px), son
+  compte, ses gestes, sur `--v8-carte-tournee`, coins bas de 28 px, collé à la barre de
+  marque (gardée : elle existe, et porte le compte et le thème). Sur le vert, la règle de
+  la charte : un bouton plein devient blanc à texte vert (plein clair en sombre), un bouton
+  à contour prend le contour clair, les recherches la surface sur vert ;
+- **la barre basse** de la planche : pleine largeur, posée au bord, libellés « Tableau de
+  bord », « Préparer », « Tournée », « Abonnements », « Plus » ; l'onglet actif se dit par
+  sa couleur, sans pastille. **Écart** : opaque, pas translucide à 74 % — le texte
+  secondaire ne tient que 4,81:1 sur le fond plein, et toute transparence au-dessus d'un
+  contenu vert le faisait tomber sous 4,5 ;
+- **le menu « Plus »** : les cinq destinations de la passation — Commandes, Stock, Clients,
+  Analyse, Paramètres. Les écrans secondaires s'ouvrent depuis leur écran. Stock n'y était
+  pas : il n'avait **aucun** accès au téléphone ; un banc vérifie maintenant que chaque
+  entrée de la barre latérale est atteignable à 390 px ;
+- les marges de la charte : 16 px sur les côtés, dans les deux thèmes (les anciennes règles
+  mobiles, écrites pour le clair seul, faisaient deux mises en page).
+
 ## 10. Guide pour l'agent
 
 - Toujours produire les deux modes (clair et sombre) avec les mêmes tokens ; lister les contrastes calculés.

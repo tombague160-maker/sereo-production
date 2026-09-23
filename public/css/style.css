@@ -11947,3 +11947,140 @@ textarea::placeholder {
 #parametres #settingsSectors .item p { white-space: normal; overflow: visible; overflow-wrap: anywhere; min-width: 0; }
 #parametres #settingsSectors .item-header { flex-wrap: wrap; gap: 8px; }
 #parametres #settingsSectors .item-header > div { min-width: 0; }
+
+/* ==========================================================================
+   MOBILE, LOT 1 -- le cadre commun des planches mobiles (1b, 7a, 8a-8d, 9a,
+   3a). Sous 820 px, la ou la barre basse remplace la barre laterale.
+   Un seul bloc, en fin de feuille, sous les deux portees de theme : les
+   anciennes regles mobiles, ecrites pour le mode clair seul, faisaient deux
+   mises en page differentes selon le theme.
+   ========================================================================== */
+@media (max-width: 820px) {
+  /* Les marges de la planche : 16 px sur les cotes (la charte, par. 5). */
+  :root[data-color-scheme] main.content,
+  :root:not([data-color-scheme]) main.content {
+    padding: 0 16px calc(112px + env(safe-area-inset-bottom));
+  }
+
+  /* L'EN-TETE VERT : sous la barre de marque (deja verte), le titre de
+     l'ecran, son compte, et ses gestes. */
+  :root[data-color-scheme] main.content > .ecran-entete,
+  :root:not([data-color-scheme]) main.content > .ecran-entete {
+    margin: 0 -16px 16px;
+    padding: 10px 20px 22px;
+    gap: 16px;
+    background: var(--v8-carte-tournee);
+    border-radius: 0 0 28px 28px;
+  }
+  :root[data-color-scheme] .ecran-entete .ecran-entete-texte h2,
+  :root:not([data-color-scheme]) .ecran-entete .ecran-entete-texte h2 {
+    font-size: 28px; color: var(--v8-texte-sur-carte-tournee); white-space: normal;
+  }
+  :root[data-color-scheme] .ecran-entete .ecran-entete-texte p,
+  :root:not([data-color-scheme]) .ecran-entete .ecran-entete-texte p {
+    font-size: 13.5px; font-weight: 500; color: var(--v8-secondaire-sur-carte-tournee);
+  }
+
+  /* Sur le vert, la regle de la charte : un bouton plein devient blanc a texte
+     vert (sinon, vert sur vert, il disparait) ; un bouton a contour prend le
+     contour clair. */
+  :root[data-color-scheme] .ecran-entete .button.primary,
+  :root:not([data-color-scheme]) .ecran-entete .button.primary {
+    background: var(--v8-surface); color: var(--v8-principal); border-color: transparent; box-shadow: none;
+  }
+  :root[data-color-scheme] .ecran-entete .button.secondary,
+  :root:not([data-color-scheme]) .ecran-entete .button.secondary,
+  :root[data-color-scheme] .ecran-entete .ecran-entete-fente .cmd-export,
+  :root:not([data-color-scheme]) .ecran-entete .ecran-entete-fente .cmd-export,
+  :root[data-color-scheme] .ecran-entete .ecran-entete-fente .cli-rappels,
+  :root:not([data-color-scheme]) .ecran-entete .ecran-entete-fente .cli-rappels {
+    background: transparent; color: var(--v8-texte-sur-carte-tournee);
+    border: 1.5px solid var(--v8-secondaire-sur-carte-tournee); box-shadow: none;
+  }
+  /* Les recherches et la pilule du mois : la surface sur vert (planche 8a). */
+  :root[data-color-scheme] .ecran-entete .cmd-recherche,
+  :root:not([data-color-scheme]) .ecran-entete .cmd-recherche {
+    height: 48px; background: var(--v8-surface-sur-vert); color: var(--v8-secondaire-sur-carte-tournee); box-shadow: none;
+  }
+  :root[data-color-scheme] .ecran-entete .cmd-recherche input,
+  :root:not([data-color-scheme]) .ecran-entete .cmd-recherche input {
+    color: var(--v8-texte-sur-carte-tournee); font-size: 15.5px;
+  }
+  .ecran-entete .cmd-recherche input::placeholder { color: var(--v8-secondaire-sur-carte-tournee); opacity: 1; }
+  :root[data-color-scheme] .ecran-entete .tb-pilule-mois,
+  :root:not([data-color-scheme]) .ecran-entete .tb-pilule-mois {
+    flex: 0 0 auto; background: var(--v8-surface); color: var(--v8-principal);
+  }
+  /* La pastille de synchro et « Actualiser » : gardes, sur la surface verte. */
+  :root[data-color-scheme] .ecran-entete #syncStatus,
+  :root:not([data-color-scheme]) .ecran-entete #syncStatus {
+    background: var(--v8-surface-sur-vert); color: var(--v8-texte-sur-carte-tournee); border: 0;
+  }
+  :root[data-color-scheme] .ecran-entete #refreshButton,
+  :root:not([data-color-scheme]) .ecran-entete #refreshButton {
+    background: var(--v8-surface-sur-vert); color: var(--v8-texte-sur-carte-tournee); border: 0; box-shadow: none;
+  }
+  .ecran-entete :focus-visible { outline: none; box-shadow: 0 0 0 3px var(--v8-carte-tournee), 0 0 0 5px var(--v8-texte-sur-carte-tournee); }
+  /* Les boutons de la fente : a leur largeur, pas etires (le « Precedent »
+     des Commandes se cassait sur deux lignes sous la meme regle). */
+  :root[data-color-scheme] .ecran-entete .ecran-entete-fente .button,
+  :root:not([data-color-scheme]) .ecran-entete .ecran-entete-fente .button { width: auto; }
+  :root[data-color-scheme] #commandes .cmd-pages .button,
+  :root:not([data-color-scheme]) #commandes .cmd-pages .button { width: auto; white-space: nowrap; flex: none; }
+
+  /* LA BARRE BASSE de la planche : pleine largeur, posee au bord, 88 px,
+     et floutee ; un onglet actif se dit par sa couleur, sans pastille.
+     OPAQUE et non translucide (planche : 74 %) : le texte secondaire ne tient
+     que 4,81:1 sur le fond plein ; toute transparence au-dessus d'un contenu
+     vert le fait tomber sous 4,5 (3,3 a 74 %, 4,1 a 92 %). Le flou reste
+     declare (la charte l'exige, il ne coute rien). */
+  :root[data-color-scheme] nav.mobile-tabbar,
+  :root:not([data-color-scheme]) nav.mobile-tabbar {
+    left: 0; right: 0; bottom: 0; width: auto;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    min-height: calc(80px + env(safe-area-inset-bottom));
+    padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+    border: 0; border-radius: 0; box-shadow: 0 -1px 0 var(--v8-surface-basse);
+    background: var(--v8-fond);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
+  }
+  :root[data-color-scheme] nav.mobile-tabbar .mobile-tab,
+  :root:not([data-color-scheme]) nav.mobile-tabbar .mobile-tab {
+    flex: 1 1 0; width: auto; min-width: 44px; min-height: 56px; padding: 4px 2px;
+    display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 4px;
+    background: none; border: 0; box-shadow: none;
+    color: var(--v8-texte-secondaire); font-size: 12.5px; font-weight: 500; line-height: 1.2;
+  }
+  :root[data-color-scheme] nav.mobile-tabbar .mobile-tab .icon,
+  :root:not([data-color-scheme]) nav.mobile-tabbar .mobile-tab .icon { width: 24px; height: 24px; color: currentColor; }
+  :root[data-color-scheme] nav.mobile-tabbar .mobile-tab span,
+  :root:not([data-color-scheme]) nav.mobile-tabbar .mobile-tab span {
+    display: block; overflow: visible; text-overflow: clip; white-space: normal; text-align: center; max-width: 7.2em;
+  }
+  /* « Tableau de bord » sur deux lignes, comme la planche. */
+  :root[data-color-scheme] nav.mobile-tabbar .mobile-tab[data-tab="journee"] span,
+  :root:not([data-color-scheme]) nav.mobile-tabbar .mobile-tab[data-tab="journee"] span { max-width: 5em; }
+  :root[data-color-scheme] nav.mobile-tabbar .mobile-tab.active,
+  :root:not([data-color-scheme]) nav.mobile-tabbar .mobile-tab.active {
+    background: none; color: var(--v8-principal); font-weight: 600;
+  }
+  :root[data-color-scheme] nav.mobile-tabbar .mobile-tab.active .icon,
+  :root:not([data-color-scheme]) nav.mobile-tabbar .mobile-tab.active .icon { color: var(--v8-principal); }
+  nav.mobile-tabbar .mobile-tab:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 14px; }
+}
+@media (max-width: 820px) {
+  /* En sombre (planches 2a, 12a) : le plein clair sur le vert sombre. */
+  :root[data-color-scheme="dark"] .ecran-entete .button.primary,
+  :root[data-color-scheme="dark"] .ecran-entete .tb-pilule-mois { background: var(--v8-principal); color: var(--v8-texte-sur-principal); }
+  :root[data-color-scheme="dark"] .ecran-entete .tb-pilule-mois select { color: var(--v8-texte-sur-principal); }
+  /* Les gestes de l'en-tete sur une rangee qui passe a la ligne. */
+  .ecran-entete .ecran-entete-actions { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .ecran-entete .ecran-entete-fente { flex-direction: row; flex-wrap: wrap; gap: 8px; flex: 1 1 100%; }
+  .ecran-entete .ecran-entete-fente .cmd-recherche { flex: 1 1 100%; }
+}
+@media (max-width: 820px) and (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) .ecran-entete .button.primary,
+  :root:not([data-color-scheme="light"]) .ecran-entete .tb-pilule-mois { background: var(--v8-principal); color: var(--v8-texte-sur-principal); }
+  :root:not([data-color-scheme="light"]) .ecran-entete .tb-pilule-mois select { color: var(--v8-texte-sur-principal); }
+}

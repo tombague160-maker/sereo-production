@@ -230,19 +230,19 @@
     <nav class="mobile-tabbar" role="tablist" aria-label="Navigation mobile">
       <button class="mobile-tab active" type="button" role="tab" aria-selected="true" aria-controls="journee" data-tab="journee">
         <svg class="icon" aria-hidden="true"><use href="#icon-home"></use></svg>
-        <span>Accueil</span>
+        <span>Tableau de bord</span>
       </button>
       <button class="mobile-tab" type="button" role="tab" aria-selected="false" aria-controls="preparation" data-tab="preparation">
         <svg class="icon" aria-hidden="true"><use href="#icon-clipboard-list"></use></svg>
-        <span>Prépa</span>
+        <span>Préparer</span>
       </button>
       <button class="mobile-tab" type="button" role="tab" aria-selected="false" aria-controls="livreur" data-tab="livreur">
         <svg class="icon" aria-hidden="true"><use href="#icon-truck"></use></svg>
         <span>Tournée</span>
       </button>
       <button class="mobile-tab" type="button" role="tab" aria-selected="false" aria-controls="abonnements" data-tab="abonnements">
-        <svg class="icon" aria-hidden="true"><use href="#icon-bell"></use></svg>
-        <span>Abos</span>
+        <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 9a5 5 0 0 1 5-5h6l-2-2m6 8a5 5 0 0 1-5 5H8l2 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+        <span>Abonnements</span>
       </button>
       <button class="mobile-tab" type="button" id="mobile-tab-more" aria-haspopup="menu" aria-expanded="false" aria-controls="mobile-more-sheet" data-action="open-more-menu" aria-label="Plus d'options">
         <svg class="icon" aria-hidden="true"><use href="#icon-more"></use></svg>
@@ -256,14 +256,15 @@
       <div class="more-sheet-panel" role="menu">
         <div class="more-sheet-handle" aria-hidden="true"></div>
         <h3 id="more-sheet-title" class="more-sheet-title">Plus d'options</h3>
-        <!-- Les quatre listes de commandes n'en font plus qu'une (planche 13c).
-             Le menu « Plus » sera redessine par le lot mobile (planches 8a, 12a). -->
+        <!-- Les cinq destinations de la passation (planche 15) : Commandes, Stock,
+             Clients, Analyse, Parametres. Les ecrans secondaires s'ouvrent
+             depuis leur ecran : la saisie de commande par « Nouvelle commande »,
+             « A recommander » par la carte du Stock, les rappels par Clients,
+             les exports par la pilule d'Analyse. Abonnements est dans la barre. -->
         <button class="more-sheet-item" type="button" role="menuitem" data-tab="commandes" data-action="more-menu-pick">
           <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-receipt"></use></svg></span>
           <span class="more-sheet-label">Commandes</span>
         </button>
-        <!-- Stock n'avait AUCUN acces au telephone : la barre laterale y est
-             masquee, et ce menu ne le portait pas (relecture mobile du 23/09). -->
         <button class="more-sheet-item" type="button" role="menuitem" data-tab="stock" data-action="more-menu-pick">
           <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-box"></use></svg></span>
           <span class="more-sheet-label">Stock</span>
@@ -272,26 +273,9 @@
           <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-home"></use></svg></span>
           <span class="more-sheet-label">Clients</span>
         </button>
-        <button class="more-sheet-item" type="button" role="menuitem" data-tab="commande-client" data-action="more-menu-pick">
-          <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-receipt"></use></svg></span>
-          <span class="more-sheet-label">Commande client</span>
-        </button>
-        <button class="more-sheet-item" type="button" role="menuitem" data-tab="abonnements" data-action="more-menu-pick"><span class="more-sheet-label">Abonnements</span></button>
-        <button class="more-sheet-item" type="button" role="menuitem" data-tab="relances" data-action="more-menu-pick">
-          <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-bell"></use></svg></span>
-          <span class="more-sheet-label">Rappels</span>
-        </button>
         <button class="more-sheet-item" type="button" role="menuitem" data-tab="statistiques" data-action="more-menu-pick">
-          <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-star"></use></svg></span>
-          <span class="more-sheet-label">Statistiques</span>
-        </button>
-        <button class="more-sheet-item" type="button" role="menuitem" data-tab="recommande" data-action="more-menu-pick">
-          <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-star"></use></svg></span>
-          <span class="more-sheet-label">À recommander</span>
-        </button>
-        <button class="more-sheet-item" type="button" role="menuitem" data-tab="exports" data-action="more-menu-pick">
-          <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-receipt"></use></svg></span>
-          <span class="more-sheet-label">Exports</span>
+          <span class="more-sheet-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg></span>
+          <span class="more-sheet-label">Analyse</span>
         </button>
         <button class="more-sheet-item" type="button" role="menuitem" data-tab="parametres" data-action="more-menu-pick">
           <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-settings"></use></svg></span>
