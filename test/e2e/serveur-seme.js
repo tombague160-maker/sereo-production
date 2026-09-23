@@ -19,7 +19,16 @@ const CLIENTS = [
   { id: "c-ssiad", nom: "SSIAD de la Haute Vallée", rue: "22 rue Neuve", ville: "Champagnole", codePostal: "39300", lat: 46.750, lng: 5.905 },
   { id: "c-veto", nom: "Clinique Vétérinaire du Doubs", rue: "1 place du Marché", ville: "Besançon", codePostal: "25000", lat: 47.245, lng: 6.030 },
   { id: "c-dupont", nom: "Cabinet Infirmier Dupont-Lefebvre", rue: "5 rue des Lilas", ville: "Besançon", codePostal: "25000", lat: 47.230, lng: 6.015 }
-].map(c => ({ ...c, crmStatus: "client_actif" }));
+].map(c => Object.freeze({ ...c, crmStatus: "client_actif" }));
+// GELES (integration des lots, 23/09). jeuDeDonnees() rendait CE tableau comme
+// `clients` du seme : un banc qui y ajoutait ses clients (adresses-a-verifier,
+// clients : `seed.clients.push(...)`) l'allongeait pour tous les bancs lances
+// ensuite dans le MEME processus d'ouvrier Playwright. Le routage simule, qui
+// dimensionne sa table sur CLIENTS.length, rendait alors 8 x 8 a une tournee
+// de 6 points : « Impossible de calculer le trajet routier. » -- le rouge de
+// meilleur-trajet.spec.js:45, seulement en suite complete, selon l'ouvrier.
+// Chaque seme recoit desormais sa COPIE ; le modele ne bouge plus.
+Object.freeze(CLIENTS);
 
 const PRODUITS = [
   { code: "CH-L", nom: "Changes taille L", prixUnitaire: 12 },
@@ -60,7 +69,7 @@ function jeuDeDonnees() {
     status, products: o.products, ...extra
   });
   return {
-    clients: CLIENTS,
+    clients: CLIENTS.map(c => ({ ...c })),
     stock: [...PRODUITS.map(p => ({ id: `st-${p.code}`, code: p.code, nom: p.nom, quantite: 100, tarif: p.prixUnitaire })),
       { id: "st-GANTS", code: "GANTS", nom: "Gants nitrile", quantite: 0, tarif: 8 }],
     commandes,
