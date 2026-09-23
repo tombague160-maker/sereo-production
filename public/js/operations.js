@@ -543,12 +543,29 @@ function renderDashboard() {
       cible: "livreur",
     });
   }
-  const out = data.stock.filter((p) => p.stockStatus === "rupture").length;
+  // Decision du 23/09 : un « Livre » en retard est accepte meme sur un rayon
+  // insuffisant, qui passe alors en negatif. Ce n'est pas une rupture comme
+  // une autre : le stock affiche est FAUX tant qu'on n'a pas recompte. Il a sa
+  // ligne, avant les ruptures, et n'est pas compte deux fois.
+  const estNegatif = (p) => p.quantityAvailable !== null && p.quantityAvailable !== undefined
+    && Number(p.quantityAvailable) < 0;
+  const negatifs = data.stock.filter(estNegatif);
+  if (negatifs.length) {
+    alerts.push({
+      titre: `${negatifs.length} produit${negatifs.length > 1 ? "s" : ""} en stock négatif`,
+      detail: `Livré sur stock insuffisant, à recompter : ${negatifs
+        .slice(0, 3)
+        .map((p) => `${p.nom || p.name || p.libelle || "Produit"} (${p.quantityAvailable})`)
+        .join(", ")}`,
+      cible: "stock",
+    });
+  }
+  const ruptures = data.stock.filter((p) => p.stockStatus === "rupture" && !estNegatif(p));
+  const out = ruptures.length;
   if (out) {
     alerts.push({
       titre: `${out} produit${out > 1 ? "s" : ""} en rupture`,
-      detail: data.stock
-        .filter((p) => p.stockStatus === "rupture")
+      detail: ruptures
         .slice(0, 3)
         .map((p) => p.nom || p.name || p.libelle || "Produit")
         .join(", "),

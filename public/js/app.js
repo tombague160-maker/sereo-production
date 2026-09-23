@@ -4010,14 +4010,18 @@ function creerLigneStock(product) {
   const id = escapeAttribute(product.id);
   const nom = getProductName(product);
   const enAlerte = ["stock_faible", "rupture"].includes(level.status);
+  // Decision du 23/09 : un « Livre » en retard est accepte meme quand le rayon
+  // n'en a plus assez ; le rayon passe alors en negatif. Ce negatif se DIT ici
+  // (et dans « A regler ») : il appelle un recomptage, pas une rupture de plus.
+  const negatif = quantite !== null && Number(quantite) < 0;
   const ligne = document.createElement("div");
   ligne.className = `stk-ligne${enAlerte ? " stk-ligne--alerte" : ""}`;
   ligne.innerHTML = `
-    <span class="stk-nom">${escapeHtml(nom)}${level.status === "a_renseigner" ? ` <span class="stk-a-renseigner">À renseigner</span>` : ""}</span>
+    <span class="stk-nom">${escapeHtml(nom)}${level.status === "a_renseigner" ? ` <span class="stk-a-renseigner">À renseigner</span>` : ""}${negatif ? ` <span class="stk-negatif">Stock négatif · à recompter</span>` : ""}</span>
     <span class="stk-code">${escapeHtml(product.code || product.sku || "-")}</span>
     <span class="stk-reserve">${escapeHtml(reserve)} sur commandes</span>
     <span class="stk-droite"><label class="sr-only" for="stk-seuil-${id}">Seuil de ${escapeHtml(nom)}</label><input class="stk-saisie stk-saisie--seuil" id="stk-seuil-${id}" data-stock-threshold-input data-product-id="${id}" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttribute(seuil)}"></span>
-    <span class="stk-droite"><label class="sr-only" for="stk-qte-${id}">Stock de ${escapeHtml(nom)}${enAlerte ? ", sous le seuil" : ""}</label><input class="stk-saisie stk-saisie--stock" id="stk-qte-${id}" data-stock-input data-product-id="${id}" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttribute(quantite === null ? "" : quantite)}" placeholder="—"></span>
+    <span class="stk-droite"><label class="sr-only" for="stk-qte-${id}">Stock de ${escapeHtml(nom)}${negatif ? ", négatif, à recompter" : enAlerte ? ", sous le seuil" : ""}</label><input class="stk-saisie stk-saisie--stock" id="stk-qte-${id}" data-stock-input data-product-id="${id}" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttribute(quantite === null ? "" : quantite)}" placeholder="—"></span>
     <span class="stk-ajuster">
       <button class="stk-pas" type="button" data-product-id="${id}" data-stock-delta="-1" aria-label="Retirer 1 unité de ${escapeAttribute(nom)}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button>
       <button class="stk-pas stk-pas--plus" type="button" data-product-id="${id}" data-stock-delta="1" aria-label="Ajouter 1 unité à ${escapeAttribute(nom)}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button>
@@ -4127,6 +4131,13 @@ async function changeStock(productId, delta) {
   if (!product) return;
 
   const currentQuantity = getProductQuantity(product) ?? 0;
+  // Un stock negatif (livraison acceptee sur stock insuffisant, 23/09) ne se
+  // corrige pas a coups de −/+ : ramene a zero, « −1 » sur −2 AJOUTAIT deux
+  // unites. On recompte le rayon et on saisit ce qu'on a compte.
+  if (currentQuantity < 0) {
+    notify(`Stock négatif (${currentQuantity}) : recompte le rayon et saisis la quantité comptée.`, "warning");
+    return;
+  }
   const nextQuantity = Math.max(0, currentQuantity + delta);
   await setStock(productId, nextQuantity);
 }
