@@ -20,12 +20,12 @@ docker-compose*.yaml
 *.subfolder.conf
 nginx-sereo.conf
 
-# Donnees runtime - JAMAIS dans l'image (montees en volume)
-data/db.json
-data/*.sqlite
-data/*.sqlite-shm
-data/*.sqlite-wal
-data/backups/
+# Donnees runtime - JAMAIS dans l'image (montees en volume). Le dossier ENTIER,
+# comme .gitignore depuis le 18/09 : une liste de fichiers laissait passer
+# tout nouveau fichier -- data/session-secret (23/09), cree par un serveur
+# lance sans SEREO_AUTH_SESSION_SECRET, suffit a signer des sessions. Le
+# Dockerfile recree data/ et data/backups/ (mkdir -p).
+data/
 uploads/
 imports/
 exports/
