@@ -160,7 +160,15 @@ test("les pilules de fréquence recalculent les trois prochaines dates, sans rie
   await expect(apercu.nth(1)).toContainText("+ 15 j");
   await expect(apercu.nth(2)).toContainText(/Lundi 2 mars/);
   await expect(page.locator("#subScheduleHint")).toContainText("Samedi, dimanche, lundi : un intervalle de 15 jours décale le jour de la semaine");
-  await pilule("Tous les mois, même date").check({ force: true });
+  // Le nom accessible de chaque pilule contient son texte visible (WCAG 2.5.3) :
+  // « cliquer Mensuel » a la voix doit trouver le radio « Mensuel ».
+  const sansEtiquette = await page.evaluate(() =>
+    [...document.querySelectorAll("#subscriptionDialog .abo-cr-pilule")]
+      .map(p => ({ vu: p.querySelector("span").textContent.trim(), nom: p.querySelector("input").getAttribute("aria-label") }))
+      .filter(m => !m.nom.toLowerCase().includes(m.vu.replace(/…$/, "").toLowerCase()))
+      .map(m => `${m.vu} → ${m.nom}`));
+  expect(sansEtiquette).toEqual([]);
+  await pilule("Mensuel").check({ force: true });
   await expect(apercu.nth(1)).toContainText(/Samedi 28 février/);
   await expect(apercu.nth(2)).toContainText(/Mardi 31 mars/);
   await expect(page.locator("#subScheduleHint")).toContainText("le dernier jour du mois quand il est plus court");
