@@ -76,6 +76,20 @@ let deliverySelection = new Set();
 // liste « vide » ne veut rien dire : ni « aucune commande », ni une selection
 // possible (voir renderDeliveryCandidates et activerSelectionLivraison).
 let commandesChargees = false;
+// Vrai quand /api/orders a ECHOUE et que `orders` n'est que le repli vide :
+// les listes disent alors l'erreur, pas « Aucune commande » (audit du 23/09).
+let commandesEnErreur = false;
+
+/** L'etat « on ne sait pas » d'une liste de commandes, avec de quoi reessayer. */
+function etatCommandesIndisponibles() {
+  return `
+    <div class="empty-state empty-state--erreur">
+      <h4>Commandes indisponibles</h4>
+      <p>Le chargement des commandes a échoué : la liste n'a pas pu être lue, elle n'est pas vide.</p>
+      <button class="button secondary empty-state-action" type="button" data-action="refresh">Réessayer</button>
+    </div>
+  `;
+}
 let deliveryFilter = {
   sector: "Tous",
   city: "",
@@ -202,7 +216,18 @@ function showStorageRecoveryBanner(recovery) {
   document.body.prepend(banner);
 }
 
-window.addEventListener("load", () => resetViewportScroll(false), { once: true });
+// Au `load`, la page repart du haut (le navigateur restaure sinon la position
+// d'avant le rechargement). MAIS `load` attend toutes les ressources : au
+// telephone, mesure du 23/09, il tombait 3 s apres l'ouverture, et ramenait
+// en haut quelqu'un qui avait deja defile. Un geste de l'utilisateur avant
+// `load` gagne : on ne lui reprend pas la page.
+let defilementParUtilisateur = false;
+for (const geste of ["wheel", "touchmove", "keydown", "pointerdown"]) {
+  window.addEventListener(geste, () => { defilementParUtilisateur = true; }, { once: true, passive: true, capture: true });
+}
+window.addEventListener("load", () => {
+  if (!defilementParUtilisateur) resetViewportScroll(false);
+}, { once: true });
 
 function setNavigationSearchValue(value, sourceInput = null) {
   // #globalNavigationSearch vivait dans la barre du haut, que les planches
@@ -312,10 +337,18 @@ function renderBadgesNav(compteurs) {
   poser("commandes", compteurs.aTraiter);
   poser("tournee", compteurs.livraisonsDuJour);
   poser("stock", compteurs.aRecommander, true);
-  // Pas de pastille « Abonnements ». La planche en montre une, mais le compte
-  // correspondant vit dans le module Operations et n'est pas lisible d'ici.
-  // Un nombre faux coute plus cher qu'un nombre absent : elle sera branchee
-  // avec la planche Abonnements, pas devinee maintenant.
+  // La pastille « Abonnements » (audit du 23/09). Le nombre qui appelle un
+  // geste : les echeances dont le rappel est arrive et qui n'ont pas encore de
+  // commande -- « a generer ». Les echeances en retard en font partie (une
+  // echeance passee a forcement son rappel derriere elle) ; il en suffit d'une
+  // pour que la pastille passe en alerte, comme celle du Stock. Meme regle que
+  // l'ecran et le tableau de bord : une echeance deja commandee n'attend plus
+  // rien. Lu dans /api/subscriptions (abonnementsDonnees), la source de
+  // l'ecran Abonnements -- pas un second calcul.
+  const aGenerer = (abonnementsDonnees.occurrences || []).filter(o => o.due && !o.orderId);
+  poser("abonnements", aGenerer.length, aGenerer.some(o => o.overdue));
+  const pastilleAbonnements = document.querySelector('.nav-badge[data-badge="abonnements"]');
+  if (pastilleAbonnements) pastilleAbonnements.setAttribute("aria-label", `${aGenerer.length} échéance${aGenerer.length > 1 ? "s" : ""} à générer`);
 }
 
 function filterNavigation(value) {
@@ -1033,8 +1066,10 @@ function poserSquelettes() {
 // sous-titre, qui lit la tuile, ne trouve pas de nombre et n'en invente pas.
 // Premier chargement seulement : a l'actualisation, les chiffres qu'on avait
 // restent lisibles pendant que les neufs arrivent.
+// « Cette semaine » (#opWeekCount) s'y ajoute le 23/09 : sa pilule disait
+// « 0 » pendant tout le chargement, le meme zero qui ment.
 const CHIFFRES_EN_ATTENTE = ["opRevenue", "opBasket", "opDelivered", "dashboardPreparingCount", "dashboardDeliveringCount",
-  "dashboardPreparingDetail", "dashboardDeliveringDetail"];
+  "dashboardPreparingDetail", "dashboardDeliveringDetail", "opWeekCount"];
 let chiffresDejaCharges = false;
 
 function poserChiffresEnAttente() {
@@ -1288,6 +1323,7 @@ async function loadData() {
     }
   });
 
+  commandesEnErreur = failed.includes("orders");
   appliquerDonnees(data);
 
   if (failed.length === 0 && copiees.length === 0) {
@@ -1680,7 +1716,7 @@ function renderCommandes() {
       + `<span class="cmd-articles cmd-droite">${colonneArticles}</span>`
       + `<span class="cmd-statut cmd-droite">${badgeDeCommande(order)}</span>`
       + `</div>`;
-  }).join("") : emptyState("Aucune commande", commandesFiltre.recherche || commandesFiltre.bloquees || commandesFiltre.statut !== "toutes"
+  }).join("") : commandesEnErreur && !(orders || []).length ? etatCommandesIndisponibles() : emptyState("Aucune commande", commandesFiltre.recherche || commandesFiltre.bloquees || commandesFiltre.statut !== "toutes"
     || commandesFiltre.completer || commandesFiltre.du || commandesFiltre.au || commandesFiltre.secteur
     ? "Aucune commande ne correspond à ce filtre."
     : "Les commandes importées et saisies apparaîtront ici.");
@@ -3377,7 +3413,10 @@ async function setStock(productId, value) {
   });
 
   await loadData();
-  notify("Stock mis à jour.", "success");
+  // Une cle : chaque − / + du telephone REMPLACE le toast precedent au lieu
+  // d'en empiler un de plus (quatre secondes chacun), qui finissait par
+  // couvrir les boutons eux-memes.
+  notify("Stock mis à jour.", "success", { cle: "stock-maj" });
 }
 
 async function setStockThreshold(productId, value) {
@@ -3589,7 +3628,9 @@ function renderPreparation() {
   container.innerHTML = "";
 
   if (!orders.length) {
-    container.innerHTML = emptyState("Aucune commande à préparer", "Importe les dossiers du jour pour générer la préparation.", { libelle: "Importer les dossiers", onglet: "journee" });
+    container.innerHTML = commandesEnErreur
+      ? etatCommandesIndisponibles()
+      : emptyState("Aucune commande à préparer", "Importe les dossiers du jour pour générer la préparation.", { libelle: "Importer les dossiers", onglet: "journee" });
     return;
   }
 
@@ -3663,24 +3704,21 @@ function etapeDePreparation(order) {
   return { cle: "a-faire", mot: "À faire" };
 }
 
-/** Ce qui manque, en un mot, pour une commande bloquee -- comme « Il manque 2 articles ». */
-function detailDeBlocage(order) {
-  const manquants = (order.stockLines || []).filter(ligne => ligne.status !== "ok").length;
-  if (manquants === 1) return "Il manque 1 article";
-  if (manquants > 1) return `Il manque ${manquants} articles`;
-  return formatStockStatus(order.stockStatus) || "Stock à vérifier";
-}
-
 function createPreparationRow(order, { unique = false } = {}) {
   if (unique) return createPreparationRowMobile(order);
   const etape = etapeDePreparation(order);
-  const lignes = (order.products || []).length;
-  const articles = lignes === 1 ? "1 article" : `${lignes} articles`;
+  // « n articles » compte les QUANTITES, comme au telephone et comme le resume
+  // (« 29 articles au total ») : le bureau comptait les lignes de produit, et
+  // la meme commande disait « 2 articles » ici et « 6 articles » au telephone.
+  const n = getOrderProductCount(order);
+  const articles = n === 1 ? "1 article" : `${n} articles`;
   const ville = order.city ? formatSectorLabel(order.city) : (order.sector ? formatSectorLabel(order.sector) : "");
   // Quatre informations : l'etat (disque), le nom, le detail, le badge. Pour
   // une commande bloquee, le manque REMPLACE le detail, comme sur la planche.
+  // Le manque aussi, en articles (manqueDeLaCommande, celui du telephone) :
+  // « Il manque 1 article » pour cinq gants absents etait la meme confusion.
   const detail = etape.cle === "bloquee"
-    ? `<span class="commande-ligne-alerte">${escapeHtml(detailDeBlocage(order))}</span>`
+    ? `<span class="commande-ligne-alerte">${escapeHtml(manqueDeLaCommande(order))}</span>`
     : `<span>${escapeHtml([ville, articles].filter(Boolean).join(" · "))}</span>`;
   const row = document.createElement("article");
   row.className = `commande-ligne commande-ligne--${etape.cle}`;
@@ -7414,8 +7452,21 @@ function notify(message, type = "info", options = {}) {
   const region = document.getElementById("toastRegion");
   if (!region) return null;
 
+  // `options.cle` : un toast de meme cle encore affiche est RETIRE, pas
+  // doublonne -- un seul message vivant par cle. Reserve aux toasts sans
+  // action ni terme (retirerToast ne declenche ni l'un ni l'autre).
+  if (options.cle) {
+    for (const ancien of region.querySelectorAll(".toast[data-cle]")) {
+      if (ancien.dataset.cle === String(options.cle)) {
+        retirerToast(ancien);
+        ancien.remove();
+      }
+    }
+  }
+
   const toast = document.createElement("div");
   toast.className = `toast toast-${type}`;
+  if (options.cle) toast.dataset.cle = String(options.cle);
   toast.setAttribute("role", type === "error" ? "alert" : "status");
 
   const text = document.createElement("span");

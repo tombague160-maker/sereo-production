@@ -1596,6 +1596,14 @@ function getSafeRedirectTarget(value) {
   return target;
 }
 
+/** « 15 secondes », « 2 minutes » : la duree du blocage, dite comme a l'ecran. */
+function formatDureeDeBlocage(ms) {
+  const secondes = Math.max(1, Math.round(ms / 1000));
+  if (secondes < 120) return `${secondes} seconde${secondes > 1 ? "s" : ""}`;
+  const minutes = Math.round(secondes / 60);
+  return `${minutes} minute${minutes > 1 ? "s" : ""}`;
+}
+
 function renderLoginPage(req, res) {
   if (!isAccessAuthEnabled()) {
     res.redirect(getSafeRedirectTarget(req.query.next));
@@ -1620,11 +1628,15 @@ function renderLoginPage(req, res) {
     // basculer entre singulier et pluriel quand le compteur descend a 1.
     errorMarkup = `<p class="login-error" role="alert" aria-live="polite">Trop de tentatives. R&eacute;essaie dans <span id="lockout-countdown">${lockedSeconds}</span> <span id="lockout-unit">seconde${plural}</span>.</p>`;
   } else if (hasError) {
+    // UNE phrase (planche 9c) : « Identifiant ou mot de passe incorrect. Il te
+    // reste 2 tentatives avant un blocage de 15 secondes. » Les essais restants
+    // etaient un <span> a part, dans un conteneur flex : deux colonnes cote a
+    // cote, dans une autre couleur. Ce n'est plus que du texte.
     const attemptsRemaining = status.remaining;
     const attemptsLine = attemptsRemaining > 0 && attemptsRemaining < AUTH_RATE_LIMIT_MAX_ATTEMPTS
-      ? `<span class="login-error-attempts">Il te reste ${attemptsRemaining} tentative${attemptsRemaining > 1 ? "s" : ""} avant blocage.</span>`
+      ? ` Il te reste ${attemptsRemaining} tentative${attemptsRemaining > 1 ? "s" : ""} avant un blocage de ${formatDureeDeBlocage(AUTH_RATE_LIMIT_LOCKOUT_MS)}.`
       : "";
-    errorMarkup = `<p class="login-error" role="alert">Identifiant ou mot de passe incorrect.${attemptsLine ? " " + attemptsLine : ""}</p>`;
+    errorMarkup = `<p class="login-error" role="alert">Identifiant ou mot de passe incorrect.${attemptsLine}</p>`;
   }
 
   const responseStatus = isLocked ? 429 : (hasError ? 401 : 200);
@@ -1724,7 +1736,6 @@ function renderLoginPage(req, res) {
       content: ""; flex: none; width: 16px; height: 16px; margin-top: 2px; border-radius: 999px;
       box-shadow: inset 0 0 0 2px var(--alerte);
     }
-    .login-error-attempts { display: block; color: var(--secondaire); font-weight: 400; }
     button[type="submit"] {
       width: 100%; height: 48px; margin-top: 6px; border: 0; border-radius: 999px;
       background: var(--principal); color: var(--sur-principal);

@@ -70,6 +70,43 @@ test("au téléphone, le pied reste lisible sur son fond (pas sur les taches)", 
   await ctx.close();
 });
 
+test("après un échec, l'identifiant tapé est gardé (planche 9c), et nulle part ailleurs", async ({ page }) => {
+  // Audit du 23/09, defaut 5 : l'identifiant etait efface. Il est garde par
+  // l'onglet (sessionStorage), jamais dans l'URL, jamais renvoye par le
+  // serveur ; le mot de passe, lui, repart vide.
+  await page.goto(BASE + "/login", { waitUntil: "networkidle" });
+  await page.fill("#username", "identifiant-du-banc");
+  await page.fill("#password", "pas-le-bon-mot-de-passe");
+  await Promise.all([page.waitForURL(/\/login\?error=1/), page.getByRole("button", { name: "Se connecter" }).click()]);
+  await expect(page.locator("#username")).toHaveValue("identifiant-du-banc");
+  await expect(page.locator("#password")).toHaveValue("");
+  await expect(page.locator("#password")).toBeFocused();
+  expect(page.url()).not.toContain("identifiant-du-banc");
+  const html = await (await page.request.get(page.url())).text();
+  expect(html, "le serveur ne renvoie ni l'identifiant ni le mot de passe").not.toMatch(/identifiant-du-banc|pas-le-bon-mot-de-passe/);
+  // Une page de connexion ordinaire l'oublie.
+  await page.goto(BASE + "/login", { waitUntil: "networkidle" });
+  await expect(page.locator("#username")).toHaveValue("");
+});
+
+test("« Se déconnecter » ferme vraiment la session", async ({ browser }) => {
+  // Audit du 23/09, defaut 14 : aucun bouton de deconnexion dans l'interface.
+  // Identifiants JETABLES du serveur de banc (playwright.config.js).
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await ctx.newPage();
+  await page.goto(BASE + "/login", { waitUntil: "networkidle" });
+  await page.fill("#username", "banc");
+  await page.fill("#password", "banc-e2e-local-sans-valeur");
+  await Promise.all([page.waitForURL(u => !u.pathname.startsWith("/login")), page.getByRole("button", { name: "Se connecter" }).click()]);
+  const bouton = page.locator(".sidebar").getByRole("button", { name: "Se déconnecter" });
+  await expect(bouton).toBeVisible();
+  await Promise.all([page.waitForURL(/\/login/), bouton.click()]);
+  // La session est partie : l'application renvoie a la connexion.
+  await page.goto(BASE + "/", { waitUntil: "networkidle" });
+  await expect(page.locator("#username")).toBeVisible();
+  await ctx.close();
+});
+
 test("le mot de passe affiché repasse masqué à l'envoi", async ({ page }) => {
   await page.goto(BASE + "/login", { waitUntil: "networkidle" });
   await page.fill("#password", "secret");
