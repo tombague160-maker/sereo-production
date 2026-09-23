@@ -4991,3 +4991,285 @@ interface-finitions, abonnements-mobile, clients-mobile : 45/45.
 - La durée de session (12 h, sans glissement) décide de ce qui se rouvre le matin :
   à trancher si les tournées commencent loin de la connexion.
 - Relecture adverse de ce lot.
+
+## Calcul routier OSRM intégré à l image Séréo (23/09)
+
+Décision 2 revue par Thomas : **aucune manipulation de sa part**. Son serveur (OMV,
+Docker, service `sereo-updater`, builder Docker LEGACY) reconstruit l'image depuis le
+`Dockerfile` à chaque release ; le compose côté serveur, hors dépôt, ne change pas.
+Tout le reste est dans l'image et dans Séréo. Branche `feat/osrm-integre`.
+
+### Fait
+
+- **Image.** `Dockerfile` : base `node:24-trixie-slim` (Debian 13, la même que l'image
+  OSRM) au lieu de `node:24-alpine`, dont la libc (musl) n'exécute pas les binaires
+  OSRM officiels (glibc). Étape `FROM ghcr.io/project-osrm/osrm-backend:v26.9.0-debian
+  AS osrm` (version **épinglée** ; l'image Docker Hub `osrm/osrm-backend` n'est plus
+  publiée depuis 2021, v5.25) ; `COPY --from=osrm` de `osrm-extract`, `-partition`,
+  `-customize`, `-routed` et du profil voiture (`/opt/osrm/profiles/car.lua` et son
+  dossier `lib/`). Par apt (`--no-install-recommends`) : `tini`, `osmium-tool`,
+  `ca-certificates`. `/sbin/tini` est un lien vers `/usr/bin/tini` : ENTRYPOINT
+  inchangé. HEALTHCHECK par `node -e fetch(...)` (pas de `wget` sur slim). Utilisateur
+  `node` (uid 1000), `NODE_ENV`, variables : inchangés.
+- **Vérifié dans l'image construite** (builder legacy, `DOCKER_BUILDKIT=0`) : `ldd` des
+  quatre binaires OSRM et d'`osmium` : **0 bibliothèque manquante** (OSRM ne dépend que
+  de libstdc++, libgcc, libm, libc) ; `osrm-routed --version` v26.9.0 ; osmium 1.18.0 ;
+  `node:sqlite` (SQLite 3.53.4) ; `nice` et `ionice` présents ; `id` = 1000(node).
+- **Taille de l'image** : 76,4 Mo → **113 Mo** compressés (contenu) ; 312 Mo → **464 Mo**
+  sur disque (mesures `docker image ls`, avant = arbre de `main` `c05e6f1`).
+- **Gestionnaire `lib/osrm-local.js`**, démarré par `startServer()` APRÈS l'écoute et
+  sans être attendu (`demarrer()` rend la main, ne jette jamais, `setImmediate`) :
+  1. choisit la zone selon la mémoire (`os.totalmem`, ou la limite du cgroup
+     `process.constrainedMemory()` si plus basse) et le disque libre du volume
+     (`statfs`, plus la place déjà prise par nos cartes) — tableau plus bas ;
+     `SEREO_OSRM_ZONE` la force (`france`, `voisins`, `region`, `aucune`, ou des
+     chemins Geofabrik comme `europe/monaco`) ;
+  2. télécharge les extraits Geofabrik en HTTPS dans `/app/data/osrm/telechargements`,
+     reprend un téléchargement interrompu (`Range` + `If-Range` sur l'ETag), vérifie la
+     somme MD5 **publiée par Geofabrik** : un fichier faux est supprimé et refusé ;
+  3. **fusionne** plusieurs extraits avec `osmium merge`. Choix : `osrm-extract` ne lit
+     qu'un fichier, et préparer chaque région à part donnerait des cartes séparées où
+     Besançon → Mulhouse ou Dole → Lausanne serait incalculable ; osmium coûte
+     quelques Mo dans l'image ;
+  4. prépare `extract → partition → customize` (MLD, profil voiture) sous `nice -n 19`
+     et `ionice -c 3`, avec la moitié des cœurs, dans `versions/<v…>-en-cours`, **à
+     côté** de la carte en service ; ne bascule qu'après succès complet : renommage du
+     dossier, puis pointeur `courante.json` réécrit par renommage (atomique). Un échec
+     supprime le dossier en cours et **garde l'ancienne carte**, qui continue de
+     servir ;
+  5. lance `osrm-routed --algorithm mld --ip 127.0.0.1 --port 5000 --mmap
+     --default-radius 3000`, le sonde (prêt au premier HTTP), le surveille et le
+     **relance** s'il meurt (2 s, 5 s, 15 s, 60 s, puis 5 min) ;
+  6. refait la carte **chaque mois** : à 3 h (Europe/Paris) quand elle a 30 jours ; la
+     toute première carte part 2 minutes après le démarrage, à toute heure ; après un
+     échec, nouvel essai à 3 h, jamais deux essais à moins de 20 h ; supprime les
+     anciennes versions et les extraits après une bascule réussie ;
+  7. journalise chaque étape (`[osrm-local] …`, sans URL complète ni donnée
+     personnelle) ; `SEREO_OSRM_LOCAL=0` coupe tout (ni réseau, ni processus, ni
+     dossier) ; sans binaires OSRM (poste de développement, CI), il ne fait rien.
+- **Routage.** `lib/routing.js` : `definirServeurLocal()`. Quand la carte locale est
+  prête, elle passe AVANT la chaîne du lot 7 (`SEREO_ROUTING_URL`, puis son repli), qui
+  reste le repli. Un refus de la carte locale (4xx, typiquement `NoSegment` : point à
+  plus de 3 km de toute route de la zone) envoie CE calcul au serveur suivant, sans
+  pause ; une panne (réseau, délai, 5xx) met la carte locale en pause 60 s, comme le
+  principal. Le code du lot 7 est inchangé ; ses bancs restent verts.
+- **État visible.** `/api/storage/status` porte `calculRoutier` (actif, prêt, zone, date
+  de la carte, étape en cours, dernière erreur, espace utilisé, raison, `resume`).
+  Paramètres → « Réglages tournée » : une ligne « Calcul routier » affiche `resume`,
+  par exemple « Sur carte locale « Bourgogne-Franche-Comté », données du 22/09/2026,
+  1,2 Go. » ou « Serveur public en attendant la carte locale « … » : téléchargement
+  1/2 : 42 %. ». Aucun CSS ajouté (`.item`, `.muted` existants).
+- `.env.example` : `SEREO_OSRM_LOCAL`, `SEREO_OSRM_ZONE`, `SEREO_OSRM_DIR`,
+  `SEREO_OSRM_PORT`. `npm run check` vérifie `lib/osrm-local.js`.
+
+### Zones et défauts prudents
+
+Seuils = mémoire ET disque (libre + nos cartes). Tailles des extraits Geofabrik
+relevées le 22/09/2026 ; Geofabrik découpe la France selon les ANCIENNES régions.
+
+| Zone | Extraits | Téléchargement | Mémoire exigée | Disque exigé |
+|---|---|---|---|---|
+| `france` | `europe/france` | 5,1 Go | ≥ 24 Go | ≥ 50 Go |
+| `voisins` | bourgogne, franche-comte, alsace, lorraine, champagne-ardenne, auvergne, rhone-alpes, centre, ile-de-france, switzerland | 2,5 Go | ≥ 12 Go | ≥ 30 Go |
+| `region` | bourgogne, franche-comte | 0,33 Go | ≥ 3 Go | ≥ 6 Go |
+| (rien) | serveur public | — | — | — |
+
+Base des seuils (estimations, **non mesurées au-delà de Monaco**) : `osrm-extract`
+monte à environ 2,5 fois l'extrait en mémoire, plus Séréo et l'ancienne carte qui sert
+pendant la mise à jour ; disque = extraits + fusion + DEUX cartes (l'ancienne reste
+jusqu'à la bascule), une carte MLD pesant 2 à 4 fois l'extrait (Monaco mesuré : 1,25 Mo
+de carte pour 0,69 Mo d'extrait, 1,8×).
+
+### Vérification réelle (Docker Desktop, ce poste, 23/09)
+
+Image construite avec `DOCKER_BUILDKIT=0`, lancée avec `SEREO_OSRM_ZONE=europe/monaco`
+et un volume neuf :
+
+- `/healthz` : **200 en 0,5 s** après `docker run` ; conteneur `healthy` (healthcheck
+  node, code 0).
+- Au bout de 2 min : téléchargement (MD5 vérifiée), extract, partition, customize,
+  bascule, `osrm-routed` lancé et prêt, **en 2 s** au total ; `courante.json`, un seul
+  dossier de version, extraits supprimés, 1,25 Mo sur le disque ; `osrm-routed` à 7 Mo
+  de mémoire (mmap).
+- Dans le conteneur : `/route` Ok (2 009 m, 228 s) ; un point à Paris → **400
+  NoSegment** : le rayon de 3 km refuse bien un point hors zone.
+- **Tournée par Séréo** : conteneur relancé avec `SEREO_ROUTING_URL=http://127.0.0.1:9`
+  (injoignable) et `SEREO_ROUTING_REPLI_URL=` (aucun repli) : la carte locale était
+  le SEUL chemin possible. `POST /api/routes` sur 3 commandes fictives à Monaco :
+  **201, `routingMode: road`, 4,6 km**. Au redémarrage, la carte en place est relancée
+  sans rien retélécharger.
+- **Relance réelle** : `osrm-routed` tué (`SIGKILL`) → la tournée suivante échoue
+  (« indisponible » : aucun repli dans ce montage, contre-témoin) → relance au bout de
+  2 s → la tournée d'après passe (201, 4,6 km).
+- `docker stop` : 0,37 s. Conteneur, volume, images de test, image OSRM et
+  `node:24-trixie-slim` supprimés ensuite.
+
+### Preuves rouges (ancien code, ou mutant ; cause lue)
+
+- `test/dockerfile-osrm.test.js` sur l'ancien `Dockerfile` : « aucune etape OSRM : FROM
+  node:24-alpine » ; « wget n'existe pas sur l'image slim : le healthcheck echouerait
+  toujours ».
+- `test/osrm-routage-local.test.js` sur les anciens `lib/routing.js` et `server.js` :
+  « server.js n'a pas de gestionnaire de carte locale », « lib/routing.js ne connait pas
+  la carte locale » (×3).
+- `test/e2e/calcul-routier.spec.js` sur l'ancien `app.js` + `index.html` : « element(s)
+  not found » (×2) ; nouvel `index.html` avec l'ancien `app.js` : « Expected: "Serveur
+  public (binaires OSRM absents de cette installation)." / Received: "Chargement…" ».
+- `lib/osrm-local.js` est neuf : son banc (`test/osrm-local.test.js`) et celui du
+  routage sont éprouvés par **20 mutants, 20 rouges, 0 échappé** (harnais en TAP ;
+  témoin : bancs non mutés verts). Un par comportement : ressources ignorées (« 16 Go
+  de memoire : pas la France entiere ») ; MD5 non vérifiée (préparation réussie sur un
+  fichier faux) ; bascule avant la préparation (« pointeur deja bascule pendant
+  osrm-extract », « le pointeur a bouge malgre l'echec ») ; dossier en cours gardé
+  (« version a moitie preparee laissee ») ; pas de relance (« jamais relance ») ;
+  `SEREO_OSRM_LOCAL` ignoré ; binaires non vérifiés ; pas de reprise ; planning sans
+  l'heure (« carte de 31 jours refaite a 14 h ») ; sans le délai de 20 h ; pas de
+  priorité basse (« osmium sans priorite basse ») ; `demarrer()` qui rend une promesse ;
+  anciennes versions gardées ; heure de Paris par `format()` (« heure de Paris
+  illisible » : `fr-FR` rend « 03 h », `Number` donne NaN — défaut réel, trouvé par le
+  banc pendant l'écriture) ; tailles en Go seulement ; refus local sans bascule (« Le
+  calcul routier refuse une des positions… ») ; pas de pause après panne ; carte
+  jamais consultée ; `server.js` qui ne branche pas son gestionnaire ; état absent de
+  `/api/storage/status`.
+- **Défaut trouvé en relisant, corrigé** (`f27206a`) : le flux d'écriture de l'extrait
+  n'avait pas d'écouteur « error ». Banc « ecriture impossible pendant le
+  telechargement » (réseau lent, dossier à la place du fichier partiel) sur le code
+  d'avant : **exception non rattrapée** `EISDIR … open …europe_a.osm.pbf.part` (Séréo
+  serait tombé), puis préparation bloquée jusqu'au délai de silence. Harnais repassé
+  sur le code final : 20 mutants, 0 échappé (témoins : 14 et 4 `ok`).
+- Le premier passage du harnais disait **20 échappés** : il cherchait des lignes TAP
+  (`not ok`) dans la sortie du rapporteur par défaut. Instrument muet, pris par son
+  propre compte ; corrigé (`--test-reporter=tap`, témoin qui compte les `ok`) avant
+  tout verdict.
+
+### Bancs
+
+`npm run check` ; `npm test` **565/565** (dont `test/osrm-local.test.js` 14, `test/osrm-routage-local.test.js` 4, `test/dockerfile-osrm.test.js` 2). E2E par `pw-lot.config.js` (port 3326) :
+`calcul-routier`, `carte-telephone`, `ecran-livreur`, `hors-ligne`,
+`integration-lots-1-5`, `livreur-ne-perd-rien`, `meilleur-trajet`, `operations`,
+`parametres`, `parametres-mobile`, `tournee`, `tournee-mobile`, `tabs`. Premier passage
+86/88 : rouges `carte-telephone:140` et `ecran-livreur:65`, verts au passage suivant
+(19/19), cause non lue. Second passage 77/80 : les trois rouges sont des **ports pris
+par un autre processus** (3188, 3175, et 3118 pour `operations.spec.js`, qui ne vérifie
+pas le sien) pendant que d'autres agents lançaient les mêmes bancs ; repassés seuls,
+verts (tournee-mobile, operations, livreur-ne-perd-rien 11/11).
+
+### Écarts nommés
+
+- La vérification Docker a porté sur l'arbre de `6ad728d` ; le correctif d'écriture
+  (`f27206a`) n'a été éprouvé que par les bancs, pas rejoué dans une image.
+- **Seuils de zone estimés**, pas mesurés : la première préparation chez Thomas sera la
+  première mesure réelle d'une région. La ligne de Paramètres et `docker logs` diront
+  la zone choisie, la durée de chaque étape et l'espace pris.
+- **Bascule mensuelle : quelques secondes de coupure.** `osrm-routed` est arrêté puis
+  relancé sur la nouvelle carte (un seul port, 5000). Pendant ce temps, tant que la
+  première carte n'est pas prête, et pour un point hors zone, le calcul passe par le
+  repli du lot 7 : les coordonnées de ces tournées-là sortent chez le serveur public.
+- **Rayon de 3 km** : un point hors zone mais à moins de 3 km d'une route de la zone est
+  accroché à cette route (calcul approché) au lieu d'aller au serveur public.
+- **Mémoire vue** : sans limite de mémoire sur le conteneur, `os.totalmem()` voit la
+  machine entière, y compris la part prise par les autres services de l'OMV. Les seuils
+  sont prudents pour cela ; `SEREO_OSRM_ZONE=region` le règle si besoin.
+- **Nouvelle dépendance de construction** : l'image OSRM vient de `ghcr.io`. Si le
+  serveur ne l'atteint pas pendant une reconstruction, le build échoue et le conteneur
+  reste sur l'ancienne image (repli non destructif de `sereo-updater`).
+- La zone `voisins` prend les anciennes régions ENTIÈRES (tout Rhône-Alpes, tout le
+  Centre…) : plus large que le rayon de 150 km, c'est voulu (« zone plus large que la
+  région pour tout couvrir »).
+- Hors Docker, si Node est tué par un signal, `osrm-routed` peut lui survivre (le
+  gestionnaire ne le tue que sur `exit`) ; dans Docker, il disparaît avec le conteneur
+  (mesuré : `docker stop` 0,37 s).
+- Le crochet « hawkscan » proposé après le commit n'a pas été lancé (aucune clé, aucune
+  application exposée pour lui).
+- Docker Desktop a été démarré sur ce poste pour la vérification (il était arrêté) ; il
+  reste démarré.
+
+### Ce qui reste
+
+- Relever, après la release, sur la ligne de Paramètres et dans `docker logs sereo`
+  (lignes `[osrm-local]`) : zone choisie, durée de la première préparation, espace
+  pris ; ajuster les seuils et le tableau de `DEPLOYMENT.md`.
+- Mesurer l'ordre du lot 7 sur de vraies matrices OSRM, et relever la limite de 50
+  commandes, qui protégeait le serveur public (lot 7, « ce qui reste »).
+- Bascule sans coupure (deuxième port, puis échange) si les quelques secondes
+  mensuelles comptent.
+
+### Relecture adverse (23/09) : le sort des cinq défauts
+
+Relecture de `bc26295`. Les cinq défauts ont été vérifiés sur le code : **tous vrais**, tous
+corrigés dans `lib/osrm-local.js`, chacun avec un banc de `test/osrm-local.test.js`
+rouge sur `bc26295` (cause lue), puis vert.
+
+1. **Important : la bascule supprimait l'ancienne carte avant que la nouvelle soit
+   chargée.** Vrai : pointeur réécrit, `osrm-routed` relancé et anciennes versions
+   supprimées sans attendre la première réponse. Une carte refusée tournait en boucle
+   jusqu'à 30 jours, sans aucune erreur affichée.
+   *Correctif* : le premier lancement d'une carte neuve est un **essai**. La bascule
+   attend sa première réponse, et l'ancienne version n'est supprimée qu'après. Si la
+   carte est refusée ou ne répond pas : le pointeur revient à l'ancienne carte, la
+   version neuve est supprimée, l'ancienne est relancée, et l'erreur est notée
+   (« osrm-routed refuse la nouvelle carte (code 1 : …) »). Pour une carte **déjà en
+   place** qu'`osrm-routed` refuse (nouvelle version d'OSRM dans l'image, fichiers
+   abîmés) : après trois arrêts de suite sans une seule réponse, la carte est notée
+   refusée (`suivi.carteRefusee`). L'erreur apparaît alors dans Paramètres, et la carte
+   est refaite la nuit suivante à 3 h, sans attendre ses 30 jours. Si la carte finit par
+   répondre (un port qui se libère), la note est levée. Le commentaire du `Dockerfile`
+   dit maintenant ce qui se passe vraiment. Rouges : « une carte que osrm-routed refuse
+   est gardee comme carte en service » (actual true) ; « carte refusee relancee en boucle
+   sans erreur visible : Serveur public le temps que la carte locale … démarre. ».
+2. **Important : aucun plancher d'espace libre pour la base SQLite, sur le même
+   volume.** Vrai. *Correctif* : un plancher de **2 Go** (défaut, non mesuré chez Thomas)
+   est retiré du disque disponible dans le choix de la zone. Il est vérifié avant chaque
+   téléchargement et chaque étape, puis relu toutes les 30 s pendant qu'ils tournent. En
+   dessous, le téléchargement est interrompu ou l'étape est tuée (`SIGKILL`) : la
+   préparation échoue proprement et l'ancienne carte reste. Les extraits d'une autre zone
+   (ceux que le choix comptait comme de la place disponible) sont supprimés au début de
+   la préparation. Rouges : « 7 Go libres : la region (6 Go) prendrait la place de la
+   base » (actual 'region') ; « osrm-extract continue d'ecrire sous le plancher » (la
+   préparation ne finissait jamais) ; « telechargement mene a son terme sous le
+   plancher ».
+3. **Mineur : aucune étape n'avait de délai maximal.** Vrai. *Correctif* : **24 h** par
+   étape (la France en priorité basse est estimée à « plusieurs heures »). Au-delà :
+   `SIGKILL`, et la promesse se rejette sans attendre la sortie (un processus bloqué en
+   E/S peut ne jamais sortir), ce qui libère le gestionnaire. Rouge : « une etape bloquee
+   fige le gestionnaire ».
+4. **Mineur : supprimer `/app/data/osrm` faisait perdre la trace de l'essai.** Vrai :
+   `suivi.json` était écrit avant la recréation du dossier (ENOENT, simple
+   avertissement). *Correctif* : `noterSuivi` recrée le dossier. Rouge : « essai non
+   note ». `DEPLOYMENT.md` le dit.
+5. **Mineur : une release pendant la première préparation repoussait l'essai au
+   surlendemain.** Vrai. *Correctif* : la fin de chaque essai est notée (`derniereFin`).
+   Un essai commencé et jamais fini a été **interrompu** (conteneur recréé) : il reprend
+   tout de suite (2 min après le démarrage), sans la règle des 20 h. Cette tolérance
+   s'arrête après **trois interruptions de suite** : une préparation qui ferait tomber
+   le conteneur ne doit pas tourner en boucle. Rouge : « preparation interrompue par un
+   redemarrage : repoussee au surlendemain comme un echec ».
+
+**Harnais de mutation** sur le correctif : **18 mutants, 18 rouges**, chacun sur son
+propre banc ; témoin non muté : 24 `ok`. Le premier passage a laissé trois mutants
+**échappés** : l'essai relancé comme un service, la note de refus jamais levée, une
+version orpheline gardée si le pointeur ne s'écrit pas. Trois bancs ont été ajoutés pour
+eux (`b32f85b`), et ils sont maintenant rouges. Deux instruments étaient faux et ont été
+corrigés avant tout verdict. Le mutant « sans délai maximal », écrit `1e12`, dépassait le
+maximum de `setTimeout`, qui se déclenchait alors tout de suite : ses rouges avaient la
+mauvaise cause, et il a été réécrit (« une etape bloquee fige le gestionnaire »). Le banc
+du téléchargement, lui, s'appuyait sur l'abandon du `fetch`, que le faux réseau
+n'honore pas : la boucle d'écriture s'arrête donc aussi d'elle-même sous le plancher.
+
+**Bancs** : `test/osrm-local.test.js` 24/24 ; `npm test` **575/575** ; `npm run check`.
+E2E par `pw-lot.config.js` (port 3326), en un passage : `calcul-routier`, `parametres`,
+`tournee`, `tournee-mobile`, `ecran-livreur`, `carte-telephone`, `meilleur-trajet`,
+`livreur-ne-perd-rien`, `integration-lots-1-5`, `operations`, `hors-ligne` : **91/91**.
+
+**Écarts nommés (relecture)**
+- Le plancher (2 Go), le délai d'étape (24 h), le seuil de refus (3 arrêts) et la
+  tolérance aux interruptions (3 de suite) sont des **défauts**, pas des mesures.
+- La version d'OSRM n'est pas inscrite dans `courante.json` : l'incompatibilité se voit
+  au refus d'`osrm-routed`, pas avant. Quand l'image change de version, il y a donc
+  trois arrêts (relances à 2 s puis 5 s, environ 7 s en tout) avant la note, puis le serveur public jusqu'à 3 h.
+- Une carte refusée est refaite la **nuit suivante**, pas tout de suite (même règle
+  qu'un échec, 3 h), sauf si aucune tentative n'a jamais été notée.
+- Rien de ce correctif n'a été rejoué dans une image Docker : il n'est éprouvé que par
+  les bancs (binaires et réseau simulés).
+- Le crochet « hawkscan » proposé après chaque commit citait `dc78e54`, un commit qui
+  n'est pas de ce lot. Il n'a pas été lancé (aucune clé, aucune application exposée).
