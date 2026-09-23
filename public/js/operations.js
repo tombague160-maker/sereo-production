@@ -1057,7 +1057,8 @@ function openEditor(id) {
   basculerCatalogue(!sub?.products?.length);
   $("subStart").value = sub?.startDate || data.subscriptions.today;
   // La frequence. « Tous les 2 mois » n'a pas de pilule : « Autre... » en mois
-  // (l'ancien formulaire en faisait « tous les 2 jours » a la modification).
+  // (l'ancien formulaire rouvrait tout abonnement en mois sur « Mensuel » :
+  // l'enregistrer en faisait « tous les mois »).
   const f = sub?.frequency || { unit: "months", interval: 1 };
   const pilule = f.unit === "months"
     ? f.interval === 1 ? "monthly" : "custom"

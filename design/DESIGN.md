@@ -2605,7 +2605,8 @@ Le défilement d'un humain n'a pas été rejoué. Hors de ce lot.
 L'ancien formulaire « Nouvel abonnement » (un `<select>` de clients, une ligne
 « Produit / Quantité / Retirer » par produit, une liste déroulante de fréquences) est
 remplacé ; le `<dialog id="subscriptionDialog">` et ses identifiants de champ restent,
-l'intérieur est neuf. `abonnement-creation.spec.js` (10 cas, port 3304) ;
+l'intérieur est neuf. `abonnement-creation.spec.js` (12 cas depuis la relecture adverse,
+port 3304) ;
 `operations.spec.js` suit les nouveaux gestes.
 
 **Posé**
@@ -2632,7 +2633,9 @@ l'intérieur est neuf. `abonnement-creation.spec.js` (10 cas, port 3304) ;
   d'office : c'est le seul chemin pour le remplir.
 - **Le panier** : une ligne par produit, nom, « code · stock », et le pas de la planche
   (− rond en creux, quantité 19 px/700, + rond plein). À un, « − » s'appelle « Retirer … »
-  et retire la ligne ; le focus passe à la ligne voisine, sinon à « Catalogue ».
+  et retire la ligne ; le focus passe à la ligne voisine, sinon à « Catalogue ». Chaque
+  ligne porte aussi un lien « Retirer » sous son stock : le geste d'un clic de l'ancien
+  formulaire, quelle que soit la quantité (voir la relecture adverse, plus bas).
 - **Les pilules de fréquence** : 7 j · 10 j · 14 j · 15 j · 21 j · 28 j · Mensuel ·
   Autre…, des boutons radio (flèches du clavier, nom accessible « Tous les 15 jours »),
   44 px, la choisie en plein principal.
@@ -2666,9 +2669,11 @@ compare le corps du `POST /api/subscriptions` champ par champ) :
 
 **Décisions prises (questions ouvertes)**
 
-- **« Tous les 2 mois » se rouvre en « Autre… 2 mois ».** L'ancien éditeur rouvrait un
-  abonnement de `{ unit: "months", interval: 2 }` en « Nombre de jours personnalisé : 2 »
-  — et l'enregistrer en faisait « tous les 2 jours ». Corrigé, prouvé par mutation.
+- **« Tous les 2 mois » se rouvre en « Autre… 2 mois ».** L'ancien éditeur rouvrait tout
+  abonnement en mois sur « Mensuel », donc `{ unit: "months", interval: 2 }` aussi — et
+  l'enregistrer en faisait « tous les mois » (`interval: 1`). Corrigé, prouvé par
+  mutation. (Écrit d'abord « tous les 2 jours » : faux, relevé par la relecture adverse,
+  mesuré sur les lignes de `ef470c6`.)
 - **Les trois « prochaines » dates** partent d'aujourd'hui quand l'abonnement a commencé
   avant (modification) : les premières dates d'un abonnement de juin sont passées.
   « départ » n'est écrit que sur la vraie première livraison.
@@ -2722,3 +2727,44 @@ client », « Ajouter … au panier »). Deux mutations du code neuf : rouvrir �
 jours → « Expected: "months" / Received: "days" » ; l'anneau remis sur `--focus-ring` →
 cas sombre « Expected: not "none" », cas clair vert. Tout restauré par copie depuis le
 commit.
+
+### Relecture adverse de la création d'abonnement (23/09) — cinq défauts, quatre vrais
+
+Relecture de `f0cc23a`. Chaque défaut a été mesuré avant d'être corrigé ; banc :
+`abonnement-creation.spec.js` (port 3304), lancé avec l'ancien code puis avec le nouveau.
+
+- **Le premier « + » du catalogue ne faisait rien après une quantité tapée** (important,
+  VRAI). Le `change` du champ part au mousedown du clic suivant ; il redessinait tout
+  `#subCatalogueListe`, et le « + » sous le pointeur était remplacé avant le mouseup.
+  Corrigé : le `change` met à jour « N au panier » en place (`majComptesCatalogue`),
+  sans toucher aux boutons. Cas « une quantité tapée, puis « + » du catalogue » (saisie
+  au clavier, pas `fill`) : ancien code **Expected 2 / Received 1** ; le compte mis à
+  jour en place, mutant « change inerte » : Received « … · 12 au panier ».
+- **Plus de retrait d'un seul geste pour une ligne au-delà de 1** (mineur, VRAI).
+  L'ancien formulaire avait « Retirer » sur chaque ligne. Rendu : un lien « Retirer »
+  sous le stock de chaque ligne (nom accessible « Retirer … du panier », 44 px, l'anneau
+  du lot ; pas de marge haute négative, l'anneau couvrait « code · stock » en capture).
+  Le focus passe au « Retirer » voisin, sinon à « Catalogue ». « − » à un retire
+  toujours la ligne. Cas « une ligne de 120 se retire d'un seul geste » : ancien code,
+  contrôle absent ; mutant du focus rendu à « − » : Expected focused / Received inactive.
+- **Le fait écrit sur l'ancien formulaire était faux** (mineur, VRAI). Il ne faisait pas
+  « tous les 2 jours » d'un abonnement de 2 mois, il en faisait « tous les mois » :
+  les lignes de `ef470c6` exécutées telles quelles rouvrent sur `monthly` et enregistrent
+  `{"unit":"months","interval":1}`. Corrigé ici (Décisions prises), dans le commentaire
+  d'`openEditor` et dans celui du banc. Rien ne change au code.
+- **Le banc « Entrée n'envoie pas le formulaire » ne pouvait pas voir un envoi**
+  (mineur, VRAI sur le fond, FAUX sur le scénario). Le scénario du relecteur (retirer
+  `preventDefault` de la recherche client fait partir le formulaire) ne se produit pas :
+  mesuré, **0 envoi**. Entrée active « Changer de client », qui vient de prendre le
+  focus, et le banc tombait déjà (Expected "c-bellevue" / Received ""). Le fond est juste :
+  l'assertion `open` ne distinguait rien, et rien ne comptait les envois. Le banc compte
+  désormais les `submit` et presse Entrée sur plusieurs résultats et dans la recherche du
+  catalogue. Deux mutants que l'ancien banc laissait passer (`preventDefault` seulement
+  sur un résultat unique ; `preventDefault` retiré du catalogue) : Expected 0 / Received 1.
+- **Le nom accessible de « Mensuel » ne contenait pas « Mensuel »** (mineur, VRAI,
+  WCAG 2.5.3). Il devient « Mensuel : tous les mois, même date ». Le banc des pilules
+  vérifie que chaque nom contient son texte visible : ancien code, Received
+  `["Mensuel → Tous les mois, même date"]` ; les treize autres pilules passaient.
+
+Tous les mutants ont été restaurés par copie. Au vert : `abonnement-creation.spec.js`
+12 sur 12, et `operations.spec.js` 5 sur 5.

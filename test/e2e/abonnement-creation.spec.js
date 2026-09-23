@@ -252,8 +252,8 @@ test("créer, puis modifier : l'API reçoit tout ce que l'ancien formulaire envo
     status: "paused"
   });
   await expect(dialogue(page)).not.toHaveAttribute("open", "");
-  // La modification rouvre les memes reglages -- « tous les 2 mois » restait
-  // « tous les 2 JOURS » dans l'ancien formulaire.
+  // La modification rouvre les memes reglages -- l'ancien formulaire rouvrait
+  // « tous les 2 mois » sur « Mensuel », et l'enregistrait « tous les mois ».
   const cree = (await (await page.request.get(srv.base + "/api/subscriptions")).json()).items.find(s => s.clientId === "c-veto");
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.locator(`#subscriptionList [data-id="${cree.id}"]`).first().click();
