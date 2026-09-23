@@ -457,6 +457,15 @@ test("téléphone : les pilules ne suivent pas sur un autre écran", async ({ pa
   await ouvrirTelephone(page);
   await page.goto(srv.base + "/#stock", { waitUntil: "networkidle" });
   await expect(page.locator("#cmdPilules")).toBeHidden();
+  // Le cas que showTab ne voit pas : la fenetre passe sous 820 px pendant
+  // qu'un AUTRE ecran est ouvert. Les pilules entrent dans l'en-tete sans
+  // changement d'ecran ; elles doivent s'y ranger cachees.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.waitForTimeout(200);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(200);
+  expect(await page.locator("#cmdPilules").evaluate(e => Boolean(e.closest(".ecran-entete")))).toBe(true);
+  await expect(page.locator("#cmdPilules")).toBeHidden();
 });
 
 test("bureau (le témoin) : les pilules restent dans la rangée de filtres, et y reviennent", async ({ page }) => {
@@ -539,6 +548,18 @@ for (const mode of ["light", "dark"]) {
     expect(mesures.length).toBe(9);
     const faibles = mesures.filter(m => m.ratio < 4.5).map(m => `${m.nom} : ${m.ratio.toFixed(2)}`);
     expect(faibles).toEqual([]);
+    // La pilule choisie suit la planche : blanche sur le vert en clair (8a),
+    // en plein clair -- le principal -- en sombre (12a). Le contraste seul ne le
+    // distingue pas : la surface sombre sous le principal passe aussi 4,5.
+    const [fond, attendu] = await page.evaluate(m => {
+      const temoin = document.createElement("span");
+      temoin.style.background = m === "dark" ? "var(--v8-principal)" : "var(--v8-surface)";
+      document.body.appendChild(temoin);
+      const valeur = getComputedStyle(temoin).backgroundColor;
+      temoin.remove();
+      return [getComputedStyle(document.querySelector('#cmdPilules [data-cmd-filtre="toutes"]')).backgroundColor, valeur];
+    }, mode);
+    expect(fond).toBe(attendu);
   });
 }
 
