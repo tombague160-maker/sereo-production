@@ -37,7 +37,7 @@ process.env.SEREO_BACKUP_DIR = path.join(tmpRoot, "data", "backups");
 process.env.SEREO_AUTH_USER = "";
 process.env.SEREO_AUTH_PASSWORD = "";
 
-const { app, closeStorage, defaultDb, readDb, writeDb, createRoute, horodatageDuGeste } = require("../server");
+const { app, closeStorage, defaultDb, readDb, writeDb, createRoute, horodatageDuGeste, _withWriteLockForTest } = require("../server");
 
 let server;
 let baseUrl;
@@ -274,6 +274,40 @@ test("H1 — deux envois SIMULTANES de la meme cle : un seul est applique", asyn
   })));
   assert.equal(readDb().commandes.length, avant + 1, "les envois simultanes ont cree plusieurs commandes");
   assert.equal(new Set(envois.map(e => e.res.status)).size, 1, "les trois envois n'ont pas le meme statut");
+});
+
+test("H1 — un client qui ABANDONNE sa requete (delai) puis la renvoie : un seul geste applique", async () => {
+  // Relecture adverse du lot 1 : la cle se liberait a la FERMETURE de la
+  // connexion, pas a la fin du traitement. Le client coupe a 10 s pendant que
+  // le serveur attend son verrou d'ecriture ; le renvoi arrive, ne trouve ni
+  // cle enregistree ni traitement en cours, et s'applique a son tour.
+  ensemencer();
+  const cle = "geste-abandon-0000001";
+  const corps = { clientId: "c-o-a", clientName: "EHPAD Les Tilleuls", products: [{ code: "A1", nom: "Alèses", quantite: 1 }] };
+  const options = signal => ({
+    method: "POST", headers: { "Content-Type": "application/json", "X-Sereo-Geste": cle }, body: JSON.stringify(corps), signal
+  });
+  const avant = readDb().commandes.length;
+  const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+  // Le verrou d'ecriture est tenu (un import, une autre ecriture lente).
+  let relacher;
+  const tenu = _withWriteLockForTest(() => new Promise(resolve => { relacher = resolve; }));
+  const ac = new AbortController();
+  const premier = fetch(`${baseUrl}/api/customer-orders`, options(ac.signal)).then(() => "repondu", () => "abandonne");
+  await pause(200);          // arrive au serveur, attend le verrou
+  ac.abort();                // le telephone abandonne : la connexion se ferme
+  await pause(200);
+  const second = demander("/api/customer-orders", options(undefined));
+  await pause(150);
+  relacher();
+  await tenu;
+  const renvoi = await second;
+
+  assert.equal(await premier, "abandonne", "prealable : le premier envoi devait etre abandonne par le client");
+  assert.equal(readDb().commandes.length, avant + 1, "le renvoi d'un envoi abandonne a cree la commande une seconde fois");
+  assert.equal(renvoi.res.status, 201);
+  assert.equal(renvoi.res.headers.get("x-sereo-geste-rejoue"), "1", "le renvoi n'a pas ete reconnu comme deja fait");
 });
 
 // --- H2 : le secret de session survit au redemarrage -----------------------------

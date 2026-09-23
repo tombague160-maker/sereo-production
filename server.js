@@ -552,12 +552,37 @@ function gesteIdempotent(req, res, next) {
   // la premiere reponse part trouve deja la cle.
   const envoyer = res.send.bind(res);
   res.send = corps => { noter(); return envoyer(corps); };
-  res.on("close", () => {
+  // La cle se LIBERE quand le traitement a fini (sa reponse est ecrite), pas
+  // quand la connexion se ferme (relecture adverse du lot 1). Premier jet :
+  // `res.on("close")`. Or un client qui abandonne (delai de 10 s, renvoi coupe
+  // a 15 s) ferme la connexion PENDANT le traitement : la cle partait, le
+  // geste passait en file, et son renvoi -- ne trouvant ni cle enregistree ni
+  // traitement en cours -- s'appliquait une seconde fois (commande terrain en
+  // double). Une connexion fermee sans reponse garde la cle jusqu'a la fin
+  // du traitement ; un filet la libere si le traitement ne finit jamais.
+  let libere = false;
+  const finir = () => {
+    if (libere) return;
+    libere = true;
     gestesEnCours.delete(cle);
     liberer();
+  };
+  const terminer = res.end.bind(res);
+  res.end = (...args) => {
+    noter();
+    const retour = terminer(...args);
+    finir();
+    return retour;
+  };
+  res.on("close", () => {
+    if (res.writableEnded) { finir(); return; }
+    const filet = setTimeout(finir, GESTE_EN_COURS_MAX_MS);
+    if (filet.unref) filet.unref();
   });
   next();
 }
+// Au-dela, un traitement qui n'a jamais repondu ne retient plus sa cle.
+const GESTE_EN_COURS_MAX_MS = 3 * 60_000;
 
 function cleanEnv(value) {
   return String(value ?? "").trim();
@@ -5629,6 +5654,11 @@ function startRoute(db, routeId) {
 // Le telephone envoie `faitLe` : l'heure a laquelle le livreur a touche le
 // bouton. Hors ligne, le geste peut arriver des heures plus tard ; le dater a
 // l'arrivee ferait tomber le chiffre d'affaires dans le mauvais jour.
+// CE QUE CELA NE REGLE PAS (defaut anterieur, mesure le 23/09) : le jour de
+// vente reste la date UTC de deliveredAt (computeStatistics tronque l'ISO).
+// Une livraison entre minuit et 2 h, heure de Paris, compte pour la veille.
+// Le corriger demande de passer TOUTES les bornes des statistiques en
+// Europe/Paris, pas seulement cette date : hors du lot 1.
 // L'horloge du telephone n'est pas une source de verite : elle est BORNEE.
 //  - dans le futur au-dela d'une marge d'horloge : on garde l'heure du serveur ;
 //  - plus vieille que GESTE_AGE_MAX_JOURS : on garde l'heure du serveur (un
@@ -8057,6 +8087,7 @@ module.exports = {
   // Helpers de test : ne pas appeler depuis du code applicatif
   _resetAuthRateLimitForTest: () => authRateLimitState.clear(),
   _createAccessSessionValueForTest: createAccessSessionValue,
+  _withWriteLockForTest: withWriteLock,
   _normalizeOrder: normalizeOrder,
   _getLastStorageRecovery: () => lastStorageRecovery,
   // Chantier 2 : permet aux tests d'attendre que le backup async finisse
