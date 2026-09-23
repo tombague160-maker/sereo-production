@@ -249,13 +249,18 @@ test("geocodeur : plus d'appel apres un premier echec, ni pour une commande sans
   process.env.SEREO_ROUTING_URL = "http://osrm.local";
   const sansCoordonnees = Array.from({ length: 10 }, (_, i) =>
     ({ id: `o${i}`, clientName: `Client ${i}`, address: `${i} rue du Bois`, postalCode: "25000", city: "Besançon" }));
+  // Seule la PREMIERE adresse est introuvable : les autres se trouvent. Un
+  // worker qui echoue s'arrete de lui-meme ; ce sont les trois AUTRES qui
+  // continuaient, commande apres commande, pour une tournee deja refusee.
   reseau(async (url) => {
     assert.ok(url.includes("geocodage"), `appel inattendu : ${url}`);
     await new Promise((r) => setTimeout(r, 5));
-    return { features: [] }; // introuvable
+    if (decodeURIComponent(url).includes("q=0 rue")) return { features: [] };
+    return { features: [{ properties: { label: "x", score: 0.9, type: "housenumber", postcode: "25000", city: "Besançon" },
+      geometry: { coordinates: [6.02, 47.24] } }] };
   });
-  await assert.rejects(roadPlan(sansCoordonnees, DEPART, DEPART), /Adresse à préciser pour Client/);
-  await new Promise((r) => setTimeout(r, 60)); // laisser finir les workers
+  await assert.rejects(roadPlan(sansCoordonnees, DEPART, DEPART), /Adresse à préciser pour Client 0\./);
+  await new Promise((r) => setTimeout(r, 80)); // laisser finir les workers
   assert.ok(appels.length <= 4, `${appels.length} appels au geocodeur pour une tournee deja refusee`);
 
   reseau(() => ({ features: [] }));
