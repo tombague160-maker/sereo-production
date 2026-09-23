@@ -314,6 +314,8 @@ test("ajouter en route : la commande urgente s'insere la ou elle allonge le moin
   const encore = await request(`/api/routes/${route.id}/ajouter`, { orderId: "u" });
   assert.equal(encore.status, 400);
   assert.match(encore.body.error, /déjà à une tournée active/);
+  // Integration de la vague 2 : le refus nomme la tournee (garde du lot 2).
+  assert.match(encore.body.error, /: « Tournée[^»]* »/);
 });
 
 test("ajouter en route : sans table OSRM, la distance a vol d'oiseau choisit la place", async () => {

@@ -9081,7 +9081,10 @@ require("./lib/tournee-pratique").registerTourneePratique(app, {
   readDb, writeDb, withWriteLock, badRequest, notFound, handleRouteError, findClient,
   addHistory, setOrderStatus, createStop, routeAvecTrace, positionPourTournee,
   memoriserPositionDuCalcul, geocoderAdresse, distanceKm: distance,
-  statutsAPlanifier: STATUTS_A_PLANIFIER, maxArrets: MAX_COMMANDES_PAR_TOURNEE
+  statutsAPlanifier: STATUTS_A_PLANIFIER, maxArrets: MAX_COMMANDES_PAR_TOURNEE,
+  // Integration de la vague 2 : la garde « deja dans une tournee active » du
+  // lot 2, et ses noms, pour « Ajouter a la tournee en cours ».
+  tourneeActiveDeLaCommande, nomDeCommande, nomDeTournee
 });
 
 // --- API des comptes utilisateurs (V8 phase 1) -----------------------------

@@ -7,6 +7,12 @@ import { normalizePhoneNumber } from "../utils/text.js";
 
 const STATUTS_TERMINES = new Set(["livre", "absent", "probleme", "a_reprogrammer"]);
 const estTermine = (stop) => STATUTS_TERMINES.has(stop?.status);
+// Integration de la vague 2 : le lot 2 a ajoute deux fins de tournee,
+// « cloturee » (elle a roule, ses restants sont a reprogrammer) et « annulee »
+// (jamais partie). Aucune heure pour une tournee finie ; l'historique compte
+// celles qui ont roule (terminee, cloturee), jamais une annulee.
+const STATUTS_TOURNEE_FINIE = new Set(["terminee", "cloturee", "annulee"]);
+const STATUTS_TOURNEE_ROULEE = new Set(["terminee", "cloturee"]);
 
 // --- Heures d'arrivee ----------------------------------------------------------
 //
@@ -51,7 +57,7 @@ function instant(valeur) {
  */
 export function horairesDeTournee(route, { maintenant = Date.now(), dureeArretMin = 6 } = {}) {
   if (!route || !Array.isArray(route.stops) || !route.stops.length) return null;
-  if (route.status === "terminee") return null;
+  if (STATUTS_TOURNEE_FINIE.has(route.status)) return null;
   const stops = route.stops;
   const n = stops.length;
   const troncons = Array.isArray(route.troncons) ? route.troncons : null;
@@ -234,7 +240,7 @@ function jourDe(route) {
 
 export function historiqueDesTournees(routes) {
   const tournees = (Array.isArray(routes) ? routes : [])
-    .filter((r) => r && r.status === "terminee")
+    .filter((r) => r && STATUTS_TOURNEE_ROULEE.has(r.status))
     .map((r) => {
       const debut = instant(r.startedAt), fin = instant(r.completedAt);
       const minutes = Number.isFinite(debut) && Number.isFinite(fin) && fin >= debut

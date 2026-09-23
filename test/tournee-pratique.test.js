@@ -195,6 +195,23 @@ test("historique : km, durees, et par mois un total par secteur (tournees termin
   assert.deepEqual(sept.total, { tournees: 4, km: 141.7, minutes: 645, livres: 8 });
 });
 
+test("integration vague 2 : une tournee cloturee compte dans l'historique, une annulee non ; aucune heure pour l'une ni l'autre", async () => {
+  const { historiqueDesTournees, horairesDeTournee } = await charger();
+  const base = { deliveryDate: "2026-09-22", sector: "Dole", totalDistance: 20, startedAt: "2026-09-22T07:00:00Z", completedAt: "2026-09-22T09:00:00Z" };
+  const routes = [
+    { ...base, id: "c", status: "cloturee", stops: [{ status: "livre" }, { status: "a_reprogrammer" }] },
+    { ...base, id: "a", status: "annulee", startedAt: null, stops: [{ status: "pret_livraison" }] }
+  ];
+  const h = historiqueDesTournees(routes);
+  assert.deepEqual(h.tournees.map((x) => [x.id, x.livres, x.minutes]), [["c", 1, 120]]);
+  // Une annulee garde des arrets « prets » et ses troncons : sans la garde,
+  // elle annoncerait des heures « si tu pars maintenant ».
+  const annulee = { status: "annulee", stops: [arret("a"), arret("b")], troncons: [troncon(10, 8), troncon(5, 3), troncon(5, 3)] };
+  assert.ok(horairesDeTournee({ ...annulee, status: "prete" }, { maintenant: T0 }), "temoin : la meme tournee prete a des heures");
+  assert.equal(horairesDeTournee(annulee, { maintenant: T0 }), null);
+  assert.equal(horairesDeTournee({ ...annulee, status: "cloturee" }, { maintenant: T0 }), null);
+});
+
 // --- Ou inserer une commande urgente ------------------------------------------------
 
 test("inserer : la place qui allonge le moins le trajet, egale a la force brute", () => {
