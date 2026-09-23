@@ -12253,3 +12253,37 @@ textarea::placeholder {
   :root[data-color-scheme] nav.mobile-tabbar,
   :root:not([data-color-scheme]) nav.mobile-tabbar { padding-inline: 4px; }
 }
+
+/* --- Etats limites (planches 10b, 10c) ------------------------------------- */
+.bandeau-hors-ligne {
+  display: flex; align-items: flex-start; gap: 12px; margin: 0 0 16px; padding: 12px 16px;
+  border-radius: 18px; background: var(--v8-vert-clair); color: var(--v8-principal-appuye);
+}
+.bandeau-hors-ligne[hidden] { display: none; }
+.bandeau-hors-ligne svg { width: 20px; height: 20px; flex: none; margin-top: 2px; }
+.bandeau-hors-ligne-texte { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.bandeau-hors-ligne-texte strong { font-size: 14.5px; font-weight: 600; }
+.bandeau-hors-ligne-texte span { font-size: 13px; font-weight: 500; }
+:root[data-color-scheme="dark"] .bandeau-hors-ligne { color: var(--v8-principal); }
+@media (prefers-color-scheme: dark) { :root:not([data-color-scheme="light"]) .bandeau-hors-ligne { color: var(--v8-principal); } }
+
+#journee[data-premier-lancement] .tb-regler,
+#journee[data-premier-lancement] .tb-semaine { display: none; }
+:root[data-color-scheme] #journee .tb-premier,
+:root:not([data-color-scheme]) #journee .tb-premier {
+  grid-column: 1 / -1; display: flex; flex-direction: column; align-items: flex-start; gap: 12px;
+}
+#journee .tb-premier[hidden] { display: none; }
+.tb-premier-disque {
+  display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; border-radius: 999px;
+  background: var(--v8-peche-claire); color: var(--v8-principal-appuye);
+}
+.tb-premier-disque svg { width: 24px; height: 24px; }
+:root[data-color-scheme] #journee .tb-premier h3,
+:root:not([data-color-scheme]) #journee .tb-premier h3 { margin: 0; font-size: 18px; font-weight: 600; color: var(--v8-texte); }
+#journee .tb-premier p { margin: 0; font-size: 14px; line-height: 1.5; color: var(--v8-texte-secondaire); }
+:root[data-color-scheme="dark"] .tb-premier-disque { color: var(--v8-principal); }
+@media (prefers-color-scheme: dark) { :root:not([data-color-scheme="light"]) .tb-premier-disque { color: var(--v8-principal); } }
+/* [hidden] doit gagner sur le display: flex (1,2,1) de la carte d'accueil. */
+:root[data-color-scheme] #journee .tb-premier[hidden],
+:root:not([data-color-scheme]) #journee .tb-premier[hidden] { display: none; }

@@ -264,7 +264,12 @@ test("hors ligne — un envoi de FICHIER n'est jamais mis en file", async ({ bro
   });
 
   await ctx.setOffline(true);
-  await page.locator("#importStockButton").click();
+  // Depuis la planche 10c, le bouton d'import est DESACTIVE hors ligne, avec
+  // sa raison. On soumet donc le formulaire par programme : la requete passe
+  // quand meme par apiFetch, ou vit la garde que ce banc protege.
+  await expect(page.locator("#importStockButton")).toBeDisabled();
+  await expect(page.locator("#importStockButton")).toHaveAttribute("title", "Import impossible hors ligne");
+  await page.evaluate(() => document.getElementById("stockForm").requestSubmit());
   await page.waitForTimeout(2500);
 
   expect(await lireFile(page), "un envoi de fichier a ete mis en file").toEqual([]);
