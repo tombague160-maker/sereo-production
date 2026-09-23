@@ -27,6 +27,15 @@ function semeAvecHistorique({ presqueFinie = false } = {}) {
       r1.stops[i].status = "livre";
       seme.commandes.find(c => c.id === r1.stops[i].orderId).status = "livre";
     }
+  } else {
+    // Deux arrets de plus : trois gestes en serie sans terminer la tournee
+    // (un geste qui la termine recharge tout, et ne dirait rien de la copie).
+    const modeleArret = r1.stops[4];
+    for (const k of [1, 2]) {
+      const o = { ...structuredClone(seme.commandes.find(c => c.id === modeleArret.orderId)), id: `o-x${k}`, status: "en_livraison", clientName: `Officine annexe ${k}` };
+      seme.commandes.push(o);
+      r1.stops.push({ ...structuredClone(modeleArret), id: `s-o-x${k}`, orderId: o.id, clientName: o.clientName, status: "pret_livraison" });
+    }
   }
   const modele = seme.commandes.find(c => c.id === "o-1");
   for (let r = 0; r < 20; r++) {
@@ -136,6 +145,81 @@ test("lot 5 — « Client absent » : l'ecran se met a jour avec la reponse, san
   await expect(page.locator("#routeStopsList .route-stop").nth(vise.rang).locator(".pill")).not.toHaveText(/Prêt|En livraison/);
   expect(erreurs).toEqual([]);
   await ctx.close();
+});
+
+// Un mandataire local qui sait RETENIR les lectures d'API : les requetes que le
+// service worker emet ne passent pas par page.route (chargement-instantane.spec.js).
+async function mandataire(cible) {
+  const http = require("node:http");
+  const etat = { retenir: null, attente: [] };
+  const server = http.createServer((req, res) => {
+    const passer = () => {
+      const amont = http.request(cible + req.url, { method: req.method, headers: req.headers }, r => {
+        res.writeHead(r.statusCode, r.headers);
+        r.pipe(res);
+      });
+      amont.on("error", () => res.destroy());
+      req.pipe(amont);
+    };
+    if (etat.retenir && req.method === "GET" && etat.retenir.test(req.url)) etat.attente.push(passer);
+    else passer();
+  });
+  server.listen(0, "127.0.0.1");
+  await require("node:events").once(server, "listening");
+  return {
+    base: `http://127.0.0.1:${server.address().port}`,
+    retenir(motif) { etat.retenir = motif; },
+    retenues() { return etat.attente.length; },
+    liberer() { etat.retenir = null; for (const f of etat.attente.splice(0)) f(); },
+    async arreter() {
+      this.liberer();
+      server.closeAllConnections();
+      await new Promise(r => server.close(r));
+    }
+  };
+}
+
+test("lot 5 — apres « Livré », l'ecran rouvert avant le reseau montre l'arret livre (la copie du service worker suit le geste)", async ({ browser }) => {
+  test.setTimeout(90000);
+  const mdt = await mandataire(srv.base);
+  const ctx = await browser.newContext({ viewport: MOBILE, timezoneId: "Europe/Paris" });
+  try {
+    const page = await ctx.newPage();
+    const erreurs = [];
+    page.on("pageerror", e => erreurs.push(e.message));
+    // Cache « chaud » : le service worker controle la page, et les donnees sont passees par lui.
+    await page.goto(mdt.base + "/#livreur", { waitUntil: "networkidle" });
+    await page.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 15000 });
+    await page.reload({ waitUntil: "networkidle" });
+    await expect.poll(() => page.evaluate(async () => {
+      const noms = (await caches.keys()).filter(n => n.startsWith("sereo-api-"));
+      return noms.length ? !!(await (await caches.open(noms[0])).match("/api/routes")) : false;
+    }), { message: "temoin : /api/routes n'est pas dans le cache du service worker" }).toBe(true);
+    await page.addStyleTag({ content: "*, *::before, *::after { transition: none !important; animation: none !important; }" });
+
+    const vise = await arretCourant(page, srv.base);
+    const reponse = patchDe(page, vise.id);
+    await page.locator("#markDeliveredButton").click();
+    const recue = await reponse;
+    expect(recue.status()).toBe(200);
+    expect((await recue.json()).route.status, "prealable : le geste ne doit pas terminer la tournee").not.toBe("terminee");
+    await expect(page.locator("#routeStopsList .route-stop").nth(vise.rang).locator(".pill")).toHaveText("Livré");
+    await page.waitForTimeout(800);
+
+    // L'ecran se rouvre, et le reseau ne repond pas : ce qu'il montre vient de la copie.
+    mdt.retenir(/^\/api\//);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect.poll(() => mdt.retenues(), { message: "prealable : les lectures d'API doivent etre retenues" }).toBeGreaterThan(0);
+    // Sous 2,5 s : le repli du service worker (3 s) ne peut pas l'expliquer.
+    await expect(page.locator("#routeStopsList .route-stop").nth(vise.rang).locator(".pill"),
+      "la copie rouverte montre l'arret livre comme a livrer").toHaveText("Livré", { timeout: 2500 });
+    await expect(page.locator("#currentClient .arret-nom"), "l'arret courant de la copie est un arret deja livre").not.toHaveText(vise.nom);
+    mdt.liberer();
+    expect(erreurs).toEqual([]);
+  } finally {
+    await ctx.close();
+    await mdt.arreter();
+  }
 });
 
 // Le lisere blanc n'est dessine que sous un trace routier (carte-et-lignes.spec.js).

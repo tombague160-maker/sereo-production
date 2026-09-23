@@ -1152,6 +1152,42 @@ async function lireDernieresDonnees(endpoints) {
   }
 }
 
+/**
+ * Lot 5 (revue du 23/09) : apres un geste d'arret, l'ecran se met a jour avec
+ * la reponse, sans relire /api/routes ni /api/orders. Or c'etaient ces
+ * lectures qui tenaient a jour la copie du service worker. Sans elles, un
+ * ecran rouvert sur un reseau lent (ou decharge par Android) montrait la
+ * tournee du matin : des arrets livres « a livrer », et l'arret courant deja
+ * livre. On recopie donc dans le cache ce que l'ecran affiche.
+ *
+ * Seules les entrees DEJA en cache sont remplacees (pas de copie : rien a
+ * tenir a jour). La date (en-tete Date) reste celle de l'ancienne copie : la
+ * copie est au moins aussi fraiche que ce qu'elle annonce, jamais moins.
+ * Les ecritures passent l'une apres l'autre : la derniere est la plus recente.
+ */
+let ecritureDeLaCopie = Promise.resolve();
+function recopierApresGeste() {
+  // Les valeurs du moment : les tableaux sont remplaces, jamais modifies en place.
+  const entrees = [["/api/routes", deliveryRoutes], ["/api/orders", orders], ["/api/clients", clients]];
+  ecritureDeLaCopie = ecritureDeLaCopie.then(async () => {
+    try {
+      if (typeof caches === "undefined") return;
+      const noms = (await caches.keys()).filter(nom => nom.startsWith(PREFIXE_CACHE_DONNEES));
+      if (!noms.length) return;
+      const cache = await caches.open(noms[0]);
+      await Promise.all(entrees.map(async ([chemin, valeur]) => {
+        const ancienne = await cache.match(chemin);
+        if (!ancienne || !ancienne.ok || !Array.isArray(valeur)) return;
+        const headers = new Headers(ancienne.headers);
+        for (const nom of ["Content-Encoding", "Content-Length", "ETag", "Last-Modified"]) headers.delete(nom);
+        headers.set("Content-Type", "application/json; charset=utf-8");
+        await cache.put(chemin, new Response(JSON.stringify(valeur), { status: 200, headers }));
+      }));
+    } catch { /* stockage indisponible : la copie restera celle d'avant */ }
+  });
+  return ecritureDeLaCopie;
+}
+
 /** « Données de 14:32 » (aujourd'hui) ou « Données du 21/09 ». Sans date lisible : « Données en cache ». */
 function libelleCopie(date) {
   if (!Number.isFinite(date)) return "Données en cache";
@@ -1417,6 +1453,7 @@ async function appliquerGesteArret(resultat) {
     return;
   }
   renderAll({ lectures: false });
+  recopierApresGeste();
 }
 
 /**
@@ -6370,6 +6407,7 @@ async function moveStop(stopId, direction) {
   deliveryRoutes = remplacerParId(deliveryRoutes, activeRoute);
   route = activeRoute.stops;
   renderAll({ lectures: false });
+  recopierApresGeste();
   notify("Ordre de tournée mis à jour.", "success");
 }
 
