@@ -1,5 +1,51 @@
 # Changelog
 
+## [1.41.0](https://github.com/tombague160-maker/sereo-production/compare/v1.40.2...v1.41.0) (2026-09-23)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **mobile:** Abonnements au telephone (planches 3a, 3c, 5a) ([33be2c1](https://github.com/tombague160-maker/sereo-production/commit/33be2c1f0a5fd16f198ccf583f13cc691935969c))
+* **mobile:** Commandes et Stock au telephone, squelettes a la taille des chiffres ([e2dcbae](https://github.com/tombague160-maker/sereo-production/commit/e2dcbae4457a85d53d11ba2c7d4a2545cc032b0b))
+* **mobile:** Parametres au telephone (planches 8d/12d) ([7585efa](https://github.com/tombague160-maker/sereo-production/commit/7585efa75ea80af349d39930e645a9f354b350b0))
+* **mobile:** Preparation en liste unique, filtres dans l'en-tete vert, detail en page (planches 7a, 7b) ([c48f2fd](https://github.com/tombague160-maker/sereo-production/commit/c48f2fdaec06d74d143ce0e0fbb8e24cb1e2ffcf))
+* **mobile:** tournee au telephone -- cockpit, carte, preparer, fin (planches 4a-4d) ([edfcd01](https://github.com/tombague160-maker/sereo-production/commit/edfcd011c69f7dd747b998af9272fdac35e06e07))
+* **mobile:** Tournée, Préparation, Abonnements, Paramètres, Commandes et Stock au téléphone ; chargement instantané ([#166](https://github.com/tombague160-maker/sereo-production/issues/166)) ([b28455d](https://github.com/tombague160-maker/sereo-production/commit/b28455d7774f930f325bc5ad0b6a46ac4922e678))
+
+
+### 🐛 Corrections de bugs
+
+* **css:** rend leurs accolades aux blocs des lots mobiles mutilés par la fusion ([e0e8f74](https://github.com/tombague160-maker/sereo-production/commit/e0e8f7499cf599c590fa1b1bbafb82230969681e))
+* **mobile:** Abonnements -- relecture adverse du lot ([ba10b4d](https://github.com/tombague160-maker/sereo-production/commit/ba10b4d6c1f4bf1e8e9edd7cb481f3804e604d3a))
+* **mobile:** Preparation, la recherche ne filtre jamais sans se voir ; sous-titre au telephone seulement ([8841c69](https://github.com/tombague160-maker/sereo-production/commit/8841c6962cd0a089e4ddbca9a2d8f0b828bf55da))
+* **mobile:** tournee -- corrections de la revue adverse du 23/09 ([a93072d](https://github.com/tombague160-maker/sereo-production/commit/a93072d6d5f1583dbf20aeaa1e324be756a67cd5))
+* **parametres:** corrige quatre défauts de la relecture du lot téléphone ([51836c1](https://github.com/tombague160-maker/sereo-production/commit/51836c1cd15669b1ce1695a3b57eabd8d85ae609))
+* **service-worker:** le nom du shell porte l'empreinte du contenu statique ([64ff245](https://github.com/tombague160-maker/sereo-production/commit/64ff245f5fd536aa9eb8449376215bdb0f406120))
+* **squelettes:** lignes grises a la hauteur des cartes de 821 a 1280 px, le libelle « Commandes livrees » survit a une erreur ([efef943](https://github.com/tombague160-maker/sereo-production/commit/efef9432a38048917a7f1bd8aab82ce810abef0e))
+* **stock:** l'ordre a plat ne bouge plus sous le doigt, la carte dit ce qui se voit ([5ff7260](https://github.com/tombague160-maker/sereo-production/commit/5ff7260e1cde84590012d82686d4ab0363e3cce6))
+
+
+### ⚡ Optimisations
+
+* **chargement:** ouverture instantanee -- statique en cache d'abord, dernieres donnees affichees avant le reseau ([3eacfb3](https://github.com/tombague160-maker/sereo-production/commit/3eacfb3cb57b40c9b1e539c00dd012264bcc199d))
+
+
+### 📚 Documentation
+
+* **design:** chargement instantane -- decisions, ecarts et mesure avant/apres ([b400ee3](https://github.com/tombague160-maker/sereo-production/commit/b400ee3d9f9363665ddc536f94452cbaafa2ffd5))
+* **design:** corrections de la relecture du lot Commandes + Stock mobile ([f409a2d](https://github.com/tombague160-maker/sereo-production/commit/f409a2dd030f768caecb5d972d4be6c864185360))
+* **design:** le CACHE_NAME des lots mobiles est réglé par l'empreinte du shell ([019788c](https://github.com/tombague160-maker/sereo-production/commit/019788c4f3a2b9dfe097c8bb4be608e9020fb90d))
+* **design:** Paramètres au téléphone, corrections de la relecture ([14c7569](https://github.com/tombague160-maker/sereo-production/commit/14c756995e0aa68fd73afe4d58653701c3278d3b))
+
+
+### 🧪 Tests
+
+* **chargement:** les polices utilisees se mesurent sans les prechargements ([ecb55e5](https://github.com/tombague160-maker/sereo-production/commit/ecb55e53ad85ec1aeb248b5f506c550a7081f606))
+* **mobile:** la page 7b rougit sur son cadre, pas sur un element absent ([194bc34](https://github.com/tombague160-maker/sereo-production/commit/194bc34b519477836349177ffebd870db4bf2f29))
+* **mobile:** le franchissement de 820 px ne depend plus du cas qui ecrit ([c199c1d](https://github.com/tombague160-maker/sereo-production/commit/c199c1d676df4855299f85402f4a5bea17bb208d))
+* **mobile:** les pilules se rangent cachees en passant sous 820 px, et la choisie suit la planche en sombre ([498e663](https://github.com/tombague160-maker/sereo-production/commit/498e66319b7613aa1d5f904d1adb4721f9bbf9db))
+* **mobile:** temoin des noms sur une ligne dans le banc des 96 px ([137e909](https://github.com/tombague160-maker/sereo-production/commit/137e9096581026a0c6b9e505a13bdc9236939eb4))
+
 ## [1.40.2](https://github.com/tombague160-maker/sereo-production/compare/v1.40.1...v1.40.2) (2026-09-23)
 
 
