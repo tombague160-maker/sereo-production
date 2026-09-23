@@ -296,7 +296,20 @@ export function initOperations(api) {
         if (point === "departure") {
           departure = value;
           departDuDepot = false;
-        } else arrival = value;
+        } else {
+          arrival = value;
+          // Lot 6 : « retour au depart » est coche par defaut ; confirmer une
+          // AUTRE arrivee dit le contraire, la case suit (sans changer le
+          // reglage memorise : seul un geste sur la case l'ecrit). Et les
+          // reglages qui arrivent APRES ne la recochent pas : les commandes
+          // (donc les reglages) peuvent arriver apres le choix, sur un
+          // reseau lent (operations.spec.js le rejoue).
+          const retour = document.getElementById("returnToStart");
+          if (value && retour) {
+            retour.checked = false;
+            retourTouche = true;
+          }
+        }
       });
   }
   // Lot 6 : une fois touchee par le livreur, la case « retour » n'est plus

@@ -442,6 +442,22 @@ test.describe("Préparer une tournée — dépôt par défaut, réoptimiser", ()
     await ctx.close();
   });
 
+  test("« retour au depot » coche par defaut : confirmer une AUTRE arrivee le decoche, sans toucher au reglage", async ({ browser, request }) => {
+    test.setTimeout(120000);
+    const { ctx, page } = await ouvrir(browser, srv.base, {
+      avant: (p) => p.route("**/api/geocode?*", (route) => route.fulfill({ json: [{ label: "Arrivée ailleurs", lat: 47.1, lng: 5.9 }] }))
+    });
+    await page.locator("#routePlanning > summary").evaluate((s) => { s.parentElement.open = true; });
+    await expect(page.locator("#returnToStart")).toBeChecked();
+    await page.locator("#arrivalQuery").fill("Ailleurs");
+    await page.locator('[data-op="search-arrival"]').click();
+    await page.locator("#arrivalResults").selectOption("0");
+    await expect(page.locator("#returnToStart")).not.toBeChecked();
+    await page.waitForTimeout(500);
+    expect((await (await request.get(`${srv.base}/api/settings/tournee`)).json()).retourAuDepot).toBe(true);
+    await ctx.close();
+  });
+
   test("« retour au depot » : decoche dans la preparation, c'est memorise", async ({ browser, request }) => {
     test.setTimeout(120000);
     let { ctx, page } = await ouvrir(browser, srv.base);
