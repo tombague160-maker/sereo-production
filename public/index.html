@@ -890,11 +890,13 @@
             <label class="compact-date">Date<input id="todayOrdersDate" type="date" /></label>
           </div>
           <div class="delivery-actions">
-            <!-- Desactives jusqu'aux commandes, comme ceux de la tournee
-                 (data-attend-commandes, activerSelectionLivraison) : touches
-                 avant, ils selectionnaient une liste vide. -->
-            <button class="button secondary" type="button" data-action="select-all-today-orders" data-attend-commandes disabled>Tout sélectionner</button>
-            <button class="button secondary" type="button" data-action="clear-today-orders" data-attend-commandes disabled>Tout désélectionner</button>
+            <!-- Desactives jusqu'a LEUR liste, comme ceux de la tournee
+                 attendent les commandes : touches avant, ils selectionnaient
+                 une liste vide. Ils agissent sur todayCustomerOrders, pas sur
+                 `orders` : une copie du cache peut avoir l'une sans l'autre
+                 (data-attend-commandes-du-jour, activerSelectionDuJour). -->
+            <button class="button secondary" type="button" data-action="select-all-today-orders" data-attend-commandes-du-jour disabled>Tout sélectionner</button>
+            <button class="button secondary" type="button" data-action="clear-today-orders" data-attend-commandes-du-jour disabled>Tout désélectionner</button>
             <button class="button primary" type="button" data-action="send-today-orders-preparation">Envoyer en préparation</button>
           </div>
           <div id="todayOrdersList" class="list"></div>

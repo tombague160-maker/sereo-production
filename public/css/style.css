@@ -13224,10 +13224,23 @@ textarea {
       laissaient au formulaire 288 px a 1440 : « Type » et « Date » cote a
       cote tombaient a 112 px, et on lisait « Commande▾ » et « dd/mm/y ».
       - Les champs vont par deux SEULEMENT s'ils tiennent (13,5 rem chacun) ;
-        sinon un par ligne. Rien ne se coupe, a aucune largeur.
-      - 1181-1599 px : deux colonnes, le formulaire a gauche sur toute la
-        hauteur, le catalogue puis le panier a droite.
+        sinon un par ligne. Rien ne se coupe, a aucune largeur. Et jamais
+        plus de deux (relecture du 23/09) : `auto-fit` seul ouvrait trois
+        pistes des qu'il y avait la place -- « Type | Date | (vide) »,
+        « Code postal » seul sur sa ligne. Le minimum de chaque piste est
+        donc la MOITIE de la grille, 13,5 rem au moins.
+      - 1181-1599 px : le formulaire en haut sur toute la largeur, puis le
+        catalogue et, A COTE, le panier -- comme avant le lot. Le premier
+        dessin (formulaire a gauche, catalogue PUIS panier a droite) mettait
+        le panier sous tout le catalogue (relecture du 23/09).
       - 1600 px et plus : les trois colonnes, formulaire d'au moins 360 px.
+      - A partir de 1181 px, le formulaire n'est plus « collant ». Un par
+        ligne, il mesure ~1 200 px : colle, sa fin (« Valider la commande »)
+        resterait hors de la fenetre. Le « collant » est de toute facon
+        INERTE aujourd'hui : html, body et .content ont `overflow-x: hidden`,
+        ce qui fait de .content le conteneur de defilement de reference, et
+        il ne defile jamais (mesure du 23/09, avant comme apres le lot). Ce
+        `static` evite le piege le jour ou ils passeront a `clip`.
       - 821-1180 px : une colonne. La colonne unique ne commencait qu'a
         920 px ; de 921 a 1180, les trois colonnes minimales (280 + 360 +
         280) ne tenaient pas dans les ~700 px du contenu.
@@ -13238,7 +13251,7 @@ textarea {
 }
 :root[data-color-scheme] .customer-client-panel .form-grid.two,
 :root:not([data-color-scheme]) .customer-client-panel .form-grid.two {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13.5rem), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, max(13.5rem, calc((100% - 12px) / 2))), 1fr));
   gap: 16px 12px;
 }
 /* Le formulaire empilait ses blocs sans aucun interligne : le libelle
@@ -13268,14 +13281,14 @@ textarea {
 @media (min-width: 1181px) {
   :root[data-color-scheme] .customer-order-layout,
   :root:not([data-color-scheme]) .customer-order-layout {
-    grid-template-columns: minmax(340px, 1fr) minmax(0, 1.5fr);
-    grid-template-rows: auto 1fr;
-    grid-template-areas: "client catalogue" "client panier";
+    grid-template-columns: minmax(0, 1.6fr) minmax(300px, 0.9fr);
+    grid-template-rows: auto auto;
+    grid-template-areas: "client client" "catalogue panier";
     gap: 24px;
   }
-  #commande-client .customer-client-panel { grid-area: client; }
+  #commande-client .customer-client-panel { grid-area: client; position: static; }
   #commande-client .customer-catalog-panel { grid-area: catalogue; }
-  #commande-client .customer-cart-panel { grid-area: panier; position: static; }
+  #commande-client .customer-cart-panel { grid-area: panier; }
 }
 @media (min-width: 1600px) {
   :root[data-color-scheme] .customer-order-layout,

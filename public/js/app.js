@@ -229,6 +229,20 @@ window.addEventListener("load", () => {
   if (!defilementParUtilisateur) resetViewportScroll(false);
 }, { once: true });
 
+// « Se deconnecter » HORS LIGNE (relecture du 23/09). Le POST /logout ne peut
+// pas arriver : le service worker effacerait quand meme la copie des donnees,
+// la navigation tomberait sur la page d'erreur du navigateur -- l'ecran de
+// tournee perdu jusqu'au retour du reseau -- et la session resterait ouverte
+// cote serveur. On ne part pas, et on le dit. Delegue au document : les deux
+// boutons (barre, menu « Plus ») visent le meme formulaire par `form=`.
+// `navigator.onLine === false` est sur ; `true` ne prouve rien (reseau qui
+// ment) : ce cas-la reste celui d'avant, hors de portee de cette garde.
+document.addEventListener("submit", event => {
+  if (event.target?.id !== "formDeconnexion" || navigator.onLine !== false) return;
+  event.preventDefault();
+  notify("Hors ligne : la déconnexion attend le retour du réseau. Rien n'a été effacé.", "error", { cle: "deconnexion-hors-ligne" });
+});
+
 function setNavigationSearchValue(value, sourceInput = null) {
   // #globalNavigationSearch vivait dans la barre du haut, que les planches
   // desktop n'ont pas. Il doublait #menuSearch, dans la barre laterale, qui
@@ -1229,6 +1243,10 @@ function appliquerDonnees(data) {
     commandesChargees = true;
     activerSelectionLivraison();
   }
+  // Les commandes DU JOUR ont leur propre liste, et la copie du cache a le
+  // droit de ne pas l'avoir (lireDernieresDonnees, endpoint `jour`) : leurs
+  // boutons attendent elle, pas `orders`.
+  if (a("todayCustomerOrders")) activerSelectionDuJour();
 
   refreshActiveRoute();
   route = activeRoute ? activeRoute.stops : (currentIndex >= 0 ? route : [...clients]);
@@ -1752,6 +1770,12 @@ function renderCommandes() {
 // Le sous-titre de la planche : « 124 bons depuis janvier · 5 en cours ».
 function majSousTitreCommandes() {
   if (!document.getElementById("commandes")?.classList.contains("active")) return;
+  // Lecture echouee : « 0 bon depuis janvier » serait le vide qu'on ne sait
+  // pas. Le sous-titre dit ce que dit la liste (relecture du 23/09).
+  if (commandesEnErreur && !(orders || []).length) {
+    setText("pageSubtitle", "Commandes indisponibles");
+    return;
+  }
   const annee = String(new Date().getFullYear());
   const depuisJanvier = (orders || []).filter(o => String(o.dateCommande || "").startsWith(annee)).length;
   const enCours = (orders || []).filter(o => !["livre", "annulee", "brouillon"].includes(o.status)).length;
@@ -3597,6 +3621,11 @@ function majSousTitrePreparation() {
   if (!document.getElementById("preparation")?.classList.contains("active")) return;
   if (!preparationEnListeUnique()) {
     setText("pageSubtitle", titles.preparation.subtitle);
+    return;
+  }
+  // Lecture echouee : pas « Aucune commande a preparer », comme la liste.
+  if (commandesEnErreur && !(orders || []).length) {
+    setText("pageSubtitle", "Commandes indisponibles");
     return;
   }
   const restantes = (orders || []).filter(order => ["importe", "stock_a_verifier", "en_preparation"].includes(order.status)).length;
@@ -6145,6 +6174,11 @@ function updateSelectedDeliveryCount() {
  */
 function activerSelectionLivraison() {
   for (const bouton of document.querySelectorAll("[data-attend-commandes]")) bouton.disabled = false;
+}
+
+/** Meme regle pour « Commandes du jour » : ses boutons attendent todayCustomerOrders. */
+function activerSelectionDuJour() {
+  for (const bouton of document.querySelectorAll("[data-attend-commandes-du-jour]")) bouton.disabled = false;
 }
 
 function selectAllDelivery(checked) {
