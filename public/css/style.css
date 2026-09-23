@@ -13203,3 +13203,195 @@ body:has(#journee.active) .ecran-entete #pageSubtitle { min-height: 2lh; }
   :root:not([data-color-scheme]) #stock .stk-categories-tete h3 { margin: 0; font-size: 14.5px; font-weight: 600; color: var(--v8-principal); }
   #stock .stk-categories-tete p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--v8-texte-secondaire); }
 }
+
+/* ==========================================================================
+   LOT 4 DE L'AUDIT GEO (23/09) -- une carte utilisable au telephone.
+   Outils de la carte (Recentrer, Ma position, Plein ecran), message quand le
+   fond de carte ne charge pas, position du livreur, points de preparation,
+   depart et arrivee, arrets regroupes, point approximatif, plein ecran.
+   Decisions gardees : marqueurs de 44 px, trace de 7 px et son lisere blanc.
+   ========================================================================== */
+:root {
+  /* Le point bleu de « Ma position » : la convention des cartes, que le
+     livreur reconnait sans legende. Aucun jeton v8 n'est bleu. */
+  --carte-position: #1A73E8;
+}
+:root[data-color-scheme="dark"] { --carte-position: #8AB4F8; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) { --carte-position: #8AB4F8; }
+}
+
+/* Les outils : trois boutons de 44 px, en haut a droite, hors de #map
+   (Leaflet n'intercepte pas leurs gestes). Au-dessus des panneaux et
+   controles Leaflet (200 a 1000). */
+.carte-outils {
+  position: absolute;
+  z-index: 1001;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.carte-outil {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--v8-principal) 25%, transparent);
+  border-radius: 12px;
+  background: var(--v8-surface);
+  color: var(--v8-principal);
+  box-shadow: 0 4px 12px rgba(15, 61, 61, 0.18);
+  cursor: pointer;
+}
+.carte-outil svg { width: 22px; height: 22px; }
+.carte-outil[aria-pressed="true"] {
+  background: var(--v8-principal);
+  color: var(--v8-texte-sur-principal);
+  border-color: var(--v8-principal);
+}
+.carte-outil:focus-visible {
+  outline: 3px solid var(--v8-focus);
+  outline-offset: 2px;
+}
+
+/* Messages poses sur la carte. [hidden] gagne toujours. */
+.carte-message,
+.carte-precision {
+  position: absolute;
+  z-index: 1001;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  box-shadow: 0 4px 12px rgba(15, 61, 61, 0.18);
+}
+.carte-message {
+  top: 10px;
+  left: 60px;
+  right: 64px;
+  background: var(--v8-avertissement-fond);
+  color: var(--v8-avertissement);
+  border: 1px solid var(--v8-avertissement);
+}
+.carte-precision {
+  left: 10px;
+  bottom: 28px;
+  width: fit-content;
+  max-width: calc(100% - 74px);
+  background: var(--v8-surface);
+  color: var(--v8-texte);
+}
+.carte-precision.carte-precision--alerte {
+  background: var(--v8-avertissement-fond);
+  color: var(--v8-avertissement);
+  border: 1px solid var(--v8-avertissement);
+}
+.carte-astuce {
+  position: absolute;
+  z-index: 1002;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: var(--v8-texte);
+  color: var(--v8-surface);
+  font-size: 14px;
+  font-weight: 600;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.carte-message[hidden],
+.carte-precision[hidden],
+.carte-astuce[hidden] { display: none; }
+
+/* Position du livreur : un point bleu cercle de blanc. */
+.leaflet-marker-icon.position-livreur { background: none; border: 0; }
+.position-livreur-point {
+  display: block;
+  width: 18px;
+  height: 18px;
+  margin: 2px;
+  border-radius: 50%;
+  background: var(--carte-position);
+  box-shadow: 0 0 0 3px #FFFFFF, 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+/* Preparation : des points sans numero. La zone de toucher reste l'ancre de
+   44 px ; le disque visible fait 22. Coche = plein, sinon contour. */
+.leaflet-marker-icon.marqueur-ancre .marqueur.marqueur--point {
+  width: 22px;
+  height: 22px;
+  font-size: 0;
+  background: var(--v8-surface);
+  box-shadow: inset 0 0 0 3px var(--v8-principal), 0 3px 8px rgba(15, 61, 61, 0.25);
+}
+.leaflet-marker-icon.marqueur-ancre .marqueur.marqueur--point.marqueur--choisi {
+  background: var(--v8-principal);
+  box-shadow: 0 0 0 3px var(--v8-surface), 0 3px 8px rgba(15, 61, 61, 0.3);
+}
+
+/* Depart et arrivee : un carre arrondi, lettre D ou A, texte sur surface. */
+.leaflet-marker-icon.marqueur-ancre .marqueur.marqueur--repere {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--v8-texte);
+  color: var(--v8-surface);
+  box-shadow: 0 0 0 2px var(--v8-surface), 0 6px 16px rgba(15, 61, 61, 0.3);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+/* Arrets a la meme adresse : « 3·7 » tient dans le disque de 44. */
+.leaflet-marker-icon.marqueur-ancre .marqueur.marqueur--groupe {
+  font-size: 14px;
+  letter-spacing: -0.02em;
+}
+
+/* Point approximatif (la rue, pas la porte) : un anneau en tirets autour du
+   disque. Le mot est dans le nom accessible et dans la bulle. */
+.leaflet-marker-icon.marqueur-ancre .marqueur.marqueur--approx {
+  outline: 2px dashed var(--v8-texte);
+  outline-offset: 3px;
+}
+
+/* Plein ecran : la carte couvre l'ecran, au-dessus de la barre basse (1100)
+   et sous les feuilles, les fenetres et les messages (1200 et plus). */
+#livreur .driver-page > .tournee-carte-panel.carte-plein-ecran,
+#livreur .tournee-carte-panel.carte-plein-ecran {
+  position: fixed;
+  inset: 0;
+  z-index: 1150;
+  display: flex;
+  flex-direction: column;
+  width: auto;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--v8-surface);
+}
+#livreur .tournee-carte-panel.carte-plein-ecran > .panel-heading { display: none; }
+#livreur .tournee-carte-panel.carte-plein-ecran .map-shell { flex: 1 1 auto; min-height: 0; }
+#livreur .tournee-carte-panel.carte-plein-ecran #map {
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+}
+#livreur .tournee-carte-panel.carte-plein-ecran .carte-outils {
+  top: calc(10px + env(safe-area-inset-top));
+}
+body.carte-plein-ecran-ouverte { overflow: hidden; }
+/* L'entree d'ecran (pageFadeIn, `both`) laisse un transform identite sur la
+   page : il en fait le cadre d'un `position: fixed` et un contexte
+   d'empilement. La carte « plein ecran » restait dans la page, sous la barre
+   basse -- mesure du 23/09 : 358 x 2106 px a y = -1273. */
+body.carte-plein-ecran-ouverte #livreur.page.active { animation: none; transform: none; }

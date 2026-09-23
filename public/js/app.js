@@ -68,7 +68,12 @@ let activeStopIndex = 0;
 // bouge (revue du 23/09 : en reseau lent, l'appui impatient livrait l'arret
 // SUIVANT, jamais vu).
 let gestesVerrouilles = 0;
-let markers = [];
+// La carte (lot 4 de l'audit geo, 23/09) : un marqueur par cle, mis a jour
+// en place ; la cle du dernier cadrage ; l'arret que la carte suit.
+let marqueursCarte = new Map();
+let signatureTrace = "";
+let cleCadrage = "";
+let arretSuivi = null;
 let routeLine = null;
 let routeLineLisere = null;
 let deliverySelection = new Set();
@@ -709,9 +714,15 @@ function bindUi() {
     // l'ecran avance tout de suite et l'envoi part au terme d'Annuler.
     if (action === "mark-delivered") livrerAvecAnnulation().catch(notifyEchec);
     if (action === "trn-voir-carte") {
-      const carte = document.querySelector("#livreur .tournee-carte-panel");
-      if (carte) carte.scrollIntoView({ block: "start", behavior: "smooth" });
+      // Au telephone, la carte etait a plus de deux ecrans de defilement : le
+      // bouton l'ouvre en plein ecran (lot 4 de l'audit geo). Au bureau, elle
+      // est a cote de la liste.
+      if (window.matchMedia("(max-width: 820px)").matches) basculerPleinEcranCarte(true);
+      else document.querySelector("#livreur .tournee-carte-panel")?.scrollIntoView({ block: "start", behavior: "smooth" });
     }
+    if (action === "carte-recentrer") cadrerCarte();
+    if (action === "carte-position") basculerPositionLivreur();
+    if (action === "carte-plein-ecran") basculerPleinEcranCarte();
     if (action === "mark-absent") runAction(actionButton, "Envoi...", () => marquerArret("absent"));
     if (action === "mark-problem") runAction(actionButton, "Envoi...", () => marquerArret("probleme"));
     if (action === "mark-reschedule") runAction(actionButton, "Envoi...", () => marquerArret("a_reprogrammer"));
@@ -903,6 +914,13 @@ function showTab(tabName, options = {}) {
 
   resetViewportScroll(updateHash);
 
+  // Hors de l'ecran Tournee, la position du livreur n'est plus suivie, et la
+  // carte ne reste pas en plein ecran par-dessus un autre ecran.
+  if (nextTab !== "livreur") {
+    arreterPositionLivreur();
+    if (carteEnPleinEcran()) basculerPleinEcranCarte(false);
+  }
+
   if (nextTab === "livreur" && map) {
     // Mesure du 19/09 : la carte etait cadree (fitBounds) au chargement des
     // donnees, pendant que l'onglet etait masque -- conteneur de 0 x 0, zoom
@@ -962,21 +980,208 @@ function initMap() {
     return;
   }
 
-  map = L.map("map", {
-    zoomControl: true
-  }).setView([46.9511, 4.9027], 10);
+  // Au telephone, un doigt fait defiler la PAGE ; deux doigts deplacent et
+  // zooment la carte (le pincement de Leaflet suit le milieu des deux doigts).
+  // Avant, le doigt qui passait sur la carte y restait pris : la page
+  // s'arretait de defiler (mesure de l'audit : 0 px de page, 200 px de carte).
+  // En plein ecran, il n'y a plus de page : le doigt seul deplace la carte.
+  carteTactile = Boolean(window.matchMedia?.("(pointer: coarse)").matches || L.Browser.mobile);
 
-  // Sans le motif `{s}` : la politique d'usage d'OpenStreetMap deconseille
-  // explicitement les sous-domaines a.b.c, herites de HTTP/1.1 et inutiles
-  // depuis HTTP/2. Mesure du 18/09 : le serveur rendait des tuiles 403
-  // "Access blocked -- App is not following the tile usage policy".
-  // ⚠ Ceci ne prouve PAS que le blocage vienne de la, ni qu'il soit leve.
-  // Le fournisseur de tuiles pour la PRODUCTION est un arbitrage ouvert,
-  // note dans la charte.
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: "&copy; OpenStreetMap"
-  }).addTo(map);
+  // Centre par defaut : la region servie (Jura, Doubs), le temps que les
+  // points arrivent. Avant : Beaune, a 80 km de Champagnole.
+  map = L.map("map", {
+    zoomControl: false,
+    dragging: !carteTactile
+  }).setView(CENTRE_PAR_DEFAUT, 9);
+  // Les libelles de Leaflet sont en anglais (« Zoom in », « Close popup »).
+  L.control.zoom({ zoomInTitle: "Zoomer", zoomOutTitle: "Dézoomer" }).addTo(map);
+  map.attributionControl.setPrefix('<a href="https://leafletjs.com" target="_blank" rel="noopener">Leaflet</a>');
+  map.on("popupopen", event => {
+    const fermer = event.popup.getElement()?.querySelector(".leaflet-popup-close-button");
+    if (fermer) { fermer.setAttribute("aria-label", "Fermer"); fermer.title = "Fermer"; }
+  });
+  if (carteTactile) {
+    map.getContainer().addEventListener("touchmove", event => {
+      if (event.touches.length === 1 && !carteEnPleinEcran()) montrerAstuceDeuxDoigts();
+    }, { passive: true });
+  }
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape" && carteEnPleinEcran()) basculerPleinEcranCarte(false);
+  });
+  chargerFondDeCarte();
+}
+
+// --- Les outils de la carte (lot 4 de l'audit geo, 23/09) -------------------
+
+const CENTRE_PAR_DEFAUT = [46.95, 5.75];
+const REGION_PAR_DEFAUT = [[46.55, 5.35], [47.35, 6.25]];
+// Au-dela, une position GPS ne situe plus le livreur dans sa rue.
+const PRECISION_SUSPECTE_M = 150;
+// Tuiles en echec d'affilee avant de dire le fond de carte indisponible.
+const TUILES_EN_ECHEC_MAX = 4;
+
+let carteTactile = false;
+let tuilesEnEchec = 0;
+let positionLivreur = null;
+let astuceMinuterie = null;
+let declencheurPleinEcran = null;
+
+/**
+ * Le fond de carte vient du serveur (lib/fond-de-carte.js) : UN seul endroit
+ * pour le fournisseur, que la CSP suit aussi. Il etait ecrit en dur ici et
+ * dans la CSP.
+ *
+ * `referrerPolicy` : les tuiles partent avec l'ORIGINE en Referer, que la
+ * politique d'usage d'OpenStreetMap exige ; le document garde `no-referrer`
+ * pour tout le reste. Mesure de l'audit : 21 tuiles sur 21 sans Referer.
+ * ⚠ Cela ne prouve PAS que les blocages « Access blocked » du 18/09 viennent
+ * de la ; le fournisseur pour la PRODUCTION reste un arbitrage (charte).
+ */
+async function chargerFondDeCarte() {
+  let fond = null;
+  try { fond = await apiFetch("/api/carte/fond"); } catch { fond = null; }
+  if (!map) return;
+  if (!fond?.url) { signalerFondDeCarte(true); return; }
+  const couche = L.tileLayer(fond.url, {
+    maxZoom: fond.zoomMax || 19,
+    attribution: fond.attribution || "",
+    referrerPolicy: fond.referrerPolicy || "strict-origin-when-cross-origin"
+  });
+  // Une tuile refusee (403 « Access blocked », reseau coupe) ne disait rien :
+  // la carte restait grise ou couverte d'images d'erreur. Quelques echecs
+  // d'affilee suffisent a le dire ; une tuile qui revient efface le message.
+  couche.on("tileerror", () => {
+    tuilesEnEchec += 1;
+    if (tuilesEnEchec >= TUILES_EN_ECHEC_MAX) signalerFondDeCarte(true);
+  });
+  couche.on("tileload", () => {
+    tuilesEnEchec = 0;
+    signalerFondDeCarte(false);
+  });
+  couche.addTo(map);
+}
+
+function signalerFondDeCarte(enPanne) {
+  const message = document.getElementById("carteMessage");
+  if (!message) return;
+  message.textContent = enPanne ? "Fond de carte indisponible — la liste des arrêts reste utilisable." : "";
+  message.hidden = !enPanne;
+}
+
+function carteEnPleinEcran() {
+  return Boolean(document.querySelector("#livreur .tournee-carte-panel.carte-plein-ecran"));
+}
+
+/**
+ * Plein ecran : la carte prend tout l'ecran, au-dessus de la barre basse.
+ * Avant, elle n'occupait que 43 % de l'ecran, a plus de deux ecrans de
+ * defilement de l'arret. Echap ou le meme bouton en sortent, et le focus
+ * revient a ce qui l'avait ouverte.
+ */
+function basculerPleinEcranCarte(ouvrir) {
+  const panneau = document.querySelector("#livreur .tournee-carte-panel");
+  const bouton = document.getElementById("cartePleinEcran");
+  if (!panneau || !map) return;
+  const plein = typeof ouvrir === "boolean" ? ouvrir : !panneau.classList.contains("carte-plein-ecran");
+  if (plein === panneau.classList.contains("carte-plein-ecran")) return;
+  if (plein) declencheurPleinEcran = document.activeElement;
+  panneau.classList.toggle("carte-plein-ecran", plein);
+  document.body.classList.toggle("carte-plein-ecran-ouverte", plein);
+  bouton?.setAttribute("aria-pressed", String(plein));
+  if (carteTactile) {
+    if (plein) map.dragging.enable();
+    else map.dragging.disable();
+  }
+  // La taille change : Leaflet la relit, le centre est garde.
+  map.invalidateSize();
+  if (plein) {
+    bouton?.focus({ preventScroll: true });
+  } else {
+    const retour = declencheurPleinEcran && document.contains(declencheurPleinEcran) ? declencheurPleinEcran : bouton;
+    declencheurPleinEcran = null;
+    retour?.focus({ preventScroll: true });
+  }
+}
+
+function montrerAstuceDeuxDoigts() {
+  const astuce = document.getElementById("carteAstuce");
+  if (!astuce) return;
+  astuce.hidden = false;
+  clearTimeout(astuceMinuterie);
+  astuceMinuterie = setTimeout(() => { astuce.hidden = true; }, 1500);
+}
+
+function formatPrecision(metres) {
+  return metres < 1000 ? `${Math.round(metres)} m` : `${(metres / 1000).toFixed(1).replace(".", ",")} km`;
+}
+
+/**
+ * La position du livreur, en direct, SEULEMENT quand il la demande. Elle reste
+ * dans le navigateur : rien n'est envoye au serveur. La precision est affichee,
+ * et signalee au-dela de ~150 m (un GPS a 8 km etait accepte sans un mot).
+ * Quitter l'ecran Tournee arrete le suivi.
+ */
+function basculerPositionLivreur() {
+  if (positionLivreur) { arreterPositionLivreur(); return; }
+  if (!map) return;
+  if (!("geolocation" in navigator)) {
+    afficherPrecisionPosition("Position indisponible sur cet appareil.", true);
+    return;
+  }
+  positionLivreur = { suivi: null, point: null, cercle: null };
+  document.getElementById("cartePosition")?.setAttribute("aria-pressed", "true");
+  afficherPrecisionPosition("Recherche de ma position…", false);
+  positionLivreur.suivi = navigator.geolocation.watchPosition(majPositionLivreur, erreurPositionLivreur,
+    { enableHighAccuracy: true, maximumAge: 10000, timeout: 30000 });
+}
+
+function majPositionLivreur(position) {
+  if (!positionLivreur || !map) return;
+  const { latitude, longitude, accuracy } = position.coords;
+  const point = [latitude, longitude];
+  const couleur = couleurCharte("--carte-position", "#1A73E8");
+  if (!positionLivreur.point) {
+    positionLivreur.cercle = L.circle(point, { radius: accuracy, interactive: false, color: couleur, weight: 1, opacity: 0.6, fillColor: couleur, fillOpacity: 0.12 }).addTo(map);
+    positionLivreur.point = L.marker(point, {
+      icon: L.divIcon({ className: "position-livreur", html: '<span class="position-livreur-point" role="img" aria-label="Ma position"></span>', iconSize: [22, 22], iconAnchor: [11, 11] }),
+      keyboard: false, interactive: false, zIndexOffset: 2000
+    }).addTo(map);
+  } else {
+    positionLivreur.point.setLatLng(point);
+    positionLivreur.cercle.setLatLng(point);
+    positionLivreur.cercle.setRadius(accuracy);
+  }
+  const imprecise = accuracy > PRECISION_SUSPECTE_M;
+  afficherPrecisionPosition(`Ma position : ± ${formatPrecision(accuracy)}${imprecise ? " — position imprécise" : ""}`, imprecise);
+}
+
+function erreurPositionLivreur(erreur) {
+  if (!positionLivreur) return;
+  if (erreur?.code === 1) {
+    arreterPositionLivreur();
+    afficherPrecisionPosition("Position refusée : autorisez la localisation pour ce site.", true);
+    return;
+  }
+  // Introuvable ou trop lente : le suivi continue, on le dit.
+  afficherPrecisionPosition("Position introuvable pour l'instant.", true);
+}
+
+function arreterPositionLivreur() {
+  if (!positionLivreur) return;
+  if (positionLivreur.suivi !== null) navigator.geolocation.clearWatch(positionLivreur.suivi);
+  if (positionLivreur.point) map.removeLayer(positionLivreur.point);
+  if (positionLivreur.cercle) map.removeLayer(positionLivreur.cercle);
+  positionLivreur = null;
+  document.getElementById("cartePosition")?.setAttribute("aria-pressed", "false");
+  afficherPrecisionPosition("", false);
+}
+
+function afficherPrecisionPosition(texte, alerte) {
+  const zone = document.getElementById("cartePrecision");
+  if (!zone) return;
+  zone.textContent = texte;
+  zone.hidden = !texte;
+  zone.classList.toggle("carte-precision--alerte", Boolean(texte) && alerte);
 }
 
 /**
@@ -6251,7 +6456,10 @@ function selectStop(index) {
   if (!activeRoute || !activeRoute.stops[index]) return;
   activeStopIndex = index;
   renderRoute();
-  focusEntity(activeRoute.stops[activeStopIndex]);
+  // M3 (audit geo) : le marqueur « en cours » de la CARTE suit l'arret choisi
+  // -- avant, deux arrets semblaient en cours. renderMap met a jour les deux
+  // marqueurs concernes et fait glisser la carte vers l'arret, a son zoom.
+  renderMap();
   updateRouteProgress();
 }
 
@@ -7026,6 +7234,27 @@ async function saveCurrentCoordinates() {
   notify("Coordonnées enregistrées.", "success");
 }
 
+/**
+ * La carte de l'ecran Tournee. Lot 4 de l'audit geo (23/09) : « une carte
+ * utilisable au telephone ».
+ *
+ * - MISE A JOUR CIBLEE. Avant, chaque rendu retirait et recreait tous les
+ *   marqueurs (120 a 265 ms par case cochee sur un telephone lent, 300 points).
+ *   Chaque marqueur a maintenant une cle ; on ne touche qu'a ce qui change
+ *   (setIcon, setLatLng, contenu de la bulle), et le trace ne se redessine que
+ *   si la tournee ou sa geometrie changent.
+ * - PLUS DE RECADRAGE A CHAQUE GESTE (H10). Avant, « Livre », « Absent » ou un
+ *   changement d'onglet recadraient sur toute la tournee : le livreur rezoomait
+ *   a chaque arret. On ne cadre que quand la tournee AFFICHEE change (autre
+ *   tournee, arrets ajoutes ou retires) ; sinon la vue du livreur est gardee, et
+ *   la carte glisse vers l'arret en cours QUAND IL CHANGE, a son zoom.
+ *   « Recentrer » remet toute la tournee dans le cadre.
+ * - SANS TOURNEE, pas de faux trajet. Avant, les commandes (ou, a defaut, TOUS
+ *   les clients de la base) etaient numerotees « Arret N » et reliees par un
+ *   pointille dans l'ordre de la liste : un trajet que rien n'avait calcule.
+ *   En preparation, la carte montre les commandes pretes a livrer par des
+ *   points sans numero, cochees ou non ; jamais les clients.
+ */
 function renderMap() {
   if (!map) return;
   // Un conteneur sans taille (onglet masque) ne se cadre pas : fitBounds y
@@ -7033,62 +7262,200 @@ function renderMap() {
   const taille = map.getSize();
   if (!taille.x || !taille.y) return;
 
-  markers.forEach(marker => map.removeLayer(marker));
-  markers = [];
+  const modeTournee = Boolean(activeRoute?.stops?.length);
+  const { voulus, sansPosition, total } = modeTournee ? marqueursDeTournee(activeRoute) : marqueursDePreparation();
+  appliquerMarqueurs(voulus);
+  dessinerTrace(modeTournee);
+  majLegendeCarte(modeTournee, voulus.filter(v => !v.repere).length, sansPosition, total);
 
-  if (routeLine) {
-    map.removeLayer(routeLine);
-    routeLine = null;
+  // Cadrer seulement quand la tournee affichee change. L'ordre des arrets n'en
+  // fait pas partie : reordonner ne deplace pas la vue.
+  const cle = modeTournee
+    ? `r:${activeRoute.id}:${activeRoute.stops.map(s => String(s.id)).sort().join(",")}`
+    : `p:${voulus.map(v => v.cle).sort().join(",")}`;
+  const courant = modeTournee && !isRouteComplete(activeRoute) ? activeRoute.stops[activeStopIndex] : null;
+  if (cle !== cleCadrage) {
+    cleCadrage = cle;
+    cadrerCarte();
+    arretSuivi = courant ? String(courant.id) : null;
+  } else if (courant && String(courant.id) !== arretSuivi) {
+    // L'arret en cours a change (« Livre », choix dans la liste ou sur la
+    // carte) : la carte le suit, au zoom que le livreur a choisi.
+    arretSuivi = String(courant.id);
+    const coords = getEntityCoordinates(courant);
+    if (coords) map.panTo([coords.lat, coords.lng]);
   }
-  if (routeLineLisere) {
-    map.removeLayer(routeLineLisere);
-    routeLineLisere = null;
-  }
+}
 
-  const entities = getMapEntities();
-  const points = [];
+const positionApproximative = entity => entity?.positionPrecision === "approximative";
 
-  entities.forEach((entity, index) => {
-    const coords = getEntityCoordinates(entity);
+/** « 3 et 7 », « 3, 5 et 7 ». */
+function listeRangs(rangs) {
+  return rangs.length < 2 ? String(rangs[0]) : `${rangs.slice(0, -1).join(", ")} et ${rangs.at(-1)}`;
+}
 
-    if (!coords) return;
+function iconeCarte(html) {
+  // Le meme marqueur que dans la ligne d'arret. La zone de toucher fait
+  // 44 x 44 (plancher de la charte) ; sur la carte le disque fait 44 lui
+  // aussi (decision du 23/09, planche 4c) -- la zone de toucher EST le disque.
+  return L.divIcon({ className: "marqueur-ancre", html, iconSize: [44, 44], iconAnchor: [22, 22], popupAnchor: [0, -20] });
+}
 
-    // Le meme marqueur que dans la ligne d'arret. La zone de toucher fait
-    // 44 x 44 (plancher de la charte) ; sur la carte le disque fait 44 lui
-    // aussi (decision du 23/09, planche 4c) -- la zone de toucher EST le disque.
-    const etat = marqueurEtat(entity, index);
-    const marker = L.marker([coords.lat, coords.lng], {
-      icon: L.divIcon({
-        className: "marqueur-ancre",
-        html: marqueurHtml(entity, index),
-        iconSize: [44, 44],
-        iconAnchor: [22, 22],
-        popupAnchor: [0, -20]
-      }),
-      // L'arret en cours passe devant les autres, puis les arrets a venir,
-      // puis les faits : ce qu'on cherche des yeux est ce qu'on doit toucher.
-      zIndexOffset: etat === "en-cours" ? 1000 : etat === "a-venir" ? 500 : 0
-    }).addTo(map);
+function bulleArret(stop, index) {
+  return `<strong>Arrêt ${index + 1} · ${escapeHtml(getEntityName(stop))}</strong><br>
+      ${escapeHtml(formatEntityAddress(stop))}<br>
+      ${escapeHtml(formatEntityStatus(stop))}${positionApproximative(stop) ? "<br><em>Position approximative : le point est au milieu de la rue.</em>" : ""}`;
+}
 
-    marker.bindPopup(`
-      <strong>${escapeHtml(getEntityName(entity))}</strong><br>
-      ${escapeHtml(formatEntityAddress(entity))}<br>
-      ${escapeHtml(formatEntityStatus(entity))}
-    `);
-
-    marker.on("click", () => {
-      if (activeRoute) selectStop(index);
-    });
-
-    markers.push(marker);
-    points.push([coords.lat, coords.lng]);
+/**
+ * Les marqueurs d'une tournee. Les arrets a la MEME position (deux commandes
+ * du meme client) font un seul marqueur « 3·7 » : empiles, un seul restait
+ * visible et l'autre semblait absent. Depart et arrivee sont dessines meme
+ * sans trace routier -- avant, ils disparaissaient apres un reordonnancement
+ * (le serveur efface la geometrie, pas le depart ni l'arrivee).
+ */
+function marqueursDeTournee(tournee) {
+  const groupes = new Map();
+  let sansPosition = 0;
+  tournee.stops.forEach((stop, index) => {
+    const coords = getEntityCoordinates(stop);
+    if (!coords) { sansPosition += 1; return; }
+    const cle = `${coords.lat.toFixed(5)},${coords.lng.toFixed(5)}`;
+    if (!groupes.has(cle)) groupes.set(cle, { coords, membres: [] });
+    groupes.get(cle).membres.push({ stop, index });
   });
 
-  const mapEmpty = document.getElementById("mapEmpty");
-  if (mapEmpty) mapEmpty.hidden = points.length > 0;
+  const voulus = [];
+  for (const { coords, membres } of groupes.values()) {
+    const etats = membres.map(m => marqueurEtat(m.stop, m.index));
+    // L'etat montre est celui qu'on cherche des yeux : l'arret en cours, puis
+    // un arret a venir, puis un echec, puis les faits.
+    const etat = ["en-cours", "a-venir", "echec", "fait"].find(e => etats.includes(e));
+    const cible = membres[etats.indexOf(etat)];
+    voulus.push({
+      cle: `a:${membres.map(m => String(m.stop.id)).join("+")}`,
+      latlng: [coords.lat, coords.lng],
+      html: membres.length === 1 ? marqueurHtml(cible.stop, cible.index, { surCarte: true }) : marqueurGroupeHtml(membres, etat),
+      bulle: membres.map(m => bulleArret(m.stop, m.index)).join("<hr>"),
+      // L'arret en cours passe devant les autres, puis les arrets a venir,
+      // puis les faits : ce qu'on cherche des yeux est ce qu'on doit toucher.
+      zIndexOffset: etat === "en-cours" ? 1000 : etat === "a-venir" ? 500 : 0,
+      clavier: true,
+      surClic: () => selectStop(cible.index)
+    });
+  }
 
-  if (activeRoute?.geometry?.coordinates) {
-    const roadPoints = activeRoute.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+  // Depart et arrivee. Au meme point (retour au depot), un seul repere.
+  const reperes = [[tournee.departure, "Départ", "D"], [tournee.arrival, "Arrivée", "A"]]
+    .map(([point, nom, lettre]) => ({ point, nom, lettre, coords: point ? getEntityCoordinates(point) : null }))
+    .filter(r => r.coords);
+  const memePoint = reperes.length === 2
+    && reperes[0].coords.lat === reperes[1].coords.lat && reperes[0].coords.lng === reperes[1].coords.lng;
+  const aDessiner = memePoint
+    ? [{ ...reperes[0], nom: "Départ et arrivée", lettre: "D·A" }]
+    : reperes;
+  for (const r of aDessiner) {
+    const libelle = `${r.nom} : ${r.point.label || "point choisi"}`;
+    voulus.push({
+      cle: `repere:${r.nom}`,
+      repere: true,
+      latlng: [r.coords.lat, r.coords.lng],
+      html: `<span class="marqueur marqueur--repere" role="img" aria-label="${escapeAttribute(libelle)}">${r.lettre}</span>`,
+      bulle: `<strong>${escapeHtml(r.nom)}</strong><br>${escapeHtml(r.point.label || "Point choisi")}`,
+      zIndexOffset: 100,
+      clavier: true,
+      surClic: null
+    });
+  }
+  return { voulus, sansPosition, total: tournee.stops.length };
+}
+
+function marqueurGroupeHtml(membres, etat) {
+  const rangs = membres.map(m => m.index + 1);
+  const libelle = etat === "fait" ? "livrés" : etat === "echec" ? "dont un en échec" : etat === "en-cours" ? "en cours" : "à venir";
+  const noms = [...new Set(membres.map(m => m.stop.clientName || "client"))].join(" ; ");
+  const approx = membres.some(m => positionApproximative(m.stop));
+  // Deux rangs se lisent « 3·7 » ; au-dela, « 3+2 » (le premier, et combien d'autres).
+  const texte = etat === "fait" || etat === "echec" ? "" : rangs.length === 2 ? rangs.join("·") : `${rangs[0]}+${rangs.length - 1}`;
+  return `<span class="marqueur marqueur--${etat} marqueur--groupe${approx ? " marqueur--approx" : ""}" role="img" aria-label="Arrêts ${listeRangs(rangs)}, ${libelle}${approx ? ", position approximative" : ""} : ${escapeAttribute(noms)}">${texte}</span>`;
+}
+
+/** Preparation : les commandes pretes a livrer (filtrees, plus la selection). */
+function marqueursDePreparation() {
+  const vues = new Map();
+  for (const order of getFilteredDeliveryOrders()) vues.set(String(order.id), order);
+  for (const order of orders) if (deliverySelection.has(String(order.id))) vues.set(String(order.id), order);
+  const voulus = [];
+  let sansPosition = 0;
+  for (const order of vues.values()) {
+    const coords = getEntityCoordinates(order);
+    if (!coords) { sansPosition += 1; continue; }
+    const choisi = deliverySelection.has(String(order.id));
+    const approx = positionApproximative(order);
+    const libelle = `${order.clientName || "Client"}, ${choisi ? "sélectionnée" : "non sélectionnée"}${approx ? ", position approximative" : ""}`;
+    voulus.push({
+      cle: `c:${order.id}`,
+      latlng: [coords.lat, coords.lng],
+      html: `<span class="marqueur marqueur--point${choisi ? " marqueur--choisi" : ""}${approx ? " marqueur--approx" : ""}" role="img" aria-label="${escapeAttribute(libelle)}"></span>`,
+      bulle: `<strong>${escapeHtml(getEntityName(order))}</strong><br>${escapeHtml(formatEntityAddress(order))}${approx ? "<br><em>Position approximative : le point est au milieu de la rue.</em>" : ""}`,
+      zIndexOffset: choisi ? 500 : 0,
+      // La liste des commandes est l'equivalent clavier : sans cela, Tab
+      // traversait chacun des points avant la suite de la page.
+      clavier: false,
+      surClic: null
+    });
+  }
+  return { voulus, sansPosition, total: vues.size };
+}
+
+function appliquerMarqueurs(voulus) {
+  const gardes = new Set();
+  for (const v of voulus) {
+    gardes.add(v.cle);
+    let marqueur = marqueursCarte.get(v.cle);
+    if (!marqueur) {
+      marqueur = L.marker(v.latlng, { icon: iconeCarte(v.html), zIndexOffset: v.zIndexOffset, keyboard: v.clavier }).addTo(map);
+      marqueur.bindPopup(v.bulle);
+      marqueur.on("click", () => marqueur.sereoSurClic?.());
+      marqueur.sereoRendu = { html: v.html, lat: v.latlng[0], lng: v.latlng[1], bulle: v.bulle, z: v.zIndexOffset };
+      marqueursCarte.set(v.cle, marqueur);
+    } else {
+      const rendu = marqueur.sereoRendu;
+      // DivIcon reutilise son element : setIcon ne recree rien dans le DOM.
+      if (rendu.html !== v.html) { marqueur.setIcon(iconeCarte(v.html)); rendu.html = v.html; }
+      if (rendu.lat !== v.latlng[0] || rendu.lng !== v.latlng[1]) { marqueur.setLatLng(v.latlng); rendu.lat = v.latlng[0]; rendu.lng = v.latlng[1]; }
+      if (rendu.bulle !== v.bulle) { marqueur.setPopupContent(v.bulle); rendu.bulle = v.bulle; }
+      if (rendu.z !== v.zIndexOffset) { marqueur.setZIndexOffset(v.zIndexOffset); rendu.z = v.zIndexOffset; }
+    }
+    marqueur.sereoSurClic = v.surClic;
+  }
+  for (const [cle, marqueur] of marqueursCarte) {
+    if (gardes.has(cle)) continue;
+    map.removeLayer(marqueur);
+    marqueursCarte.delete(cle);
+  }
+}
+
+/** Le trace : seulement pour une tournee, redessine seulement s'il change. */
+function dessinerTrace(modeTournee) {
+  const geo = modeTournee ? activeRoute.geometry?.coordinates : null;
+  // Sans trace routier, le pointille relie depart, arrets et arrivee dans
+  // l'ORDRE DE LA TOURNEE (reordonnee a la main, ou jamais calculee).
+  const pointille = modeTournee && !geo
+    ? [activeRoute.departure, ...activeRoute.stops, activeRoute.arrival].map(e => e && getEntityCoordinates(e)).filter(Boolean).map(c => [c.lat, c.lng])
+    : [];
+  const signature = !modeTournee ? "" : geo
+    ? `g:${activeRoute.id}:${geo.length}:${geo[0]}:${geo.at(-1)}`
+    : `p:${pointille.map(p => p.join(",")).join(";")}`;
+  if (signature === signatureTrace) return;
+  signatureTrace = signature;
+
+  if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+  if (routeLineLisere) { map.removeLayer(routeLineLisere); routeLineLisere = null; }
+  if (!modeTournee) return;
+
+  if (geo) {
+    const roadPoints = geo.map(([lng, lat]) => [lat, lng]);
     // Planche 4c, decision de Thomas du 23/09 (remplace les 4,5 px du 19/09) :
     // le trace est en ACCENT, 7 px, bouts ronds. Une forme, pas un texte --
     // l'orange y est a sa place. Dessous, un lisere blanc de 2 px de chaque
@@ -7097,41 +7464,62 @@ function renderMap() {
     // esquisse. Le lisere n'est pas interactif : le clic reste au trace.
     routeLineLisere = L.polyline(roadPoints, {color: "#FFFFFF", weight: 11, opacity: 0.9, lineCap: "round", lineJoin: "round", interactive: false}).addTo(map);
     routeLine = L.polyline(roadPoints, {color: couleurCharte("--v8-accent", "#EF9177"), weight: 7, opacity: 1, lineCap: "round", lineJoin: "round"}).addTo(map);
-    for (const [point, label] of [[activeRoute.departure, "Départ"], [activeRoute.arrival, "Arrivée"]]) {
-      if (point) markers.push(L.marker([point.lat, point.lng]).addTo(map).bindPopup(`${label} : ${escapeHtml(point.label || "Point choisi")}`));
-    }
-    map.fitBounds(routeLine.getBounds(), {padding:[30,30]});
-  } else if (points.length > 1) {
+  } else if (pointille.length > 1) {
     // Sans geometrie routiere : un pointille en PRINCIPAL, pas un bleu V7.
-    routeLine = L.polyline(points, {
+    routeLine = L.polyline(pointille, {
       dashArray: "6 8",
       color: couleurCharte("--v8-principal", "#386B6D"),
       weight: 3,
       opacity: 0.8,
       lineCap: "round"
     }).addTo(map);
-
-    map.fitBounds(routeLine.getBounds(), {
-      padding: [30, 30]
-    });
-  } else if (points.length === 1) {
-    // Audit UI 2026-07 : cas frequent "1 arret" -> fitBounds n'etait pas
-    // appele, la carte restait sur le centre code en dur [46.9511,4.9027] et
-    // le marqueur unique tombait hors-cadre. On recentre sur ce point.
-    map.setView(points[0], 14);
   }
 }
 
-function getMapEntities() {
-  if (activeRoute?.stops?.length) return activeRoute.stops;
+/** Sous-titre, legende et message de la carte, selon ce qu'elle montre. */
+function majLegendeCarte(modeTournee, points, sansPosition, total) {
+  const sousTitre = document.getElementById("carteSousTitre");
+  if (sousTitre) {
+    sousTitre.textContent = modeTournee
+      ? (activeRoute.geometry?.coordinates ? "Trajet routier · départ → clients → arrivée" : "Ordre de passage · tracé routier à recalculer")
+      : "Commandes prêtes à livrer · aucune tournée";
+  }
+  const legende = document.getElementById("carteLegende");
+  if (legende) legende.hidden = !modeTournee;
+  const recentrer = document.getElementById("carteRecentrer");
+  if (recentrer) recentrer.title = modeTournee ? "Recentrer sur toute la tournée" : "Recentrer sur les commandes";
 
-  const selectedOrders = orders.filter(order => deliverySelection.has(String(order.id)));
-  if (selectedOrders.length) return selectedOrders;
+  const vide = document.getElementById("mapEmpty");
+  if (!vide) return;
+  let texte = "";
+  if (!points) {
+    texte = modeTournee ? "Aucun arrêt de cette tournée n'a de position."
+      : total ? "Aucune commande prête à livrer n'a de position."
+        : "Aucune tournée ni commande prête à livrer.";
+  } else if (sansPosition) {
+    // Avant, ces arrets disparaissaient de la carte sans un mot.
+    const quoi = modeTournee ? (sansPosition > 1 ? "arrêts" : "arrêt") : (sansPosition > 1 ? "commandes" : "commande");
+    texte = `${sansPosition} ${quoi} sans position, absent${sansPosition > 1 ? "s" : ""} de la carte.`;
+  }
+  vide.textContent = texte;
+  vide.hidden = !texte;
+}
 
-  const filtered = getFilteredDeliveryOrders();
-  if (filtered.length) return filtered;
-
-  return clients;
+/** Toute la tournee (ou les commandes) dans le cadre ; la region s'il n'y a rien. */
+function cadrerCarte() {
+  if (!map) return;
+  const taille = map.getSize();
+  if (!taille.x || !taille.y) return;
+  const bornes = L.latLngBounds([...marqueursCarte.values()].map(m => m.getLatLng()));
+  if (routeLine) bornes.extend(routeLine.getBounds());
+  if (!bornes.isValid()) {
+    map.fitBounds(REGION_PAR_DEFAUT);
+  } else if (bornes.getNorthEast().equals(bornes.getSouthWest())) {
+    // Audit UI 2026-07 : cas frequent "1 arret" -> on centre sur ce point.
+    map.setView(bornes.getCenter(), 14);
+  } else {
+    map.fitBounds(bornes, { padding: [30, 30] });
+  }
 }
 
 function focusEntity(entity) {
@@ -7858,13 +8246,18 @@ function marqueurEtat(stop, index) {
   return "a-venir";
 }
 
-function marqueurHtml(stop, index) {
+function marqueurHtml(stop, index, { surCarte = false } = {}) {
   const etat = marqueurEtat(stop, index);
   // La coche et le « ! » sont dessines en CSS : le numero n'est ecrit que
   // pour les etats qui le montrent.
   const contenu = etat === "fait" || etat === "echec" ? "" : String(index + 1);
   const libelle = etat === "fait" ? "livré" : etat === "echec" ? "en échec" : etat === "en-cours" ? "en cours" : "à venir";
-  return `<span class="marqueur marqueur--${etat}" role="img" aria-label="Arrêt ${index + 1}, ${libelle}">${contenu}</span>`;
+  // Sur la carte, le marqueur est seul : il dit le client (lot 4 de l'audit
+  // geo -- un lecteur d'ecran annoncait « Arret 3, en cours » sans nom) et
+  // s'il est approximatif. Dans la ligne, le nom est deja a cote.
+  const approx = surCarte && positionApproximative(stop);
+  const suite = surCarte ? `${approx ? ", position approximative" : ""} : ${escapeAttribute(stop.clientName || "client")}` : "";
+  return `<span class="marqueur marqueur--${etat}${approx ? " marqueur--approx" : ""}" role="img" aria-label="Arrêt ${index + 1}, ${libelle}${suite}">${contenu}</span>`;
 }
 
 function getStopPill(status) {

@@ -71,7 +71,7 @@ test.afterAll(async () => {
   await Promise.all([tournee?.arreter(), sansTournee?.arreter()]);
 });
 
-async function ouvrir(browser, srv, { vue = BUREAU, contexte = {}, avant } = {}) {
+async function ouvrir(browser, srv, { vue = BUREAU, contexte = {}, avant, figer = true } = {}) {
   const ctx = await browser.newContext({ viewport: vue, ...contexte });
   const page = await ctx.newPage();
   const erreurs = [];
@@ -79,7 +79,10 @@ async function ouvrir(browser, srv, { vue = BUREAU, contexte = {}, avant } = {})
   if (avant) await avant(page);
   await page.goto(srv.base + "/#livreur", { waitUntil: "networkidle" });
   await page.waitForTimeout(1500);
-  await page.addStyleTag({ content: "*, *::before, *::after { transition: none !important; animation: none !important; }" });
+  // `figer: false` garde les animations : l'entree d'ecran laisse un
+  // `transform` sur la page, et un `transform` fait d'un ancetre le cadre
+  // d'un `position: fixed`. Figer les animations masquait ce defaut.
+  if (figer) await page.addStyleTag({ content: "*, *::before, *::after { transition: none !important; animation: none !important; }" });
   return { ctx, page, erreurs };
 }
 
@@ -414,7 +417,7 @@ async function glisser(cdp, points, dy, pas = 8) {
 
 test("telephone — un doigt fait defiler la PAGE, deux doigts deplacent la carte ; plein ecran", async ({ browser }) => {
   test.setTimeout(150000);
-  const { ctx, page, erreurs } = await ouvrir(browser, tournee, { vue: TELEPHONE, contexte: { hasTouch: true, isMobile: true } });
+  const { ctx, page, erreurs } = await ouvrir(browser, tournee, { vue: TELEPHONE, contexte: { hasTouch: true, isMobile: true }, figer: false });
   const cdp = await ctx.newCDPSession(page);
   // La carte au milieu de l'ecran, avec de la page a defiler dessous.
   await page.evaluate(() => { const m = document.getElementById("map").getBoundingClientRect(); window.scrollBy(0, m.top - 150); });
@@ -444,13 +447,18 @@ test("telephone — un doigt fait defiler la PAGE, deux doigts deplacent la cart
   await plein.click();
   await page.waitForTimeout(700);
   const r = await page.evaluate(() => {
-    const p = document.querySelector("#livreur .tournee-carte-panel").getBoundingClientRect();
+    const panneau = document.querySelector("#livreur .tournee-carte-panel");
+    const p = panneau.getBoundingClientRect();
     const m = document.getElementById("map").getBoundingClientRect();
-    return { top: Math.round(p.top), h: Math.round(p.height), carte: Math.round(m.height), ecran: innerHeight };
+    // Ce qui est PEINT aux coins et en bas (la barre basse y est au-dessous) :
+    // la carte doit couvrir l'ecran, pas seulement y etre mesuree.
+    const dessus = (x, y) => panneau.contains(document.elementFromPoint(x, y));
+    return { cadre: [p.left, p.top, p.width, p.height].map(Math.round), carte: Math.round(m.height), ecran: [innerWidth, innerHeight],
+      couvre: [dessus(4, 4), dessus(innerWidth - 4, innerHeight - 4), dessus(innerWidth / 2, innerHeight - 30)] };
   });
-  expect(r.top).toBe(0);
-  expect(r.h).toBe(r.ecran);
-  expect(r.carte, "la carte ne remplit pas l'ecran").toBeGreaterThan(r.ecran - 120);
+  expect(r.cadre, "la carte en plein ecran ne couvre pas l'ecran").toEqual([0, 0, ...r.ecran]);
+  expect(r.couvre, "quelque chose est peint par-dessus la carte en plein ecran").toEqual([true, true, true]);
+  expect(r.carte, "la carte ne remplit pas l'ecran").toBeGreaterThan(r.ecran[1] - 120);
   const avant3 = await positions(page);
   await glisser(cdp, [{ x: 195, y: 420 }], -120);
   await page.waitForTimeout(700);
