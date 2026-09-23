@@ -262,8 +262,11 @@ export function initOperations(api) {
     const ligne = event.target.closest(".sub-product-line");
     if (ligne) majLigne(ligne);
   });
+  // Le change d'une quantite part au mousedown du geste suivant (le champ perd
+  // le focus). Redessiner le catalogue a cet instant remplacait le « + » sous
+  // le pointeur : le premier clic n'ajoutait rien. Les comptes changent en place.
   $("subProducts").addEventListener("change", () => {
-    if (!$("subCatalogue").hidden) rendreCatalogue();
+    if (!$("subCatalogue").hidden) majComptesCatalogue();
   });
   // Les pilules sont des boutons radio : le changement remonte au groupe.
   $("subFrequency").addEventListener("change", majFrequence);
@@ -922,6 +925,20 @@ function changerQuantite(ligne, pas) {
   majLigne(ligne);
   if (!$("subCatalogue").hidden) rendreCatalogue();
 }
+// « code · stock », et « N au panier » quand il y est.
+function texteCatalogue(p) {
+  const dans = ligneDuPanier(p.id);
+  const combien = dans ? Number(dans.querySelector(".sub-quantity").value) : 0;
+  return `${texteStock(p)}${combien ? ` · ${combien} au panier` : ""}`;
+}
+// Les comptes du catalogue, sans toucher a ses boutons.
+function majComptesCatalogue() {
+  for (const bouton of $("subCatalogueListe").querySelectorAll('[data-op="sub-ajouter"]')) {
+    const p = (data.stock || []).find((x) => String(x.id) === bouton.dataset.id);
+    const texte = bouton.closest(".abo-cr-produit")?.querySelector(".abo-cr-produit-stock");
+    if (p && texte) texte.textContent = texteCatalogue(p);
+  }
+}
 function rendreCatalogue() {
   const q = normalizeTextKey($("subCatalogueSearch").value);
   const trouves = (data.stock || [])
@@ -929,10 +946,8 @@ function rendreCatalogue() {
     .sort((a, b) => nomProduit(a).localeCompare(nomProduit(b), "fr"));
   const MAX = 40;
   const lignes = trouves.slice(0, MAX).map((p) => {
-    const dans = ligneDuPanier(p.id);
-    const combien = dans ? Number(dans.querySelector(".sub-quantity").value) : 0;
     const nom = nomProduit(p);
-    return `<div role="listitem" class="abo-cr-produit"><span class="abo-cr-produit-texte"><span class="abo-cr-produit-nom">${h(nom)}</span><span class="abo-cr-produit-stock">${h(texteStock(p))}${combien ? ` · ${combien} au panier` : ""}</span></span><button type="button" class="abo-cr-pas-bouton abo-cr-pas--plus" data-op="sub-ajouter" data-id="${h(p.id)}" aria-label="Ajouter ${h(nom)} au panier"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button></div>`;
+    return `<div role="listitem" class="abo-cr-produit"><span class="abo-cr-produit-texte"><span class="abo-cr-produit-nom">${h(nom)}</span><span class="abo-cr-produit-stock">${h(texteCatalogue(p))}</span></span><button type="button" class="abo-cr-pas-bouton abo-cr-pas--plus" data-op="sub-ajouter" data-id="${h(p.id)}" aria-label="Ajouter ${h(nom)} au panier"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button></div>`;
   });
   $("subCatalogueListe").innerHTML = lignes.join("")
     || `<p class="abo-cr-note">${data.stock?.length ? "Aucun produit ne correspond." : "Le catalogue est vide : ajoute des produits dans Stock."}</p>`;

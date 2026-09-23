@@ -121,6 +121,30 @@ test("le catalogue montre le stock disponible et compose le panier en pas de un"
   await expect(catalogue.locator(".abo-cr-produit")).toHaveCount(1);
 });
 
+// Relecture adverse du 23/09 : la quantite tapee perd le focus au mousedown du
+// « + » ; le change redessinait tout le catalogue entre mousedown et mouseup,
+// et le premier clic n'ajoutait rien. On tape au clavier (pas fill) pour que
+// le change parte du vrai blur, comme sous le doigt.
+test("une quantité tapée, puis « + » du catalogue : le premier clic ajoute le produit", async ({ page }) => {
+  await ouvrirEditeur(page);
+  await page.getByRole("button", { name: "Ajouter Changes taille L au panier" }).click();
+  const panier = page.locator("#subProducts .sub-product-line");
+  const quantite = panier.filter({ hasText: "Changes taille L" }).locator(".sub-quantity");
+  await quantite.click();
+  await page.keyboard.press("Control+A");
+  await page.keyboard.type("12");
+  await page.getByRole("button", { name: "Ajouter Alèses au panier" }).click();
+  await expect(panier).toHaveCount(2);
+  await expect(quantite).toHaveValue("12");
+  // Le compte du catalogue suit la quantite tapee des que le champ est quitte,
+  // sans redessiner la liste (Tab : aucun clic ne redessine derriere).
+  await quantite.click();
+  await page.keyboard.press("Control+A");
+  await page.keyboard.type("30");
+  await page.keyboard.press("Tab");
+  await expect(page.locator("#subCatalogueListe .abo-cr-produit").filter({ hasText: "Changes taille L" })).toContainText("CH-L · 100 en stock · 30 au panier");
+});
+
 test("les pilules de fréquence recalculent les trois prochaines dates, sans rien valider", async ({ page }) => {
   await ouvrirEditeur(page);
   // Un 31, loin dans le futur (le banc ne se perime pas) : le mensuel retombe
