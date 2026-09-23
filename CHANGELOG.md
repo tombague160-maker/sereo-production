@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.43.0](https://github.com/tombague160-maker/sereo-production/compare/v1.42.1...v1.43.0) (2026-09-23)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **tournee:** tournées annulables, pratique au quotidien, Tournée hors ligne, calcul routier OSRM intégré ([#174](https://github.com/tombague160-maker/sereo-production/issues/174)) ([0e66cd3](https://github.com/tombague160-maker/sereo-production/commit/0e66cd32c2c3d29d0ca5fa1c4788541cba5dd95a))
+
+
+### 📚 Documentation
+
+* **design:** intégration de la vague 2 du 23/09 ([a1004ef](https://github.com/tombague160-maker/sereo-production/commit/a1004ef9b300981343ba1b65af9c757c6a03a57c))
+
 ## [1.42.1](https://github.com/tombague160-maker/sereo-production/compare/v1.42.0...v1.42.1) (2026-09-23)
 
 
