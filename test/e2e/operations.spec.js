@@ -318,9 +318,19 @@ test.describe("Abonnements et pilotage", () => {
     await page.locator("#arrivalQuery").fill("Arrivée");
     await page.locator('[data-op="search-arrival"]').click();
     await page.locator("#arrivalResults").selectOption("0");
+    // « Tout sélectionner » prend les commandes DEJA CHARGEES. loadData() part
+    // au DOMContentLoaded sans etre attendu par goto(), et interroge dix-sept
+    // routes : sous la charge d'une suite complete, il peut finir APRES ce clic.
+    // La selection est alors vide, « Créer une tournée » reste desactive, et le
+    // banc meurt d'un timeout qui accuse la tournee. On attend donc l'etat reel :
+    // les deux commandes pretes affichees parmi les candidates.
+    await expect(
+      page.locator("#deliveryCandidates [data-delivery-order]"),
+    ).toHaveCount(2);
     await page
       .getByRole("button", { name: "Tout sélectionner", exact: true })
       .click();
+    await expect(page.locator("#createRouteButton")).toBeEnabled();
     await page.locator("#createRouteButton").click();
     await expect(page.locator("#routeMetrics")).toContainText("trajet routier");
     await expect(page.locator("#routeMetrics")).toContainText("12 km");
