@@ -58,6 +58,8 @@ async function mandataire(cible) {
       res.end('{"error":"Connexion requise"}');
       return;
     }
+    // L'adresse suit la requete retenue : `retenues(motif)` compte par adresse.
+    passer.url = req.url;
     if (etat.retenir && etat.retenir.test(req.url)) etat.attente.push(passer);
     else if (etat.bloquer && etat.bloquer.test(req.url)) etat.bloquees.push(passer);
     else if (etat.delaiApi && req.url.startsWith("/api/")) setTimeout(passer, etat.delaiApi);
@@ -70,7 +72,9 @@ async function mandataire(cible) {
     etat,
     retenir(motif) { etat.retenir = motif; },
     liberer() { etat.retenir = null; for (const f of etat.attente.splice(0)) f(); this.debloquer(); },
-    retenues() { return etat.attente.length; },
+    // Sans motif : toutes les requetes retenues ; avec : celles dont l'adresse
+    // y repond.
+    retenues(motif) { return motif ? etat.attente.filter(f => motif.test(f.url)).length : etat.attente.length; },
     bloquer(motif) { etat.bloquer = motif; },
     debloquer() { etat.bloquer = null; for (const f of etat.bloquees.splice(0)) f(); },
     async arreter() {
@@ -96,6 +100,8 @@ test.afterEach(() => {
 });
 
 const CHIFFRE = "#opRevenue";
+// La requete dont vient CHIFFRE (renderDashboard lit data.operations).
+const SOURCE_DU_CHIFFRE = /^\/api\/operations(\?|$)/;
 const VIDE = "—";
 
 /** Ouvre l'app, attend que le service worker controle la page, recharge une
@@ -139,10 +145,15 @@ const STATIQUES = /^\/(css|js|fonts|vendor|brand|icons)\//;
  * reponse -- et c'est justement ce qui rend « aucune requete encore partie »
  * possible a l'instant du chiffre.
  *
- * Le prealable garde ce qu'il gardait : que ces requetes passent bien par le
- * mandataire et y sont retenues (pas servies par le cache HTTP, pas
- * contournees). Il attend donc leur ARRIVEE -- un evenement, pas une duree --
- * et un contournement le fait toujours rougir, au bout du delai d'expect.
+ * Le prealable garde que la requete dont vient le chiffre (/api/operations,
+ * voir renderDashboard) passe bien par le mandataire et y est retenue (pas
+ * servie par le cache HTTP, pas contournee). Il attend donc son ARRIVEE -- un
+ * evenement, pas une duree -- et la compte, ELLE : compter toutes les
+ * requetes d'API laissait passer un contournement partiel (/api/operations
+ * servie sans le mandataire, d'autres retenues, compte > 0). Un
+ * contournement de /api/operations le fait rougir, au bout du delai d'expect.
+ * Les autres requetes d'API ne sont pas gardees une par une : aucune ne
+ * produit le chiffre lu ici.
  * La pastille, elle, se lit a l'instant du chiffre : loadData pose « Mise a
  * jour… » dans la meme tache que la copie, et le repli de 3 s du service
  * worker la changerait si on la lisait apres l'attente.
@@ -169,7 +180,7 @@ async function chiffreAvantLeReseau(browser, { statiquesBloques = false } = {}) 
     expect(mdt.retenues(), "prealable du temoin : l'API est arrivee avant le chiffre, le cas n'est pas produit").toBe(0);
     mdt.debloquer();
   }
-  await expect.poll(() => mdt.retenues(), { message: "prealable : les requetes d'API doivent etre retenues" }).toBeGreaterThan(0);
+  await expect.poll(() => mdt.retenues(SOURCE_DU_CHIFFRE), { message: "prealable : la requete /api/operations doit etre retenue" }).toBeGreaterThan(0);
   // Et il n'est pas presente comme frais.
   expect(statut, "le chiffre du cache est presente comme frais").toMatch(/^Mise à jour…/);
 
