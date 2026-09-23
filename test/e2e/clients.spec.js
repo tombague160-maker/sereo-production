@@ -236,6 +236,33 @@ test("téléphone : la liste, puis la fiche en plein écran, puis le retour (pla
   expect(await page.evaluate(() => document.activeElement?.textContent || "")).toContain("Tilleuls");
 });
 
+test("téléphone : le retour du téléphone ramène à la liste, et le bouton Clients a son focus", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await ouvrir(page);
+  await ligne(page, "Tilleuls").click();
+  await expect(page.locator("#cliFiche")).toBeVisible();
+  // Le focus arrive sur « Clients » et se voit.
+  const ombre = await page.evaluate(() => {
+    const e = document.activeElement; const cs = getComputedStyle(e);
+    return { classe: e.className, visible: (cs.boxShadow && cs.boxShadow !== "none") || cs.outlineStyle !== "none" };
+  });
+  expect(ombre.classe).toContain("cli-retour");
+  await page.goBack();
+  await expect(page.locator("#crmList")).toBeVisible();
+  await expect(page.locator("#cliFiche")).toBeHidden();
+  await expect(page.locator("#crm")).toHaveClass(/active/);
+});
+
+test("téléphone : quitter Clients referme la fiche", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await ouvrir(page);
+  await ligne(page, "Tilleuls").click();
+  await page.locator('.mobile-tabbar [data-tab="journee"]').click();
+  await page.locator('.mobile-tabbar [data-action="open-more-menu"]').click();
+  await page.locator('#mobile-more-sheet [data-tab="crm"]').click();
+  await expect(page.locator("#crmList")).toBeVisible();
+});
+
 test("au bureau, le bouton retour n'existe pas (liste et fiche côte à côte)", async ({ page }) => {
   await ouvrir(page);
   await expect(page.locator("#cliFiche .cli-retour")).toBeHidden();

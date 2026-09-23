@@ -751,6 +751,10 @@ function bindUi() {
   });
 
   window.addEventListener("hashchange", () => showTab(getInitialTab(), { updateHash: false }));
+  // Le bouton retour du telephone, depuis une fiche client : la liste.
+  window.addEventListener("popstate", () => {
+    if (document.getElementById("crm")?.dataset.vue === "fiche") ouvrirVueClient("liste", { depuisHistorique: true });
+  });
 }
 
 function getInitialTab() {
@@ -763,6 +767,9 @@ function getInitialTab() {
 
 
 function showTab(tabName, options = {}) {
+  // Quitter Clients referme la fiche : y revenir montre la liste (planche 9a).
+  const ecranClients = document.getElementById("crm");
+  if (ecranClients && ecranClients.dataset.vue === "fiche" && tabName !== "crm") ecranClients.dataset.vue = "liste";
   const { updateHash = true } = options;
   // Les quatre anciens ecrans-listes de commandes : ils ne sont plus des
   // ecrans, mais on les honore -- l'ecran unique s'ouvre sur LEUR filtre.
@@ -2071,9 +2078,17 @@ function ouvrirDialogueClient(clientId = null) {
 
 // La vue du telephone : « liste » ou « fiche » (sans effet au-dessus de 820 px,
 // ou la liste et la fiche sont cote a cote).
-function ouvrirVueClient(vue) {
+function ouvrirVueClient(vue, { depuisHistorique = false } = {}) {
   const ecran = document.getElementById("crm");
   if (!ecran) return;
+  // Ouvrir une fiche pose une entree d'historique : le retour du telephone
+  // ramene a la liste au lieu de quitter l'ecran. Le bouton « Clients » de la
+  // fiche consomme cette entree.
+  if (vue === "fiche" && ecran.dataset.vue !== "fiche") history.pushState({ cliVue: "fiche" }, "", location.hash || "#crm");
+  if (vue === "liste" && ecran.dataset.vue === "fiche" && !depuisHistorique && history.state?.cliVue === "fiche") {
+    history.back();
+    return;
+  }
   ecran.dataset.vue = vue;
   window.scrollTo({ top: 0 });
   if (vue === "fiche") {
@@ -2195,6 +2210,10 @@ async function saveCrmClient(form) {
   document.getElementById("cliDialogue")?.close();
   await loadData();
   notify(id ? "Fiche client mise à jour." : "Client enregistré.", "success");
+  // Au telephone, la fiche creee s'ouvre (et pas seulement sa ligne).
+  if (!id && window.matchMedia("(max-width: 820px)").matches) ouvrirVueClient("fiche");
+  // Le rendu a remplace le bouton retour : le focus y revient.
+  if (document.getElementById("crm")?.dataset.vue === "fiche") document.querySelector("#cliFiche .cli-retour")?.focus();
 }
 
 async function updateCrmClientStatus(clientId, status) {

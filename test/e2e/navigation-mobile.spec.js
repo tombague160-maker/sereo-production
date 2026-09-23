@@ -77,7 +77,9 @@ test("sur le vert, un bouton plein est blanc à texte vert (il ne disparaît pas
 test("la barre basse est opaque : ses libellés ne passent pas sur le contenu", async ({ page }) => {
   await page.goto("/", { waitUntil: "networkidle" });
   const fond = await page.locator(".mobile-tabbar").evaluate(e => getComputedStyle(e).backgroundColor);
-  expect(fond).not.toMatch(/rgba\(.*, 0\.\d+\)$/);
+  // Opaque : ni rgba(..., 0.x) ni transparent.
+  const alpha = (fond.match(/rgba\([^)]*,\s*([\d.]+)\)$/) || [null, "1"])[1];
+  expect(Number(alpha)).toBe(1);
 });
 
 test("tableau de bord : le montant et le panier côte à côte, le lien sur la ligne du titre", async ({ page }) => {
@@ -91,6 +93,52 @@ test("tableau de bord : le montant et le panier côte à côte, le lien sur la l
       souligne: getComputedStyle(lien).textDecorationLine
     };
   });
+  expect(Math.abs(r.montant - r.panier)).toBeLessThan(40);
   expect(Math.abs(r.lien.top + r.lien.height / 2 - (r.titre.top + r.titre.height / 2))).toBeLessThan(12);
   expect(r.souligne).toBe("none");
 });
+
+// --- La relecture : le focus au clavier, les libelles de la barre -------------
+
+async function anneauVisible(page, selecteur) {
+  await page.keyboard.press("Tab");
+  await page.locator(selecteur).first().focus();
+  return page.evaluate(sel => {
+    const e = document.querySelector(sel);
+    const cible = e.closest(".cmd-recherche") || e;
+    const cs = getComputedStyle(cible);
+    return (cs.boxShadow && cs.boxShadow !== "none") || (cs.outlineStyle !== "none" && parseFloat(cs.outlineWidth) > 0);
+  }, selecteur);
+}
+
+test("au clavier, les onglets de la barre basse montrent leur focus", async ({ page }) => {
+  await page.goto("/", { waitUntil: "networkidle" });
+  expect(await anneauVisible(page, '.mobile-tabbar [data-tab="livreur"]')).toBe(true);
+});
+
+test("au clavier, la recherche de l'en-tête vert montre son focus", async ({ page }) => {
+  await page.goto("/#commandes", { waitUntil: "networkidle" });
+  expect(await anneauVisible(page, "#cmdRecherche")).toBe(true);
+});
+
+test("l'onglet actif se distingue autrement que par sa couleur", async ({ page }) => {
+  await page.goto("/", { waitUntil: "networkidle" });
+  const r = await page.evaluate(() => {
+    const barre = e => getComputedStyle(e, "::before").backgroundColor;
+    return { actif: barre(document.querySelector(".mobile-tab.active")), inactif: barre(document.querySelector('.mobile-tab[data-tab="livreur"]')) };
+  });
+  expect(r.actif).not.toBe(r.inactif);
+  expect(r.inactif).toBe("rgba(0, 0, 0, 0)");
+});
+
+for (const largeur of [360, 320]) {
+  test(`à ${largeur} px, les libellés de la barre ne se chevauchent pas`, async ({ page }) => {
+    await page.setViewportSize({ width: largeur, height: 740 });
+    await page.goto("/", { waitUntil: "networkidle" });
+    const boites = await page.locator(".mobile-tabbar .mobile-tab span").evaluateAll(els => els.map(e => {
+      const r = document.createRange(); r.selectNodeContents(e); const b = r.getBoundingClientRect(); return [b.left, b.right];
+    }));
+    for (let i = 1; i < boites.length; i++) expect(boites[i][0], `libellé ${i}`).toBeGreaterThanOrEqual(boites[i - 1][1] - 0.5);
+    expect(boites[boites.length - 1][1]).toBeLessThanOrEqual(largeur + 0.5);
+  });
+}
