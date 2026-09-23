@@ -723,9 +723,16 @@
            par lot -- n'avait plus de place. -->
       <section id="commandes" class="page" role="tabpanel" aria-labelledby="tab-commandes">
         <div class="cmd-filtres">
-          <div id="cmdPilules" class="filtre-pilules cmd-pilules" role="group" aria-label="Filtrer par statut"></div>
+          <!-- Au telephone (planche 8a), ces pilules passent dans l'en-tete vert :
+               app.js les deplace (placerPilulesCommandes). data-ecran les y
+               range avec les autres commandes de l'ecran. -->
+          <div id="cmdPilules" class="filtre-pilules cmd-pilules" role="group" aria-label="Filtrer par statut" data-ecran="commandes"></div>
+          <!-- Au telephone seulement : le compte de la planche 8a (« 124 bons »),
+               et un bouton qui replie les filtres hors planche (gardes). -->
+          <span id="cmdResume" class="cmd-resume"></span>
+          <button id="cmdFiltresBouton" class="cmd-filtres-bouton" type="button" aria-expanded="false" data-action="cmd-filtres-basculer">Filtres</button>
           <span class="cmd-separateur" aria-hidden="true"></span>
-          <label class="cmd-case">
+          <label class="cmd-case cmd-filtre-second">
             <input type="checkbox" id="cmdBloquees" />
             <span class="cmd-case-carre" aria-hidden="true"></span>
             <span>Bloquées seulement</span>
@@ -733,14 +740,14 @@
           <!-- Le filtre « A completer » de l'ancien ecran « Bons de commande »
                (adresse ou telephone manquant). La passation range ces axes-la
                hors des pilules : « case ou filtre a part ». -->
-          <label class="cmd-case">
+          <label class="cmd-case cmd-filtre-second">
             <input type="checkbox" id="cmdACompleter" />
             <span class="cmd-case-carre" aria-hidden="true"></span>
             <span id="cmdACompleterLibelle">À compléter</span>
           </label>
           <!-- Le secteur de l'ancien ecran « Bons de commande » : sans lui, plus
                d'export par secteur. Meme forme que le tri. -->
-          <label class="cmd-tri">
+          <label class="cmd-tri cmd-filtre-second">
             <span class="sr-only">Secteur</span>
             <select id="cmdSecteur" aria-label="Filtrer par secteur">
               <option value="">Tous les secteurs</option>
@@ -753,7 +760,7 @@
           <span class="cmd-ressort" aria-hidden="true"></span>
           <!-- La periode Du / Au de l'ancien ecran : sans elle, on ne pouvait
                plus exporter un mois donne. La planche ne la dessine pas. -->
-          <div class="cmd-periode" role="group" aria-label="Période">
+          <div class="cmd-periode cmd-filtre-second" role="group" aria-label="Période">
             <label>Du <input type="date" id="cmdDu" /></label>
             <label>au <input type="date" id="cmdAu" /></label>
           </div>
@@ -981,7 +988,23 @@
             <button class="stk-tout-voir" type="button" data-action="go-tab" data-target-tab="recommande" data-lien-secondaire>Tout voir, avec les besoins estimés</button>
           </article>
 
+          <!-- Au telephone (planche 8b), les tuiles ont un titre et un compte. -->
+          <div id="stkCategoriesTete" class="stk-categories-tete" hidden>
+            <h3>Catégories</h3>
+            <p id="stkCategoriesCompte"></p>
+          </div>
           <div id="stkCategories" class="stk-categories" role="group" aria-label="Catégories"></div>
+
+          <!-- ETAT « A PLAT » (planche 10a) : aucune categorie, ou une seule. Les
+               tuiles ne trieraient rien ; la carte dit ce qui manque et comment
+               le retrouver, et le tableau montre les produits a plat. -->
+          <article id="stkAPlat" class="stk-carte stk-a-plat" aria-labelledby="stkAPlatTitre" hidden>
+            <span class="stk-a-plat-disque" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3 3 8v8l9 5 9-5V8z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path></svg></span>
+            <div class="stk-a-plat-texte">
+              <h3 id="stkAPlatTitre"></h3>
+              <p id="stkAPlatDetail"></p>
+            </div>
+          </article>
 
           <div class="stk-carte stk-tableau">
             <div class="stk-filtres">

@@ -601,6 +601,10 @@ function bindUi() {
     if (action === "refresh") runAction(actionButton, "Actualisation...", loadData);
     if (action === "go-tab") showTab(actionButton.dataset.targetTab || "journee");
     if (action === "cmd-export") exportBdcCsv(commandesFiltrees(), "sereo-commandes");
+    if (action === "cmd-filtres-basculer") {
+      commandesFiltresOuverts = !commandesFiltresOuverts;
+      renderCommandes();
+    }
     if (action === "cmd-confirmer" || action === "cmd-annuler") {
       runAction(actionButton, "...", () => gesteDuDetail(action, actionButton.dataset.orderId));
     }
@@ -823,6 +827,9 @@ function showTab(tabName, options = {}) {
       if (champ) champ.value = "";
     }
     commandesSelection.clear();
+    // « Adresses a corriger » arrive filtre : au telephone, le filtre se montre
+    // deplie, pour que la liste ne paraisse pas amputee sans raison visible.
+    commandesFiltresOuverts = Boolean(redirection.completer);
     tabName = redirection.onglet;
     renderCommandes();
     // L'adresse dit ou l'on est vraiment : #commandes, plus l'ancien nom.
@@ -870,6 +877,11 @@ function showTab(tabName, options = {}) {
   // generique, sans quoi celui-ci l'ecraserait.
   if (nextTab === "commandes") majSousTitreCommandes();
   if (nextTab === "stock") majSousTitreStock();
+  // Rouvrir le Stock refait l'ordre a plat, fige pendant les ajustements.
+  if (nextTab === "stock" && ordreAPlat) {
+    ordreAPlat = null;
+    renderStock();
+  }
   if (nextTab === "crm") majSousTitreClients();
   if (nextTab === "abonnements") majSousTitreAbonnements();
   if (nextTab === "livreur") majEnteteTournee();
@@ -976,21 +988,73 @@ function initMap() {
  * scintillement gris sur des donnees qu'on avait deja.
  */
 function poserSquelettes() {
+  // Les listes dont on connait la LIGNE (planche 10b) prennent des lignes a sa
+  // hauteur ; les autres gardent les barres de texte.
+  const LIGNES = new Set(["dashboardPreparing", "dashboardDelivering", "dashboardSubscriptions", "opAlerts",
+    "crmList", "stockList", "cmdLignes"]);
   const zones = [
-    ["dashboardPreparing", 3], ["dashboardDelivering", 3], ["dashboardSubscriptions", 3],
-    ["crmList", 4], ["stockList", 5], ["todayOrdersList", 4], ["plannedOrdersList", 4],
+    ["dashboardPreparing", 3], ["dashboardDelivering", 3], ["dashboardSubscriptions", 2],
+    ["crmList", 4], ["stockList", 4], ["todayOrdersList", 4], ["plannedOrdersList", 4],
     ["relanceList", 3], ["exportsList", 3], ["historiqueList", 3], ["stockMovementList", 4],
     // Ajoutes apres mesure : la premiere liste avait ete ecrite de memoire, et
     // le graphique du tableau de bord -- le plus grand vide de l'ecran, 556x184
     // -- n'y figurait pas. On ne devine pas quels conteneurs sont vides, on les
     // releve dans la page pendant que l'API est ralentie.
-    ["revenueChart", 6], ["opAlerts", 3]
+    ["revenueChart", 6], ["opAlerts", 2],
+    // La liste des Commandes restait vide pendant le chargement (23/09).
+    ["cmdLignes", 5]
   ];
   for (const [id, lignes] of zones) {
     const zone = document.getElementById(id);
     if (!zone || zone.children.length) continue;
     zone.setAttribute("aria-busy", "true");
-    zone.innerHTML = squelette(lignes, id === "revenueChart" ? "colonnes" : "liste");
+    zone.innerHTML = squelette(lignes, id === "revenueChart" ? "colonnes" : (LIGNES.has(id) ? "lignes" : "liste"));
+  }
+  poserChiffresEnAttente();
+}
+
+// LES CHIFFRES du tableau de bord (planche 10b, haut) : « les cartes gardent
+// leur forme et leurs libelles ; seuls les chiffres sont des blocs aux
+// dimensions du chiffre attendu ». Avant le 23/09, ils affichaient « 0 » et
+// « — » pendant le chargement : un zero qui MENT (il y avait des commandes),
+// que le sous-titre recopiait (« 0 commande a preparer »), puis un saut de
+// 22 px (bureau) a 72 px (telephone) a l'arrivee des donnees.
+//
+// Le bloc est dessine par la feuille (.squelette-chiffre) ; l'element est
+// VIDE, donc sans glyphe : la regle « jamais de texte dessus » tient, et le
+// sous-titre, qui lit la tuile, ne trouve pas de nombre et n'en invente pas.
+// Premier chargement seulement : a l'actualisation, les chiffres qu'on avait
+// restent lisibles pendant que les neufs arrivent.
+const CHIFFRES_EN_ATTENTE = ["opRevenue", "opBasket", "opDelivered", "dashboardPreparingCount", "dashboardDeliveringCount",
+  "dashboardPreparingDetail", "dashboardDeliveringDetail"];
+let chiffresDejaCharges = false;
+
+function poserChiffresEnAttente() {
+  if (chiffresDejaCharges) return;
+  for (const id of CHIFFRES_EN_ATTENTE) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    // Le texte du balisage est garde : « Commandes livrees » (#opDelivered)
+    // est un LIBELLE tant que le rendu ne l'a pas remplace par un compte.
+    el.dataset.texteInitial = el.textContent.trim();
+    el.textContent = "";
+    el.classList.add("squelette-chiffre");
+  }
+  // Le sous-titre a deja lu « 0 » dans la tuile a l'ouverture de l'ecran : il
+  // relit la tuile vide, et ne dit plus « 0 commande a preparer ».
+  majEnteteTableauDeBord(getInitialTab());
+  // Le mois du chiffre d'affaires : sa pilule etait VIDE (64 px) pendant le
+  // chargement, puis « septembre 2026 » (188 px) -- au telephone, l'import
+  // passait alors a la ligne et tout l'ecran descendait de 52 px. Le mois
+  // courant est connu sans le serveur : c'est celui que le rendu choisit.
+  const mois = document.getElementById("revenueMonth");
+  if (mois && !mois.options.length) {
+    const aujourdhui = new Date();
+    const cle = `${aujourdhui.getFullYear()}-${String(aujourdhui.getMonth() + 1).padStart(2, "0")}`;
+    const option = document.createElement("option");
+    option.value = cle;
+    option.textContent = new Date(`${cle}-01T12:00:00`).toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+    mois.appendChild(option);
   }
 }
 
@@ -1001,6 +1065,18 @@ function retirerSquelettes() {
     zone.removeAttribute("aria-busy");
     if (zone.querySelector(".squelette")) zone.innerHTML = "";
   }
+  // Un chiffre que son rendu n'a pas rempli (le tableau de bord en erreur)
+  // redevient « — » : un bloc gris a vie promettrait un nombre qui ne vient pas.
+  // Un LIBELLE, lui, revient tel quel : /api/operations en erreur donnait « — »
+  // au-dessus de « — », et la tuile perdait son nom. Un « 0 » du balisage
+  // n'est pas un libelle (c'est le zero qui ment) : il devient « — » aussi.
+  for (const el of document.querySelectorAll(".squelette-chiffre")) {
+    el.classList.remove("squelette-chiffre");
+    const initial = el.dataset.texteInitial || "";
+    delete el.dataset.texteInitial;
+    if (!el.textContent.trim()) el.textContent = /\p{L}/u.test(initial) ? initial : "—";
+  }
+  chiffresDejaCharges = true;
 }
 
 // --- CHARGEMENT INSTANTANE (lot du 23/09) ------------------------------------
@@ -1384,6 +1460,38 @@ function adresseACorriger(order) {
 }
 const commandesSelection = new Set();
 
+// Au telephone (planche 8a), les filtres hors planche -- « Bloquees
+// seulement », « A completer », le secteur, la periode -- se replient derriere
+// un bouton « Filtres » qui dit combien sont actifs. Ils sont GARDES : ce sont
+// les seuls chemins vers ces listes et vers l'export d'un mois ou d'un secteur.
+let commandesFiltresOuverts = false;
+function filtresSecondsActifs() {
+  return [commandesFiltre.bloquees, commandesFiltre.completer, commandesFiltre.secteur, commandesFiltre.du, commandesFiltre.au]
+    .filter(Boolean).length;
+}
+
+// Le seuil de la barre basse (lot mobile 1) : sous 820 px, l'en-tete est vert.
+const ecranTelephone = window.matchMedia ? window.matchMedia("(max-width: 820px)") : { matches: false };
+
+// Les pilules de statut des Commandes : dans l'en-tete vert au telephone, sous
+// la recherche (planche 8a) ; dans la rangee de filtres au bureau (planche
+// 13c). UN seul groupe, deplace -- deux groupes feraient deux noms pour le
+// meme geste, et l'un des deux serait toujours cache.
+function placerPilulesCommandes() {
+  const pilules = document.getElementById("cmdPilules");
+  const filtres = document.querySelector("#commandes .cmd-filtres");
+  const recherche = document.querySelector('#enteteActions .cmd-recherche[data-ecran="commandes"]');
+  if (!pilules || !filtres || !recherche) return;
+  if (ecranTelephone.matches) {
+    if (pilules.parentElement !== recherche.parentElement) recherche.after(pilules);
+    // showTab ne range la fente qu'en changeant d'ecran : ici, on s'y range seul.
+    pilules.hidden = !document.getElementById("commandes")?.classList.contains("active");
+  } else if (pilules.parentElement !== filtres) {
+    filtres.prepend(pilules);
+    pilules.hidden = false;
+  }
+}
+
 function commandeBloquee(order) {
   return ["importe", "stock_a_verifier"].includes(order.status) && order.canPrepare === false;
 }
@@ -1506,6 +1614,16 @@ function renderCommandes() {
   if (tri) tri.value = commandesFiltre.tri;
 
   const liste = commandesFiltrees();
+  // Le compte de la planche 8a (« 124 bons ») et le bouton des filtres repliés,
+  // au telephone seulement (la feuille les cache au bureau).
+  setText("cmdResume", `${liste.length} bon${liste.length > 1 ? "s" : ""}`);
+  const actifs = filtresSecondsActifs();
+  const boutonFiltres = document.getElementById("cmdFiltresBouton");
+  if (boutonFiltres) {
+    boutonFiltres.textContent = actifs ? `Filtres · ${actifs}` : "Filtres";
+    boutonFiltres.setAttribute("aria-expanded", String(commandesFiltresOuverts));
+  }
+  document.querySelector("#commandes .cmd-filtres")?.classList.toggle("cmd-filtres--ouverts", commandesFiltresOuverts);
   // La selection ne garde que ce qui est A L'ECRAN : une recherche ou un
   // changement de jour ne doit pas laisser partir des commandes masquees.
   const visibles = new Set(liste.map(o => String(o.id)));
@@ -1637,15 +1755,21 @@ async function envoyerCommandesEnPreparation() {
 function bindCommandes() {
   const ecran = document.getElementById("commandes");
   if (!ecran) return;
-  ecran.addEventListener("click", event => {
+  // Les pilules ecoutent ELLES-MEMES : au telephone, elles vivent dans
+  // l'en-tete, hors de l'ecran (placerPilulesCommandes).
+  document.getElementById("cmdPilules")?.addEventListener("click", event => {
     const pilule = event.target.closest("[data-cmd-filtre]");
-    if (pilule) {
-      commandesFiltre.statut = pilule.dataset.cmdFiltre;
-      commandesFiltre.page = 1;
-      commandesSelection.clear();
-      renderCommandes();
-      return;
-    }
+    if (!pilule) return;
+    commandesFiltre.statut = pilule.dataset.cmdFiltre;
+    commandesFiltre.page = 1;
+    commandesSelection.clear();
+    renderCommandes();
+    // Le rendu refait les pilules : le focus clavier reste sur celle choisie.
+    document.querySelector(`#cmdPilules [data-cmd-filtre="${CSS.escape(commandesFiltre.statut)}"]`)?.focus();
+  });
+  placerPilulesCommandes();
+  ecranTelephone.addEventListener?.("change", placerPilulesCommandes);
+  ecran.addEventListener("click", event => {
     if (event.target.closest(".cmd-col-choix")) return;   // la case ne doit pas ouvrir le detail
     const ligne = event.target.closest("[data-cmd-ouvrir]");
     if (ligne) ouvrirDetailCommande(ligne.dataset.cmdOuvrir);
@@ -2918,7 +3042,7 @@ function renderStock() {
     return;
   }
 
-  const filtered = getFilteredStock();
+  const filtered = stockAPlat() ? ordonnerAPlat(getFilteredStock()) : getFilteredStock();
 
   if (!filtered.length) {
     container.innerHTML = emptyState("Aucun produit trouvé", "Modifie la recherche ou le filtre de statut.");
@@ -2935,6 +3059,38 @@ function categorieDuProduit(product) {
   return String(product.category || product.type || "");
 }
 
+// Le stock est « a plat » quand ses produits n'ont aucune categorie, ou tous
+// la meme : il n'y a rien a trier (planche 10a).
+function stockAPlat() {
+  return stock.length > 0 && new Set(stock.map(categorieDuProduit)).size <= 1;
+}
+
+// A plat, « du plus bas au plus haut » (planche 10a) : ce qui est sous le seuil
+// d'abord, puis ce qui est a renseigner (une quantite inconnue appelle aussi
+// un geste), puis le reste ; dans chaque groupe, la plus petite quantite en tete.
+function trierAPlat(produits) {
+  const groupe = p => (sousLeSeuil(p) ? 0 : getStockLevel(p).status === "a_renseigner" ? 1 : 2);
+  const quantite = p => Number(p.quantityAvailable ?? getProductQuantity(p) ?? 0) || 0;
+  return [...produits].sort((a, b) => groupe(a) - groupe(b) || quantite(a) - quantite(b)
+    || String(getProductName(a)).localeCompare(getProductName(b), "fr"));
+}
+
+// L'ordre a plat est FIGE tant qu'on reste sur l'ecran. Chaque −/+ et chaque
+// seuil rechargent la liste : retriee sur la quantite du moment, la ligne
+// qu'on touchait changeait de place sous le doigt, et le tap suivant, au meme
+// endroit, modifiait le stock d'un AUTRE produit (relecture du 23/09 : Gants
+// a 2, six « + », il passe sous Desinfectant a 7, le septieme tombe sur
+// Desinfectant). L'ordre se refait en rouvrant l'ecran (showTab), ou quand un
+// produit inconnu arrive (un import) ; un produit neuf n'y a pas de rang.
+let ordreAPlat = null;
+
+function ordonnerAPlat(produits) {
+  if (!ordreAPlat || stock.some(p => !ordreAPlat.has(String(p.id)))) {
+    ordreAPlat = new Map(trierAPlat(stock).map((p, rang) => [String(p.id), rang]));
+  }
+  return [...produits].sort((a, b) => ordreAPlat.get(String(a.id)) - ordreAPlat.get(String(b.id)));
+}
+
 function sousLeSeuil(product) {
   return ["stock_faible", "rupture"].includes(getStockLevel(product).status);
 }
@@ -2946,9 +3102,15 @@ function majSousTitreStock() {
   if (!document.getElementById("stock")?.classList.contains("active")) return;
   const n = stock.length;
   const sous = getLowStockProducts().length;
-  const categories = new Set(stock.map(categorieDuProduit)).size;
+  const cles = new Set(stock.map(categorieDuProduit));
+  const categories = cles.size;
+  // Sans aucune categorie, « 1 categorie » comptait « Sans categorie » comme
+  // une categorie. La planche 10a dit « sans catégorie ».
+  const compte = categories === 1 && cles.has("")
+    ? "sans catégorie"
+    : `${categories} catégorie${categories > 1 ? "s" : ""}`;
   setText("pageSubtitle", n
-    ? `${n} référence${n > 1 ? "s" : ""} · ${sous} sous le seuil · ${categories} catégorie${categories > 1 ? "s" : ""}`
+    ? `${n} référence${n > 1 ? "s" : ""} · ${sous} sous le seuil · ${compte}`
     : "Aucun produit importé");
 }
 
@@ -2998,7 +3160,30 @@ function renderStockCategories() {
     .sort((a, b) => (a.cle ? 0 : 1) - (b.cle ? 0 : 1) || a.cle.localeCompare(b.cle, "fr"));
   if (stockFilter.category !== "all" && !parCategorie.has(stockFilter.category)) stockFilter.category = "all";
   bloc.classList.toggle("stk-categories--liste", categories.length > 12);
-  bloc.hidden = !categories.length;
+  // A PLAT (planche 10a) : sans categorie, ou avec une seule, une tuile ne
+  // trie rien -- elle montrait « Sans categorie · 200 » au-dessus d'un tableau
+  // qui disait deja tout. La carte dit ce qui manque, le tableau suit.
+  const aPlat = stockAPlat();
+  bloc.hidden = !categories.length || aPlat;
+  const tete = document.getElementById("stkCategoriesTete");
+  if (tete) tete.hidden = bloc.hidden;
+  setText("stkCategoriesCompte", `${categories.length} catégorie${categories.length > 1 ? "s" : ""}`);
+  const carte = document.getElementById("stkAPlat");
+  if (carte) {
+    carte.hidden = !aPlat;
+    const seule = categories[0]?.cle;
+    setText("stkAPlatTitre", seule ? `Une seule catégorie : ${seule}` : "Pas de catégories dans ce fichier");
+    setText("stkAPlatDetail", seule
+      ? "Tous les produits sont dans la même catégorie : des tuiles ne trieraient rien. Ils sont affichés à plat, sous le seuil en premier."
+      // L'import ne distingue pas une colonne ABSENTE d'une colonne VIDE (le
+      // serveur lit "" dans les deux cas) : la carte dit ce qui se voit -- aucun
+      // produit n'a de categorie --, pas une cause qu'elle ne connait pas.
+      : "Aucun produit de ce fichier n’a de catégorie. Ils sont affichés à plat, sous le seuil en premier. Remplissez la colonne « Catégorie » de votre fichier (ajoutez-la si elle manque) et réimportez-le pour retrouver les tuiles.");
+  }
+  if (aPlat) {
+    bloc.innerHTML = "";
+    return;
+  }
   bloc.innerHTML = categories.map((c, i) => {
     const nom = c.cle || "Sans catégorie";
     const ligne = c.sous

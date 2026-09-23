@@ -42,7 +42,7 @@ export function cssEscape(value) {
  * les blocs.
  *
  * @param {number} lignes  nombre de blocs (3 par defaut)
- * @param {"liste"|"carte"|"colonnes"} forme  la silhouette a occuper
+ * @param {"liste"|"lignes"|"carte"|"colonnes"} forme  la silhouette a occuper
  */
 export function squelette(lignes = 3, forme = "liste") {
   // Un graphique n'a pas la silhouette d'une liste : ses barres montent depuis
@@ -56,6 +56,20 @@ export function squelette(lignes = 3, forme = "liste") {
       <div class="squelette squelette-colonnes" aria-hidden="true">
         ${Array.from({ length: Math.max(1, lignes) }, (_, i) =>
           `<span class="squelette-bloc" style="--squelette-haut:${hauteurs[i % 6]}%"></span>`).join("")}
+      </div>
+    `;
+  }
+  // Des LIGNES a la hauteur des lignes reelles (planche 10b : « pas de saut a
+  // l'arrivee des donnees »). Chaque ligne porte deux blocs -- le nom et sa
+  // ligne de detail -- et sa hauteur vient de la zone, en CSS
+  // (--squelette-ligne) : c'est la feuille qui connait la hauteur d'une ligne
+  // de commande ou de stock, au bureau comme au telephone.
+  if (forme === "lignes") {
+    return `
+      <div class="squelette squelette-lignes" aria-hidden="true">
+        ${Array.from({ length: Math.max(1, lignes) }, (_, i) =>
+          `<span class="squelette-ligne"><span class="squelette-bloc" style="--squelette-part:${[62, 48, 56, 44, 58][i % 5]}%"></span>`
+          + `<span class="squelette-bloc squelette-bloc--detail" style="--squelette-part:${[38, 30, 34, 26, 32][i % 5]}%"></span></span>`).join("")}
       </div>
     `;
   }

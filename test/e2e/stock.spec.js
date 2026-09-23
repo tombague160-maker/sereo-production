@@ -223,3 +223,25 @@ for (const largeur of [1024, 1280]) {
     expect(client.width).toBeGreaterThan(120);
   });
 }
+
+// --- Planche 8b et le temoin du Stock a plat (23/09) -------------------------
+
+test("plusieurs catégories (le témoin de stock-a-plat) : des tuiles, pas de carte « à plat »", async ({ page }) => {
+  await ouvrir(page);
+  await expect(page.locator("#stkAPlat")).toBeHidden();
+  await expect(page.locator("#stkCategories .stk-tuile")).toHaveCount(4);
+  // Le titre des tuiles est celui du telephone : au bureau, la planche 13d n'en a pas.
+  await expect(page.locator("#stkCategoriesTete")).toBeHidden();
+});
+
+test("téléphone : les tuiles ont leur titre et leur compte (planche 8b)", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await ouvrir(page);
+  const tete = page.locator("#stkCategoriesTete");
+  await expect(tete).toBeVisible();
+  await expect(tete.locator("h3")).toHaveText("Catégories");
+  await expect(tete.locator("p")).toHaveText("4 catégories");
+  const titre = await tete.boundingBox();
+  const premiere = await page.locator("#stkCategories .stk-tuile").first().boundingBox();
+  expect(titre.y + titre.height).toBeLessThanOrEqual(premiere.y);
+});

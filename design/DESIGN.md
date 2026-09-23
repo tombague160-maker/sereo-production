@@ -1741,8 +1741,8 @@ Sous **820 px** (le seuil réel de la barre basse — pas 920) :
 - **Premier lancement** : sans aucune commande, une carte « Commencez par importer vos
   ventes » remplace « À régler » et « Cette semaine », avec le bouton d'import.
 
-Pas encore faits : le chargement en blocs de la taille d'un chiffre (10b haut — les
-squelettes actuels remplacent des zones entières), et le Stock sans catégorie à plat (10a).
+Le chargement en blocs de la taille d'un chiffre (10b haut) et le Stock sans catégorie à
+plat (10a) : posés le 23/09, voir « Commandes + Stock mobile + squelettes » en fin de fichier.
 
 ## 10. Guide pour l'agent
 
@@ -2274,3 +2274,103 @@ rapport le disait.
 
 **Reste à l'intégrateur** : `CACHE_NAME` du service worker n'est pas changé par ce lot,
 alors que `style.css`, `app.js` et `domains/comptes.js` (APP_SHELL) le sont.
+
+### Commandes + Stock mobile + squelettes (planches 8a, 8b, 10a, 10b), posé le 23/09
+
+**Commandes au téléphone (planche 8a).**
+
+- Les **pilules de statut** passent dans l'en-tête vert, sous la recherche, en 44 px :
+  la choisie en blanc à texte vert (plein clair en sombre), les autres sur la surface
+  sur vert. C'est **le même groupe**, déplacé par `placerPilulesCommandes()` au seuil de
+  820 px, et remis dans la rangée de filtres au bureau (planche 13c) : deux groupes
+  auraient fait deux noms pour le même geste, dont un toujours caché. Il écoute ses
+  propres clics (il vit hors de l'écran au téléphone) et, rangé dans la fente, suit la
+  règle `data-ecran` : il ne suit pas sur un autre écran.
+- Sous l'en-tête, la ligne de la planche : **le compte** à gauche (« 10 bons », le compte
+  de la liste filtrée), **le tri** à droite.
+- **Gardés hors planche, repliés** : « Bloquées seulement », « À compléter », le secteur
+  et la période n'ont pas de place sur la planche 8a ; ce sont les seuls chemins vers ces
+  listes et vers l'export d'un mois ou d'un secteur. Ils se replient derrière un bouton
+  « Filtres » (44 px, `aria-expanded`) qui **dit combien sont actifs** (« Filtres · 1 »),
+  même replié : un filtre actif ne se cache jamais sans le dire. L'alerte « adresses à
+  corriger » du tableau de bord arrive filtres dépliés. Le filtre client (« Client : … ✕ »)
+  reste toujours visible.
+- **Écart** : « Exporter en CSV » et « Nouvelle commande » restent dans l'en-tête (lot 1) ;
+  la planche ne les dessine pas, ce sont les seuls chemins de l'export et de la saisie.
+- Le balayage de contraste de l'application tourne à 1440 px et ne voit pas l'en-tête
+  vert : un banc de ce lot mesure pilules, compte et « Filtres » dans les deux thèmes
+  (≥ 4,5:1), et l'anneau clavier de la pilule sur le vert.
+
+**Stock au téléphone (planches 8b, 10a).**
+
+- **À plat** (planche 10a) : quand aucun produit n'a de catégorie, **ou tous la même**,
+  plus de tuiles — une seule tuile « Sans catégorie · 200 » ne triait rien. À leur place,
+  au bureau comme au téléphone, une carte qui dit ce qui manque et comment le retrouver :
+  « Pas de catégories dans ce fichier » (ou « Une seule catégorie : Hygiène »), puis le
+  tableau **à plat, du plus bas au plus haut** : sous le seuil d'abord, puis « à
+  renseigner » (une quantité inconnue appelle aussi un geste), puis le reste, chaque
+  groupe par quantité croissante. Le sous-titre dit « sans catégorie » au lieu de
+  « 1 catégorie ».
+- **L'ordre à plat est figé tant qu'on reste sur l'écran** (relecture du 23/09). Chaque
+  − / + et chaque seuil rechargent la liste ; retriée sur la quantité du moment, la ligne
+  touchée changeait de place sous le doigt, et le tap suivant, au même endroit, ajustait
+  **un autre produit** (Gants à 2, Désinfectant à 7 : au 6ᵉ « + », le doigt tombait sur
+  Désinfectant). L'ordre se refait en **rouvrant l'écran** ou quand un produit inconnu
+  arrive (un import). Prix nommé : un produit réassorti reste en tête jusque-là.
+- La carte dit **ce qui se voit** : « Aucun produit de ce fichier n'a de catégorie ». Le
+  premier jet affirmait « le fichier n'a pas de colonne « Catégorie » », or l'import lit
+  une colonne absente et une colonne vide de la même façon ; il disait « ajoutez » à qui
+  l'avait déjà. Elle dit maintenant « Remplissez la colonne… (ajoutez-la si elle manque) ».
+- Deux catégories ou plus : les tuiles, et au téléphone leur **titre** « Catégories » et
+  leur compte (planche 8b).
+- **Décision** : la carte « à plat » s'applique aussi au bureau. Le cas est une propriété
+  des données, pas de l'écran ; et une tuile unique était aussi vide de sens à 1440 px.
+- **Décision** : vouvoiement dans la carte (« Remplissez la colonne… »), comme la carte de
+  premier lancement ; la planche tutoie.
+- **Omis faute de données** : « Commander » (aucune route ne commande à un fournisseur,
+  déjà nommé au 23/09) ; « trouvées dans le dernier import » (rien ne rattache une
+  catégorie à un import) — le titre des tuiles dit « 4 catégories ».
+- **Gardé hors planche** : la ligne de stock garde ses champs Seuil et Stock et ses pas
+  − / + (seuls chemins pour les poser) ; la planche 10a montre une liste en lecture seule.
+
+**Squelettes (planche 10b).**
+
+- **Les chiffres** du tableau de bord (chiffre d'affaires, panier moyen, commandes
+  livrées, les deux tuiles et leur détail) sont, pendant le **premier** chargement, des
+  blocs gris **à la taille du chiffre attendu** (le montant ≈ 3,8 em sur 0,86 em, un
+  compte de tuile ≈ 1,1 em). L'élément est vide — un espace sans chasse en
+  pseudo-élément lui garde sa hauteur de ligne — et le bloc est dessiné par-dessus : rien
+  n'est écrit, la règle « jamais de texte dessus » tient. Pulsation d'opacité à 1,6 s,
+  coupée sous `prefers-reduced-motion`. À l'actualisation, les chiffres qu'on avait
+  restent lisibles.
+- Avant : « 0 » et « — » pendant le chargement — un **zéro qui mentait**, que le
+  sous-titre recopiait (« 0 commande à préparer ») — puis tout l'écran descendait de
+  **22 px** au bureau et **72 px** au téléphone. Trois causes, trois remèdes : les
+  chiffres (ci-dessus) ; la pilule du mois, vide (64 px) puis « septembre 2026 » (188 px),
+  qui faisait passer l'import à la ligne — elle porte le mois courant dès le départ (il
+  est connu sans serveur) ; le sous-titre, qui passait sur deux lignes en se complétant —
+  il **réserve deux lignes** sur le tableau de bord (**écart** : jusqu'à 22 px d'air sous
+  un sous-titre d'une ligne, le prix d'un écran qui ne saute plus).
+- **Les lignes** : les listes dont on connaît la ligne (commandes, stock, clients, « À
+  régler », « Cette semaine », « À préparer », « À livrer ») prennent des lignes grises à
+  la hauteur de la ligne réelle — 56 / 72 px pour une commande, 56 / 141 px pour un
+  produit, 60 / 72 px pour un client, au bureau / au téléphone. La liste des Commandes,
+  vide pendant le chargement, a maintenant les siennes.
+- **Entre 821 et 1280 px**, Commandes et Stock sont des **cartes à trois rangs** : la ligne
+  grise y mesure **95 px** (commande, de 821 à 1280 px) et **129 px** (produit, de 921 à
+  1280 px). Le premier jet gardait 56 px et la liste sautait de ~170 à ~290 px ; son banc
+  ne mesurait qu'à 1440 et 390 px, il ne pouvait pas le voir (relecture du 23/09).
+- **Un libellé n'est pas un chiffre** : « Commandes livrées » est vidé pendant le
+  chargement comme les chiffres (le rendu y écrit « 12 commandes livrées »). Si
+  `/api/operations` échoue, le libellé revient ; les chiffres, eux, disent « — ». Le premier
+  jet montrait « — » au-dessus de « — ».
+- Banc : les chiffres et ce qui les suit bougent de **0 px** à l'arrivée des données, à
+  1440 et à 390 px (tolérance 2 px) ; une ligne grise mesure la ligne réelle à 2 px près, à
+  1440, 1280, 1024, 880 et 390 px.
+- **Non fait, nommé** : le **nombre** de lignes grises reste une estimation (on ne le sait
+  qu'avec les données) — ce qui est **sous** une liste peut encore bouger. La colonne
+  droite du tableau de bord change de carte à l'arrivée des données (« À livrer » laisse
+  la place à la tournée du jour) : un changement de contenu, pas un squelette. Le compte
+  « Cette semaine » affiche encore « 0 » pendant le chargement. Au téléphone, les toasts
+  « Stock mis à jour » s'empilent depuis le bas et peuvent couvrir un bouton − / + après
+  cinq ou six ajustements rapides (constat du banc, antérieur à ce lot, non traité).
