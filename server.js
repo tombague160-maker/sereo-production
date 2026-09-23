@@ -5297,6 +5297,10 @@ function getDeliverableOrders(db, filters = {}) {
   });
 }
 
+// Le plafond du calcul routier (lib/routing.js, roadPlan), applique aussi au
+// calcul « sans depart » (lot 5).
+const MAX_COMMANDES_PAR_TOURNEE = 50;
+
 function createRoute(db, options = {}) {
   const selectedOrderIds = Array.isArray(options.orderIds) ? options.orderIds.map(String) : [];
   const sector = clean(options.sector || "Tous");
@@ -5316,6 +5320,10 @@ function createRoute(db, options = {}) {
 
   if (!orders.length) {
     throw badRequest("Aucune commande prete selectionnee pour la tournee");
+  }
+  // Lot 5 : plafond aussi ici, pour tout appelant (optimizeOrders est en n² log n).
+  if (orders.length > MAX_COMMANDES_PAR_TOURNEE) {
+    throw badRequest(`Sélectionne entre 1 et ${MAX_COMMANDES_PAR_TOURNEE} commandes par tournée.`);
   }
 
   if (options.plan && orders.some(order => db.routes.some(route => ["prete", "en_livraison"].includes(route.status) && route.stops.some(stop => String(stop.orderId) === String(order.id))))) {
@@ -7422,6 +7430,14 @@ app.post("/api/orders/:id/release-stock", async (req, res) => {
 app.post("/api/routes", async (req, res) => {
   try {
     let plan = null;
+    // Lot 5 (audit geo, 23/09) : le calcul « sans depart » (vol d'oiseau) avait
+    // ni selection exigee ni plafond : {} prenait TOUTES les commandes pretes,
+    // et 2 000 commandes figeaient le serveur 17 s sous le verrou d'ecriture.
+    // Meme regle que le calcul routier : une selection de 1 a 50 commandes.
+    const ids = Array.isArray(req.body.orderIds) ? req.body.orderIds : [];
+    if (!ids.length || ids.length > MAX_COMMANDES_PAR_TOURNEE) {
+      throw badRequest(`Sélectionne entre 1 et ${MAX_COMMANDES_PAR_TOURNEE} commandes par tournée.`);
+    }
     if (req.body.departure || req.body.arrival) {
       if (!Array.isArray(req.body.orderIds) || !req.body.orderIds.length) throw badRequest("Sélectionne les commandes de la tournée.");
       const snapshot = readDb();
@@ -7691,7 +7707,9 @@ app.post("/api/optimize-route", async (req, res) => {
 require("./lib/operations-api").registerOperations(app, {
   readDb, writeDb, withWriteLock, badRequest, notFound, handleRouteError, findClient,
   buildCustomerOrderLines, createPlannedOrder, addHistory, getOrderTotal,
-  buildImportedSalesIndex, getImportedOrderTotal, normalizeDateInput
+  buildImportedSalesIndex, getImportedOrderTotal, normalizeDateInput,
+  // Lot 5 : la limite de debit du relais de recherche d'adresse, par compte et par IP.
+  cleDeDebit: req => `${getRequestIdentity(req)?.identifiant || "anonyme"}|${getClientIp(req)}`
 });
 
 // --- API des comptes utilisateurs (V8 phase 1) -----------------------------

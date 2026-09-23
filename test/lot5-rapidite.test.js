@@ -446,3 +446,56 @@ test("lot 5 : sans sauvegarde, pas de purge", async () => {
   // Temoin : avec une sauvegarde, la meme purge part.
   assert.equal((await S.purgerTourneesAnciennes({ maintenant: MAINTENANT })).purgees, 1);
 });
+
+// --- 9. Plafond du calcul « sans depart » ------------------------------------
+
+test("lot 5 : une tournee « sans depart » exige une selection de 1 a 50 commandes", async () => {
+  const cmd = Array.from({ length: 60 }, (_, i) => commande("x" + i, "pret_livraison", i));
+  writeDb({ ...defaultDb(), clients: clients(), commandes: cmd, routes: [] }, { backup: false });
+
+  const toutes = await api("/api/routes", { method: "POST", body: JSON.stringify({ sector: "Tous" }) });
+  assert.equal(toutes.status, 400, `sans selection, la tournee prend toutes les commandes pretes (${toutes.body?.stops?.length} arrets)`);
+  const trop = await api("/api/routes", { method: "POST", body: JSON.stringify({ sector: "Tous", orderIds: cmd.slice(0, 51).map(c => c.id) }) });
+  assert.equal(trop.status, 400, `51 commandes acceptees (${trop.body?.stops?.length} arrets)`);
+  assert.match(trop.body.error, /entre 1 et 50 commandes/);
+  // Temoin : 50, c'est permis.
+  const ok = await api("/api/routes", { method: "POST", body: JSON.stringify({ sector: "Tous", orderIds: cmd.slice(0, 50).map(c => c.id) }) });
+  assert.equal(ok.status, 201, JSON.stringify(ok.body));
+  assert.equal(ok.body.stops.length, 50);
+});
+
+// --- 10. Relais de recherche d'adresse : cache et limite de debit ------------
+
+test("lot 5 : /api/geocode garde ses reponses en cache et limite le debit vers la Geoplateforme", async () => {
+  const fetchReel = globalThis.fetch;
+  const appels = [];
+  // Aucun appel reseau reel : la Geoplateforme est bouchonnee dans ce processus.
+  globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith("https://data.geopf.fr/")) {
+      appels.push(String(url));
+      return new Response(JSON.stringify({ features: [{ properties: { label: "1 rue de Dole 39100 Dole", score: 0.9, type: "housenumber", postcode: "39100", city: "Dole" }, geometry: { coordinates: [5.49, 47.09] } }] }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    return fetchReel(url, init);
+  };
+  try {
+    const a = await api("/api/geocode?q=" + encodeURIComponent("1 rue de Dole"));
+    const b = await api("/api/geocode?q=" + encodeURIComponent("  1 RUE  de dole "));
+    assert.equal(a.status, 200);
+    assert.deepEqual(b.body, a.body);
+    assert.equal(appels.length, 1, `la meme recherche est repartie ${appels.length} fois`);
+
+    // Rafale de 12 recherches distinctes : au plus 5 (+ la recharge) partent.
+    const statuts = [];
+    for (let i = 0; i < 12; i++) statuts.push((await api(`/api/geocode?q=${encodeURIComponent(`${i} rue du Pont`)}`)).status);
+    assert.ok(appels.length <= 1 + 6, `${appels.length} appels a la Geoplateforme pour 13 recherches en rafale`);
+    assert.ok(statuts.includes(503), `aucune recherche refusee : ${statuts.join(",")}`);
+    assert.equal(statuts[0], 200, "la premiere recherche de la rafale est refusee");
+    const refus = await api(`/api/geocode?q=${encodeURIComponent("99 rue du Pont")}`);
+    assert.equal(refus.status, 503);
+    assert.match(refus.body.error, /Réessaie dans une seconde/);
+    // Une recherche deja en cache passe toujours, meme seau vide.
+    assert.equal((await api("/api/geocode?q=" + encodeURIComponent("1 rue de Dole"))).status, 200);
+  } finally {
+    globalThis.fetch = fetchReel;
+  }
+});
