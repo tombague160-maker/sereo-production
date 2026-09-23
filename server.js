@@ -13,6 +13,8 @@ const { createSqliteStore } = require("./storage/sqliteStore");
 const { empreinteDesSources, shellEmpreinte } = require("./lib/empreinte-shell");
 const { fondDeCarte } = require("./lib/fond-de-carte");
 const { GestionnaireOsrm } = require("./lib/osrm-local");
+// Le jour calendaire est celui de Paris, quel que soit le fuseau du processus (24/09).
+const { jourParis, jourDeLInstant, ajouterJours, debutSemaine, debutMois, moisSuivant, moisPrecedent } = require("./lib/jour-paris");
 
 loadEnvFile(path.join(__dirname, ".env"));
 
@@ -2827,7 +2829,8 @@ function ensureOrderNumbers(db) {
       // Revue R1 MINOR-14 + R3 hardening : forcer YYYY-MM-DD (10 chars).
       const raw = order.dateImport || order.createdAt || new Date().toISOString();
       const dateStr = raw instanceof Date ? raw.toISOString() : String(raw);
-      order.dateCommande = dateStr.slice(0, 10);
+      // dateImport et createdAt sont des INSTANTS : leur jour est celui de Paris.
+      order.dateCommande = jourDeLInstant(raw) || dateStr.slice(0, 10);
     }
     if (resetAnnually) {
       const year = String(extractYear(order.dateCommande));
@@ -4125,7 +4128,7 @@ function recordStockMovement(db, product, oldQuantity, newQuantity, reason = "Aj
 
 function getDashboardSummary(db) {
   const stockView = getStockView(db);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = jourParis();
   const orderCounts = {
     imported: db.commandes.length,
     toCheck: db.commandes.filter(order => ["importe", "stock_a_verifier"].includes(order.status)).length,
@@ -4208,10 +4211,12 @@ function productKeyFromLine(line) {
 // ERP v1.9.0 : numerotation bons de commande + detection doublons re-import
 // ============================================================================
 
-// Extrait l'annee d'une date ISO ou FR. Retourne new Date().getFullYear() en
+// Extrait l'annee d'une date ISO ou FR. Retourne l'annee courante (a Paris) en
 // fallback pour ne jamais bloquer sur un format inconnu.
 function extractYear(dateString) {
-  if (!dateString) return new Date().getFullYear();
+  // L'annee de repli est celle de PARIS : le 31/12 a 23:30 UTC, c'est deja l'an neuf.
+  const anneeCourante = () => Number(jourParis().slice(0, 4));
+  if (!dateString) return anneeCourante();
   const str = String(dateString);
   // Format ISO ou ISO-like : "2026-05-18" / "2026-05-18T..." / "2026/05/18"
   const isoMatch = str.match(/^(\d{4})[-/]/);
@@ -4219,7 +4224,7 @@ function extractYear(dateString) {
   // Format francais : "18/05/2026" ou "18-05-2026"
   const frMatch = str.match(/^\d{1,2}[/-]\d{1,2}[/-](\d{4})/);
   if (frMatch) return Number(frMatch[1]);
-  return new Date().getFullYear();
+  return anneeCourante();
 }
 
 // Genere le prochain numero de commande au format PREFIX-YYYY-NNN (reset
@@ -4404,7 +4409,7 @@ function syncWorkflow(db) {
     if (orders.length > 0) return;
     if (!Array.isArray(client.produits) || client.produits.length === 0) return;
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = jourParis();
     const fallback = normalizeOrder({
       clientId: client.id,
       clientName: client.nom,
@@ -4539,12 +4544,17 @@ function normalizeOrder(order) {
   // la valeur brute (string) telle quelle : le diagnostic /api/diagnostic/
   // suspicious-dates la signale pour correction manuelle, sans perte. Le defaut
   // "aujourd'hui" ne s'applique qu'a une commande SANS aucune date fournie.
+  // dateCommande est une date sans heure : lue telle quelle. dateImport et
+  // createdAt sont des instants : leur jour est celui de Paris (24/09), comme
+  // le defaut « aujourd'hui ».
   const rawDateCommande = order.dateCommande || order.dateImport || order.createdAt;
-  const normalizedDateCommande = normalizeDateInput(rawDateCommande);
+  const normalizedDateCommande = order.dateCommande
+    ? normalizeDateInput(order.dateCommande)
+    : jourCalendaire(rawDateCommande);
   const dateCommande = normalizedDateCommande
     || (typeof rawDateCommande === "string" && rawDateCommande.trim()
       ? rawDateCommande.trim()
-      : now.slice(0, 10));
+      : jourParis());
 
   return {
     id: order.id || `cmd-${order.clientId || crypto.randomUUID()}`,
@@ -4801,6 +4811,8 @@ function normalizeRelanceStatus(value, fallback = "a_faire") {
 
 function normalizeCrmReminder(reminder = {}) {
   const now = new Date().toISOString();
+  // Le jour par defaut d'un rappel : aujourd'hui a PARIS, pas la date UTC de `now`.
+  const aujourdhui = jourParis(new Date(now));
   const status = normalizeRelanceStatus(reminder.status || reminder.statut);
   return {
     ...reminder,
@@ -4808,12 +4820,12 @@ function normalizeCrmReminder(reminder = {}) {
     clientId: clean(reminder.clientId || reminder.client_id),
     commandeId: clean(reminder.commandeId || reminder.orderId || reminder.commande_id),
     type: clean(reminder.type || reminder.kind || "crm"),
-    datePrevue: normalizeDateInput(reminder.datePrevue || reminder.reminderDate || reminder.date_prevue) || now.slice(0, 10),
+    datePrevue: normalizeDateInput(reminder.datePrevue || reminder.reminderDate || reminder.date_prevue) || aujourdhui,
     motif: clean(reminder.motif || reminder.reason),
     commentaire: clean(reminder.commentaire || reminder.comment),
     status,
     dateRealisation: status === "fait"
-      ? (normalizeDateInput(reminder.dateRealisation || reminder.doneDate) || now.slice(0, 10))
+      ? (normalizeDateInput(reminder.dateRealisation || reminder.doneDate) || aujourdhui)
       : normalizeDateInput(reminder.dateRealisation || reminder.doneDate),
     resultat: clean(reminder.resultat || reminder.result),
     createdAt: reminder.createdAt || now,
@@ -4863,7 +4875,7 @@ function crmClientView(db, client) {
 }
 
 function getReminderViews(db, query = {}) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = jourParis();
   const range = clean(query.range || "");
   let list = db.relances.map(reminder => ({
     ...reminder,
@@ -4886,7 +4898,7 @@ function getReminderViews(db, query = {}) {
   if (range === "late") list = list.filter(reminder => reminder.status === "a_faire" && reminder.datePrevue < today);
   if (range === "upcoming") list = list.filter(reminder => reminder.status === "a_faire" && reminder.datePrevue > today);
   if (range === "week") {
-    const limit = toYmd(addDays(startOfLocalDay(new Date()), 7));
+    const limit = ajouterJours(today, 7);
     list = list.filter(reminder => reminder.datePrevue >= today && reminder.datePrevue <= limit);
   }
 
@@ -4907,7 +4919,7 @@ function validateCrmClientPayload(payload = {}, existing = {}) {
     secteur: deriveSector(city, payload.secteur ?? existing.secteur),
     notes: clean(payload.notes ?? existing.notes),
     crmStatus: normalizeCrmStatus(payload.crmStatus ?? payload.statutCrm ?? existing.crmStatus),
-    firstContactDate: normalizeDateInput(payload.firstContactDate ?? existing.firstContactDate) || existing.firstContactDate || new Date().toISOString().slice(0, 10),
+    firstContactDate: normalizeDateInput(payload.firstContactDate ?? existing.firstContactDate) || existing.firstContactDate || jourParis(),
     lastVisitDate: normalizeDateInput(payload.lastVisitDate ?? existing.lastVisitDate),
     nextReminderDate: normalizeDateInput(payload.nextReminderDate ?? existing.nextReminderDate),
     source: clean(payload.source ?? existing.source),
@@ -5019,7 +5031,7 @@ function createCustomerOrder(db, payload = {}) {
     clientId: payload.clientId,
     ...(payload.client || {})
   });
-  const dateCommande = normalizeDateInput(payload.dateCommande) || new Date().toISOString().slice(0, 10);
+  const dateCommande = normalizeDateInput(payload.dateCommande) || jourParis();
   const lines = buildCustomerOrderLines(db, payload.products || payload.produits);
   const total = Math.round(lines.reduce((sum, line) => sum + line.totalLigne, 0) * 100) / 100;
   const numero = generateOrderNumber(db, dateCommande);
@@ -5164,15 +5176,18 @@ function jourDuMoisRabattu(jourVoulu, ymd) {
   return Number.isFinite(jourVoulu) && jourVoulu > jourRetenu;
 }
 
+// Le point de depart est AUJOURD'HUI A PARIS (24/09) : entre minuit et 2 h, le
+// processus en UTC croyait etre la veille, et un secteur du jour pouvait etre
+// propose... pour la veille. Ensuite, tout se calcule sur des cles, en UTC pur.
 function nextSectorDeliveryDate(sectorConfig, fromDate = new Date()) {
   const sourceDay = Math.max(1, Math.min(31, Math.round(number(sectorConfig?.jourMois, 1))));
-  const base = startOfLocalDay(fromDate);
-  let year = base.getFullYear();
-  let month = base.getMonth();
+  const base = jourParis(fromDate);
+  let year = Number(base.slice(0, 4));
+  let month = Number(base.slice(5, 7)) - 1;
 
   const makeCandidate = () => {
-    const lastDay = new Date(year, month + 1, 0).getDate();
-    return new Date(year, month, Math.min(sourceDay, lastDay));
+    const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+    return new Date(Date.UTC(year, month, Math.min(sourceDay, lastDay))).toISOString().slice(0, 10);
   };
 
   let candidate = makeCandidate();
@@ -5185,7 +5200,7 @@ function nextSectorDeliveryDate(sectorConfig, fromDate = new Date()) {
     candidate = makeCandidate();
   }
 
-  return toYmd(candidate);
+  return candidate;
 }
 
 /**
@@ -5259,7 +5274,7 @@ function createPlannedOrder(db, payload = {}) {
     clientId: payload.clientId,
     ...(payload.client || {})
   });
-  const dateCommande = normalizeDateInput(payload.dateCommande) || new Date().toISOString().slice(0, 10);
+  const dateCommande = normalizeDateInput(payload.dateCommande) || jourParis();
   const deliveryDate = resolvePlannedDeliveryDate(db, client, payload);
   if (!deliveryDate) throw badRequest("Date de livraison obligatoire pour une commande planifiee");
 
@@ -5364,7 +5379,7 @@ function confirmPlannedOrder(db, orderId) {
     .filter(reminder => String(reminder.commandeId) === String(order.id) && reminder.status === "a_faire")
     .forEach(reminder => {
       reminder.status = "fait";
-      reminder.dateRealisation = order.confirmedAt.slice(0, 10);
+      reminder.dateRealisation = jourParis(order.confirmedAt);
       reminder.resultat = reminder.resultat || "Commande confirmee";
       reminder.updatedAt = order.confirmedAt;
     });
@@ -5374,7 +5389,7 @@ function confirmPlannedOrder(db, orderId) {
   if (client) {
     client.crmStatus = "client_actif";
     client.crmConvertedAt = client.crmConvertedAt || order.confirmedAt;
-    client.lastVisitDate = order.confirmedAt.slice(0, 10);
+    client.lastVisitDate = jourParis(order.confirmedAt);
   }
 
   return order;
@@ -5419,8 +5434,8 @@ function replanOrder(db, orderId, payload = {}) {
   return result;
 }
 
-function getCustomerOrdersForDate(db, date = new Date().toISOString().slice(0, 10)) {
-  const target = normalizeDateInput(date) || new Date().toISOString().slice(0, 10);
+function getCustomerOrdersForDate(db, date = jourParis()) {
+  const target = normalizeDateInput(date) || jourParis();
   return db.commandes
     .filter(order => String(order.dateCommande || "").slice(0, 10) === target)
     .filter(order => order.source === "commande_terrain" || order.status === "commande_client_validee")
@@ -5451,10 +5466,11 @@ function sendCustomerOrdersToPreparation(db, orderIds) {
   return updated;
 }
 
-function startOfLocalDay(date = new Date()) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
-}
-
+// addDays et toYmd ne servent plus qu'a des DATES SANS HEURE construites en
+// heure locale et relues en heure locale (feries, rappel avant livraison) : le
+// fuseau n'y entre pas. Pour le jour d'un INSTANT (maintenant, deliveredAt...),
+// c'est jourParis() de lib/jour-paris.js -- jamais toYmd(new Date()) (24/09 :
+// startOfLocalDay et startOfWeekMonday, qui le faisaient, sont retirees).
 function addDays(date, days) {
   const copy = new Date(date);
   copy.setDate(copy.getDate() + days);
@@ -5465,13 +5481,14 @@ function toYmd(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function startOfWeekMonday(date) {
-  const day = date.getDay() || 7;
-  return addDays(startOfLocalDay(date), 1 - day);
+// Le jour calendaire d'une valeur : un INSTANT (ISO avec fuseau, Date) est lu
+// a Paris ; une date sans heure passe par normalizeDateInput, sans decalage.
+function jourCalendaire(value) {
+  return jourDeLInstant(value) || normalizeDateInput(value);
 }
 
 function orderDate(order) {
-  return normalizeDateInput(order.dateCommande || order.createdAt) || "";
+  return (order.dateCommande ? normalizeDateInput(order.dateCommande) : jourCalendaire(order.createdAt)) || "";
 }
 
 function importedSaleDate(vente) {
@@ -5541,12 +5558,18 @@ function getImportedProductTotal(importedIndex, order, date, line) {
   return importedIndex.byOrderProduct.get(`${importedOrderKey(clientName, "")}|${lineKey}`) || 0;
 }
 
+// Toutes les bornes sont des cles "YYYY-MM-DD" du jour a PARIS (24/09) : le
+// processus tourne en UTC en production, et `now.getDate()` y rendait la veille
+// entre minuit et 2 h. Le jour d'une vente est celui de l'INSTANT deliveredAt,
+// lu a Paris ; deliveryDate et dateCommande sont des dates sans heure, prises
+// telles quelles. Les cles se comparent en texte, s'additionnent en UTC pur.
 function computeStatistics(db, now = new Date()) {
-  const todayStart = startOfLocalDay(now);
-  const weekStart = startOfWeekMonday(now);
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const prevWeekStart = addDays(weekStart, -7);
-  const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const today = jourParis(now);
+  const weekStart = debutSemaine(today);
+  const monthStart = debutMois(today);
+  const nextMonthStart = moisSuivant(today);
+  const prevWeekStart = ajouterJours(weekStart, -7);
+  const prevMonthStart = moisPrecedent(today);
   const prevMonthEnd = monthStart;
 
   const commercialStatuses = new Set(["livre"]);
@@ -5554,7 +5577,7 @@ function computeStatistics(db, now = new Date()) {
   const salesOrders = db.commandes
     .filter(order => commercialStatuses.has(order.status))
     .map(order => {
-      const _date = normalizeDateInput(order.deliveredAt) || order.deliveryDate || orderDate(order);
+      const _date = jourCalendaire(order.deliveredAt) || order.deliveryDate || orderDate(order);
       const explicitTotal = getOrderTotal(order);
       return {
         ...order,
@@ -5564,11 +5587,11 @@ function computeStatistics(db, now = new Date()) {
     })
     .filter(order => order._date);
 
-  const inRange = (order, start, end) => order._date >= toYmd(start) && order._date < toYmd(end);
+  const inRange = (order, start, end) => order._date >= start && order._date < end;
   const sum = list => Math.round(list.reduce((total, order) => total + order._total, 0) * 100) / 100;
-  const todayOrders = salesOrders.filter(order => inRange(order, todayStart, addDays(todayStart, 1)));
-  const weekOrders = salesOrders.filter(order => inRange(order, weekStart, addDays(weekStart, 7)));
-  const monthOrders = salesOrders.filter(order => inRange(order, monthStart, new Date(now.getFullYear(), now.getMonth() + 1, 1)));
+  const todayOrders = salesOrders.filter(order => inRange(order, today, ajouterJours(today, 1)));
+  const weekOrders = salesOrders.filter(order => inRange(order, weekStart, ajouterJours(weekStart, 7)));
+  const monthOrders = salesOrders.filter(order => inRange(order, monthStart, nextMonthStart));
   const prevWeekOrders = salesOrders.filter(order => inRange(order, prevWeekStart, weekStart));
   const prevMonthOrders = salesOrders.filter(order => inRange(order, prevMonthStart, prevMonthEnd));
 
@@ -5607,21 +5630,20 @@ function computeStatistics(db, now = new Date()) {
     };
   };
 
-  const last14Days = Array.from({ length: 14 }, (_, index) => addDays(todayStart, index - 13))
+  const last14Days = Array.from({ length: 14 }, (_, index) => ajouterJours(today, index - 13))
     .map(day => {
-      const end = addDays(day, 1);
-      const list = salesOrders.filter(order => inRange(order, day, end));
-      return { date: toYmd(day), total: sum(list), orders: list.length };
+      const list = salesOrders.filter(order => inRange(order, day, ajouterJours(day, 1)));
+      return { date: day, total: sum(list), orders: list.length };
     });
 
   const newClientsMonth = db.clients.filter(client => {
-    const created = normalizeDateInput(client.firstContactDate || client.createdAt);
-    return created && created >= toYmd(monthStart);
+    const created = client.firstContactDate ? normalizeDateInput(client.firstContactDate) : jourCalendaire(client.createdAt);
+    return created && created >= monthStart;
   }).length;
 
   const convertedMonth = db.clients.filter(client => {
-    const converted = normalizeDateInput(client.crmConvertedAt);
-    return converted && converted >= toYmd(monthStart);
+    const converted = jourCalendaire(client.crmConvertedAt);
+    return converted && converted >= monthStart;
   }).length;
 
   return {
@@ -6325,11 +6347,11 @@ function startRoute(db, routeId) {
 // Le telephone envoie `faitLe` : l'heure a laquelle le livreur a touche le
 // bouton. Hors ligne, le geste peut arriver des heures plus tard ; le dater a
 // l'arrivee ferait tomber le chiffre d'affaires dans le mauvais jour.
-// CE QUE CELA NE REGLE PAS (defaut anterieur, mesure le 23/09) : le jour de
-// vente reste la date UTC de deliveredAt (computeStatistics tronque l'ISO).
-// Une livraison entre minuit et 2 h, heure de Paris, compte pour la veille.
-// Le corriger demande de passer TOUTES les bornes des statistiques en
-// Europe/Paris, pas seulement cette date : hors du lot 1.
+// Le jour de vente est celui de deliveredAt LU A PARIS (corrige le 24/09 : le
+// defaut 7, mesure le 23/09 -- computeStatistics tronquait l'ISO en UTC, et
+// une livraison entre minuit et 2 h, heure de Paris, comptait pour la veille).
+// Toutes les bornes des statistiques sont desormais des jours de Paris
+// (lib/jour-paris.js ; banc test/jour-paris.test.js, processus en UTC).
 // L'horloge du telephone n'est pas une source de verite : elle est BORNEE.
 //  - dans le futur au-dela d'une marge d'horloge : on garde l'heure du serveur ;
 //  - plus vieille que GESTE_AGE_MAX_JOURS : on garde l'heure du serveur (un
@@ -7331,7 +7353,7 @@ app.get("/api/crm/clients", (req, res) => {
   const db = readDb();
   const query = normalizeTextKey(req.query.q || "");
   const statusFilter = normalizeCrmStatus(req.query.status || "", "");
-  const today = new Date().toISOString().slice(0, 10);
+  const today = jourParis();
 
   let list = db.clients
     .filter(client => !client.crmArchived)
@@ -8024,7 +8046,7 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     // Chaque (client, date) = 1 bon de commande distinct. Multiples imports
     // d'un meme bon (meme client + meme date) = update du contenu, pas creation
     // de doublon (anti-doublon via excelRowHash).
-    const todayIso = new Date().toISOString().slice(0, 10);
+    const todayIso = jourParis();
     const clientsMap = {};
 
     ventes.forEach(vente => {
@@ -8757,7 +8779,7 @@ app.post("/api/orders/:id/finish-preparation", async (req, res) => {
       }
 
       setOrderStatus(order, "pret_livraison");
-      order.deliveryDate = normalizeDateInput(req.body?.deliveryDate) || order.deliveryDate || new Date().toISOString().slice(0, 10);
+      order.deliveryDate = normalizeDateInput(req.body?.deliveryDate) || order.deliveryDate || jourParis();
 
       addHistory(db, "Preparation", `${order.clientName} : pret pour livraison`, {
         orderId: order.id,
@@ -9483,7 +9505,7 @@ async function purgerTourneesAnciennes({ maintenant = new Date(), mois = PURGE_T
     const ids = new Set(cibles.map(route => String(route.id)));
     const arrets = cibles.reduce((n, route) => n + (route.stops || []).length, 0);
     db.routes = db.routes.filter(route => !ids.has(String(route.id)));
-    const limite = toYmd(limiteDePurge(maintenant, mois));
+    const limite = jourParis(limiteDePurge(maintenant, mois));
     const fichier = path.basename(String(sauvegarde));
     addHistory(db, "Purge", `${ids.size} tournée(s) terminée(s) avant le ${limite} supprimée(s), ${arrets} arrêt(s) — conservation ${mois} mois. Commandes et chiffre d'affaires intacts. Sauvegarde : ${fichier}`, {
       tournees: ids.size,
