@@ -201,16 +201,37 @@ for (const schema of ["light", "dark"]) {
       const fonds = await page.locator(selecteur).evaluateAll(els => els.map(el => getComputedStyle(el).backgroundColor));
       for (const f of fonds) expect.soft(f, `${selecteur} : fond`).toBe(await surface());
     }
+    // Les gestes d'un rappel (Fait, Reporte, Annule) : plus de degrade, et un
+    // texte lisible sur ce qui est reellement dessous (le bouton plein, ou la
+    // carte pour un bouton a contour).
+    await page.evaluate(() => { location.hash = "#relances"; });
+    await expect(page.locator("#relances")).toHaveClass(/active/);
+    const fondCarte = await surface();
+    const gestes = await page.locator("#relanceList .card-actions .button").evaluateAll(els => els.map(el => {
+      const cs = getComputedStyle(el);
+      return { texte: el.textContent.trim(), image: cs.backgroundImage, fond: cs.backgroundColor, couleur: cs.color };
+    }));
+    expect(gestes).toHaveLength(3);
+    for (const g of gestes) {
+      expect.soft(g.image, `geste « ${g.texte} » : degrade`).toBe("none");
+      const dessous = g.fond === "rgba(0, 0, 0, 0)" ? fondCarte : g.fond;
+      expect.soft(contraste(g.couleur, dessous), `geste « ${g.texte} » : ${g.couleur} / ${dessous}`).toBeGreaterThanOrEqual(4.5);
+    }
   });
 
   test(`au téléphone (${schema}) : les filtres sont des pilules, pas des boutons pleine largeur`, async ({ page }) => {
+    // Les filtres sont des pilules a leur largeur, plusieurs par rangee. Les
+    // trois exports sont des GESTES (un telechargement chacun), pas des
+    // filtres : on exige seulement qu'ils ne s'etirent plus sur la rangee
+    // entiere -- « Commandes planifiees » fait ~200 px a 14 px, deux ne
+    // tiennent pas cote a cote sur 328.
     const cas = [
-      ["relances", "#relances .recommend-toolbar .button", 5],
-      ["recommande", "#recommande .recommend-toolbar .button", 3],
-      ["exports", "#exports .export-actions .button", 3]
+      ["relances", "#relances .recommend-toolbar .button", 5, "filtre"],
+      ["recommande", "#recommande .recommend-toolbar .button", 3, "filtre"],
+      ["exports", "#exports .export-actions .button", 3, "geste"]
     ];
     let premier = true;
-    for (const [ecran, selecteur, n] of cas) {
+    for (const [ecran, selecteur, n, nature] of cas) {
       if (premier) { await ouvrir(page, ecran, { schema, largeur: 390 }); premier = false; } else {
         await page.evaluate(e => { location.hash = `#${e}`; }, ecran);
         await expect(page.locator(`#${ecran}`)).toHaveClass(/active/);
@@ -225,21 +246,36 @@ for (const schema of ["light", "dark"]) {
         const cs = getComputedStyle(el);
         const rangee = el.parentElement.getBoundingClientRect();
         return {
-          texte: el.textContent.trim(), l: r.width, h: r.height, rangee: rangee.width,
+          texte: el.textContent.trim(), l: r.width, h: r.height, haut: Math.round(r.top), rangee: rangee.width,
           rayon: parseFloat(cs.borderTopLeftRadius), fond: cs.backgroundColor, couleur: cs.color
         };
       }));
       for (const m of mesures) {
-        expect.soft(m.l, `${ecran} « ${m.texte} » : largeur`).toBeLessThan(m.rangee * 0.6);
+        const limite = nature === "filtre" ? m.rangee * 0.6 : m.rangee - 40;
+        expect.soft(m.l, `${ecran} « ${m.texte} » : largeur`).toBeLessThan(limite);
         expect.soft(m.h, `${ecran} « ${m.texte} » : hauteur`).toBeGreaterThanOrEqual(44);
         expect.soft(m.rayon, `${ecran} « ${m.texte} » : pilule`).toBeGreaterThanOrEqual(m.h / 2 - 1);
         expect.soft(contraste(m.couleur, m.fond), `${ecran} « ${m.texte} » : contraste ${m.couleur} / ${m.fond}`).toBeGreaterThanOrEqual(4.5);
       }
-      // Toutes sur la meme rangee que la premiere, ou a la ligne : jamais une
-      // par ligne quand elles tiennent a deux.
-      const hauts = [...new Set(mesures.map(m => Math.round(m.h)))];
-      expect.soft(hauts.length, `${ecran} : hauteurs`).toBe(1);
+      // Une seule hauteur (pas de pilule de 44 a cote d'une de 48) ; et des
+      // filtres PARTAGEANT leurs rangees : jamais un par ligne.
+      expect.soft(new Set(mesures.map(m => Math.round(m.h))).size, `${ecran} : hauteurs`).toBe(1);
+      if (nature === "filtre") {
+        expect.soft(new Set(mesures.map(m => m.haut)).size, `${ecran} : rangees`).toBeLessThan(n);
+      }
+      // Le compte d'un en-tete de carte ne s'etire pas sur toute la carte.
+      const pastille = page.locator(`#${ecran} .panel-heading .status-chip`);
+      if (await pastille.count()) {
+        const [l, carte] = await pastille.first().evaluate(el => [el.getBoundingClientRect().width, el.closest(".panel").getBoundingClientRect().width]);
+        expect.soft(l, `${ecran} : pastille du compte`).toBeLessThan(carte * 0.6);
+      }
     }
+    // A recommander : les quatre chiffres d'un produit tiennent dans leur case.
+    await page.evaluate(() => { location.hash = "#recommande"; });
+    await expect(page.locator("#recommande")).toHaveClass(/active/);
+    const debords = await page.locator("#recommandeList .stock-kpis > span").evaluateAll(els => els
+      .filter(el => el.scrollWidth > el.clientWidth + 1).map(el => el.textContent.trim()));
+    expect.soft(debords, "cases qui debordent").toEqual([]);
   });
 
   test(`au téléphone (${schema}) : la pilule choisie se dit, et l'anneau clavier se voit`, async ({ page }) => {
@@ -249,8 +285,13 @@ for (const schema of ["light", "dark"]) {
     await expect(pilule).toHaveAttribute("aria-pressed", "true");
     await expect(page.locator('#relances [data-relance-filter="today"]')).toHaveAttribute("aria-pressed", "false");
     // La choisie est pleine : fond different des autres.
-    const fonds = await page.locator("#relances .recommend-toolbar .button").evaluateAll(els => els.map(el => getComputedStyle(el).backgroundColor));
-    expect(new Set(fonds).size).toBe(2);
+    // Le pointeur quitte la rangee : on mesure l'etat au repos, pas le survol.
+    await page.mouse.move(0, 0);
+    // Le fond est anime (transition des boutons) : on attend qu'il se pose.
+    await expect.poll(async () => {
+      const fonds = await page.locator("#relances .recommend-toolbar .button").evaluateAll(els => els.map(el => getComputedStyle(el).backgroundColor));
+      return new Set(fonds).size;
+    }).toBe(2);
     // Clavier : l'anneau (contour ou ombre) est visible sur la pilule.
     await page.locator('#relances [data-relance-filter="week"]').focus();
     await page.keyboard.press("Shift+Tab");

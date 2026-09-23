@@ -102,7 +102,6 @@ let customerProductFilter = {
   category: "all"
 };
 let customerCart = new Map();
-let todayOrdersSelection = new Set();
 let lastImportSummary = null;
 let recommendFilter = "urgent";
 let preparationFilter = { query: "", sector: "all" };
@@ -242,7 +241,7 @@ function libellesDuGroupe(groupe) {
   return [...ecrans.map(onglet => titles[onglet]?.title || ""), ...(ANCIENS_NOMS[groupe] || [])];
 }
 
-const ANCIENS_NOMS = { tournee: ["Livraison"], clients: ["CRM"], stock: ["Inventaire"] };
+const ANCIENS_NOMS = { tournee: ["Livraison"], clients: ["CRM"], stock: ["Inventaire"], analyse: ["Statistiques"] };
 
 function renderSousOnglets(nomOnglet) {
   const rangee = document.getElementById("sousOnglets");
@@ -536,12 +535,6 @@ function bindUi() {
     renderCustomerCatalog();
   });
 
-  document.getElementById("todayOrdersDate")?.addEventListener("change", async event => {
-    todayOrdersSelection.clear();
-    await loadTodayOrders(event.target.value);
-    renderTodayOrders();
-  });
-
   document.getElementById("deliveryDate")?.addEventListener("change", event => {
     deliveryFilter.date = event.target.value;
     applyDeliveryFilter();
@@ -720,17 +713,6 @@ function bindUi() {
     if (action === "open-maps") openGoogleMaps();
     if (action === "call-current-client") callCurrentClient();
     if (action === "save-coordinates") runAction(actionButton, "Sauvegarde...", saveCurrentCoordinates);
-    if (action === "select-all-today-orders") {
-      todayCustomerOrders.forEach(order => todayOrdersSelection.add(String(order.id)));
-      renderTodayOrders();
-    }
-    if (action === "clear-today-orders") {
-      todayOrdersSelection.clear();
-      renderTodayOrders();
-    }
-    if (action === "send-today-orders-preparation") runAction(actionButton, "Envoi...", sendTodayOrdersToPreparation);
-    if (action === "confirm-planned-order") runAction(actionButton, "Confirmation...", () => confirmPlannedOrder(actionButton.dataset.orderId));
-    if (action === "cancel-planned-order") runAction(actionButton, "Annulation...", () => cancelPlannedOrder(actionButton.dataset.orderId));
     if (action === "export-annex-orders") downloadOrdersExport("annexe");
     if (action === "export-planned-orders") downloadOrdersExport("planned");
     if (action === "export-all-orders") downloadOrdersExport("all");
@@ -780,13 +762,6 @@ function bindUi() {
     const deliveryCheckbox = event.target.closest("[data-delivery-order]");
     if (deliveryCheckbox) {
       setDeliverySelection(deliveryCheckbox.dataset.deliveryOrder, deliveryCheckbox.checked);
-    }
-
-    const todayOrderCheckbox = event.target.closest("[data-today-order]");
-    if (todayOrderCheckbox) {
-      if (todayOrderCheckbox.checked) todayOrdersSelection.add(String(todayOrderCheckbox.dataset.todayOrder));
-      else todayOrdersSelection.delete(String(todayOrderCheckbox.dataset.todayOrder));
-      renderTodayOrders();
     }
   });
 
@@ -1866,16 +1841,15 @@ function renderAll() {
   renderCrm();
   renderRelances();
   renderCustomerOrder();
-  rendreSiAffiche("commandes-jour", renderTodayOrders);
-  rendreSiAffiche("commandes-planifiees", renderPlannedOrders);
   renderStatistics();
   renderExports();
   renderStock();
   renderStockMovements();
   renderPreparation();
   renderRecommande();
-  rendreSiAffiche("commandes-livrees", renderCommandesLivrees);
-  rendreSiAffiche("bons-commande", renderBonsCommande);
+  // Les quatre anciennes listes de commandes n'ont plus de rendu : leurs
+  // sections ont quitte la page le 23/09 (dette 7), l'ecran Commandes les
+  // porte toutes.
   renderCommandes();
   rendreSiAffiche("produits", renderProduits);
   renderVentes();
@@ -2549,8 +2523,12 @@ function renderRelances() {
   }
   if (relanceFilter === "upcoming") list = list.filter(item => item.status === "a_faire" && item.datePrevue > today);
 
+  // La pilule choisie se dit aussi a un lecteur d'ecran, pas seulement par
+  // son fond (comme les pilules de la Preparation).
   document.querySelectorAll("[data-relance-filter]").forEach(button => {
-    button.classList.toggle("active-filter", button.dataset.relanceFilter === relanceFilter);
+    const choisie = button.dataset.relanceFilter === relanceFilter;
+    button.classList.toggle("active-filter", choisie);
+    button.setAttribute("aria-pressed", String(choisie));
   });
 
   const todoCount = crmRelances.filter(item => item.status === "a_faire").length;
@@ -2813,97 +2791,15 @@ async function submitCustomerOrder(form) {
   showTab(data.orderType === "planifiee" ? "commandes-planifiees" : "commandes-jour");
 }
 
+// Le jour des commandes terrain que charge loadData. Son champ vivait dans
+// l'ancien ecran « Commandes du jour », retire le 23/09 : le jour choisi par
+// l'ecran Commandes (#cmdJour) filtre la liste chargee, pas cette requete.
 function getTodayOrdersDate() {
-  const input = document.getElementById("todayOrdersDate");
-  return input?.value || getTodayDateInput();
+  return getTodayDateInput();
 }
 
-async function loadTodayOrders(date = getTodayOrdersDate()) {
-  todayCustomerOrders = await apiFetch(`/api/customer-orders/today?date=${encodeURIComponent(date)}`);
-}
-
-function renderTodayOrders() {
-  const input = document.getElementById("todayOrdersDate");
-  if (input && !input.value) input.value = getTodayDateInput();
-  const container = document.getElementById("todayOrdersList");
-  if (!container) return;
-  if (!todayCustomerOrders.length) {
-    container.innerHTML = emptyState("Aucune commande client", "Les commandes validées chez les clients apparaîtront ici.");
-    return;
-  }
-  container.innerHTML = todayCustomerOrders.map(order => `
-    <article class="item today-order-card ${getOrderPill(order.status)}">
-      <div class="today-order-row">
-        <label class="select-row">
-          <input type="checkbox" data-today-order="${escapeAttribute(order.id)}" ${todayOrdersSelection.has(String(order.id)) ? "checked" : ""} ${order.status !== "commande_client_validee" ? "disabled" : ""}>
-          <span></span>
-        </label>
-        <div>
-          <h4>${escapeHtml(order.clientName)}</h4>
-          <p>${escapeHtml(formatOrderAddress(order))}</p>
-          <p class="muted">${escapeHtml((order.products || []).map(line => `${line.nom} x${line.quantite}`).join(" - "))}</p>
-        </div>
-        <div class="today-order-side">
-          <span class="pill ${getOrderPill(order.status)}">${escapeHtml(formatOrderStatus(order.status))}</span>
-          <strong>${formatMoney(order.total || 0)}</strong>
-        </div>
-      </div>
-    </article>
-  `).join("");
-}
-
-async function sendTodayOrdersToPreparation() {
-  await apiFetch("/api/customer-orders/send-preparation", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ orderIds: Array.from(todayOrdersSelection) })
-  });
-  todayOrdersSelection.clear();
-  await loadData();
-  notify("Commandes envoyées en préparation.", "success");
-}
-
-function renderPlannedOrders() {
-  const container = document.getElementById("plannedOrdersList");
-  const summary = document.getElementById("plannedOrdersSummary");
-  if (!container) return;
-
-  const active = plannedOrders.filter(order => order.status !== "annulee");
-  if (summary) summary.textContent = `${active.length} planifiée${active.length > 1 ? "s" : ""}`;
-
-  if (!plannedOrders.length) {
-    container.innerHTML = emptyState("Aucune commande planifiée", "Crée une commande planifiée depuis l'onglet Commande client.", { libelle: "Commande client", onglet: "commande-client" });
-    return;
-  }
-
-  container.innerHTML = plannedOrders.map(order => {
-    const reminder = crmRelances.find(item => String(item.commandeId) === String(order.id));
-    const canConfirm = ["planifiee", "a_confirmer"].includes(order.status);
-    const canCancel = !["annulee", "stock_a_verifier", "en_preparation", "pret_livraison", "en_livraison", "livre"].includes(order.status);
-    return `
-      <article class="item planned-order-card ${getOrderPill(order.status)}">
-        <div class="item-header">
-          <div>
-            <h4>${escapeHtml(order.clientName)}</h4>
-            <p>${escapeHtml(formatOrderAddress(order))}</p>
-            <p class="muted">${escapeHtml((order.products || []).map(line => `${line.nom} x${line.quantite}`).join(" - "))}</p>
-          </div>
-          <span class="pill ${getOrderPill(order.status)}">${escapeHtml(formatOrderStatus(order.status))}</span>
-        </div>
-        <div class="order-meta">
-          <span>Livraison : ${escapeHtml(order.deliveryDate ? formatDeliveryDate(order.deliveryDate) : "à dater")}</span>
-          <span>Rappel : ${escapeHtml(reminder?.datePrevue ? formatDeliveryDate(reminder.datePrevue) : "-")}</span>
-          <span>Total : ${formatMoney(order.total || 0)}</span>
-        </div>
-        <div class="card-actions">
-          <button class="button ok" type="button" data-action="confirm-planned-order" data-order-id="${escapeAttribute(order.id)}" ${canConfirm ? "" : "disabled"}>Confirmer</button>
-          <button class="button danger" type="button" data-action="cancel-planned-order" data-order-id="${escapeAttribute(order.id)}" ${canCancel ? "" : "disabled"}>Annuler</button>
-        </div>
-      </article>
-    `;
-  }).join("");
-}
-
+// Confirmer / Annuler une planifiee : les gestes du detail de l'ecran
+// Commandes (cmd-confirmer, cmd-annuler).
 async function confirmPlannedOrder(orderId) {
   await apiFetch(`/api/planned-orders/${encodeURIComponent(orderId)}/confirm`, { method: "POST" });
   await loadData();
@@ -2965,22 +2861,17 @@ function renderStatistics() {
     { label: "Nouveaux clients", value: statistics.newClientsMonth || 0, hint: "Ce mois-ci", tone: "warning" },
     { label: "Prospects convertis", value: statistics.convertedProspectsMonth || 0, hint: "Ce mois-ci", tone: "success" }
   ];
+  // Ni point colore dans le coin ni bandeau d'evolution au-dessus (ecrans sans
+  // planche, 23/09) : le point etait un code couleur sans legende, et le
+  // bandeau repetait les deux evolutions des tuiles sans dire laquelle etait
+  // la semaine. Chaque evolution se lit UNE fois, dans sa tuile.
   kpis.innerHTML = items.map(item => `
     <article class="stat-tile stat-tile-${escapeAttribute(item.tone)}">
-      <i aria-hidden="true"></i>
       <span>${escapeHtml(item.label)}</span>
       <strong>${escapeHtml(item.value)}</strong>
       <small>${escapeHtml(item.hint)}</small>
     </article>
   `).join("");
-
-  const evolution = document.getElementById("statsEvolution");
-  if (evolution) {
-    evolution.innerHTML = `
-      <span class="pill ${statistics.week?.evolution?.label === "baisse" ? "pill-danger" : "pill-ok"}">${escapeHtml(formatEvolution(statistics.week?.evolution))}</span>
-      <span class="pill ${statistics.month?.evolution?.label === "baisse" ? "pill-danger" : "pill-blue"}">${escapeHtml(formatEvolution(statistics.month?.evolution))}</span>
-    `;
-  }
 
   renderBarChart("salesChart", statistics.salesByDay || []);
   renderRankList("topProductsChart", statistics.topProducts || [], "quantity");
@@ -3007,14 +2898,21 @@ function renderBarChart(id, rows) {
   // plusieurs lignes et devenait illisible (colonnes de ~20px). On le retire
   // (la valeur reste dans le tooltip title) et la hauteur devient strictement
   // proportionnelle (plancher 3% au lieu de 12% qui aplatissait les ecarts).
-  container.innerHTML = rows.map(row => {
+  // Le rendu de l'histogramme du tableau de bord : la derniere barre (le
+  // serveur finit la serie sur aujourd'hui) est le jour courant, et
+  // l'etiquette ne garde que le jour du mois -- « 09-10 » se cassait en
+  // « 09- / 10 » sous une colonne de 22 px. La date entiere reste dans le nom
+  // accessible et l'infobulle.
+  container.innerHTML = rows.map((row, index) => {
     const total = Number(row.total) || 0;
     const height = total > 0 ? Math.max(3, total / max * 100) : 2;
     const label = `${row.date} : ${formatMoney(row.total)}`;
+    const courant = index === rows.length - 1;
+    const jour = String(Number(String(row.date).slice(8, 10)) || String(row.date).slice(5));
     return `
-    <div class="bar-item ${total > 0 ? "is-active" : ""}" title="${escapeAttribute(label)}" role="img" aria-label="${escapeAttribute(label)}">
+    <div class="bar-item${total > 0 ? " is-active" : ""}${courant ? " bar-courant" : ""}" title="${escapeAttribute(label)}" role="img" aria-label="${escapeAttribute(label)}">
       <span style="height:${height}%"></span>
-      <small>${escapeHtml(String(row.date).slice(5))}</small>
+      <small>${escapeHtml(jour)}</small>
     </div>
   `;
   }).join("");
@@ -4037,7 +3935,9 @@ function renderRecommande() {
 
 function updateRecommendFilterButtons() {
   document.querySelectorAll("[data-recommend-filter]").forEach(button => {
-    button.classList.toggle("active-filter", button.dataset.recommendFilter === recommendFilter);
+    const choisie = button.dataset.recommendFilter === recommendFilter;
+    button.classList.toggle("active-filter", choisie);
+    button.setAttribute("aria-pressed", String(choisie));
   });
 }
 
@@ -4258,7 +4158,8 @@ function renderHistorique() {
   });
 }
 
-// Helpers ERP v1.11.0 partages entre renderCommandesLivrees et renderBonsCommande
+// Helpers ERP v1.11.0 (les anciennes listes « Commandes livrees » et « Bons de
+// commande » ont quitte la page le 23/09 ; ce format sert le detail et les rappels)
 
 // Format date "seulement jour" : YYYY-MM-DD ou ISO complet -> DD/MM/YYYY (sans heure).
 // Avant on utilisait formatDate qui inclut l'heure 02:00:00 (artefact timezone Excel).
@@ -4274,89 +4175,6 @@ function formatDateDayOnly(value) {
 }
 
 
-function renderCommandesLivrees() {
-  const container = document.getElementById("commandesLivreesList");
-  const summary = document.getElementById("commandesLivreesSummary");
-  if (!container) return;
-
-  const livrees = (orders || []).filter(order => order.status === "livre");
-
-  if (summary) {
-    summary.textContent = livrees.length
-      ? `${livrees.length} commande${livrees.length > 1 ? "s" : ""} livrée${livrees.length > 1 ? "s" : ""}.`
-      : "";
-  }
-
-  if (!livrees.length) {
-    container.innerHTML = emptyState(
-      "Aucune commande livrée",
-      "Les commandes terminées via une tournée ou importées comme déjà livrées apparaîtront ici."
-    );
-    return;
-  }
-
-  const sorted = livrees.slice().sort((a, b) => {
-    const dateA = a.deliveryDate || a.updatedAt || "";
-    const dateB = b.deliveryDate || b.updatedAt || "";
-    return String(dateB).localeCompare(String(dateA));
-  });
-
-  container.innerHTML = sorted.map(order => {
-    const products = Array.isArray(order.products) ? order.products : [];
-    const productsHtml = products.length
-      ? products.map(p => {
-          // Cas 1 : code-barre dans le champ `code` -> on garde tel quel
-          // Cas 2 : code-barre fusionne dans le `nom` -> on le separe
-          const rawName = p.nom || p.code || "Produit";
-          const split = splitProductCode(rawName);
-          const codeDisplay = p.code && p.code !== rawName
-            ? p.code
-            : split.code || "";
-          return `
-            <li class="commandes-livrees-product">
-              <div class="cl-product-main">
-                ${codeDisplay ? `<code class="cl-product-code">${escapeHtml(codeDisplay)}</code>` : ""}
-                <span>${escapeHtml(split.name)}</span>
-              </div>
-              <span class="muted">x ${escapeHtml(p.quantite ?? 0)}</span>
-            </li>
-          `;
-        }).join("")
-      : `<li class="muted">Aucun produit identifié.</li>`;
-
-    const origin = order.importedAsLivre
-      ? `<span class="pill pill-warning">Importée déjà livrée</span>`
-      : `<span class="pill pill-ok">Livrée via tournée</span>`;
-
-    // ERP v1.11.0 : numero CMD-... affiche pour coherence avec page Bons de commande,
-    // et toute la carte est cliquable pour ouvrir le meme modal detail.
-    const numero = order.numero || "(non numéroté)";
-    const dateDisplay = order.dateCommande || order.deliveryDate || order.updatedAt;
-
-    return `
-      <article class="item commandes-livrees-card" data-action="open-bdc-detail" data-order-id="${escapeAttribute(order.id)}" role="button" tabindex="0" aria-label="Ouvrir le détail du bon ${escapeAttribute(numero)}">
-        <header class="item-header">
-          <div>
-            <div class="cl-numero-line">
-              <strong class="cl-numero">${escapeHtml(numero)}</strong>
-              <span class="muted">· ${escapeHtml(formatDateDayOnly(dateDisplay))}</span>
-            </div>
-            <h4>${escapeHtml(order.clientName || "Client")}</h4>
-            <p class="muted">${escapeHtml([order.address, order.postalCode, order.city].filter(Boolean).join(" · "))}</p>
-          </div>
-          ${origin}
-        </header>
-        <div class="item-meta">
-          <span class="muted">Secteur : ${escapeHtml(order.sector || "-")}</span>
-        </div>
-        <ul class="commandes-livrees-products">
-          ${productsHtml}
-        </ul>
-      </article>
-    `;
-  }).join("");
-}
-
 // ============================================================================
 // PAGE "BONS DE COMMANDE" (Phase 3 ERP v1.10.0)
 //
@@ -4366,13 +4184,9 @@ function renderCommandesLivrees() {
 // Tri par defaut : dateCommande desc, puis numero desc (plus recent en haut).
 // ============================================================================
 
+// L'etat de la fenetre de detail. Les filtres de l'ancienne liste (statut,
+// recherche, secteur, dates, vue) sont partis avec elle le 23/09.
 const bdcState = {
-  status: "all",
-  search: "",
-  sector: "",
-  dateFrom: "",
-  dateTo: "",
-  view: "cards",       // "cards" | "table"
   editingClientId: null // id du client en cours d'edition dans le modal detail
 };
 
@@ -4424,185 +4238,13 @@ function bdcFormatDate(iso) {
   return `${m[3]}/${m[2]}/${m[1]}`;
 }
 
-function bdcMatchSearch(order, search) {
-  if (!search) return true;
-  const q = search.toLowerCase();
-  return (
-    (order.numero || "").toLowerCase().includes(q) ||
-    (order.clientName || "").toLowerCase().includes(q) ||
-    (order.id || "").toLowerCase().includes(q)
-  );
-}
-
-function bdcFilterOrders() {
-  return (orders || [])
-    .filter(o => o && o.clientId)
-    .filter(o => {
-      // Filtre statut, avec cas special "to_complete" (filtre meta sur completude profil)
-      if (bdcState.status === "all") return true;
-      if (bdcState.status === "to_complete") return bdcNeedsCompletion(o);
-      return o.status === bdcState.status;
-    })
-    .filter(o => !bdcState.sector || o.sector === bdcState.sector)
-    .filter(o => bdcMatchSearch(o, bdcState.search))
-    .filter(o => {
-      const d = String(o.dateCommande || "").slice(0, 10);
-      if (bdcState.dateFrom && d < bdcState.dateFrom) return false;
-      if (bdcState.dateTo && d > bdcState.dateTo) return false;
-      return true;
-    })
-    .sort((a, b) => {
-      const dateA = String(a.dateCommande || "").slice(0, 10);
-      const dateB = String(b.dateCommande || "").slice(0, 10);
-      if (dateA !== dateB) return dateB.localeCompare(dateA);
-      return String(b.numero || "").localeCompare(String(a.numero || ""));
-    });
-}
-
-function renderBdcSectorOptions() {
-  const select = document.getElementById("bdc-sector");
-  if (!select) return;
-  const currentValue = select.value;
-  const sectors = Array.from(new Set((orders || [])
-    .map(o => o.sector)
-    .filter(Boolean))).sort();
-  select.innerHTML = `<option value="">Tous secteurs</option>` +
-    sectors.map(s => `<option value="${escapeAttribute(s)}">${escapeHtml(s)}</option>`).join("");
-  // Re-set valeur si elle est toujours dispo
-  if (currentValue && sectors.includes(currentValue)) select.value = currentValue;
-}
-
-function renderBonsCommande() {
-  const container = document.getElementById("bdc-list");
-  const summary = document.getElementById("bdc-summary");
-  if (!container) return;
-
-  renderBdcSectorOptions();
-
-  const filtered = bdcFilterOrders();
-  const allOrders = (orders || []).filter(o => o && o.clientId);
-  const total = allOrders.length;
-  const toCompleteCount = allOrders.filter(bdcNeedsCompletion).length;
-
-  // Mettre a jour le compteur du bouton "A completer"
-  const toCompleteBtn = document.querySelector('[data-bdc-status="to_complete"]');
-  if (toCompleteBtn) {
-    const baseLabel = "⚠ À compléter";
-    toCompleteBtn.textContent = toCompleteCount > 0
-      ? `${baseLabel} (${toCompleteCount})`
-      : baseLabel;
-    toCompleteBtn.disabled = toCompleteCount === 0;
-  }
-
-  if (summary) {
-    summary.textContent = total === 0
-      ? "Aucune commande pour l'instant. Importe ton fichier ventes pour commencer."
-      : `${filtered.length} bon${filtered.length > 1 ? "s" : ""} affiché${filtered.length > 1 ? "s" : ""} sur ${total} au total.`;
-  }
-
-  // Toggle classes selon la vue active
-  container.classList.toggle("bdc-list-table-mode", bdcState.view === "table");
-
-  if (!filtered.length) {
-    container.innerHTML = emptyState(
-      "Aucun bon ne correspond aux filtres",
-      total === 0
-        ? "Importe ton fichier de ventes pour voir les bons de commande ici."
-        : "Essaie de réinitialiser les filtres ou d'élargir la plage de dates."
-    );
-    return;
-  }
-
-  if (bdcState.view === "table") {
-    container.innerHTML = renderBdcTable(filtered);
-    return;
-  }
-
-  container.innerHTML = filtered.map(order => {
-    const productsCount = Array.isArray(order.products) ? order.products.length : 0;
-    const totalQty = (order.products || []).reduce((sum, p) => sum + Number(p.quantite || 0), 0);
-    const numero = order.numero || `(non numéroté)`;
-    const address = [order.address, order.postalCode, order.city].filter(Boolean).join(" · ");
-    const livreFromImport = order.importedAsLivre
-      ? `<span class="bdc-pill bdc-pill-neutral" title="Importée comme déjà livrée">📥 import livré</span>`
-      : "";
-    const addressHtml = address
-      ? `<p class="muted">${escapeHtml(address)}</p>`
-      : `<p class="bdc-card-no-address">⚠ Adresse non renseignée</p>`;
-
-    return `
-      <article class="bdc-card" data-action="open-bdc-detail" data-order-id="${escapeAttribute(order.id)}" role="button" tabindex="0" aria-label="Ouvrir le détail du bon ${escapeAttribute(numero)}">
-        <header class="bdc-card-head">
-          <div class="bdc-card-numero">
-            <strong>${escapeHtml(numero)}</strong>
-            <span class="bdc-card-date">${escapeHtml(bdcFormatDate(order.dateCommande))}</span>
-          </div>
-          ${bdcStatusBadge(order.status)}
-        </header>
-        <div class="bdc-card-client">
-          <h4>${escapeHtml(order.clientName || "Client sans nom")}</h4>
-          ${addressHtml}
-        </div>
-        <footer class="bdc-card-foot">
-          <span class="muted">Secteur : <strong>${escapeHtml(order.sector || "—")}</strong></span>
-          <span class="muted">${productsCount} ligne${productsCount > 1 ? "s" : ""} · ${totalQty} unité${totalQty > 1 ? "s" : ""}</span>
-          ${livreFromImport}
-        </footer>
-      </article>
-    `;
-  }).join("");
-}
-
-// Vue tableau dense : utile pour scanner 100+ bons d'un coup. Sticky header,
-// clic sur ligne ouvre le modal detail.
-function renderBdcTable(orders) {
-  const rows = orders.map(order => {
-    const numero = order.numero || "(non numéroté)";
-    const totalQty = (order.products || []).reduce((sum, p) => sum + Number(p.quantite || 0), 0);
-    const productsCount = Array.isArray(order.products) ? order.products.length : 0;
-    const needs = bdcNeedsCompletion(order);
-    return `
-      <tr data-action="open-bdc-detail" data-order-id="${escapeAttribute(order.id)}" tabindex="0" class="${needs ? "bdc-row-warning" : ""}">
-        <td class="bdc-td-numero"><strong>${escapeHtml(numero)}</strong></td>
-        <td class="muted">${escapeHtml(bdcFormatDate(order.dateCommande))}</td>
-        <td>${escapeHtml(order.clientName || "—")}</td>
-        <td class="muted">${escapeHtml(order.sector || "—")}</td>
-        <td>${bdcStatusBadge(order.status)}</td>
-        <td class="bdc-td-num">${productsCount}</td>
-        <td class="bdc-td-num">${totalQty}</td>
-        <td>${needs ? `<span class="bdc-row-warning-flag" title="Profil client à compléter">⚠</span>` : ""}</td>
-      </tr>
-    `;
-  }).join("");
-
-  return `
-    <div class="bdc-table-wrap" role="region" aria-label="Tableau des bons de commande">
-      <table class="bdc-table">
-        <thead>
-          <tr>
-            <th>Numéro</th>
-            <th>Date</th>
-            <th>Client</th>
-            <th>Secteur</th>
-            <th>Statut</th>
-            <th class="bdc-td-num">Lignes</th>
-            <th class="bdc-td-num">Qté</th>
-            <th aria-label="Alertes"></th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>
-  `;
-}
-
 // Export CSV des bons filtres. Pas d'endpoint backend : Blob + download client-side.
 // Format : Numero;Date;Client;Adresse;CP;Ville;Secteur;Statut;Telephone;Lignes;Qté
 // Separateur ; (compatibilite Excel FR), encodage UTF-8 BOM pour les accents.
-function exportBdcCsv(liste = null, prefixe = "sereo-bons-commande") {
-  // Le meme export sert l'ecran Commandes (planche 13c) : on lui passe SA
-  // liste filtree. Sans argument, il garde son comportement d'origine.
-  const filtered = liste || bdcFilterOrders();
+function exportBdcCsv(liste = [], prefixe = "sereo-commandes") {
+  // L'ecran Commandes (planche 13c) lui passe SA liste filtree. L'ancien ecran
+  // « Bons de commande », qui l'appelait sans argument, a quitte la page.
+  const filtered = liste || [];
   if (!filtered.length) {
     notify("Aucun bon à exporter (filtres vides).", "warning");
     return;
@@ -4901,49 +4543,11 @@ function closeBdcDetail() {
 }
 
 function bindBonsCommandeUi() {
-  // Recherche texte (event input pour reactivite immediate)
-  document.addEventListener("input", event => {
-    const search = event.target.closest("#bdc-search");
-    if (search) {
-      bdcState.search = search.value || "";
-      renderBonsCommande();
-    }
-  });
-
-  // Filtres + clic carte + close modal (delegation au document)
+  // La fenetre de detail d'une commande (ouvrir, fermer, editer le client).
+  // Les filtres de l'ancienne liste « Bons de commande » (recherche, statut,
+  // secteur, dates, vue, export) sont partis avec elle le 23/09 : l'ecran
+  // Commandes a les siens.
   document.addEventListener("click", event => {
-    const statusBtn = event.target.closest("[data-bdc-status]");
-    if (statusBtn) {
-      bdcState.status = statusBtn.dataset.bdcStatus;
-      document.querySelectorAll(".bdc-status-filter").forEach(btn => {
-        btn.classList.toggle("active-filter", btn.dataset.bdcStatus === bdcState.status);
-      });
-      renderBonsCommande();
-      return;
-    }
-
-    const reset = event.target.closest('[data-action="bdc-reset-filters"]');
-    if (reset) {
-      bdcState.status = "all";
-      bdcState.search = "";
-      bdcState.sector = "";
-      bdcState.dateFrom = "";
-      bdcState.dateTo = "";
-      const search = document.getElementById("bdc-search");
-      if (search) search.value = "";
-      const sector = document.getElementById("bdc-sector");
-      if (sector) sector.value = "";
-      const dateFrom = document.getElementById("bdc-date-from");
-      if (dateFrom) dateFrom.value = "";
-      const dateTo = document.getElementById("bdc-date-to");
-      if (dateTo) dateTo.value = "";
-      document.querySelectorAll(".bdc-status-filter").forEach(btn => {
-        btn.classList.toggle("active-filter", btn.dataset.bdcStatus === "all");
-      });
-      renderBonsCommande();
-      return;
-    }
-
     const opener = event.target.closest('[data-action="open-bdc-detail"]');
     if (opener) {
       bdcState.editingClientId = null; // reset edit mode a l'ouverture
@@ -4955,23 +4559,6 @@ function bindBonsCommandeUi() {
     if (closer) {
       bdcState.editingClientId = null;
       closeBdcDetail();
-      return;
-    }
-
-    // Toggle vue cartes / tableau
-    const viewBtn = event.target.closest("[data-bdc-view]");
-    if (viewBtn) {
-      bdcState.view = viewBtn.dataset.bdcView;
-      document.querySelectorAll(".bdc-view-btn").forEach(btn => {
-        btn.classList.toggle("active-filter", btn.dataset.bdcView === bdcState.view);
-      });
-      renderBonsCommande();
-      return;
-    }
-
-    // Export CSV
-    if (event.target.closest('[data-action="bdc-export-csv"]')) {
-      exportBdcCsv();
       return;
     }
 
@@ -5001,22 +4588,6 @@ function bindBonsCommandeUi() {
       event.preventDefault();
       saveBdcClientEdit(saveBtn);
       return;
-    }
-  });
-
-  // Selects et date inputs (event change)
-  document.addEventListener("change", event => {
-    if (event.target.id === "bdc-sector") {
-      bdcState.sector = event.target.value || "";
-      renderBonsCommande();
-    }
-    if (event.target.id === "bdc-date-from") {
-      bdcState.dateFrom = event.target.value || "";
-      renderBonsCommande();
-    }
-    if (event.target.id === "bdc-date-to") {
-      bdcState.dateTo = event.target.value || "";
-      renderBonsCommande();
     }
   });
 

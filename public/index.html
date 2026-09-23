@@ -866,37 +866,6 @@
         </div>
       </section>
 
-      <section id="commandes-jour" class="page" role="tabpanel" aria-labelledby="tab-commandes-jour">
-        <div class="panel">
-          <div class="panel-heading">
-            <div>
-              <h3>Commandes du jour</h3>
-              <p class="muted">Regroupe les commandes terrain avant préparation.</p>
-            </div>
-            <label class="compact-date">Date<input id="todayOrdersDate" type="date" /></label>
-          </div>
-          <div class="delivery-actions">
-            <button class="button secondary" type="button" data-action="select-all-today-orders">Tout sélectionner</button>
-            <button class="button secondary" type="button" data-action="clear-today-orders">Tout désélectionner</button>
-            <button class="button primary" type="button" data-action="send-today-orders-preparation">Envoyer en préparation</button>
-          </div>
-          <div id="todayOrdersList" class="list"></div>
-        </div>
-      </section>
-
-      <section id="commandes-planifiees" class="page" role="tabpanel" aria-labelledby="tab-commandes-planifiees">
-        <div class="panel">
-          <div class="panel-heading">
-            <div>
-              <h3>Commandes planifiées</h3>
-              <p class="muted">Rappels J-7 et confirmations avant préparation.</p>
-            </div>
-            <span id="plannedOrdersSummary" class="status-chip">0 planifiée</span>
-          </div>
-          <div id="plannedOrdersList" class="list"></div>
-        </div>
-      </section>
-
       <section id="relances" class="page" role="tabpanel" aria-label="Rappels">
         <div class="field-app-grid">
           <div class="panel">
@@ -905,11 +874,11 @@
               <span id="relanceSummary" class="status-chip">0 à faire</span>
             </div>
             <div class="recommend-toolbar">
-              <button class="button secondary compact active-filter" type="button" data-relance-filter="today">Aujourd'hui</button>
-              <button class="button secondary compact" type="button" data-relance-filter="late">En retard</button>
-              <button class="button secondary compact" type="button" data-relance-filter="week">Cette semaine</button>
-              <button class="button secondary compact" type="button" data-relance-filter="upcoming">À venir</button>
-              <button class="button secondary compact" type="button" data-relance-filter="all">Toutes</button>
+              <button class="button secondary compact active-filter" type="button" aria-pressed="true" data-relance-filter="today">Aujourd'hui</button>
+              <button class="button secondary compact" type="button" aria-pressed="false" data-relance-filter="late">En retard</button>
+              <button class="button secondary compact" type="button" aria-pressed="false" data-relance-filter="week">Cette semaine</button>
+              <button class="button secondary compact" type="button" aria-pressed="false" data-relance-filter="upcoming">À venir</button>
+              <button class="button secondary compact" type="button" aria-pressed="false" data-relance-filter="all">Toutes</button>
             </div>
             <div id="relanceList" class="list"></div>
           </div>
@@ -930,14 +899,9 @@
 
       <section id="statistiques" class="page" role="tabpanel" aria-labelledby="tab-statistiques">
         <div class="stats-page">
-          <div class="stats-hero panel">
-            <div>
-              <p class="eyebrow">SEREO commercial</p>
-              <h3>Statistiques</h3>
-              <p class="muted">Ventes, clients et produits les plus actifs.</p>
-            </div>
-            <div id="statsEvolution" class="stats-evolution"></div>
-          </div>
+          <!-- Plus de bandeau « SEREO commercial / Statistiques » : il repetait
+               le titre de l'ecran, et ses deux pilules les evolutions que les
+               tuiles portent deja (ecrans sans planche, 23/09). -->
           <div id="statsKpis" class="stats-kpis"></div>
           <div class="stats-grid">
             <section class="panel">
@@ -1269,59 +1233,11 @@
         </div>
       </section>
 
-      <section id="bons-commande" class="page" role="tabpanel" aria-labelledby="tab-bons-commande">
-        <div class="panel">
-          <div class="panel-heading">
-            <h3>Bons de commande</h3>
-            <span class="muted">Tous les bons importés, triables et filtrables.</span>
-          </div>
-
-          <div class="bdc-toolbar" role="region" aria-label="Filtres bons de commande">
-            <label class="bdc-search">
-              <span class="sr-only">Rechercher par numéro ou client</span>
-              <input type="search" id="bdc-search" placeholder="Numéro CMD-... ou nom client" autocomplete="off" />
-            </label>
-
-            <div class="bdc-filter-group" role="group" aria-label="Filtrer par statut">
-              <button class="button secondary compact bdc-status-filter active-filter" type="button" data-bdc-status="all">Tous</button>
-              <button class="button secondary compact bdc-status-filter" type="button" data-bdc-status="stock_a_verifier">À vérifier</button>
-              <button class="button secondary compact bdc-status-filter" type="button" data-bdc-status="en_preparation">En préparation</button>
-              <button class="button secondary compact bdc-status-filter" type="button" data-bdc-status="pret_livraison">Prêt livraison</button>
-              <button class="button secondary compact bdc-status-filter" type="button" data-bdc-status="en_livraison">En livraison</button>
-              <button class="button secondary compact bdc-status-filter" type="button" data-bdc-status="livre">Livrées</button>
-              <button class="button secondary compact bdc-status-filter bdc-status-warning" type="button" data-bdc-status="to_complete" title="Bons dont l'adresse ou le téléphone manque">⚠ À compléter</button>
-            </div>
-
-            <div class="bdc-filter-row">
-              <label class="bdc-field">
-                <span>Secteur</span>
-                <select id="bdc-sector"><option value="">Tous secteurs</option></select>
-              </label>
-              <label class="bdc-field">
-                <span>Du</span>
-                <input type="date" id="bdc-date-from" />
-              </label>
-              <label class="bdc-field">
-                <span>Au</span>
-                <input type="date" id="bdc-date-to" />
-              </label>
-              <button class="button secondary compact" type="button" data-action="bdc-reset-filters">Réinitialiser</button>
-            </div>
-
-            <div class="bdc-view-actions">
-              <div class="bdc-view-toggle" role="group" aria-label="Mode d'affichage">
-                <button class="button secondary compact bdc-view-btn active-filter" type="button" data-bdc-view="cards" title="Vue cartes">⊞ Cartes</button>
-                <button class="button secondary compact bdc-view-btn" type="button" data-bdc-view="table" title="Vue tableau dense">≡ Tableau</button>
-              </div>
-              <button class="button secondary compact bdc-export-btn" type="button" data-action="bdc-export-csv" title="Télécharger un CSV des bons actuellement filtrés">📥 Exporter CSV</button>
-            </div>
-          </div>
-
-          <div id="bdc-summary" class="muted" aria-live="polite"></div>
-          <div id="bdc-list" class="list bdc-list"></div>
-        </div>
-      </section>
-
+      <!-- Les quatre anciennes listes (Commandes du jour, Commandes planifiees,
+           Bons de commande, Commandes livrees) ont quitte la page le 23/09 :
+           l'ecran Commandes les a absorbees (planche 13c), et leurs adresses
+           redirigent (config/tabs.js, REDIRECTIONS). Cette fenetre de detail
+           vivait parmi elles ; c'est celle de l'ecran Commandes, elle reste. -->
       <!-- Modal détail bon de commande : meme pattern que versionModal -->
       <div id="bdc-detail-modal" class="version-modal" role="dialog" aria-modal="true" aria-labelledby="bdc-detail-title" aria-hidden="true">
         <div class="version-modal-backdrop" data-action="close-bdc-detail"></div>
@@ -1350,22 +1266,11 @@
             <span class="muted">Stock faible ou rupture</span>
           </div>
           <div class="recommend-toolbar">
-            <button class="button secondary compact active-filter" type="button" data-recommend-filter="urgent">Urgent</button>
-            <button class="button secondary compact" type="button" data-recommend-filter="low">Stock faible</button>
-            <button class="button secondary compact" type="button" data-recommend-filter="all">Tout afficher</button>
+            <button class="button secondary compact active-filter" type="button" aria-pressed="true" data-recommend-filter="urgent">Urgent</button>
+            <button class="button secondary compact" type="button" aria-pressed="false" data-recommend-filter="low">Stock faible</button>
+            <button class="button secondary compact" type="button" aria-pressed="false" data-recommend-filter="all">Tout afficher</button>
           </div>
           <div id="recommandeList" class="list"></div>
-        </div>
-      </section>
-
-      <section id="commandes-livrees" class="page" role="tabpanel" aria-labelledby="tab-commandes-livrees">
-        <div class="panel">
-          <div class="panel-heading">
-            <h3>Commandes livrées</h3>
-            <span class="muted">Historique des livraisons effectuées et des ventes importées comme déjà livrées</span>
-          </div>
-          <div id="commandesLivreesSummary" class="muted" aria-live="polite"></div>
-          <div id="commandesLivreesList" class="list"></div>
         </div>
       </section>
 
