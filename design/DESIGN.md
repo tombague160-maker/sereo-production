@@ -2598,3 +2598,74 @@ renvoyé en haut par `resetViewportScroll(false)`. Mesuré par la sonde sur la s
 position qu'elle avait : `scrollY` 138 au `DOMContentLoaded` (le défilement vers
 l'ancre `#livreur`), 0 au `load` — la remise écrase toute position prise avant.
 Le défilement d'un humain n'a pas été rejoué. Hors de ce lot.
+
+## Finitions d interface (audit du 23/09)
+
+L'audit de complétude contre les 49 planches V8 a relevé une liste de défauts ; ce
+lot en solde dix, plus une phrase périmée de ce fichier. Les numéros sont ceux du
+rapport d'audit. Le CSS est au bout de `public/css/style.css` (bloc « FINITIONS
+D'INTERFACE ») ; le reste vit dans `app.js`, `login.js`, `index.html` et
+`renderLoginPage`.
+
+### Ce qui est fait, et ce qui a été décidé
+
+| # | Défaut | Ce qui change | Décision nommée |
+|---|---|---|---|
+| 2 | Les quatre zones de texte (notes client, notes de commande, commentaire de rappel, notes d'abonnement) en police à chasse fixe | `textarea { font: inherit }` : la règle `button, input, select` l'oubliait | Sélecteur nu : les règles plus précises (taille des notes du bon de commande) gardent la main |
+| 3 | « Commande client » au bureau : formulaire de 280 px, « Type » et « Date » coupés (« dd/mm/y ») | Une colonne de 821 à 1180 px ; deux de 1181 à 1599 (formulaire à gauche, catalogue puis panier à droite) ; trois à partir de 1600 (formulaire ≥ 360 px). Les champs ne vont par deux que s'ils tiennent (13,5 rem chacun), 16 px entre les blocs, la saisie en 500 | Seule la mise en page : l'habillage de l'écran est un autre lot (« Écrans sans planche au style V8 ») |
+| 5 | Connexion : l'identifiant effacé après un échec ; les essais restants dans une seconde colonne | L'identifiant est gardé (planche 9c) ; l'échec et les essais restants font UNE phrase qui dit aussi la durée : « Identifiant ou mot de passe incorrect. Il te reste 4 tentatives avant un blocage de 15 secondes. » | Gardé par l'onglet (`sessionStorage`), rendu seulement sur `?error=1` ou `?locked=1`, oublié par toute autre ouverture de `/login` — dont celle qui suit « Se déconnecter ». Ni dans l'URL de la redirection (historique, journaux du proxy), ni renvoyé par le serveur. Le mot de passe n'est jamais gardé ; le curseur y va |
+| 8 | `--warning` déclaré cinq fois avec cinq valeurs (`#f1a447`, `#ed9d72` ×2, `var(--v8-accent)`, `#f18c79`) | Les cinq déclarations valent `var(--v8-avertissement)`. Le seul texte posé sur cette famille, le bouton « warning » (« Reporte » des rappels), prend la paire de la charte : texte `--v8-avertissement` sur `--v8-avertissement-fond`, **4,89:1** en clair, **4,56:1** en sombre ; le survol pose un contour au lieu de changer les couleurs | Avant : 4,45 au repos et 3,55 au survol en clair, ~1,0 en sombre. Le commentaire « ⛔ NON BRANCHÉ, délibérément » est remplacé par ce qui a été mesuré |
+| 10 | Pas de pastille sur « Abonnements » | Le nombre d'échéances **à générer** — rappel arrivé, pas encore de commande — lu dans `/api/subscriptions`, la source de l'écran ; en alerte (comme celle du Stock) s'il y en a une en retard ; `aria-label` « n échéances à générer » | Le nombre qui appelle un geste. Les retards en font partie (une échéance passée a son rappel derrière elle) : les compter à part aurait fait deux nombres pour une seule file |
+| 11 | Préparation au bureau : « 2 articles » là où le téléphone dit « 6 articles » | « n articles » compte les quantités (`getOrderProductCount`), le manque aussi (`manqueDeLaCommande`, celui du téléphone) : cinq gants absents font « Il manque 5 articles », plus « 1 article » | `detailDeBlocage`, qui comptait les lignes de produit, est retiré |
+| 12 | Chargement hors tournée | « Cette semaine » (`#opWeekCount`) a son squelette au lieu d'un 0 ; « Stock mis à jour » ne s'empile plus (un toast par clé, `notify(…, { cle })`, remplacé à chaque − / +) ; la page ne remonte plus si l'on a défilé avant le `load` ; une lecture des commandes en échec dit « Commandes indisponibles » avec « Réessayer », pas « Aucune commande » (Commandes et Préparation) ; « Tout sélectionner » / « Tout désélectionner » des commandes du jour restent désactivés jusqu'aux commandes (`data-attend-commandes`, le motif de la tournée) | Le défilement : un geste de l'utilisateur (`wheel`, `touchmove`, `keydown`, `pointerdown`) avant `load` gagne sur `resetViewportScroll(false)`. C'est l'« écart nommé, NON corrigé » de la section « Lot du 23/09 — deux bancs instables » : il est corrigé ici |
+| 13 | De 821 à 920 px, un demi-rang de pilules en trop | Le plafond du repli y vaut 2 × 44 + 8 = 96 px (les pilules du bureau), plus 104 (celui du téléphone) | `:not(.filtre-pilules--depliee)` : la rangée dépliée garde ses deux classes, et la règle, écrite après, l'aurait repliée |
+| 14 | Aucun bouton « Se déconnecter » | Au bureau sous le bloc compte de la barre, dans la voix de la ligne de version (texte secondaire, 4,63:1 sur le vert, 44 px) ; au téléphone dans « Plus », après un filet, comme une action et non une destination. UN formulaire `POST /logout` (attribut `form`) qui navigue : le service worker y vide le cache de données | Aucune planche ne le dessine. Les cinq destinations du menu « Plus » restent cinq |
+| — | Ce fichier disait que le thème démarre en clair | La ligne « Le thème par défaut » dit « Système », comme le code (`anti-fart.js`) | — |
+
+### Écarts nommés
+
+- **« Se déconnecter » sans authentification.** Sur un serveur lancé sans
+  `SEREO_AUTH_*` (le développement, le serveur commun des bancs), le bouton est
+  là et ne fait que recharger : `/login` y renvoie à l'application. En
+  exploitation l'authentification est active. Le masquer demanderait de lire
+  `moi.source === "desactivee"` (`/api/me`) : pas fait, rien ne le demande.
+- **L'identifiant gardé survit à une connexion réussie**, dans le
+  `sessionStorage` de l'onglet, jusqu'à la prochaine ouverture ordinaire de
+  `/login` (celle de « Se déconnecter » comprise) ou la fermeture de l'onglet.
+  Ce n'est pas un secret : le mot de passe n'y passe jamais.
+- **Le blocage se compte par adresse IP** (écart déjà nommé plus haut) : la
+  phrase « avant un blocage de 15 secondes » n'y change rien.
+
+### Bancs
+
+Chacun a été lancé sur le code d'avant (fichiers produit de `main` remis en place,
+bancs du lot gardés, puis restauration par `git checkout HEAD --` et
+`git diff --quiet`) et rougit pour la bonne cause :
+
+- `test/e2e/interface-finitions.spec.js` (serveur semé **3301**) :
+  2 → reçu `notes : monospace` ×2, `commentaire`, `subNotes` ; 3 → 60 champs
+  coupés, dont « 1024px customerOrderType « Commande immédiate » : 108px pour
+  221 » et « formulaire de 280px » ; 10 → la pastille reste `hidden` ;
+  12 « Cette semaine » → reçu `"0"` ; 12 toasts → reçu 3, attendu 1 ;
+  12 défilement → `scrollY` reçu 0, attendu > 200 (le banc ralentit les tuiles
+  de 3 s : servies localement, `load` tombait à ~140 ms, avant tout geste, et le
+  banc passait sur le défaut) ; 12 erreur → « Aucune commande » au lieu de
+  « Commandes indisponibles » ; 12 « Tout sélectionner » → `enabled` ;
+  14 → bouton absent ; 8 → `--warning` vaut `#F18C79` en clair, `#ED9D72` en
+  sombre.
+- `test/e2e/preparation-lignes.spec.js` : 11 → « Il manque 1 article » au lieu de
+  « Il manque 5 articles » (tablette et bureau) ; 13, nouvelle vue « tablette »
+  (serveur semé **3300**) → plafond reçu 104, attendu 96.
+- `test/e2e/connexion.spec.js` (serveur authentifié) : identifiant reçu `""` ;
+  « Se déconnecter » introuvable dans la barre.
+- `test/auth.test.js` : reçu le `<span class="login-error-attempts">` à part.
+- `test/interface-finitions.test.js` : `--warning` en quatre valeurs distinctes ;
+  la ligne du thème par défaut ; et cette section, dernière du fichier, que
+  citent la feuille et le banc.
+
+Non-régression verte sur le produit final : `npm test` ; `navigation-mobile`,
+`cibles-tactiles`, `texte-coupe`, `contraste-application`, `charte-composants`,
+`focus-clavier`, `themes`, `typographie`, `operations` ; `commandes`, `stock`,
+`preparation-mobile`, `livraison-chargement`, `squelette`, `parametres-mobile`,
+`abonnements`, `abonnements-mobile` ; `contraste-login` et `connexion` sur un
+serveur authentifié à part (copies locales non suivies visant 3311).

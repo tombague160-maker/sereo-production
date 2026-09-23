@@ -29,3 +29,17 @@ test("DESIGN.md ne dit plus que le thème démarre en clair", () => {
   assert.doesNotMatch(ligne, /le code force `light` au départ/);
   assert.match(ligne, /Système/);
 });
+
+test("DESIGN.md porte la section du lot, en fin de fichier, celle que citent la feuille et le banc", () => {
+  // Le bloc CSS du lot et l'en-tete de interface-finitions.spec.js renvoient
+  // tous deux a « Finitions d interface (audit du 23/09) » dans DESIGN.md :
+  // une reference qui ne mene nulle part est une explication perdue.
+  const titre = "Finitions d interface (audit du 23/09)";
+  const spec = fs.readFileSync(path.join(racine, "test", "e2e", "interface-finitions.spec.js"), "utf8");
+  assert.match(css, /FINITIONS D'INTERFACE -- audit du 23\/09 \(DESIGN\.md, « Finitions d\s+interface \(audit du 23\/09\) »\)/, "prealable : la feuille cite la section");
+  assert.match(spec, /DESIGN\.md, « Finitions d interface »/, "prealable : le banc cite la section");
+  const design = fs.readFileSync(path.join(racine, "design", "DESIGN.md"), "utf8");
+  const sections = design.split("\n").filter(l => /^## /.test(l));
+  assert.ok(sections.length > 5, "l'instrument ne voit plus les sections");
+  assert.equal(sections[sections.length - 1], `## ${titre}`, "la derniere section n'est pas celle du lot");
+});
