@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.37.0](https://github.com/tombague160-maker/sereo-production/compare/v1.36.0...v1.37.0) (2026-09-23)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* Abonnements et Tournée des planches V8 ([#152](https://github.com/tombague160-maker/sereo-production/issues/152)) ([5fe2d9d](https://github.com/tombague160-maker/sereo-production/commit/5fe2d9d78c6df84f11b12cbb84eadb71101ea5c8))
+* **abonnements:** l'écran des planches 13a/14a — tableau, « Les 90 jours », filtres, tri ([fa0133e](https://github.com/tombague160-maker/sereo-production/commit/fa0133ed21bb82d2dff624ffb1290018ef7f42cc))
+* **tournee:** l'écran des planches 13b/14b au bureau — carte à gauche, tournée à droite, titre de page ([79e1204](https://github.com/tombague160-maker/sereo-production/commit/79e1204259f52546ba665b22462fc010ec80d70a))
+
+
+### 🐛 Corrections de bugs
+
+* **abonnements:** relecture — agenda ouvert sur le retard puis cette semaine, rappel, retard aligné au tableau de bord, 1439 px ([2633ac2](https://github.com/tombague160-maker/sereo-production/commit/2633ac2b03f3bd35935ce199e5d4b0943fea5fa9))
+* **tournee:** relecture — boutons d'en-tête au bureau seulement, titre générique sans tournée, carte à sa hauteur, « livraison » retrouvé ([a5a3509](https://github.com/tombague160-maker/sereo-production/commit/a5a3509294beabb5c010f628f64cdaafce24078d))
+
+
+### 📚 Documentation
+
+* **abonnements:** l'agenda s'ouvre sur le présent, une définition du retard ([7dff97e](https://github.com/tombague160-maker/sereo-production/commit/7dff97ef4903793af4a29b3904782ebecdfc41f1))
+* **abonnements:** la section des planches 13a/14a ([5f7e5ca](https://github.com/tombague160-maker/sereo-production/commit/5f7e5cac2068e8adcc46753ad8d2f10fe725e64a))
+
+
+### 🧪 Tests
+
+* **a11y:** chaque écran a un nom accessible, par aria-labelledby ou aria-label — dix écrans ([9f176d4](https://github.com/tombague160-maker/sereo-production/commit/9f176d464049a708ac702c2f58a7fff7e1215a14))
+* **abonnements:** tri distingué, règles 921-1280 séparées du téléphone ([8666ff7](https://github.com/tombague160-maker/sereo-production/commit/8666ff798a3786655c913a9b28b748ee886f0b35))
+
 ## [1.36.0](https://github.com/tombague160-maker/sereo-production/compare/v1.35.0...v1.36.0) (2026-09-22)
 
 
