@@ -1105,12 +1105,86 @@
           </article>
         </div>
       </section>
-      <dialog id="subscriptionDialog" class="subscription-dialog" aria-labelledby="subDialogTitle"><form id="subscriptionForm"><div class="panel-heading"><h2 id="subDialogTitle">Nouvel abonnement</h2><button class="button secondary" type="button" data-op="close-sub" aria-label="Fermer">✕</button></div>
-        <label>Client<select id="subClient" required></select></label>
-        <div id="subNewClient" class="op-form-grid" hidden><label>Nom<input id="subLastName" data-required></label><label>Prénom<input id="subFirstName"></label><label>Adresse<input id="subAddress" data-required></label><label>Code postal<input id="subPostal" inputmode="numeric"></label><label>Ville<input id="subCity" data-required></label><label>Téléphone<input id="subPhone" type="tel"></label></div>
-        <h3>Son panier habituel</h3><div id="subProducts"></div><button class="button secondary" type="button" data-op="add-line">+ Ajouter un produit</button>
-        <h3>Son rythme de livraison</h3><div class="op-form-grid"><label>Première livraison<input id="subStart" type="date" required></label><label>Fréquence<select id="subFrequency"><option value="7">Chaque semaine · même jour</option><option value="14">Toutes les 2 semaines · même jour</option><option value="10">Tous les 10 jours</option><option value="15">Tous les 15 jours</option><option value="21">Toutes les 3 semaines · même jour</option><option value="28">Toutes les 4 semaines · même jour</option><option value="monthly">Tous les mois · même date</option><option value="custom">Nombre de jours personnalisé</option></select></label><label id="subCustomWrap" hidden>Nombre de jours<input id="subCustom" type="number" min="1" max="366" value="10"></label><label>Rappel avant livraison (jours)<input id="subReminder" type="number" min="0" max="60" required value="7"></label><label>Statut<select id="subStatus"><option value="active">Actif</option><option value="paused">En pause</option><option value="cancelled">Arrêté</option></select></label></div>
-        <p id="subScheduleHint" class="muted"></p><label>Notes de livraison<textarea id="subNotes" rows="2" maxlength="2000" placeholder="Digicode, consignes, horaire préféré…"></textarea></label><p class="muted">Les modifications s’appliquent aux prochaines échéances. Les commandes déjà créées restent à gérer dans Commandes, filtre « Planifiées ».</p><p id="subError" class="op-error" role="alert"></p><div class="op-dialog-footer"><button class="button secondary" type="button" data-op="close-sub">Annuler</button><button id="subSave" class="button primary" type="submit">Enregistrer l’abonnement</button></div>
+      <!-- Creation et modification d'un abonnement (planches 3b / 5b). Au
+           telephone, une page pleine avec l'en-tete vert ; au bureau, la meme
+           logique dans une fenetre. Tout ce que l'ancien formulaire permettait
+           est garde : fiche client creee a la volee, quantites libres, un
+           nombre de jours (ou de mois) quelconque, rappel de 0 a 60 jours ; le
+           statut et les notes, que la planche ne dessine pas, sont sous
+           « Plus d'options ». -->
+      <dialog id="subscriptionDialog" class="subscription-dialog abo-cr" aria-labelledby="subDialogTitle"><form id="subscriptionForm" class="abo-cr-form">
+        <div class="abo-cr-entete">
+          <button class="abo-cr-fermer" type="button" data-op="close-sub" aria-label="Fermer"><svg class="abo-cr-fleche" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m14 6-6 6 6 6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg><svg class="abo-cr-croix" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button>
+          <h2 id="subDialogTitle">Nouvel abonnement</h2>
+        </div>
+        <div class="abo-cr-corps">
+          <section class="abo-cr-carte abo-cr-client" aria-labelledby="subClientTitre">
+            <h3 id="subClientTitre" class="abo-cr-libelle">Client</h3>
+            <input id="subClient" type="hidden" value="">
+            <div id="subClientChoisi" class="abo-cr-client-choisi" hidden>
+              <div class="abo-cr-client-champ"><span id="subClientNom" class="abo-cr-client-nom"></span><button class="abo-cr-client-changer" type="button" data-op="sub-client-changer" aria-label="Changer de client"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button></div>
+              <p id="subClientAdresse" class="abo-cr-client-adresse"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s7-6.2 7-11.5A7 7 0 0 0 5 9.5C5 14.8 12 21 12 21z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path><circle cx="12" cy="9.5" r="2.5" stroke="currentColor" stroke-width="2"></circle></svg><span></span></p>
+            </div>
+            <div id="subClientRecherche" class="abo-cr-client-recherche">
+              <label class="abo-cr-champ abo-cr-champ--recherche"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"></circle><path d="m20 20-4.35-4.35" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg><input id="subClientSearch" type="search" placeholder="Nom, ville ou téléphone" autocomplete="off" aria-label="Chercher un client" aria-controls="subClientResults"></label>
+              <div id="subClientResults" class="abo-cr-client-cartes" role="list" aria-label="Clients"></div>
+              <p id="subClientReste" class="abo-cr-note" hidden></p>
+            </div>
+            <fieldset id="subNewClient" class="abo-cr-fiche" disabled hidden><legend>Nouvelle fiche client</legend><label>Nom<input id="subLastName" required></label><label>Prénom<input id="subFirstName"></label><label>Adresse<input id="subAddress" required></label><label>Code postal<input id="subPostal" inputmode="numeric"></label><label>Ville<input id="subCity" required></label><label>Téléphone<input id="subPhone" type="tel"></label></fieldset>
+            <button id="subNouveauClient" class="button secondary abo-cr-secondaire" type="button" data-op="sub-nouveau-client" aria-expanded="false" aria-controls="subNewClient">Créer une fiche client</button>
+          </section>
+          <section class="abo-cr-carte abo-cr-produits" aria-labelledby="subProduitsTitre">
+            <div class="abo-cr-tete"><h3 id="subProduitsTitre">Produits</h3><button id="subCatalogueBouton" class="abo-cr-lien" type="button" data-op="sub-catalogue" aria-expanded="false" aria-controls="subCatalogue">Catalogue</button></div>
+            <div id="subProducts" class="abo-cr-panier"></div>
+            <p id="subPanierVide" class="abo-cr-note" hidden>Aucun produit : ajoute-les depuis le catalogue.</p>
+            <div id="subCatalogue" class="abo-cr-catalogue" hidden>
+              <label class="abo-cr-champ abo-cr-champ--recherche"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"></circle><path d="m20 20-4.35-4.35" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg><input id="subCatalogueSearch" type="search" placeholder="Produit ou code" autocomplete="off" aria-label="Chercher dans le catalogue" aria-controls="subCatalogueListe"></label>
+              <div id="subCatalogueListe" class="abo-cr-catalogue-liste" role="list" aria-label="Catalogue"></div>
+            </div>
+          </section>
+          <section class="abo-cr-carte abo-cr-rythme" aria-label="Rythme de livraison">
+            <label class="abo-cr-bloc"><span class="abo-cr-libelle">Première livraison</span><input id="subStart" class="abo-cr-champ" type="date" required></label>
+            <div class="abo-cr-bloc"><span id="subFrequenceTitre" class="abo-cr-libelle">Fréquence</span>
+              <div id="subFrequency" class="abo-cr-pilules" role="radiogroup" aria-labelledby="subFrequenceTitre">
+                <label class="abo-cr-pilule"><input type="radio" name="subFrequence" value="7" aria-label="Tous les 7 jours"><span>7 j</span></label>
+                <label class="abo-cr-pilule"><input type="radio" name="subFrequence" value="10" aria-label="Tous les 10 jours"><span>10 j</span></label>
+                <label class="abo-cr-pilule"><input type="radio" name="subFrequence" value="14" aria-label="Tous les 14 jours"><span>14 j</span></label>
+                <label class="abo-cr-pilule"><input type="radio" name="subFrequence" value="15" aria-label="Tous les 15 jours"><span>15 j</span></label>
+                <label class="abo-cr-pilule"><input type="radio" name="subFrequence" value="21" aria-label="Tous les 21 jours"><span>21 j</span></label>
+                <label class="abo-cr-pilule"><input type="radio" name="subFrequence" value="28" aria-label="Tous les 28 jours"><span>28 j</span></label>
+                <label class="abo-cr-pilule"><input type="radio" name="subFrequence" value="monthly" aria-label="Tous les mois, même date"><span>Mensuel</span></label>
+                <label class="abo-cr-pilule"><input type="radio" name="subFrequence" value="custom" aria-label="Autre fréquence"><span>Autre…</span></label>
+              </div>
+              <fieldset id="subCustomWrap" class="abo-cr-autre" disabled hidden><legend class="sr-only">Autre fréquence</legend><label>Tous les<input id="subCustom" type="number" min="1" max="366" step="1" inputmode="numeric" required value="10"></label><label>Unité<select id="subCustomUnit"><option value="days">jours</option><option value="months">mois</option></select></label></fieldset>
+            </div>
+            <div class="abo-cr-apercu" aria-live="polite">
+              <p class="abo-cr-apercu-titre">Trois prochaines livraisons</p>
+              <ol id="subApercu" class="abo-cr-apercu-dates"></ol>
+              <p id="subScheduleHint" class="abo-cr-note"></p>
+            </div>
+          </section>
+          <section class="abo-cr-carte abo-cr-rappel" aria-labelledby="subRappelTitre">
+            <div class="abo-cr-tete abo-cr-tete--base"><span id="subRappelTitre" class="abo-cr-libelle">Rappel avant l’échéance</span><strong id="subRappelValeur" class="abo-cr-valeur"></strong></div>
+            <div class="abo-cr-pilules" role="radiogroup" aria-labelledby="subRappelTitre">
+              <label class="abo-cr-pilule"><input type="radio" name="subRappel" value="0" aria-label="Aucun rappel"><span>Aucun</span></label>
+              <label class="abo-cr-pilule"><input type="radio" name="subRappel" value="2" aria-label="2 jours avant"><span>2 j</span></label>
+              <label class="abo-cr-pilule"><input type="radio" name="subRappel" value="3" aria-label="3 jours avant"><span>3 j</span></label>
+              <label class="abo-cr-pilule"><input type="radio" name="subRappel" value="7" aria-label="7 jours avant"><span>7 j</span></label>
+              <label class="abo-cr-pilule"><input type="radio" name="subRappel" value="15" aria-label="15 jours avant"><span>15 j</span></label>
+              <label class="abo-cr-pilule"><input type="radio" name="subRappel" value="custom" aria-label="Autre rappel"><span>Autre…</span></label>
+            </div>
+            <label id="subReminderWrap" class="abo-cr-autre" hidden>Jours avant l’échéance<input id="subReminder" type="number" min="0" max="60" step="1" inputmode="numeric" required value="7"></label>
+            <p id="subRappelNote" class="abo-cr-note"></p>
+          </section>
+          <details id="subOptions" class="abo-cr-carte abo-cr-options">
+            <summary>Plus d’options</summary>
+            <label>Statut<select id="subStatus"><option value="active">Actif</option><option value="paused">En pause</option><option value="cancelled">Arrêté</option></select></label>
+            <label>Notes de livraison<textarea id="subNotes" rows="3" maxlength="2000" placeholder="Digicode, consignes, horaire préféré…"></textarea></label>
+          </details>
+          <p id="subModifNote" class="abo-cr-note" hidden>Les modifications s’appliquent aux prochaines échéances. Les commandes déjà créées restent à gérer dans Commandes, filtre « Planifiées ».</p>
+          <p id="subError" class="op-error" role="alert"></p>
+        </div>
+        <div class="op-dialog-footer abo-cr-pied"><button class="button secondary" type="button" data-op="close-sub">Annuler</button><button id="subSave" class="button primary" type="submit">Créer l’abonnement</button></div>
       </form></dialog>
       <section id="livreur" class="page" role="tabpanel" aria-label="Tournée">
         <div class="driver-page">
