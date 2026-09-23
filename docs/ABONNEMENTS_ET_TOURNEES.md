@@ -41,7 +41,7 @@ Une tournée manuellement réordonnée perd son ancien tracé ; **Recalculer le 
 
 ### Dépendances externes et exploitation
 
-- Géocodage : `https://data.geopf.fr/geocodage/search` ([documentation IGN](https://ignf.github.io/cartes.gouv.fr-documentation/fr/guides-utilisateur/utiliser-les-services-de-la-geoplateforme/geocodage/)).
+- Géocodage : un seul module, `lib/geocodage.js`, pour l’import, le lot de fond, la tournée et la recherche d’adresse. Base Adresse Nationale, `SEREO_GEOCODER_URL`, par défaut `https://api-adresse.data.gouv.fr/search/` (Licence Ouverte 2.0, source citée à l’écran). Résultats gardés dans la table `geocodages` ; un rejet est redemandé après 30 jours. Avant le 23/09, la tournée interrogeait `data.geopf.fr` avec un autre seuil et sans cache.
 - Itinéraire : `SEREO_ROUTING_URL`, par défaut `https://router.project-osrm.org` ([documentation OSRM](https://project-osrm.org/docs/v5.22.0/api/)). Le serveur public ne fournit pas de garantie de disponibilité. Prévoir un service dédié avant un usage intensif : une adresse locale (`http://127.0.0.1:5000`) se branche telle quelle. Si le serveur configuré ne répond pas (réseau, délai, erreur 5xx), le calcul part sur le serveur public, pendant 60 s, et le journal le signale : les coordonnées de la tournée sortent alors chez ce tiers. `SEREO_ROUTING_REPLI_URL` change ce repli ; vide, il n’y a pas de repli.
 - Localisation : HTTPS en production et autorisation de l’utilisateur dans le navigateur. Le header `Permissions-Policy` autorise désormais `geolocation=(self)`.
 - Si un service échoue, aucune tournée partielle n’est enregistrée. Les anciennes tournées sans calcul routier sont explicitement signalées comme tracés à recalculer.

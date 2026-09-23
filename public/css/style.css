@@ -13231,3 +13231,162 @@ body:has(#journee.active) .ecran-entete #pageSubtitle { min-height: 2lh; }
 }
 .delivery-premier:has(input:focus-visible) { box-shadow: var(--focus-ring); }
 .delivery-premier input:focus-visible { outline: none; }
+
+/* ==========================================================================
+   LOT 3 DE L'AUDIT GEO (23/09) : DES ADRESSES JUSTES
+   L'ecran « Adresses a verifier » (sheet au telephone, fenetre au bureau),
+   l'alerte de la preparation de tournee et la liste des adresses qui bloquent
+   un calcul. Jetons V8 seulement : les deux modes suivent seuls.
+   Contrastes : avertissement sur son fond 4,89 (clair) / >= 4,5 (sombre) ;
+   alerte sur surface haute 5,8 / 4,52 ; secondaire sur surface haute 5,13 /
+   7,67. L'alerte voyage toujours avec un mot.
+   ========================================================================== */
+.adr-alerte,
+.adr-erreurs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin: 10px 0;
+  padding: 10px 14px;
+  border-radius: 16px;
+  background: var(--v8-avertissement-fond);
+  color: var(--v8-avertissement);
+  font-size: 14px;
+  line-height: 1.45;
+}
+.adr-alerte[hidden],
+.adr-erreurs[hidden] { display: none; }
+.adr-alerte--bloquante { box-shadow: inset 4px 0 0 var(--v8-alerte); }
+.adr-alerte-texte { font-weight: 600; }
+.adr-erreurs { display: block; }
+.adr-erreurs-titre { margin: 0 0 6px; font-weight: 600; }
+.adr-erreurs-liste { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.adr-erreurs-liste li {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px;
+}
+.adr-erreurs-liste strong { color: var(--v8-avertissement); }
+.adr-motif { color: var(--v8-avertissement); }
+
+:root[data-color-scheme] .adr-alerte .button.compact,
+:root:not([data-color-scheme]) .adr-alerte .button.compact,
+:root[data-color-scheme] .adr-erreurs .button.compact,
+:root:not([data-color-scheme]) .adr-erreurs .button.compact {
+  width: auto;
+  min-height: 44px;
+  flex: 0 0 auto;
+}
+
+/* La sheet : plus large que le detail d'une commande (une carte y tient). */
+:root[data-color-scheme] .sheet.adr-sheet,
+:root:not([data-color-scheme]) .sheet.adr-sheet {
+  width: min(760px, 100vw);
+  max-height: 92vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.adr-corps { display: grid; gap: 12px; }
+.adr-resume { margin: 0; font-size: 14px; color: var(--v8-texte-secondaire); }
+.adr-source { margin: 4px 0 0; font-size: 12.5px; color: var(--v8-texte-secondaire); }
+.adr-vide { margin: 0; padding: 16px; border-radius: 16px; background: var(--v8-surface-basse); color: var(--v8-texte); }
+.adr-liste { display: grid; gap: 10px; }
+
+.adr-ligne {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 20px;
+  background: var(--v8-surface);
+  color: var(--v8-texte);
+  box-shadow: 0 1px 2px rgba(15, 61, 61, 0.06), 0 0 0 1px var(--v8-vert-clair);
+}
+.adr-ligne-tete { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.adr-ligne-texte { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.adr-nom { font-size: 15.5px; font-weight: 600; color: var(--v8-texte); overflow-wrap: anywhere; }
+.adr-adresse,
+.adr-complement,
+.adr-detail,
+.adr-aide { font-size: 13.5px; line-height: 1.45; color: var(--v8-texte-secondaire); overflow-wrap: anywhere; }
+.adr-detail,
+.adr-aide { margin: 0; }
+.adr-a-livrer { margin: 0; font-size: 13.5px; font-weight: 600; color: var(--v8-texte); }
+
+.adr-puce {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.adr-puce--alerte { color: var(--v8-alerte); box-shadow: inset 0 0 0 1.5px currentColor; background: var(--v8-surface); }
+.adr-puce--avertissement { color: var(--v8-avertissement); background: var(--v8-avertissement-fond); }
+.adr-puce--neutre { color: var(--v8-principal-appuye); background: var(--v8-vert-clair); }
+
+.adr-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+:root[data-color-scheme] .adr-actions .button,
+:root:not([data-color-scheme]) .adr-actions .button { min-height: 44px; }
+:root[data-color-scheme] .adr-actions .adr-accepter,
+:root:not([data-color-scheme]) .adr-actions .adr-accepter {
+  display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  height: auto; padding-top: 8px; padding-bottom: 8px; text-align: left; white-space: normal;
+}
+.adr-proposition { font-size: 12.5px; font-weight: 500; opacity: 0.92; overflow-wrap: anywhere; }
+
+.adr-editeur { display: grid; gap: 10px; padding-top: 6px; border-top: 1px solid var(--v8-vert-clair); }
+.adr-editeur[hidden] { display: none; }
+.adr-recherche { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
+.adr-champ { display: grid; gap: 4px; flex: 1 1 260px; font-size: 13.5px; color: var(--v8-texte-secondaire); }
+:root[data-color-scheme] .adr-champ input,
+:root:not([data-color-scheme]) .adr-champ input {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--v8-vert-eau);
+  border-radius: 12px;
+  background: var(--v8-surface-basse);
+  color: var(--v8-texte);
+  font: inherit;
+  font-size: 15px;
+}
+.adr-resultats-liste { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.adr-resultat {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 10px;
+  width: 100%; min-height: 44px; padding: 8px 12px;
+  border: 0; border-radius: 12px;
+  background: var(--v8-surface-basse); color: var(--v8-texte);
+  font: inherit; font-size: 14px; text-align: left; cursor: pointer;
+}
+.adr-resultat:hover { background: var(--v8-vert-clair); }
+.adr-resultat-precision { font-size: 12.5px; color: var(--v8-texte-secondaire); }
+.adr-carte {
+  height: 260px;
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--v8-surface-basse);
+  color: var(--v8-texte-secondaire);
+}
+.adr-position { margin: 0; font-size: 14px; font-weight: 600; color: var(--v8-texte); overflow-wrap: anywhere; }
+.adr-erreur {
+  margin: 0; padding: 8px 12px; border-radius: 12px;
+  background: var(--v8-avertissement-fond); color: var(--v8-avertissement); font-size: 14px;
+}
+.adr-erreur[hidden] { display: none; }
+
+/* Focus : l'anneau a deux tons de la charte, ecrit EN CLAIR. `--focus-ring`
+   n'est defini que sous :root[data-color-scheme="light"] : en mode sombre,
+   var(--focus-ring) rend un box-shadow invalide, donc aucun anneau (mesure du
+   banc adresses-a-verifier, 23/09 ; le defaut touche aussi d'autres ecrans). */
+:root[data-color-scheme] #adressesDialog :is(button, input):focus-visible,
+:root:not([data-color-scheme]) #adressesDialog :is(button, input):focus-visible,
+:root[data-color-scheme] #adressesAlerte button:focus-visible,
+:root:not([data-color-scheme]) #adressesAlerte button:focus-visible,
+:root[data-color-scheme] #adressesTourneeErreurs button:focus-visible,
+:root:not([data-color-scheme]) #adressesTourneeErreurs button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus);
+}
+
+@media (min-width: 921px) {
+  .adr-carte { height: 320px; }
+}

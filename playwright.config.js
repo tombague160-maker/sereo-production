@@ -54,7 +54,10 @@ module.exports = defineConfig({
       SEREO_AUTH_PASSWORD: "",
       // SQLite dans un fichier dedie pour ne pas polluer le dev
       SEREO_SQLITE_PATH: "./data/sereo-e2e.sqlite",
-      SEREO_SKIP_RELEASE_FETCH: "1"
+      SEREO_SKIP_RELEASE_FETCH: "1",
+      // Lot 3 (audit geo) : creer ou modifier un client le geocode en fond.
+      // Les bancs n'appellent jamais la vraie Base Adresse Nationale.
+      SEREO_GEOCODAGE_AUTO: "0"
     }
   }, {
     // Le serveur AUTHENTIFIE, reserve a `contraste-login.spec.js`.

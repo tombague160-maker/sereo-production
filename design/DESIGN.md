@@ -2757,3 +2757,155 @@ créneaux horaires : « À livrer en premier »).
 - **Conséquence du cédage au lot 3.** Tant que le lot 3 n'est pas fusionné, `main` garde
   l'ancienne boucle : après un premier échec, les autres workers continuent d'interroger
   le géocodeur (§2 basse). Le lot 3 la remplace par une résolution complète, voulue.
+
+## 23/09 — Lot 3 de l audit géo : des adresses justes
+
+Référence : rapport d'audit du 23/09 (`audit-geo-rapport.md`, code audité `019788c`),
+décisions de Thomas du même jour, toutes « oui » aux défauts. Branche
+`fix/adresses-justes`, depuis `main` (v1.41.1).
+
+### Ce qui est fait
+
+- **Un seul géocodeur** (`lib/geocodage.js`) pour l'import, le lot de fond, le calcul
+  de tournée et la recherche d'adresse : la BAN (`api-adresse.data.gouv.fr`,
+  `SEREO_GEOCODER_URL`), un seuil (0,6), une requête (voie + commune, code postal en
+  filtre), un cache (table `geocodages`), un User-Agent `Sereo/<version>
+  (+<dépôt public>)` — un contact générique, jamais une adresse e-mail. Avant, la
+  tournée interrogeait `data.geopf.fr` codé en dur, seuil 0,65, sans cache : une
+  adresse « trouvée » à l'import y était refusée.
+- **H6** : une commande créée dans l'application (terrain, planifiée, abonnement,
+  replanifiée) hérite de la position de son client quand elle se livre à son
+  adresse. Le calcul de tournée prend la position du client avant le géocodeur, et
+  **mémorise** ce qu'il trouve (commande, client s'il n'en avait pas, cache).
+- **H5, H12, décision 8** : un changement d'adresse (Modifier le profil, fiche CRM,
+  commande terrain qui corrige le client) efface la position de l'ancienne adresse
+  et relance le géocodage en fond. Les commandes non livrées qui se livraient à
+  l'ANCIENNE adresse suivent la nouvelle ; celles livrées ailleurs (EHPAD, proche)
+  et celles déjà livrées ou annulées ne sont plus réécrites (adresse, téléphone,
+  consigne). Une consigne propre à une commande n'est plus écrasée par celle du client.
+- **M8** : une position placée par une personne est marquée `geoSource: "manuel"`.
+  Le lot ne l'écrase jamais, même avec `forcer` ; il re-vérifie chaque client sous
+  le verrou (saisie pendant le lot, adresse changée pendant le lot). Deux lots ne
+  tournent plus en parallèle (409), `max` est borné.
+- **M5, décision 6** : (0,0), latitude et longitude inversées, et toute position à
+  plus de **150 km du départ** de la tournée sont refusés avant l'appel à OSRM, en
+  NOMMANT le client ; l'inversion est proposée corrigée. Sans départ (saisie
+  manuelle), la borne est la France métropolitaine. « Réessaie » n'est plus dit que
+  d'une vraie panne de service.
+- **Le calcul liste TOUTES les adresses douteuses d'un coup** (`details.adresses`
+  dans la réponse 400), chacune avec son motif et, s'il y en a une, sa proposition.
+- **H11** : « Résidence…, Bât. B, Apt 12, », « BP 40012 » sont retirés de la requête
+  (l'adresse enregistrée ne change pas : le livreur les lit toujours) ; « CEDEX » et
+  le code CEDEX (qui n'est pas un filtre de la BAN) sont gérés ; un code postal lu
+  comme un nombre par Excel (1100) redevient 01100 ; un rejet est redemandé après
+  30 jours, et n'occupe plus une place du lot en attendant (famine).
+- **La précision est gardée** (`geoPrecision` : numéro, rue, lieu-dit, commune,
+  manuel) sur le client, la commande et l'arrêt, et signalée : « Position
+  approximative : au milieu de la rue ».
+- **M4** : un arrêt encore à faire lit sa commande (consigne, adresse, position,
+  téléphone, articles). Un arrêt soldé, ou une tournée terminée, garde ce qui a été
+  livré. Une commande reportée à une autre date quitte la tournée prête ou en cours
+  et redevient « prête à livrer ».
+- **Client créé ou modifié au CRM : géocodé** en fond. Une demande pendant un lot
+  n'est plus perdue (relance).
+- **H7 — écran « Adresses à vérifier »** (sheet au téléphone, fenêtre au bureau,
+  `public/js/domains/adresses.js`) : clients sans position, approximatifs, ou dont
+  l'adresse a changé après une saisie manuelle ; proposition de la BAN acceptée
+  d'un clic ; recherche d'adresse ou « latitude, longitude » collé ; mini-carte
+  Leaflet au marqueur déplaçable (ou toucher la carte). Alerte « N clients à livrer
+  sans position » dans « Préparer une tournée » (calculée sur les données chargées :
+  aucune requête de plus au rechargement). « Corriger la position » dans les autres
+  actions de l'arrêt remplace les deux champs numériques qui envoyaient
+  l'identifiant de l'ARRÊT au lieu du client. Source citée : « Adresses : BAN ».
+
+### Décisions prises dans le lot
+
+- Accepter une proposition, choisir un résultat de recherche ou déplacer le
+  marqueur, c'est une saisie **manuelle** : elle est protégée, et un point
+  approximatif ainsi validé ne revient pas dans la liste (sa précision reste affichée).
+- Un changement d'adresse garde une position manuelle mais la marque « à vérifier »
+  (« Adresse modifiée ») : elle corrigeait peut-être un lieu-dit que la BAN ignore.
+- La référence des 150 km est le **départ** de la tournée : aucun dépôt n'est encore
+  réglé dans l'application (lot 6).
+- Une commande reportée pendant la tournée en est **retirée** (pas seulement
+  signalée). En route, le tracé est gardé plutôt qu'effacé sous le livreur.
+
+### Écarts nommés
+
+- **`--focus-ring` n'existe pas en mode sombre** (défini sous
+  `:root[data-color-scheme="light"]` seulement) : `box-shadow: var(--focus-ring)`
+  n'y peint rien. Trouvé par le banc de ce lot, contourné ici (anneau écrit en
+  clair), NON corrigé ailleurs (`.cli-retour`, `.cmd-ligne`…) : hors périmètre.
+- L'import Excel, chemin 2 (même bon, contenu modifié), recopie toujours l'adresse
+  du fichier sur la commande ; seule la position y est désormais protégée pour une
+  commande livrée.
+- Le point approximatif n'est pas encore dessiné autrement sur la carte (marqueur
+  creux) : c'est le lot 4.
+- La consigne d'un arrêt à faire suit celle de la commande : une note saisie par le
+  livreur sur un arrêt NON soldé serait remplacée (rare ; les notes d'échec, elles,
+  vont dans `problemReason`).
+- Une adresse de livraison distincte (EHPAD) n'a pas d'écran propre : elle se
+  géocode par son adresse au calcul de tournée (cache), et se corrige dans l'écran
+  seulement via le client.
+- Mesuré une fois : `carte-et-lignes.spec.js` « trace de repli » a dépassé 3 min
+  sous la charge de six fichiers à deux ouvriers ; vert seul (3 s) et au second
+  passage de la même charge (44/44). Non reproduit, cause non affirmée.
+
+### Ce qui reste
+
+- Lot 6 : un dépôt réglé (il remplacera le départ comme référence des 150 km, et
+  la France métropolitaine pour la saisie manuelle).
+- Lot 4 : le marqueur « approximatif » sur la carte, la mention BAN à côté de la
+  licence OSM.
+- Lot 2 : retirer l'ancien panneau « Clients tournée » (décision 7) — sa saisie de
+  coordonnées est déjà remplacée par le bouton de cet écran.
+- Plus tard : l'appel groupé CSV de la BAN pour les gros imports ; une colonne
+  « Complément » reconnue à l'import.
+
+### Relecture adverse du 23/09 — sept défauts, sept vrais
+
+Chacun a son banc, rouge sur le code relu (`1daf3d9`) pour la cause nommée, vert
+après. Aucun n'était faux.
+
+- **Bloquant — la virgule après le numéro** (« 12, rue de Dole », « Rue de Dole,
+  12 », « 12 bis, rue X ») : le numéro seul devenait la voie, la rue partait en
+  complément. La BAN ne recevait que « 12 », et deux voies différentes au même
+  numéro avaient la même clé de cache : un déménagement de « 12, rue de Dole » à
+  « 12, avenue Foch » passait inaperçu (position et commandes figées). Le numéro
+  isolé est recollé à sa voie. En plus : quand la clé ne change pas mais le texte si
+  (« Apt 12 » → « Apt 14 »), le texte suit sur les commandes à livrer et la position
+  reste.
+- **« Bat » dans un nom de voie** (« rue du Bateau », « chemin de la Batie », « rue
+  de Batz ») était coupé comme un bâtiment. « Bat » doit maintenant être suivi d'un
+  point ou d'une espace (« Bat B », « Bât. C », « Batiment 2 » restent retirés).
+- **Téléphone d'une commande livrée ailleurs** : « Modifier le profil » renvoie le
+  téléphone à chaque enregistrement et l'écrasait sur la commande EHPAD. Il ne suit
+  plus que si la commande avait le numéro du client (ou aucun), comme la consigne.
+  Le paragraphe « Ce qui est fait » disait « adresse, téléphone, consigne » des
+  commandes LIVRÉES : c'était vrai d'elles seulement.
+- **Import Excel avec Latitude/Longitude** : il écrasait une position placée à la
+  main et ne passait pas `verifierPosition`. Une position manuelle est gardée ; une
+  position du fichier (0,0), inversée ou hors de France est ignorée et comptée
+  (`positionsRefusees` dans la réponse, et dans l'historique).
+- **Lot lancé à la main** : une demande arrivée pendant ce lot était perdue (seul le
+  lot de fond relançait). Il relance aussi.
+- **Stockage JSON** : le calcul de tournée refusait toute commande sans position
+  pour « adresse incomplète ». Il interroge de nouveau la BAN, sans cache ; le lot
+  de fond reste réservé à SQLite.
+- **Focus dans « Adresses à vérifier »** : Annuler, Accepter, Garder et Enregistrer
+  détruisaient le bouton actif et le focus retombait sur `<body>`. Il revient sur
+  « Placer sur la carte » de la même ligne, sinon sur la ligne qui a pris sa place,
+  sinon sur le résumé.
+
+Écarts nommés :
+
+- Le téléphone d'une commande à l'adresse du client, mais qui portait un autre
+  numéro (un proche), ne suit plus un changement du numéro du client : c'est voulu,
+  comme pour la consigne.
+- L'import Excel ne sait toujours pas comparer la position du fichier au départ
+  d'une tournée (aucun dépôt réglé, lot 6) : il la borne à la France métropolitaine.
+- Un client rattaché par la clé secondaire de l'import (nom + code postal, adresse
+  légèrement différente) repart d'une fiche vide côté position, comme avant ce lot :
+  non traité ici.
+- « Bâtiment C 3 rue de Dole » (complément en tête, SANS virgule) n'est pas nettoyé (le motif
+  « en ligne » exige une espace avant) : inchangé, la BAN le trouve souvent quand même.

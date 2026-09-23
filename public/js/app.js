@@ -1,4 +1,5 @@
 import { initOperations, renderOperations, getRoutePoints, majSousTitreAbonnements } from "./operations.js";
+import { initAdresses, majAlerteAdresses, afficherErreursTournee } from "./domains/adresses.js";
 // Sereo — point d'entree du front.
 //
 // Charge comme module ES (<script type="module"> dans index.html). Les
@@ -151,9 +152,13 @@ document.addEventListener("DOMContentLoaded", () => {
   watchSystemColorScheme();
   bindUi();
   initOperations({apiFetch, loadData, notify, recalculateRoute, formatSectorLabel});
+  initAdresses({ apiFetch, loadData, notify, getCurrentTarget: () => getCurrentDeliveryTarget() });
   bindVersionModal();
   bindBonsCommandeUi();
   initMap();
+  // Lot 3 : la source des adresses (Licence Ouverte de la BAN), a cote de celle
+  // du fond de carte. Une ligne a part : initMap appartient au lot de la carte.
+  map?.attributionControl?.addAttribution("Adresses : BAN");
   registerServiceWorker();
   brancherFileHorsLigne();
   // Avant showTab : au telephone, les filtres de la Preparation vivent dans
@@ -721,7 +726,6 @@ function bindUi() {
     if (action === "next-client") nextClient();
     if (action === "open-maps") openGoogleMaps();
     if (action === "call-current-client") callCurrentClient();
-    if (action === "save-coordinates") runAction(actionButton, "Sauvegarde...", saveCurrentCoordinates);
     if (action === "select-all-today-orders") {
       todayCustomerOrders.forEach(order => todayOrdersSelection.add(String(order.id)));
       renderTodayOrders();
@@ -1891,6 +1895,9 @@ function renderAll() {
   renderHistorique();
   renderDeliveryFilters();
   renderDeliveryCandidates();
+  // Lot 3 (audit geo) : « N clients a livrer sans position », calcule sur les
+  // donnees deja chargees -- aucune requete de plus.
+  majAlerteAdresses(clients, orders);
   renderRoute();
   renderClients();
   renderSettings();
@@ -6193,24 +6200,32 @@ async function createDeliveryRoute() {
     pourLaSuite = groupes.slice(1).flat();
   }
 
-  activeRoute = await apiFetch("/api/routes", {
-    method: "POST",
-    timeoutMs: 90000,
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      ...points,
-      sector: deliveryFilter.sector,
-      city: deliveryFilter.city,
-      deliveryDate: deliveryFilter.date,
-      orderIds: tournee,
-      premiers: tournee.filter(id => deliveryFirst.has(String(id))),
-      // Un arret injoignable par la route ne bloque plus toute la tournee : il
-      // en est retire, et nomme ci-dessous.
-      retirerInjoignables: true
-    })
-  });
+  try {
+    activeRoute = await apiFetch("/api/routes", {
+      method: "POST",
+      timeoutMs: 90000,
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        ...points,
+        sector: deliveryFilter.sector,
+        city: deliveryFilter.city,
+        deliveryDate: deliveryFilter.date,
+        orderIds: tournee,
+        premiers: tournee.filter(id => deliveryFirst.has(String(id))),
+        // Un arret injoignable par la route ne bloque plus toute la tournee : il
+        // en est retire, et nomme ci-dessous.
+        retirerInjoignables: true
+      })
+    });
+  } catch (erreur) {
+    // Lot 3 : le serveur nomme TOUTES les adresses douteuses ; chacune
+    // recoit son bouton « Corriger » sous la preparation.
+    afficherErreursTournee(erreur?.details?.adresses || []);
+    throw erreur;
+  }
+  afficherErreursTournee([]);
 
   activeStopIndex = 0;
   deliverySelection = new Set(pourLaSuite.map(String));
@@ -7012,15 +7027,7 @@ function showCurrentClient(client) {
     </div>
     ${renderProducts(client)}
     <div class="coordinate-controls">
-      <label>
-        Latitude
-        <input id="currentLat" type="number" min="-90" max="90" step="any" value="${escapeAttribute(client.lat ?? "")}">
-      </label>
-      <label>
-        Longitude
-        <input id="currentLng" type="number" min="-180" max="180" step="any" value="${escapeAttribute(client.lng ?? "")}">
-      </label>
-      <button class="button primary" type="button" data-action="save-coordinates">Enregistrer coordonnées</button>
+      <button class="button secondary" type="button" data-adr="ouvrir" data-adr-client="${escapeAttribute(client.clientId || client.id)}">Corriger la position</button>
     </div>
   `;
   updateDriverActionButtons(client);
@@ -7062,39 +7069,6 @@ function updateDriverActionButtons(target = getCurrentDeliveryTarget()) {
   setButtonDisabled("markRescheduleButton", !canChangeStatus);
   setButtonDisabled("replanCurrentButton", !canReplan);
   setButtonDisabled("nextClientButton", !hasTarget || !routeStarted || !hasNextStop);
-}
-
-async function saveCurrentCoordinates() {
-  const client = route[currentIndex];
-
-  if (!client) {
-    notify("Aucun client sélectionné.", "warning");
-    return;
-  }
-
-  const lat = document.getElementById("currentLat")?.value ?? "";
-  const lng = document.getElementById("currentLng")?.value ?? "";
-
-  await apiFetch(`/api/clients/${encodeURIComponent(client.id)}/coordinates`, {
-    method: "PATCH",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ lat, lng })
-  });
-
-  await loadData();
-
-  const nextIndex = clients.findIndex(item => String(item.id) === String(client.id));
-  route = [...clients];
-  currentIndex = nextIndex;
-
-  if (currentIndex >= 0) {
-    showCurrentClient(route[currentIndex]);
-    focusEntity(route[currentIndex]);
-  }
-
-  notify("Coordonnées enregistrées.", "success");
 }
 
 function renderMap() {
@@ -7298,7 +7272,10 @@ async function apiFetch(url, options = {}) {
     const message = body && typeof body === "object" && body.error
       ? body.error
       : `Erreur HTTP ${res.status}`;
-    throw new Error(message);
+    const erreur = new Error(message);
+    // Un refus peut porter sa liste (ex. les adresses a verifier d'une tournee).
+    if (body && typeof body === "object" && body.details) erreur.details = body.details;
+    throw erreur;
   }
 
   return body;
@@ -7771,6 +7748,11 @@ function getEntityName(entity) {
 function getAddressWarning(entity) {
   const parts = getAddressParts(entity);
   if (!String(parts.address).trim() || !String(parts.city).trim()) return "Adresse incomplète";
+  // Lot 3 (audit geo) : un point au milieu de la rue ou au centre de la
+  // commune ne passe plus pour la porte du client.
+  if (entity?.geoPrecision === "rue") return "Position approximative : au milieu de la rue";
+  if (entity?.geoPrecision === "lieu-dit") return "Position approximative : centre du lieu-dit";
+  if (entity?.geoPrecision === "commune") return "Position approximative : centre de la commune";
   return "";
 }
 

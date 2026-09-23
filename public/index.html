@@ -1175,6 +1175,10 @@
                     <button id="markRescheduleButton" class="button secondary compact" type="button" data-action="mark-reschedule">À reprogrammer</button>
                     <button id="replanCurrentButton" class="button secondary compact" type="button" data-action="replan-current-stop">Planifier suite</button>
                     <button id="nextClientButton" class="button secondary compact" type="button" data-action="next-client">Suivant</button>
+                    <!-- Lot 3 (audit geo, H7) : la position du client de l'arret,
+                         corrigee depuis la route. Remplace les deux champs
+                         numeriques qui envoyaient l'identifiant de l'arret. -->
+                    <button id="corrigerPositionButton" class="button secondary compact" type="button" data-adr="ouvrir-cible">Corriger la position</button>
                   </div>
                 </details>
               </div>
@@ -1220,6 +1224,13 @@
 
             <div class="route-planner"><div class="route-step"><span class="op-step-number">1</span><div><label>Votre départ<input id="departureQuery" placeholder="Adresse ou ville de départ"></label><div class="quick-actions"><button class="button secondary" type="button" data-op="search-departure">Rechercher</button><button class="button primary" type="button" data-op="locate">Me localiser</button></div><select id="departureResults" aria-label="Confirmer le départ" hidden></select></div></div><div class="route-step"><span class="op-step-number">2</span><div><label>Votre arrivée<input id="arrivalQuery" placeholder="Adresse ou ville d’arrivée"></label><button class="button secondary" type="button" data-op="search-arrival">Rechercher</button><select id="arrivalResults" aria-label="Confirmer l’arrivée" hidden></select><label class="op-check"><input id="returnToStart" type="checkbox"> Retour au point de départ</label></div></div></div>
             <p id="routeLocationStatus" class="muted" role="status">Choisissez le départ et l’arrivée, puis les clients ci-dessous. Le calcul utilise les routes, sans trafic en temps réel.</p>
+            <!-- Lot 3 (audit geo) : les clients a livrer sans position se voient
+                 AVANT le calcul, et un calcul refuse les nomme tous. -->
+            <div id="adressesAlerte" class="adr-alerte" role="status" hidden>
+              <span class="adr-alerte-texte" data-adr-texte></span>
+              <button class="button secondary compact" type="button" data-adr="ouvrir">Vérifier les adresses</button>
+            </div>
+            <div id="adressesTourneeErreurs" class="adr-erreurs" role="alert" hidden></div>
             <div class="delivery-filters">
               <label>
                 Date
@@ -1654,6 +1665,22 @@
       <div id="commandeDetailPuces" class="commande-page-puces"></div>
     </div>
     <div id="commandeDetailCorps" class="sheet-corps"></div>
+  </dialog>
+
+  <!-- Adresses a verifier (lot 3 de l'audit geo, H7) : sheet au telephone,
+       fenetre au bureau, comme le detail d'une commande. Le contenu est rendu
+       par js/domains/adresses.js. -->
+  <dialog id="adressesDialog" class="sheet adr-sheet" aria-labelledby="adressesTitre">
+    <div class="sheet-poignee" aria-hidden="true"></div>
+    <div class="sheet-entete">
+      <h3 id="adressesTitre">Adresses à vérifier</h3>
+      <button class="button secondary compact sheet-fermer" type="button" data-adr="fermer" aria-label="Fermer">✕</button>
+    </div>
+    <div class="sheet-corps adr-corps">
+      <p id="adressesResume" class="adr-resume" role="status"></p>
+      <div id="adressesListe" class="adr-liste"></div>
+      <p id="adressesSource" class="adr-source">Adresses : Base Adresse Nationale (BAN), Licence Ouverte 2.0.</p>
+    </div>
   </dialog>
 
   <!-- Le detail d'un abonnement : la ligne l'ouvre, il porte les faits et les actions. -->

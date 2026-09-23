@@ -1,4 +1,5 @@
 const routing = require("./lib/routing");
+const geocodage = require("./lib/geocodage");
 const express = require("express");
 const compression = require("compression");
 const multer = require("multer");
@@ -823,33 +824,24 @@ function listUserAccounts() {
 // configurable pour que les tests puissent pointer un faux serveur local :
 // le projet n'a aucune bibliotheque de simulation reseau.
 
-const GEOCODER_URL = cleanEnv(process.env.SEREO_GEOCODER_URL)
-  || "https://api-adresse.data.gouv.fr/search/";
+// L'URL, le seuil, la requete, le User-Agent et le nettoyage des adresses
+// vivent dans lib/geocodage.js, partage avec le calcul de tournee (lot 3 de
+// l'audit geo, 23/09). Ici : le cache SQLite, le lot de fond, et ce qu'une
+// position fait aux clients et a leurs commandes.
 
 // La BAN tolere une cadence elevee, mais rien ne presse : un import se geocode
 // en tache de fond. Cet intervalle evite d'etre pris pour un robot abusif.
 const GEOCODER_INTERVALLE_MS = Number(process.env.SEREO_GEOCODER_INTERVALLE_MS || 120);
-const GEOCODER_TIMEOUT_MS = Number(process.env.SEREO_GEOCODER_TIMEOUT_MS || 8000);
 
 // Plafond par lancement : evite qu'une base anormalement grosse ne parte en
 // boucle de plusieurs heures sans qu'on s'en apercoive.
 const GEOCODER_MAX_PAR_LOT = Number(process.env.SEREO_GEOCODER_MAX_PAR_LOT || 300);
 
-const GEOCODAGE_STATUTS = {
-  TROUVE: "trouve",
-  AMBIGU: "ambigu",
-  INTROUVABLE: "introuvable",
-  ERREUR: "erreur"
-};
+const GEOCODAGE_STATUTS = geocodage.STATUTS;
+const cleGeocodage = geocodage.cleGeocodage;
+const adresseGeocodable = geocodage.adresseGeocodable;
+const qualifierResultat = geocodage.qualifierResultat;
 
-/**
- * Cle de cache d'une adresse.
- *
- * Volontairement construite a partir des champs bruts et non de normalizeCity :
- * cette derniere renvoie "Besancon" sans cedille pour les secteurs coeur et
- * applique un titleCase qui ne decoupe que sur les espaces ("Saint-Claude"
- * devient "Saint-claude"). Pour une cle de cache, seule compte la stabilite.
- */
 /**
  * Premiere coordonnee reellement renseignee.
  *
@@ -866,129 +858,36 @@ function premiereCoordonnee(...valeurs) {
   return "";
 }
 
-function cleGeocodage({ rue, codePostal, ville }) {
-  return [rue, codePostal, ville]
-    .map(part => clean(part).toLowerCase())
-    .join("|")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function adresseGeocodable({ rue, codePostal, ville }) {
-  // Sans code postal ni ville, la BAN ne peut pas desambiguiser une rue.
-  return Boolean(clean(rue)) && Boolean(clean(codePostal) || clean(ville));
-}
-
-/**
- * Interroge la BAN pour une adresse.
- *
- * Ne leve JAMAIS : toute erreur devient un statut "erreur", pour qu'un incident
- * reseau ne fasse pas echouer un import complet. L'appelant decide quoi faire.
- */
-async function interrogerGeocodeur({ rue, codePostal, ville }) {
-  const requete = [clean(rue), clean(ville)].filter(Boolean).join(" ");
-  const url = new URL(GEOCODER_URL);
-  url.searchParams.set("q", requete);
-  url.searchParams.set("limit", "1");
-
-  // Le code postal est passe en filtre plutot qu'en texte libre : il est
-  // fiable a 100 % dans les donnees observees, alors que le nom de ville
-  // souffre des variations d'accent et de casse de l'export Ximi.
-  const cp = clean(codePostal);
-  if (cp) url.searchParams.set("postcode", cp);
-
-  try {
-    const reponse = await fetch(url, {
-      headers: { "User-Agent": "sereo-app" },
-      // fetchReleaseNotes, seul autre appel sortant du serveur, n'a AUCUN
-      // timeout. On ne reproduit pas ce defaut ici : sans plafond, une BAN
-      // lente bloquerait le lot entier.
-      signal: AbortSignal.timeout(GEOCODER_TIMEOUT_MS)
-    });
-
-    if (!reponse.ok) {
-      return { statut: GEOCODAGE_STATUTS.ERREUR, message: `HTTP ${reponse.status}`, requete };
-    }
-
-    const corps = await reponse.json();
-    const trait = Array.isArray(corps?.features) ? corps.features[0] : null;
-
-    if (!trait) {
-      return { statut: GEOCODAGE_STATUTS.INTROUVABLE, requete };
-    }
-
-    const [lng, lat] = trait.geometry?.coordinates || [];
-    const score = Number(trait.properties?.score ?? 0);
-    const type = String(trait.properties?.type || "");
-    const libelle = String(trait.properties?.label || "");
-
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-      return { statut: GEOCODAGE_STATUTS.ERREUR, message: "coordonnees absentes", requete };
-    }
-
-    return { statut: qualifierResultat(score, type), lat, lng, score, type, libelle, requete };
-  } catch (error) {
-    return {
-      statut: GEOCODAGE_STATUTS.ERREUR,
-      message: error.name === "TimeoutError" ? "delai depasse" : error.message,
-      requete
-    };
-  }
-}
-
-/**
- * Qualifie un resultat de la BAN.
- *
- * `municipality` et `locality` renvoient le centre de la commune, pas l'adresse.
- * Livrer a partir de ce point ferait croire a une position exacte alors qu'elle
- * peut etre a plusieurs kilometres : ces types ne sont jamais consideres comme
- * trouves, quel que soit leur score.
- *
- * Le seuil de 0,6 n'est pas arbitraire, il est mesure sur la BAN reelle
- * (26/08/2026) :
- *
- *   "1 rue Megevand" 25000        -> 0,98  housenumber  adresse exacte
- *   "place de la Revolution" 25000 -> 0,97  street       adresse exacte
- *   "grande rue" 25000             -> 0,98  street       adresse exacte
- *   "2 rue des Lilas" 39100        -> 0,46  housenumber  "2 Impasse des Lilas, Gevry"
- *   "12 av. du General de Gaulle"  -> 0,44  housenumber  "12 rue general lecourbe"
- *
- * Les deux derniers cas sont le piege : la BAN renvoie un type `housenumber`
- * rassurant pour une rue COMPLETEMENT differente. Se fier au type seul aurait
- * livre le camion a la mauvaise adresse. Seul le score les separe, et l'ecart
- * entre les vraies correspondances (>= 0,97) et les rapprochements hasardeux
- * (<= 0,46) est assez large pour que 0,6 soit un choix sur.
- */
-function qualifierResultat(score, type) {
-  const precis = type === "housenumber" || type === "street";
-  if (precis && score >= 0.6) return GEOCODAGE_STATUTS.TROUVE;
-  if (score >= 0.4) return GEOCODAGE_STATUTS.AMBIGU;
-  return GEOCODAGE_STATUTS.INTROUVABLE;
-}
-
 /**
  * Geocode une adresse, en passant par le cache.
  *
- * `forcer` ignore le cache : utile pour retenter les adresses en erreur reseau
- * sans avoir a vider la table.
+ * `forcer` ignore le cache. Un rejet (introuvable, ambigu) n'est plus garde a
+ * vie : il est redemande apres geocodage.DUREE_REJET_JOURS jours. L'entree
+ * rendue porte `reseau: true` quand la BAN a vraiment ete appelee (le lot ne
+ * s'impose une pause qu'apres un vrai appel).
  */
 async function geocoderAdresse(adresse, { forcer = false } = {}) {
-  if (!useSqliteStorage()) return null;
   if (!adresseGeocodable(adresse)) return null;
+  if (!useSqliteStorage()) {
+    // Stockage JSON : pas de table de cache, mais la tournee doit toujours
+    // geocoder (avant le lot, routing.geocode le faisait sans condition ;
+    // rendre null ici la refusait pour « adresse incomplete », relecture du
+    // lot 3). Le lot de fond, lui, reste reserve a SQLite.
+    const resultat = await geocodage.interroger(adresse);
+    return { ...resultat, cle: cleGeocodage(adresse), precision: geocodage.precisionDuType(resultat.type), reseau: true };
+  }
 
   const cle = cleGeocodage(adresse);
   const store = getSqliteStore();
 
   if (!forcer) {
     const enCache = store.getGeocodage(cle);
-    // Une erreur reseau n'est pas un resultat : on retente. Un "introuvable"
-    // en revanche est une reponse, on ne rappelle pas l'API pour rien.
-    if (enCache && enCache.statut !== GEOCODAGE_STATUTS.ERREUR) return enCache;
+    if (geocodage.entreeCacheValide(enCache)) {
+      return { ...enCache, precision: geocodage.precisionDuType(enCache.type), reseau: false };
+    }
   }
 
-  const resultat = await interrogerGeocodeur(adresse);
+  const resultat = await geocodage.interroger(adresse);
 
   const entree = {
     cle,
@@ -1004,7 +903,7 @@ async function geocoderAdresse(adresse, { forcer = false } = {}) {
   };
 
   store.saveGeocodage(entree);
-  return entree;
+  return { ...entree, precision: geocodage.precisionDuType(entree.type), reseau: true };
 }
 
 /** Adresse d'un client, sous la forme attendue par le geocodeur. */
@@ -1014,6 +913,165 @@ function adresseDuClient(client) {
     codePostal: client.codePostal || "",
     ville: client.ville || ""
   };
+}
+
+/** Adresse de livraison d'une commande. */
+function adresseDeLaCommande(order) {
+  return {
+    rue: order.address || "",
+    codePostal: order.postalCode || "",
+    ville: order.city || ""
+  };
+}
+
+const STATUTS_COMMANDE_CLOSE = new Set(["livre", "annulee"]);
+
+/**
+ * Une commande "suit" l'adresse de son client quand elle n'est ni livree ni
+ * annulee, et qu'elle se livre a cette adresse (meme cle) ou n'en a aucune.
+ * Une commande livree AILLEURS (EHPAD, proche) ne suit pas : decision 8.
+ * `cleClient` permet de comparer a l'ANCIENNE adresse lors d'un demenagement.
+ */
+function commandeSuitLeClient(order, client, cleClient = cleGeocodage(adresseDuClient(client))) {
+  if (String(order.clientId) !== String(client.id)) return false;
+  if (STATUTS_COMMANDE_CLOSE.has(order.status)) return false;
+  if (!clean(order.address)) return true;
+  return cleGeocodage(adresseDeLaCommande(order)) === cleClient;
+}
+
+/**
+ * Pose une position sur le client et sur les commandes qui le suivent.
+ *
+ * `position` : { lat, lng, source: "manuel"|"ban"|"calcul"|"import",
+ * precision, libelle }. Une commande dont la position a ete placee a la main
+ * (geoSource "manuel") garde la sienne. Rend le nombre de commandes touchees.
+ */
+function appliquerPositionClient(db, client, position) {
+  const cle = cleGeocodage(adresseDuClient(client));
+  const vide = position.lat === "" || position.lat === null || position.lat === undefined;
+  client.lat = vide ? "" : Number(position.lat);
+  client.lng = vide ? "" : Number(position.lng);
+  client.geoSource = vide ? "" : clean(position.source);
+  client.geoPrecision = vide ? "" : clean(position.precision);
+  client.geoLibelle = vide ? "" : clean(position.libelle);
+  client.geoCle = vide ? "" : cle;
+  client.geoAVerifier = "";
+  client.geoMajLe = new Date().toISOString();
+
+  let touchees = 0;
+  for (const order of db.commandes) {
+    if (!commandeSuitLeClient(order, client, cle)) continue;
+    if (order.geoSource === "manuel" && position.source !== "manuel") continue;
+    order.lat = client.lat;
+    order.lng = client.lng;
+    order.geoPrecision = client.geoPrecision;
+    order.geoSource = client.geoSource ? "client" : "";
+    order.updatedAt = new Date().toISOString();
+    touchees += 1;
+  }
+  return touchees;
+}
+
+/**
+ * H6 : une commande nee dans l'application herite de la position de son
+ * client quand elle se livre a son adresse. Avant, elle naissait sans
+ * position, et le calcul de tournee repartait du texte : refus complet, ou
+ * point du geocodeur a la place d'une correction faite a la main.
+ */
+function heriterPositionDuClient(order, client) {
+  if (!client || !order) return order;
+  if (getCoordinates(order)) return order;
+  if (!getCoordinates(client)) return order;
+  if (!commandeSuitLeClient(order, client)) return order;
+  order.lat = client.lat;
+  order.lng = client.lng;
+  order.geoPrecision = client.geoPrecision || "";
+  order.geoSource = "client";
+  return order;
+}
+
+/**
+ * H5, H12 et decision 8 : ce que le changement d'adresse d'un client fait.
+ *
+ * - Sa position devient fausse : effacee (le lot de fond la recalcule), SAUF
+ *   une position placee a la main, gardee mais marquee "a verifier" (elle
+ *   corrigeait peut-etre un lieu-dit que la BAN ignore).
+ * - Ses commandes non livrees qui se livraient a l'ANCIENNE adresse suivent la
+ *   nouvelle ; celles livrees ailleurs (EHPAD, proche) et celles deja livrees
+ *   ne bougent pas.
+ *
+ * `avant` : l'adresse du client AVANT la modification. Rend le nombre de
+ * commandes deplacees.
+ */
+function demenagerClient(db, client, avant) {
+  const cleAvant = cleGeocodage(avant);
+  const cleApres = cleGeocodage(adresseDuClient(client));
+  const suivent = db.commandes.filter(order => commandeSuitLeClient(order, client, cleAvant));
+
+  if (cleAvant === cleApres) {
+    // Meme voie, autre ecriture : un complement change ("Apt 12" -> "Apt 14"),
+    // la casse, une virgule. La position reste juste, mais le livreur lit le
+    // TEXTE de la commande : il suit (relecture du lot 3).
+    const apres = adresseDuClient(client);
+    const memeTexte = ["rue", "codePostal", "ville"].every(champ => clean(avant[champ]) === clean(apres[champ]));
+    if (memeTexte) return { demenage: false, commandes: 0 };
+    let touchees = 0;
+    for (const order of suivent) {
+      if (clean(order.address) === clean(apres.rue) && clean(order.postalCode) === clean(apres.codePostal)
+        && clean(order.city) === clean(apres.ville)) continue;
+      order.address = apres.rue;
+      order.postalCode = apres.codePostal;
+      order.city = apres.ville;
+      order.updatedAt = new Date().toISOString();
+      touchees += 1;
+    }
+    return { demenage: false, commandes: touchees };
+  }
+
+  if (client.geoSource === "manuel" && getCoordinates(client)) {
+    client.geoAVerifier = "adresse-modifiee";
+  } else {
+    client.lat = "";
+    client.lng = "";
+    client.geoSource = "";
+    client.geoPrecision = "";
+    client.geoLibelle = "";
+    client.geoCle = "";
+    client.geoAVerifier = "";
+  }
+
+  const now = new Date().toISOString();
+  for (const order of suivent) {
+    order.address = client.rue;
+    order.postalCode = client.codePostal;
+    order.city = client.ville;
+    order.sector = client.secteur || order.sector;
+    // La position de l'ancienne adresse ne vaut plus rien pour la nouvelle :
+    // la commande prend celle du client (effacee, ou manuelle a verifier).
+    order.lat = client.lat;
+    order.lng = client.lng;
+    order.geoPrecision = client.geoPrecision || "";
+    order.geoSource = getCoordinates(client) ? "client" : "";
+    order.updatedAt = now;
+  }
+  return { demenage: true, commandes: suivent.length };
+}
+
+/**
+ * La position d'une commande pour le calcul de tournee : la sienne, sinon
+ * celle du client quand elle se livre a son adresse. Rend une COPIE : l'appel
+ * se fait hors verrou, sur un instantane.
+ */
+function positionPourTournee(db, order) {
+  const copie = { ...order };
+  if (getCoordinates(copie)) return copie;
+  const client = findClient(db, order.clientId);
+  if (client && getCoordinates(client) && commandeSuitLeClient({ ...order, status: "pret_livraison" }, client)) {
+    copie.lat = client.lat;
+    copie.lng = client.lng;
+    copie.geoPrecision = client.geoPrecision || "";
+  }
+  return copie;
 }
 
 function clientAGeocoder(client) {
@@ -1030,26 +1088,41 @@ function clientAGeocoder(client) {
  * les appels gelerait l'application entiere pour tout le monde.
  *
  * On lit, on interroge le reseau sans verrou, puis on prend le verrou une
- * seule fois pour ecrire. Un client cree entre-temps sera simplement traite au
- * lancement suivant.
+ * seule fois pour ecrire -- en RE-VERIFIANT chaque client (M8) : une position
+ * saisie a la main pendant le lot, ou une adresse changee entre-temps, gagne
+ * toujours. `forcer` ne touche jamais une position manuelle.
+ *
+ * Famine : un client dont l'adresse a deja ete rejetee (et dont le rejet est
+ * encore valide en cache) n'occupe plus une place du lot ; il attend dans
+ * l'ecran "Adresses a verifier".
  */
 async function geocoderClients({ forcer = false, max = GEOCODER_MAX_PAR_LOT } = {}) {
   assertGeocodageSupporte();
+  const store = getSqliteStore();
 
-  const aTraiter = readDb().clients.filter(client =>
-    forcer ? adresseGeocodable(adresseDuClient(client)) : clientAGeocoder(client)
-  );
+  const eligibles = readDb().clients.filter(client => {
+    if (!adresseGeocodable(adresseDuClient(client))) return false;
+    if (client.geoSource === "manuel") return false;
+    if (forcer) return !getCoordinates(client) || client.geoSource === "ban";
+    return !getCoordinates(client);
+  });
 
-  const lot = aTraiter.slice(0, max);
+  const aTraiter = forcer
+    ? eligibles
+    : eligibles.filter(client => {
+      const enCache = store.getGeocodage(cleGeocodage(adresseDuClient(client)));
+      return !geocodage.entreeCacheValide(enCache) || enCache.statut === GEOCODAGE_STATUTS.TROUVE;
+    });
+
+  const lot = aTraiter.slice(0, Math.max(0, Math.min(Number(max) || GEOCODER_MAX_PAR_LOT, GEOCODER_MAX_PAR_LOT)));
   const resultats = new Map();
-  let premier = true;
+  let dernierAppelReseau = false;
 
   for (const client of lot) {
-    // Espacement entre les appels, sauf avant le premier.
-    if (!premier) await pause(GEOCODER_INTERVALLE_MS);
-    premier = false;
-
+    // Espacement entre deux vrais appels ; une lecture du cache n'attend pas.
+    if (dernierAppelReseau) await pause(GEOCODER_INTERVALLE_MS);
     const entree = await geocoderAdresse(adresseDuClient(client), { forcer });
+    dernierAppelReseau = Boolean(entree?.reseau);
     if (entree) resultats.set(String(client.id), entree);
   }
 
@@ -1061,18 +1134,22 @@ async function geocoderClients({ forcer = false, max = GEOCODER_MAX_PAR_LOT } = 
     for (const client of db.clients) {
       const entree = resultats.get(String(client.id));
       if (!entree || entree.statut !== GEOCODAGE_STATUTS.TROUVE) continue;
+      // L'adresse a change pendant le lot : ce point est celui de l'ancienne.
+      if (cleGeocodage(adresseDuClient(client)) !== entree.cle) continue;
+      // Une position manuelle n'est jamais ecrasee, meme par `forcer`.
+      if (client.geoSource === "manuel") continue;
+      // Une position posee pendant le lot (hors lot automatique) gagne.
+      if (getCoordinates(client) && !(forcer && client.geoSource === "ban")) continue;
+      if (!geocodage.verifierPosition(entree).ok) continue;
 
-      client.lat = entree.lat;
-      client.lng = entree.lng;
+      appliquerPositionClient(db, client, {
+        lat: entree.lat,
+        lng: entree.lng,
+        source: "ban",
+        precision: entree.precision || geocodage.precisionDuType(entree.type),
+        libelle: entree.libelle
+      });
       appliques += 1;
-
-      // Propagation aux commandes du client : sans cela, les bons deja
-      // importes resteraient sans position et les tournees sans distance.
-      for (const order of db.commandes) {
-        if (String(order.clientId) !== String(client.id)) continue;
-        order.lat = entree.lat;
-        order.lng = entree.lng;
-      }
     }
 
     if (appliques > 0) {
@@ -1088,6 +1165,7 @@ async function geocoderClients({ forcer = false, max = GEOCODER_MAX_PAR_LOT } = 
 
   return {
     candidats: aTraiter.length,
+    enAttenteDeVerification: eligibles.length - aTraiter.length,
     traites: lot.length,
     tronque: aTraiter.length > lot.length,
     appliques: bilan,
@@ -1107,8 +1185,6 @@ function pause(ms) {
 
 /**
  * Etat du geocodage : ce qui reste a faire et ce que le cache contient deja.
- * Sert d'indicateur d'avancement, et de base au futur ecran de reprise des
- * adresses ambigues.
  */
 function etatGeocodage() {
   assertGeocodageSupporte();
@@ -1127,6 +1203,105 @@ function etatGeocodage() {
     aGeocoder: clients.filter(clientAGeocoder).length,
     sansAdresseExploitable: sansAdresse,
     cache: store.countGeocodagesParStatut()
+  };
+}
+
+const STATUTS_A_LIVRER = new Set(["pret_livraison", "a_reprogrammer", "en_livraison"]);
+const STATUTS_ACTIFS = new Set([
+  "importe", "stock_a_verifier", "en_preparation", "preparation_terminee",
+  "pret_livraison", "en_livraison", "a_reprogrammer", "probleme_livraison",
+  "commande_client_validee", "planifiee", "a_confirmer"
+]);
+
+/**
+ * H7 : la liste de l'ecran "Adresses a verifier".
+ *
+ * Un client y figure s'il a une commande en cours, ou une adresse exploitable,
+ * ET : aucune position (raison "sans-position"), une position approximative
+ * -- rue, lieu-dit, commune (raison "approximative") --, ou une position
+ * manuelle gardee apres un changement d'adresse ("adresse-modifiee"). La
+ * proposition vient du cache (un "ambigu" a deja un point) ; accepter la
+ * proposition, c'est l'enregistrer comme une saisie manuelle.
+ */
+function listerAdressesAVerifier(db, { inclure = "" } = {}) {
+  const store = useSqliteStorage() ? getSqliteStore() : null;
+  const commandesParClient = new Map();
+  const aLivrerParClient = new Map();
+  for (const order of db.commandes) {
+    const id = String(order.clientId);
+    if (STATUTS_ACTIFS.has(order.status)) commandesParClient.set(id, (commandesParClient.get(id) || 0) + 1);
+    if (STATUTS_A_LIVRER.has(order.status)) aLivrerParClient.set(id, (aLivrerParClient.get(id) || 0) + 1);
+  }
+
+  const lignes = [];
+  for (const client of db.clients) {
+    if (client.crmArchived) continue;
+    const id = String(client.id);
+    const actives = commandesParClient.get(id) || 0;
+    const adresse = adresseDuClient(client);
+    const geocodable = adresseGeocodable(adresse);
+    const demande = Boolean(inclure) && String(inclure) === id;
+    if (!actives && !geocodable && !demande) continue;
+
+    const position = getCoordinates(client);
+    let raison = "";
+    if (!position) raison = "sans-position";
+    else if (client.geoAVerifier === "adresse-modifiee") raison = "adresse-modifiee";
+    // Une position approximative VALIDEE par une personne (proposition
+    // acceptee) ne revient pas dans la liste : sa precision reste affichee.
+    else if (geocodage.precisionApproximative(client.geoPrecision) && client.geoSource !== "manuel") raison = "approximative";
+    // "Corriger la position" depuis un arret : le client est montre meme
+    // quand rien ne le signale (la BAN peut se tromper de porte).
+    if (!raison && demande) raison = "demandee";
+    if (!raison) continue;
+
+    const nettoyee = geocodage.nettoyerAdresse(adresse);
+    const enCache = store && geocodable ? store.getGeocodage(cleGeocodage(adresse)) : null;
+    const proposition = enCache && Number.isFinite(enCache.lat) && Number.isFinite(enCache.lng)
+      && geocodage.verifierPosition(enCache).ok
+      && !(position && Number(position.lat) === enCache.lat && Number(position.lng) === enCache.lng)
+      ? {
+        lat: enCache.lat,
+        lng: enCache.lng,
+        libelle: enCache.libelle || "",
+        score: enCache.score,
+        precision: geocodage.precisionDuType(enCache.type),
+        statut: enCache.statut
+      }
+      : null;
+
+    lignes.push({
+      id: client.id,
+      nom: [client.prenom, client.nom].filter(Boolean).join(" ") || client.nom || "Client",
+      rue: client.rue || "",
+      codePostal: client.codePostal || "",
+      ville: client.ville || "",
+      complement: nettoyee.complement,
+      adresseExploitable: geocodable,
+      lat: position ? position.lat : "",
+      lng: position ? position.lng : "",
+      geoPrecision: client.geoPrecision || "",
+      geoSource: client.geoSource || "",
+      raison,
+      statutGeocodage: enCache ? enCache.statut : "",
+      commandesActives: actives,
+      commandesALivrer: aLivrerParClient.get(id) || 0,
+      proposition
+    });
+  }
+
+  const poids = ligne => (ligne.commandesALivrer ? 0 : 2) + (ligne.raison === "sans-position" ? 0 : 1);
+  lignes.sort((a, b) => poids(a) - poids(b) || a.nom.localeCompare(b.nom, "fr"));
+
+  return {
+    source: geocodage.SOURCE_ADRESSES,
+    total: lignes.length,
+    sansPosition: lignes.filter(l => l.raison === "sans-position").length,
+    approximatives: lignes.filter(l => l.raison === "approximative").length,
+    adressesModifiees: lignes.filter(l => l.raison === "adresse-modifiee").length,
+    // L'alerte de la preparation de tournee : clients a livrer sans position.
+    aLivrerSansPosition: lignes.filter(l => l.raison === "sans-position" && l.commandesALivrer > 0).length,
+    clients: lignes
   };
 }
 
@@ -3223,7 +3398,10 @@ function handleRouteError(error, res, fallbackMessage) {
   }
 
   res.status(status).json({
-    error: status >= 500 ? fallbackMessage : error.message
+    error: status >= 500 ? fallbackMessage : error.message,
+    // Lot 3 : un refus peut porter sa liste (ex. toutes les adresses a
+    // verifier d'une tournee), que l'ecran affiche une par une.
+    ...(status < 500 && error.details ? { details: error.details } : {})
   });
 }
 
@@ -4006,7 +4184,7 @@ function normalizeClient(client) {
     nom: clean(client.nom || client.name || client.client || "Client sans nom"),
     rue: clean(client.rue || client.address || client.adresse),
     ville: city,
-    codePostal: clean(client.codePostal || client.postalCode || client.cp),
+    codePostal: geocodage.normaliserCodePostal(client.codePostal || client.postalCode || client.cp),
     telephone: clean(client.telephone || client.phone),
     statut: client.statut || "restant",
     produits: normalizeProducts(client.produits || client.products),
@@ -4090,7 +4268,7 @@ function normalizeOrder(order) {
     clientName: clean(order.clientName || order.nom || order.client || "Client sans nom"),
     address: clean(order.address || order.rue || order.adresse),
     city,
-    postalCode: clean(order.postalCode || order.codePostal || order.cp),
+    postalCode: geocodage.normaliserCodePostal(order.postalCode || order.codePostal || order.cp),
     sector,
     products: normalizeProducts(order.products || order.produits),
     status,
@@ -4103,6 +4281,10 @@ function normalizeOrder(order) {
     phone: clean(order.phone || order.telephone),
     lat: order.lat ?? order.latitude ?? "",
     lng: order.lng ?? order.longitude ?? "",
+    // Lot 3 (audit geo) : la precision du point (numero, rue, commune, manuel)
+    // et son origine (client, manuel, calcul) survivent a la normalisation.
+    geoPrecision: clean(order.geoPrecision),
+    geoSource: clean(order.geoSource),
     deliveryDate: normalizeDateInput(order.deliveryDate || order.dateLivraison || order.livraisonDate),
     stockReservedAt: order.stockReservedAt || null,
     // Chantier 1 (2026-06-04) : preserver l'historique des liberations de stock
@@ -4452,7 +4634,9 @@ function findOrCreateCustomerClient(db, payload = {}) {
 
   const duplicate = findDuplicateClient(db, payload);
   if (duplicate) {
+    const avant = adresseDuClient(duplicate);
     Object.assign(duplicate, validateCrmClientPayload(payload, duplicate));
+    demenagerClient(db, duplicate, avant);
     return duplicate;
   }
 
@@ -4553,6 +4737,7 @@ function createCustomerOrder(db, payload = {}) {
   client.crmConvertedAt = client.crmConvertedAt || new Date().toISOString();
   client.lastVisitDate = dateCommande;
   client.nextReminderDate = client.nextReminderDate || "";
+  heriterPositionDuClient(order, client);
   db.commandes.push(order);
   reserveStockForOrder(db, order);
   setOrderStatus(order, "stock_a_verifier");
@@ -4794,6 +4979,7 @@ function createPlannedOrder(db, payload = {}) {
 
   client.crmStatus = client.crmStatus === "client_actif" ? client.crmStatus : "client_a_relancer";
   client.nextDeliveryDate = deliveryDate;
+  heriterPositionDuClient(order, client);
   db.commandes.push(order);
   const reminder = createAutomaticOrderReminder(db, order, {
     leadDays: payload.reminderLeadDays,
@@ -5293,6 +5479,32 @@ function getDeliverableOrders(db, filters = {}) {
   });
 }
 
+/**
+ * Lot 3 : le resultat du calcul de tournee est MEMORISE. La commande garde le
+ * point ; le client aussi, quand la commande se livre a son adresse et qu'il
+ * n'avait aucune position (le cache geocodages l'a deja, via geocoderAdresse).
+ * Avant, chaque calcul regeocodait chaque commande, et le client restait sans
+ * position.
+ */
+function memoriserPositionDuCalcul(db, order, item) {
+  const avait = Boolean(getCoordinates(order));
+  order.lat = item.lat;
+  order.lng = item.lng;
+  order.geoPrecision = item.geoPrecision || order.geoPrecision || "";
+  if (!avait) order.geoSource = item.geoTrouve ? "calcul" : "client";
+  if (!item.geoTrouve) return;
+  const client = findClient(db, order.clientId);
+  if (client && !getCoordinates(client) && client.geoSource !== "manuel" && commandeSuitLeClient(order, client)) {
+    appliquerPositionClient(db, client, {
+      lat: item.lat,
+      lng: item.lng,
+      source: "ban",
+      precision: item.geoPrecision,
+      libelle: item.geoTrouve.libelle
+    });
+  }
+}
+
 function createRoute(db, options = {}) {
   const selectedOrderIds = Array.isArray(options.orderIds) ? options.orderIds.map(String) : [];
   const sector = clean(options.sector || "Tous");
@@ -5331,7 +5543,11 @@ function createRoute(db, options = {}) {
     const original = orders.find(order => String(order.id) === String(item.id));
     if (!original) throw badRequest("La sélection a changé. Recalcule la tournée.");
     if (["address", "city", "postalCode", "status", "clientId"].some(key => original[key] !== item[key])) throw badRequest("Une adresse ou une commande a changé pendant le calcul. Recommence.");
-    original.lat = item.lat; original.lng = item.lng;
+    const actuelle = getCoordinates(original);
+    if (actuelle && (Number(actuelle.lat) !== Number(item.lat) || Number(actuelle.lng) !== Number(item.lng))) {
+      throw badRequest("Une position a été corrigée pendant le calcul. Recommence.");
+    }
+    memoriserPositionDuCalcul(db, original, item);
     return original;
   }) : optimizeOrders(orders, premiers);
   if (optimizedOrders.length !== orders.length) throw badRequest("La sélection a changé. Recalcule la tournée.");
@@ -5435,8 +5651,68 @@ function createStop(routeId, order, index, livrerEnPremier = false) {
     livrerEnPremier: Boolean(livrerEnPremier),
     notes: order.notes || "",
     lat: order.lat,
-    lng: order.lng
+    lng: order.lng,
+    geoPrecision: order.geoPrecision || ""
   };
+}
+
+const STATUTS_ARRET_SOLDE = new Set(["livre", "absent", "probleme", "a_reprogrammer"]);
+
+/**
+ * M4 (audit geo) : un arret encore a faire LIT sa commande. Avant, l'arret
+ * etait une copie figee a la creation : une consigne ajoutee, une adresse ou
+ * une position corrigee n'atteignaient jamais le livreur. Un arret solde (ou
+ * une tournee terminee) garde, lui, ce qui a ete livre : c'est l'historique.
+ */
+function arretVivant(route, stop, order) {
+  if (!order) return stop;
+  if (route.status === "terminee" || STATUTS_ARRET_SOLDE.has(stop.status)) return stop;
+  return {
+    ...stop,
+    clientName: order.clientName || stop.clientName,
+    phone: order.phone || "",
+    address: order.address || "",
+    city: order.city || "",
+    postalCode: order.postalCode || "",
+    sector: order.sector || stop.sector,
+    deliveryDate: order.deliveryDate || stop.deliveryDate,
+    products: order.products || stop.products,
+    notes: order.notes || "",
+    lat: order.lat,
+    lng: order.lng,
+    geoPrecision: order.geoPrecision || ""
+  };
+}
+
+/**
+ * M4 : une commande reportee ne se livre plus aujourd'hui. Si sa nouvelle date
+ * n'est plus celle d'une tournee prete ou en cours ou elle attend encore, son
+ * arret en est retire et elle redevient "prete a livrer" pour la bonne date.
+ * Un arret deja solde n'est jamais retire (historique).
+ */
+function retirerDesTourneesSiReportee(db, order) {
+  let retiree = false;
+  for (const route of db.routes) {
+    if (!["prete", "en_livraison"].includes(route.status)) continue;
+    const dateTournee = normalizeDateInput(route.deliveryDate);
+    if (!dateTournee || !order.deliveryDate || order.deliveryDate === dateTournee) continue;
+    const index = route.stops.findIndex(stop => String(stop.orderId) === String(order.id));
+    if (index < 0 || STATUTS_ARRET_SOLDE.has(route.stops[index].status)) continue;
+    route.stops.splice(index, 1);
+    route.stops.forEach((stop, i) => { stop.orderIndex = i + 1; });
+    route.selectedOrderIds = route.stops.map(stop => stop.orderId);
+    // Le trace passait par cet arret : a refaire avant le depart. En route,
+    // on garde l'ancien plutot que d'effacer la carte sous le livreur.
+    if (route.status === "prete") route.geometry = null;
+    retiree = true;
+  }
+  if (!retiree) return false;
+  order.routeId = null;
+  if (order.status === "en_livraison") setOrderStatus(order, "pret_livraison");
+  addHistory(db, "Tournee", `${order.clientName} : commande reportee au ${order.deliveryDate}, retiree de la tournee`, {
+    orderId: order.id
+  });
+  return true;
 }
 
 function normalizeRoute(route, orders) {
@@ -5444,8 +5720,9 @@ function normalizeRoute(route, orders) {
   const stops = Array.isArray(route.stops) ? route.stops : [];
   const orderMap = new Map(orders.map(order => [String(order.id), order]));
 
-  const normalizedStops = stops.map((stop, index) => {
-    const order = orderMap.get(String(stop.orderId));
+  const normalizedStops = stops.map((brut, index) => {
+    const order = orderMap.get(String(brut.orderId));
+    const stop = arretVivant({ ...route, status: routeStatus }, brut, order);
     return {
       ...stop,
       orderIndex: index + 1,
@@ -6069,6 +6346,9 @@ app.post("/api/crm/clients", async (req, res) => {
       return crmClientView(db, client);
     });
     res.status(201).json(result);
+    // Lot 3 : un client cree au CRM est geocode (avant : seulement apres un
+    // import Excel -- il restait sans position jusque-la).
+    declencherGeocodageEnFond("creation client");
   } catch (error) {
     handleRouteError(error, res, "Erreur CRM");
   }
@@ -6090,7 +6370,11 @@ app.patch("/api/crm/clients/:id", async (req, res) => {
       const duplicate = findDuplicateClient(db, req.body || {}, client.id);
       if (duplicate) throw Object.assign(badRequest("Client/prospect deja existant"), { statusCode: 409 });
 
+      const avant = adresseDuClient(client);
       Object.assign(client, validateCrmClientPayload(req.body || {}, client));
+      // H5 : une adresse changee au CRM deplace aussi la position et les
+      // commandes a livrer a l'ancienne adresse (decision 8).
+      demenagerClient(db, client, avant);
       addHistory(db, "CRM", `${[client.prenom, client.nom].filter(Boolean).join(" ") || client.nom} : fiche mise a jour`, {
         clientId: client.id
       });
@@ -6098,6 +6382,7 @@ app.patch("/api/crm/clients/:id", async (req, res) => {
       return crmClientView(db, client);
     });
     res.json(result);
+    declencherGeocodageEnFond("modification client");
   } catch (error) {
     handleRouteError(error, res, "Erreur CRM");
   }
@@ -6579,6 +6864,8 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
   // qty negative dans Ximi est souvent un retour/avoir, le clamp silencieux
   // pourrait masquer cette info metier.
   let clampedNegativeQtyCount = 0;
+  // Positions Latitude/Longitude du fichier ignorees : (0,0), inversees, hors zone.
+  let positionsImportRefusees = 0;
 
   try {
     const rows = await readExcelRows(uploadedPath);
@@ -6626,7 +6913,7 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
         const produitComplet = clean(getCell(row, headers, "Produit", 1));
         const telephone = clean(getCellByNames(row, headers, ["Telephone favori", "Téléphone favori", "Telephone", "Téléphone", "Mobile", "Phone"]));
         const reference = clean(getCell(row, headers, "Reference", 1));
-        const codePostal = clean(getCellByNames(row, headers, ["Code Postal", "Code postal", "CP", "PostalCode"]));
+        const codePostal = geocodage.normaliserCodePostal(getCellByNames(row, headers, ["Code Postal", "Code postal", "CP", "PostalCode"]));
         const rue = clean(getCellByNames(row, headers, ["Rue", "Adresse", "Adresse client"]));
         const ville = normalizeCity(getCellByNames(row, headers, ["Ville", "Commune"]));
         const secteur = deriveSector(ville, getCellByNames(row, headers, ["Secteur", "Sector"]));
@@ -6687,6 +6974,14 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       const venteFactureLivree = isFactureStatusLivre(vente.statutFacture);
 
       if (!clientsMap[key]) {
+        // Relecture du lot 3 : la position du fichier ne remplace jamais une
+        // position placee a la main (M8), et elle passe le meme controle
+        // qu'une saisie (M5) : (0,0), inversee ou hors zone, elle est ignoree.
+        const manuelle = existingClient.geoSource === "manuel" && Boolean(getCoordinates(existingClient));
+        const positionFichier = vente.lat !== "" && vente.lng !== "";
+        const fichierRefuse = positionFichier && !geocodage.verifierPosition({ lat: vente.lat, lng: vente.lng }).ok;
+        if (fichierRefuse) positionsImportRefusees += 1;
+        const prendFichier = positionFichier && !manuelle && !fichierRefuse;
         clientsMap[key] = {
           id: existingClient.id || crypto.randomUUID(),
           nom: vente.client || "Client sans nom",
@@ -6697,8 +6992,20 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
           statut: existingClient.statut || "restant",
           // Liste flat (legacy compat pour syncWorkflow et anciennes UIs)
           produits: [],
-          lat: vente.lat !== "" ? vente.lat : (existingClient.lat || ""),
-          lng: vente.lng !== "" ? vente.lng : (existingClient.lng || ""),
+          lat: prendFichier ? vente.lat : (existingClient.lat || ""),
+          lng: prendFichier ? vente.lng : (existingClient.lng || ""),
+          // Lot 3 (audit geo) : l'origine et la precision de la position
+          // suivent la position. Sans elles, une saisie manuelle redevenait
+          // anonyme a chaque import, et le lot `forcer` pouvait l'ecraser.
+          ...(prendFichier
+            ? { geoSource: "import", geoPrecision: "manuel", geoCle: "", geoLibelle: "", geoAVerifier: "" }
+            : {
+              geoSource: existingClient.geoSource || "",
+              geoPrecision: existingClient.geoPrecision || "",
+              geoCle: existingClient.geoCle || "",
+              geoLibelle: existingClient.geoLibelle || "",
+              geoAVerifier: existingClient.geoAVerifier || ""
+            }),
           secteur: vente.secteur,
           deliveryDate: vente.deliveryDate,
           notes: vente.notes || existingClient.notes || "",
@@ -6812,8 +7119,13 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
           sameKeyOrder.postalCode = client.codePostal || sameKeyOrder.postalCode;
           sameKeyOrder.sector = client.secteur || sameKeyOrder.sector;
           sameKeyOrder.phone = client.telephone || sameKeyOrder.phone;
-          if (client.lat !== "") sameKeyOrder.lat = client.lat;
-          if (client.lng !== "") sameKeyOrder.lng = client.lng;
+          // Lot 3 : une commande livree garde la position de sa livraison.
+          if (client.lat !== "" && client.lng !== "" && !STATUTS_COMMANDE_CLOSE.has(sameKeyOrder.status)) {
+            sameKeyOrder.lat = client.lat;
+            sameKeyOrder.lng = client.lng;
+            sameKeyOrder.geoPrecision = client.geoPrecision || "";
+            sameKeyOrder.geoSource = "client";
+          }
           updatedCount += 1;
           return;
         }
@@ -6831,6 +7143,8 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
           products: orderData.produits,
           lat: client.lat,
           lng: client.lng,
+          geoPrecision: client.lat !== "" ? client.geoPrecision || "" : "",
+          geoSource: client.lat !== "" ? "client" : "",
           notes: client.notes,
           priority: client.priority,
           dateCommande: orderData.dateCommande,
@@ -6866,10 +7180,13 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     const clampedMessage = clampedNegativeQtyCount > 0
       ? `, ⚠ ${clampedNegativeQtyCount} quantite(s) negative(s) clampee(s) a 0 (verifier retours/avoirs Ximi)`
       : "";
+    const positionsMessage = positionsImportRefusees > 0
+      ? `, ${positionsImportRefusees} position(s) du fichier ignoree(s) (0,0, inversee ou hors zone)`
+      : "";
     addHistory(
       db,
       "Import ventes",
-      `${db.ventes.length} vente(s) importee(s), ${importedClients.length} client(s) detecte(s), ${commandeStats}${preservedMessage}${mergedMessage}${livreMessage}${clampedMessage}`,
+      `${db.ventes.length} vente(s) importee(s), ${importedClients.length} client(s) detecte(s), ${commandeStats}${preservedMessage}${mergedMessage}${livreMessage}${clampedMessage}${positionsMessage}`,
       {
         fichier: req.file.originalname
       }
@@ -6900,6 +7217,7 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       updated: updatedCount,
       skippedIdentical: skippedIdenticalCount,
       clampedNegativeQuantities: clampedNegativeQtyCount,
+      positionsRefusees: positionsImportRefusees,
       archive
     };
     }); // fin withWriteLock
@@ -6940,10 +7258,19 @@ let geocodageEnCours = false;
 // disponible via POST /api/geocodage/lancer.
 const GEOCODAGE_AUTO = cleanEnv(process.env.SEREO_GEOCODAGE_AUTO) !== "0";
 
+// Une demande pendant un lot n'est plus perdue : un client cree ou demenage
+// pendant le lot serait sinon reste sans position jusqu'au prochain import.
+let geocodageARelancer = false;
+
 function declencherGeocodageEnFond(origine) {
-  if (!GEOCODAGE_AUTO || !useSqliteStorage() || geocodageEnCours) return;
+  if (!GEOCODAGE_AUTO || !useSqliteStorage()) return;
+  if (geocodageEnCours) {
+    geocodageARelancer = true;
+    return;
+  }
 
   geocodageEnCours = true;
+  geocodageARelancer = false;
   geocoderClients()
     .then(bilan => {
       if (bilan.traites > 0) {
@@ -6958,6 +7285,7 @@ function declencherGeocodageEnFond(origine) {
     })
     .finally(() => {
       geocodageEnCours = false;
+      if (geocodageARelancer) declencherGeocodageEnFond(`${origine} (relance)`);
     });
 }
 
@@ -7140,10 +7468,16 @@ app.patch("/api/stock/:id", async (req, res) => {
 });
 
 // PATCH /api/clients/:id : mise a jour partielle des champs metier d'un client
-// (rue, codePostal, ville, telephone, notes). Utilise par la nouvelle UI
-// "Compléter le profil client" depuis la modal detail bon de commande v1.11.0.
-// Propage les changements vers la/les commande(s) active(s) du client pour que
-// les ecrans Livraison/Preparation reflechent l'adresse a jour.
+// (rue, codePostal, ville, telephone, notes). Utilise par "Modifier le profil"
+// depuis le detail d'une commande.
+//
+// Lot 3 de l'audit geo (H5, H12, decision 8 de Thomas, 23/09) :
+// - une commande LIVREE ou annulee n'est plus jamais reecrite (historique) ;
+// - l'adresse ne suit que sur les commandes qui se livraient a l'ANCIENNE
+//   adresse du client : une commande livree ailleurs (EHPAD, proche) garde la
+//   sienne (demenagerClient) ;
+// - la position de l'ancienne adresse est effacee et recalculee en fond ;
+// - une consigne propre a une commande n'est pas ecrasee par celle du client.
 app.patch("/api/clients/:id", async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
@@ -7154,10 +7488,13 @@ app.patch("/api/clients/:id", async (req, res) => {
         throw notFound("Client introuvable");
       }
 
+      const avant = adresseDuClient(client);
+      const notesAvant = clean(client.notes);
+      const telephoneAvant = clean(client.telephone);
       const updates = {};
       if (req.body.nom !== undefined) updates.nom = clean(req.body.nom);
       if (req.body.rue !== undefined) updates.rue = clean(req.body.rue);
-      if (req.body.codePostal !== undefined) updates.codePostal = clean(req.body.codePostal);
+      if (req.body.codePostal !== undefined) updates.codePostal = geocodage.normaliserCodePostal(req.body.codePostal);
       if (req.body.ville !== undefined) {
         const newVille = normalizeCity(clean(req.body.ville));
         updates.ville = newVille;
@@ -7170,32 +7507,74 @@ app.patch("/api/clients/:id", async (req, res) => {
       Object.assign(client, updates);
       client.updatedAt = new Date().toISOString();
 
-      const matchingOrders = db.commandes.filter(o => String(o.clientId) === String(client.id));
+      const cleAvant = cleGeocodage(avant);
+      const suivent = new Set(
+        db.commandes
+          .filter(order => commandeSuitLeClient(order, client, cleAvant))
+          .map(order => String(order.id))
+      );
+      const demenagement = demenagerClient(db, client, avant);
+
+      const matchingOrders = db.commandes.filter(o =>
+        String(o.clientId) === String(client.id) && !STATUTS_COMMANDE_CLOSE.has(o.status)
+      );
+      const now = new Date().toISOString();
       matchingOrders.forEach(order => {
         if (updates.nom !== undefined) order.clientName = updates.nom;
-        if (updates.rue !== undefined) order.address = updates.rue;
-        if (updates.codePostal !== undefined) order.postalCode = updates.codePostal;
-        if (updates.ville !== undefined) order.city = updates.ville;
-        if (updates.ville !== undefined) order.sector = updates.secteur;
-        if (updates.telephone !== undefined) order.phone = updates.telephone;
-        if (updates.notes !== undefined) order.notes = updates.notes;
-        order.updatedAt = new Date().toISOString();
+        // Comme la consigne : le telephone d'une commande livree ailleurs
+        // (EHPAD, proche) est le sien. Seul celui qui etait le numero du client
+        // (ou vide) suit ; le formulaire renvoie le telephone a chaque
+        // enregistrement, meme quand seules les notes changent.
+        if (updates.telephone !== undefined
+          && (!clean(order.phone) || clean(order.phone) === telephoneAvant)) {
+          order.phone = updates.telephone;
+        }
+        if (updates.notes !== undefined && suivent.has(String(order.id))
+          && (!clean(order.notes) || clean(order.notes) === notesAvant)) {
+          order.notes = updates.notes;
+        }
+        // Une ville changee sans changer la cle (casse, accent) : le secteur suit.
+        if (updates.ville !== undefined && suivent.has(String(order.id))) order.sector = updates.secteur;
+        order.updatedAt = now;
       });
 
       addHistory(db, "Client", `${client.nom} : profil mis a jour`, {
         clientId: client.id,
-        champsModifies: Object.keys(updates)
+        champsModifies: Object.keys(updates),
+        commandesDeplacees: demenagement.commandes
       });
 
       writeDb(db);
-      return { client, ordersUpdated: matchingOrders.length };
+      return { client, ordersUpdated: matchingOrders.length, demenagement };
     });
     res.json(result);
+    if (result.demenagement.demenage) declencherGeocodageEnFond("modification client");
   } catch (error) {
     handleRouteError(error, res, "Erreur mise a jour client");
   }
 });
 
+/**
+ * Lit une position saisie : { lat, lng } en nombres ou en texte ("46,75"), ou
+ * un seul champ `position` colle depuis une carte ("46.7512, 5.9123").
+ */
+function lirePositionSaisie(body = {}) {
+  const colle = clean(body.position);
+  if (colle) {
+    // "46.7512, 5.9123", "46,7512 ; 5,9123", "46.75 5.91" : deux nombres.
+    const nombres = colle.match(/-?\d+(?:[.,]\d+)?/g) || [];
+    if (nombres.length === 2) return { lat: nombres[0], lng: nombres[1] };
+    return { lat: "x", lng: "x" };
+  }
+  return { lat: body.lat, lng: body.lng };
+}
+
+const PRECISIONS_SAISIES = new Set(["numero", "rue", "lieu-dit", "commune", "manuel"]);
+
+// Saisie d'une position par une personne : une proposition acceptee, un
+// resultat de recherche choisi, un marqueur deplace, ou deux nombres. Elle est
+// marquee "manuelle" et aucun traitement automatique ne l'ecrasera (M8).
+// Elle n'atteint que les commandes qui se livrent a l'adresse du client (H12).
 app.patch("/api/clients/:id/coordinates", async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
@@ -7206,27 +7585,31 @@ app.patch("/api/clients/:id/coordinates", async (req, res) => {
         throw notFound("Client introuvable");
       }
 
-      const lat = parseCoordinate(req.body.lat, -90, 90);
-      const lng = parseCoordinate(req.body.lng, -180, 180);
+      const saisie = lirePositionSaisie(req.body);
+      const lat = parseCoordinate(saisie.lat, -90, 90);
+      const lng = parseCoordinate(saisie.lng, -180, 180);
 
       if (!lat.ok || !lng.ok) {
-        throw badRequest("Coordonnees invalides");
+        throw badRequest(`Coordonnées invalides pour ${client.nom}.`);
       }
 
-      client.lat = lat.value;
-      client.lng = lng.value;
-
-      // .filter et non .find : depuis le bucketing par (client, dateCommande)
-      // de la v1.9.0, un client a couramment PLUSIEURS bons de commande. Avec
-      // .find, une seule commande recevait les coordonnees et les autres
-      // restaient sans position. Le PATCH /api/clients/:id juste au-dessus
-      // utilise deja .filter — l'incoherence etait ici.
-      const orders = db.commandes.filter(item => String(item.clientId) === String(client.id));
-      for (const order of orders) {
-        order.lat = lat.value;
-        order.lng = lng.value;
-        order.updatedAt = new Date().toISOString();
+      const efface = lat.value === "" || lng.value === "";
+      if (!efface) {
+        // M5 : (0,0), latitude et longitude inversees, hors zone : refuses,
+        // avec le nom du client et, pour l'inversion, la correction.
+        const verdict = geocodage.verifierPosition({ lat: lat.value, lng: lng.value });
+        if (!verdict.ok) {
+          throw Object.assign(
+            badRequest(`Position refusée pour ${client.nom} : ${verdict.message}.`),
+            { details: { code: verdict.code, corrigee: verdict.corrigee || null } }
+          );
+        }
       }
+
+      const precision = PRECISIONS_SAISIES.has(clean(req.body.precision)) ? clean(req.body.precision) : "manuel";
+      appliquerPositionClient(db, client, efface
+        ? { lat: "", lng: "" }
+        : { lat: lat.value, lng: lng.value, source: "manuel", precision, libelle: clean(req.body.libelle).slice(0, 300) });
 
       addHistory(db, "Coordonnees", `${client.nom} : coordonnees mises a jour`, {
         clientId: client.id,
@@ -7240,6 +7623,16 @@ app.patch("/api/clients/:id/coordinates", async (req, res) => {
     res.json(result);
   } catch (error) {
     handleRouteError(error, res, "Erreur coordonnees");
+  }
+});
+
+// H7 : l'ecran "Adresses a verifier".
+app.get("/api/adresses/a-verifier", (req, res) => {
+  try {
+    res.set("Cache-Control", "no-store");
+    res.json(listerAdressesAVerifier(readDb(), { inclure: clean(req.query.client) }));
+  } catch (error) {
+    handleRouteError(error, res, "Erreur adresses a verifier");
   }
 });
 
@@ -7320,7 +7713,10 @@ app.patch("/api/orders/:id", async (req, res) => {
       if (req.body.notes !== undefined) order.notes = clean(req.body.notes);
       if (req.body.priority !== undefined) order.priority = clean(req.body.priority);
       if (req.body.sector !== undefined) order.sector = deriveSector(order.city, req.body.sector);
-      if (req.body.deliveryDate !== undefined) order.deliveryDate = normalizeDateInput(req.body.deliveryDate);
+      if (req.body.deliveryDate !== undefined) {
+        order.deliveryDate = normalizeDateInput(req.body.deliveryDate);
+        retirerDesTourneesSiReportee(db, order);
+      }
       if (req.body.status !== undefined) {
         if (clean(req.body.status) === "annulee" && order.stockReservedAt) {
           releaseOrderStockReservation(db, order, "order_cancelled");
@@ -7399,11 +7795,13 @@ app.post("/api/routes", async (req, res) => {
       const ids = new Set((req.body.orderIds || []).map(String));
       const selected = getDeliverableOrders(snapshot, req.body).filter(o => ids.has(String(o.id)) && ["pret_livraison", "a_reprogrammer"].includes(o.status));
       if (selected.length !== ids.size) throw badRequest("Certaines commandes ne sont plus prêtes.");
+      // H6 : la position du client vaut pour ses commandes livrees chez lui ;
+      // le reste passe par le geocodeur partage (cache, meme seuil).
       const enPremier = new Set(premiers);
       plan = await routing.roadPlan(
-        selected.map(o => ({ ...o, livrerEnPremier: enPremier.has(String(o.id)) })),
+        selected.map(o => ({ ...positionPourTournee(snapshot, o), livrerEnPremier: enPremier.has(String(o.id)) })),
         req.body.departure, req.body.arrival, snapshot.settings.tournee.stopDurationMin, false,
-        { retirerInjoignables: req.body.retirerInjoignables === true }
+        { geocoder: geocoderAdresse, retirerInjoignables: req.body.retirerInjoignables === true }
       );
       // Un arret injoignable par la route, retire a la demande : sa commande
       // reste « prete », hors de cette tournee, et la reponse le nomme.
@@ -7671,7 +8069,8 @@ app.post("/api/optimize-route", async (req, res) => {
 require("./lib/operations-api").registerOperations(app, {
   readDb, writeDb, withWriteLock, badRequest, notFound, handleRouteError, findClient,
   buildCustomerOrderLines, createPlannedOrder, addHistory, getOrderTotal,
-  buildImportedSalesIndex, getImportedOrderTotal, normalizeDateInput
+  buildImportedSalesIndex, getImportedOrderTotal, normalizeDateInput,
+  geocoderAdresse, positionPourTournee, memoriserPositionDuCalcul
 });
 
 // --- API des comptes utilisateurs (V8 phase 1) -----------------------------
@@ -7746,10 +8145,25 @@ app.get("/api/geocodage/etat", (req, res) => {
  */
 app.post("/api/geocodage/lancer", async (req, res) => {
   try {
-    const bilan = await geocoderClients({
-      forcer: req.body?.forcer === true,
-      max: Number(req.body?.max) > 0 ? Number(req.body.max) : GEOCODER_MAX_PAR_LOT
-    });
+    // Deux lots en parallele doublaient les appels a la BAN et s'ecrasaient
+    // l'un l'autre (audit geo, mesure du 23/09).
+    if (geocodageEnCours) {
+      throw Object.assign(badRequest("Un géocodage est déjà en cours. Réessaie dans une minute."), { statusCode: 409 });
+    }
+    geocodageEnCours = true;
+    let bilan;
+    try {
+      bilan = await geocoderClients({
+        forcer: req.body?.forcer === true,
+        max: Number(req.body?.max) > 0 ? Number(req.body.max) : GEOCODER_MAX_PAR_LOT
+      });
+    } finally {
+      geocodageEnCours = false;
+      // Un client cree ou demenage pendant ce lot a demande un geocodage de
+      // fond, refuse car un lot tournait : il est relance maintenant, comme
+      // apres un lot de fond (relecture du lot 3).
+      if (geocodageARelancer) declencherGeocodageEnFond("relance apres le lot manuel");
+    }
     res.json(bilan);
   } catch (error) {
     handleRouteError(error, res, "Erreur geocodage");
@@ -7900,6 +8314,9 @@ module.exports = {
   etatGeocodage,
   premiereCoordonnee,
   GEOCODAGE_STATUTS,
+  // Lot 3 de l audit geo : des adresses justes
+  listerAdressesAVerifier,
+  getSqliteStoreForTests: () => getSqliteStore(),
   // Comptes utilisateurs (V8 phase 1)
   hashPassword,
   verifyPassword,
