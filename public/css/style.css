@@ -11940,3 +11940,10 @@ textarea::placeholder {
 #parametres .par-carte#comptesBlock, #parametres .par-carte.par-imports { grid-column: span 12; }
 /* La fiche des secteurs vit dans une carte etroite : une colonne. */
 #parametres #settingsSectors { grid-template-columns: 1fr; }
+
+/* La fiche des secteurs dans une carte etroite : le texte passe a la ligne
+   (il etait coupe sans ellipse, texte-coupe.spec.js). */
+#parametres #settingsSectors .item h4,
+#parametres #settingsSectors .item p { white-space: normal; overflow: visible; overflow-wrap: anywhere; min-width: 0; }
+#parametres #settingsSectors .item-header { flex-wrap: wrap; gap: 8px; }
+#parametres #settingsSectors .item-header > div { min-width: 0; }
