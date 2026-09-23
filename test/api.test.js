@@ -3161,7 +3161,9 @@ test("route multi-stops : statuts varies sur 3 stops (livre / absent / probleme)
     body: JSON.stringify({ status: "absent" })
   });
   assert.equal(b.res.status, 200);
-  assert.equal(b.body.order.status, "probleme_livraison");
+  // Lot 1 de l'audit geo (C1) : un absent revient « A reprogrammer » au lieu
+  // de rester bloque en probleme_livraison ; la cause reste dans deliveryStatus.
+  assert.equal(b.body.order.status, "a_reprogrammer");
   assert.equal(b.body.order.deliveryStatus, "absent");
 
   // Stop C : probleme
@@ -3171,7 +3173,7 @@ test("route multi-stops : statuts varies sur 3 stops (livre / absent / probleme)
     body: JSON.stringify({ status: "probleme", notes: "Adresse introuvable" })
   });
   assert.equal(c.res.status, 200);
-  assert.equal(c.body.order.status, "probleme_livraison");
+  assert.equal(c.body.order.status, "a_reprogrammer");
   assert.equal(c.body.order.deliveryStatus, "probleme");
 
   // Verifier les statuts finaux en DB
@@ -3180,8 +3182,8 @@ test("route multi-stops : statuts varies sur 3 stops (livre / absent / probleme)
   const orderB = db.commandes.find(o => o.id === "o-b");
   const orderC = db.commandes.find(o => o.id === "o-c");
   assert.equal(orderA.status, "livre");
-  assert.equal(orderB.status, "probleme_livraison");
-  assert.equal(orderC.status, "probleme_livraison");
+  assert.equal(orderB.status, "a_reprogrammer");
+  assert.equal(orderC.status, "a_reprogrammer");
 });
 
 test("route multi-stops : stop a_reprogrammer met la commande en a_reprogrammer", async () => {

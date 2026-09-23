@@ -251,6 +251,25 @@ function createSqliteStore(options) {
       return database.prepare("DELETE FROM geocodages WHERE cle = ?").run(String(cle)).changes > 0;
     },
 
+    // --- Gestes deja appliques (idempotence, lot 1 de l'audit geo) -------
+
+    getGesteRecu(cle) {
+      const row = database.prepare("SELECT * FROM gestes_recus WHERE cle = ?").get(String(cle));
+      return row ? { cle: row.cle, methode: row.methode, chemin: row.chemin, statut: Number(row.statut), recuLe: row.recu_le } : null;
+    },
+
+    /** Enregistre un geste, et oublie ceux recus avant `oublierAvant` (ISO). */
+    saveGesteRecu(entree, oublierAvant = null) {
+      database
+        .prepare(
+          `INSERT INTO gestes_recus (cle, methode, chemin, statut, recu_le)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(cle) DO NOTHING`
+        )
+        .run(String(entree.cle), String(entree.methode), String(entree.chemin), Number(entree.statut), String(entree.recuLe));
+      if (oublierAvant) database.prepare("DELETE FROM gestes_recus WHERE recu_le < ?").run(String(oublierAvant));
+    },
+
     sqlitePath
   };
 }
@@ -450,6 +469,19 @@ function migrateSchema(database) {
       statut TEXT NOT NULL,
       source TEXT NOT NULL,
       mis_a_jour_le TEXT NOT NULL
+    );
+
+    -- Les gestes d'ecriture deja appliques, par cle d'idempotence (en-tete
+    -- X-Sereo-Geste, lot 1 de l'audit geo). Un geste renvoye par la file hors
+    -- ligne apres un delai depasse n'est applique qu'UNE fois. Hors de
+    -- readDb/writeDb, comme geocodages : writeDb ne l'efface pas. On ne garde
+    -- que le statut de la reponse -- la file ne lit rien d'autre.
+    CREATE TABLE IF NOT EXISTS gestes_recus (
+      cle TEXT PRIMARY KEY,
+      methode TEXT NOT NULL,
+      chemin TEXT NOT NULL,
+      statut INTEGER NOT NULL,
+      recu_le TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS utilisateurs (

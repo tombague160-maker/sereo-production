@@ -296,6 +296,8 @@ que le réseau ne l'a pas emporté. Un **délai dépassé**, lui, peut parfaitem
 signifier que le serveur a reçu et traité la demande : le rejouer dupliquerait une
 écriture non idempotente. C'est la seule raison pour laquelle la file peut se passer
 d'une clé d'idempotence côté serveur — **si cette garde tombe un jour, il en faut une.**
+*(23/09 : la garde est tombée, et la clé existe — voir « Lot 1 de l'audit géo » en fin
+de fichier.)*
 
 **« Le réseau n'a pas répondu » et « le serveur a refusé » ne demandent pas le même
 geste.** Un 4xx retire l'écriture : le serveur a jugé, insister ferait une file qui ne
@@ -3121,3 +3123,220 @@ même point retirée ; import qui perd la précision ; saisie manuelle dite `num
 
 *Non couvert par un banc : la commande de repli de `syncWorkflow` (héritage de
 `geoPrecision`).*
+
+## Lot 1 de l'audit géo — « le livreur ne perd plus rien », posé le 23/09
+
+Source : audit « localisation, carte, tournées » du 23/09 (code audité : `019788c`),
+constats C1, H1, H2, H3, H4, M1, M6, M9. Décision retenue pour C1 : **retour
+automatique**, marqué « À reprogrammer », sans bouton à toucher.
+
+### Ce qui est posé
+
+- **C1 — un absent n'est plus une impasse.** « Absent » et « Problème » passent la
+  commande à `a_reprogrammer` (et non plus `probleme_livraison`, qu'aucune liste ne
+  proposait et qu'aucun bouton ne faisait sortir). La cause reste dans
+  `deliveryStatus` et dans l'arrêt. La commande revient d'elle-même dans « Commandes
+  prêtes à livrer », badge « À reprogrammer ». Les commandes **déjà** bloquées en
+  `probleme_livraison` reviennent aussi (serveur et écran les listent ; la transition
+  `probleme_livraison → en_livraison` existait). Une commande à relivrer n'est pas
+  cachée par le filtre de date, et un arrêt déjà traité ne la retient plus dans sa
+  tournée (« appartient déjà à une tournée active » ne compte que les arrêts encore
+  à faire).
+- **Le stock** : la réservation est **gardée** pour la relivraison (le patron déjà
+  écrit en tête de `RESERVED_ORDER_STATUSES`), jamais prise une seconde fois (le
+  départ de tournée ne réserve rien), et **consommée** à la livraison. Mesuré sur le
+  banc : 12 réservées avant l'absent, 12 après, 12 après le départ de la nouvelle
+  tournée, 8 après « Livré » ; le stock en rayon ne bouge pas.
+- **M1** : une commande en échec ne se replanifie plus en clone (400, message qui
+  renvoie aux commandes prêtes) ; « Planifier la suite » ne s'active que sur un arrêt
+  livré. La suite d'une commande livrée reste permise.
+- **H1** : toute écriture dont l'envoi échoue — réseau muet alors que le téléphone
+  se croit en ligne, délai dépassé (10 s pour un geste d'arrêt, 30 s sinon),
+  passerelle 502/503/504 — part en file. Le risque qui justifiait l'ancienne prudence
+  (un délai dépassé alors que le serveur a traité : le renvoi dupliquerait) est tenu
+  par une **clé d'idempotence** : chaque écriture porte `X-Sereo-Geste`, gardée dans
+  la file ; le serveur (`gesteIdempotent`) n'applique une clé qu'une fois, et fait
+  attendre un doublon simultané. Table SQLite `gestes_recus`, hors `readDb/writeDb`,
+  14 jours. Le bandeau nomme ce qui attend (« 1 livraison en attente d'envoi :
+  Dupont. », « … : Martin (absent) ») et l'arrêt porte « En attente d'envoi ». La
+  file repart seule : à la première réponse du serveur, et toutes les 20 s — le
+  téléphone qui se croit en ligne n'émet jamais « online ». Plus aucun message brut
+  du navigateur (« Failed to fetch ») : « Impossible de joindre le serveur. Vérifie ta
+  connexion. » La **purge** et les **comptes** ne sont jamais mis en file (rejouée plus
+  tard, une purge effacerait le travail fait entre-temps ; un mot de passe n'a rien à
+  faire en clair dans `indexedDB`).
+- **H2** : au renvoi, 401 et 429 **gardent** toute la file et renvoient vers la
+  connexion (une fois par minute au plus, pour ne pas boucler) ; la file repart à la
+  réouverture. Un geste qui rencontre la session expirée en direct part en file avant
+  la redirection. Le **secret de session** : sans `SEREO_AUTH_SESSION_SECRET`, le
+  serveur écrit un secret aléatoire dans le dossier de données (`session-secret`, à
+  côté de la base, jamais dans le dépôt) et le relit ; un redémarrage — donc chaque
+  mise à jour déployée — ne déconnecte plus. La variable reste prioritaire. Dossier
+  non inscriptible : ancien comportement, dit dans le journal.
+- **H3** : un geste mis en file fait avancer l'écran à l'arrêt **suivant** de celui du
+  geste, comme en ligne. Un second geste sur un arrêt déjà en file est refusé à
+  l'écran (il aurait été refusé au renvoi, donc perdu).
+- **H4** : le service worker met en cache la réponse arrivée **après** son repli de
+  3 s et prévient la page (`sereo-api-tardive`), qui remplace la copie à l'écran —
+  sauf si la requête est partie avant la dernière écriture. Après une écriture,
+  `loadData` envoie `X-Sereo-Frais` : pas de repli, et un échec **garde** ce que
+  l'écran montre (« Mise à jour impossible »), jamais la copie d'avant le geste ni
+  une liste vide. La tournée affichée n'est jamais remplacée par une version plus
+  ancienne (`updatedAt`, posé à chaque geste d'arrêt). Les gestes d'arrêt en file
+  sont superposés à toute donnée rechargée.
+- **M9** : un seul renvoi à la fois (promesse partagée, et Web Locks entre onglets),
+  plus un tour pour ce qui a été déposé pendant.
+- **M6** : « Livré » envoie l'heure de l'**appui** (`faitLe`), gardée dans la file ; le
+  serveur date l'arrêt et la commande de cette heure, bornée : pas dans le futur
+  (marge 5 min), pas plus de 7 jours (défaut ; plage raisonnable 3 à 14), pas avant le
+  départ de la tournée.
+
+### Bancs, et le rouge de chacun
+
+Chaque correctif retiré seul (mutation par copie, restauration par copie), le banc
+rougit de la bonne cause :
+
+| Correctif retiré | Banc | Rouge |
+|---|---|---|
+| absent → `probleme_livraison` | `livreur-ne-perd-rien.test.js` | reçu `probleme_livraison`, attendu `a_reprogrammer` |
+| bloquées hors de la liste | idem | « Aucune commande prete selectionnee », 400 au lieu de 201 |
+| filtre de date sans exception | idem | 400 au lieu de 201 (4 cas) |
+| garde « tournée active » sur tous les arrêts | idem | « appartient déjà à une tournée active » |
+| M1 retiré | idem | 201 au lieu de 400 : le clone est créé |
+| M6 serveur retiré | idem | daté de l'arrivée, deux heures après le geste |
+| idempotence débranchée | idem | 6 commandes au lieu de 5 ; 7 pour 3 envois simultanés |
+| secret aléatoire | idem | deux signatures différentes après redémarrage |
+| 401/429 traités en refus | `file-attente.test.js`, e2e H2 | file vidée (0 au lieu de 2) ; pas de renvoi vers la connexion |
+| 502/504 comptés en essais | `file-attente.test.js` | bloquée à la 6ᵉ tentative |
+| verrou de renvoi (les deux) | idem | 9 requêtes pour 3 écritures |
+| relance après dépôt | idem | l'écriture déposée pendant le renvoi reste en file |
+| résumé non gardé | idem | `resume` indéfini |
+| service worker de v1.41.1 | `service-worker-api.test.js` | copie jamais rafraîchie ; copie servie après écriture ; copie au lieu de l'échec |
+| mise en file seulement hors ligne | e2e H1, `hors-ligne` | file vide : « le Livré est perdu » |
+| bandeau sans noms | e2e H1 | « 1 modification en attente d'envoi. » |
+| aucun renvoi sans « online » | e2e H1 | le serveur reste `en_livraison` |
+| message brut | e2e purge | « Failed to fetch » |
+| purge mise en file | e2e purge | « enregistré, sera envoyé » |
+| H3 retiré | e2e H3 | l'écran revient au premier arrêt restant au lieu du suivant |
+| redirection retirée | e2e H2 | pas de nouveau document |
+| `faitLe` non envoyé | e2e H2 + M6 | `NaN` |
+| `X-Sereo-Frais` retiré | e2e H4 | 111 échantillons « En livraison » après « Livré » |
+| écoute des réponses tardives retirée | e2e H4 | reçu « Prêt », attendu « Livré » |
+| front C1 (bloquées, date) | e2e C1 | carte absente |
+
+Deux redondances, dites : le verrou de la page seul retiré, les Web Locks tiennent
+encore la concurrence (seule la relance rougit) ; le cas e2e H2 rougit sur la
+redirection avant la file (le banc unitaire, lui, montre la file vidée). Et une
+leçon : le premier banc H3 ne distinguait rien — la superposition des gestes en file
+fait déjà sauter l'écran au premier arrêt restant, qui était aussi le suivant.
+Il saute désormais un arrêt d'abord.
+
+Le banc `hors-ligne.spec.js` « en ligne — un échec réseau n'est PAS mis en file » est
+**renversé**, pas supprimé : il exige désormais la mise en file ET la clé.
+
+Exécutions : `npm test` 439/439 ; e2e des bancs touchés (livreur-ne-perd-rien,
+hors-ligne, tournee, tournee-mobile, ecran-livreur, livraison-chargement,
+chargement-instantane, operations, etats-limites, abonnements-mobile, tabs) : 75/75
+au second passage. Au premier, à deux ouvriers, deux rouges non reproduits seuls ni
+au second passage : `tournee-mobile` « Annuler DÉFAIT » (le clic est tombé après les
+4 s du toast : l'envoi est parti) et `chargement-instantane` « requêtes retenues »
+(précondition : aucune requête encore arrivée au mandataire). Dits, non corrigés.
+
+### Écarts nommés, hors de ce lot
+
+- **M10 / arbitrage 4** : l'application ne se rouvre toujours pas hors ligne ; seule la
+  superposition des gestes d'arrêt en file est faite.
+- **La file est celle du navigateur, pas de la personne** : si un autre compte se
+  connecte sur le même téléphone, il renvoie les gestes du premier sous son nom.
+- **Une commande « À reprogrammer » ne s'annule pas** : aucune transition
+  `a_reprogrammer → annulee`, aucun bouton ; une commande refusée par le client revient
+  donc dans les commandes prêtes, stock réservé, jusqu'à la libération manuelle par
+  l'API (`release-stock`).
+- **« Planifier la suite » d'une commande livrée** perd toujours consignes et
+  coordonnées (le reste de M1).
+- **L'ancien arrêt d'une commande reprogrammée** reste « Absent » dans sa tournée ;
+  rien n'empêche encore de le re-marquer (M2, lot 2).
+- Une écriture en direct peut passer **avant** des écritures plus anciennes en file ;
+  seul le même arrêt est protégé.
+- Les écritures autres que les gestes d'arrêt, mises en file, ne sont pas superposées
+  à l'écran (une commande terrain en attente n'apparaît qu'une fois envoyée).
+
+### Relecture adverse du lot 1 (23/09) — sept défauts vérifiés, six corrigés
+
+Chacun vérifié avant d'être corrigé ; chaque correctif a son banc, rouge prouvé sur
+l'ancien code (ou sur un mutant qui ne retire que lui).
+
+- **Un 500 passager bloquait la file pour toujours** (important, vrai). Un 5xx comptait
+  un essai sans pause, et le renvoi repart toutes les 20 s et à chaque lecture réussie :
+  cinq essais en quelques secondes, puis l'entrée n'était plus jamais renvoyée, sous un
+  toast répété. Désormais : pause après un 5xx (30 s, 1 min, 2 min, 4 min, puis 15 min),
+  une entrée à bout d'essais est **retentée tous les quarts d'heure** au lieu d'être
+  abandonnée, et le blocage est annoncé **une fois** (et dans le bandeau). (Une garde
+  « un passage arrêté ne se relance pas » a été retirée à la reprise, voir plus bas.)
+  Bancs : `file-attente.test.js`
+  (rafale : 5 envois → 1 ; entrée bloquée avant la mise à jour : repart),
+  `livreur-ne-perd-rien.spec.js` « 500 passager » (ancien code : `Received: 5` ; mutant
+  « toast à chaque fois » : `Received: 8`).
+- **Le renvoi n'avait aucun délai** (important, vrai). Chaque envoi de la file est coupé à
+  15 s (signal + course), compté comme un échec réseau, sans essai. Banc :
+  `file-attente.test.js` « renvoi MUET » (ancien code : la file reste gelée).
+- **L'idempotence se libérait à la fermeture de la connexion** (mineur, vrai). La clé se
+  libère désormais à la fin du traitement (`res.end`) ; une connexion fermée sans réponse
+  la garde (filet de 3 min). Banc : `livreur-ne-perd-rien.test.js` « ABANDONNE »
+  (mutant `close` : 6 commandes au lieu de 5). **Reste ouvert** : `withWriteLock` qui
+  expire à 60 s répond 500 pendant que le traitement continue ; la clé n'est pas gardée
+  (5xx) et un renvoi peut s'appliquer une seconde fois.
+- **Le service worker rangeait une réponse tardive par-dessus une plus récente** (mineur,
+  vrai). Numéro d'ordre par requête : une réponse ne se range (ni ne s'annonce) que si
+  aucune requête partie après elle n'a rangé la sienne. Banc :
+  `service-worker-api.test.js` (ancien code : la copie revient à `en_livraison`).
+- **Le corps de la réponse sans délai ni traduction** (mineur, vrai, antérieur au lot).
+  Délai propre au corps ; message français ; si les en-têtes disaient 2xx, le geste est
+  fait : l'écran avance comme sur un succès. Bancs e2e « corps CASSE » et « corps qui ne
+  vient JAMAIS » (ancien code : l'écran reste sur l'arrêt).
+- **`data/session-secret` pas exclu du contexte Docker** (mineur, vrai). `.dockerignore`
+  exclut `data/` en entier, comme `.gitignore`. Banc : `dockerignore.test.js`.
+- **Le jour de vente reste la date UTC de `deliveredAt`** (mineur, vrai, antérieur) :
+  mesuré (`2026-09-23T22:40Z` → `2026-09-23`, Paris : le 24). **Non corrigé** : il faut
+  passer toutes les bornes de `computeStatistics` en Europe/Paris, hors du lot ; le
+  commentaire M6 le dit désormais.
+
+Vu en passant, non corrigé : `tournee-mobile` « 4b — hors ligne : les gestes qui suivent
+un Livre » échoue lancé seul (`-g`, 4 fois sur 4) **aussi sur `main` (ef470c6)** ; il
+passe dans son fichier complet. Le banc H2 de ce lot avait une course (le vrai « online »
+de `setOffline(false)` renvoie vers `/login` pendant le `page.evaluate`) : tolérée.
+
+### Reprise de la correction (23/09, après une limite d'utilisation) — chaque rouge rejoué
+
+L'agent de correction a été coupé après ses commits, avant son compte rendu. Chaque
+correctif annoncé ci-dessus a été rejoué **contre l'ancien code**, par copie restaurée :
+
+- `file-attente.js` de 1b33cdc : « rafale » `5` envois au lieu de `1` ; « bloquée avant la
+  mise à jour » `0` au lieu de `1` ; « renvoi MUET » : la file reste gelée.
+- `service-worker.js` de 1b33cdc : la copie revient à `{ arret: 'en_livraison' }` ; le
+  témoin (réponse tardive sans requête plus récente) reste vert.
+- `gesteIdempotent` libérant à la fermeture : `6` commandes au lieu de `5`.
+- `.dockerignore` de 1b33cdc : `data/session-secret` n'est pas exclu ; le témoin reste vert.
+- `app.js` de 1b33cdc, file neuve : le blocage annoncé `4` fois au lieu d'`1` ; app et file
+  de 1b33cdc : `Received: 5` renvois. « corps CASSE » et « corps qui ne vient JAMAIS » :
+  l'écran reste sur « EHPAD Les Tilleuls… ». (Attention : lancés ensemble, en mode
+  `serial`, un premier rouge laisse les suivants « did not run » ; chaque rouge a été
+  rejoué seul.)
+
+Deux écarts trouvés, et réglés :
+
+- **Un correctif sans banc.** La garde `!bilan.arrete` de `viderLaFile` (« un passage
+  arrêté ne se relance pas aussitôt ») : retirée seule, **tout reste vert** — la pause
+  après un 5xx fait déjà qu'un tour redemandé s'arrête sans rien envoyer. Retirée du code
+  plutôt que gardée sans preuve.
+- **Le chemin le plus fréquent n'avait pas de banc.** Les bancs « corps » passent par
+  « Absent ». Le `return` sur `recuParLeServeur` de `envoyerLivraisonEnSuspens` (le
+  « Livré » différé, soldé par le geste suivant) n'était distingué par rien. Nouveau banc
+  « « Livré » dont le corps CASSE, puis « Absent » aussitôt » : sans ce `return` (mutant, et
+  app.js de 1b33cdc), l'erreur remonte, `solderLivraisonEnSuspens` la prend pour un refus
+  et **arrête le geste suivant** — `Received: "pret_livraison"` pour l'arrêt qui devait
+  passer « Absent ».
+
+Toujours ouvert : `withWriteLock` qui expire à 60 s (voir plus haut). Et une lecture
+(GET) dont le corps casse lève « Le serveur a bien reçu la demande… » (lu dans
+`apiFetch`, non mesuré à l'écran) : exact, mais écrit pour une écriture.
