@@ -190,4 +190,30 @@ test("decoupage : au-dela de 50 commandes, des groupes de 50 au plus, sans en pe
   const cotes = r.body.groupes.map((g) => [g.filter((id) => Number(id.slice(1)) % 2 === 0).length, g.filter((id) => Number(id.slice(1)) % 2 === 1).length]);
   assert.deepEqual(cotes, [[37, 0], [0, 36]]);
   assert.equal(readDb().routes.length, 0, "une proposition n'ecrit rien");
+  // Revue du 23/09 : une commande « a livrer en premier » (x1, a l'est) part
+  // dans la premiere tournee.
+  const avecEpingle = await request("/api/routes/decoupage", { orderIds: ids, departure: DEPART, premiers: ["x1"] });
+  assert.equal(avecEpingle.status, 200);
+  assert.ok(avecEpingle.body.groupes[0].includes("x1"), `x1 hors de la premiere tournee : ${avecEpingle.body.groupes[1].includes("x1") ? "dans la seconde" : "absente"}`);
+  assert.deepEqual(avecEpingle.body.groupes.flat().sort(), [...ids].sort());
+});
+
+// Revue du 23/09 : le mode « sans depart » n'avait aucun plafond, et
+// l'optimiseur (synchrone, sous le verrou d'ecriture) y passait 2 s a 400
+// commandes, 18 s avec des epingles. Une tournee compte 50 commandes au plus,
+// dans les deux modes ; au-dela, le decoupage.
+test("sans depart : au-dela de 50 commandes, refus (comme en mode routier), rien n'est ecrit", async () => {
+  writeDb({ ...defaultDb(), commandes: Array.from({ length: 51 }, (_, i) => commande(`y${i}`, 6 + i * 0.001)) }, { backup: false });
+  const choisies = await request("/api/routes", { orderIds: Array.from({ length: 51 }, (_, i) => `y${i}`) });
+  assert.equal(choisies.status, 400);
+  assert.match(choisies.body.error, /entre 1 et 50 commandes/);
+  // Sans liste : toutes les commandes pretes, 51 aussi.
+  const toutes = await request("/api/routes", {});
+  assert.equal(toutes.status, 400);
+  assert.match(toutes.body.error, /entre 1 et 50 commandes/);
+  assert.equal(readDb().routes.length, 0);
+  // 50 passent.
+  const cinquante = await request("/api/routes", { orderIds: Array.from({ length: 50 }, (_, i) => `y${i}`) });
+  assert.equal(cinquante.status, 201);
+  assert.equal(cinquante.body.stops.length, 50);
 });

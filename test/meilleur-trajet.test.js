@@ -337,3 +337,24 @@ test("decoupage : une entree qui alterne ouest et est rend deux paquets d'un seu
   const cotes = paquets.map((p) => [p.filter((x) => x.id.startsWith("o")).length, p.filter((x) => x.id.startsWith("e")).length]);
   assert.deepEqual(cotes, [[37, 0], [0, 37]]);
 });
+
+// Revue du 23/09 : une commande « a livrer en premier » part dans la PREMIERE
+// tournee, meme si sa direction la rangeait dans une autre. Elle y prend la
+// place d'une commande sans epingle, qui passe a la suivante (tailles gardees).
+test("decoupage : les commandes « a livrer en premier » partent dans la premiere tournee", () => {
+  const points = Array.from({ length: 74 }, (_, i) => {
+    const ouest = i % 2 === 0;
+    return { id: `${ouest ? "o" : "e"}${i}`, lat: (ouest ? 47.09 : 46.9) + i * 0.0005, lng: ouest ? 5.49 : 6.35 };
+  });
+  const depart = { lat: 47.2378, lng: 6.0241 };
+  // Sans epingle, la premiere tournee est l'ouest : e5 et e9 sont dans la seconde.
+  assert.ok(routing.decouperEnTournees(points, depart, 50)[1].some((p) => p.id === "e5"));
+  const paquets = routing.decouperEnTournees(points, depart, 50, ["e5", "e9"]);
+  assert.deepEqual(paquets.map((p) => p.length), [37, 37]);
+  assert.ok(["e5", "e9"].every((id) => paquets[0].some((p) => p.id === id)), "les epingles sont dans la premiere tournee");
+  assert.deepEqual(paquets.flat().map((p) => p.id).sort(), points.map((p) => p.id).sort());
+  // Une majorite d'epingles a l'est : c'est l'est qui part en premier, entier.
+  const est = routing.decouperEnTournees(points, depart, 50, ["e1", "e3", "e5", "o0"]);
+  assert.equal(est[0].filter((p) => p.id.startsWith("e")).length, 36);
+  assert.ok(est[0].some((p) => p.id === "o0"));
+});

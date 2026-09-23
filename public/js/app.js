@@ -6175,10 +6175,17 @@ async function createDeliveryRoute() {
   let tournee = orderIds;
   let pourLaSuite = [];
   if (orderIds.length > 50) {
+    // La proposition de decoupage n'ecrit rien : hors ligne, apiFetch la
+    // mettrait en file et l'ecran dirait « enregistre », alors qu'aucune
+    // tournee ne serait jamais creee (revue du 23/09).
+    if (estDefinitivementHorsLigne()) {
+      throw new Error("Hors ligne : au-delà de 50 commandes, le découpage en tournées demande le réseau. Rien n’a été enregistré.");
+    }
     const { groupes } = await apiFetch("/api/routes/decoupage", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ orderIds, departure: points.departure })
+      // Les commandes « À livrer en premier » partent dans la premiere tournee.
+      body: JSON.stringify({ orderIds, departure: points.departure, premiers: orderIds.filter(id => deliveryFirst.has(String(id))) })
     });
     const tailles = groupes.map(groupe => groupe.length).join(" + ");
     if (!window.confirm(`${orderIds.length} commandes : une tournée en compte 50 au plus. Séréo propose ${groupes.length} tournées (${tailles}), regroupées par direction depuis le départ.\n\nCréer la première maintenant (${groupes[0].length} commandes) ? Les autres resteront sélectionnées pour la suivante.`)) return;
@@ -6211,10 +6218,12 @@ async function createDeliveryRoute() {
   await loadData();
   showTab("livreur");
   const retires = (activeRoute.injoignablesRetires || []).map(o => o.clientName).filter(Boolean);
+  // Les deux nouvelles peuvent arriver ensemble : aucune ne masque l'autre.
+  const suite = pourLaSuite.length ? ` ${pourLaSuite.length} commande(s) restent sélectionnées pour la tournée suivante.` : "";
   if (retires.length) {
-    notify(`Tournée créée sans ${retires.join(", ")} : injoignable par la route. Vérifie l’adresse ; la commande reste prête à livrer.`, "warning");
+    notify(`Tournée créée sans ${retires.join(", ")} : injoignable par la route. Vérifie l’adresse ; la commande reste prête à livrer.${suite}`, "warning");
   } else if (pourLaSuite.length) {
-    notify(`Tournée optimisée créée. ${pourLaSuite.length} commande(s) restent sélectionnées pour la tournée suivante.`, "success");
+    notify(`Tournée optimisée créée.${suite}`, "success");
   } else {
     notify("Tournée optimisée créée.", "success");
   }

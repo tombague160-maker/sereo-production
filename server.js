@@ -5317,6 +5317,12 @@ function createRoute(db, options = {}) {
   if (!orders.length) {
     throw badRequest("Aucune commande prete selectionnee pour la tournee");
   }
+  // Revue du 23/09 : 50 commandes au plus, dans les deux modes. Sans depart,
+  // rien ne bornait l'optimiseur, synchrone et sous le verrou d'ecriture
+  // (2 s a 400 commandes, 18 s avec des epingles : le serveur fige).
+  if (orders.length > 50) {
+    throw badRequest("Sélectionne entre 1 et 50 commandes par tournée.");
+  }
 
   if (options.plan && orders.some(order => db.routes.some(route => ["prete", "en_livraison"].includes(route.status) && route.stops.some(stop => String(stop.orderId) === String(order.id))))) {
     throw badRequest("Une commande sélectionnée appartient déjà à une tournée active.");
@@ -7372,7 +7378,9 @@ app.post("/api/routes/decoupage", (req, res) => {
   try {
     const ids = new Set((Array.isArray(req.body.orderIds) ? req.body.orderIds : []).map(String));
     const selected = getDeliverableOrders(readDb(), {}).filter(o => ids.has(String(o.id)));
-    const groupes = routing.decouperEnTournees(selected, req.body.departure, 50);
+    // Les commandes « a livrer en premier » partent dans la premiere tournee.
+    const premiers = Array.isArray(req.body.premiers) ? req.body.premiers.map(String) : [];
+    const groupes = routing.decouperEnTournees(selected, req.body.departure, 50, premiers);
     res.json({ max: 50, groupes: groupes.map(groupe => groupe.map(o => String(o.id))) });
   } catch (error) {
     handleRouteError(error, res, "Erreur decoupage tournee");

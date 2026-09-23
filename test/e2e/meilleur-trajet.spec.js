@@ -123,4 +123,61 @@ test.describe("Tournée — plus de 50 commandes", () => {
     expect(ouest).toBe(28);
     await expect(page.locator("#selectedDeliveryCount")).toHaveText("27 sélection");
   });
+
+  // Revue du 23/09 : (1) le decoupage ignorait « À livrer en premier » -- une
+  // commande epinglee de l'est partait avec la seconde tournee ; (2) quand un
+  // arret injoignable etait retire, la notification taisait la tournee suivante.
+  test("une commande « À livrer en premier » part dans la premiere tournee, et la notification dit aussi la suite", async ({ page }) => {
+    test.setTimeout(60000);
+    await page.goto(serveur.base + "/#livreur");
+    await expect(page.locator("#deliveryCandidates [data-delivery-order]")).toHaveCount(55);
+    await page.getByRole("button", { name: "Tout sélectionner", exact: true }).click();
+    await expect(page.locator("#selectedDeliveryCount")).toHaveText("55 sélection");
+    // m-1 est a l'est : sans epingle, elle irait dans la seconde tournee.
+    await page.locator('.delivery-premier:has([data-delivery-first="m-1"]) input').check();
+    await choisirDepart(page);
+
+    let envoye = null;
+    await page.route("**/api/routes", async route => {
+      if (route.request().method() !== "POST") return route.continue();
+      envoye = route.request().postDataJSON();
+      await route.fulfill({ status: 201, json: { id: "r-simulee", status: "prete", stops: [], selectedOrderIds: envoye.orderIds,
+        injoignablesRetires: [{ id: "m-0", clientName: "Client 00" }] } });
+    });
+    page.once("dialog", dialogue => dialogue.accept());
+    await page.locator("#createRouteButton").click();
+
+    await expect.poll(() => envoye).not.toBeNull();
+    expect(envoye.orderIds).toContain("m-1");
+    expect(envoye.premiers).toEqual(["m-1"]);
+    // La seule epingle est a l'est : c'est l'est entier (27) qui part d'abord.
+    expect(envoye.orderIds.length).toBe(27);
+    expect(envoye.orderIds.every(id => Number(id.slice(2)) % 2 === 1)).toBe(true);
+    const toast = page.locator("#toastRegion .toast-message").last();
+    await expect(toast).toContainText("sans Client 00");
+    await expect(toast).toContainText("28 commande(s) restent sélectionnées pour la tournée suivante");
+  });
+
+  // Revue du 23/09 : hors ligne, la proposition de decoupage (qui n'ecrit rien)
+  // etait mise en file, et l'ecran annoncait « enregistré, sera envoyé ».
+  test("hors ligne, au-dela de 50 commandes : l'ecran dit que rien n'est enregistre", async ({ page, context }) => {
+    test.setTimeout(60000);
+    await page.goto(serveur.base + "/#livreur");
+    await expect(page.locator("#deliveryCandidates [data-delivery-order]")).toHaveCount(55);
+    await page.getByRole("button", { name: "Tout sélectionner", exact: true }).click();
+    await expect(page.locator("#selectedDeliveryCount")).toHaveText("55 sélection");
+    await choisirDepart(page);
+    let dialogue = false;
+    page.on("dialog", d => { dialogue = true; d.dismiss(); });
+
+    await context.setOffline(true);
+    await page.locator("#createRouteButton").click();
+    const toast = page.locator("#toastRegion .toast-message").last();
+    await expect(toast).toContainText("le découpage en tournées demande le réseau");
+    await expect(page.locator("#toastRegion")).not.toContainText("sera envoyé à la reconnexion");
+    expect(dialogue).toBe(false);
+    await context.setOffline(false);
+    // Rien en file : la selection est intacte, aucune tournee ne sera creee.
+    await expect(page.locator("#selectedDeliveryCount")).toHaveText("55 sélection");
+  });
 });
