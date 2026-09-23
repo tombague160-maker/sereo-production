@@ -2,8 +2,10 @@
 //
 // 1. « À livrer en premier » : une case sous chaque commande CHOISIE (cachee
 //    sinon), et la tournee creee ouvre sur cette commande.
-// 2. Au-dela de 50 commandes : l'ecran propose un decoupage, cree la premiere
-//    tournee (50 au plus) et garde les autres selectionnees pour la suivante.
+// 2. Au-dela de 50 commandes : l'ecran propose un decoupage par direction, cree
+//    la premiere tournee (50 au plus, avec les commandes « en premier ») et garde
+//    les autres selectionnees pour la suivante ; la notification dit aussi un
+//    arret retire. Hors ligne, rien n'est mis en file (revue du 23/09).
 //
 // Serveur seme, sans tournee en cours ; routage simule en local (serveur-seme.js :
 // sa table de durees fait 6 x 6, d'ou QUATRE commandes pretes + depart + arrivee).

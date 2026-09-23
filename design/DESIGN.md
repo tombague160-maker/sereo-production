@@ -2634,8 +2634,8 @@ créneaux horaires : « À livrer en premier »).
   injoignable par la route… ») ou le départ/l'arrivée. Option `retirerInjoignables` :
   l'arrêt sort de la tournée, sa commande reste prête, la réponse le nomme
   (`injoignablesRetires`). L'écran l'envoie toujours, et l'annonce par une notification.
-- **Géocodeur (§2 basse).** Au premier échec, les autres workers s'arrêtent (10 appels
-  → 4 au plus) ; une commande sans rue est refusée AVANT tout appel.
+- **Géocodeur (§2 basse) : cédé au lot 3** (revue du 23/09, voir plus bas). La boucle
+  de géocodage de `roadPlan` est rendue telle que sur main.
 - **Tronçons (§3b).** `route.troncons` : `{ duree (s), distance (m) }` par trajet,
   départ → … → arrivée, tels qu'OSRM les rend (`legs`). Rien de neuf n'est affiché :
   c'est la matière des heures d'arrivée du lot 6. Un réordonnancement à la main les
@@ -2648,8 +2648,10 @@ créneaux horaires : « À livrer en premier »).
   pas, et son message dit « refuse une des positions » au lieu de « réessaie ».
 - **Découpage au-delà de 50 (§3b, lot 8).** `POST /api/routes/decoupage` (n'écrit
   rien) : balayage angulaire autour du départ, coupé à la plus grande trouée, paquets
-  équilibrés de 50 au plus. L'écran le propose (confirmation), crée la première tournée
-  et garde les autres commandes sélectionnées pour la suivante.
+  équilibrés de 50 au plus ; les commandes « À livrer en premier » partent dans la
+  première. L'écran le propose (confirmation), crée la première tournée et garde les
+  autres commandes sélectionnées pour la suivante. Hors ligne, il refuse sans rien
+  mettre en file.
 - **Garde-fou.** La descente a un plafond de mouvements : une matrice aux valeurs
   géantes (un « infini » à 9e15, vu pendant ce lot) faisait voir des gains fantômes à
   l'arrondi, et la boucle ne finissait pas. Banc : processus fils tué au bout de 20 s.
@@ -2660,7 +2662,6 @@ créneaux horaires : « À livrer en premier »).
   Mutant sans Or-opt (perturbations gardées) : pire 7,07 %, rouge aussi.
 - Épingles : « épinglés 4,0 mais ordre 3,1,0,2,4 ».
 - Injoignable : reçu « Un trajet est inaccessible par la route. Vérifie les adresses. ».
-- Géocodeur : « 10 appels au géocodeur pour une tournée déjà refusée ».
 - Tronçons : reçu `undefined` (lib), « la tournée n'a pas gardé ses tronçons » (serveur) ;
   mutant qui ne les efface pas au réordonnancement : rouge.
 - Repli : « …indisponible. Réessaie… » au lieu d'un calcul.
@@ -2685,8 +2686,6 @@ créneaux horaires : « À livrer en premier »).
 - Le découpage est un balayage angulaire, pas un regroupement : deux villes dans la même
   direction peuvent tomber ensemble, une ville à cheval sur deux paquets reste
   possible. Une seule tournée se voit à la fois (H9, lot 2) : la deuxième se crée après.
-- Le géocodeur s'arrête au premier échec, mais l'écran ne dit toujours qu'UNE adresse
-  douteuse par essai (§5, « toutes d'un coup », M) : non fait.
 - Hors périmètre, au plus petit : dans `server.js`, `createRoute`, `createStop`,
   `reorderRouteStops` (une ligne), `POST /api/routes` et la nouvelle route de
   découpage ; dans `app.js`, la liste de préparation et `createDeliveryRoute`.
@@ -2707,3 +2706,54 @@ créneaux horaires : « À livrer en premier »).
   l'écran (lot 6).
 - Afficher « en premier » dans la liste des arrêts ; vrais créneaux horaires (VROOM)
   si la décision 9 change.
+
+### Revue adverse du 23/09 : six défauts, six vrais
+
+- **Bancs du découpage aveugles au regroupement (important) : vrai, corrigé.** Les trois
+  bancs recevaient des commandes déjà rangées par côté ; le mutant « couper dans l'ordre
+  reçu » les passait. L'entrée alterne désormais ouest et est, et chaque groupe doit
+  être d'un seul côté : `[[37, 0], [0, 37]]` (lib), `[[37, 0], [0, 36]]` (serveur),
+  28 commandes de l'ouest sur 28 (e2e). Mutant : reçu `[[19, 18], [18, 19]]`,
+  `[[19, 18], [18, 18]]`, « Expected: 28 / Received: 14 ». Le code était juste.
+- **Conflit avec le lot 3, `fix/adresses-justes` (important) : vrai, corrigé de ce
+  côté.** La résolution des adresses d'une tournée appartient au lot 3 (« un seul module
+  de géocodage »), qui résout TOUTES les commandes pour nommer TOUTES les adresses
+  douteuses ; « arrêter au premier échec » disait l'inverse, dans les mêmes lignes. Ce
+  lot rend la boucle de main, retire son banc, range le détail d'un refus sous
+  `error.details` (convention du lot 3 ; banc : reçu `undefined` sur l'ancien code), et
+  ne réécrit plus les lignes que le lot 3 réécrit (`fail`, `json`, `geocode`, la fin de
+  `createStop`). Mesure `git merge-tree` avec `fix/adresses-justes` : `lib/routing.js`
+  passe de 5 blocs en conflit à 2, `server.js` de 2 à 1. Restent, à résoudre à la main
+  par UNION : la signature de `roadPlan` (`{ geocoder = null, ...options } = {}` ou
+  deux lectures), `module.exports` (garder `resoudrePositions`, `injoignables`,
+  `decouperEnTournees`, `_reinitialiserRepli` ; retirer `geocode`, que le lot 3 a
+  déplacé), l'appel de `roadPlan` dans `POST /api/routes` (passer `geocoder` ET
+  `retirerInjoignables`), `createDeliveryRoute` dans `app.js` (le `try` du lot 3
+  autour du `POST /api/routes` du lot 7), la fin de `style.css`, `DESIGN.md` et la
+  doc. Après fusion : `Object.assign(fail(msg), { details })` reste juste avec le
+  `fail` du lot 3.
+- **Hors ligne, découpage mis en file (mineur) : vrai, corrigé.** Au-delà de 50
+  commandes et hors ligne, l'écran dit « le découpage en tournées demande le réseau.
+  Rien n'a été enregistré » avant tout appel. Ancien code : « Hors ligne — enregistré,
+  sera envoyé à la reconnexion » et « 1 en attente ». **À la fusion du lot 1**, qui met
+  en file sur TOUT échec réseau (pas seulement `navigator.onLine === false`) : ajouter
+  `/^\/api\/routes\/decoupage$/` à `JAMAIS_EN_FILE`, sinon le cas « réseau présent mais
+  muet » revient.
+- **Sans départ, aucun plafond (mineur) : vrai, corrigé.** Mesuré sur la copie de la
+  branche : 400 commandes 1,6 s, avec 8 épingles 17,8 s (200 : 0,14 s et 2,2 s).
+  `createRoute` refuse au-delà de 50 dans les deux modes (« Sélectionne entre 1 et 50
+  commandes par tournée. »), y compris l'appel sans liste (toutes les commandes
+  prêtes). Ancien code : 201. L'écran n'utilise pas ce mode ; un appel d'API qui créait
+  une tournée de plus de 50 est désormais refusé.
+- **Le découpage ignorait « À livrer en premier » (mineur) : vrai, corrigé.**
+  `decouperEnTournees(points, depart, max, premiers)` : la tournée qui porte le plus
+  d'épingles part d'abord (rotation, l'ordre des directions est gardé) ; une épingle
+  restée ailleurs prend la place de la dernière commande sans épingle de la première,
+  qui passe en tête de la tournée qu'elle quitte (tailles gardées). Écart : plus
+  d'épingles que de places, le surplus reste où il est, sans message.
+- **Notification qui taisait la suite (mineur) : vrai, corrigé.** Un arrêt retiré ET
+  des commandes pour la suivante : les deux phrases, dans le même message. Mutant
+  (ancien message) : reçu « Tournée créée sans Client 00 : injoignable… » seul.
+- **Conséquence du cédage au lot 3.** Tant que le lot 3 n'est pas fusionné, `main` garde
+  l'ancienne boucle : après un premier échec, les autres workers continuent d'interroger
+  le géocodeur (§2 basse). Le lot 3 la remplace par une résolution complète, voulue.

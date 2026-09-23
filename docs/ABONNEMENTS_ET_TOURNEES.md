@@ -26,7 +26,7 @@ Les abonnements sont stockés dans la table SQLite `abonnements`, intégrée aux
 
 1. Choisir le départ : **Me localiser** ou rechercher une adresse/ville, puis confirmer le résultat.
 2. Choisir l’arrivée de la même manière, ou cocher **Retour au point de départ**.
-3. Sélectionner les commandes prêtes et créer la tournée. Sous chaque commande choisie, **À livrer en premier** la place en tête de tournée (plusieurs possibles : l’ordre entre elles est optimisé aussi). Au-delà de 50 commandes, l’écran propose de les répartir en plusieurs tournées, par direction depuis le départ : il crée la première et garde les autres sélectionnées pour la suivante.
+3. Sélectionner les commandes prêtes et créer la tournée. Sous chaque commande choisie, **À livrer en premier** la place en tête de tournée (plusieurs possibles : l’ordre entre elles est optimisé aussi). Au-delà de 50 commandes, l’écran propose de les répartir en plusieurs tournées, par direction depuis le départ : il crée la première (celle des commandes « À livrer en premier ») et garde les autres sélectionnées pour la suivante. Ce découpage demande le réseau.
 4. Démarrer. Chaque validation Livré/Absent passe à l’arrêt suivant. Google Maps ouvre la navigation vers le client. Après le dernier arrêt, un lien permet de rejoindre l’arrivée.
 
 Le serveur utilise le géocodage IGN pour les adresses sans coordonnées, puis OSRM pour les temps routiers et le tracé. Les noms, téléphones et produits ne sont pas transmis : le géocodeur reçoit les adresses, le moteur routier reçoit les coordonnées. Une adresse trop incertaine bloque le calcul avec une demande de correction.
@@ -35,7 +35,7 @@ L’ordre part du client le plus proche en temps routier puis est amélioré en 
 
 Un arrêt injoignable par la route (île, chemin privé, mauvaise position) est nommé. Depuis l’écran, il est retiré de la tournée et signalé ; sa commande reste prête à livrer. La tournée garde la durée et la distance de chaque trajet (`troncons`), pour les heures d’arrivée.
 
-Une tournée créée sans départ (par l’API) suit le plus court chemin entre les arrêts, à vol d’oiseau.
+Une tournée créée sans départ (par l’API) suit le plus court chemin entre les arrêts, à vol d’oiseau ; 50 commandes au plus, comme avec un départ.
 
 Une tournée manuellement réordonnée perd son ancien tracé ; **Recalculer le tracé** le reconstruit en conservant cet ordre. Le démarrage recalcule automatiquement si le tracé a été invalidé. Une tournée démarrée ne remet jamais ses arrêts déjà traités à zéro.
 
