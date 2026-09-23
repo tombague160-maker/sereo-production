@@ -1324,7 +1324,8 @@ async function loadData() {
 function refreshActiveRoute() {
   if (activeRoute) {
     const updated = deliveryRoutes.find(item => String(item.id) === String(activeRoute.id));
-    activeRoute = updated || activeRoute;
+    activeRoute = updated ? garderTrace(updated, activeRoute) : activeRoute;
+    chargerTraceOmise();
     if (activeRoute && activeStopIndex >= activeRoute.stops.length) activeStopIndex = 0;
     // Un rechargement pendant les 4 s d'Annuler ne fait pas reapparaitre
     // l'arret qu'on vient de livrer.
@@ -1336,6 +1337,86 @@ function refreshActiveRoute() {
     || deliveryRoutes.find(item => item.status === "prete")
     || null;
   activeStopIndex = 0;
+}
+
+// --- MISE A JOUR CIBLEE APRES UN GESTE D'ARRET (lot 5, audit geo du 23/09) ---
+//
+// Avant : chaque « Livre », « Absent », deplacement d'arret relancait loadData(),
+// 17 requetes qui relisent toute la base -- 5,5 a 8,8 s apres un an
+// d'historique, sur le telephone du livreur en 4G. La reponse du serveur porte
+// deja ce que le geste a change (la tournee, l'arret, la commande, le client,
+// sous la forme des listes) : on remplace ces objets-la, et on redessine.
+//
+// Ce qui n'est PAS recharge a chaque geste (tableau de bord, statistiques,
+// historique) l'est quand la tournee se termine, et par le sondage de
+// l'accueil. Le point d'entree des gestes ne change pas : seul le rechargement
+// qui les suivait est remplace.
+
+/** Remplace dans `liste` l'element de meme id (ou l'ajoute en tete). Rend la nouvelle liste. */
+function remplacerParId(liste, objet) {
+  if (!objet) return liste;
+  const copie = Array.isArray(liste) ? [...liste] : [];
+  const i = copie.findIndex(item => String(item.id) === String(objet.id));
+  if (i >= 0) copie[i] = objet;
+  else copie.unshift(objet);
+  return copie;
+}
+
+/**
+ * La liste ne porte plus le trace d'une tournee terminee (`traceOmise`) : si
+ * l'ecran l'avait deja, il le garde.
+ */
+function garderTrace(nouvelle, ancienne) {
+  if (!nouvelle || nouvelle.geometry || !nouvelle.traceOmise) return nouvelle;
+  if (ancienne && String(ancienne.id) === String(nouvelle.id) && ancienne.geometry) {
+    return { ...nouvelle, geometry: ancienne.geometry };
+  }
+  return nouvelle;
+}
+
+/** Le trace d'une tournee terminee, demande au serveur quand l'ecran ne l'a pas. */
+let traceEnDemande = null;
+function chargerTraceOmise() {
+  const cible = activeRoute;
+  if (!cible || !cible.traceOmise || cible.geometry || traceEnDemande === String(cible.id)) return;
+  traceEnDemande = String(cible.id);
+  apiFetch(`/api/routes/${encodeURIComponent(cible.id)}`)
+    .then(complete => {
+      if (!complete?.geometry || !activeRoute || String(activeRoute.id) !== String(cible.id)) return;
+      activeRoute = { ...activeRoute, geometry: complete.geometry };
+      renderMap();
+    })
+    .catch(() => { /* sans trace, la carte montre les arrets : rien de faux */ })
+    .finally(() => { traceEnDemande = null; });
+}
+
+/**
+ * Applique la reponse d'un geste d'arret ({ route, stop, order, client }).
+ * Quand le geste termine la tournee, un chargement complet suit : c'est la
+ * qu'on veut le tableau de bord et les statistiques a jour, une fois.
+ */
+async function appliquerGesteArret(resultat) {
+  const tournee = resultat && resultat.route;
+  if (!tournee || !Array.isArray(tournee.stops)) {
+    await loadData();
+    return;
+  }
+  deliveryRoutes = remplacerParId(deliveryRoutes, tournee);
+  if (resultat.order) orders = remplacerParId(orders, resultat.order);
+  if (resultat.client) {
+    clients = remplacerParId(clients, { ...resultat.client, statut: resultat.client.statut || "restant" });
+  }
+  if (activeRoute && String(activeRoute.id) === String(tournee.id)) {
+    activeRoute = garderTrace(tournee, activeRoute);
+    if (activeStopIndex >= activeRoute.stops.length) activeStopIndex = 0;
+    appliquerLivraisonEnSuspens();
+    route = activeRoute.stops;
+  }
+  if (tournee.status === "terminee") {
+    await loadData();
+    return;
+  }
+  renderAll({ lectures: false });
 }
 
 /**
@@ -1853,7 +1934,13 @@ function rendreSiAffiche(idSection, rendu) {
   if (document.getElementById(idSection)?.classList.contains("active")) rendu();
 }
 
-function renderAll() {
+/**
+ * @param lectures faux apres un geste d'arret (lot 5) : les trois rendus qui
+ *   relisent le serveur (reglages, archives d'import, comptes) n'ont rien a
+ *   voir avec le geste, et le rechargement qu'on vient d'eviter reviendrait
+ *   par eux.
+ */
+function renderAll({ lectures = true } = {}) {
   majEnteteTableauDeBord(getInitialTab());
   // Premier lancement (planche 10b) : aucune commande -> la carte d'accueil
   // remplace « A regler » et « Cette semaine ».
@@ -1885,9 +1972,11 @@ function renderAll() {
   renderDeliveryCandidates();
   renderRoute();
   renderClients();
-  renderSettings();
-  renderImportsArchives();
-  renderComptes();
+  if (lectures) {
+    renderSettings();
+    renderImportsArchives();
+    renderComptes();
+  }
   renderMap();
   updateRouteProgress();
   renderTourneeDuJour();
@@ -6277,7 +6366,10 @@ async function moveStop(stopId, direction) {
   });
 
   activeStopIndex = nextIndex;
-  await loadData();
+  // Lot 5 : la reponse est la tournee telle que la liste la rend.
+  deliveryRoutes = remplacerParId(deliveryRoutes, activeRoute);
+  route = activeRoute.stops;
+  renderAll({ lectures: false });
   notify("Ordre de tournée mis à jour.", "success");
 }
 
@@ -6543,7 +6635,8 @@ async function updateCurrentDeliveryStatus(status, motif = null) {
 
     activeRoute = result.route;
     if (activeStopIndex < activeRoute.stops.length - 1) activeStopIndex++;
-    await loadData();
+    // Lot 5 : mise a jour ciblee, plus le rechargement complet.
+    await appliquerGesteArret(result);
     notify("Statut livraison enregistré.", "success");
     return;
   }
@@ -6700,8 +6793,9 @@ function envoyerLivraisonEnSuspens(attendu = null) {
   livraisonEnSuspens = null;
   retirerToast(s.toast);
   const envoi = (async () => {
+    let resultat;
     try {
-      await apiFetch(`/api/routes/${encodeURIComponent(s.routeId)}/stops/${encodeURIComponent(s.stopId)}`, {
+      resultat = await apiFetch(`/api/routes/${encodeURIComponent(s.routeId)}/stops/${encodeURIComponent(s.stopId)}`, {
         method: "PATCH",
         // keepalive : l'envoi declenche par `pagehide` survit a la page.
         keepalive: true,
@@ -6715,7 +6809,8 @@ function envoyerLivraisonEnSuspens(attendu = null) {
       await loadData();
       throw error;
     }
-    await loadData();
+    // Lot 5 : mise a jour ciblee, plus le rechargement complet.
+    await appliquerGesteArret(resultat);
   })();
   envoiLivraison = envoi;
   const liberer = () => { if (envoiLivraison === envoi) envoiLivraison = null; };
