@@ -1522,6 +1522,17 @@ function bindCommandes() {
   });
 }
 
+// Les anciens ecrans-listes (commandes du jour, planifiees, livrees, bons de
+// commande) et deux ecrans hors navigation (produits, alertes) ne sont plus
+// atteignables : les planches V8 les ont fondus dans d'autres ecrans, et leurs
+// adresses redirigent. Les dessiner a chaque chargement coutait cher -- mesure
+// du 23/09 sur 2 000 commandes : 78 000 elements sur 108 000, et une tache de
+// 289 ms au demarrage. On ne les dessine que s'ils sont AFFICHES : si l'un
+// redevient atteignable, il se redessine sans qu'on touche a cette liste.
+function rendreSiAffiche(idSection, rendu) {
+  if (document.getElementById(idSection)?.classList.contains("active")) rendu();
+}
+
 function renderAll() {
   majEnteteTableauDeBord(getInitialTab());
   renderStats();
@@ -1530,20 +1541,20 @@ function renderAll() {
   renderCrm();
   renderRelances();
   renderCustomerOrder();
-  renderTodayOrders();
-  renderPlannedOrders();
+  rendreSiAffiche("commandes-jour", renderTodayOrders);
+  rendreSiAffiche("commandes-planifiees", renderPlannedOrders);
   renderStatistics();
   renderExports();
   renderStock();
   renderStockMovements();
   renderPreparation();
   renderRecommande();
-  renderCommandesLivrees();
-  renderBonsCommande();
+  rendreSiAffiche("commandes-livrees", renderCommandesLivrees);
+  rendreSiAffiche("bons-commande", renderBonsCommande);
   renderCommandes();
-  renderProduits();
+  rendreSiAffiche("produits", renderProduits);
   renderVentes();
-  renderAlertes();
+  rendreSiAffiche("alertes", renderAlertes);
   renderHistorique();
   renderDeliveryFilters();
   renderDeliveryCandidates();
