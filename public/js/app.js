@@ -1228,6 +1228,14 @@ function dateDeLaCommande(order) {
     : (order.dateCommande || order.deliveryDate);
 }
 
+// « 16 sept. » -> <jour>16</jour> <mois>sept.</mois> (et l'annee, s'il y en a
+// une, avec le mois). Le texte lu ne change pas.
+function dateEnDeuxMorceaux(texte) {
+  const [jour, ...reste] = String(texte).split(" ");
+  if (!reste.length) return escapeHtml(texte);
+  return `<span class="cmd-date-jour">${escapeHtml(jour)}</span> <span class="cmd-date-mois">${escapeHtml(reste.join(" "))}</span>`;
+}
+
 function dateCourte(iso) {
   if (!iso) return "—";
   const d = new Date(`${String(iso).slice(0, 10)}T12:00:00`);
@@ -1360,9 +1368,13 @@ function renderCommandes() {
       + case_
       + `<span class="cmd-num">${escapeHtml(order.numero || "—")}`
       + `${order.subscriptionId ? '<span class="cmd-abo">Abonnement</span>' : ""}</span>`
-      + `<span class="cmd-date">${escapeHtml(dateCourte(dateDeLaCommande(order)))}</span>`
+      // La date en deux morceaux (planche 8a : le jour en grand, le mois en
+      // petit) ; le texte reste « 16 sept. » pour le bureau et les bancs.
+      + `<span class="cmd-date">${dateEnDeuxMorceaux(dateCourte(dateDeLaCommande(order)))}</span>`
       + `<span class="cmd-client">${escapeHtml(order.clientName || "Client")}</span>`
       + `<span class="cmd-secteur">${escapeHtml(order.sector ? formatSectorLabel(order.sector) : "—")}</span>`
+      // La ligne de detail du telephone (planche 8a) : « CMD-2026-007 · Champagnole ».
+      + `<span class="cmd-meta">${escapeHtml([order.subscriptionId ? "Abonnement" : (order.numero || ""), order.sector ? formatSectorLabel(order.sector) : ""].filter(Boolean).join(" · "))}</span>`
       + `<span class="cmd-articles cmd-droite">${colonneArticles}</span>`
       + `<span class="cmd-statut cmd-droite">${badgeDeCommande(order)}</span>`
       + `</div>`;
