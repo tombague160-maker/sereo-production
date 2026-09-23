@@ -937,6 +937,9 @@ function showTab(tabName, options = {}) {
     history.replaceState(null, "", `#${tabName}`);
   }
   const nextTab = titles[tabName] && mainTabs.has(tabName) ? tabName : "journee";
+  // Decision 4 : ouverte sans reseau, seul l'ecran Tournee se montre.
+  ongletAffiche = nextTab;
+  majEcranDemandeReseau();
 
   document.querySelectorAll(".page").forEach(page => page.classList.remove("active"));
   // La rangee de pilules AVANT la boucle : elle cree les elements que la
@@ -1556,7 +1559,11 @@ async function appliquerReponsesTardives() {
   if (Object.prototype.hasOwnProperty.call(data, "orders")) commandesEnErreur = false;
   appliquerDonnees(data);
   for (const cle of cles) clesEnCopie.delete(cle);
-  if (clesEnCopie.size === 0 && /^Données (de|du|en cache)/.test(dernierStatut)) setStatus("À jour");
+  if (clesEnCopie.size === 0 && /^Données (de|du|en cache)/.test(dernierStatut)) {
+    copieAffichee = null;
+    setStatus("À jour");
+    quitterOuvertureHorsLigne();
+  }
 }
 
 /**
@@ -1716,6 +1723,8 @@ async function loadData() {
     copie = await lireDernieresDonnees(endpoints);
     if (copie && !reseauFini) {
       appliquerDonnees(copie.data);
+      // Decision 4 : hors ligne, le bandeau dit tout de suite de quand elles datent.
+      copieAffichee = copie.date;
       setStatus("Mise à jour…");
     }
   }
@@ -1774,6 +1783,9 @@ async function loadData() {
   // erreur aussi, si c'etait elle : une liste vide y dirait « Aucune commande ».
   commandesEnErreur = failed.includes("orders") || (gardees.includes("orders") && commandesEnErreur);
   appliquerDonnees(data);
+  // Decision 4 : la date des copies a l'ecran, pour le bandeau hors ligne.
+  // En mode frais sans reseau, l'ecran garde ce qu'il montrait : sa date aussi.
+  if (!gardees.length) copieAffichee = copiees.length ? dateCopie : null;
 
   if (gardees.length) {
     // Le geste est parti ou attend dans la file (le bandeau le dit) : on ne
@@ -1781,6 +1793,7 @@ async function loadData() {
     setStatus("Mise à jour impossible");
   } else if (failed.length === 0 && copiees.length === 0) {
     setStatus("À jour");
+    quitterOuvertureHorsLigne();
   } else if (failed.length === 0) {
     setStatus(libelleCopie(dateCopie));
   } else if (failed.length === endpoints.length) {
@@ -8515,19 +8528,98 @@ function renvoyerVersConnexionPourLaFile() {
 // rechargement fait hors ligne (le bandeau dit alors « Hors ligne », sans heure).
 let horsLigneDepuis = null;
 
+// --- L'ECRAN TOURNEE ROUVERT SANS RESEAU (decision 4, 23/09) ----------------
+//
+// Le service worker rend la page depuis son cache pour UNE navigation : vers
+// l'ecran Tournee, hors ligne, session valide connue (service-worker.js). Il
+// la marque (data-ouverte-hors-ligne sur <html>). Tant que le reseau n'a pas
+// repondu :
+//  - seul l'ecran Tournee se montre ; les autres disent qu'ils demandent le
+//    reseau (#ecranDemandeReseau), sans montrer leurs donnees de secours ;
+//  - le bandeau dit « Hors ligne — données de HH:MM ».
+// Au premier chargement complet venu du reseau, tout redevient normal.
+let ouverteHorsLigne = typeof document !== "undefined"
+  && document.documentElement.hasAttribute("data-ouverte-hors-ligne");
+// L'ecran affiche (showTab), pour savoir s'il faut dire « demande le réseau ».
+let ongletAffiche = null;
+// La date des donnees affichees quand ce sont des COPIES (cache du service
+// worker) ; null quand elles viennent du reseau. NaN : copie sans date lisible.
+let copieAffichee = null;
+
+function majEcranDemandeReseau() {
+  const ecran = document.getElementById("ecranDemandeReseau");
+  if (ecran) ecran.hidden = !(ouverteHorsLigne && ongletAffiche !== "livreur");
+}
+
+/** Le reseau a repondu : l'application redevient entiere. */
+function quitterOuvertureHorsLigne() {
+  if (!ouverteHorsLigne) return;
+  ouverteHorsLigne = false;
+  document.documentElement.removeAttribute("data-ouverte-hors-ligne");
+  majEcranDemandeReseau();
+  // Ce que l'ouverture sans reseau n'a pas pu lire (jamais en cache).
+  loadMoi();
+  loadVersionInfo();
+  setStatus(dernierStatut);
+}
+
+/**
+ * Le reseau revient : la file part D'ABORD (lot 1), puis, si l'ecran montre
+ * des copies, tout se relit. Dans cet ordre : un rechargement parti avant le
+ * renvoi decrirait l'etat d'avant les gestes.
+ */
+let retourEnCours = null;
+function auRetourDuReseau() {
+  // Un seul retour a la fois : la sonde reguliere et « online » peuvent se croiser.
+  if (retourEnCours) return retourEnCours;
+  retourEnCours = Promise.resolve(viderLaFile()).catch(() => {}).then(() => {
+    if (ouverteHorsLigne || copieAffichee !== null) return loadData();
+    return undefined;
+  }).catch(() => {}).finally(() => { retourEnCours = null; });
+  return retourEnCours;
+}
+
 // Le telephone qui se croit en ligne ne dit jamais « online » : sans essai
 // regulier, une ecriture mise en file sur un delai depasse attendrait le
 // prochain rechargement.
 const RENVOI_PERIODIQUE_MS = 20_000;
 
+// Relecture adverse (23/09) : une page ROUVERTE sans reseau par le delai de
+// 5 s ou par une passerelle en erreur (502/503/504, serveur arrete pendant que
+// sereo-updater reconstruit l'image) vient d'un telephone qui se croit en
+// ligne : aucun « online » n'arrivera. Sans essai regulier, elle restait
+// « Hors ligne », figee, les autres ecrans bloques, jusqu'a un rechargement a
+// la main. On sonde donc le serveur (/api/me : leger, jamais mis en cache par
+// le service worker) ; toute reponse qui ne vient pas d'une passerelle en
+// erreur dit qu'il est la -- un 401 aussi : loadData renvoie alors vers la
+// connexion, et vide le cache de donnees (apiFetch).
+const DELAI_SONDE_RETOUR_MS = 8000;
+let sondeEnCours = false;
+async function sonderLeRetourDuReseau() {
+  if (!ouverteHorsLigne || sondeEnCours || retourEnCours || estDefinitivementHorsLigne() || document.hidden) return;
+  sondeEnCours = true;
+  try {
+    const signal = typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+      ? AbortSignal.timeout(DELAI_SONDE_RETOUR_MS) : undefined;
+    const reponse = await fetch("/api/me", { cache: "no-store", credentials: "same-origin", signal });
+    if (![502, 503, 504].includes(reponse.status)) auRetourDuReseau();
+  } catch {
+    // Toujours pas de reseau : le prochain essai viendra.
+  } finally {
+    sondeEnCours = false;
+  }
+}
+
 function brancherFileHorsLigne() {
-  window.addEventListener("online", () => { horsLigneDepuis = null; setStatus(dernierStatut); viderLaFile(); });
+  window.addEventListener("online", () => { horsLigneDepuis = null; setStatus(dernierStatut); auRetourDuReseau(); });
   window.addEventListener("offline", () => { horsLigneDepuis = new Date(); setStatus(dernierStatut); });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible" && ecrituresEnAttente > 0 && !estDefinitivementHorsLigne()) viderLaFile();
+    if (document.visibilityState === "visible") sonderLeRetourDuReseau();
   });
   setInterval(() => {
     if (ecrituresEnAttente > 0 && !estDefinitivementHorsLigne()) viderLaFile();
+    sonderLeRetourDuReseau();
   }, RENVOI_PERIODIQUE_MS);
   // A l'ouverture : l'onglet a pu etre ferme avec des ecritures en attente.
   // C'est le prix de ne pas utiliser Background Sync, absent d'iOS Safari --
@@ -8570,7 +8662,9 @@ function setStatus(message) {
 function majBandeauHorsLigne() {
   const bandeau = document.getElementById("bandeauHorsLigne");
   if (!bandeau) return;
-  const horsLigne = estDefinitivementHorsLigne();
+  // Ouverte sans reseau (decision 4) : hors ligne tant que le reseau n'a pas
+  // repondu, meme si le telephone se croit en ligne (4G sans debit).
+  const horsLigne = estDefinitivementHorsLigne() || ouverteHorsLigne;
   // Un import de fichier ne se met pas en file (tenterMiseEnFile) : hors
   // ligne, ses boutons le disent au lieu d'echouer. AVANT le retour anticipe
   // du bandeau masque : sinon, le reseau revenu, ils restaient desactives.
@@ -8584,7 +8678,13 @@ function majBandeauHorsLigne() {
   const heure = horsLigneDepuis
     ? horsLigneDepuis.toLocaleTimeString("fr-FR", { hour: "numeric", minute: "2-digit" }).replace(":", " h ")
     : "";
-  setText("bandeauHorsLigneTitre", horsLigne ? (heure ? `Hors ligne depuis ${heure}` : "Hors ligne") : "Envoi en attente");
+  // Des COPIES a l'ecran : le bandeau dit de quand elles datent (« Hors ligne
+  // — données de 14:32 »), l'information qui compte pour le livreur. Des
+  // donnees fraiches : depuis quand la coupure dure.
+  const titreHorsLigne = copieAffichee !== null
+    ? `Hors ligne — ${libelleCopie(copieAffichee).replace(/^D/, "d")}`
+    : (heure ? `Hors ligne depuis ${heure}` : "Hors ligne");
+  setText("bandeauHorsLigneTitre", horsLigne ? titreHorsLigne : "Envoi en attente");
   const n = ecrituresEnAttente;
   const suite = horsLigne ? "Envoi au retour du réseau."
     : fileBloquee ? "Le serveur répond en erreur : nouvel essai tous les quarts d'heure."
@@ -9324,7 +9424,9 @@ function registerServiceWorker() {
   });
   navigator.serviceWorker.register("/service-worker.js")
     .then(registration => {
-      registration.update();
+      // Hors ligne (decision 4 : la tournee s'ouvre sans reseau), la
+      // verification echoue ; son rejet ne doit pas remonter en erreur de page.
+      registration.update().catch(() => {});
       registration.addEventListener("updatefound", () => {
         const installing = registration.installing;
         if (!installing) return;

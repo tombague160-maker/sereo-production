@@ -343,6 +343,10 @@ quelqu'un qui n'est plus connecté — les données, elles, resteraient inaccess
 sécurité, donc il revient à Thomas, pas à moi.** La file d'attente fonctionne sans
 lui : elle se vide au retour du réseau dans l'onglet ouvert, et au démarrage suivant.
 
+> **Tranché le 23/09 (décision 4 de Thomas)** : l'écran Tournée, et lui seul, se
+> rouvre hors ligne, sous session valide connue. Voir la dernière section, « L écran
+> Tournée se rouvre sans réseau ».
+
 ### Trois cécités de l'instrument de contraste — fermées le 18/09
 
 Le banc annonçait **1 275 textes, 0 défaut**. Il ne mentait pas ; sa **portée**
@@ -4796,3 +4800,194 @@ retouchée pour une tournée sans départ). Résultats sur `5110ba7` : `npm test
 e2e tournee-pratique, tournee, tournee-mobile, ecran-livreur, carte-telephone,
 meilleur-trajet, livreur-ne-perd-rien, integration-lots-1-5, operations, hors-ligne :
 88/88.
+
+## 23/09 — L écran Tournée se rouvre sans réseau (décision 4)
+
+Source : arbitrage ouvert le 18/09 (section de la file hors ligne, plus haut), M10 de
+l'audit géo du 23/09. Décision de Thomas : **l'écran Tournée, et seulement lui**, se
+rouvre sans réseau — onglet fermé, téléphone redémarré. Branche
+`feat/tournee-hors-ligne`, partie de `main` v1.42.0 (`c05e6f1`).
+
+### Fait
+
+- **Le service worker garde la page** (`public/service-worker.js`, `naviguer`). La
+  navigation passe toujours au réseau d'abord : c'est elle qui porte le contrôle de
+  session. Chaque navigation réussie range le HTML de l'application **dans le cache
+  de données** (`sereo-api-…`, clé `/__sereo/page-tournee`) : il part donc avec lui à
+  la déconnexion (`POST /logout`) et à l'expiration de session (401, `apiFetch`).
+- **Il ne la rend que pour la tournée**, et à quatre conditions : la navigation vise
+  `#livreur` (ou `?ecran=livreur`, pour un navigateur qui ne transmettrait pas
+  l'ancre) ; le réseau a échoué, se tait depuis 5 s, ou la passerelle répond
+  502/503/504 ; la session connue n'est pas finie ; la page gardée annonce le shell de
+  **ce** service worker (sinon ses scripts, servis par ce cache-ci, ne seraient pas
+  les siens). La copie garde les en-têtes de la page (CSP comprise) et porte
+  `data-ouverte-hors-ligne` sur `<html>`.
+- **La session, dite par le serveur** (`server.js`, `finDeSessionConnue`) : la page
+  annonce `X-Sereo-Session-Fin` = émission du cookie + 12 h, jamais plus (hors ligne,
+  personne ne peut la prolonger). L'en-tête est aussi sur le 304 d'une revalidation
+  (le navigateur remplace les en-têtes gardés par ceux du 304). La **page de
+  connexion** annonce « 0 » : le service worker vide alors tout le cache de données,
+  page et données — la session est finie, rien ne se rouvre. Qu'elle soit rendue en
+  place sur « / » ou ouverte directement (`/login`, favori) : ce second cas ne passait
+  pas par le service worker, corrigé par la relecture adverse (plus bas). Sans session du tout
+  (authentification désactivée, ou accès Basic sans cookie), rien n'est annoncé :
+  la page n'est ni gardée ni oubliée.
+- **Les autres écrans, hors ligne** : une navigation vers un autre écran rend une
+  page du service worker, « Hors ligne — cet écran demande le réseau », avec un
+  bouton « Ouvrir la tournée » seulement si une copie valide existe (sans session :
+  « Séréo demande le réseau pour s’ouvrir. », rien d'autre). Dans la page rouverte,
+  les autres onglets ne montrent pas leurs données de secours : `#ecranDemandeReseau`
+  le dit à leur place (état vide de la charte, bouton 44 px vers la tournée).
+- **Le bandeau** dit « Hors ligne — données de HH:MM » (ou « du JJ/MM ») dès que
+  l'écran montre des copies, et dès la copie lue au démarrage. Des données fraiches,
+  puis une coupure : « Hors ligne depuis HH h MM », comme avant.
+- **Les gestes en file** restent superposés (lot 1) : l'arrêt livré hors ligne revient
+  « Livré — En attente d’envoi » après le redémarrage, et l'écran ne propose pas de
+  le relivrer.
+- **Au retour du réseau** (`auRetourDuReseau`) : la file part **d'abord**, puis, si
+  l'écran montre des copies, tout se relit. Au premier chargement complet venu du
+  réseau, la page redevient entière (`quitterOuvertureHorsLigne` : marque retirée,
+  identité et version relues).
+- `registration.update()` sans `catch` : hors ligne, son rejet remontait en erreur de
+  page. Il n'était jamais atteint avant (la page ne s'ouvrait pas hors ligne).
+
+### Décisions prises dans le lot
+
+- **La page vit dans le cache de données, pas dans celui du shell** : elle hérite
+  ainsi des deux purges existantes (déconnexion, 401) sans code de plus.
+- **« Seulement la tournée » lu strictement** : l'icône de l'écran d'accueil
+  (`start_url` = `/`) rouvre, hors ligne, la page « demande le réseau » avec son
+  bouton « Ouvrir la tournée » — un toucher de plus, plutôt qu'une application
+  entière servie sans réseau.
+- **Réseau muet** : copie au bout de **5 s** (défaut ; plage raisonnable 3 à 10 s : en
+  dessous, un serveur lent au réveil ferait ouvrir la copie ; au-dessus, le livreur
+  attend devant un écran blanc). Seulement pour la tournée : un autre écran attend le
+  réseau.
+- **Sans authentification, pas d'ouverture hors ligne** : il n'y a pas de session,
+  donc pas de « session valide connue ». Mesuré : la première version annonçait 12 h
+  dans ce cas, et `chargement-instantane.spec.js` « la déconnexion vide le cache de
+  données » rougissait (le serveur sans authentification sert l'application à la
+  place de `/login`, et la navigation remettait la page dans le cache). La
+  production a l'authentification (DEPLOYMENT.md).
+
+### Écarts nommés
+
+- **Une nouvelle version activée pendant que la page est ouverte** (le toast
+  « Recharger ») : la page gardée annonce l'ancien shell, elle n'est plus rendue ;
+  la tournée ne se rouvre hors ligne qu'après une navigation en ligne sur la nouvelle
+  version. Choisi : jamais d'ancien HTML sous de nouveaux scripts.
+- **La session ne glisse pas** : elle finit 12 h après la connexion. Un livreur
+  connecté la veille au soir ne rouvre pas sa tournée hors ligne le matin — le
+  serveur l'aurait refusé de toute façon. Allonger la session est une décision de
+  sécurité, hors de ce lot.
+- **Une session qui expire pendant que la page rouverte est affichée** : la page ne
+  se referme pas d'elle-même ; seule la réouverture suivante est refusée.
+- **Un compte désactivé, ou une session invalidée côté serveur**, pendant que le
+  téléphone est hors ligne : le téléphone ne peut pas le savoir. La copie se rouvre
+  jusqu'à la fin annoncée (émission + 12 h), avec les noms, adresses et téléphones de
+  la tournée. Au premier contact avec le serveur (navigation, sonde de retour, toute
+  lecture), le refus arrive : page de connexion ou 401, et le cache de données part.
+  Fermer cet écart demanderait de ne rien rouvrir hors ligne — contraire à la
+  décision 4 ; raccourcir la fenêtre, c'est raccourcir la session (décision de
+  sécurité, hors de ce lot).
+- **Safari et l'ancre** : non mesuré (aucun banc WebKit). Le bouton « Ouvrir la
+  tournée » passe par `?ecran=livreur`, que le service worker reconnaît sans l'ancre ;
+  un favori `/#livreur` sur iPhone, lui, reste non vérifié.
+- **L'instrument** : Playwright 1.61 + Chromium, profil relancé hors ligne — les
+  requêtes d'API du service worker échappaient à l'émulation (16 « requestfinished »
+  côté service worker, pastille « À jour » hors ligne). Le banc coupe donc aussi le
+  chemin (mandataire qui ferme toute connexion) ; `navigator.onLine` vient de
+  `setOffline`.
+- **La file est celle du navigateur** (lot 1) : inchangé.
+
+### Bancs, et le rouge de chacun
+
+`test/e2e/tournee-hors-ligne.spec.js` (serveur semé **authentifié**, port 3334, connexion
+par le formulaire, navigateur fermé puis relancé sur le même profil) :
+
+1. fermée puis rouverte hors ligne, téléphone redémarré : la tournée revient, geste en
+   file compris ; le reste demande le réseau ; tout repart au retour ;
+2. après la déconnexion, rien ne se rouvre (témoin dans le cas : la même ouverture,
+   avant, rend la tournée ; puis, file vide, le retour du réseau relit tout) ;
+3. session perdue (la page de connexion) : copie et données oubliées (témoin : avant,
+   elles sont là) ;
+4. rouverte par une passerelle en erreur (502), téléphone qui se croit en ligne : au
+   retour du serveur, tout repart sans événement `online` (relecture adverse).
+
+`test/tournee-hors-ligne.test.js` : 15 cas du service worker (vrai fichier, bac à sable ;
+2 ajoutés par la relecture adverse)
+et 3 cas du serveur (HTTP, authentification active). `test/api.test.js` : sans
+authentification, aucune fin annoncée.
+
+| Retiré (v1.42.0, ou mutant par copie, restauré par copie) | Banc | Rouge |
+|---|---|---|
+| tout (sources de `c05e6f1`) | e2e 1 | `page.goto: net::ERR_FAILED at …/#livreur` |
+| idem | e2e 2 | témoin : `net::ERR_FAILED` |
+| idem | e2e 3 | témoin : la clé `/__sereo/page-tournee` absente |
+| idem | unitaires | 11 rouges sur 16 (les 5 verts : négatifs dont le témoin rougit) |
+| fin de session ignorée | unitaire « session EXPIREE » | `'copie'` au lieu de `'hors-ligne'` |
+| tous les écrans rendus | unitaires « AUTRE écran », « réseau MUET » | `'copie'` ; `'repondu'` au lieu de `'attend'` |
+| pas de purge sur la page de connexion | unitaire « CONNEXION » | `true` au lieu de `false` |
+| shell ignoré | unitaire « AUTRE version » | `'copie'` |
+| pas de délai | unitaire « réseau MUET » | `null` |
+| pas de repli sur 502 | unitaire « passerelle » | `null` au lieu de `'copie'` |
+| pas de marque | unitaire « COPIE, marquée » | le HTML sans `data-ouverte-hors-ligne` |
+| en-tête de fin retiré | unitaire « serveur — fin de SA session » | `null` |
+| « 0 » retiré de la page de connexion | unitaire ; e2e 3 | `null` ; 24 clés restent en cache |
+| 12 h sans authentification | `api.test.js` | `'1790231224895'` au lieu de `null` |
+| titre du bandeau sans date | e2e 1 | reçu « Hors ligne » |
+| `#ecranDemandeReseau` jamais montré | e2e 1 | `hidden` |
+| jamais de sortie du mode | e2e 1 | le bandeau reste visible |
+| retour du réseau sans relecture | e2e 2 | reçu « Données de 20:21 » au lieu de « À jour » |
+| `registration.update()` sans `catch` | e2e 1 | `Failed to update a ServiceWorker…` en erreur de page |
+| règle CSS des pages retirée | e2e 1 | `#stock` visible |
+
+**Exécutions** (sur l'arbre final) : `npm run check` ; `node --check` du service
+worker ; `npm test` 562/562 ;
+e2e tournee-hors-ligne, tournee, tournee-mobile, ecran-livreur, carte-telephone,
+meilleur-trajet, livreur-ne-perd-rien, integration-lots-1-5, operations, hors-ligne,
+etats-limites, chargement-instantane, tabs : 92/92 (un premier passage a buté sur des
+ports pris par d'autres worktrees — 3188, 3190, 3194 —, rejoués verts) ;
+interface-finitions, abonnements-mobile, clients-mobile : 45/45.
+
+### Relecture adverse (23/09) : trois défauts, trois corrections
+
+- **Rouverte par le délai de 5 s ou par une passerelle en erreur, la page ne
+  revenait jamais d'elle-même** (important, vrai). Le seul déclencheur du retour
+  était l'événement `online` ; un téléphone qui se croit en ligne (4G sans débit,
+  serveur OMV arrêté pendant que `sereo-updater` reconstruit l'image) ne l'émet
+  jamais. La page restait « Hors ligne », figée, les autres écrans bloqués. Corrigé
+  (`app.js`, `sonderLeRetourDuReseau`) : tant que la page est rouverte hors ligne,
+  toutes les 20 s (le rythme du renvoi de la file) et au retour au premier plan, une
+  sonde légère (`GET /api/me`, jamais mise en cache par le service worker, 8 s au
+  plus) ; toute réponse qui ne vient pas d'une passerelle en erreur (502/503/504)
+  lance `auRetourDuReseau` — un 401 aussi : la relecture renvoie alors vers la
+  connexion et vide le cache. `auRetourDuReseau` ne se lance plus deux fois en même
+  temps (sonde et `online` peuvent se croiser). Page ouverte normalement : rien ne
+  change, la sonde ne part pas.
+- **Une copie déjà rendue, puis la page réseau d'une version plus récente**
+  (mineur, vrai) : le service worker classait quand même la page « en retard »,
+  et ses fichiers suivants arrivaient en nouvelle version sous l'ancien HTML.
+  Corrigé (`service-worker.js`, `naviguer`) : la page n'est « en retard » que si
+  c'est la page réseau qui est rendue.
+- **La page de connexion ouverte directement ne vidait rien** (mineur, vrai) : le
+  service worker laissait passer toute navigation vers `/login`. Corrigé : une
+  navigation vers `/login` passe par lui ; si le serveur rend la page de connexion
+  (« 0 »), le cache de données part. Hors ligne, rien n'est vidé : le livreur qui
+  ouvre `/login` par erreur garde sa tournée. `/login.js` et `POST /login` restent
+  hors du service worker. La révocation hors ligne, elle, est un écart nommé
+  (plus haut) : aucune correction ne la ferme sans renoncer à la décision 4.
+
+| Retiré (code de `1d20c2f`) | Banc | Rouge |
+|---|---|---|
+| sonde de retour | e2e 4 « PASSERELLE en erreur (502) » | reçu « Données de 20:45 » au lieu de « À jour » après 45 s (préalables verts : copie, `navigator.onLine` vrai, bandeau daté) |
+| garde « page réseau rendue » | unitaire « copie rendue PUIS page réseau » | `'nouveau'` au lieu de `'ancien'` (témoin, page réseau rendue : `'nouveau'`, vert) |
+| `/login` par le service worker | unitaire « navigation DIRECTE vers /login » | `true` au lieu de `false` (témoin hors ligne : rien vidé, vert) |
+
+### Ce qui reste
+
+- Vérifier sur un vrai téléphone (Android Chrome, iPhone Safari) : icône de l'écran
+  d'accueil hors ligne, puis « Ouvrir la tournée » ; redémarrage du téléphone.
+- La durée de session (12 h, sans glissement) décide de ce qui se rouvre le matin :
+  à trancher si les tournées commencent loin de la connexion.
+- Relecture adverse de ce lot.

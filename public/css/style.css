@@ -14972,3 +14972,16 @@ textarea {
 
 /* [hidden] gagne sur tout ce qui precede. */
 :is(#reoptimiserButton, #parDepotResultats, #parDepotEffacer, .trn-ajouter)[hidden] { display: none !important; }
+
+/* ==========================================================================
+   L'ECRAN TOURNEE SE ROUVRE SANS RESEAU (decision 4, 23/09)
+   --------------------------------------------------------------------------
+   Le service worker rend la page depuis son cache pour la seule navigation
+   vers la tournee, et marque <html data-ouverte-hors-ligne>. Tant que le
+   reseau n'a pas repondu, les autres ecrans ne montrent pas leurs donnees de
+   secours : #ecranDemandeReseau le dit a leur place. L'etat vide et son
+   bouton (44 px, focus, sombre) sont ceux de la charte (.empty-state).
+   ========================================================================== */
+html[data-ouverte-hors-ligne] .content > .page:not(#livreur) { display: none !important; }
+.ecran-demande-reseau { margin: 0 0 16px; }
+.ecran-demande-reseau[hidden] { display: none !important; }
