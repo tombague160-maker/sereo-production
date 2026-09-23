@@ -4557,7 +4557,9 @@ du téléchargement, lui, s'appuyait sur l'abandon du `fetch`, que le faux rése
 n'honore pas : la boucle d'écriture s'arrête donc aussi d'elle-même sous le plancher.
 
 **Bancs** : `test/osrm-local.test.js` 24/24 ; `npm test` **575/575** ; `npm run check`.
-E2E par `pw-lot.config.js` (port 3326) : voir le compte rendu de la branche.
+E2E par `pw-lot.config.js` (port 3326), en un passage : `calcul-routier`, `parametres`,
+`tournee`, `tournee-mobile`, `ecran-livreur`, `carte-telephone`, `meilleur-trajet`,
+`livreur-ne-perd-rien`, `integration-lots-1-5`, `operations`, `hors-ligne` : **91/91**.
 
 **Écarts nommés (relecture)**
 - Le plancher (2 Go), le délai d'étape (24 h), le seuil de refus (3 arrêts) et la
