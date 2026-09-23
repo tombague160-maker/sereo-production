@@ -6,7 +6,7 @@
 // copies, que le livreur en tournee sans reseau continuerait de recevoir.
 // (Ce commentaire disait « servie depuis le cache indefiniment », ce qui ne
 //  correspond plus a la strategie reseau-d'abord.)
-const CACHE_NAME = "sereo-shell-20260923-clients";
+const CACHE_NAME = "sereo-shell-20260923-tournee";
 const API_CACHE_NAME = "sereo-api-20260514";
 const APP_SHELL = [
   "/css/style.css",

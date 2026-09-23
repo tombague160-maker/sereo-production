@@ -1578,6 +1578,76 @@ Ferrand, cadre de santé », « entrée de service ») — le modèle client n'a
 les notes, besoins et produits préférés s'affichent à leur place. Les pilules font
 44 px (la planche : 40), la charte l'exige.
 
+### Abonnements des planches 13a/14a, posé le 23/09 — un tableau, les 90 jours
+
+**Au bureau** (≥ 921 px) : à gauche (7 colonnes), les pilules Tous / Actifs / En pause, le
+tri « Prochaine livraison » ou « Client », et **une** carte-tableau : Client (nom et
+panier « 3 changes molletonnés L, 2 alèses »), Fréquence, Prochaine (« Mer. 23 sept. », ou
+« Échue le 12 sept. » en alerte), État. À droite (5 colonnes), **« Les 90 jours »** :
+l'horizon que le serveur calcule déjà, groupé par semaine (« Semaine du 21 septembre ·
+3 »), deux semaines visibles et « Les N semaines suivantes ». Chaque échéance porte son
+geste (« Créer la commande », ou le statut de la commande déjà créée). Sous-titre :
+« 6 actifs · 1 en pause · 2 échéances en retard ».
+
+**Au téléphone** : la ligne de la charte ne change pas (disque d'état, nom, « ville ·
+fréquence », badge) ; le détail s'ouvre toujours dans le sheet. Les planches mobiles 3a–3c
+viendront avec le lot mobile.
+
+**Remplacés** : le calendrier d'une semaine (et sa navigation) et « Rappels à traiter »
+fusionnent dans « Les 90 jours » — la planche le décide. **Gardés** : la recherche (dans
+l'en-tête), le sheet de détail et ses actions, l'éditeur.
+
+**Écarts assumés** :
+
+- pas d'opacité sur la ligne en pause (la planche : 0,78) — composée sur blanc, elle
+  donnait **3,70:1** au nom et **3,29:1** au panier, sous le seuil ; le badge dit « En
+  pause » ;
+- « Arrêté », que la planche ne dessine pas, prend le badge neutre (surface basse) : sans
+  le disque, il avait les couleurs d'« Actif » ;
+- « Créer la commande » fait 44 px (la planche : 36) ;
+- pas de « Depuis le 4 sept. » sur une ligne en pause : aucun champ ne date la pause ;
+- la fréquence garde les libellés de l'application (« Toutes les 2 semaines ») plutôt que
+  « Tous les 15 j » / « Mensuel » : un seul vocabulaire entre la ligne, le sheet et
+  l'éditeur ;
+- entre 921 et **1439 px**, l'agenda passe sous le tableau : au-dessus de 1280, sept colonnes
+  sur douze moins 420 px de colonnes fixes ne laissaient qu'une dizaine de pixels au nom
+  (la planche, à 1440, lui en donne 122).
+
+**L'agenda s'ouvre sur le présent** : d'abord « En retard · N » (échu, sans commande), puis
+« Cette semaine » et la suivante. Le serveur rend aussi les échéances passées depuis le
+début de l'abonnement ; les grouper par semaine ouvrait l'agenda sur les plus anciennes.
+Une échéance dont le rappel est arrivé le dit (« · rappel arrivé ») — la promesse « rappel
+N jours avant » de l'éditeur reste tenue sans le panneau « Rappels à traiter ». Une
+échéance déjà commandée montre le statut de sa commande, qui mène à Commandes.
+
+« En retard » = échue **et sans commande**, partout : le sous-titre de l'écran et
+l'alerte du tableau de bord comptent la même chose.
+
+Le badge « En pause » prend le texte principal appuyé de la planche (**7,04:1**) au lieu
+de l'avertissement (4,45:1, sous le seuil).
+
+### Tournée des planches 13b/14b, posé le 23/09 — la carte à gauche
+
+**Au bureau** (≥ 1181 px) : la grille « 60 / 40 » de la planche — la carte à gauche
+(3 fr), pleine hauteur d'écran (une hauteur **explicite**, que Leaflet connaît au moment du
+rendu) ; à droite (2 fr) l'arrêt en cours puis la liste des arrêts ; la planification et les
+commandes prêtes dessous, pleine largeur. Sans tournée, la planification passe en tête.
+Le **titre de page** est la tournée (« Tournée Besançon ») et le sous-titre son jour et son
+avancement (« Mercredi 16 septembre · arrêt 3 sur 8 »). « Nouvelle tournée » (ouvre la
+planification, repliée pendant la livraison) et « Recalculer le tracé » sont dans
+l'en-tête. Sur la carte, ni titre ni légende. Sous 1181 px : l'écran du téléphone, empilé.
+
+**Gardés, hors planche** : Appeler, Itinéraire, « Autres actions » (à reprogrammer,
+planifier la suite, suivant) — ils existent et servent sur la route.
+
+**Décisions du 19/09 maintenues contre la planche** (elles sont testées et datées) :
+
+- les flèches de réordonnancement ne s'affichent que sur une tournée **prête**, pas sur
+  une tournée qui roule (la planche les montre en livraison) ;
+- les marqueurs de carte gardent 34 / 28 px et le tracé 4,5 px (la planche : 44 et 7) ;
+- pas de distance par arrêt ni de « km restants » : la planche ne dit pas de quoi c'est la
+  distance, et rien ne la calcule côté navigateur.
+
 ## 10. Guide pour l'agent
 
 - Toujours produire les deux modes (clair et sombre) avec les mêmes tokens ; lister les contrastes calculés.

@@ -89,12 +89,17 @@ test.describe("Barre laterale -- finitions de la v1.34.0", () => {
     // aria-labelledby="tab-journee" visait un element qui n'existait plus : le
     // Tableau de bord, la Preparation, la Tournee et les Abonnements n'ont
     // qu'un ecran, donc pas de pilule, donc pas d'identifiant a viser.
-    for (const onglet of ["journee", "preparation", "livreur", "abonnements"]) {
+    // Depuis les planches V8, d'autres ecrans ont perdu leur pilule (Commandes,
+    // Stock, Clients, et les ecrans secondaires) : ils se nomment par
+    // aria-label. Un aria-labelledby qui vise un element absent ne nomme rien.
+    for (const onglet of ["journee", "preparation", "livreur", "abonnements", "commandes", "commande-client",
+      "stock", "recommande", "crm", "relances"]) {
       await page.goto(`/#${onglet}`, { waitUntil: "networkidle" });
       const nom = await page.evaluate(id => {
-        const cible = document.getElementById(id).getAttribute("aria-labelledby");
+        const section = document.getElementById(id);
+        const cible = section.getAttribute("aria-labelledby");
         const el = cible && document.getElementById(cible);
-        return el ? el.textContent.trim() : null;
+        return el ? el.textContent.trim() : (section.getAttribute("aria-label") || "").trim() || null;
       }, onglet);
       expect(nom, `nom accessible de #${onglet}`).toBeTruthy();
     }
