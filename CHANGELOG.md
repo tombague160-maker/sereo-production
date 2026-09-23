@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.41.1](https://github.com/tombague160-maker/sereo-production/compare/v1.41.0...v1.41.1) (2026-09-23)
+
+
+### 🐛 Corrections de bugs
+
+* **e2e:** operations attend les commandes chargées avant « Tout sélectionner » ([710017a](https://github.com/tombague160-maker/sereo-production/commit/710017a70d7d4a2ce7bcfe7acbc34905ccf1e237))
+* **tournee:** « Tout sélectionner » attend les commandes ; deux bancs instables guéris par la cause ([#168](https://github.com/tombague160-maker/sereo-production/issues/168)) ([b2522a5](https://github.com/tombague160-maker/sereo-production/commit/b2522a5e3ca66cf3ab9bc4fe654565850b361cf9))
+* **tournee:** « Tout sélectionner » attend les commandes au lieu d'un faux état vide ([b0e7e37](https://github.com/tombague160-maker/sereo-production/commit/b0e7e373a752a8b36256aee609f84a646e07166c))
+
+
+### 📚 Documentation
+
+* **design:** les bancs instables du 23/09 — cause, preuves, ce qui reste ouvert ([08b52b2](https://github.com/tombague160-maker/sereo-production/commit/08b52b2ec97699284193c6f01baf0c6e4de21441))
+
 ## [1.41.0](https://github.com/tombague160-maker/sereo-production/compare/v1.40.2...v1.41.0) (2026-09-23)
 
 
