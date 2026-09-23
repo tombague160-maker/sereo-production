@@ -434,6 +434,35 @@ for (const maniere of ["casse", "muet"]) {
   });
 }
 
+test("relecture — « Livre » dont le corps de la reponse CASSE, puis « Absent » aussitot : les deux sont appliques, sans echec", async ({ browser }) => {
+  // Le chemin le plus frequent : « Livre » part en differe (toast Annuler),
+  // et c'est le geste SUIVANT qui le solde. Si le corps de sa reponse casse,
+  // la livraison est faite au serveur -- mais sans le `return` sur
+  // recuParLeServeur (envoyerLivraisonEnSuspens), l'erreur remontait :
+  // solderLivraisonEnSuspens la traitait comme un refus et ARRETAIT le geste
+  // suivant. Le livreur voyait un echec, et son « Absent » ne partait pas.
+  test.setTimeout(120000);
+  const { ctx, page, erreurs } = await ouvrir(browser, srv.base);
+  const [[a, nomA], [b, nomB]] = await prochains(srv.base);
+  await expect(page.locator("#currentClient .arret-nom")).toHaveText(nomA);
+  await corpsDesGestes(page, "casse");
+
+  await page.locator("#markDeliveredButton").click();
+  await expect(page.locator("#currentClient .arret-nom"), "prealable : « Livre » fait avancer l'ecran").toHaveText(nomB);
+  // Avant le terme des 4 s : c'est ce geste qui envoie la livraison en suspens.
+  await page.locator("#markAbsentButton").click();
+  await page.waitForTimeout(800);
+  await choisirMotifSiDemande(page);
+
+  await expect.poll(async () => (await arretsServeur(srv.base))[a].status, { timeout: 10000, message: "prealable : la livraison doit etre appliquee au serveur" }).toBe("livre");
+  await expect.poll(async () => (await arretsServeur(srv.base))[b].status, { timeout: 15000, message: "le « Absent » qui suivait n'est jamais parti : la reponse coupee du « Livre » a arrete le geste" }).toBe("absent");
+  const toasts = await page.evaluate(() => window.__toasts.join(" | "));
+  expect(toasts, "une livraison faite est annoncee comme un echec").not.toMatch(/coupée en route|network error|Failed to fetch|NetworkError|Load failed/i);
+  expect(await lireFile(page), "un geste applique a ete mis en file").toEqual([]);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
 // --- H4, par le mandataire ------------------------------------------------------
 
 async function ouvrirACacheChaud(browser) {
