@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.38.0](https://github.com/tombague160-maker/sereo-production/compare/v1.37.0...v1.38.0) (2026-09-23)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **connexion:** la page des planches 9b/9c/9d — carte, marque, afficher le mot de passe, échec lié au champ, polices avant la session ([27574e1](https://github.com/tombague160-maker/sereo-production/commit/27574e18b05689bf96f6572bc64d445ea8e6cd0a))
+* Paramètres et page de connexion des planches V8 ([#154](https://github.com/tombague160-maker/sereo-production/issues/154)) ([c6f9c04](https://github.com/tombague160-maker/sereo-production/commit/c6f9c045a64a67780c4322f6319afe1280b1269c))
+* **parametres:** l'écran des planches 13f/14f — grille de cartes, thème, secteurs, numérotation des bons ([71cb59c](https://github.com/tombague160-maker/sereo-production/commit/71cb59cd1f5dcd448ed18eab471977bfd43b0f62))
+
+
+### 🐛 Corrections de bugs
+
+* **connexion:** relecture — le banc des polices exige une police, pied sur son fond, mot de passe remasqué, aria-invalid ([fa73316](https://github.com/tombague160-maker/sereo-production/commit/fa73316196f5d2e103a32c11e845bcc802a39a89))
+* **parametres:** la fiche des secteurs passe à la ligne dans sa carte étroite ([969250d](https://github.com/tombague160-maker/sereo-production/commit/969250da3891124dadd82ca6ec418a417f3c8a18))
+* **parametres:** relecture — le vrai prochain numéro, anneau de focus du thème, contour d'alerte en sombre, tableaux pleine largeur, libellés ([2061a71](https://github.com/tombague160-maker/sereo-production/commit/2061a7134c9eb2357b5849d52e2a27de3cbff60d))
+
+
+### 📚 Documentation
+
+* **parametres:** écarts nommés, la réserve sur la numérotation ([3936636](https://github.com/tombague160-maker/sereo-production/commit/3936636e3d8e946f77d5064fc508cbc52b4df783))
+
 ## [1.37.0](https://github.com/tombague160-maker/sereo-production/compare/v1.36.0...v1.37.0) (2026-09-23)
 
 
