@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.42.1](https://github.com/tombague160-maker/sereo-production/compare/v1.42.0...v1.42.1) (2026-09-23)
+
+
+### 🐛 Corrections de bugs
+
+* **parametres:** la numérotation des bons est réservée à l'administration ([d30c543](https://github.com/tombague160-maker/sereo-production/commit/d30c543d101348dc85f995b1a33de9e4aacbda68))
+* **parametres:** la numérotation des bons est réservée à l'administration ([#172](https://github.com/tombague160-maker/sereo-production/issues/172)) ([f5b5d03](https://github.com/tombague160-maker/sereo-production/commit/f5b5d035a6398f6823ee9d2693baad1611f4dff1))
+
 ## [1.42.0](https://github.com/tombague160-maker/sereo-production/compare/v1.41.1...v1.42.0) (2026-09-23)
 
 
