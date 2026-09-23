@@ -105,12 +105,28 @@ function portLibre(port) {
   });
 }
 
-/** Routage simulé : une matrice de durées et une géométrie plausible. */
-function demarrerRoutage() {
+/**
+ * Routage simulé : une matrice de durées et une géométrie plausible.
+ * `adaptatif` (lot 6) : la table et le tracé suivent les points de la
+ * requête -- une durée par distance, un tronçon par trajet (`legs`) -- pour
+ * juger les heures d'arrivée et les réordonnancements. Le mode par défaut ne
+ * change pas : les bancs d'avant restent sur leur table fixe.
+ */
+function demarrerRoutage({ adaptatif = false } = {}) {
   const n = CLIENTS.length;
   const durations = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => (i === j ? 0 : 600 + 60 * Math.abs(i - j))));
   const server = require("node:http").createServer((req, res) => {
     res.setHeader("Content-Type", "application/json");
+    if (adaptatif) {
+      const xy = req.url.split("/driving/")[1].split("?")[0].split(";").map(p => p.split(",").map(Number));
+      // ~100 km par degre ; 60 km/h de moyenne : 1 m = 0,06 s.
+      const m = (a, b) => Math.round(Math.hypot(a[0] - b[0], a[1] - b[1]) * 100000);
+      const legs = xy.slice(1).map((b, i) => ({ distance: m(xy[i], b), duration: Math.round(m(xy[i], b) * 0.06) }));
+      res.end(JSON.stringify(req.url.includes("/table/")
+        ? { code: "Ok", durations: xy.map(a => xy.map(b => Math.round(m(a, b) * 0.06))) }
+        : { code: "Ok", routes: [{ distance: legs.reduce((s, l) => s + l.distance, 0), duration: legs.reduce((s, l) => s + l.duration, 0), geometry: { type: "LineString", coordinates: xy }, legs }] }));
+      return;
+    }
     res.end(JSON.stringify(req.url.includes("/table/")
       ? { code: "Ok", durations }
       : { code: "Ok", routes: [{ distance: 18000, duration: 2820, geometry: { type: "LineString", coordinates: CLIENTS.map(c => [c.lng, c.lat]) } }] }));
@@ -124,7 +140,7 @@ function demarrerRoutage() {
  * Le port doit être distinct de ceux de playwright.config.js (3100, 3101) et
  * des autres bancs à serveur propre (operations.spec.js : 3118).
  */
-async function demarrer({ port, seed = jeuDeDonnees(), env = {} }) {
+async function demarrer({ port, seed = jeuDeDonnees(), env = {}, routageAdaptatif = false }) {
   // Le port doit etre LIBRE avant le lancement (integration des lots 1 a 7,
   // 23/09). Sinon le serveur seme meurt aussitot (EADDRINUSE, sortie ignoree)
   // et la boucle d'attente ci-dessous recevait le 200 de /healthz... d'un
@@ -136,7 +152,7 @@ async function demarrer({ port, seed = jeuDeDonnees(), env = {} }) {
   if (!(await portLibre(port))) {
     throw new Error(`port ${port} deja pris par un autre processus : le banc parlerait a un serveur qui n'est pas le sien`);
   }
-  const routage = await demarrerRoutage();
+  const routage = await demarrerRoutage({ adaptatif: routageAdaptatif });
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "sereo-seme-"));
   fs.writeFileSync(path.join(root, "seed.json"), JSON.stringify(seed));
   const child = spawn(process.execPath, ["server.js"], {

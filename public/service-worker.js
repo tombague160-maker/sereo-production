@@ -34,6 +34,7 @@ const APP_SHELL = [
   "/js/config/tabs.js",
   "/js/domains/comptes.js",
   "/js/domains/adresses.js",
+  "/js/domains/tournee-pratique.js",
   // Les quatre graisses du premier rendu (prechargees par index.html).
   "/fonts/poppins-400-latin.woff2",
   "/fonts/poppins-500-latin.woff2",

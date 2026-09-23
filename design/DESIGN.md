@@ -4548,3 +4548,251 @@ Ce qui reste après la relecture :
   décision.
 - Un « Livré » en retard refusé faute de stock n'a aujourd'hui aucun chemin pour être
   enregistré (`corrigerArret` le refuse aussi) : la commande reste à reprogrammer. À décider.
+
+## Lot 6 de l audit géo : pratique au quotidien (23/09)
+
+Audit de référence : rapport du 23/09, §3b, §5 et lot 6. Décisions de Thomas du 23/09
+appliquées : n° 5 (position « Me localiser » arrondie à ~100 m : aussi pour
+« Réoptimiser les arrêts restants »), n° 6 (150 km), n° 9 (pas de créneaux : « À livrer en
+premier » est gardé par chaque réoptimisation). Branche `feat/tournee-pratique`, partie de
+`main` 1.42.0 (`c05e6f1`).
+
+### Fait
+
+- **Heure d'arrivée par arrêt, km restants, heure de retour** (planches 4a/4b, 13b).
+  `public/js/domains/tournee-pratique.js` (`horairesDeTournee`, pur) lit les tronçons
+  OSRM du lot 7 (`route.troncons`) et la durée d'arrêt des Paramètres. Référence : maintenant
+  pour une tournée prête (« si tu pars maintenant ») ; en route, l'heure du dernier geste
+  (arrêt soldé le plus récent), du départ ou du dernier calcul depuis la position GPS
+  (`tronconsDepuis`), la plus tardive — et jamais avant maintenant : un livreur en retard
+  arrive « maintenant », la suite glisse. Un arrêt fait dans le désordre, au milieu des
+  restants : le trajet passe par lui. Tronçons absents ou désaccordés (réordonnancement à la
+  main, arrêt retiré d'une commande reportée) : **aucune heure plutôt qu'une heure fausse**.
+  Affichage : « · vers 10 h 40 » DANS la ligne de détail (la ligne garde ses quatre
+  informations, charte §4) ; cockpit « Arrivée prévue vers 10 h 40 » et « Prochain : … ·
+  6,2 km · environ 14 min » (la planche 4b, posée en entier) ; en-tête « 69 km restants,
+  retour vers 15 h 20 » (planche 13b) ; même chose à la suite des métriques. Heures
+  arrondies à 5 min.
+- **Dépôt par défaut** (Paramètres → Réglages tournée) : recherche d'adresse (le relais
+  `/api/geocode` du lot 5), confirmation, « Effacer ». `settings.tournee.depot`
+  `{ label ≤ 200, lat, lng }` validé au serveur (refusé plutôt que tronqué), `retourAuDepot`
+  (défaut **vrai**, y compris pour une base d'avant le lot), `messagePrevenir`. Le départ de
+  la préparation est prérempli tant que le livreur n'en a pas choisi un autre ; « Retour au
+  point de départ » suit le réglage, et **décocher la case dans la préparation le
+  mémorise** (PATCH discret, en file hors ligne). Préparer une tournée : « Tout
+  sélectionner », « Créer » — **deux gestes** (banc : deux clics, départ et arrivée = dépôt).
+- **« Y aller »** vers les **coordonnées** de l'arrêt quand elles existent, sinon l'adresse
+  (rue et ville, la règle d'avant) : un lieu-dit sans rue, placé à la main, a son bouton.
+  Un point **approximatif** (rue, lieu-dit, commune) cède à l'adresse complète quand elle
+  existe (relecture adverse, ci-dessous).
+  Google Maps, Waze, Plans (**seulement sur iPhone/iPad**, iPadOS compris) ; le choix vit
+  dans Paramètres, **par appareil** (`localStorage`, repli sur la session), titre du bouton
+  « Ouvrir l'itinéraire dans Waze ». L'écran de fin suit le même choix.
+- **« Prévenir »** (cockpit, « Autres actions ») : un lien `sms:` avec le numéro du client et
+  « Bonjour, je passe vers 10 h 40 pour votre livraison. » ; texte modifiable dans
+  Paramètres (`{heure}` ; sans heure connue, « vers {heure} » devient « bientôt »). Aucun
+  fournisseur, aucun coût : c'est l'application SMS du téléphone qui envoie. Le lien est
+  refait à l'instant du toucher (l'heure a pu avancer depuis le rendu). iOS : `&body=`,
+  ailleurs `?body=`.
+- **« Réoptimiser »** (`POST /api/routes/:id/reoptimiser`) : tournée **prête** → dialogue
+  « Partir de » (le départ prévu, le dépôt s'il diffère, ma position) ; une tournée qui
+  revenait à son départ revient au nouveau. Tournée **en livraison** → « Réoptimiser les
+  arrêts restants » depuis la position GPS arrondie à 3 décimales **sur le téléphone** (et
+  au serveur) ; les arrêts soldés restent en tête ; le départ enregistré ne change pas.
+  L'optimiseur est celui du lot 7 ; « À livrer en premier » reste devant.
+- **« Faire maintenant »** (`POST …/stops/:stopId/maintenant`) : un arrêt choisi hors de
+  l'ordre montre, dans le cockpit, « Prévu après X » et le bouton (pas dans la ligne : elle
+  garde ses quatre informations). L'arrêt passe en tête des restants ; les tronçons des
+  restants sont recalculés depuis le dernier arrêt soldé.
+- **« Ajouter à la tournée en cours »** (`POST /api/routes/:id/ajouter`) : sur chaque
+  commande prête, quand une tournée roule. Insertion au **moindre détour** entre le point de
+  reprise, les restants et l'arrivée (table OSRM ; repli à vol d'oiseau), égale à la force
+  brute sur 300 tirages. La commande passe en livraison, l'arrêt a un identifiant neuf (un
+  arrêt retiré laisse son numéro à un autre : `createStop` numérote par rang).
+- **Historique des tournées** (Tournée, repliable, sous la préparation) : par mois, un
+  total par secteur (tournées, km **du tracé prévu**, durée **réelle** départ → dernier
+  arrêt, livrés), les tournées sans tracé ou sans heures comptées à part ; les dix
+  dernières. Calculé sur les tournées déjà chargées : aucune requête de plus.
+- **File hors ligne et idempotence (lot 1)** : « Faire maintenant », « Ajouter », les
+  réglages passent par `apiFetch` (clé `X-Sereo-Geste`, file). Un « Faire maintenant »
+  hors ligne attend dans la file et l'écran montre déjà l'arrêt. Une même clé renvoyée
+  n'ajoute qu'une fois (banc, deux envois simultanés puis un troisième).
+- Toute réponse d'écriture porte la tournée (et la commande, le client) telle que les
+  listes la rendent, avec `updatedAt` : l'écran l'applique par la mise à jour ciblée du
+  lot 5 (`appliquerGesteArret`), gardes du lot 1 comprises (jamais une tournée plus
+  ancienne, gestes en file superposés).
+
+### Décisions prises
+
+- **Réoptimiser n'est jamais mis en file** (`JAMAIS_EN_FILE`), et l'écran le refuse hors
+  ligne avant tout envoi : c'est un calcul routier depuis la position de l'instant ;
+  rejoué une heure plus tard, il réordonnerait la tournée d'après un endroit quitté. Même
+  famille que la purge et le découpage.
+- **Sans calcul routier** (OSRM muet), « Faire maintenant » et « Ajouter » changent quand
+  même l'ordre ; les tronçons tombent (`null`), la réponse le dit
+  (`horairesARecalculer`), la notification invite à « Réoptimiser les arrêts restants ».
+  En route, le tracé reste (on n'efface pas la carte sous le livreur) ; avant le départ, il
+  est à refaire, comme après un réordonnancement à la main.
+- **Tronçons alignés sur l'ordre** : après un changement d'ordre en route, les soldés
+  passent en tête et gardent leurs tronçons d'origine (historique), ceux des restants sont
+  recalculés ; `totalDistance` = trajets faits connus + nouveau reste.
+- **« Retour au départ » décoché dès qu'une AUTRE arrivée est confirmée**, sans toucher
+  au réglage (seul un geste sur la case l'écrit), et les réglages qui arrivent après ne la
+  recochent pas. Cause : `operations.spec.js` (commandes lentes) choisissait une arrivée,
+  puis les réglages recochaient la case — l'arrivée choisie était ignorée.
+- **Le choix de l'application est par appareil**, dans Paramètres, sans question au
+  premier « Y aller » : le geste le plus fréquent garde un seul toucher (Google Maps par
+  défaut, comme avant).
+- Une commande urgente ne s'ajoute qu'à une tournée **qui roule** (bouton) ; le serveur
+  accepte aussi une tournée prête (API).
+
+### Écarts nommés
+
+- **Hors périmètre, laissés aux autres lots de la vague 2** : l'ancien panneau
+  « Clients tournée » et `/api/optimize-route` (décision 7 ; lot « tournées
+  annulables », M7) ; la note « remis à… » (décision 10) ; l'écran Tournée hors ligne
+  (le module neuf est dans `APP_SHELL`) ; OSRM dans l'image.
+- **`tournee-mobile.spec.js` « 4b — Y aller » renversé**, pas supprimé : il attendait
+  l'adresse en texte, il attend désormais les coordonnées de l'arrêt semé.
+- Le SMS : le séparateur `&body=` (iOS) / `?body=` (ailleurs) est l'usage constaté, non
+  mesuré sur un vrai téléphone ; un fixe ne reçoit pas de SMS (rien ne le distingue).
+- Les heures sont des estimations hors trafic (tronçons OSRM + durée d'arrêt fixe) ; la
+  référence en route est l'heure du dernier geste **connu du serveur** : un geste encore en
+  file n'en donne pas.
+- La position envoyée pour « Réoptimiser les arrêts restants » n'est pas stockée ; le tracé
+  recalculé part d'elle (arrondie, ~100 m) et n'est pas rogné par `rognerTraceGps`, qui ne
+  lit que départ et arrivée.
+- `lib/routing.js` : une fonction ajoutée (`tableDesDurees`), en fin de fichier.
+  `serveur-seme.js` : une option `routageAdaptatif` (table et tronçons suivant la
+  requête), le mode par défaut ne change pas.
+- Une modification de `server.js` faite par script (déplacement des constantes du lot
+  avant `normalizeSettings`), et une de `package.json` (script `check`), au lieu de l'outil
+  Edit ; relues par `node --check`, `npm run check` et les bancs.
+- `ecrans-sans-planche.spec.js` a refusé de partir une fois (port 3306 pris par un autre
+  worktree, refus voulu) ; rejoué ensuite : vert.
+
+### Preuves rouges
+
+Ancien code (`c05e6f1`, fichiers remis par copie, restaurés, empreinte vérifiée) :
+- `tournee-pratique-serveur.test.js` : 15 rouges sur 15 — `404` sur les trois routes
+  neuves, `depot` `undefined` au lieu de `null`.
+- `tournee-pratique.spec.js` (un cas à la fois) : la ligne d'arrêt sans « vers … »
+  (`toContainText`, heures), `#prevenirButton`, `#reoptimiserButton`, `.arret-hors-ordre button`,
+  `[data-action="ajouter-a-la-tournee"]`, `#parDepotActuel` « element(s) not found » ;
+  « Expected: Entrepôt de démonstration / Received: "" » (deux gestes) ; `retourAuDepot`
+  « Expected: false / Received: undefined » ; historique et contraste : le panneau
+  n'existe pas (le clic attend jusqu'au délai).
+
+Mutants (copie, restauration vérifiée par empreinte), chacun rouge pour sa cause :
+insertion toujours en fin (`['a','b','d','u']` au lieu de `['a','b','u','d']`) ; soldés
+oubliés en tête ; position exacte envoyée (`6.0512345,47.2004567`) ; panne qui garde les
+tronçons ; ajout sans passage en livraison (`pret_livraison`) ; dépôt non validé (200 au
+lieu de 400) ; retour au dépôt décoché par défaut sur une base ancienne ; « à livrer en
+premier » oublié en route (`d` au lieu de `a`) ; heure de référence toujours maintenant ;
+retard dans le passé ; durée d'arrêt ignorée ; tronçon de trop accepté (renforcé : le premier
+banc passait par une autre garde) ; « Y aller » sans les coordonnées ; Plans hors Apple ;
+SMS sans heure qui garde `{heure}` ; tournées en cours dans l'historique ; trajet qui ne
+passe pas par l'arrêt fait. À l'écran : heures non branchées ; lien « Prévenir » non
+rafraîchi aux réglages (le défaut qu'a trouvé le premier passage du banc, corrigé) ;
+« Y aller » qui ignore le choix ; réoptimiser mis en file sur un réseau muet ; réoptimiser
+hors ligne non refusé ; départ non prérempli ; retour non mémorisé ; position exacte
+envoyée ; arrivée confirmée qui ne décoche pas le retour (et la variante « seulement si
+déjà cochée », prise par `operations.spec.js`). Un défaut trouvé par un banc existant :
+`cibles-tactiles.spec.js`, le `<label>` du message dans le titre faisait 20 px de haut —
+nommé désormais par `aria-labelledby`.
+
+### Bancs
+
+`test/tournee-pratique.test.js` (12, pur), `test/tournee-pratique-serveur.test.js` (15,
+serveur et faux OSRM local), `test/e2e/tournee-pratique.spec.js` (14, ports **3332** et
+**3333**, horloge du navigateur figée, contraste ≥ 4,5:1 en clair et en sombre, 44 px).
+
+Vérifié sur `1a2db4e` (le code de la tête ; seul ce fichier a changé depuis) :
+`npm run check` ; `npm test` 572/572 ; e2e tournee-pratique, tournee, tournee-mobile,
+ecran-livreur, carte-telephone, meilleur-trajet, livreur-ne-perd-rien,
+integration-lots-1-5, operations, hors-ligne, carte-et-lignes, rapidite-tournee,
+ecrans-sans-planche : 116/116. Sur `b268646` (même code) : parametres,
+parametres-mobile, cibles-tactiles 28/28 ; texte-coupe, focus-clavier,
+contraste-application, contraste-champs, integration-interface, typographie,
+charte-composants, etats-limites : verts. Sur `076813c` (avant le correctif du
+`<label>`, une ligne de `index.html`) : themes, tabs, livraison-chargement,
+chargement-instantane verts.
+
+### Ce qui reste
+
+- Mesurer les heures annoncées contre les heures réelles (les gestes sont datés) et
+  ajuster la durée d'arrêt par client ou par secteur.
+- Un « Prévenir » groupé (les N prochains clients) ; le choix de l'application au premier
+  « Y aller » si les livreurs ne vont pas dans Paramètres.
+- Réoptimiser en route sans GPS (depuis le dernier arrêt soldé).
+- L'historique : km **roulés** (aucune trace n'est enregistrée), export.
+
+### Relecture adverse du 23/09 : six défauts, six vrais
+
+Relecture de `f5c572d`. Chaque défaut a été vérifié par un banc écrit AVANT le correctif et
+commité rouge (`8a2991a`, sur le code de `f5c572d`) ; correctifs `4e610bd` (serveur) et
+`5110ba7` (écran).
+
+1. **Important, vrai : « Y aller » préférait tout point, même approximatif.** Une commande
+   géocodée « au milieu de la rue » (type BAN `street`, accepté comme TROUVÉ) ouvrait
+   Google Maps au milieu d'une route de plusieurs kilomètres, là où le texte « 48 route de
+   Lons 39300 Champagnole » menait au numéro (la règle d'avant le lot). Corrigé :
+   `lienNavigation` lit `geoPrecision` ; `rue`, `lieu-dit`, `commune` cèdent à l'adresse
+   complète quand elle existe. Sans adresse, le point reste (le texte ne ferait pas mieux) ;
+   `numero`, `manuel` (position placée à la main) et une précision vide gardent le point.
+   Rouge : `actual: '…destination=46.75,5.91'`, `expected: '…destination=48%20route%20de%20Lons…'`.
+2. **Important, vrai : l'ajout en route pouvait passer devant un « À livrer en premier ».**
+   `meilleurePlace` comparait toutes les places de 0 à n. Corrigé : un argument `depuis`, la
+   place qui suit le dernier « en premier » des restants. Rouge : tournée [d (en premier),
+   c, b, a], `u` près du dépôt → `expected: 'd'`, `actual: 'u'` ; témoin sans épingle : `u`
+   passe bien en tête.
+3. **Important, vrai : une tournée sans arrivée se réoptimisait en boucle.** En route,
+   l'arrivée devenait la position du livreur : ordre de circuit fermé, retour fictif dans
+   les km restants, l'heure de « retour » et `totalDistance` (repris par l'historique).
+   Avant le départ, le serveur refusait une réoptimisation sans arrivée, et le dialogue en
+   imposait une (le nouveau départ) sans lire « retour au dépôt ». Corrigé : `roadPlan`
+   prend `arriveeLibre` — le chemin OUVERT du lot 7 (l'arrivée coûte 0 depuis chaque arrêt,
+   le tracé s'arrête au dernier, le tronçon « vers l'arrivée » est nul : toujours un par
+   arrêt, plus un) ; le serveur l'emploie dès qu'aucune arrivée n'existe ; le dialogue,
+   pour une tournée sans arrivée, n'en envoie une (le nouveau départ) que si « retour au
+   dépôt » est coché ; l'écran dit « fin vers » au lieu de « retour vers »
+   (`horairesDeTournee` rend `avecRetour`). Rouges : `totalDistance` `expected: 3.5`,
+   `actual: 6` (en route) ; `400 « Confirme un point de départ et un point d'arrivée. »`
+   (prête) ; e2e « Expected substring: "fin vers" / Received: "… retour vers 23 h 25" » ;
+   mutant du seul dialogue : « Expected path: not "arrival" / Received value: {Entrepôt…} ».
+4. **Mineur, vrai : une position corrigée pendant le calcul était écrasée.** L'empreinte de
+   la tournée ne contrôle que ids et statuts ; `memoriserPositionDuCalcul` réécrivait le
+   point de l'instantané en gardant `geoSource: "manuel"`. Corrigé : l'empreinte des
+   positions lues pour le calcul (celle de `positionPourTournee`, client compris) est
+   recomparée sous le verrou, pour les restants (réoptimiser) et pour la commande
+   (ajouter) ; même refus que `createRoute` : « Une position a été corrigée pendant le
+   calcul. Recommence. ». Rouges : `[47.2, 6.02, 'manuel']` au lieu de `[47.21, 6.022,
+   'manuel']` (et de même pour l'ajout). Le banc joue la correction PENDANT la requête OSRM
+   (crochet `pendantLeCalcul` du faux OSRM).
+5. **Mineur, vrai : une commande absente rajoutée à SA tournée n'était plus retirée par un
+   report.** Décision : l'ajout reste permis (repasser l'après-midi chez un absent du matin
+   est un usage) ; c'est `retirerDesTourneesSiReportee` (M4, lot 1) qui prend désormais
+   l'arrêt ENCORE À FAIRE de la commande, pas le premier. Un arrêt soldé n'est toujours
+   jamais retiré. Rouge : `['absent', 'en_livraison']` au lieu de `['absent']`.
+6. **Mineur, vrai : « déjà dans une tournée active » n'était vérifié que sur
+   l'instantané.** Une tournée prête créée au bureau pendant le calcul prenait la commande
+   sans changer son statut. Corrigé : le contrôle est refait sous le verrou. Rouge :
+   `expected: 400`, `actual: 201` (la tournée concurrente créée par le crochet du faux OSRM).
+
+**Écarts nommés.** Une précision vide (point d'origine inconnue, antérieur au lot 3) garde
+le point : rien ne dit qu'il est approximatif. Une position placée à la main dans
+« Adresses à vérifier » sans déplacer le marqueur garde la précision d'origine (`rue`…) ;
+l'arrêt ne porte pas `geoSource`, « Y aller » la traite donc comme approximative et suit
+l'adresse. « Faire maintenant » et « Ajouter » sur une tournée sans arrivée font toujours
+tomber les heures (`trajetDansLOrdre` exige une arrivée) : rien de faux n'est affiché.
+Constaté hors du lot, non corrigé : `createRoute` SANS départ (pas de `plan`) ne vérifie
+pas « déjà dans une tournée active » ; une tournée prête peut donc reprendre une commande
+d'une autre tournée prête. Deux mutations temporaires d'`app.js` faites par script
+(copie, restaurée par `cp` et `cmp`), rien de commité ainsi.
+
+**Bancs.** `test/tournee-pratique.test.js` +2 (14), `test/tournee-pratique-serveur.test.js`
++7 (22), `test/e2e/tournee-pratique.spec.js` +1 (15, port 3333, réponse du serveur
+retouchée pour une tournée sans départ). Résultats sur `5110ba7` : `npm test` 581/581 ;
+e2e tournee-pratique, tournee, tournee-mobile, ecran-livreur, carte-telephone,
+meilleur-trajet, livreur-ne-perd-rien, integration-lots-1-5, operations, hors-ligne :
+88/88.
