@@ -5736,6 +5736,7 @@ function renderSettings() {
   renderTourneeSettings();
   renderParSecteursPilules();
   chargerNumerotation();
+  majDroitsNumerotation();
 
   const sectorsContainer = document.getElementById("settingsSectors");
   if (!sectorsContainer) return;
@@ -5809,6 +5810,27 @@ async function loadMoi() {
   // le premier rendu, le titre doit suivre.
   majEnteteTableauDeBord(getInitialTab());
   renderComptes();
+  majDroitsNumerotation();
+}
+
+// La numerotation des bons est reservee a l'administration (decision du
+// 23/09, garde serveur requireAdministration) : un autre compte la LIT, mais
+// ses champs sont fermes et la carte dit pourquoi -- au lieu d'un refus 403
+// a l'enregistrement. Tant que /api/me n'a pas repondu, rien ne change.
+function majDroitsNumerotation() {
+  const form = document.getElementById("numerotationForm");
+  if (!form || !moi) return;
+  const ferme = !moi.administration;
+  for (const champ of form.querySelectorAll("input, button")) champ.disabled = ferme;
+  let note = document.getElementById("parNumeroReserve");
+  if (ferme && !note) {
+    note = document.createElement("p");
+    note.id = "parNumeroReserve";
+    note.className = "par-aide";
+    note.textContent = "Réservé aux administrateurs.";
+    form.append(note);
+  }
+  if (note) note.hidden = !ferme;
 }
 
 /**
