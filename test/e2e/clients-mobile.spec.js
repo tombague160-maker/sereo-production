@@ -143,6 +143,14 @@ for (const schema of ["light", "dark"]) {
     }
     // L'active (Tous) se distingue des autres.
     expect(r.pilules[0].fond).not.toBe(r.pilules[1].fond);
+    // « Rappels » (garde) partage sa rangee avec la pastille de synchro et
+    // « Actualiser » : l'en-tete n'a pas une rangee de plus pour eux.
+    const rangee = await page.evaluate(() => ["#crm-rappels", "#syncStatus", "#refreshButton"].map(s => {
+      const e = s === "#crm-rappels" ? document.querySelector(".ecran-entete .cli-rappels") : document.querySelector(s);
+      const b = e.getBoundingClientRect();
+      return Math.round((b.top + b.bottom) / 2);
+    }));
+    expect(Math.max(...rangee) - Math.min(...rangee)).toBeLessThanOrEqual(2);
   });
 
   test(`fiche (${schema === "light" ? "8c" : "12c"}) : le nom, les puces, Appeler et Itinéraire dans le vert, avec la flèche (${schema})`, async ({ page }) => {
@@ -307,6 +315,17 @@ test("fiche : ce qui existait reste -- Modifier, les notes, le statut, les comma
   expect(Math.min(b.width, b.height)).toBeGreaterThanOrEqual(44);
   await expect(page.locator("#cliFiche .cli-notes")).toContainText("entrée de service");
   await expect(page.locator("#cliFiche .cli-statut select")).toBeVisible();
+  // Le statut : son libelle au-dessus d'une selection pleine largeur (cote a
+  // cote, « Statut commercial » passait sur deux lignes).
+  const statut = await page.locator("#cliFiche .cli-statut").evaluate(e => {
+    const lib = e.querySelector(".cli-libelle");
+    return {
+      dessous: e.querySelector("select").getBoundingClientRect().top >= lib.getBoundingClientRect().bottom - 1,
+      largeur: Math.round(e.querySelector("select").getBoundingClientRect().width)
+    };
+  });
+  expect(statut.dessous).toBe(true);
+  expect(statut.largeur).toBeGreaterThanOrEqual(300);
   await expect(page.locator("#cliFiche .cli-abonnement")).toContainText("Abonnement");
   await expect(page.locator("#cliFiche .cli-commande")).toHaveCount(4);
   await expect(page.locator("#cliFiche .cli-autres")).toBeVisible();
