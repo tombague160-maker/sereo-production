@@ -69,8 +69,10 @@ test("etats vides — les IDENTIFIANTS restent sans accent", () => {
   // Le contre-temoin de la regle precedente. Sans lui, "corriger les accents"
   // pourrait un jour toucher un chemin d'API ou une classe CSS, et casser le
   // routage en silence -- une correction cosmetique qui deplace un defaut.
+  // « commandes-livrees » a quitte app.js avec son ancienne liste (23/09) ;
+  // la cle du filtre « Livrees » de l'ecran Commandes porte le meme mot.
   for (const ident of [
-    "commandes-livrees", "commandes-planifiees", "commande-client",
+    "\"livrees\"", "commandes-planifiees", "commande-client",
     "send-preparation", "finish-preparation", "start-preparation"
   ]) {
     assert.ok(app.includes(ident), `identifiant introuvable ou accentue : ${ident}`);

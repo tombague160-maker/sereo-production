@@ -236,7 +236,7 @@ maquette oublie. Les deux coûtent cher si personne ne les nomme avant le chiffr
 |---|---|---|
 | ~~L'écran de connexion n'a pas d'état bloqué~~ — **réglé le 16/09, planches 9c et 9d** | le code le fait, l'écran le montre | `server.js` bloque après **5 tentatives** ratées dans une fenêtre glissante de **15 min**, pour **15 s** (`AUTH_RATE_LIMIT_*`). La page actuelle affiche les tentatives restantes, puis un décompte vivant avec les champs désactivés (`renderLoginPage`, l. 1502-1526). Le mot « tentative » n'apparaît nulle part dans l'export |
 | ~~La file d'attente hors ligne n'existe pas~~ — **soldée le 18/09, v1.31.0** | l'écran le promettait, le code ne le faisait pas | `service-worker.js` l. 113 : tout ce qui n'est pas un GET same-origin est laissé passer tel quel. Aucun écouteur `sync`, aucun magasin de reprise, et `app.js` n'écoute ni `online` ni `offline` pour ses **32 écritures réseau**. La *lecture* hors ligne, elle, est réelle : network-first à 3 s puis cache, sur tout `/api/` sauf `status`, `version`, `me`, `comptes` |
-| Le thème par défaut | écart mineur, assumé | le code force `light` au départ (« pendant la phase de test, on n'active pas le mode sombre auto ») ; la maquette met « Système ». Le choix par appareil, lui, est exactement ce que fait `app.js` : `localStorage` seul, la valeur en base est délibérément ignorée |
+| ~~Le thème par défaut~~ — **aligné, relu le 23/09** | le code suit la maquette | Sans préférence enregistrée, le thème démarre sur « Système », comme la maquette : `anti-fart.js` résout l'appareil en clair ou en sombre avant le premier rendu. *Cette ligne disait jusqu'au 23/09 que le code forçait le clair : c'était vrai le 16/09, plus depuis.* Le choix par appareil, lui, est exactement ce que fait `app.js` : `localStorage` seul, la valeur en base est délibérément ignorée |
 | Le blocage se compte par adresse IP, pas par personne | à dire à l'écran | `authRateLimitState` est une `Map` indexée par `getClientIp(req)` (`server.js` l. 348-404), `trust proxy` à 1. Cinq échecs derrière une même connexion — le wifi de l'entrepôt, un NAT d'opérateur — bloquent tout le monde. Un écran qui annonce « 5 essais ratés » accuse quelqu'un qui n'a peut-être rien tapé |
 | Le sur-titre était orange sur blanc | l'écran l'inventait, la charte ne l'interdisait pas | « ARRÊT EN COURS » en `#EF9177` 12 px sur `#FFFFFF` vaut **2,34:1**. La charte interdisait l'orange comme *fond* de texte, pas comme texte : le trou est comblé. Les mots passent en principal, le point rond à côté garde l'orange |
 | ~~Les pilules de filtre sur en-tête vert~~ — **mesuré et soldé le 18/09** | jamais mesuré par personne, et pour une raison d'instrument | `rgba(255,255,255,.16)` sur `#386B6D` compose `#588284` : blanc **4,25:1**, texte indicatif des champs de recherche **3,27:1**. Dix planches, présent depuis le premier export |
@@ -296,6 +296,8 @@ que le réseau ne l'a pas emporté. Un **délai dépassé**, lui, peut parfaitem
 signifier que le serveur a reçu et traité la demande : le rejouer dupliquerait une
 écriture non idempotente. C'est la seule raison pour laquelle la file peut se passer
 d'une clé d'idempotence côté serveur — **si cette garde tombe un jour, il en faut une.**
+*(23/09 : la garde est tombée, et la clé existe — voir « Lot 1 de l'audit géo » en fin
+de fichier.)*
 
 **« Le réseau n'a pas répondu » et « le serveur a refusé » ne demandent pas le même
 geste.** Un 4xx retire l'écriture : le serveur a jugé, insister ferait une file qui ne
@@ -1483,6 +1485,7 @@ le rend à la ligne à la fermeture ; cocher une ligne au clavier garde le focus
 **Dette nommée** : les anciennes sections (`#commandes-jour`, `#commandes-planifiees`,
 `#bons-commande`, `#commandes-livrees`) restent dans la page, inatteignables, et se
 dessinent encore. Les retirer touche leurs rendus et leurs bancs : un lot à part.
+**Soldée le 23/09** — voir « Écrans sans planche au style V8 », en fin de fichier.
 
 **Portées de rôles** (dormantes tant que `SEREO_SEPARATION_ROLES` n'est pas posé) : le
 préparateur et le livreur nommaient les anciennes listes ; ils nomment maintenant
@@ -2188,7 +2191,8 @@ Client » (pilule sur le vert, à côté des filtres), la pastille de synchronis
 - le toast « Bon CMD-2026-0xx créé » avec **Annuler** : la création reste celle de l'application
   (une notification, sans annulation — aucune route ne supprime une commande d'abonnement) ;
 - la création 3b (sélecteur client en carte, catalogue avec stock, pilules de fréquence, aperçu
-  des trois dates) : l'éditeur actuel est gardé tel quel, c'est un lot à part ;
+  des trois dates) : l'éditeur actuel est gardé tel quel, c'est un lot à part —
+  posé depuis, voir « Création d'abonnement (planches 3b, 5b) » en fin de fichier ;
 - la tache floue rose derrière la liste (décor).
 
 **`CACHE_NAME`** : réglé à l'intégration du 23/09. Le lot « chargement instantané » l'a porté à
@@ -2598,3 +2602,1692 @@ renvoyé en haut par `resetViewportScroll(false)`. Mesuré par la sonde sur la s
 position qu'elle avait : `scrollY` 138 au `DOMContentLoaded` (le défilement vers
 l'ancre `#livreur`), 0 au `load` — la remise écrase toute position prise avant.
 Le défilement d'un humain n'a pas été rejoué. Hors de ce lot.
+
+## Lot 7 de l audit géo : meilleur trajet et calcul routier (23/09)
+
+Audit de référence : rapport du 23/09 (copie `019788c`), §3a, §3b, §5, §6 et lot 7,
+plus la partie « calcul routier » du lot 8. Décisions de Thomas du 23/09 appliquées :
+n° 2 (serveur OSRM à nous, **révisée en cours de lot** : aucune manipulation sur son
+serveur, OSRM sera intégré plus tard à l'image Séréo par l'intégrateur) et n° 9 (pas de
+créneaux horaires : « À livrer en premier »).
+
+### Fait
+
+- **Or-opt (§3a).** `lib/routing.js` : après le plus proche voisin, une descente 2-opt
+  puis Or-opt (déplacer un arrêt ou un bloc de 2-3, dans son sens ou retourné), jusqu'à
+  stabilité, puis des perturbations « double pont » en nombre FIXE et à graine fixe (le
+  même appel rend le même ordre sur toute machine). Deltas en O(1), sommes cumulées dans
+  les deux sens pour le 2-opt (la matrice est dirigée). Banc
+  `test/meilleur-trajet.test.js` : 750 tournées de 5 à 9 arrêts (cinq scénarios de
+  Franche-Comté, détours, vitesse qui monte avec la distance, côtes, adresses en
+  double), comparées à la force brute : médian 0 %, pire **1,65 %** (avant : pire
+  **8,31 %**). À 50 arrêts : 8 à 12 ms (plafond du banc : 100 ms), gain de 0,7 à 2,8 %
+  sur l'ancien ordre.
+- **« À livrer en premier » (§5, décision 9).** Une case sous chaque commande choisie de
+  l'écran de préparation ; `premiers` dans `POST /api/routes` ; drapeau
+  `livrerEnPremier` sur l'arrêt, respecté par un recalcul. L'optimiseur essaie chaque
+  épinglé comme dernier de la tête (les six plus proches du reste s'il y en a plus),
+  optimise la tête et la queue séparément. Optimiser d'un tenant en interdisant les
+  mouvements mixtes restait à 20 % de l'optimum sous contrainte : abandonné.
+- **Mode « sans départ » (§3a, 16 %).** `optimizeOrders` : plus court chemin OUVERT
+  (départ et arrivée fictifs à coût nul) par le même optimiseur, à vol d'oiseau, au lieu
+  du voisin alphabétique. Banc `test/trajet-serveur.test.js` : 200 instances, avant
+  médian 7,87 % / pire 56,70 %, après ≤ 1 % / ≤ 5 %.
+- **Arrêt injoignable (§2 basse).** `injoignables()` retire le nœud qui porte le plus de
+  `null` jusqu'à une table complète ; le message nomme le client (« Client b :
+  injoignable par la route… ») ou le départ/l'arrivée. Option `retirerInjoignables` :
+  l'arrêt sort de la tournée, sa commande reste prête, la réponse le nomme
+  (`injoignablesRetires`). L'écran l'envoie toujours, et l'annonce par une notification.
+- **Géocodeur (§2 basse) : cédé au lot 3** (revue du 23/09, voir plus bas). La boucle
+  de géocodage de `roadPlan` est rendue telle que sur main.
+- **Tronçons (§3b).** `route.troncons` : `{ duree (s), distance (m) }` par trajet,
+  départ → … → arrivée, tels qu'OSRM les rend (`legs`). Rien de neuf n'est affiché :
+  c'est la matière des heures d'arrivée du lot 6. Un réordonnancement à la main les
+  efface avec le tracé.
+- **Serveur de calcul routier (§6, décision 2).** `SEREO_ROUTING_URL` désigne notre
+  serveur ; une adresse locale (`http://127.0.0.1:5000`) se branche telle quelle. S'il
+  ne répond pas (réseau, délai, 5xx), repli sur le serveur public, pendant 60 s, avec un
+  avertissement au journal (origine seule, jamais un identifiant glissé dans l'URL).
+  `SEREO_ROUTING_REPLI_URL` change le repli ; vide, aucun. Un refus (4xx) ne bascule
+  pas, et son message dit « refuse une des positions » au lieu de « réessaie ».
+- **Découpage au-delà de 50 (§3b, lot 8).** `POST /api/routes/decoupage` (n'écrit
+  rien) : balayage angulaire autour du départ, coupé à la plus grande trouée, paquets
+  équilibrés de 50 au plus ; les commandes « À livrer en premier » partent dans la
+  première. L'écran le propose (confirmation), crée la première tournée et garde les
+  autres commandes sélectionnées pour la suivante. Hors ligne, il refuse sans rien
+  mettre en file.
+- **Garde-fou.** La descente a un plafond de mouvements : une matrice aux valeurs
+  géantes (un « infini » à 9e15, vu pendant ce lot) faisait voir des gains fantômes à
+  l'arrondi, et la boucle ne finissait pas. Banc : processus fils tué au bout de 20 s.
+
+### Preuves rouges (ancien code, cause lue)
+
+- Qualité : « pire écart trop grand : médian 0,00 %, p90 0,93 %, pire 8,31 % sur 750 ».
+  Mutant sans Or-opt (perturbations gardées) : pire 7,07 %, rouge aussi.
+- Épingles : « épinglés 4,0 mais ordre 3,1,0,2,4 ».
+- Injoignable : reçu « Un trajet est inaccessible par la route. Vérifie les adresses. ».
+- Tronçons : reçu `undefined` (lib), « la tournée n'a pas gardé ses tronçons » (serveur) ;
+  mutant qui ne les efface pas au réordonnancement : rouge.
+- Repli : « …indisponible. Réessaie… » au lieu d'un calcul.
+- Découpage : fonction absente ; route 404.
+- Sans départ : « médian 7,87 %, pire 56,70 % sur 200 ».
+- Plafond retiré : « le calcul a été tué : il ne finissait pas » (SIGTERM).
+- E2E `meilleur-trajet.spec.js` sur l'ancien `app.js` : « element(s) not found » pour la
+  case, « Expected substring: "55 commandes" / Received string: "" ».
+
+### Écarts nommés
+
+- **`deploy/osrm/` non fait**, sur contre-ordre du 23/09 (OSRM viendra dans l'image
+  Séréo, lot de l'intégrateur). Le défaut reste donc le serveur public de
+  démonstration, et le repli y renvoie les coordonnées : tant que notre serveur n'existe
+  pas, la question RGPD du §6 reste entière.
+- « À livrer en premier » vit sur l'ARRÊT, pas sur la commande : la case n'est pas
+  mémorisée d'une préparation à l'autre, ne s'affiche pas dans la liste des arrêts et
+  ne se change plus après la création (sauf réordonner à la main).
+- La qualité est mesurée sur des temps synthétiques et jusqu'à 9 arrêts ; à 50, seul le
+  gain sur l'ancien ordre est mesuré, pas l'écart à l'optimum. Aucune vraie matrice
+  OSRM.
+- Le découpage est un balayage angulaire, pas un regroupement : deux villes dans la même
+  direction peuvent tomber ensemble, une ville à cheval sur deux paquets reste
+  possible. Une seule tournée se voit à la fois (H9, lot 2) : la deuxième se crée après.
+- Hors périmètre, au plus petit : dans `server.js`, `createRoute`, `createStop`,
+  `reorderRouteStops` (une ligne), `POST /api/routes` et la nouvelle route de
+  découpage ; dans `app.js`, la liste de préparation et `createDeliveryRoute`.
+  `apiFetch` n'est pas touché (lot 1).
+- Deux modifications de JS (`server.js`, remplacement de la section de l'optimiseur)
+  ont été faites par script au lieu de l'outil Edit, relues par `node --check` et les
+  bancs.
+- Instabilités vues, non imputées : un rouge `toHaveText` dans la première passe des
+  bancs e2e (probablement `operations.spec.js:247`, `#opSubscriptions`, sans rapport
+  avec ce lot) non reproduit en deux passes (40/40, 42/42) ; `C2.stock.a` (250 ms) rouge
+  une fois en `npm test` sous charge (1 988 ms), vert seul (237 ms).
+
+### Ce qui reste
+
+- Mesurer l'ordre sur de vraies matrices OSRM, une fois notre serveur dans l'image ;
+  relever alors la limite de 50 (elle protège le serveur public).
+- Heures d'arrivée par arrêt à partir de `troncons` (lot 6), « Réoptimiser » depuis
+  l'écran (lot 6).
+- Afficher « en premier » dans la liste des arrêts ; vrais créneaux horaires (VROOM)
+  si la décision 9 change.
+
+### Revue adverse du 23/09 : six défauts, six vrais
+
+- **Bancs du découpage aveugles au regroupement (important) : vrai, corrigé.** Les trois
+  bancs recevaient des commandes déjà rangées par côté ; le mutant « couper dans l'ordre
+  reçu » les passait. L'entrée alterne désormais ouest et est, et chaque groupe doit
+  être d'un seul côté : `[[37, 0], [0, 37]]` (lib), `[[37, 0], [0, 36]]` (serveur),
+  28 commandes de l'ouest sur 28 (e2e). Mutant : reçu `[[19, 18], [18, 19]]`,
+  `[[19, 18], [18, 18]]`, « Expected: 28 / Received: 14 ». Le code était juste.
+- **Conflit avec le lot 3, `fix/adresses-justes` (important) : vrai, corrigé de ce
+  côté.** La résolution des adresses d'une tournée appartient au lot 3 (« un seul module
+  de géocodage »), qui résout TOUTES les commandes pour nommer TOUTES les adresses
+  douteuses ; « arrêter au premier échec » disait l'inverse, dans les mêmes lignes. Ce
+  lot rend la boucle de main, retire son banc, range le détail d'un refus sous
+  `error.details` (convention du lot 3 ; banc : reçu `undefined` sur l'ancien code), et
+  ne réécrit plus les lignes que le lot 3 réécrit (`fail`, `json`, `geocode`, la fin de
+  `createStop`). Mesure `git merge-tree` avec `fix/adresses-justes` : `lib/routing.js`
+  passe de 5 blocs en conflit à 2, `server.js` de 2 à 1. Restent, à résoudre à la main
+  par UNION : la signature de `roadPlan` (`{ geocoder = null, ...options } = {}` ou
+  deux lectures), `module.exports` (garder `resoudrePositions`, `injoignables`,
+  `decouperEnTournees`, `_reinitialiserRepli` ; retirer `geocode`, que le lot 3 a
+  déplacé), l'appel de `roadPlan` dans `POST /api/routes` (passer `geocoder` ET
+  `retirerInjoignables`), `createDeliveryRoute` dans `app.js` (le `try` du lot 3
+  autour du `POST /api/routes` du lot 7), la fin de `style.css`, `DESIGN.md` et la
+  doc. Après fusion : `Object.assign(fail(msg), { details })` reste juste avec le
+  `fail` du lot 3.
+- **Hors ligne, découpage mis en file (mineur) : vrai, corrigé.** Au-delà de 50
+  commandes et hors ligne, l'écran dit « le découpage en tournées demande le réseau.
+  Rien n'a été enregistré » avant tout appel. Ancien code : « Hors ligne — enregistré,
+  sera envoyé à la reconnexion » et « 1 en attente ». **À la fusion du lot 1**, qui met
+  en file sur TOUT échec réseau (pas seulement `navigator.onLine === false`) : ajouter
+  `/^\/api\/routes\/decoupage$/` à `JAMAIS_EN_FILE`, sinon le cas « réseau présent mais
+  muet » revient.
+- **Sans départ, aucun plafond (mineur) : vrai, corrigé.** Mesuré sur la copie de la
+  branche : 400 commandes 1,6 s, avec 8 épingles 17,8 s (200 : 0,14 s et 2,2 s).
+  `createRoute` refuse au-delà de 50 dans les deux modes (« Sélectionne entre 1 et 50
+  commandes par tournée. »), y compris l'appel sans liste (toutes les commandes
+  prêtes). Ancien code : 201. L'écran n'utilise pas ce mode ; un appel d'API qui créait
+  une tournée de plus de 50 est désormais refusé.
+- **Le découpage ignorait « À livrer en premier » (mineur) : vrai, corrigé.**
+  `decouperEnTournees(points, depart, max, premiers)` : la tournée qui porte le plus
+  d'épingles part d'abord (rotation, l'ordre des directions est gardé) ; une épingle
+  restée ailleurs prend la place de la dernière commande sans épingle de la première,
+  qui passe en tête de la tournée qu'elle quitte (tailles gardées). Écart : plus
+  d'épingles que de places, le surplus reste où il est, sans message.
+- **Notification qui taisait la suite (mineur) : vrai, corrigé.** Un arrêt retiré ET
+  des commandes pour la suivante : les deux phrases, dans le même message. Mutant
+  (ancien message) : reçu « Tournée créée sans Client 00 : injoignable… » seul.
+- **Conséquence du cédage au lot 3.** Tant que le lot 3 n'est pas fusionné, `main` garde
+  l'ancienne boucle : après un premier échec, les autres workers continuent d'interroger
+  le géocodeur (§2 basse). Le lot 3 la remplace par une résolution complète, voulue.
+
+## 23/09 — Lot 3 de l audit géo : des adresses justes
+
+Référence : rapport d'audit du 23/09 (`audit-geo-rapport.md`, code audité `019788c`),
+décisions de Thomas du même jour, toutes « oui » aux défauts. Branche
+`fix/adresses-justes`, depuis `main` (v1.41.1).
+
+### Ce qui est fait
+
+- **Un seul géocodeur** (`lib/geocodage.js`) pour l'import, le lot de fond, le calcul
+  de tournée et la recherche d'adresse : la BAN (`api-adresse.data.gouv.fr`,
+  `SEREO_GEOCODER_URL`), un seuil (0,6), une requête (voie + commune, code postal en
+  filtre), un cache (table `geocodages`), un User-Agent `Sereo/<version>
+  (+<dépôt public>)` — un contact générique, jamais une adresse e-mail. Avant, la
+  tournée interrogeait `data.geopf.fr` codé en dur, seuil 0,65, sans cache : une
+  adresse « trouvée » à l'import y était refusée.
+- **H6** : une commande créée dans l'application (terrain, planifiée, abonnement,
+  replanifiée) hérite de la position de son client quand elle se livre à son
+  adresse. Le calcul de tournée prend la position du client avant le géocodeur, et
+  **mémorise** ce qu'il trouve (commande, client s'il n'en avait pas, cache).
+- **H5, H12, décision 8** : un changement d'adresse (Modifier le profil, fiche CRM,
+  commande terrain qui corrige le client) efface la position de l'ancienne adresse
+  et relance le géocodage en fond. Les commandes non livrées qui se livraient à
+  l'ANCIENNE adresse suivent la nouvelle ; celles livrées ailleurs (EHPAD, proche)
+  et celles déjà livrées ou annulées ne sont plus réécrites (adresse, téléphone,
+  consigne). Une consigne propre à une commande n'est plus écrasée par celle du client.
+- **M8** : une position placée par une personne est marquée `geoSource: "manuel"`.
+  Le lot ne l'écrase jamais, même avec `forcer` ; il re-vérifie chaque client sous
+  le verrou (saisie pendant le lot, adresse changée pendant le lot). Deux lots ne
+  tournent plus en parallèle (409), `max` est borné.
+- **M5, décision 6** : (0,0), latitude et longitude inversées, et toute position à
+  plus de **150 km du départ** de la tournée sont refusés avant l'appel à OSRM, en
+  NOMMANT le client ; l'inversion est proposée corrigée. Sans départ (saisie
+  manuelle), la borne est la France métropolitaine. « Réessaie » n'est plus dit que
+  d'une vraie panne de service.
+- **Le calcul liste TOUTES les adresses douteuses d'un coup** (`details.adresses`
+  dans la réponse 400), chacune avec son motif et, s'il y en a une, sa proposition.
+- **H11** : « Résidence…, Bât. B, Apt 12, », « BP 40012 » sont retirés de la requête
+  (l'adresse enregistrée ne change pas : le livreur les lit toujours) ; « CEDEX » et
+  le code CEDEX (qui n'est pas un filtre de la BAN) sont gérés ; un code postal lu
+  comme un nombre par Excel (1100) redevient 01100 ; un rejet est redemandé après
+  30 jours, et n'occupe plus une place du lot en attendant (famine).
+- **La précision est gardée** (`geoPrecision` : numéro, rue, lieu-dit, commune,
+  manuel) sur le client, la commande et l'arrêt, et signalée : « Position
+  approximative : au milieu de la rue ».
+- **M4** : un arrêt encore à faire lit sa commande (consigne, adresse, position,
+  téléphone, articles). Un arrêt soldé, ou une tournée terminée, garde ce qui a été
+  livré. Une commande reportée à une autre date quitte la tournée prête ou en cours
+  et redevient « prête à livrer ».
+- **Client créé ou modifié au CRM : géocodé** en fond. Une demande pendant un lot
+  n'est plus perdue (relance).
+- **H7 — écran « Adresses à vérifier »** (sheet au téléphone, fenêtre au bureau,
+  `public/js/domains/adresses.js`) : clients sans position, approximatifs, ou dont
+  l'adresse a changé après une saisie manuelle ; proposition de la BAN acceptée
+  d'un clic ; recherche d'adresse ou « latitude, longitude » collé ; mini-carte
+  Leaflet au marqueur déplaçable (ou toucher la carte). Alerte « N clients à livrer
+  sans position » dans « Préparer une tournée » (calculée sur les données chargées :
+  aucune requête de plus au rechargement). « Corriger la position » dans les autres
+  actions de l'arrêt remplace les deux champs numériques qui envoyaient
+  l'identifiant de l'ARRÊT au lieu du client. Source citée : « Adresses : BAN ».
+
+### Décisions prises dans le lot
+
+- Accepter une proposition, choisir un résultat de recherche ou déplacer le
+  marqueur, c'est une saisie **manuelle** : elle est protégée, et un point
+  approximatif ainsi validé ne revient pas dans la liste (sa précision reste affichée).
+- Un changement d'adresse garde une position manuelle mais la marque « à vérifier »
+  (« Adresse modifiée ») : elle corrigeait peut-être un lieu-dit que la BAN ignore.
+- La référence des 150 km est le **départ** de la tournée : aucun dépôt n'est encore
+  réglé dans l'application (lot 6).
+- Une commande reportée pendant la tournée en est **retirée** (pas seulement
+  signalée). En route, le tracé est gardé plutôt qu'effacé sous le livreur.
+
+### Écarts nommés
+
+- **`--focus-ring` n'existe pas en mode sombre** (défini sous
+  `:root[data-color-scheme="light"]` seulement) : `box-shadow: var(--focus-ring)`
+  n'y peint rien. Trouvé par le banc de ce lot, contourné ici (anneau écrit en
+  clair), NON corrigé ailleurs (`.cli-retour`, `.cmd-ligne`…) : hors périmètre.
+- L'import Excel, chemin 2 (même bon, contenu modifié), recopie toujours l'adresse
+  du fichier sur la commande ; seule la position y est désormais protégée pour une
+  commande livrée.
+- Le point approximatif n'est pas encore dessiné autrement sur la carte (marqueur
+  creux) : c'est le lot 4.
+- La consigne d'un arrêt à faire suit celle de la commande : une note saisie par le
+  livreur sur un arrêt NON soldé serait remplacée (rare ; les notes d'échec, elles,
+  vont dans `problemReason`).
+- Une adresse de livraison distincte (EHPAD) n'a pas d'écran propre : elle se
+  géocode par son adresse au calcul de tournée (cache), et se corrige dans l'écran
+  seulement via le client.
+- Mesuré une fois : `carte-et-lignes.spec.js` « trace de repli » a dépassé 3 min
+  sous la charge de six fichiers à deux ouvriers ; vert seul (3 s) et au second
+  passage de la même charge (44/44). Non reproduit, cause non affirmée.
+
+### Ce qui reste
+
+- Lot 6 : un dépôt réglé (il remplacera le départ comme référence des 150 km, et
+  la France métropolitaine pour la saisie manuelle).
+- Lot 4 : le marqueur « approximatif » sur la carte, la mention BAN à côté de la
+  licence OSM.
+- Lot 2 : retirer l'ancien panneau « Clients tournée » (décision 7) — sa saisie de
+  coordonnées est déjà remplacée par le bouton de cet écran.
+- Plus tard : l'appel groupé CSV de la BAN pour les gros imports ; une colonne
+  « Complément » reconnue à l'import.
+
+### Relecture adverse du 23/09 — sept défauts, sept vrais
+
+Chacun a son banc, rouge sur le code relu (`1daf3d9`) pour la cause nommée, vert
+après. Aucun n'était faux.
+
+- **Bloquant — la virgule après le numéro** (« 12, rue de Dole », « Rue de Dole,
+  12 », « 12 bis, rue X ») : le numéro seul devenait la voie, la rue partait en
+  complément. La BAN ne recevait que « 12 », et deux voies différentes au même
+  numéro avaient la même clé de cache : un déménagement de « 12, rue de Dole » à
+  « 12, avenue Foch » passait inaperçu (position et commandes figées). Le numéro
+  isolé est recollé à sa voie. En plus : quand la clé ne change pas mais le texte si
+  (« Apt 12 » → « Apt 14 »), le texte suit sur les commandes à livrer et la position
+  reste.
+- **« Bat » dans un nom de voie** (« rue du Bateau », « chemin de la Batie », « rue
+  de Batz ») était coupé comme un bâtiment. « Bat » doit maintenant être suivi d'un
+  point ou d'une espace (« Bat B », « Bât. C », « Batiment 2 » restent retirés).
+- **Téléphone d'une commande livrée ailleurs** : « Modifier le profil » renvoie le
+  téléphone à chaque enregistrement et l'écrasait sur la commande EHPAD. Il ne suit
+  plus que si la commande avait le numéro du client (ou aucun), comme la consigne.
+  Le paragraphe « Ce qui est fait » disait « adresse, téléphone, consigne » des
+  commandes LIVRÉES : c'était vrai d'elles seulement.
+- **Import Excel avec Latitude/Longitude** : il écrasait une position placée à la
+  main et ne passait pas `verifierPosition`. Une position manuelle est gardée ; une
+  position du fichier (0,0), inversée ou hors de France est ignorée et comptée
+  (`positionsRefusees` dans la réponse, et dans l'historique).
+- **Lot lancé à la main** : une demande arrivée pendant ce lot était perdue (seul le
+  lot de fond relançait). Il relance aussi.
+- **Stockage JSON** : le calcul de tournée refusait toute commande sans position
+  pour « adresse incomplète ». Il interroge de nouveau la BAN, sans cache ; le lot
+  de fond reste réservé à SQLite.
+- **Focus dans « Adresses à vérifier »** : Annuler, Accepter, Garder et Enregistrer
+  détruisaient le bouton actif et le focus retombait sur `<body>`. Il revient sur
+  « Placer sur la carte » de la même ligne, sinon sur la ligne qui a pris sa place,
+  sinon sur le résumé.
+
+Écarts nommés :
+
+- Le téléphone d'une commande à l'adresse du client, mais qui portait un autre
+  numéro (un proche), ne suit plus un changement du numéro du client : c'est voulu,
+  comme pour la consigne.
+- L'import Excel ne sait toujours pas comparer la position du fichier au départ
+  d'une tournée (aucun dépôt réglé, lot 6) : il la borne à la France métropolitaine.
+- Un client rattaché par la clé secondaire de l'import (nom + code postal, adresse
+  légèrement différente) repart d'une fiche vide côté position, comme avant ce lot :
+  non traité ici.
+- « Bâtiment C 3 rue de Dole » (complément en tête, SANS virgule) n'est pas nettoyé (le motif
+  « en ligne » exige une espace avant) : inchangé, la BAN le trouve souvent quand même.
+
+## Lot 4 de l audit géo : une carte utilisable au téléphone — 23/09
+
+Source : rapport d'audit géo du 23/09 (commit audité `019788c`), §2 H10 et M3, §5 « carte
+au téléphone », « sans tournée », petites finitions, §6 fond de carte. Décisions de Thomas
+du 23/09 appliquées ici : garder les tuiles OpenStreetMap une fois le Referer corrigé.
+
+### Fait
+
+- **Fond de carte en UN endroit.** `lib/fond-de-carte.js` lit `SEREO_TUILES_URL`,
+  `SEREO_TUILES_ATTRIBUTION`, `SEREO_TUILES_ZOOM_MAX` (documentés dans `.env.example`) ;
+  OpenStreetMap par défaut. La page le reçoit par `GET /api/carte/fond` ; la CSP
+  (`img-src`) lit le même module. L'URL était écrite en dur deux fois (`app.js` et la CSP).
+  Une URL invalide (pas https, pas de `{z}/{x}/{y}`, jeton inconnu dans l'hôte) retombe sur
+  OSM **avec l'attribution d'OSM**.
+- **Referer et licence.** Les tuiles portent `referrerPolicy:
+  "strict-origin-when-cross-origin"` : l'origine seule part (mesure : `http://127.0.0.1:3194/`
+  sur chaque tuile, `null` avant). Le document garde `Referrer-Policy: no-referrer`.
+  L'attribution porte le lien `https://www.openstreetmap.org/copyright` (« © les
+  contributeurs d'OpenStreetMap »).
+- **Fond indisponible.** Quatre tuiles refusées d'affilée affichent « Fond de carte
+  indisponible — la liste des arrêts reste utilisable. » ; une tuile qui revient l'efface.
+- **H10.** On ne cadre plus qu'au **changement de tournée affichée** (autre tournée, arrêts
+  ajoutés ou retirés ; l'ordre n'en fait pas partie). Le rechargement qui suit « Livré »,
+  « Absent », et le changement d'onglet gardent le zoom et le cadre du livreur (mesure avant :
+  996 px de déplacement des marqueurs après un rechargement). Quand l'arrêt en cours
+  **change**, la carte glisse vers lui (`panTo`), au zoom du livreur. Bouton **Recentrer**.
+- **M3.** Choisir un arrêt (ligne ou marqueur) met à jour le marqueur « en cours » de la
+  carte (avant : la carte gardait l'anneau sur l'arrêt 3 quand la liste disait 5).
+- **Mise à jour ciblée.** Un marqueur par clé ; seul ce qui change est touché (`setIcon`,
+  qui réutilise l'élément, `setLatLng`, bulle, `zIndexOffset`). Le tracé ne se redessine
+  que si la tournée ou sa géométrie changent. Un rechargement ne recrée plus aucun marqueur.
+- **Ma position.** Bouton à bascule (`aria-pressed`) : `watchPosition`, point bleu et cercle
+  de précision, « Ma position : ± 30 m » ; au-delà de 150 m, « — position imprécise » sur fond
+  d'avertissement. **Rien n'est envoyé au serveur** (le banc écoute toutes les requêtes).
+  Quitter l'écran Tournée arrête le suivi.
+- **Sans tournée.** Plus de pointillé ni de « Arrêt N » : la carte montre les commandes
+  prêtes à livrer (filtrées, plus la sélection) par des **points sans numéro**, pleins si
+  cochés, nommés « <client>, sélectionnée / non sélectionnée », hors de la tabulation (la
+  liste est l'équivalent clavier). **Jamais les clients de la base.** Le sous-titre et la
+  légende suivent le mode.
+- **Centre par défaut** sur le Jura et le Doubs (Champagnole, Dole, Besançon), plus Beaune.
+- **Téléphone.** Un doigt fait défiler la page, deux doigts déplacent et zooment la carte
+  (mesure avant : page 0 px, carte 160 px ; après : page 145 px, carte 0 px). Une astuce
+  « Deux doigts pour déplacer la carte » apparaît 1,5 s. **Plein écran** : bouton de la
+  carte, et « Carte » du cockpit au téléphone ; le doigt seul y déplace la carte ; Échap ou
+  le bouton en sortent, le focus revient à ce qui l'avait ouvert.
+- **Départ et arrivée** : repères carrés « D » et « A » (« D·A » au même point), nommés
+  « Départ : <libellé> ». Ils sont dessinés **même sans tracé** — ils disparaissaient après un
+  réordonnancement (le serveur efface la géométrie, pas le départ). Le pointillé de repli
+  relie désormais départ, arrêts et arrivée dans l'ordre de la tournée.
+- **Arrêts à la même adresse regroupés** : un marqueur « 3·7 » (au-delà de deux, « 3+2 »),
+  nommé « Arrêts 3 et 7, en cours : <client> » ; l'état montré est le plus urgent.
+- **Point approximatif** : anneau en tirets, « position approximative » dans le nom et la
+  bulle. Le serveur le dit : `positionPrecision` (`adresse`, `approximative`, `manuelle`)
+  posé par le géocodage par lot (type BAN `street` = approximatif), par le calcul de tournée,
+  et « manuelle » par la correction à la main ; copié dans l'arrêt.
+- **Libellés en français** : « Zoomer », « Dézoomer », « Fermer » (bulle) ; chaque marqueur
+  d'arrêt dit son client.
+- **Décisions gardées** : marqueurs de 44 px, tracé de 7 px et liseré blanc.
+
+### Décisions prises
+
+- **Suivre sans zoomer.** Choisir un arrêt faisait `setView(…, 15)` ; le zoom du livreur
+  est maintenant gardé partout (il avait rezoomé à la main, on ne le lui reprend pas).
+- **Le fond vient d'une requête.** Un fond qui ne se charge pas (requête refusée) affiche le
+  même message qu'une panne de tuiles. `/api/carte/fond` passe par la copie de secours du
+  service worker comme les autres `GET /api`.
+- **Seuil de 4 tuiles** en échec d'affilée : un échec isolé (tuile hors zone) ne dit rien.
+- **Plein écran sans l'API Fullscreen** : une classe sur le panneau (`position: fixed`,
+  z-index 1150 : au-dessus de la barre basse, sous les feuilles et les messages). L'entrée
+  d'écran `pageFadeIn` (`both`) laissait un `transform` identité sur `#livreur`, qui faisait
+  de la page le cadre du `fixed` : la carte restait dans la page (358 × 2 106 px à
+  y = −1 273). Le plein écran coupe l'animation de `#livreur`. Le banc garde les animations
+  pour ce cas : les figer masquait le défaut.
+- **Point bleu** `--carte-position` (#1A73E8, #8AB4F8 en sombre) : la convention des cartes ;
+  aucun jeton v8 n'est bleu.
+
+### Écarts nommés
+
+- **Le Referer ne prouve pas la levée des blocages** « Access blocked » du 18/09 : à
+  vérifier une fois depuis la production (décision 3 : observer une semaine).
+- **Une tuile 403 servie AVEC une image** (l'« Access blocked » d'OSM) peut s'afficher sans
+  déclencher `tileerror` : le message ne couvre que les refus sans image et les coupures.
+- **En préparation**, deux commandes au même point ne sont pas regroupées, et toucher un
+  point ne coche pas la commande (constat « moyenne » de l'audit, non fait).
+- **« Me localiser » du départ** (arrondi à ~100 m, décision 5) et la purge à 12 mois ne sont
+  pas dans ce lot : la position en direct, elle, ne quitte jamais le navigateur.
+- **Les arrêts restent des copies** (M4, lot 3) : un arrêt créé avant ce lot n'a pas de
+  `positionPrecision` ; un client corrigé ensuite ne met pas à jour l'arrêt existant.
+- **Hors ligne**, les tuiles ne sont pas en cache (service worker : autre origine ignorée ;
+  selon l'audit, la politique d'OSM l'interdit). La carte devrait rester grise, avec le
+  message : **déduit, non rejoué**.
+- **Sans banc** : l'astuce « Deux doigts », le repère « D·A » au même point, le « 3+2 »
+  au-delà de deux arrêts, le retour du message quand une tuile revient.
+
+### Ce qui reste
+
+- Mesurer depuis la production que les tuiles passent (Referer) ; trancher le fournisseur si
+  les blocages continuent (un changement se fait par `SEREO_TUILES_URL`, sans code).
+- Carte de préparation : cocher en touchant un point ; regrouper au-delà de ~50 points.
+- Le lot 3 (bonnes adresses) peut s'appuyer sur `positionPrecision` et la remplir aussi pour
+  les adresses corrigées depuis l'écran « Adresses à vérifier ».
+
+*Bancs : `test/e2e/carte-telephone.spec.js` (12 cas, ports 3194 et 3195) — tous rouges sur
+la carte d'avant, chacun pour sa cause ; cinq mutants tués (repères sans tracé, recadrage au
+changement d'onglet, `panTo` retiré, position envoyée, repli sur les clients).
+`test/carte-telephone.test.js` (5 cas, faux géocodeur 3392) : `/api/carte/fond`, CSP,
+défaut OSM avec licence, URL invalide, `positionPrecision`. Verts aussi :
+`carte-et-lignes`, `tournee`, `tournee-mobile`, `ecran-livreur`, `operations`,
+`tuiles-bloquees`, `tabs`, `cibles-tactiles`, `focus-clavier`, `contraste-application`,
+`etats-limites`, `hors-ligne`, `chargement-instantane`, `navigation-mobile`.*
+
+### Relecture adverse du 23/09 — cinq défauts, cinq vrais
+
+Relecture de `f7eed6d`. Chaque défaut a été vérifié avant d'être corrigé ; chaque correctif
+a un banc rouge sur le code relu, pour la cause nommée.
+
+- **Important — le « approximatif » disparaissait sur les commandes suivantes.** Vrai, et
+  plus large que dit : le client est **reconstruit** à chaque import (`clientsMap`), sa
+  précision était perdue ; la commande créée ensuite (chemin 3), la commande de secours de
+  `syncWorkflow` et la mise à jour (chemin 2) copiaient le point sans elle. Corrigé : l'import
+  garde la précision du point qu'il conserve (un point venu du fichier n'en porte pas) et la
+  copie sur les commandes. **Données d'avant le lot** : `geocoderClients` relit la précision
+  dans le cache du géocodeur, sans appel réseau, **seulement si le point du cache est celui
+  du client** (un point posé à la main ou venu du fichier reste sans mention), et la pose
+  sur ses commandes **au même point** — pas sur celles livrées ailleurs (EHPAD, proche).
+  Le rattrapage a lieu au prochain géocodage (après un import, ou « Lancer » à la main).
+  Rouges : « le client réimporté a perdu sa précision » (`undefined`), « la commande de
+  mardi s'affiche comme une adresse exacte » (`''`, chemin 3 seul retiré), « le client
+  d'avant le lot n'est jamais rattrapé », « la commande livrée ailleurs a pris la précision
+  du client » (garde du même point retirée).
+  *Partie fausse du constat* : les commandes terrain et planifiées ne copient **pas** le
+  point du client (`createCustomerOrder`, `createPlannedOrder` : ni `lat` ni `lng`) ; le
+  calcul de tournée les géocode lui-même et pose la précision (`lib/routing.js`).
+- **Mineur — la légende restait en préparation.** Vrai : `.legend.vertical` (grid) et
+  `.marqueur-legende` (flex) battaient `[hidden]`. Corrigé par `#carteLegende[hidden]`.
+  Rouge : `toBeHidden()` → « visible » au téléphone, sans tournée. Témoin positif : visible
+  avec une tournée.
+- **Mineur — un échec de `/api/carte/fond` laissait la carte grise.** Vrai. Corrigé : le
+  fond est redemandé à 3 s, 10 s, 30 s puis toutes les 60 s, et dès l'événement `online` ;
+  une seule couche posée (garde contre deux appels croisés). Rouge : 0 tuile après 12 s.
+- **Mineur — la précision GPS recouvrait « N arrêts sans position ».** Vrai (mesure :
+  précision 45,610 246×60 sur message 51,612 288×70). Corrigé : les deux sont **empilés** dans
+  `.carte-bas` (flex en colonne, précision au-dessus), à 28 px du bas comme l'était la
+  précision (le message était à 16 px). Rouge : rectangles qui se croisent.
+- **Mineur — un fournisseur sans `SEREO_TUILES_ATTRIBUTION` perdait la licence.** Vrai.
+  Décision : la mention d'OpenStreetMap (ODbL, avec le lien) s'affiche à sa place — les fonds
+  courants sont faits de ses données — et le démarrage l'écrit dans le journal. Rouge :
+  attribution `''`.
+
+**Écarts nommés.** Le géocodage par lot (`geocoderClients`, antérieur au lot 4) réécrit
+toujours le point de **toutes** les commandes du client quand il le géocode, y compris
+celles livrées ailleurs : la décision « sauf celles livrées ailleurs » relève du lot des
+adresses (lot 3), non fait ici. Un arrêt de tournée déjà créé garde sa copie (M4). Si le
+service worker a déjà mis `/api/carte/fond` en cache, la relance peut le servir de là :
+c'est voulu (hors ligne), et le banc ne compte donc pas les relances, il compte les tuiles.
+
+*Bancs ajoutés : `test/carte-telephone.test.js` (+3 cas : import après géocodage, rattrapage
+depuis le cache et commande livrée ailleurs, attribution absente) ;
+`test/e2e/carte-telephone.spec.js` (+3 cas « relecture », ports 3194 et 3195).*
+
+## Intégration des lots 1, 3, 4, 5 et 7 (branche integration/geo-vague1) — 23/09
+
+Ordre : lot 7 (meilleur trajet), lot 3 (adresses justes), puis lot 4 (carte au téléphone) ;
+ensuite lot 1 (le livreur ne perd plus rien) et lot 5 (rapidité), en fin de section.
+
+**Un seul champ pour la précision d'un point : `geoPrecision`** (lot 3), avec son origine
+`geoSource`, portés par le client, la commande et l'arrêt. Le lot 4 avait inventé
+`positionPrecision` (`adresse`, `approximative`, `manuelle`) pour la même idée : il est
+**retiré partout** (serveur, `app.js`, bancs). Ce que la carte en tire :
+
+| `geoPrecision` | Sur la carte |
+| --- | --- |
+| `numero` | exact (disque plein) |
+| `rue`, `lieu-dit`, `commune` | **approximatif** (`marqueur--approx`, « position approximative » dans le nom, la bulle dit où est le point) |
+| `manuel` (posé à la main, ou venu du fichier) | exact — pas dit approximatif |
+| vide (point d'avant la précision, non rattrapé) | exact, sans mention |
+
+La partition est celle de `geocodage.precisionApproximative` (écran « Adresses à vérifier »).
+Une proposition « rue » acceptée à la main garde `geoPrecision: "rue"` : l'écran ne la
+redemande plus (`geoSource: "manuel"`), mais la carte la dit toujours approximative — le
+point reste au milieu de la rue.
+
+**Ce qui a été réconcilié.**
+- `lib/routing.js` : `resoudrePositions` du lot 3 (décision 150 km, `geoPrecision` déjà portée
+  jusqu'à l'arrêt) remplace la boucle de géocodage du lot 4.
+- `server.js` : géocodage par lot, normalisation, `createRoute`, `createStop`, import (×3) et
+  saisie des coordonnées suivent le lot 3. Le **rattrapage** du lot 4 (client placé avant que
+  la précision existe, relu dans le cache BAN s'il est au même point) est gardé, porté sur
+  `geoPrecision` : il écrit aussi `geoSource: "ban"`, et ne touche que les commandes qui
+  suivent le client **au même point** (ni livrées ailleurs, ni placées à la main). La commande
+  de repli de `syncWorkflow` hérite `geoPrecision` comme l'import.
+- Un arrêt en cours relit sa commande (`arretVivant`, M4 du lot 3) : la précision se pose sur
+  la commande, l'arrêt suit. Le banc e2e du lot 4 la posait sur l'arrêt seul ; il la pose
+  maintenant sur les deux, comme `createStop`.
+- Les deux « écarts nommés » du lot 4 sont soldés par le lot 3 : le géocodage par lot ne
+  réécrit plus les commandes livrées ailleurs (`commandeSuitLeClient`), et une commande née
+  dans l'application hérite du point de son client (`heriterPositionDuClient`).
+- Conflits en fin de fichier (`DESIGN.md`, `style.css`) : base + ajout de chaque côté,
+  reconstruits depuis les trois versions, jamais en ôtant les marqueurs.
+
+**Bancs adaptés, sans les affaiblir.** `test/carte-telephone.test.js` : mêmes cas, mesurés sur
+`rue` / `numero` / `manuel`, plus l'absence de `positionPrecision`. `test/e2e/carte-telephone.spec.js` :
+arrêt 6 `rue` (approximatif), arrêt 5 `manuel` et arrêt 2 `numero` (non), et en préparation un
+point `commune` (approximatif) à côté d'un `numero` et d'un `manuel`. Mutations, chacune rouge
+pour sa cause : la carte relit `positionPrecision` (le défaut d'intégration même) ; seule
+`rue` approximative ; `manuel` ou `numero` dits approximatifs ; rattrapage coupé ; garde du
+même point retirée ; import qui perd la précision ; saisie manuelle dite `numero` ;
+`street` rendu `numero`.
+
+*Non couvert par un banc : la commande de repli de `syncWorkflow` (héritage de
+`geoPrecision`).*
+
+### Lots 1 et 5, fusionnés ensuite (23/09)
+
+Ordre : lot 1 (`fix/livreur-ne-perd-rien`, fusion `1486edc`), puis lot 5
+(`perf/tournees-rapides`, fusion `c2dfa87`), puis la réconciliation (`19f399b`).
+
+**Conflits de texte.**
+- `DESIGN.md` : ajouts en fin des deux côtés, et pour le lot 1 une note au milieu
+  (§ file hors ligne, « la garde est tombée ») : `ajouts.py` refuse (code 2) ;
+  reconstruit depuis les trois versions — notre version, la note du lot 1, puis la
+  section de chaque lot (219 et 186 lignes, exactement leurs diffs).
+- `style.css` : ajouts en fin (`ajouts.py`).
+- `app.js` : la carte « À livrer en premier » (lot 7) et le statut affiché
+  « À reprogrammer » (lot 1), indépendants : les deux ; l'écoute des réponses
+  tardives (lot 1) et `recopierApresGeste` (lot 5) : les deux ; `refreshActiveRoute`
+  garde la garde `updatedAt` du lot 1 et `garderTrace`/`chargerTraceOmise` du lot 5.
+- `sqliteStore.js` : `gestes_recus` (lot 1) et `traces_tournees` (lot 5), les deux.
+- `server.js` : le plafond de 50 commandes posé deux fois (revue du lot 7, lot 5) : un
+  seul, sur `MAX_COMMANDES_PAR_TOURNEE` ; `arretVivant` (lot 4) et l'index `Map` des
+  commandes (lot 5) dans `normalizeRoute` ; `premiers` (lot 7) et la sélection exigée
+  (lot 5) dans `POST /api/routes`.
+- `operations-api.js` : `/api/geocode` garde le cache et la limite de débit du lot 5
+  devant le géocodeur du lot 3 (`geocodage.rechercher`, BAN). Conflit sémantique : le
+  banc du relais bouchonnait `data.geopf.fr` ; la recherche part désormais vers
+  `api-adresse.data.gouv.fr` et le banc échouait. Le bouchon prend les deux.
+
+**Le chemin des gestes d'arrêt : les deux garanties.** Le lot 1 tenait l'écran après
+un geste PAR le rechargement complet qui le suivait (`refreshActiveRoute` : jamais une
+tournée plus ancienne, gestes en file superposés ; `X-Sereo-Frais` ; copie du service
+worker rafraîchie par ce rechargement). Le lot 5 a remplacé ce rechargement par la mise
+à jour ciblée (`appliquerGesteArret`), qui ne passait par aucune de ces gardes. Sur la
+fusion brute, quatre trous, chacun corrigé :
+
+| Trou (fusion brute `c2dfa87`) | Correctif | Banc |
+|---|---|---|
+| la réponse d'un geste effaçait de l'écran un geste qui attend dans la file | `appliquerGesteArret` appelle `appliquerGestesEnFile` | e2e « un geste EN FILE reste à l'écran » |
+| deux réponses croisées : la plus ancienne ramenait l'arrêt suivant « Prêt » | garde `updatedAt` dans `appliquerGesteArret` ; une réponse tardive ne déplace plus l'écran si le livreur a choisi un autre arrêt | e2e « se CROISENT » |
+| un chargement parti avant un geste et fini après remettait les commandes d'avant, et plus rien ne les relisait | ce croisement (et lui seul) relance un chargement frais ; il n'efface plus le drapeau « écriture non relue » | e2e « chargement parti AVANT » |
+| le service worker rangeait, par-dessus la recopie de la page, la réponse d'une requête partie avant le geste | la page annonce chaque écriture (`sereo-ecriture`) ; le service worker ne range plus une réponse à une requête partie avant | `service-worker-api.test.js` + e2e « annonce chaque écriture » |
+
+Les bancs e2e : `test/e2e/integration-lots-1-5.spec.js` (port 3190, service worker
+bloqué sauf pour le dernier cas). Chacun rouge sur la fusion brute, lancé seul (le mode
+`serial` laisse les suivants « did not run » après un premier rouge), et sur chaque
+correctif retiré seul (mutation par copie, restauration vérifiée par empreinte) : 5
+mutants sur 5, chacun de sa cause.
+
+**Côté serveur, rien à corriger — prouvé.** L'écriture ciblée du lot 5 écrit ce que le
+lot 1 ajoute : `test/integration-lots-1-5.test.js` relit le FICHIER par une seconde
+connexion (ni cache du store, ni `readDb`) après « Absent » (`a_reprogrammer` en colonne
+et en payload, la cause, `updatedAt` de la tournée), après « Livré » avec `faitLe`
+(`deliveredAt` de la commande et de l'arrêt), et après d'autres écritures ciblées puis
+une réécriture complète (`gestes_recus` intact, le renvoi n'applique rien). Pris par 4
+mutants sur 4 : mise à jour sautée (seules les insertions), empreinte aveugle au
+payload, écriture qui vide `gestes_recus`, `faitLe` non transmis par la route.
+
+**`meilleur-trajet.spec.js:45` — cause trouvée, au banc.** « Impossible de calculer le
+trajet routier. » (400), en suite complète seulement. Rejoué 25 fois sous la charge de la
+suite : vert. Journal du serveur semé et de `lib/routing.js` pendant un rouge : la table
+du routage simulé faisait **8 × 8** pour une tournée de 6 points. `jeuDeDonnees()` rendait
+le tableau `CLIENTS` du module comme `clients` du semé ; `adresses-a-verifier.spec.js` et
+`clients.spec.js` y ajoutent deux clients chacun : les bancs lancés ensuite dans le même
+ouvrier héritaient d'un `CLIENTS` allongé, et `demarrerRoutage()` dimensionne sa table
+dessus. Reproduit 3/3 (`adresses-a-verifier.spec.js meilleur-trajet.spec.js
+--workers=1`) ; corrigé (clients gelés, chaque semé reçoit sa copie) : 3/3 vert ; banc
+`test/serveur-seme.test.js`. Vu en chemin, défaut distinct et corrigé aussi : un port déjà
+pris faisait parler `demarrer()` au serveur d'un autre (le 200 de `/healthz` d'autrui) —
+reproduit en occupant 3198, il refuse désormais de démarrer. Ce n'était pas la cause de
+ce rouge : le commit `f1fd819` le présente comme mécanisme possible, la cause est dans
+`18f299c`.
+
+**Vérifié** sur `18f299c` : `npm run check` ; `npm test` 538/538 ; e2e des bancs des lots
+1, 3, 4, 5, 7 et de l'intégration + tournee, tournee-mobile, ecran-livreur, hors-ligne,
+operations, livraison-chargement, chargement-instantane : 97/97 (sur `19f399b`) ; suite
+e2e complète deux fois : 401/401 et 401/401.
+
+**Écarts nommés.**
+- La recopie du lot 5 écrit dans le cache ce que l'écran montre, gestes en file
+  superposés compris (avec « En attente d'envoi ») : rouverte, la copie les montre faits.
+  La file les superpose de toute façon et retire la mention s'ils sont partis ; un geste
+  refusé au renvoi reste montré fait jusqu'au prochain chargement — comme l'écran.
+- La barrière du service worker est en mémoire : un service worker redémarré entre le
+  geste et l'arrivée d'une réponse d'avant ne la connaît plus (même limite que la garde
+  du lot 1, dite dans sa section).
+- `demarrer()` : un port pris dans les millisecondes entre son contrôle et le lancement
+  n'est pas vu (`/healthz` ne dit pas qui répond). Les ports sont uniques dans ce dépôt,
+  pas entre les worktrees qui lancent les mêmes bancs en même temps.
+- `service-worker.js` : `CACHE_NAME` n'a pas été changé (lots 1, 3, 5) ; le nom servi
+  suit l'empreinte du contenu de `public/` (`lib/empreinte-shell.js`), le changement est
+  donc pris sans lui.
+
+## Lot 1 de l'audit géo — « le livreur ne perd plus rien », posé le 23/09
+
+Source : audit « localisation, carte, tournées » du 23/09 (code audité : `019788c`),
+constats C1, H1, H2, H3, H4, M1, M6, M9. Décision retenue pour C1 : **retour
+automatique**, marqué « À reprogrammer », sans bouton à toucher.
+
+### Ce qui est posé
+
+- **C1 — un absent n'est plus une impasse.** « Absent » et « Problème » passent la
+  commande à `a_reprogrammer` (et non plus `probleme_livraison`, qu'aucune liste ne
+  proposait et qu'aucun bouton ne faisait sortir). La cause reste dans
+  `deliveryStatus` et dans l'arrêt. La commande revient d'elle-même dans « Commandes
+  prêtes à livrer », badge « À reprogrammer ». Les commandes **déjà** bloquées en
+  `probleme_livraison` reviennent aussi (serveur et écran les listent ; la transition
+  `probleme_livraison → en_livraison` existait). Une commande à relivrer n'est pas
+  cachée par le filtre de date, et un arrêt déjà traité ne la retient plus dans sa
+  tournée (« appartient déjà à une tournée active » ne compte que les arrêts encore
+  à faire).
+- **Le stock** : la réservation est **gardée** pour la relivraison (le patron déjà
+  écrit en tête de `RESERVED_ORDER_STATUSES`), jamais prise une seconde fois (le
+  départ de tournée ne réserve rien), et **consommée** à la livraison. Mesuré sur le
+  banc : 12 réservées avant l'absent, 12 après, 12 après le départ de la nouvelle
+  tournée, 8 après « Livré » ; le stock en rayon ne bouge pas.
+- **M1** : une commande en échec ne se replanifie plus en clone (400, message qui
+  renvoie aux commandes prêtes) ; « Planifier la suite » ne s'active que sur un arrêt
+  livré. La suite d'une commande livrée reste permise.
+- **H1** : toute écriture dont l'envoi échoue — réseau muet alors que le téléphone
+  se croit en ligne, délai dépassé (10 s pour un geste d'arrêt, 30 s sinon),
+  passerelle 502/503/504 — part en file. Le risque qui justifiait l'ancienne prudence
+  (un délai dépassé alors que le serveur a traité : le renvoi dupliquerait) est tenu
+  par une **clé d'idempotence** : chaque écriture porte `X-Sereo-Geste`, gardée dans
+  la file ; le serveur (`gesteIdempotent`) n'applique une clé qu'une fois, et fait
+  attendre un doublon simultané. Table SQLite `gestes_recus`, hors `readDb/writeDb`,
+  14 jours. Le bandeau nomme ce qui attend (« 1 livraison en attente d'envoi :
+  Dupont. », « … : Martin (absent) ») et l'arrêt porte « En attente d'envoi ». La
+  file repart seule : à la première réponse du serveur, et toutes les 20 s — le
+  téléphone qui se croit en ligne n'émet jamais « online ». Plus aucun message brut
+  du navigateur (« Failed to fetch ») : « Impossible de joindre le serveur. Vérifie ta
+  connexion. » La **purge** et les **comptes** ne sont jamais mis en file (rejouée plus
+  tard, une purge effacerait le travail fait entre-temps ; un mot de passe n'a rien à
+  faire en clair dans `indexedDB`).
+- **H2** : au renvoi, 401 et 429 **gardent** toute la file et renvoient vers la
+  connexion (une fois par minute au plus, pour ne pas boucler) ; la file repart à la
+  réouverture. Un geste qui rencontre la session expirée en direct part en file avant
+  la redirection. Le **secret de session** : sans `SEREO_AUTH_SESSION_SECRET`, le
+  serveur écrit un secret aléatoire dans le dossier de données (`session-secret`, à
+  côté de la base, jamais dans le dépôt) et le relit ; un redémarrage — donc chaque
+  mise à jour déployée — ne déconnecte plus. La variable reste prioritaire. Dossier
+  non inscriptible : ancien comportement, dit dans le journal.
+- **H3** : un geste mis en file fait avancer l'écran à l'arrêt **suivant** de celui du
+  geste, comme en ligne. Un second geste sur un arrêt déjà en file est refusé à
+  l'écran (il aurait été refusé au renvoi, donc perdu).
+- **H4** : le service worker met en cache la réponse arrivée **après** son repli de
+  3 s et prévient la page (`sereo-api-tardive`), qui remplace la copie à l'écran —
+  sauf si la requête est partie avant la dernière écriture. Après une écriture,
+  `loadData` envoie `X-Sereo-Frais` : pas de repli, et un échec **garde** ce que
+  l'écran montre (« Mise à jour impossible »), jamais la copie d'avant le geste ni
+  une liste vide. La tournée affichée n'est jamais remplacée par une version plus
+  ancienne (`updatedAt`, posé à chaque geste d'arrêt). Les gestes d'arrêt en file
+  sont superposés à toute donnée rechargée.
+- **M9** : un seul renvoi à la fois (promesse partagée, et Web Locks entre onglets),
+  plus un tour pour ce qui a été déposé pendant.
+- **M6** : « Livré » envoie l'heure de l'**appui** (`faitLe`), gardée dans la file ; le
+  serveur date l'arrêt et la commande de cette heure, bornée : pas dans le futur
+  (marge 5 min), pas plus de 7 jours (défaut ; plage raisonnable 3 à 14), pas avant le
+  départ de la tournée.
+
+### Bancs, et le rouge de chacun
+
+Chaque correctif retiré seul (mutation par copie, restauration par copie), le banc
+rougit de la bonne cause :
+
+| Correctif retiré | Banc | Rouge |
+|---|---|---|
+| absent → `probleme_livraison` | `livreur-ne-perd-rien.test.js` | reçu `probleme_livraison`, attendu `a_reprogrammer` |
+| bloquées hors de la liste | idem | « Aucune commande prete selectionnee », 400 au lieu de 201 |
+| filtre de date sans exception | idem | 400 au lieu de 201 (4 cas) |
+| garde « tournée active » sur tous les arrêts | idem | « appartient déjà à une tournée active » |
+| M1 retiré | idem | 201 au lieu de 400 : le clone est créé |
+| M6 serveur retiré | idem | daté de l'arrivée, deux heures après le geste |
+| idempotence débranchée | idem | 6 commandes au lieu de 5 ; 7 pour 3 envois simultanés |
+| secret aléatoire | idem | deux signatures différentes après redémarrage |
+| 401/429 traités en refus | `file-attente.test.js`, e2e H2 | file vidée (0 au lieu de 2) ; pas de renvoi vers la connexion |
+| 502/504 comptés en essais | `file-attente.test.js` | bloquée à la 6ᵉ tentative |
+| verrou de renvoi (les deux) | idem | 9 requêtes pour 3 écritures |
+| relance après dépôt | idem | l'écriture déposée pendant le renvoi reste en file |
+| résumé non gardé | idem | `resume` indéfini |
+| service worker de v1.41.1 | `service-worker-api.test.js` | copie jamais rafraîchie ; copie servie après écriture ; copie au lieu de l'échec |
+| mise en file seulement hors ligne | e2e H1, `hors-ligne` | file vide : « le Livré est perdu » |
+| bandeau sans noms | e2e H1 | « 1 modification en attente d'envoi. » |
+| aucun renvoi sans « online » | e2e H1 | le serveur reste `en_livraison` |
+| message brut | e2e purge | « Failed to fetch » |
+| purge mise en file | e2e purge | « enregistré, sera envoyé » |
+| H3 retiré | e2e H3 | l'écran revient au premier arrêt restant au lieu du suivant |
+| redirection retirée | e2e H2 | pas de nouveau document |
+| `faitLe` non envoyé | e2e H2 + M6 | `NaN` |
+| `X-Sereo-Frais` retiré | e2e H4 | 111 échantillons « En livraison » après « Livré » |
+| écoute des réponses tardives retirée | e2e H4 | reçu « Prêt », attendu « Livré » |
+| front C1 (bloquées, date) | e2e C1 | carte absente |
+
+Deux redondances, dites : le verrou de la page seul retiré, les Web Locks tiennent
+encore la concurrence (seule la relance rougit) ; le cas e2e H2 rougit sur la
+redirection avant la file (le banc unitaire, lui, montre la file vidée). Et une
+leçon : le premier banc H3 ne distinguait rien — la superposition des gestes en file
+fait déjà sauter l'écran au premier arrêt restant, qui était aussi le suivant.
+Il saute désormais un arrêt d'abord.
+
+Le banc `hors-ligne.spec.js` « en ligne — un échec réseau n'est PAS mis en file » est
+**renversé**, pas supprimé : il exige désormais la mise en file ET la clé.
+
+Exécutions : `npm test` 439/439 ; e2e des bancs touchés (livreur-ne-perd-rien,
+hors-ligne, tournee, tournee-mobile, ecran-livreur, livraison-chargement,
+chargement-instantane, operations, etats-limites, abonnements-mobile, tabs) : 75/75
+au second passage. Au premier, à deux ouvriers, deux rouges non reproduits seuls ni
+au second passage : `tournee-mobile` « Annuler DÉFAIT » (le clic est tombé après les
+4 s du toast : l'envoi est parti) et `chargement-instantane` « requêtes retenues »
+(précondition : aucune requête encore arrivée au mandataire). Dits, non corrigés.
+
+### Écarts nommés, hors de ce lot
+
+- **M10 / arbitrage 4** : l'application ne se rouvre toujours pas hors ligne ; seule la
+  superposition des gestes d'arrêt en file est faite.
+- **La file est celle du navigateur, pas de la personne** : si un autre compte se
+  connecte sur le même téléphone, il renvoie les gestes du premier sous son nom.
+- **Une commande « À reprogrammer » ne s'annule pas** : aucune transition
+  `a_reprogrammer → annulee`, aucun bouton ; une commande refusée par le client revient
+  donc dans les commandes prêtes, stock réservé, jusqu'à la libération manuelle par
+  l'API (`release-stock`).
+- **« Planifier la suite » d'une commande livrée** perd toujours consignes et
+  coordonnées (le reste de M1).
+- **L'ancien arrêt d'une commande reprogrammée** reste « Absent » dans sa tournée ;
+  rien n'empêche encore de le re-marquer (M2, lot 2).
+- Une écriture en direct peut passer **avant** des écritures plus anciennes en file ;
+  seul le même arrêt est protégé.
+- Les écritures autres que les gestes d'arrêt, mises en file, ne sont pas superposées
+  à l'écran (une commande terrain en attente n'apparaît qu'une fois envoyée).
+
+### Relecture adverse du lot 1 (23/09) — sept défauts vérifiés, six corrigés
+
+Chacun vérifié avant d'être corrigé ; chaque correctif a son banc, rouge prouvé sur
+l'ancien code (ou sur un mutant qui ne retire que lui).
+
+- **Un 500 passager bloquait la file pour toujours** (important, vrai). Un 5xx comptait
+  un essai sans pause, et le renvoi repart toutes les 20 s et à chaque lecture réussie :
+  cinq essais en quelques secondes, puis l'entrée n'était plus jamais renvoyée, sous un
+  toast répété. Désormais : pause après un 5xx (30 s, 1 min, 2 min, 4 min, puis 15 min),
+  une entrée à bout d'essais est **retentée tous les quarts d'heure** au lieu d'être
+  abandonnée, et le blocage est annoncé **une fois** (et dans le bandeau). (Une garde
+  « un passage arrêté ne se relance pas » a été retirée à la reprise, voir plus bas.)
+  Bancs : `file-attente.test.js`
+  (rafale : 5 envois → 1 ; entrée bloquée avant la mise à jour : repart),
+  `livreur-ne-perd-rien.spec.js` « 500 passager » (ancien code : `Received: 5` ; mutant
+  « toast à chaque fois » : `Received: 8`).
+- **Le renvoi n'avait aucun délai** (important, vrai). Chaque envoi de la file est coupé à
+  15 s (signal + course), compté comme un échec réseau, sans essai. Banc :
+  `file-attente.test.js` « renvoi MUET » (ancien code : la file reste gelée).
+- **L'idempotence se libérait à la fermeture de la connexion** (mineur, vrai). La clé se
+  libère désormais à la fin du traitement (`res.end`) ; une connexion fermée sans réponse
+  la garde (filet de 3 min). Banc : `livreur-ne-perd-rien.test.js` « ABANDONNE »
+  (mutant `close` : 6 commandes au lieu de 5). **Reste ouvert** : `withWriteLock` qui
+  expire à 60 s répond 500 pendant que le traitement continue ; la clé n'est pas gardée
+  (5xx) et un renvoi peut s'appliquer une seconde fois.
+- **Le service worker rangeait une réponse tardive par-dessus une plus récente** (mineur,
+  vrai). Numéro d'ordre par requête : une réponse ne se range (ni ne s'annonce) que si
+  aucune requête partie après elle n'a rangé la sienne. Banc :
+  `service-worker-api.test.js` (ancien code : la copie revient à `en_livraison`).
+- **Le corps de la réponse sans délai ni traduction** (mineur, vrai, antérieur au lot).
+  Délai propre au corps ; message français ; si les en-têtes disaient 2xx, le geste est
+  fait : l'écran avance comme sur un succès. Bancs e2e « corps CASSE » et « corps qui ne
+  vient JAMAIS » (ancien code : l'écran reste sur l'arrêt).
+- **`data/session-secret` pas exclu du contexte Docker** (mineur, vrai). `.dockerignore`
+  exclut `data/` en entier, comme `.gitignore`. Banc : `dockerignore.test.js`.
+- **Le jour de vente reste la date UTC de `deliveredAt`** (mineur, vrai, antérieur) :
+  mesuré (`2026-09-23T22:40Z` → `2026-09-23`, Paris : le 24). **Non corrigé** : il faut
+  passer toutes les bornes de `computeStatistics` en Europe/Paris, hors du lot ; le
+  commentaire M6 le dit désormais.
+
+Vu en passant, non corrigé : `tournee-mobile` « 4b — hors ligne : les gestes qui suivent
+un Livre » échoue lancé seul (`-g`, 4 fois sur 4) **aussi sur `main` (ef470c6)** ; il
+passe dans son fichier complet. Le banc H2 de ce lot avait une course (le vrai « online »
+de `setOffline(false)` renvoie vers `/login` pendant le `page.evaluate`) : tolérée.
+
+### Reprise de la correction (23/09, après une limite d'utilisation) — chaque rouge rejoué
+
+L'agent de correction a été coupé après ses commits, avant son compte rendu. Chaque
+correctif annoncé ci-dessus a été rejoué **contre l'ancien code**, par copie restaurée :
+
+- `file-attente.js` de 1b33cdc : « rafale » `5` envois au lieu de `1` ; « bloquée avant la
+  mise à jour » `0` au lieu de `1` ; « renvoi MUET » : la file reste gelée.
+- `service-worker.js` de 1b33cdc : la copie revient à `{ arret: 'en_livraison' }` ; le
+  témoin (réponse tardive sans requête plus récente) reste vert.
+- `gesteIdempotent` libérant à la fermeture : `6` commandes au lieu de `5`.
+- `.dockerignore` de 1b33cdc : `data/session-secret` n'est pas exclu ; le témoin reste vert.
+- `app.js` de 1b33cdc, file neuve : le blocage annoncé `4` fois au lieu d'`1` ; app et file
+  de 1b33cdc : `Received: 5` renvois. « corps CASSE » et « corps qui ne vient JAMAIS » :
+  l'écran reste sur « EHPAD Les Tilleuls… ». (Attention : lancés ensemble, en mode
+  `serial`, un premier rouge laisse les suivants « did not run » ; chaque rouge a été
+  rejoué seul.)
+
+Deux écarts trouvés, et réglés :
+
+- **Un correctif sans banc.** La garde `!bilan.arrete` de `viderLaFile` (« un passage
+  arrêté ne se relance pas aussitôt ») : retirée seule, **tout reste vert** — la pause
+  après un 5xx fait déjà qu'un tour redemandé s'arrête sans rien envoyer. Retirée du code
+  plutôt que gardée sans preuve.
+- **Le chemin le plus fréquent n'avait pas de banc.** Les bancs « corps » passent par
+  « Absent ». Le `return` sur `recuParLeServeur` de `envoyerLivraisonEnSuspens` (le
+  « Livré » différé, soldé par le geste suivant) n'était distingué par rien. Nouveau banc
+  « « Livré » dont le corps CASSE, puis « Absent » aussitôt » : sans ce `return` (mutant, et
+  app.js de 1b33cdc), l'erreur remonte, `solderLivraisonEnSuspens` la prend pour un refus
+  et **arrête le geste suivant** — `Received: "pret_livraison"` pour l'arrêt qui devait
+  passer « Absent ».
+
+Toujours ouvert : `withWriteLock` qui expire à 60 s (voir plus haut). Et une lecture
+(GET) dont le corps casse lève « Le serveur a bien reçu la demande… » (lu dans
+`apiFetch`, non mesuré à l'écran) : exact, mais écrit pour une écriture.
+
+## Lot 5 de l'audit géo : rapidité (23/09)
+
+Source : rapport d'audit du 23/09, §4 (performance), §6 (vie privée) et décision 5
+de Thomas (« oui » : position « Me localiser » à ~100 m, purge à 12 mois). Branche
+`perf/tournees-rapides`, partie de `main` 1.41.1 (`ef470c6`).
+
+### Fait
+
+- **§4, « une ligne »** — `syncWorkflow` construit l'index des commandes UNE fois ;
+  `normalizeRoute` le reconstruisait pour chaque tournée (O(tournées × commandes)).
+  Banc : 1 000 commandes, 200 tournées, insertions dans des `Map` comptées pendant
+  `writeDb` — 201 010 avant, sous 60 000 après.
+- **§4, écriture ciblée** — `storage/sqliteStore.js` ne supprime plus 13 tables
+  pour les réinsérer : il calcule les mêmes lignes qu'avant, les compare à
+  l'empreinte (sha1) de ce que la base contient, et n'écrit que ce qui change,
+  dans une transaction. L'état connu est un cache vérifié à chaque écriture par
+  `PRAGMA data_version` (une autre connexion a écrit → relu) : un cache faux peut
+  faire une écriture de trop, jamais en sauter une. Les rangs (`sort_order`) sont
+  gardés tant que l'ordre relatif tient ; un ajout en tête (`addHistory`,
+  `createRoute`) prend un rang plus petit. Un seul chemin d'écriture (la graine
+  JSON d'une base neuve passe par le même).
+- **§4, tracés hors de la liste** — le tracé d'une tournée vit dans
+  `traces_tournees`, hors du payload ; `readDb` ne le charge que pour les
+  tournées non terminées ; migration à CHAQUE ouverture, sur les seuls payloads
+  qui portent encore un tracé (une sauvegarde d'avant, ou un retour à une version
+  d'avant puis une remontée : ce tracé-là est le plus récent, il remplace celui
+  de la table). `GET /api/routes` n'envoie plus le tracé
+  des tournées terminées (`traceOmise: true`) ; `GET /api/routes/:id` le rend.
+- **§4, mise à jour ciblée** — la réponse d'un geste d'arrêt porte la tournée,
+  l'arrêt, la commande et le client tels que les listes les rendent
+  (`etatApresGesteArret`, après `writeDb`). « Livré » (`envoyerLivraisonEnSuspens`),
+  « Absent » / « Problème » (`updateCurrentDeliveryStatus`) et le déplacement d'un
+  arrêt remplacent ces objets et redessinent (`renderAll({ lectures: false })`)
+  au lieu de relancer `loadData()`. Points d'entrée des gestes et file d'attente
+  (lot 1) inchangés : seul le rechargement qui suivait le succès est remplacé ; un
+  échec recharge comme avant. La fin de tournée recharge une fois. Une tournée
+  terminée garde son tracé à l'écran (`garderTrace`), ou le redemande.
+- **Décision 5, position** — « Me localiser » arrondit à 3 décimales sur le
+  téléphone (la position exacte ne part plus, ni au serveur ni au calcul routier) ;
+  `normalizeRoute` arrondit aussi à chaque écriture ce qui porte le libellé
+  « Ma position actuelle », y compris les tournées déjà enregistrées. Leur
+  **tracé** aussi : les sommets à moins de 150 m de la position arrondie sont
+  remplacés par elle (`rognerTraceGps`, dans `normalizeRoute` ; au démarrage pour
+  les tournées terminées, dont `readDb` ne charge pas le tracé).
+- **Décision 5, purge** — chaque jour (une minute après le démarrage, puis toutes
+  les 24 h), les tournées **terminées** depuis plus de 12 mois partent avec leurs
+  arrêts et leur tracé. Avant : `writeBackupNowAsync("avant-purge")`, forcée ; si
+  elle échoue ou n'écrit rien, pas de purge. La sauvegarde se fait HORS du verrou
+  d'écriture (les « Livré » ne l'attendent pas) ; la base est relue sous le
+  verrou, et seule part une tournée que la sauvegarde contient sous sa forme
+  actuelle. Les commandes restent (chiffre
+  d'affaires et statistiques se calculent sur elles : banc « statistiques
+  identiques avant/après »). Journalisée (historique, type « Purge »).
+  `SEREO_PURGE_TOURNEES_MOIS` (0 = coupée), documentée dans `.env.example`.
+  Mécanisme de sauvegarde vérifié : `writeBackupNowAsync` fait un checkpoint WAL,
+  gzip le fichier, renomme atomiquement ; rotation à 30 fichiers.
+- **§4, plafond « sans départ »** — `POST /api/routes` exige 1 à 50 commandes,
+  avec ou sans départ (avant : `{}` prenait toutes les commandes prêtes) ;
+  `createRoute` plafonne aussi.
+- **§4 et §6, relais d'adresse** — `/api/geocode` : cache de 500 recherches (24 h,
+  saisie normalisée) et seau à jetons par compte et par IP (rafale 5, puis 1/s).
+
+### Mesures avant / après
+
+Script de l'audit (`perf-db.js` : 600 clients, 25 arrêts par tournée, tracé réel
+de 3 000 points ≈ 100 km), même PC, `ef470c6` contre ce lot, lancés à la suite.
+Le poste était partagé avec d'autres agents : les deux séries « avant » à 250
+diffèrent du simple au double ; ce sont des ordres de grandeur.
+
+| Historique | Mesure | Avant | Après |
+|---|---|---|---|
+| 0 | « Livré » (PATCH), médiane de 5 | 28 ms | 19 ms |
+| 250 | « Livré » (PATCH), médiane de 5, deux séries | 1 578 / 1 711 ms | 372 / 599 ms |
+| 250 | `readDb` | 413-665 ms | 108-154 ms |
+| 250 | `writeDb` (base inchangée, `syncWorkflow` compris) | 1 178-1 476 ms | 282-476 ms |
+| 250 | `GET /api/routes` (gzip) | 5 118 Ko | 263 Ko |
+| 250 | chargement complet (17 requêtes) | 7,8-14,8 s | 2,2-2,6 s |
+| 250 | après un geste | le chargement complet | 0 requête (réponse du PATCH, 21 Ko) |
+| 500 | « Livré » (PATCH), médiane de 5 | 2 736 ms | 547 ms |
+| 500 | `GET /api/routes` (gzip) | 10 215 Ko | 506 Ko |
+| 500 | chargement complet (17 requêtes) | 15,6 s | 3,3 s |
+
+Un profil (`--cpu-prof`) a montré que l'empreinte coûtait plus en petits
+`update()` qu'en hachage : une chaîne, un `update` — écriture sans changement,
+store seul, 290-470 ms → 150-210 ms.
+
+### Bancs et preuves
+
+`test/lot5-rapidite.test.js` (16 cas depuis la revue) et
+`test/e2e/rapidite-tournee.spec.js` (6 cas, serveurs semés 3196 et 3197). Rouges sur le code d'avant, de la bonne cause :
+index des commandes (201 010 insertions) ; écriture ciblée (journal par
+déclencheurs SQLite : « les tournées terminées ont été réécrites ») ; migration
+(« le tracé d'une tournée terminée est encore relu ») ; liste (« la liste envoie le
+tracé ») ; réponse du geste (« ne porte pas le client ») ; position (« stockée au
+centimètre ») ; purge (« la tournée de 13 mois n'a pas été purgée ») ; plafond
+(60 arrêts sans sélection) ; relais (« la même recherche est repartie 2 fois ») ;
+e2e « Livré » et « Absent » (22 lectures après le geste) ; fin de tournée (« le
+tracé a disparu de la carte ») — CE défaut-là naît du lot lui-même (la liste sans
+tracé), le banc le tient ; « Me localiser » (47.2381234 reçu).
+Gardes neuves prouvées par mutants (le code d'avant n'a pas de purge ni
+d'écriture différentielle) : banc d'équivalence (60 mutations au hasard, base
+différentielle = base réécrite d'un coup) pris par 4 mutants sur 4 (rang en tête,
+tracé absent effacé, suppression oubliée, renumérotation oubliée) ; purge prise
+par 3 sur 3 (échec de sauvegarde ignoré, pas de sauvegarde, tournée active
+purgée) ; relais pris par 2 sur 2 (sans limite, sans cache).
+
+### Écarts nommés
+
+- **503, pas 429**, pour le relais d'adresse saturé : `apiFetch` traite tout 429
+  comme un verrou de connexion et renvoie à `/login`.
+- **Tableau de bord, statistiques, historique** ne sont plus rechargés à chaque
+  geste : à la fin de la tournée, par le sondage de l'accueil (60 s), ou à la
+  prochaine ouverture. Pendant la tournée, ils peuvent retarder de quelques arrêts.
+- **« Sans tracé » = `terminee` seulement** (liste et `readDb`). Un statut de
+  clôture ajouté plus tard (lot 2 : annulée, clôturée) charge son tracé tant qu'il
+  n'est pas ajouté aux deux ensembles : plus lent, jamais faux.
+- **L'arrondi de position se fonde sur le libellé** « Ma position actuelle »
+  (seul `operations.js` le pose). Une adresse choisie (dépôt) n'est pas arrondie.
+- **La sauvegarde « avant-purge » est dans la rotation** (30 fichiers) : elle part
+  avec elle. Voulu : la purge sert la vie privée, une archive éternelle la
+  contredirait. C'est un filet contre une purge fautive, pas une archive.
+- **Une commande garde son `routeId`** vers une tournée purgée (rien ne le suit à
+  l'écran ; `shouldPreserveClientAfterImport` s'en sert encore, dans le bon sens).
+- **Revenir à une version d'avant** : elle ne lit pas `traces_tournees`, les tracés
+  des tournées en cours ne s'y affichent pas (recalculables) ; en remontant, les
+  tracés reviennent, et un tracé écrit entre-temps dans un payload (recalculé, ou
+  effacé : `geometry: null`) gagne sur celui de la table, à l'ouverture.
+- **La copie « dernières données » après un geste** est recopiée par la page
+  (tournées, commandes, clients), pas relue au serveur : elle dit ce que l'écran
+  affiche. Son en-tête `Date` reste celui de la copie d'avant : l'étiquette
+  « Données de 08:00 » peut sous-estimer sa fraîcheur, jamais la surestimer. Les
+  autres données (tableau de bord, statistiques) y gardent leur retard.
+- **Un geste sur un arrêt déjà terminé** (« Absent » tapé sur un arrêt livré)
+  reste accepté par le serveur : c'est aussi le chemin d'une correction légitime
+  (« Livré » tapé par erreur). Pas de garde ajoutée ici (lot 1, gestes du livreur).
+- **Tracé rogné autour de « Me localiser »** : le tracé part d'un segment droit
+  depuis la position arrondie (au plus 150 m de route invisibles), aussi pour les
+  tournées calculées après le lot.
+- **Sauvegarde « avant-purge » hors verrou** : comme les sauvegardes automatiques
+  de `writeDb`, elle lit le fichier pendant que des écritures peuvent passer par le
+  WAL ; un checkpoint automatique (1 000 pages) pendant la compression la rendrait
+  incohérente — risque partagé avec toutes les sauvegardes existantes, non mesuré.
+  Une autre sauvegarde automatique ne court jamais en même temps (`pendingBackup`).
+- **`sort_order` de `lignes_commande` et `livraisons`** devient un rang global
+  (c'était l'indice de ligne) ; aucune lecture ne s'en sert (grep).
+- Sous charge (autres agents sur le poste), trois rouges vus une fois et non
+  reproduits : `C2.stock.a` (seuil de 250 ms, 1 suite complète sur 3),
+  `tournee-mobile` « sous le pouce » (1 sur 3), `carte-et-lignes`
+  `ERR_CONNECTION_REFUSED` sur 3141 (port fixe, partagé entre worktrees). Aucune
+  cause affirmée.
+
+### Revue adverse (23/09)
+
+Quatre défauts relevés sur `73cc8de`, tous vérifiés vrais, tous corrigés :
+
+- **Important — la copie du service worker ne suivait plus les gestes.** Plus
+  aucune lecture après un geste : `/api/routes` et `/api/orders` restaient ceux
+  du matin dans le cache ; un écran rouvert avant le réseau montrait des arrêts
+  livrés « à livrer ». Correctif : `recopierApresGeste` (écritures en série).
+  Banc e2e : geste, réseau retenu, réouverture — « En livraison » au lieu de
+  « Livré » avant, « Livré » après.
+- **Mineur — le tracé d'avant le lot gardait la position exacte.** Correctif :
+  `rognerTraceGps` (idempotent : 20 000 cas au hasard, une deuxième passe ne
+  change rien). Banc : rouge « le tracé stocké d'une tournée terminée part encore
+  de la position exacte » ; chaque site d'appel pris par son mutant.
+- **Mineur — aller-retour de version.** Le drapeau de migration empêchait de
+  relire un tracé écrit entre-temps dans le payload. Banc : rouge « le tracé
+  d'avant le retour a écrasé celui recalculé » ; l'effacement pris par mutant.
+- **Mineur — la purge tenait le verrou pendant la sauvegarde.** Banc : une
+  sauvegarde retenue, un « Livré » pendant — rouge « le geste a attendu », puis
+  vert, et la purge n'efface pas le geste. Garde neuve (une tournée modifiée
+  pendant la sauvegarde attend le lendemain) prise par son mutant.
+
+### Ce qui reste
+
+- Le **chargement complet** reste à 2,2-3,3 s à 250-500 tournées : 17 requêtes,
+  17 `readDb` (≈ 130 ms chacun, surtout les commandes). Il n'a plus lieu après
+  chaque geste, mais à l'ouverture et au sondage. Levier suivant : un seul
+  `readDb` par vague (point d'entrée agrégé, ou lecture mémorisée par
+  `data_version`).
+- `syncWorkflow` renormalise **toutes** les commandes à chaque écriture
+  (≈ 150-250 ms à 6 000 commandes) : c'est le gros du « Livré » restant.
+- L'**historique texte** n'est jamais purgé (§4, réserve †).
+- Hors lot : tracés OSRM compacts (`polyline6` / `overview=simplified`, avec le
+  serveur OSRM hébergé) ; marqueurs recréés à chaque rendu de carte (lot 4).
+
+## Finitions d interface (audit du 23/09)
+
+L'audit de complétude contre les 49 planches V8 a relevé une liste de défauts ; ce
+lot en solde dix, plus une phrase périmée de ce fichier. Les numéros sont ceux du
+rapport d'audit. Le CSS est au bout de `public/css/style.css` (bloc « FINITIONS
+D'INTERFACE ») ; le reste vit dans `app.js`, `login.js`, `index.html` et
+`renderLoginPage`.
+
+### Ce qui est fait, et ce qui a été décidé
+
+| # | Défaut | Ce qui change | Décision nommée |
+|---|---|---|---|
+| 2 | Les quatre zones de texte (notes client, notes de commande, commentaire de rappel, notes d'abonnement) en police à chasse fixe | `textarea { font: inherit }` : la règle `button, input, select` l'oubliait | Sélecteur nu : les règles plus précises (taille des notes du bon de commande) gardent la main |
+| 3 | « Commande client » au bureau : formulaire de 280 px, « Type » et « Date » coupés (« dd/mm/y ») | Une colonne de 821 à 1180 px ; de 1181 à 1599, le formulaire en haut sur toute la largeur, puis le catalogue et, à côté, le panier (revu à la relecture, voir plus bas) ; trois colonnes à partir de 1600 (formulaire ≥ 360 px). Les champs ne vont par deux que s'ils tiennent (13,5 rem chacun), jamais plus de deux, 16 px entre les blocs, la saisie en 500 | Seule la mise en page : l'habillage de l'écran est un autre lot (« Écrans sans planche au style V8 ») |
+| 5 | Connexion : l'identifiant effacé après un échec ; les essais restants dans une seconde colonne | L'identifiant est gardé (planche 9c) ; l'échec et les essais restants font UNE phrase qui dit aussi la durée : « Identifiant ou mot de passe incorrect. Il te reste 4 tentatives avant un blocage de 15 secondes. » | Gardé par l'onglet (`sessionStorage`), rendu seulement sur `?error=1` ou `?locked=1`, oublié par toute autre ouverture de `/login` — dont celle qui suit « Se déconnecter ». Ni dans l'URL de la redirection (historique, journaux du proxy), ni renvoyé par le serveur. Le mot de passe n'est jamais gardé ; le curseur y va |
+| 8 | `--warning` déclaré cinq fois avec cinq valeurs (`#f1a447`, `#ed9d72` ×2, `var(--v8-accent)`, `#f18c79`) | Les cinq déclarations valent `var(--v8-avertissement)`. Le seul texte posé sur cette famille, le bouton « warning » (« Reporte » des rappels), prend la paire de la charte : texte `--v8-avertissement` sur `--v8-avertissement-fond`, **4,89:1** en clair, **4,56:1** en sombre ; le survol pose un contour au lieu de changer les couleurs | Avant : 4,45 au repos et 3,55 au survol en clair, ~1,0 en sombre. Le commentaire « ⛔ NON BRANCHÉ, délibérément » est remplacé par ce qui a été mesuré |
+| 10 | Pas de pastille sur « Abonnements » | Le nombre d'échéances **à générer** — rappel arrivé, pas encore de commande — lu dans `/api/subscriptions`, la source de l'écran ; en alerte (comme celle du Stock) s'il y en a une en retard ; `aria-label` « n échéances à générer » | Le nombre qui appelle un geste. Les retards en font partie (une échéance passée a son rappel derrière elle) : les compter à part aurait fait deux nombres pour une seule file |
+| 11 | Préparation au bureau : « 2 articles » là où le téléphone dit « 6 articles » | « n articles » compte les quantités (`getOrderProductCount`), le manque aussi (`manqueDeLaCommande`, celui du téléphone) : cinq gants absents font « Il manque 5 articles », plus « 1 article » | `detailDeBlocage`, qui comptait les lignes de produit, est retiré |
+| 12 | Chargement hors tournée | « Cette semaine » (`#opWeekCount`) a son squelette au lieu d'un 0 ; « Stock mis à jour » ne s'empile plus (un toast par clé, `notify(…, { cle })`, remplacé à chaque − / +) ; la page ne remonte plus si l'on a défilé avant le `load` ; une lecture des commandes en échec dit « Commandes indisponibles » avec « Réessayer », pas « Aucune commande » (Commandes et Préparation) ; « Tout sélectionner » / « Tout désélectionner » des commandes du jour restent désactivés jusqu'à LEUR liste (`data-attend-commandes-du-jour`, le motif de la tournée) ; les sous-titres de Commandes et de Préparation disent aussi « Commandes indisponibles » | Le défilement : un geste de l'utilisateur (`wheel`, `touchmove`, `keydown`, `pointerdown`) avant `load` gagne sur `resetViewportScroll(false)`. C'est l'« écart nommé, NON corrigé » de la section « Lot du 23/09 — deux bancs instables » : il est corrigé ici |
+| 13 | De 821 à 920 px, un demi-rang de pilules en trop | Le plafond du repli y vaut 2 × 44 + 8 = 96 px (les pilules du bureau), plus 104 (celui du téléphone) | `:not(.filtre-pilules--depliee)` : la rangée dépliée garde ses deux classes, et la règle, écrite après, l'aurait repliée |
+| 14 | Aucun bouton « Se déconnecter » | Au bureau sous le bloc compte de la barre, dans la voix de la ligne de version (texte secondaire, 4,63:1 sur le vert, 44 px) ; au téléphone dans « Plus », après un filet, comme une action et non une destination. UN formulaire `POST /logout` (attribut `form`) qui navigue : le service worker y vide le cache de données. Hors ligne (`navigator.onLine === false`), rien ne part : un message le dit | Aucune planche ne le dessine. Les cinq destinations du menu « Plus » restent cinq |
+| — | Ce fichier disait que le thème démarre en clair | La ligne « Le thème par défaut » dit « Système », comme le code (`anti-fart.js`) | — |
+
+### Écarts nommés
+
+- **« Se déconnecter » sans authentification.** Sur un serveur lancé sans
+  `SEREO_AUTH_*` (le développement, le serveur commun des bancs), le bouton est
+  là et ne fait que recharger : `/login` y renvoie à l'application. En
+  exploitation l'authentification est active. Le masquer demanderait de lire
+  `moi.source === "desactivee"` (`/api/me`) : pas fait, rien ne le demande.
+- **L'identifiant gardé survit à une connexion réussie**, dans le
+  `sessionStorage` de l'onglet, jusqu'à la prochaine ouverture ordinaire de
+  `/login` (celle de « Se déconnecter » comprise) ou la fermeture de l'onglet.
+  Ce n'est pas un secret : le mot de passe n'y passe jamais.
+- **Le blocage se compte par adresse IP** (écart déjà nommé plus haut) : la
+  phrase « avant un blocage de 15 secondes » n'y change rien.
+
+### Bancs
+
+Chacun a été lancé sur le code d'avant (fichiers produit de `main` remis en place,
+bancs du lot gardés, puis restauration par `git checkout HEAD --` et
+`git diff --quiet`) et rougit pour la bonne cause :
+
+- `test/e2e/interface-finitions.spec.js` (serveur semé **3301**) :
+  2 → reçu `notes : monospace` ×2, `commentaire`, `subNotes` ; 3 → 60 champs
+  coupés, dont « 1024px customerOrderType « Commande immédiate » : 108px pour
+  221 » et « formulaire de 280px » ; 10 → la pastille reste `hidden` ;
+  12 « Cette semaine » → reçu `"0"` ; 12 toasts → reçu 3, attendu 1 ;
+  12 défilement → `scrollY` reçu 0, attendu > 200 (le banc ralentit les tuiles
+  de 3 s : servies localement, `load` tombait à ~140 ms, avant tout geste, et le
+  banc passait sur le défaut) ; 12 erreur → « Aucune commande » au lieu de
+  « Commandes indisponibles » ; 12 « Tout sélectionner » → `enabled` ;
+  14 → bouton absent ; 8 → `--warning` vaut `#F18C79` en clair, `#ED9D72` en
+  sombre.
+- `test/e2e/preparation-lignes.spec.js` : 11 → « Il manque 1 article » au lieu de
+  « Il manque 5 articles » (tablette et bureau) ; 13, nouvelle vue « tablette »
+  (serveur semé **3300**) → plafond reçu 104, attendu 96.
+- `test/e2e/connexion.spec.js` (serveur authentifié) : identifiant reçu `""` ;
+  « Se déconnecter » introuvable dans la barre.
+- `test/auth.test.js` : reçu le `<span class="login-error-attempts">` à part.
+- `test/interface-finitions.test.js` : `--warning` en quatre valeurs distinctes ;
+  la ligne du thème par défaut ; et cette section, que citent la feuille et le
+  banc (présente une fois — sa place dans le fichier n'est pas jugée, voir la
+  relecture).
+
+Non-régression verte sur le produit final : `npm test` ; `navigation-mobile`,
+`cibles-tactiles`, `texte-coupe`, `contraste-application`, `charte-composants`,
+`focus-clavier`, `themes`, `typographie`, `operations` ; `commandes`, `stock`,
+`preparation-mobile`, `livraison-chargement`, `squelette`, `parametres-mobile`,
+`abonnements`, `abonnements-mobile` ; `contraste-login` et `connexion` sur un
+serveur authentifié à part (copies locales non suivies visant 3311).
+
+### Relecture adverse du 23/09
+
+Six défauts relevés sur le lot ; chacun vérifié avant d'être corrigé, et chaque
+correction a un banc qui rougit sans elle.
+
+| Défaut relevé | Verdict | Ce qui change |
+|---|---|---|
+| Le banc « la dernière section de DESIGN.md est celle du lot » rougit dès qu'un lot frère ajoute la sienne | Vrai : une section ajoutée après celle-ci le fait rougir sans aucune régression | Il exige que la section existe, une seule fois ; sa place n'est plus jugée |
+| « Tout sélectionner » des commandes du jour s'active sur `orders`, alors qu'il agit sur `todayCustomerOrders` | Vrai : au premier chargement du jour, la copie du cache a `orders` mais pas l'URL du jour, et les boutons s'activaient sur une liste vide | Les deux boutons attendent leur propre liste (`data-attend-commandes-du-jour`, `activerSelectionDuJour`) ; ceux de la tournée gardent `data-attend-commandes` |
+| De 1181 à 1599 px, le panier passe sous tout le catalogue ; le formulaire, collant et plus haut que la fenêtre, cache « Valider la commande » | Vrai pour la place du panier. Faux pour l'effet du « collant » : **aucun** `position: sticky` de l'écran n'agit, avant comme après le lot. `html`, `body` et `.content` ont `overflow-x: hidden`, ce qui fait de `.content` le conteneur de défilement de référence, et `.content` ne défile jamais : c'est la fenêtre qui défile (mesure : à 1600 px, le panier « collant » part à −1 696 px) | De 1181 à 1599 : formulaire en haut sur toute la largeur, puis le catalogue et, à côté, le panier — l'ordre de la colonne unique, avec le panier au niveau du catalogue et non plus après lui. À partir de 1181 px, le formulaire n'est plus déclaré collant (un champ par ligne, ~1 200 px) : rien ne change aujourd'hui, mais ce piège n'attend plus le jour où le collant revivra |
+| Au téléphone et hors ligne, « Se déconnecter » efface le cache de données, puis remplace l'application par la page d'erreur du navigateur, alors que la session reste ouverte | Vrai (mesure : l'adresse devient `chrome-error://chromewebdata/`) | Un écouteur `submit` sur le document : `navigator.onLine === false` → rien ne part, et le toast « Hors ligne : la déconnexion attend le retour du réseau. Rien n'a été effacé. » s'affiche. Le même geste, une fois en ligne, déconnecte |
+| Lecture des commandes en échec : les sous-titres disent encore le vide (« Aucune commande à préparer » au téléphone, « 0 bon depuis janvier · 0 en cours » dans Commandes) | Vrai | `majSousTitrePreparation` et `majSousTitreCommandes` disent « Commandes indisponibles », comme la liste |
+| `auto-fit` ouvre trois colonnes quand le formulaire est large : trous et champs orphelins | Vrai à 1100 et 1180 px (et de 3 à 5 colonnes à partir de 1181 px dans la nouvelle mise en page) | Chaque piste mesure au moins la moitié de la grille (et 13,5 rem) : `minmax(min(100%, max(13.5rem, calc((100% - 12px) / 2))), 1fr)`, donc deux colonnes au plus |
+
+**Écarts nommés.**
+
+- **Le collant inerte** vaut pour tout l'écran, et sans doute pour d'autres :
+  le réparer (`overflow-x: clip` au lieu de `hidden` sur `html`, `body` et
+  `.content`) réveillerait **tous** les `position: sticky` de la feuille à la
+  fois. C'est un lot à part, qui les passerait tous en revue. Tant qu'il n'est
+  pas fait, le panier ne suit pas le défilement, à aucune largeur.
+- **De 1181 à 1599 px, le premier écran est le formulaire** : catalogue et
+  panier commencent sous la ligne de flottaison, comme dans la colonne unique.
+  C'est le prix d'un panier au niveau du catalogue sans casser les champs.
+- **Hors ligne : seul le cas sûr est gardé.** `navigator.onLine === true` ne
+  prouve pas que le réseau répond (réseau qui ment) : dans ce cas le geste part
+  comme avant, et le service worker efface le cache avant de savoir si le POST
+  est arrivé. Le rendre conditionnel au succès toucherait le service worker, ce
+  que ce lot ne fait pas. Pas de confirmation non plus : aucune planche n'en
+  dessine, et en ligne une déconnexion par erreur ne coûte qu'une reconnexion.
+
+**Bancs.** Chacun a d'abord été lancé sur le code d'avant (fichier produit de
+`46637aa` remis en place, puis restauré) :
+
+- `test/interface-finitions.test.js` : sur le banc d'avant, une section
+  « ## Clients au téléphone (23/09) » ajoutée en fin de fichier → « la derniere
+  section n'est pas celle du lot », sans régression. Le banc neuf reste vert
+  dans ce cas, et rougit si la section manque (reçu 0) ou si elle est en double
+  (reçu 2).
+- `test/e2e/interface-finitions.spec.js` : « copie du cache sans la liste du
+  jour » (cache posé à la main, service worker bloqué, API ralentie) → reçu
+  `enabled` ; « sous-titres » → reçu « Aucune commande à préparer » à 390 px ;
+  « hors ligne » → reçu `chrome-error://chromewebdata/` ; « panier à côté du
+  catalogue » → « le panier n'est pas a cote du catalogue (4233px plus bas) » de
+  1181 à 1599 px, et « customer-client-panel collant de 1193px pour 816px de
+  fenetre » (le formulaire seul remis collant : rouge à 1181, 1600 et 1920) ;
+  « au plus par deux » → 3 colonnes à 1100 et 1180 px (5 à 1599 avec la
+  nouvelle mise en page et l'ancienne règle).
+
+## Clients au téléphone (planches 9a, 8c, 12c), posé le 23/09
+
+Sous **820 px** ; au bureau (planche 13e), rien ne change : ce qui est propre au téléphone
+est caché hors du media, et le tri n'y est ni rendu ni appliqué. CSS : le bloc « CLIENTS AU
+TELEPHONE » en fin de `style.css`. Banc : `test/e2e/clients-mobile.spec.js` (18 cas, port
+3302, dont 3 ajoutés par la revue adverse, plus bas) ; `clients.spec.js` reste vert.
+
+**Posé — la liste (9a)**
+
+- **Les filtres dans le vert** : l'en-tête se prolonge dans le bloc des pilules (Tous, les
+  secteurs, Abonnés), un seul vert arrondi de 28 px dessous — le motif des Abonnements (3a).
+  Pilules de 44 px : inactives en surface sur vert, l'active en blanc à texte vert (plein
+  clair en sombre). Le **statut commercial** (hors planche, gardé) y est une pilule de plus,
+  sur la surface sur vert.
+- **La ligne « N clients » / tri**, sous le vert : le compte de la liste **filtrée**
+  (« 1 client » sous « Abonnés »), et le tri **« Dernière livraison »** ou **« Nom »**.
+- **« Nouveau client » fixé en bas**, pleine largeur moins 16 px, 48 px, à 14 px au-dessus
+  de la barre basse. La liste lui réserve sa place (172 px sous le dernier client) : tout
+  en bas, le dernier client est entièrement au-dessus du bouton — mesuré. Même élément que
+  le bouton de l'en-tête du bureau (un geste, deux positions) ; il disparaît dans la fiche.
+- **« Rappels »** (hors planche, gardé : seul chemin vers les rappels) partage sa rangée avec
+  la pastille de synchro et « Actualiser », au lieu d'en faire une de plus.
+
+**Posé — la fiche (8c clair, 12c sombre)**
+
+- **Le bloc vert de la fiche** : la flèche de retour (rond de 44 px, surface sur vert) à
+  gauche du nom (24 px), les puces dessous — le lieu en surface sur vert, l'abonnement en
+  blanc à texte vert (en sombre : vert clair sombre, texte principal, comme 12c) — puis
+  **« Appeler »** (blanc ; plein clair en sombre) et **« Itinéraire »** (contour clair ; en
+  sombre, contour et texte principal, comme 12c), 48 px, côte à côte. Le bloc prolonge
+  l'en-tête de l'écran, dont le titre « Clients » et les gestes de la liste s'effacent.
+- **« Itinéraire »** ouvre Google Maps sur l'adresse du client, encodée : le même
+  constructeur (`buildGoogleMapsUrl`) que « Y aller » de la tournée ; il n'est rendu que si
+  l'adresse a une rue **et** une ville (sinon le lien serait vide).
+- **Le reste en cartes V8** (surface, rayon 24, marge 18) : adresse et contact avec leur
+  icône et un filet entre eux ; les notes ; le statut commercial ; l'abonnement (titre et
+  badge sur une rangée, « Créer la commande » en pleine largeur) ; les commandes (le
+  numéro, puis « date · articles », le badge à droite, un filet entre elles ; « Les N
+  autres » centré).
+- **Le passage liste → fiche → retour** : la flèche et le retour du téléphone ramènent la
+  liste, le focus revient sur la ligne ouverte. Mesuré aussi après un rechargement depuis
+  une fiche : la liste revient, et la fiche rouverte se referme d'une seule flèche — la
+  flèche s'arrête à la liste, sans second recul dans l'historique (garde : le code de
+  `main` le fait déjà ; le `popstate` privé de `depuisHistorique` recule d'une entrée de
+  trop et le cas le prend, `cliVue` reçu `null` au lieu de `"fiche"`).
+
+**Décisions prises**
+
+- **Le tri par défaut, au téléphone, est « Dernière livraison »** : c'est celui de la
+  planche, et la passation le dit « le plus utile en tournée ». Il est calculé **dans le
+  navigateur**, depuis les commandes déjà chargées (même décision qu'au bureau pour « livrée
+  le … » : rien de neuf côté serveur). Les clients jamais livrés viennent ensuite, par nom.
+  Au bureau la liste reste par nom ; passer le seuil de 820 px (une tablette qu'on tourne)
+  redessine la liste dans l'ordre de la largeur.
+- **« Modifier »** (hors planche, gardé : seul chemin vers le formulaire) est un **rond de
+  48 px** au bout de la rangée Appeler / Itinéraire, avec un crayon ; son nom accessible
+  reste le mot « Modifier », caché à l'œil seulement. À trois boutons pleine largeur,
+  « Appeler » et « Itinéraire » ne tenaient plus sur 358 px.
+- **La pastille de synchro et « Actualiser » restent** en haut du vert de la fiche (la
+  planche ne les dessine pas ; gardés comme dans « Les 90 jours » des Abonnements).
+- **L'ordre des cartes est celui du DOM du bureau** : adresse et contact, notes, statut,
+  abonnement, commandes. Les réordonner au seul téléphone (`order`) aurait séparé l'ordre
+  du clavier de l'ordre lu.
+- Les libellés « Adresse » / « Contact » sont **cachés à l'œil**, lus par les lecteurs
+  d'écran : la planche met l'icône à leur place. Le statut commercial passe **en colonne**
+  (côte à côte, « Statut commercial » tenait sur deux lignes).
+- **Hors ligne**, le bandeau s'intercale entre l'en-tête et l'écran : l'en-tête garde son
+  arrondi, et les filtres (liste) ou le bloc de la fiche deviennent une carte verte fermée
+  — deux verts fermés plutôt qu'un vert coupé (le motif des Abonnements).
+- **L'anneau clavier hors du vert** (« Nouveau client » fixé, les lignes de la liste,
+  « Créer la commande », les commandes de la fiche, « Les N autres ») écrit ses deux tons en clair (`--v8-focus-halo`, `--v8-focus`) au lieu
+  de `var(--focus-ring)` : ce jeton n'est défini que sous le thème clair, et en sombre la
+  déclaration `box-shadow` devenait invalide — aucun anneau (mesuré : ombre `none`, contour
+  `none`, sur les trois). Le tri garde `--focus-ring` : en sombre, le contour du `select`
+  porte l'anneau, le banc l'y voit.
+- **La puce « En pause »** prend la teinte tiède partout. Avant, sans secteur ni ville, elle
+  devenait la première puce et prenait la teinte froide d'« Abonné » ; seul effet au bureau,
+  sur ce seul cas — gardé à la revue adverse, et désormais couvert par un banc.
+
+**Écarts nommés**
+
+- le titre de la carte d'abonnement garde sa fréquence (« Abonnement · toutes les 2
+  semaines ») au lieu de « Abonnement » seul et « Tous les 15 j · rappel … » dessous : la
+  carte est celle du bureau ;
+- la fiche commence sous la rangée synchro / Actualiser : une rangée de plus que 8c ;
+- barre basse opaque et bouton à 14 px d'elle telle qu'elle est rendue (lot 1).
+
+**Omis, faute de données** : l'interlocuteur (« Mme Ferrand, cadre de santé ») et
+l'instruction de livraison (« entrée de service ») — le modèle client n'a pas ces champs ;
+les notes s'affichent dans leur carte, comme au bureau.
+
+**Constaté hors du lot, non corrigé** : au bureau, « Itinéraire » **se voit**, souligné
+(capture de l'audit `crm-bureau-light.png`, sur `main`), alors que la section 13e décide
+« au téléphone, pas au bureau » : `.cli-itineraire { display: none }` (0,1,0) perd contre
+`:root[data-color-scheme] #crm .cli-bouton-contour { display: inline-flex }` (1,2,0). La
+consigne « au bureau, rien ne change » m'interdisait de le retirer. À trancher : l'ôter
+(la décision écrite) ou le garder et le styler comme « Modifier ».
+
+**Constaté hors du lot, non corrigé (2)** : au bureau **en sombre**, « Modifier » et les
+commandes de la fiche n'ont **aucun anneau** au clavier (sonde à 1280 px : ombre `none`,
+contour `none`) — `#crm .cli-bouton-contour:focus-visible` et `#crm
+.cli-commande:focus-visible` comptent sur `--focus-ring`, défini sous le seul thème clair.
+Même chose, par la même règle ou sa voisine, pour les lignes de la liste
+(`#crm .cli-ligne:focus-visible`) et « Créer la commande » : au téléphone, la revue
+adverse les a fait corriger (plus bas) ; au bureau, ils restent sans anneau en sombre.
+Sur `main`, pas de ce lot ; même remède que ci-dessus, à poser au bureau.
+
+**Ce que le banc mesure** : dans les deux thèmes, le vert des filtres et de la fiche collé
+à l'en-tête, les rayons, le contraste ≥ 4,5:1 de tout texte de l'en-tête de fiche et des
+cartes, la hauteur des pilules (≥ 44) et des gestes (≥ 48), la couleur d'« Appeler » ; le
+tri et le compte ; le bouton fixe (position, place réservée) ; le lien d'« Itinéraire »
+(l'adresse affichée, encodée) ; ce qui est gardé ; l'anneau clavier sur chaque geste du
+vert, et hors du vert dans les deux thèmes (tri, « Nouveau client », une ligne, « Créer la
+commande », une commande, « Les N autres ») ; le rechargement depuis une fiche ; le bandeau hors ligne ; le bureau inchangé (ligne de tri cachée, bouton non fixe,
+fiche en carte blanche, icônes cachées, liste par nom, retour au bon ordre au passage du
+seuil). **Ne voit pas** : les règles `prefers-color-scheme` sans `data-color-scheme` —
+l'application pose toujours l'attribut, elles ne servent qu'avant le script (comme dans
+les autres lots).
+
+**Preuves rouges** : les 13 premiers cas échouent avec le HTML, le CSS et le JS de `main`
+(sauf le lien d'« Itinéraire », vert sur `main` : il existait, le cas est une garde) —
+rejoué cas par cas à la reprise, chacun rouge sur sa propre assertion ; douze mutations
+ciblées (un morceau du lot retiré à la fois) ont été prises chacune par son cas (mesure de
+la session d'implémentation, non rejouée à la reprise). L'anneau hors du vert : avant le
+remède, le cas sombre liste « Nouveau client », la commande et « Les N autres » sans
+anneau ; chacune des trois déclarations remise seule à `var(--focus-ring)` (ou retirée)
+rend le cas sombre rouge sur son seul élément, le cas clair restant vert. La
+couleur d'« Appeler » en sombre est posée sous les deux portées du thème : retirer l'une ne
+suffit pas, retirer les deux rend le cas rouge.
+
+**`CACHE_NAME`** : non touché — le nom annoncé porte l'empreinte du contenu de `public/`.
+
+### Clients au téléphone — revue adverse, corrigée le 23/09
+
+Une relecture adverse du lot (au SHA `6a9a619`) a nommé cinq défauts. Les cinq sont vrais.
+Trois sont corrigés, chacun avec un banc qui échoue sans le correctif ; le quatrième (un
+changement voulu, sans banc) est gardé et reçoit son banc ; le cinquième est nommé, non
+corrigé.
+
+- **Tourner une tablette vidait le client d'un rappel en cours de saisie** (important).
+  L'écouteur du seuil de 820 px relance `renderCrm`, qui recrée la liste du formulaire
+  « Nouveau rappel » : le client choisi retombait sur « Choisir un client » (champ requis).
+  **Remède** : `renderClientSelects` remet le client choisi s'il existe encore. Après
+  l'envoi, le formulaire est remis à zéro **avant** le rechargement : rien ne reste. Le même
+  remède couvre tout autre rechargement pendant la saisie. **Banc** : « tourner la tablette
+  ne perd pas le client choisi… » (1180 → 820 → 1180 px, sur l'écran Rappels ; témoin : la
+  liste des clients est bien redessinée dans l'ordre du téléphone). **Rouge sans lui** :
+  `Expected: "c-tilleuls"`, `Received: ""`.
+- **En sombre, au téléphone, les lignes de la liste et « Créer la commande » n'avaient
+  aucun anneau** (important). Leurs règles communes (`#crm .cli-ligne:focus-visible`,
+  `#crm .cli-bouton-contour:focus-visible`) posent `outline: none` et ne comptent que sur
+  `--focus-ring`, défini sous le seul thème clair ; la règle du bloc vert n'atteint pas
+  « Créer la commande », qui est dans la carte Abonnement. **Remède** : les deux tons
+  écrits en clair, dans le bloc du lot, comme pour les commandes. **Banc** : le cas
+  « l'anneau se voit hors du vert » regarde aussi une ligne et « Créer la commande ».
+  **Rouge sans lui** : le cas sombre liste `ligne` et `creer` (ombre `none`, contour
+  `none`), le clair reste vert ; chacun des deux sélecteurs neutralisé seul rend le cas
+  sombre rouge sur son seul élément.
+- **La dernière livraison était calculée deux fois par client** (mineur) : une fois pour le
+  tri, une fois pour la ligne, chaque calcul parcourant toutes les commandes. **Remède** :
+  `renderCrm` la calcule une fois par client et par rendu, et la passe au tri
+  (`clientsTries(livraisonDe)`). **Banc** : on compte les jours pris à Paris
+  (`toLocaleDateString`, fuseau `Europe/Paris`) pendant un rendu : autant au tri par
+  livraison qu'au tri par nom. **Rouge sans lui** : `Expected: 8`, `Received: 16`.
+- **« En pause » change de teinte au bureau, sans banc** (mineur). Le changement est
+  **gardé** : c'est un défaut de `main` (sans secteur ni ville, la puce « En pause »
+  devenait la première et prenait la teinte froide d'« Abonné », alors que le badge de la
+  ligne est tiède). **Banc** : « au bureau, « En pause » garde la teinte tiède… » (le
+  client sans lieu est obtenu en interceptant `/api/crm/clients`). **Rouge avec le code de
+  `main`** : `Expected pattern: /cli-badge--tiede/`, `Received: "cli-badge
+  cli-badge--froid cli-puce"`.
+- **Au téléphone, « Nouveau client » est en bas de l'écran mais tôt dans l'ordre du
+  clavier** (mineur) — **vrai, non corrigé**. Mesuré à 390 px : recherche, « Rappels »,
+  **« Nouveau client »** (en bas, `top` 692), « Actualiser », puis les pilules. Le bouton
+  vit dans l'en-tête partagé des écrans, et le placer ailleurs dans le DOM au seul
+  téléphone déplacerait aussi le bouton du bureau, ou le dédoublerait : pas un correctif
+  bon marché. Même motif, déjà en place, que « Nouvel abonnement » (Abonnements, 3a). À
+  trancher avec lui : l'action principale reste atteinte tôt (le motif du bouton flottant),
+  ou les deux boutons passent après leur liste.
+
+### Création d'abonnement (planches 3b, 5b), posé le 23/09
+
+L'ancien formulaire « Nouvel abonnement » (un `<select>` de clients, une ligne
+« Produit / Quantité / Retirer » par produit, une liste déroulante de fréquences) est
+remplacé ; le `<dialog id="subscriptionDialog">` et ses identifiants de champ restent,
+l'intérieur est neuf. `abonnement-creation.spec.js` (12 cas depuis la relecture adverse,
+port 3304) ;
+`operations.spec.js` suit les nouveaux gestes.
+
+**Posé**
+
+- **Au téléphone** (sous 820 px) : une page pleine. L'en-tête vert de la planche
+  (`--v8-carte-tournee`, arrondi 0 0 28 28), sa flèche ronde de 44 px sur la surface sur
+  vert, le titre 24 px/700 ; des cartes blanches de 24 px de rayon, 18 px de marge
+  intérieure ; en bas « Annuler » (contour) et « Créer l'abonnement » (plein, qui prend
+  la largeur), 48 px. En sombre (5b) : les jetons de la planche, le creux des champs en
+  `--v8-fond` (« surface basse → fond en creux » de la passation).
+- **Au bureau** : la même logique dans une fenêtre V8 — 640 px, coins 28, fond `--v8-fond`,
+  les mêmes cartes, le titre à gauche et la croix ronde de 44 px à droite, la barre du
+  bas alignée à droite. Le corps défile, l'en-tête et la barre restent.
+- **Le client en carte** : une recherche (nom, ville, rue, code postal ; ou trois chiffres
+  du téléphone) et des cartes de 60 px (nom ; « rue, CP ville »). Choisie, la carte
+  devient le champ vert clair de la planche (nom en principal appuyé, 7,04:1) avec sa
+  croix ronde « Changer de client », et l'adresse dessous. Entrée sur un résultat unique
+  le choisit ; Entrée n'envoie jamais le formulaire depuis une recherche.
+- **Le catalogue** : « Catalogue » ouvre la liste des produits avec **le stock
+  disponible du serveur** (`quantityAvailable`, sinon la quantité) : « CH-L · 100 en
+  stock », « rupture », « stock à renseigner » ; « N au panier » quand il y est. Chaque
+  produit a son « + » rond de 44 px. Une recherche filtre par nom ou code (40 lignes au
+  plus, puis « N autres : précise la recherche »). Un panier vide ouvre le catalogue
+  d'office : c'est le seul chemin pour le remplir.
+- **Le panier** : une ligne par produit, nom, « code · stock », et le pas de la planche
+  (− rond en creux, quantité 19 px/700, + rond plein). À un, « − » s'appelle « Retirer … »
+  et retire la ligne ; le focus passe à la ligne voisine, sinon à « Catalogue ». Chaque
+  ligne porte aussi un lien « Retirer » sous son stock : le geste d'un clic de l'ancien
+  formulaire, quelle que soit la quantité (voir la relecture adverse, plus bas).
+- **Les pilules de fréquence** : 7 j · 10 j · 14 j · 15 j · 21 j · 28 j · Mensuel ·
+  Autre…, des boutons radio (flèches du clavier, nom accessible « Tous les 15 jours »),
+  44 px, la choisie en plein principal.
+- **Les trois prochaines livraisons** : recalculées à chaque geste, sans validation
+  (règle de `lib/subscriptions.js` recopiée : dernier jour du mois quand il est plus
+  court). La première porte le point pêche et « départ », les suivantes « + 15 j » ou
+  « + 2 mois ». La note dit ce que l'intervalle fait : « Samedi, dimanche, lundi : un
+  intervalle de 15 jours décale le jour de la semaine. Choisis « Mensuel » pour garder la
+  même date, « 14 j » pour garder le même jour », ou « Toujours le mardi », ou « Le 31 de
+  chaque mois ; le dernier jour du mois quand il est plus court ».
+- **Le rappel** : Aucun · 2 j · 3 j · 7 j · 15 j · Autre… (0 à 60), sa valeur en 19 px à
+  droite du titre.
+
+**Gardé de l'ancien formulaire** (rien de ce que l'API reçoit n'est perdu — le banc
+compare le corps du `POST /api/subscriptions` champ par champ) :
+
+- `clientId`, et la **fiche client créée à la volée** (« Créer une fiche client » : nom,
+  prénom, adresse, code postal, ville, téléphone ; `POST /api/crm/clients` puis
+  l'abonnement). Une fiche créée n'est pas recréée si l'enregistrement échoue ensuite ;
+- `products[]` `{ productId, quantite }`, **la quantité saisie au clavier** (1 à 10 000) ;
+- `startDate` (le champ date natif) ;
+- `frequency` : les six intervalles et le mensuel, et **« Autre… » en jours (1 à 366)
+  OU EN MOIS (1 à 12)** — l'API acceptait les mois, l'ancien formulaire non ;
+- `reminderDays` (0 à 60) ;
+- sous **« Plus d'options »** (la planche ne les dessine pas) : `status` (Actif, En pause,
+  Arrêté) et `notes` (« Notes de livraison », 2 000 caractères). Le bloc s'ouvre seul à
+  la modification quand le statut n'est pas « Actif » ou qu'une note existe ;
+- à la modification : le titre « Modifier l'abonnement », « Enregistrer les
+  modifications », et la phrase « Les modifications s'appliquent aux prochaines
+  échéances… ».
+
+**Décisions prises (questions ouvertes)**
+
+- **« Tous les 2 mois » se rouvre en « Autre… 2 mois ».** L'ancien éditeur rouvrait tout
+  abonnement en mois sur « Mensuel », donc `{ unit: "months", interval: 2 }` aussi — et
+  l'enregistrer en faisait « tous les mois » (`interval: 1`). Corrigé, prouvé par
+  mutation. (Écrit d'abord « tous les 2 jours » : faux, relevé par la relecture adverse,
+  mesuré sur les lignes de `ef470c6`.)
+- **Les trois « prochaines » dates** partent d'aujourd'hui quand l'abonnement a commencé
+  avant (modification) : les premières dates d'un abonnement de juin sont passées.
+  « départ » n'est écrit que sur la vraie première livraison.
+- **La note du rappel dit ce que fait le serveur**, pas ce que dit la planche. La planche
+  écrit « Le rappel remonte dans « À régler » du tableau de bord » ; c'est faux : « À
+  régler » ne montre que les échéances EN RETARD. Le rappel fait compter l'échéance dans
+  « Échéances à préparer » (`due = rappel <= aujourd'hui`) et dire « rappel arrivé » dans
+  Les 90 jours. La note : « Le 16 septembre, la livraison du 23 septembre passe dans
+  « Échéances à préparer » du tableau de bord. De 0 à 60 jours. »
+- **Le rappel par défaut reste 7 jours** (l'ancien défaut ; la planche montre 3 j
+  choisi). Changer un défaut change ce que les abonnements créés demain voudront dire.
+- **Le secteur** n'est ajouté à l'adresse (« …, 25000 Besançon · Besançon ») que s'il dit
+  autre chose que la ville.
+- **La barre du bas est opaque** (la planche : fond à 82 %), comme la barre basse du
+  lot 1 : un bouton à contour posé sur un texte qui défile dessous perdait son contraste.
+- **Un produit retiré du catalogue** reste dans le panier d'un abonnement qu'on modifie,
+  nommé « retiré du catalogue » : l'enregistrement le signale plutôt que de le perdre en
+  silence.
+- **Sans client**, le formulaire dit « Choisis un client, ou crée sa fiche. » et n'envoie
+  rien (le `<select required>` le faisait).
+
+**Écarts nommés**
+
+- la première livraison garde le champ date natif (« 23/09/2026 ») au lieu du champ
+  « Mardi 22 septembre 2026 » à icône : la date longue est dite juste dessous, dans
+  l'aperçu, et le sélecteur natif est celui que le téléphone sait ouvrir ;
+- l'en-tête prend 16 px + la zone sûre en haut, pas les 54 px de la planche (qui
+  comptent la barre d'état dessinée) ;
+- la planche ne montre pas la recherche du client (elle montre un client déjà choisi) :
+  les cartes de résultats sont dessinées dans ses jetons (creux, 18 px, nom 15/600,
+  adresse 13/500) ;
+- les pilules ne se replient pas (« Autre… » passe à la ligne à 390 px, comme sur la
+  planche).
+
+**Omis, faute de données** : rien — chaque texte de la planche a sa source. La planche
+invente seulement l'exemple « 42 en stock » : c'est le chiffre du serveur qui s'affiche.
+
+**Relevé, non corrigé (hors de ce lot)** : le jeton `--focus-ring` n'est déclaré que
+sous `:root[data-color-scheme="light"]` (deux fois). En sombre, toute règle
+`box-shadow: var(--focus-ring)` vaut `none` : l'anneau de focus disparaît. Le banc de ce
+lot l'a pris (cas sombre, « Expected: not "none" ») ; ce bloc pose son propre anneau
+(`--abo-anneau`, mêmes valeurs). Les autres écrans qui s'appuient sur `--focus-ring` en
+sombre ne sont pas vérifiés ici.
+
+**Preuves rouges** (index.html, operations.js et style.css de `main` remis, le banc
+neuf lancé sans `serial`, un ouvrier) : 10 rouges sur 10. La croix : attendu 44 × 44,
+reçu **316 × 48** ; au bureau : attendu 640 px et une croix de 44, reçu 740 et 50 ; la
+recherche du client et le catalogue : « Expected: visible — element(s) not found » ; les
+six autres cas s'arrêtent sur le contrôle absent (pilule, recherche, « Créer une fiche
+client », « Ajouter … au panier »). Deux mutations du code neuf : rouvrir « Autre… » en
+jours → « Expected: "months" / Received: "days" » ; l'anneau remis sur `--focus-ring` →
+cas sombre « Expected: not "none" », cas clair vert. Tout restauré par copie depuis le
+commit.
+
+### Relecture adverse de la création d'abonnement (23/09) — cinq défauts, quatre vrais
+
+Relecture de `f0cc23a`. Chaque défaut a été mesuré avant d'être corrigé ; banc :
+`abonnement-creation.spec.js` (port 3304), lancé avec l'ancien code puis avec le nouveau.
+
+- **Le premier « + » du catalogue ne faisait rien après une quantité tapée** (important,
+  VRAI). Le `change` du champ part au mousedown du clic suivant ; il redessinait tout
+  `#subCatalogueListe`, et le « + » sous le pointeur était remplacé avant le mouseup.
+  Corrigé : le `change` met à jour « N au panier » en place (`majComptesCatalogue`),
+  sans toucher aux boutons. Cas « une quantité tapée, puis « + » du catalogue » (saisie
+  au clavier, pas `fill`) : ancien code **Expected 2 / Received 1** ; le compte mis à
+  jour en place, mutant « change inerte » : Received « … · 12 au panier ».
+- **Plus de retrait d'un seul geste pour une ligne au-delà de 1** (mineur, VRAI).
+  L'ancien formulaire avait « Retirer » sur chaque ligne. Rendu : un lien « Retirer »
+  sous le stock de chaque ligne (nom accessible « Retirer … du panier », 44 px, l'anneau
+  du lot ; pas de marge haute négative, l'anneau couvrait « code · stock » en capture).
+  Le focus passe au « Retirer » voisin, sinon à « Catalogue ». « − » à un retire
+  toujours la ligne. Cas « une ligne de 120 se retire d'un seul geste » : ancien code,
+  contrôle absent ; mutant du focus rendu à « − » : Expected focused / Received inactive.
+- **Le fait écrit sur l'ancien formulaire était faux** (mineur, VRAI). Il ne faisait pas
+  « tous les 2 jours » d'un abonnement de 2 mois, il en faisait « tous les mois » :
+  les lignes de `ef470c6` exécutées telles quelles rouvrent sur `monthly` et enregistrent
+  `{"unit":"months","interval":1}`. Corrigé ici (Décisions prises), dans le commentaire
+  d'`openEditor` et dans celui du banc. Rien ne change au code.
+- **Le banc « Entrée n'envoie pas le formulaire » ne pouvait pas voir un envoi**
+  (mineur, VRAI sur le fond, FAUX sur le scénario). Le scénario du relecteur (retirer
+  `preventDefault` de la recherche client fait partir le formulaire) ne se produit pas :
+  mesuré, **0 envoi**. Entrée active « Changer de client », qui vient de prendre le
+  focus, et le banc tombait déjà (Expected "c-bellevue" / Received ""). Le fond est juste :
+  l'assertion `open` ne distinguait rien, et rien ne comptait les envois. Le banc compte
+  désormais les `submit` et presse Entrée sur plusieurs résultats et dans la recherche du
+  catalogue. Deux mutants que l'ancien banc laissait passer (`preventDefault` seulement
+  sur un résultat unique ; `preventDefault` retiré du catalogue) : Expected 0 / Received 1.
+- **Le nom accessible de « Mensuel » ne contenait pas « Mensuel »** (mineur, VRAI,
+  WCAG 2.5.3). Il devient « Mensuel : tous les mois, même date ». Le banc des pilules
+  vérifie que chaque nom contient son texte visible : ancien code, Received
+  `["Mensuel → Tous les mois, même date"]` ; les treize autres pilules passaient.
+
+Tous les mutants ont été restaurés par copie. Au vert : `abonnement-creation.spec.js`
+12 sur 12, et `operations.spec.js` 5 sur 5.
+
+## Écrans sans planche au style V8, posé le 23/09
+
+Les écrans que les planches V8 ne dessinent pas : **Analyse** (l'ancien
+« Statistiques »), **Exports**, **Rappels**, **À recommander** (la liste détaillée
+derrière la carte du Stock) et l'**habillage** de **Commande client**. Décision de
+Thomas, déléguée : **pas de nouveau dessin**. On leur applique le système déjà posé
+ailleurs, et rien d'autre. Bloc « ECRANS SANS PLANCHE » en fin de `style.css` ; toutes
+ses règles portent l'`#id` de l'écran (elles battent les
+`:root[data-color-scheme="light"] X` des couches anciennes).
+
+**Ce qui est appliqué**
+
+- **Analyse** : le titre de l'écran suit la passation et la barre latérale
+  (« Analyse », `config/tabs.js`). Deux noms pour un lieu, c'était un de trop.
+  « Statistiques » reste trouvable par la recherche du menu (`ANCIENS_NOMS`).
+- Le bandeau « SEREO commercial / Statistiques » est **retiré** : il répétait le titre
+  de l'écran, et ses deux pilules d'évolution répétaient les tuiles sans dire laquelle
+  était la semaine et laquelle le mois. Chaque évolution se lit **une fois**, dans sa
+  tuile.
+- Les six tuiles chiffrées ont le rendu de celles du tableau de bord : blanches,
+  sans trait coloré à gauche ni point coloré dans le coin (un code couleur sans
+  légende), chiffres en `tabular-nums`. Une baisse se dit par le mot **et** par la
+  couleur d'alerte. Une tuile ne se soulève plus au survol : ce n'est pas un bouton.
+- L'**histogramme** a le rendu de celui du tableau de bord : ni grille ni dégradé,
+  barres pleines au principal, le jour courant (la dernière barre) à l'accent de
+  donnée, son étiquette en gras — la même information sans la couleur. L'étiquette ne
+  garde que le **jour du mois** (« 09-10 » se cassait en « 09- / 10 » sous une colonne
+  de 22 px) ; la date entière reste dans le nom accessible et l'infobulle. Au
+  téléphone, tous les jours sont lisibles (l'ancienne règle en cachait un sur deux, à
+  9 px). Un **jour sans vente** est un moignon **vert d'eau**, pas une barre au
+  principal : relevé au plancher de 6 px, il se lisait comme une petite vente (relecture
+  du 23/09 ; en sombre, l'ancien écran les distinguait). 3,20:1 entre les deux états en
+  clair, ~6:1 en sombre. Aujourd'hui sans vente reste un moignon ; son étiquette en gras
+  dit encore quel jour c'est.
+- Les **classements** (meilleurs clients, produits) : des lignes à filet, rang en
+  pastille, montant en `tabular-nums`, une jauge plate au principal (plus de dégradé
+  corail-vert).
+- **Exports, Rappels, À recommander, Commande client** : les cartes imbriquées sont
+  blanches à filet régulier (surface basse en clair, vert d'eau en sombre), sans trait
+  coloré ; les listes n'ont plus de fond dégradé. Commande client : **seules** ses
+  cartes (catalogue, panier vide) — la grille de son formulaire n'est pas touchée, un
+  autre lot la reprend.
+- Les **gestes d'un rappel** (Fait, Reporté, Annulé) n'ont plus de dégradé : un geste
+  plein (Fait) et deux à contour ; « Annulé » garde la couleur d'alerte, avec son mot.
+  « Reporté » passait à 4,45:1 sur son ancien fond ; il est au-dessus de 4,5:1 partout.
+- **Au téléphone**, dans le cadre commun (en-tête vert, barre basse) : les filtres des
+  Rappels et d'À recommander sont des **pilules** de 44 px à leur largeur, plusieurs
+  par rangée (et non cinq gros boutons pleine largeur empilés) ; la choisie est pleine
+  au principal et se dit par `aria-pressed`. L'anneau clavier est écrit avec les jetons
+  `--v8-focus` / `--v8-focus-halo`, **pas** `--focus-ring`, qui n'est défini qu'en
+  clair (en sombre l'anneau tombait à « none »). Les trois exports sont des **gestes**,
+  pas des filtres : des boutons à leur largeur qui passent à la ligne. La pastille de
+  compte d'un en-tête de carte garde sa largeur. Les quatre chiffres d'un produit à
+  recommander passent deux par rangée : à trois, « À recommander » débordait de sa case.
+
+**Dette 7, soldée** : les quatre anciennes listes de commandes (`#commandes-jour`,
+`#commandes-planifiees`, `#bons-commande`, `#commandes-livrees`), inatteignables depuis
+l'écran unique des Commandes mais encore dessinées, quittent la page avec leurs rendus,
+leurs filtres et leurs gestes propres. Vérifié avant (grep) : aucune portée de rôle ne
+les nomme plus (les rôles nomment `commandes`), aucun geste atteignable n'y menait
+(leurs adresses redirigeaient déjà), et les bancs qui les visaient ont été repris
+(`performance.spec.js` ne mesure plus des identifiants absents, qui rendaient −1 et
+passaient ; `etats-vides.test.js` vise la clé « livrees »). **Gardé** :
+
+- les **redirections** et les titres des anciens écrans (`config/tabs.js`) : un favori,
+  un lien ou un `showTab("commandes-planifiees")` codé en dur arrivent sur l'écran
+  Commandes, filtré ; la recherche du menu les trouve encore ;
+- la **fenêtre de détail** d'une commande (`#bdc-detail-modal`), qui vivait entre deux
+  de ces sections : c'est celle de l'écran Commandes ;
+- `confirmPlannedOrder` / `cancelPlannedOrder` (les gestes Confirmer / Annuler du
+  détail), `bdcNeedsCompletion` (la case « À compléter ») et `exportBdcCsv` (l'export
+  de l'écran Commandes, qui lui passe sa liste filtrée).
+
+`loadData` ne demande **plus** `/api/customer-orders/today` : seul l'ancien écran
+« Commandes du jour » lisait ces commandes. La requête partait encore à chaque
+chargement, et son échec affichait « Partiel (1 indispo) » avec un toast nommant la clé
+brute `todayCustomerOrders`, pour des données qu'aucun écran ne montre. L'écran
+Commandes filtre `orders` (`/api/orders`) par son propre jour (`#cmdJour`). La route
+serveur reste (`test/api.test.js` la tient) ; la porte « endpoint du jour » de
+`lireDernieresDonnees` aussi, sans occupant.
+
+**Croisement avec `fix/interface-finitions`** (relecture du 23/09 ; mesuré sur
+`bff9ee7`, branche encore mouvante). Ce lot-là, point 12 de l'audit, fait attendre
+leurs commandes à « Tout sélectionner » / « Tout désélectionner » de `#commandes-jour`
+(`data-attend-commandes-du-jour disabled`, `activerSelectionDuJour()` quand
+`todayCustomerOrders` arrive) — la section et la liste que celui-ci retire. Conflit dans
+`public/index.html`, `style.css` et ce fichier ; `app.js` fusionne **sans** conflit, et
+c'est le piège. **Résolution, éprouvée** sur un arbre fusionné :
+
+1. `index.html` : garder la **suppression**. Reprendre la section ramènerait deux
+   boutons inertes (leurs gestionnaires ont quitté `app.js`), et
+   `test/ecrans-sans-planche.test.js` le refuse.
+2. `app.js` : retirer `if (a("todayCustomerOrders")) activerSelectionDuJour();` et
+   `activerSelectionDuJour()` — plus aucune clé ni aucun bouton à activer ; code mort
+   que la fusion automatique laisse passer.
+3. `style.css` et ce fichier : deux ajouts en fin de fichier, à garder **entiers**. Ôter
+   les seuls marqueurs ne suffit pas : git a sorti du conflit des lignes communes, et le
+   résultat perd le `}` qui ferme le `@media` de ce lot et l'ouverture du commentaire
+   d'en-tête des finitions (CSS cassée : cinq bancs des finitions et de
+   `preparation-lignes.spec.js` rouges). Reconstruire : les deux fins de fichier bout à
+   bout, 13 629 lignes pour `style.css`.
+4. `test/e2e/interface-finitions.spec.js` : le test « 12 — Tout sélectionner des
+   commandes du jour attend les commandes » attend 2 boutons et en trouve 0 : le
+   **réécrire**, ce qu'il protège vaut pour les boutons qui restent (ceux de la
+   tournée) :
+
+   ```js
+   // « Tout sélectionner » des commandes du jour est parti avec son écran (lot
+   // « écrans sans planche ») ; la règle vaut pour ceux qui restent.
+   const boutons = page.locator("[data-attend-commandes]");
+   expect(await boutons.count()).toBeGreaterThan(0);
+   await expect(page.locator('[data-action="select-all-today-orders"]')).toHaveCount(0);
+   for (const b of await boutons.all()) await expect(b).toBeDisabled();
+   for (const b of await boutons.all()) await expect(b).toBeEnabled({ timeout: 15000 });
+   ```
+
+   Et **supprimer** « 12 — une copie du cache sans la liste du jour n'active pas… » :
+   après la fusion il reste **vert sans rien juger** (ses boucles portent sur zéro
+   bouton), et la liste du jour qu'il protégeait n'est plus chargée.
+
+Sur l'arbre ainsi résolu : `interface-finitions.spec.js`, `ecrans-sans-planche.spec.js`,
+`performance.spec.js`, `preparation-lignes.spec.js` — 43 verts ; les bancs Node des deux
+lots (`ecrans-sans-planche`, `interface-finitions`, `etats-vides`, `jetons-v8`, `auth`)
+verts. `connexion.spec.js` (serveur authentifié) n'y a pas été rejoué.
+
+**Non fait, nommé** : les règles CSS des anciennes listes (`.bdc-list`, `.bdc-search`,
+`.stats-hero`, `.commandes-livrees-card`…) restent dans `style.css`, sans élément à
+styler. Les retirer touche des dizaines de sélecteurs groupés dans les couches
+anciennes, pendant que d'autres lots écrivent ce fichier : un nettoyage à part.
+
+Bancs : `test/e2e/ecrans-sans-planche.spec.js` (serveur semé, port 3306 ; clair et
+sombre ; styles calculés et textes rendus) et `test/ecrans-sans-planche.test.js` (plus
+aucune référence aux conteneurs disparus ; contre-témoin : les quatre redirections).
+
+## Intégration des lots d'interface du 23/09 (branche integration/geo-vague1)
+
+Sur la vague géo (lots 1, 3, 4, 5, 7, `0e16b19`), quatre lots d'interface partis de
+v1.41.1 (`ef470c6`), fusionnés dans cet ordre : `fix/interface-finitions` (`8ab6988`),
+`feat/clients-mobile` (`6b10eaa`), `feat/abonnement-creation` (`b5034b6`),
+`feat/ecrans-sans-planche-v8` (`16042d3`) ; puis deux réconciliations (`3b32456`) et
+un banc repris (`2e728e1`).
+
+**Conflits de fin de fichier** (`DESIGN.md`, `style.css`, aux quatre fusions) : notre
+côté avait aussi modifié le milieu (la note du lot 1 ici, la famille `--warning` des
+finitions dans la feuille), `ajouts.py` refusait (code 2). Reconstruits depuis les
+trois versions, jamais en ôtant les marqueurs : l'ajout en fin de chaque côté
+détaché, les têtes fusionnées à trois voies (`git merge-file`, propre), puis les deux
+ajouts bout à bout. Contrôle à chaque fusion : le diff du résultat contre `HEAD` est
+**exactement** le diff du lot contre sa base (lignes ajoutées et retirées, triées).
+
+**Conflits de code, et ce qui a été gardé.**
+- `loadData` (finitions × lot 1) : le mode frais du lot 1 (`clesEnCopie`, écriture
+  croisée) et l'erreur des finitions (`commandesEnErreur`), les deux. En mode frais,
+  des commandes **gardées** faute de réseau gardent aussi l'erreur qu'elles
+  montraient : sinon une liste vide se serait dite « Aucune commande ».
+- Les quatre anciennes listes (écrans sans planche) : la section `#commandes-jour`
+  retirée, ses gestes aussi ; `save-coordinates` n'est repris par aucun côté (le lot 3
+  a retiré sa fonction) ; la case « À livrer en premier » (lot 7) gardée. Aucun code
+  des lots géo ne lisait `todayCustomerOrders` ni ces listes (grep : les fonctions
+  retirées n'ont plus d'appelant, les identifiants retirés ne sont cités que par les
+  redirections de `config/tabs.js`). `/api/customer-orders/today` a quitté
+  `endpointsDeChargement` (lot 1) par la fusion automatique ; la porte `jour` de
+  `lireDernieresDonnees` reste, sans occupant.
+- Le croisement finitions × écrans, résolu **comme le lot écrans l'a écrit et
+  éprouvé** : `activerSelectionDuJour` et son appel retirés (code mort que la fusion
+  automatique laissait) ; « Tout sélectionner attend les commandes » porte sur les
+  boutons qui restent (`data-attend-commandes`) ; le cas « copie du cache sans la
+  liste du jour » retiré (vert sans rien juger).
+
+**Réconciliations**, chacune avec un banc qui rougit sans elle
+(`test/e2e/integration-interface.spec.js`, serveurs semés 3308 et 3309) :
+
+| Défaut de la combinaison | Correctif | Rouge sans lui |
+|---|---|---|
+| Une réponse tardive (lot 1 : repli de 3 s sans copie, puis la réponse arrive) n'effaçait pas « Commandes indisponibles » (finitions) : une liste vraiment vide restait « indisponible » jusqu'au rechargement | `appliquerReponsesTardives` remet `commandesEnErreur` à faux quand elle apporte les commandes | la liste garde « Commandes indisponibles » après la réponse |
+| `--focus-ring` n'existait qu'en clair : en sombre, toute règle `outline: none; box-shadow: var(--focus-ring)` n'avait **aucun** indicateur. Relevé par le lot 3, Clients au téléphone, Création d'abonnement, Écrans sans planche ; chacun l'a contourné dans son bloc | le jeton est déclaré sur `:root` (bloc « INTEGRATION DES LOTS D'INTERFACE » en fin de feuille) : les mêmes deux tons, qui suivent déjà le thème. Les anneaux écrits en clair par les lots (`--abo-anneau`, Clients, Écrans) ont la même valeur et restent | au bureau en sombre : une ligne de Clients, « Modifier » et une commande de la fiche, ombre `none` et contour `none` ; le même relevé en clair, vert |
+
+**Banc repris** : `interface-finitions.spec.js`, « 12 — la page ne remonte pas toute
+seule », tombait sur son préalable (`load` déjà passé), 3 fois sur 3 seul. Cause
+sondée : l'adresse des tuiles vient du serveur (`/api/carte/fond`), demandée après
+les scripts ; `load` tombe à 150 ms, la première tuile part à 160 ms, ralentir les
+tuiles ne retient plus `load`. Le banc ralentit le logo de la barre à leur place.
+Vert 3/3 ; le mutant « `resetViewportScroll` toujours » rouge pour sa cause.
+
+**Ports e2e** : 3300 à 3306 (lots d'interface), 3308 et 3309 (ce banc), 3190 (lots
+1-5) : chacun une seule fois (`test/ports-e2e.test.js`).
+
+**Vérifié** sur `2e728e1` : `node --check` de `server.js`, `app.js`, `operations.js` ;
+`npm run check` ; `npm test` 545/545 ; suite e2e complète deux fois, 469/469 et
+469/469 (dont `connexion.spec.js` et `contraste-login.spec.js` sur le serveur
+authentifié, que le lot écrans n'avait pas rejoués sur l'arbre fusionné).
+
+**Écarts nommés.**
+- `--focus-ring` global : là où une règle garde aussi son contour, le sombre montre
+  désormais contour **et** anneau — mesuré sur le tri de Clients au téléphone : contour
+  plein de 3 px sur le `select`, anneau à deux tons sur son étiquette `.cli-tri`.
+- Les règles CSS des anciennes listes (`.bdc-list`, `.stats-hero`,
+  `.commandes-livrees-card`…) restent sans élément à styler (déjà nommé par le lot
+  écrans).
+- Les écarts nommés par chaque lot restent les leurs (le collant inerte de Commande
+  client, « Se déconnecter » sans authentification, « Nouveau client » tôt dans
+  l'ordre du clavier, « Itinéraire » visible au bureau…).

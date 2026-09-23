@@ -1,4 +1,6 @@
 import { escapeHtml as h } from "./utils/dom.js";
+import { normalizeTextKey } from "./utils/text.js";
+import { getAddressParts } from "./utils/address.js";
 let context,
   data = {},
   selectedMonth = "",
@@ -111,9 +113,36 @@ export function initOperations(api) {
     if (action === "view-order") return;
     if (action === "close-sub")
       return document.getElementById("subscriptionDialog").close();
-    if (action === "add-line") return addLine();
-    if (action === "remove-line")
-      return el.closest(".sub-product-line").remove();
+    // La creation d'un abonnement (planches 3b / 5b) : des gestes locaux au
+    // formulaire, sans appel au serveur.
+    if (action === "sub-client") {
+      $("subClient").value = el.dataset.id;
+      majClient();
+      document.querySelector('[data-op="sub-client-changer"]').focus();
+      return;
+    }
+    if (action === "sub-client-changer") {
+      $("subClient").value = "";
+      majClient();
+      $("subClientSearch").focus();
+      return;
+    }
+    if (action === "sub-nouveau-client") {
+      ficheNouvelle = !ficheNouvelle;
+      majClient();
+      (ficheNouvelle ? $("subLastName") : $("subNouveauClient")).focus();
+      return;
+    }
+    if (action === "sub-catalogue") return basculerCatalogue();
+    if (action === "sub-ajouter") {
+      ajouterProduit(el.dataset.id);
+      // Le catalogue est redessine : le focus revient au meme « + ».
+      $("subCatalogueListe").querySelector(`[data-id="${CSS.escape(el.dataset.id)}"]`)?.focus();
+      return;
+    }
+    if (action === "sub-moins" || action === "sub-plus")
+      return changerQuantite(el.closest(".sub-product-line"), action === "sub-plus" ? 1 : -1);
+    if (action === "sub-retirer") return retirerLigne(el.closest(".sub-product-line"), "sub-retirer");
     if (action === "abo-filtre") {
       aboFiltre = el.dataset.filtre || "tous";
       renderSubscriptions();
@@ -217,22 +246,38 @@ export function initOperations(api) {
   document
     .getElementById("subscriptionForm")
     .addEventListener("submit", saveSubscription);
-  document.getElementById("subClient").addEventListener("change", (event) => {
-    document.getElementById("subNewClient").hidden =
-      event.target.value !== "new";
-    for (const input of document.querySelectorAll(
-      "#subNewClient [data-required]",
-    ))
-      input.required = event.target.value === "new";
+  // La recherche du client et celle du catalogue : Entree n'envoie pas le
+  // formulaire (elle choisirait un abonnement a moitie rempli).
+  $("subClientSearch").addEventListener("input", rendreClients);
+  $("subClientSearch").addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    const cartes = $("subClientResults").querySelectorAll('[data-op="sub-client"]');
+    if (cartes.length === 1) cartes[0].click();
   });
-  document.getElementById("subFrequency").addEventListener("change", () => {
-    document.getElementById("subCustomWrap").hidden =
-      document.getElementById("subFrequency").value !== "custom";
-    previewSchedule();
+  $("subCatalogueSearch").addEventListener("input", rendreCatalogue);
+  $("subCatalogueSearch").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") event.preventDefault();
   });
-  document
-    .getElementById("subStart")
-    .addEventListener("change", previewSchedule);
+  $("subProducts").addEventListener("input", (event) => {
+    const ligne = event.target.closest(".sub-product-line");
+    if (ligne) majLigne(ligne);
+  });
+  // Le change d'une quantite part au mousedown du geste suivant (le champ perd
+  // le focus). Redessiner le catalogue a cet instant remplacait le « + » sous
+  // le pointeur : le premier clic n'ajoutait rien. Les comptes changent en place.
+  $("subProducts").addEventListener("change", () => {
+    if (!$("subCatalogue").hidden) majComptesCatalogue();
+  });
+  // Les pilules sont des boutons radio : le changement remonte au groupe.
+  $("subFrequency").addEventListener("change", majFrequence);
+  $("subCustom").addEventListener("input", previewSchedule);
+  $("subCustomUnit").addEventListener("change", majFrequence);
+  $("subStart").addEventListener("input", previewSchedule);
+  $("subStart").addEventListener("change", previewSchedule);
+  for (const radio of document.querySelectorAll('input[name="subRappel"]'))
+    radio.addEventListener("change", () => majRappel({ depuisPilule: true }));
+  $("subReminder").addEventListener("input", () => majRappel());
   for (const point of ["departure", "arrival"]) {
     document.getElementById(`${point}Query`).addEventListener("input", () => {
       if (point === "departure") departure = null;
@@ -712,85 +757,342 @@ function renderAgenda() {
       : `Les ${reste} semaine${reste > 1 ? "s" : ""} suivante${reste > 1 ? "s" : ""}<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>`;
   }
 }
-function addLine(line) {
-  const row = document.createElement("div");
-  row.className = "sub-product-line";
-  row.innerHTML = `<label>Produit<select class="sub-product" required><option value="">Choisir un produit</option>${data.stock.map((p) => `<option value="${h(p.id)}" ${line && (String(line.stockId) === String(p.id) || line.code === p.code) ? "selected" : ""}>${h(p.nom || p.produit || p.name || p.code)}${p.code ? " · " + h(p.code) : ""}</option>`).join("")}</select></label><label>Quantité<input class="sub-quantity" type="number" min="1" max="10000" step="1" required value="${line?.quantite || 1}"></label>${button("remove-line", "Retirer")}`;
-  document.getElementById("subProducts").append(row);
+/* ---------------------------------------------------------------------------
+ * LA CREATION D'UN ABONNEMENT -- planches 3b / 5b, posee le 23/09.
+ * Le client se choisit en carte (recherche), le panier se compose depuis le
+ * catalogue avec le stock disponible, la frequence est une pilule et
+ * l'apercu des trois prochaines dates se recalcule a chaque geste. Rien de
+ * ce que l'ancien formulaire permettait n'est perdu : fiche client creee a la
+ * volee, quantite saisie au clavier, nombre de jours ou de MOIS quelconque,
+ * rappel de 0 a 60 jours, statut et notes (sous « Plus d'options »).
+ * ------------------------------------------------------------------------- */
+const $ = (id) => document.getElementById(id);
+// Une fiche nouvelle en cours de saisie, a la place du choix d'un client.
+let ficheNouvelle = false;
+// La prochaine livraison de l'apercu : la note du rappel en depend.
+let prochaineLivraison = "";
+const nomProduit = (p) => p.nom || p.produit || p.name || p.code || "Produit";
+// Le disponible du serveur (stock moins les commandes actives), sinon le stock.
+const quantiteDisponible = (p) => {
+  const v = p.quantityAvailable ?? p.quantite ?? p.stock ?? p.qte;
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(String(v).replace(",", "."));
+  return Number.isFinite(n) ? n : null;
+};
+const texteStock = (p) => {
+  const q = quantiteDisponible(p);
+  return [p.code, q === null ? "stock à renseigner" : q <= 0 ? "rupture" : `${q} en stock`]
+    .filter(Boolean)
+    .join(" · ");
+};
+const adresseClient = (c) => {
+  const a = getAddressParts(c);
+  const ville = [a.postalCode, a.city].filter(Boolean).join(" ");
+  const secteur = c.ville ? context.formatSectorLabel(c.ville) : "";
+  // La planche ecrit « ..., 25000 Besancon · Besancon » : le secteur n'est
+  // ajoute que s'il dit autre chose que la ville.
+  return [[a.address, ville].filter(Boolean).join(", "), normalizeTextKey(secteur) !== normalizeTextKey(a.city) ? secteur : ""]
+    .filter(Boolean)
+    .join(" · ");
+};
+const MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
+const JOURS = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"];
+const majuscule = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+const jourSemaineDe = (value) => JOURS[new Date(`${value}T12:00:00Z`).getUTCDay()];
+// « Mardi 22 septembre », « Jeudi 1er octobre » ; l'annee si elle change.
+const jourLong = (value) => {
+  const d = new Date(`${value}T12:00:00Z`);
+  const n = d.getUTCDate();
+  const annee = d.getUTCFullYear() !== Number(String(data.subscriptions?.today || "").slice(0, 4)) ? ` ${d.getUTCFullYear()}` : "";
+  return `${majuscule(jourSemaineDe(value))} ${n === 1 ? "1er" : n} ${MOIS[d.getUTCMonth()]}${annee}`;
+};
+const jourCourtLong = (value) => jourLong(value).replace(/^\S+ /, "");
+// La meme regle que lib/subscriptions.js occurrenceDate : l'apercu dit ce que
+// le serveur calculera (dernier jour du mois quand il est plus court).
+function dateOccurrence(start, frequence, index) {
+  const a = new Date(`${start}T12:00:00Z`);
+  if (frequence.unit === "days")
+    return new Date(+a + index * frequence.interval * 86400000).toISOString().slice(0, 10);
+  const m = new Date(Date.UTC(a.getUTCFullYear(), a.getUTCMonth() + index * frequence.interval, 1, 12));
+  const dernier = new Date(Date.UTC(m.getUTCFullYear(), m.getUTCMonth() + 1, 0)).getUTCDate();
+  m.setUTCDate(Math.min(a.getUTCDate(), dernier));
+  return m.toISOString().slice(0, 10);
+}
+const frequenceChoisie = () =>
+  document.querySelector('input[name="subFrequence"]:checked')?.value || "monthly";
+function lireFrequence() {
+  const f = frequenceChoisie();
+  if (f === "monthly") return { unit: "months", interval: 1 };
+  if (f === "custom")
+    return { unit: $("subCustomUnit").value === "months" ? "months" : "days", interval: Number($("subCustom").value) };
+  return { unit: "days", interval: Number(f) };
+}
+function cocher(nom, valeur) {
+  const radio = document.querySelector(`input[name="${nom}"][value="${valeur}"]`)
+    || document.querySelector(`input[name="${nom}"][value="custom"]`);
+  radio.checked = true;
+}
+
+/* Le client : une recherche, des cartes ; la carte choisie devient le champ. */
+function rendreClients() {
+  const saisie = $("subClientSearch").value;
+  const q = normalizeTextKey(saisie);
+  const chiffres = saisie.replace(/\D/g, "");
+  const trouves = data.crmClients
+    .filter((c) => !c.crmArchived)
+    .filter((c) =>
+      !q
+      || normalizeTextKey([name(c), c.ville, c.rue, c.address, c.codePostal].join(" ")).includes(q)
+      || (chiffres.length >= 3 && String(c.telephone || c.phone || "").replace(/\D/g, "").includes(chiffres)))
+    .sort((a, b) => name(a).localeCompare(name(b), "fr"));
+  const MAX = 6;
+  $("subClientResults").innerHTML = trouves
+    .slice(0, MAX)
+    .map((c) => `<div role="listitem"><button type="button" class="abo-cr-client-carte" data-op="sub-client" data-id="${h(c.id)}"><strong>${h(name(c) || "Client sans nom")}</strong><span>${h(adresseClient(c) || "Adresse à compléter")}</span></button></div>`)
+    .join("");
+  const reste = $("subClientReste");
+  reste.hidden = trouves.length > 0 && trouves.length <= MAX;
+  reste.textContent = !trouves.length
+    ? data.crmClients.some((c) => !c.crmArchived)
+      ? "Aucun client ne correspond : crée sa fiche."
+      : "Aucun client pour l’instant : crée sa fiche."
+    : `${trouves.length - MAX} autre${trouves.length - MAX > 1 ? "s" : ""} : précise la recherche.`;
+}
+function majClient() {
+  const id = $("subClient").value;
+  const c = id ? data.crmClients.find((x) => String(x.id) === String(id)) : null;
+  $("subClientChoisi").hidden = !c || ficheNouvelle;
+  $("subClientRecherche").hidden = Boolean(c) || ficheNouvelle;
+  const fiche = $("subNewClient");
+  fiche.hidden = !ficheNouvelle;
+  fiche.disabled = !ficheNouvelle;
+  const bouton = $("subNouveauClient");
+  bouton.textContent = ficheNouvelle ? "Choisir un client existant" : "Créer une fiche client";
+  bouton.setAttribute("aria-expanded", String(ficheNouvelle));
+  if (c) {
+    $("subClientNom").textContent = name(c) || "Client sans nom";
+    $("subClientAdresse").querySelector("span").textContent = adresseClient(c) || "Adresse à compléter";
+  } else if (!ficheNouvelle) rendreClients();
+}
+
+/* Le panier : une ligne par produit, quantite en pas de un ou au clavier. */
+function majLigne(ligne) {
+  const nom = ligne.querySelector(".abo-cr-produit-nom").textContent;
+  const q = Number(ligne.querySelector(".sub-quantity").value);
+  ligne.querySelector('[data-op="sub-moins"]').setAttribute("aria-label", q <= 1 ? `Retirer ${nom}` : `Un de moins : ${nom}`);
+}
+function majPanier() {
+  const vide = !document.querySelector("#subProducts .sub-product-line");
+  $("subPanierVide").hidden = !vide;
+  if (!$("subCatalogue").hidden) rendreCatalogue();
+}
+function ligneProduit(produit, quantite, secours) {
+  const ligne = document.createElement("div");
+  ligne.className = "sub-product-line abo-cr-produit";
+  ligne.dataset.productId = produit ? String(produit.id) : String(secours?.stockId || "");
+  const nom = produit ? nomProduit(produit) : secours?.nom || "Produit";
+  const stock = produit ? texteStock(produit) : [secours?.code, "retiré du catalogue"].filter(Boolean).join(" · ");
+  // « Retirer » : l'ancien formulaire retirait une ligne d'un geste, quelle que
+  // soit sa quantite ; « − » ne le fait qu'a un.
+  ligne.innerHTML = `<span class="abo-cr-produit-texte"><span class="abo-cr-produit-nom">${h(nom)}</span><span class="abo-cr-produit-stock">${h(stock)}</span><button type="button" class="abo-cr-lien abo-cr-retirer" data-op="sub-retirer" aria-label="Retirer ${h(nom)} du panier">Retirer</button></span><span class="abo-cr-pas"><button type="button" class="abo-cr-pas-bouton abo-cr-pas--moins" data-op="sub-moins"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button><input class="sub-quantity abo-cr-quantite" type="number" min="1" max="10000" step="1" inputmode="numeric" required value="${h(quantite)}" aria-label="Quantité de ${h(nom)}"><button type="button" class="abo-cr-pas-bouton abo-cr-pas--plus" data-op="sub-plus" aria-label="Un de plus : ${h(nom)}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button></span>`;
+  majLigne(ligne);
+  return ligne;
+}
+const ligneDuPanier = (id) =>
+  [...document.querySelectorAll("#subProducts .sub-product-line")].find((l) => l.dataset.productId === String(id));
+function ajouterProduit(id) {
+  const existante = ligneDuPanier(id);
+  if (existante) {
+    const input = existante.querySelector(".sub-quantity");
+    input.value = Math.min(10000, (Number(input.value) || 0) + 1);
+    majLigne(existante);
+  } else {
+    const produit = data.stock.find((p) => String(p.id) === String(id));
+    if (!produit) return;
+    $("subProducts").append(ligneProduit(produit, 1));
+  }
+  majPanier();
+}
+// Le focus ne tombe pas sur <body> : le meme geste sur la ligne suivante,
+// sinon le catalogue.
+function retirerLigne(ligne, geste) {
+  const suivante = ligne.nextElementSibling || ligne.previousElementSibling;
+  ligne.remove();
+  majPanier();
+  (suivante?.querySelector(`[data-op="${geste}"]`) || $("subCatalogueBouton")).focus();
+}
+function changerQuantite(ligne, pas) {
+  const input = ligne.querySelector(".sub-quantity");
+  const q = (Number(input.value) || 0) + pas;
+  if (q < 1) return retirerLigne(ligne, "sub-moins");
+  input.value = Math.min(10000, q);
+  majLigne(ligne);
+  if (!$("subCatalogue").hidden) rendreCatalogue();
+}
+// « code · stock », et « N au panier » quand il y est.
+function texteCatalogue(p) {
+  const dans = ligneDuPanier(p.id);
+  const combien = dans ? Number(dans.querySelector(".sub-quantity").value) : 0;
+  return `${texteStock(p)}${combien ? ` · ${combien} au panier` : ""}`;
+}
+// Les comptes du catalogue, sans toucher a ses boutons.
+function majComptesCatalogue() {
+  for (const bouton of $("subCatalogueListe").querySelectorAll('[data-op="sub-ajouter"]')) {
+    const p = (data.stock || []).find((x) => String(x.id) === bouton.dataset.id);
+    const texte = bouton.closest(".abo-cr-produit")?.querySelector(".abo-cr-produit-stock");
+    if (p && texte) texte.textContent = texteCatalogue(p);
+  }
+}
+function rendreCatalogue() {
+  const q = normalizeTextKey($("subCatalogueSearch").value);
+  const trouves = (data.stock || [])
+    .filter((p) => !q || normalizeTextKey(`${nomProduit(p)} ${p.code || ""}`).includes(q))
+    .sort((a, b) => nomProduit(a).localeCompare(nomProduit(b), "fr"));
+  const MAX = 40;
+  const lignes = trouves.slice(0, MAX).map((p) => {
+    const nom = nomProduit(p);
+    return `<div role="listitem" class="abo-cr-produit"><span class="abo-cr-produit-texte"><span class="abo-cr-produit-nom">${h(nom)}</span><span class="abo-cr-produit-stock">${h(texteCatalogue(p))}</span></span><button type="button" class="abo-cr-pas-bouton abo-cr-pas--plus" data-op="sub-ajouter" data-id="${h(p.id)}" aria-label="Ajouter ${h(nom)} au panier"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button></div>`;
+  });
+  $("subCatalogueListe").innerHTML = lignes.join("")
+    || `<p class="abo-cr-note">${data.stock?.length ? "Aucun produit ne correspond." : "Le catalogue est vide : ajoute des produits dans Stock."}</p>`;
+  if (trouves.length > MAX)
+    $("subCatalogueListe").insertAdjacentHTML("beforeend", `<p class="abo-cr-note">${trouves.length - MAX} autres : précise la recherche.</p>`);
+}
+function basculerCatalogue(ouvrir) {
+  const catalogue = $("subCatalogue");
+  catalogue.hidden = ouvrir === undefined ? !catalogue.hidden : !ouvrir;
+  $("subCatalogueBouton").setAttribute("aria-expanded", String(!catalogue.hidden));
+  $("subCatalogueBouton").textContent = catalogue.hidden ? "Catalogue" : "Fermer le catalogue";
+  if (!catalogue.hidden) rendreCatalogue();
+}
+
+/* La frequence, l'apercu des trois dates, le rappel. */
+function majFrequence() {
+  const autre = frequenceChoisie() === "custom";
+  $("subCustomWrap").hidden = !autre;
+  $("subCustomWrap").disabled = !autre;
+  $("subCustom").max = $("subCustomUnit").value === "months" ? "12" : "366";
+  previewSchedule();
 }
 function previewSchedule() {
-  const date = document.getElementById("subStart").value,
-    f = document.getElementById("subFrequency").value;
-  document.getElementById("subScheduleHint").textContent = date
-    ? `Première livraison : ${day(date)}. ${["7", "14", "21", "28"].includes(f) ? "Le jour de la semaine sera conservé." : f === "monthly" ? "Même date chaque mois ; dernier jour si le mois est plus court." : "Le jour de la semaine peut varier selon l’intervalle."}`
-    : "";
+  const start = $("subStart").value;
+  const f = lireFrequence();
+  const max = f.unit === "months" ? 12 : 366;
+  const liste = $("subApercu");
+  const note = $("subScheduleHint");
+  prochaineLivraison = "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !Number.isInteger(f.interval) || f.interval < 1 || f.interval > max) {
+    liste.innerHTML = "";
+    note.textContent = !start
+      ? "Choisis la date de la première livraison."
+      : "Fréquence invalide : 1 à 366 jours ou 1 à 12 mois.";
+    majRappel();
+    return;
+  }
+  // Les trois PROCHAINES : un abonnement qu'on modifie a commence il y a des
+  // mois ; ses premieres dates sont passees.
+  const today = data.subscriptions?.today || iso(new Date());
+  let i = 0;
+  while (i < 5000 && dateOccurrence(start, f, i) < today) i++;
+  const dates = [0, 1, 2].map((k) => ({ index: i + k, date: dateOccurrence(start, f, i + k) }));
+  prochaineLivraison = dates[0].date;
+  const ecart = f.unit === "days" ? `+ ${f.interval} j` : `+ ${f.interval} mois`;
+  liste.innerHTML = dates
+    .map((d, k) => `<li class="abo-cr-apercu-date${k === 0 ? " abo-cr-apercu-date--premiere" : ""}"><span class="abo-cr-point" aria-hidden="true"></span><span class="abo-cr-apercu-jour">${h(jourLong(d.date))}</span><span class="abo-cr-apercu-ecart">${d.index === 0 ? "départ" : ecart}</span></li>`)
+    .join("");
+  if (f.unit === "months") {
+    const jour = Number(start.slice(8, 10));
+    note.textContent = `Le ${jour === 1 ? "1er" : jour} ${f.interval === 1 ? "de chaque mois" : `du mois, tous les ${f.interval} mois`}${jour >= 29 ? " ; le dernier jour du mois quand il est plus court." : "."}`;
+  } else if (f.interval % 7 === 0) {
+    note.textContent = `Toujours le ${jourSemaineDe(dates[0].date)} : un intervalle de ${f.interval} jours garde le jour de la semaine.`;
+  } else {
+    const semaines = majuscule(dates.map((d) => jourSemaineDe(d.date)).join(", "));
+    const proche = f.interval <= 31 ? `« ${Math.min(28, Math.max(7, Math.round(f.interval / 7) * 7))} j »` : "un multiple de 7 jours";
+    note.textContent = `${semaines} : un intervalle de ${f.interval} jours décale le jour de la semaine. Choisis « Mensuel » pour garder la même date, ${proche} pour garder le même jour.`;
+  }
+  majRappel();
+}
+function majRappel({ depuisPilule = false } = {}) {
+  const choix = document.querySelector('input[name="subRappel"]:checked')?.value;
+  if (depuisPilule && choix && choix !== "custom") $("subReminder").value = choix;
+  $("subReminderWrap").hidden = choix !== "custom";
+  const n = Number($("subReminder").value);
+  const valide = $("subReminder").value !== "" && Number.isInteger(n) && n >= 0 && n <= 60;
+  $("subRappelValeur").textContent = !valide ? "—" : n === 0 ? "Aucun" : `${n} j`;
+  // La promesse est celle du serveur (due = rappel <= aujourd'hui) : le compte
+  // « Echeances a preparer » du tableau de bord.
+  $("subRappelNote").textContent = !valide
+    ? "Le rappel va de 0 à 60 jours."
+    : !prochaineLivraison
+      ? "L’échéance compte dans « Échéances à préparer » du tableau de bord. De 0 à 60 jours."
+      : n === 0
+        ? `Sans rappel, la livraison du ${jourCourtLong(prochaineLivraison)} compte dans « Échéances à préparer » du tableau de bord le jour même. De 0 à 60 jours.`
+        : `Le ${jourCourtLong(plus(prochaineLivraison, -n))}, la livraison du ${jourCourtLong(prochaineLivraison)} passe dans « Échéances à préparer » du tableau de bord. De 0 à 60 jours.`;
 }
 function openEditor(id) {
   editingId = id || null;
   const sub = data.subscriptions?.items.find((s) => s.id === id);
   const form = document.getElementById("subscriptionForm");
   form.reset();
-  document.getElementById("subDialogTitle").textContent = sub
+  $("subDialogTitle").textContent = sub
     ? "Modifier l’abonnement"
     : "Nouvel abonnement";
-  document.getElementById("subClient").innerHTML =
-    '<option value="">Choisir un client</option><option value="new">+ Créer une fiche client</option>' +
-    data.crmClients
-      .filter((c) => !c.crmArchived || String(c.id) === String(sub?.clientId))
-      .map(
-        (c) =>
-          `<option value="${h(c.id)}" ${String(sub?.clientId) === String(c.id) ? "selected" : ""}>${h(name(c))} · ${h(c.ville || "")}</option>`,
-      )
-      .join("");
-  document.getElementById("subNewClient").hidden = true;
-  for (const input of document.querySelectorAll(
-    "#subNewClient [data-required]",
-  ))
-    input.required = false;
-  document.getElementById("subStart").value =
-    sub?.startDate || data.subscriptions.today;
-  const value = sub
-    ? sub.frequency.unit === "months"
-      ? "monthly"
-      : String(sub.frequency.interval)
-    : "monthly";
-  document.getElementById("subFrequency").value = [
-    "7",
-    "10",
-    "14",
-    "15",
-    "21",
-    "28",
-    "monthly",
-  ].includes(value)
-    ? value
-    : "custom";
-  document.getElementById("subCustom").value = sub?.frequency.interval || 10;
-  document.getElementById("subCustomWrap").hidden =
-    document.getElementById("subFrequency").value !== "custom";
-  document.getElementById("subReminder").value = sub?.reminderDays ?? 7;
-  document.getElementById("subNotes").value = sub?.notes || "";
-  document.getElementById("subStatus").value = sub?.status || "active";
-  document.getElementById("subProducts").innerHTML = "";
-  (sub?.products || [null]).forEach(addLine);
-  document.getElementById("subError").textContent = "";
-  previewSchedule();
-  document.getElementById("subscriptionDialog").showModal();
+  $("subSave").textContent = sub ? "Enregistrer les modifications" : "Créer l’abonnement";
+  // Le client : la fiche de l'abonnement (meme archivee), sinon la recherche.
+  $("subClient").value = sub ? String(sub.clientId) : "";
+  $("subClientSearch").value = "";
+  ficheNouvelle = false;
+  majClient();
+  // Le panier. Une ligne dont le produit a quitte le catalogue reste visible,
+  // nommee : l'enregistrement le signalera plutot que de la perdre en silence.
+  $("subProducts").innerHTML = "";
+  for (const line of sub?.products || []) {
+    const produit = data.stock.find((p) => String(p.id) === String(line.stockId))
+      || data.stock.find((p) => line.code && p.code === line.code);
+    $("subProducts").append(ligneProduit(produit, line.quantite || 1, line));
+  }
+  $("subCatalogueSearch").value = "";
+  majPanier();
+  // Un panier vide ouvre le catalogue : c'est le seul chemin pour le remplir.
+  basculerCatalogue(!sub?.products?.length);
+  $("subStart").value = sub?.startDate || data.subscriptions.today;
+  // La frequence. « Tous les 2 mois » n'a pas de pilule : « Autre... » en mois
+  // (l'ancien formulaire rouvrait tout abonnement en mois sur « Mensuel » :
+  // l'enregistrer en faisait « tous les mois »).
+  const f = sub?.frequency || { unit: "months", interval: 1 };
+  const pilule = f.unit === "months"
+    ? f.interval === 1 ? "monthly" : "custom"
+    : ["7", "10", "14", "15", "21", "28"].includes(String(f.interval)) ? String(f.interval) : "custom";
+  cocher("subFrequence", pilule);
+  $("subCustom").value = pilule === "custom" ? f.interval : 10;
+  $("subCustomUnit").value = pilule === "custom" && f.unit === "months" ? "months" : "days";
+  $("subReminder").value = sub?.reminderDays ?? 7;
+  cocher("subRappel", String(sub?.reminderDays ?? 7));
+  $("subNotes").value = sub?.notes || "";
+  $("subStatus").value = sub?.status || "active";
+  // Ce qui est regle hors des defauts se voit : le statut et les notes.
+  $("subOptions").open = Boolean(sub && (sub.status !== "active" || sub.notes));
+  $("subModifNote").hidden = !sub;
+  $("subError").textContent = "";
+  majFrequence();
+  $("subscriptionDialog").showModal();
 }
 async function saveSubscription(event) {
   event.preventDefault();
   const save = document.getElementById("subSave");
   save.disabled = true;
   try {
-    const lines = [...document.querySelectorAll(".sub-product-line")].map(
+    const lines = [...document.querySelectorAll("#subProducts .sub-product-line")].map(
       (row) => ({
-        productId: row.querySelector("select").value,
-        quantite: Number(row.querySelector("input").value),
+        productId: row.dataset.productId,
+        quantite: Number(row.querySelector(".sub-quantity").value),
       }),
     );
     if (!lines.length) throw new Error("Ajoute au moins un produit.");
     let clientId = document.getElementById("subClient").value;
-    if (clientId === "new") {
+    if (!ficheNouvelle && !clientId)
+      throw new Error("Choisis un client, ou crée sa fiche.");
+    if (ficheNouvelle) {
       const client = await context.apiFetch("/api/crm/clients", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -806,24 +1108,16 @@ async function saveSubscription(event) {
       });
       clientId = client.id;
       data.crmClients.push(client);
-      const opt = new Option(name(client), clientId, true, true);
-      document.getElementById("subClient").add(opt);
-      document.getElementById("subNewClient").hidden = true;
+      // La fiche existe : un second envoi (apres une erreur) ne la recree pas.
+      document.getElementById("subClient").value = String(clientId);
+      ficheNouvelle = false;
+      majClient();
     }
-    const f = document.getElementById("subFrequency").value;
     const payload = {
       clientId,
       products: lines,
       startDate: document.getElementById("subStart").value,
-      frequency: {
-        unit: f === "monthly" ? "months" : "days",
-        interval:
-          f === "monthly"
-            ? 1
-            : f === "custom"
-              ? Number(document.getElementById("subCustom").value)
-              : Number(f),
-      },
+      frequency: lireFrequence(),
       reminderDays: Number(document.getElementById("subReminder").value),
       notes: document.getElementById("subNotes").value,
       status: document.getElementById("subStatus").value,
@@ -843,6 +1137,8 @@ async function saveSubscription(event) {
     context.notify("Abonnement enregistré.", "success");
   } catch (e) {
     document.getElementById("subError").textContent = e.message;
+    // L'erreur est en bas du formulaire : elle se voit, sans chercher.
+    document.getElementById("subError").scrollIntoView?.({ block: "nearest" });
   } finally {
     save.disabled = false;
   }
@@ -885,9 +1181,13 @@ async function locate() {
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 },
     ),
   );
+  // Lot 5 (decision 5 de Thomas, 23/09) : ~100 m (3 decimales). La position
+  // exacte ne quitte pas le telephone : ni le serveur ni le calcul routier ne
+  // la recoivent. Le serveur arrondit aussi ce qu'il stocke (normalizeRoute).
+  const arrondi = (v) => Math.round(v * 1000) / 1000;
   departure = {
-    lat: location.coords.latitude,
-    lng: location.coords.longitude,
+    lat: arrondi(location.coords.latitude),
+    lng: arrondi(location.coords.longitude),
     label: "Ma position actuelle",
   };
   document.getElementById("departureQuery").value =

@@ -1,4 +1,5 @@
 import { initOperations, renderOperations, getRoutePoints, majSousTitreAbonnements } from "./operations.js";
+import { initAdresses, majAlerteAdresses, afficherErreursTournee } from "./domains/adresses.js";
 // Sereo — point d'entree du front.
 //
 // Charge comme module ES (<script type="module"> dans index.html). Les
@@ -7,7 +8,7 @@ import { initOperations, renderOperations, getRoutePoints, majSousTitreAbonnemen
 // rendu, qui seront decoupes par domaine dans les increments suivants.
 
 import { escapeHtml, escapeAttribute, cssEscape, emptyState, squelette } from "./utils/dom.js";
-import { mettreEnAttente, compterFile, rejouer } from "./utils/file-attente.js";
+import { mettreEnAttente, lireFile, rejouer, ESSAIS_MAX } from "./utils/file-attente.js";
 import {
   normalizeTextKey,
   normalizePhoneNumber,
@@ -51,7 +52,6 @@ let ventes = [];
 let historique = [];
 let crmClients = [];
 let crmRelances = [];
-let todayCustomerOrders = [];
 let plannedOrders = [];
 let statistics = null;
 let sectors = [];
@@ -68,14 +68,35 @@ let activeStopIndex = 0;
 // bouge (revue du 23/09 : en reseau lent, l'appui impatient livrait l'arret
 // SUIVANT, jamais vu).
 let gestesVerrouilles = 0;
-let markers = [];
+// La carte (lot 4 de l'audit geo, 23/09) : un marqueur par cle, mis a jour
+// en place ; la cle du dernier cadrage ; l'arret que la carte suit.
+let marqueursCarte = new Map();
+let signatureTrace = "";
+let cleCadrage = "";
+let arretSuivi = null;
 let routeLine = null;
 let routeLineLisere = null;
 let deliverySelection = new Set();
+// Lot 7 : les commandes cochees « A livrer en premier » (parmi la selection).
+let deliveryFirst = new Set();
 // Faux tant que le PREMIER loadData() n'a pas rendu les commandes. Avant, la
 // liste « vide » ne veut rien dire : ni « aucune commande », ni une selection
 // possible (voir renderDeliveryCandidates et activerSelectionLivraison).
 let commandesChargees = false;
+// Vrai quand /api/orders a ECHOUE et que `orders` n'est que le repli vide :
+// les listes disent alors l'erreur, pas « Aucune commande » (audit du 23/09).
+let commandesEnErreur = false;
+
+/** L'etat « on ne sait pas » d'une liste de commandes, avec de quoi reessayer. */
+function etatCommandesIndisponibles() {
+  return `
+    <div class="empty-state empty-state--erreur">
+      <h4>Commandes indisponibles</h4>
+      <p>Le chargement des commandes a échoué : la liste n'a pas pu être lue, elle n'est pas vide.</p>
+      <button class="button secondary empty-state-action" type="button" data-action="refresh">Réessayer</button>
+    </div>
+  `;
+}
 let deliveryFilter = {
   sector: "Tous",
   city: "",
@@ -90,7 +111,10 @@ let crmFilter = {
   query: "",
   status: "all",
   // Le secteur (planche 13e) : "" = tous, "__abonnes" = les abonnes.
-  secteur: ""
+  secteur: "",
+  // Le tri du telephone (planche 9a) : la derniere livraison d'abord, ou le
+  // nom. Au bureau (planche 13e), la liste reste par nom.
+  tri: "livraison"
 };
 // Le client dont la fiche est ouverte (planche 13e : une ligne selectionnee).
 let clientChoisi = null;
@@ -102,7 +126,6 @@ let customerProductFilter = {
   category: "all"
 };
 let customerCart = new Map();
-let todayOrdersSelection = new Set();
 let lastImportSummary = null;
 let recommendFilter = "urgent";
 let preparationFilter = { query: "", sector: "all" };
@@ -149,10 +172,15 @@ document.addEventListener("DOMContentLoaded", () => {
   watchSystemColorScheme();
   bindUi();
   initOperations({apiFetch, loadData, notify, recalculateRoute, formatSectorLabel});
+  initAdresses({ apiFetch, loadData, notify, getCurrentTarget: () => getCurrentDeliveryTarget() });
   bindVersionModal();
   bindBonsCommandeUi();
   initMap();
+  // Lot 3 : la source des adresses (Licence Ouverte de la BAN), a cote de celle
+  // du fond de carte. Une ligne a part : initMap appartient au lot de la carte.
+  map?.attributionControl?.addAttribution("Adresses : BAN");
   registerServiceWorker();
+  ecouterReponsesTardives();
   brancherFileHorsLigne();
   // Avant showTab : au telephone, les filtres de la Preparation vivent dans
   // la fente d'en-tete, que showTab montre ou cache par ecran.
@@ -202,7 +230,32 @@ function showStorageRecoveryBanner(recovery) {
   document.body.prepend(banner);
 }
 
-window.addEventListener("load", () => resetViewportScroll(false), { once: true });
+// Au `load`, la page repart du haut (le navigateur restaure sinon la position
+// d'avant le rechargement). MAIS `load` attend toutes les ressources : au
+// telephone, mesure du 23/09, il tombait 3 s apres l'ouverture, et ramenait
+// en haut quelqu'un qui avait deja defile. Un geste de l'utilisateur avant
+// `load` gagne : on ne lui reprend pas la page.
+let defilementParUtilisateur = false;
+for (const geste of ["wheel", "touchmove", "keydown", "pointerdown"]) {
+  window.addEventListener(geste, () => { defilementParUtilisateur = true; }, { once: true, passive: true, capture: true });
+}
+window.addEventListener("load", () => {
+  if (!defilementParUtilisateur) resetViewportScroll(false);
+}, { once: true });
+
+// « Se deconnecter » HORS LIGNE (relecture du 23/09). Le POST /logout ne peut
+// pas arriver : le service worker effacerait quand meme la copie des donnees,
+// la navigation tomberait sur la page d'erreur du navigateur -- l'ecran de
+// tournee perdu jusqu'au retour du reseau -- et la session resterait ouverte
+// cote serveur. On ne part pas, et on le dit. Delegue au document : les deux
+// boutons (barre, menu « Plus ») visent le meme formulaire par `form=`.
+// `navigator.onLine === false` est sur ; `true` ne prouve rien (reseau qui
+// ment) : ce cas-la reste celui d'avant, hors de portee de cette garde.
+document.addEventListener("submit", event => {
+  if (event.target?.id !== "formDeconnexion" || navigator.onLine !== false) return;
+  event.preventDefault();
+  notify("Hors ligne : la déconnexion attend le retour du réseau. Rien n'a été effacé.", "error", { cle: "deconnexion-hors-ligne" });
+});
 
 function setNavigationSearchValue(value, sourceInput = null) {
   // #globalNavigationSearch vivait dans la barre du haut, que les planches
@@ -242,7 +295,7 @@ function libellesDuGroupe(groupe) {
   return [...ecrans.map(onglet => titles[onglet]?.title || ""), ...(ANCIENS_NOMS[groupe] || [])];
 }
 
-const ANCIENS_NOMS = { tournee: ["Livraison"], clients: ["CRM"], stock: ["Inventaire"] };
+const ANCIENS_NOMS = { tournee: ["Livraison"], clients: ["CRM"], stock: ["Inventaire"], analyse: ["Statistiques"] };
 
 function renderSousOnglets(nomOnglet) {
   const rangee = document.getElementById("sousOnglets");
@@ -312,10 +365,18 @@ function renderBadgesNav(compteurs) {
   poser("commandes", compteurs.aTraiter);
   poser("tournee", compteurs.livraisonsDuJour);
   poser("stock", compteurs.aRecommander, true);
-  // Pas de pastille « Abonnements ». La planche en montre une, mais le compte
-  // correspondant vit dans le module Operations et n'est pas lisible d'ici.
-  // Un nombre faux coute plus cher qu'un nombre absent : elle sera branchee
-  // avec la planche Abonnements, pas devinee maintenant.
+  // La pastille « Abonnements » (audit du 23/09). Le nombre qui appelle un
+  // geste : les echeances dont le rappel est arrive et qui n'ont pas encore de
+  // commande -- « a generer ». Les echeances en retard en font partie (une
+  // echeance passee a forcement son rappel derriere elle) ; il en suffit d'une
+  // pour que la pastille passe en alerte, comme celle du Stock. Meme regle que
+  // l'ecran et le tableau de bord : une echeance deja commandee n'attend plus
+  // rien. Lu dans /api/subscriptions (abonnementsDonnees), la source de
+  // l'ecran Abonnements -- pas un second calcul.
+  const aGenerer = (abonnementsDonnees.occurrences || []).filter(o => o.due && !o.orderId);
+  poser("abonnements", aGenerer.length, aGenerer.some(o => o.overdue));
+  const pastilleAbonnements = document.querySelector('.nav-badge[data-badge="abonnements"]');
+  if (pastilleAbonnements) pastilleAbonnements.setAttribute("aria-label", `${aGenerer.length} échéance${aGenerer.length > 1 ? "s" : ""} à générer`);
 }
 
 function filterNavigation(value) {
@@ -479,6 +540,11 @@ function bindUi() {
     renderCrm();
   });
 
+  document.getElementById("cliTri")?.addEventListener("change", event => {
+    crmFilter.tri = event.target.value;
+    renderCrm();
+  });
+
   document.getElementById("crmForm")?.addEventListener("submit", event => {
     event.preventDefault();
     runAction(event.submitter, "Enregistrement...", () => saveCrmClient(event.currentTarget));
@@ -534,12 +600,6 @@ function bindUi() {
   document.getElementById("customerCategoryFilter")?.addEventListener("change", event => {
     customerProductFilter.category = event.target.value;
     renderCustomerCatalog();
-  });
-
-  document.getElementById("todayOrdersDate")?.addEventListener("change", async event => {
-    todayOrdersSelection.clear();
-    await loadTodayOrders(event.target.value);
-    renderTodayOrders();
   });
 
   document.getElementById("deliveryDate")?.addEventListener("change", event => {
@@ -709,9 +769,15 @@ function bindUi() {
     // l'ecran avance tout de suite et l'envoi part au terme d'Annuler.
     if (action === "mark-delivered") livrerAvecAnnulation().catch(notifyEchec);
     if (action === "trn-voir-carte") {
-      const carte = document.querySelector("#livreur .tournee-carte-panel");
-      if (carte) carte.scrollIntoView({ block: "start", behavior: "smooth" });
+      // Au telephone, la carte etait a plus de deux ecrans de defilement : le
+      // bouton l'ouvre en plein ecran (lot 4 de l'audit geo). Au bureau, elle
+      // est a cote de la liste.
+      if (window.matchMedia("(max-width: 820px)").matches) basculerPleinEcranCarte(true);
+      else document.querySelector("#livreur .tournee-carte-panel")?.scrollIntoView({ block: "start", behavior: "smooth" });
     }
+    if (action === "carte-recentrer") cadrerCarte();
+    if (action === "carte-position") basculerPositionLivreur();
+    if (action === "carte-plein-ecran") basculerPleinEcranCarte();
     if (action === "mark-absent") runAction(actionButton, "Envoi...", () => marquerArret("absent"));
     if (action === "mark-problem") runAction(actionButton, "Envoi...", () => marquerArret("probleme"));
     if (action === "mark-reschedule") runAction(actionButton, "Envoi...", () => marquerArret("a_reprogrammer"));
@@ -719,18 +785,6 @@ function bindUi() {
     if (action === "next-client") nextClient();
     if (action === "open-maps") openGoogleMaps();
     if (action === "call-current-client") callCurrentClient();
-    if (action === "save-coordinates") runAction(actionButton, "Sauvegarde...", saveCurrentCoordinates);
-    if (action === "select-all-today-orders") {
-      todayCustomerOrders.forEach(order => todayOrdersSelection.add(String(order.id)));
-      renderTodayOrders();
-    }
-    if (action === "clear-today-orders") {
-      todayOrdersSelection.clear();
-      renderTodayOrders();
-    }
-    if (action === "send-today-orders-preparation") runAction(actionButton, "Envoi...", sendTodayOrdersToPreparation);
-    if (action === "confirm-planned-order") runAction(actionButton, "Confirmation...", () => confirmPlannedOrder(actionButton.dataset.orderId));
-    if (action === "cancel-planned-order") runAction(actionButton, "Annulation...", () => cancelPlannedOrder(actionButton.dataset.orderId));
     if (action === "export-annex-orders") downloadOrdersExport("annexe");
     if (action === "export-planned-orders") downloadOrdersExport("planned");
     if (action === "export-all-orders") downloadOrdersExport("all");
@@ -782,11 +836,10 @@ function bindUi() {
       setDeliverySelection(deliveryCheckbox.dataset.deliveryOrder, deliveryCheckbox.checked);
     }
 
-    const todayOrderCheckbox = event.target.closest("[data-today-order]");
-    if (todayOrderCheckbox) {
-      if (todayOrderCheckbox.checked) todayOrdersSelection.add(String(todayOrderCheckbox.dataset.todayOrder));
-      else todayOrdersSelection.delete(String(todayOrderCheckbox.dataset.todayOrder));
-      renderTodayOrders();
+    const firstCheckbox = event.target.closest("[data-delivery-first]");
+    if (firstCheckbox) {
+      if (firstCheckbox.checked) deliveryFirst.add(String(firstCheckbox.dataset.deliveryFirst));
+      else deliveryFirst.delete(String(firstCheckbox.dataset.deliveryFirst));
     }
   });
 
@@ -903,6 +956,13 @@ function showTab(tabName, options = {}) {
 
   resetViewportScroll(updateHash);
 
+  // Hors de l'ecran Tournee, la position du livreur n'est plus suivie, et la
+  // carte ne reste pas en plein ecran par-dessus un autre ecran.
+  if (nextTab !== "livreur") {
+    arreterPositionLivreur();
+    if (carteEnPleinEcran()) basculerPleinEcranCarte(false);
+  }
+
   if (nextTab === "livreur" && map) {
     // Mesure du 19/09 : la carte etait cadree (fitBounds) au chargement des
     // donnees, pendant que l'onglet etait masque -- conteneur de 0 x 0, zoom
@@ -962,21 +1022,234 @@ function initMap() {
     return;
   }
 
-  map = L.map("map", {
-    zoomControl: true
-  }).setView([46.9511, 4.9027], 10);
+  // Au telephone, un doigt fait defiler la PAGE ; deux doigts deplacent et
+  // zooment la carte (le pincement de Leaflet suit le milieu des deux doigts).
+  // Avant, le doigt qui passait sur la carte y restait pris : la page
+  // s'arretait de defiler (mesure de l'audit : 0 px de page, 200 px de carte).
+  // En plein ecran, il n'y a plus de page : le doigt seul deplace la carte.
+  carteTactile = Boolean(window.matchMedia?.("(pointer: coarse)").matches || L.Browser.mobile);
 
-  // Sans le motif `{s}` : la politique d'usage d'OpenStreetMap deconseille
-  // explicitement les sous-domaines a.b.c, herites de HTTP/1.1 et inutiles
-  // depuis HTTP/2. Mesure du 18/09 : le serveur rendait des tuiles 403
-  // "Access blocked -- App is not following the tile usage policy".
-  // ⚠ Ceci ne prouve PAS que le blocage vienne de la, ni qu'il soit leve.
-  // Le fournisseur de tuiles pour la PRODUCTION est un arbitrage ouvert,
-  // note dans la charte.
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: "&copy; OpenStreetMap"
-  }).addTo(map);
+  // Centre par defaut : la region servie (Jura, Doubs), le temps que les
+  // points arrivent. Avant : Beaune, a 80 km de Champagnole.
+  map = L.map("map", {
+    zoomControl: false,
+    dragging: !carteTactile
+  }).setView(CENTRE_PAR_DEFAUT, 9);
+  // Les libelles de Leaflet sont en anglais (« Zoom in », « Close popup »).
+  L.control.zoom({ zoomInTitle: "Zoomer", zoomOutTitle: "Dézoomer" }).addTo(map);
+  map.attributionControl.setPrefix('<a href="https://leafletjs.com" target="_blank" rel="noopener">Leaflet</a>');
+  map.on("popupopen", event => {
+    const fermer = event.popup.getElement()?.querySelector(".leaflet-popup-close-button");
+    if (fermer) { fermer.setAttribute("aria-label", "Fermer"); fermer.title = "Fermer"; }
+  });
+  if (carteTactile) {
+    map.getContainer().addEventListener("touchmove", event => {
+      if (event.touches.length === 1 && !carteEnPleinEcran()) montrerAstuceDeuxDoigts();
+    }, { passive: true });
+  }
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape" && carteEnPleinEcran()) basculerPleinEcranCarte(false);
+  });
+  // Le reseau revient : le fond de carte, s'il manque, est redemande tout de suite.
+  window.addEventListener("online", () => chargerFondDeCarte());
+  chargerFondDeCarte();
+}
+
+// --- Les outils de la carte (lot 4 de l'audit geo, 23/09) -------------------
+
+const CENTRE_PAR_DEFAUT = [46.95, 5.75];
+const REGION_PAR_DEFAUT = [[46.55, 5.35], [47.35, 6.25]];
+// Au-dela, une position GPS ne situe plus le livreur dans sa rue.
+const PRECISION_SUSPECTE_M = 150;
+// Tuiles en echec d'affilee avant de dire le fond de carte indisponible.
+const TUILES_EN_ECHEC_MAX = 4;
+
+// Relances de /api/carte/fond apres un echec (ms), la derniere se repete.
+const FOND_RELANCES_MS = [3000, 10000, 30000, 60000];
+
+let carteTactile = false;
+let tuilesEnEchec = 0;
+let coucheFond = null;
+let fondEnCours = false;
+let fondRelance = null;
+let fondEchecs = 0;
+let positionLivreur = null;
+let astuceMinuterie = null;
+let declencheurPleinEcran = null;
+
+/**
+ * Le fond de carte vient du serveur (lib/fond-de-carte.js) : UN seul endroit
+ * pour le fournisseur, que la CSP suit aussi. Il etait ecrit en dur ici et
+ * dans la CSP.
+ *
+ * `referrerPolicy` : les tuiles partent avec l'ORIGINE en Referer, que la
+ * politique d'usage d'OpenStreetMap exige ; le document garde `no-referrer`
+ * pour tout le reste. Mesure de l'audit : 21 tuiles sur 21 sans Referer.
+ * ⚠ Cela ne prouve PAS que les blocages « Access blocked » du 18/09 viennent
+ * de la ; le fournisseur pour la PRODUCTION reste un arbitrage (charte).
+ */
+async function chargerFondDeCarte() {
+  if (!map || coucheFond || fondEnCours) return;
+  fondEnCours = true;
+  clearTimeout(fondRelance);
+  fondRelance = null;
+  let fond = null;
+  try { fond = await apiFetch("/api/carte/fond"); } catch { fond = null; }
+  fondEnCours = false;
+  if (!map || coucheFond) return;
+  if (!fond?.url) {
+    signalerFondDeCarte(true);
+    // Un seul echec (reseau lent au premier chargement, redeploiement)
+    // laissait la carte grise jusqu'au rechargement de la page : l'URL des
+    // tuiles etait fixe avant, elle vient du serveur depuis ce lot. On
+    // redemande, de plus en plus espace, et des que le reseau revient.
+    const delai = FOND_RELANCES_MS[Math.min(fondEchecs, FOND_RELANCES_MS.length - 1)];
+    fondEchecs += 1;
+    fondRelance = setTimeout(chargerFondDeCarte, delai);
+    return;
+  }
+  fondEchecs = 0;
+  const couche = L.tileLayer(fond.url, {
+    maxZoom: fond.zoomMax || 19,
+    attribution: fond.attribution || "",
+    referrerPolicy: fond.referrerPolicy || "strict-origin-when-cross-origin"
+  });
+  // Une tuile refusee (403 « Access blocked », reseau coupe) ne disait rien :
+  // la carte restait grise ou couverte d'images d'erreur. Quelques echecs
+  // d'affilee suffisent a le dire ; une tuile qui revient efface le message.
+  couche.on("tileerror", () => {
+    tuilesEnEchec += 1;
+    if (tuilesEnEchec >= TUILES_EN_ECHEC_MAX) signalerFondDeCarte(true);
+  });
+  couche.on("tileload", () => {
+    tuilesEnEchec = 0;
+    signalerFondDeCarte(false);
+  });
+  coucheFond = couche;
+  couche.addTo(map);
+}
+
+function signalerFondDeCarte(enPanne) {
+  const message = document.getElementById("carteMessage");
+  if (!message) return;
+  message.textContent = enPanne ? "Fond de carte indisponible — la liste des arrêts reste utilisable." : "";
+  message.hidden = !enPanne;
+}
+
+function carteEnPleinEcran() {
+  return Boolean(document.querySelector("#livreur .tournee-carte-panel.carte-plein-ecran"));
+}
+
+/**
+ * Plein ecran : la carte prend tout l'ecran, au-dessus de la barre basse.
+ * Avant, elle n'occupait que 43 % de l'ecran, a plus de deux ecrans de
+ * defilement de l'arret. Echap ou le meme bouton en sortent, et le focus
+ * revient a ce qui l'avait ouverte.
+ */
+function basculerPleinEcranCarte(ouvrir) {
+  const panneau = document.querySelector("#livreur .tournee-carte-panel");
+  const bouton = document.getElementById("cartePleinEcran");
+  if (!panneau || !map) return;
+  const plein = typeof ouvrir === "boolean" ? ouvrir : !panneau.classList.contains("carte-plein-ecran");
+  if (plein === panneau.classList.contains("carte-plein-ecran")) return;
+  if (plein) declencheurPleinEcran = document.activeElement;
+  panneau.classList.toggle("carte-plein-ecran", plein);
+  document.body.classList.toggle("carte-plein-ecran-ouverte", plein);
+  bouton?.setAttribute("aria-pressed", String(plein));
+  if (carteTactile) {
+    if (plein) map.dragging.enable();
+    else map.dragging.disable();
+  }
+  // La taille change : Leaflet la relit, le centre est garde.
+  map.invalidateSize();
+  if (plein) {
+    bouton?.focus({ preventScroll: true });
+  } else {
+    const retour = declencheurPleinEcran && document.contains(declencheurPleinEcran) ? declencheurPleinEcran : bouton;
+    declencheurPleinEcran = null;
+    retour?.focus({ preventScroll: true });
+  }
+}
+
+function montrerAstuceDeuxDoigts() {
+  const astuce = document.getElementById("carteAstuce");
+  if (!astuce) return;
+  astuce.hidden = false;
+  clearTimeout(astuceMinuterie);
+  astuceMinuterie = setTimeout(() => { astuce.hidden = true; }, 1500);
+}
+
+function formatPrecision(metres) {
+  return metres < 1000 ? `${Math.round(metres)} m` : `${(metres / 1000).toFixed(1).replace(".", ",")} km`;
+}
+
+/**
+ * La position du livreur, en direct, SEULEMENT quand il la demande. Elle reste
+ * dans le navigateur : rien n'est envoye au serveur. La precision est affichee,
+ * et signalee au-dela de ~150 m (un GPS a 8 km etait accepte sans un mot).
+ * Quitter l'ecran Tournee arrete le suivi.
+ */
+function basculerPositionLivreur() {
+  if (positionLivreur) { arreterPositionLivreur(); return; }
+  if (!map) return;
+  if (!("geolocation" in navigator)) {
+    afficherPrecisionPosition("Position indisponible sur cet appareil.", true);
+    return;
+  }
+  positionLivreur = { suivi: null, point: null, cercle: null };
+  document.getElementById("cartePosition")?.setAttribute("aria-pressed", "true");
+  afficherPrecisionPosition("Recherche de ma position…", false);
+  positionLivreur.suivi = navigator.geolocation.watchPosition(majPositionLivreur, erreurPositionLivreur,
+    { enableHighAccuracy: true, maximumAge: 10000, timeout: 30000 });
+}
+
+function majPositionLivreur(position) {
+  if (!positionLivreur || !map) return;
+  const { latitude, longitude, accuracy } = position.coords;
+  const point = [latitude, longitude];
+  const couleur = couleurCharte("--carte-position", "#1A73E8");
+  if (!positionLivreur.point) {
+    positionLivreur.cercle = L.circle(point, { radius: accuracy, interactive: false, color: couleur, weight: 1, opacity: 0.6, fillColor: couleur, fillOpacity: 0.12 }).addTo(map);
+    positionLivreur.point = L.marker(point, {
+      icon: L.divIcon({ className: "position-livreur", html: '<span class="position-livreur-point" role="img" aria-label="Ma position"></span>', iconSize: [22, 22], iconAnchor: [11, 11] }),
+      keyboard: false, interactive: false, zIndexOffset: 2000
+    }).addTo(map);
+  } else {
+    positionLivreur.point.setLatLng(point);
+    positionLivreur.cercle.setLatLng(point);
+    positionLivreur.cercle.setRadius(accuracy);
+  }
+  const imprecise = accuracy > PRECISION_SUSPECTE_M;
+  afficherPrecisionPosition(`Ma position : ± ${formatPrecision(accuracy)}${imprecise ? " — position imprécise" : ""}`, imprecise);
+}
+
+function erreurPositionLivreur(erreur) {
+  if (!positionLivreur) return;
+  if (erreur?.code === 1) {
+    arreterPositionLivreur();
+    afficherPrecisionPosition("Position refusée : autorisez la localisation pour ce site.", true);
+    return;
+  }
+  // Introuvable ou trop lente : le suivi continue, on le dit.
+  afficherPrecisionPosition("Position introuvable pour l'instant.", true);
+}
+
+function arreterPositionLivreur() {
+  if (!positionLivreur) return;
+  if (positionLivreur.suivi !== null) navigator.geolocation.clearWatch(positionLivreur.suivi);
+  if (positionLivreur.point) map.removeLayer(positionLivreur.point);
+  if (positionLivreur.cercle) map.removeLayer(positionLivreur.cercle);
+  positionLivreur = null;
+  document.getElementById("cartePosition")?.setAttribute("aria-pressed", "false");
+  afficherPrecisionPosition("", false);
+}
+
+function afficherPrecisionPosition(texte, alerte) {
+  const zone = document.getElementById("cartePrecision");
+  if (!zone) return;
+  zone.textContent = texte;
+  zone.hidden = !texte;
+  zone.classList.toggle("carte-precision--alerte", Boolean(texte) && alerte);
 }
 
 /**
@@ -998,7 +1271,9 @@ function poserSquelettes() {
     "crmList", "stockList", "cmdLignes"]);
   const zones = [
     ["dashboardPreparing", 3], ["dashboardDelivering", 3], ["dashboardSubscriptions", 2],
-    ["crmList", 4], ["stockList", 4], ["todayOrdersList", 4], ["plannedOrdersList", 4],
+    // Plus de todayOrdersList ni de plannedOrdersList : ces deux listes ont
+    // quitte la page le 23/09 (dette 7), la zone cmdLignes les porte.
+    ["crmList", 4], ["stockList", 4],
     ["relanceList", 3], ["exportsList", 3], ["historiqueList", 3], ["stockMovementList", 4],
     // Ajoutes apres mesure : la premiere liste avait ete ecrite de memoire, et
     // le graphique du tableau de bord -- le plus grand vide de l'ecran, 556x184
@@ -1033,8 +1308,10 @@ function poserSquelettes() {
 // sous-titre, qui lit la tuile, ne trouve pas de nombre et n'en invente pas.
 // Premier chargement seulement : a l'actualisation, les chiffres qu'on avait
 // restent lisibles pendant que les neufs arrivent.
+// « Cette semaine » (#opWeekCount) s'y ajoute le 23/09 : sa pilule disait
+// « 0 » pendant tout le chargement, le meme zero qui ment.
 const CHIFFRES_EN_ATTENTE = ["opRevenue", "opBasket", "opDelivered", "dashboardPreparingCount", "dashboardDeliveringCount",
-  "dashboardPreparingDetail", "dashboardDeliveringDetail"];
+  "dashboardPreparingDetail", "dashboardDeliveringDetail", "opWeekCount"];
 let chiffresDejaCharges = false;
 
 function poserChiffresEnAttente() {
@@ -1108,6 +1385,34 @@ let premierChargementDesDonnees = true;
 // Les URL auxquelles le service worker a repondu par une COPIE (en-tete
 // X-Sereo-Cache : le reseau n'a pas repondu a temps), avec la date de la copie.
 const reponsesCopiees = new Map();
+// H4 (lot 1 de l'audit geo) : vrai des qu'une ecriture est partie (ou mise en
+// file, ou renvoyee) et tant qu'aucun rechargement COMPLET ne l'a relue au
+// serveur. Pendant ce temps, loadData demande au service worker de NE PAS
+// servir sa copie de secours (en-tete X-Sereo-Frais) : la copie date d'avant
+// le geste, et remettrait « En livraison » un arret que le serveur sait livre.
+let ecritureNonRelue = false;
+// L'instant ou la derniere ecriture est partie : une reponse TARDIVE (arrivee
+// apres le repli de 3 s du service worker) a une requete plus ancienne ne
+// remplace jamais ce que l'ecran sait de plus recent.
+let derniereEcritureA = 0;
+// Les cles dont l'ecran montre une COPIE (reseau trop lent), depuis le dernier
+// chargement : une reponse tardive les rafraichit (ecouterReponsesTardives).
+const clesEnCopie = new Set();
+
+/**
+ * Une ecriture part (ou vient d'etre renvoyee par la file). Integration des
+ * lots 1 et 5 (23/09) : le service worker l'apprend aussi. Depuis le lot 5,
+ * aucune lecture ne suit un geste d'arret ; la page recopie l'ecran dans le
+ * cache (recopierApresGeste), et le service worker ne doit plus y ranger la
+ * reponse d'une requete partie AVANT l'ecriture (voir barriereEcriture).
+ */
+function noterEcriture() {
+  ecritureNonRelue = true;
+  derniereEcritureA = Date.now();
+  try {
+    navigator.serviceWorker?.controller?.postMessage({ type: "sereo-ecriture" });
+  } catch { /* pas de service worker : rien a prevenir */ }
+}
 
 async function viderCacheDeDonnees() {
   try {
@@ -1120,9 +1425,10 @@ async function viderCacheDeDonnees() {
 /**
  * Les dernieres donnees connues, lues dans le cache du service worker.
  * Rend { data, date } ou null. Tout ou presque : une copie a moitie montrerait
- * des listes vides qui ne le sont pas. Seul l'endpoint date du jour (`jour`)
+ * des listes vides qui ne le sont pas. Seul un endpoint date du jour (`jour`)
  * peut manquer (au premier jour d'ouverture, son URL a change) ; il garde
- * alors sa valeur courante.
+ * alors sa valeur courante. Aucun n'en porte depuis le 23/09 (les commandes
+ * du jour ont quitte loadData) : la porte reste pour le prochain.
  */
 async function lireDernieresDonnees(endpoints) {
   try {
@@ -1152,6 +1458,100 @@ async function lireDernieresDonnees(endpoints) {
   }
 }
 
+/**
+ * H4 (lot 1 de l'audit geo) : la reponse du reseau qui arrive APRES le repli
+ * de 3 s du service worker. Avant, elle etait jetee -- ni mise en cache, ni
+ * montree : l'ecran gardait la copie, et la copie ne se rafraichissait plus
+ * tant que le reseau restait lent. Le service worker la met desormais en
+ * cache et previent la page (message « sereo-api-tardive ») ; la page relit
+ * la reponse dans le cache et remplace la copie a l'ecran.
+ */
+const DELAI_REGROUPEMENT_TARDIVES_MS = 300;
+const reponsesTardives = new Map();
+let minuteurTardives = null;
+
+function ecouterReponsesTardives() {
+  if (typeof navigator === "undefined" || !navigator.serviceWorker) return;
+  navigator.serviceWorker.addEventListener("message", evenement => {
+    const message = evenement.data;
+    if (!message || message.type !== "sereo-api-tardive" || typeof message.url !== "string") return;
+    // Une requete partie AVANT la derniere ecriture decrit un etat anterieur
+    // au geste : on ne la montre pas.
+    if (Number(message.debut) < derniereEcritureA) return;
+    let chemin;
+    try {
+      const url = new URL(message.url, window.location.origin);
+      chemin = url.pathname + url.search;
+    } catch { return; }
+    const endpoint = endpointsDeChargement().find(e => e.path === chemin);
+    if (!endpoint) return;
+    reponsesTardives.set(endpoint.key, chemin);
+    clearTimeout(minuteurTardives);
+    minuteurTardives = setTimeout(appliquerReponsesTardives, DELAI_REGROUPEMENT_TARDIVES_MS);
+  });
+}
+
+async function appliquerReponsesTardives() {
+  const lots = [...reponsesTardives];
+  reponsesTardives.clear();
+  const data = {};
+  try {
+    const noms = (await caches.keys()).filter(nom => nom.startsWith(PREFIXE_CACHE_DONNEES));
+    if (!noms.length) return;
+    const cache = await caches.open(noms[0]);
+    for (const [cle, chemin] of lots) {
+      const reponse = await cache.match(chemin);
+      if (!reponse || !reponse.ok) continue;
+      data[cle] = await reponse.json();
+    }
+  } catch { return; }
+  const cles = Object.keys(data);
+  if (!cles.length) return;
+  // Integration des lots d'interface (23/09) : des commandes enfin lues ne
+  // sont plus « indisponibles » -- l'echec du repli de 3 s (loadData) avait
+  // pose l'erreur, la reponse tardive l'efface.
+  if (Object.prototype.hasOwnProperty.call(data, "orders")) commandesEnErreur = false;
+  appliquerDonnees(data);
+  for (const cle of cles) clesEnCopie.delete(cle);
+  if (clesEnCopie.size === 0 && /^Données (de|du|en cache)/.test(dernierStatut)) setStatus("À jour");
+}
+
+/**
+ * Lot 5 (revue du 23/09) : apres un geste d'arret, l'ecran se met a jour avec
+ * la reponse, sans relire /api/routes ni /api/orders. Or c'etaient ces
+ * lectures qui tenaient a jour la copie du service worker. Sans elles, un
+ * ecran rouvert sur un reseau lent (ou decharge par Android) montrait la
+ * tournee du matin : des arrets livres « a livrer », et l'arret courant deja
+ * livre. On recopie donc dans le cache ce que l'ecran affiche.
+ *
+ * Seules les entrees DEJA en cache sont remplacees (pas de copie : rien a
+ * tenir a jour). La date (en-tete Date) reste celle de l'ancienne copie : la
+ * copie est au moins aussi fraiche que ce qu'elle annonce, jamais moins.
+ * Les ecritures passent l'une apres l'autre : la derniere est la plus recente.
+ */
+let ecritureDeLaCopie = Promise.resolve();
+function recopierApresGeste() {
+  // Les valeurs du moment : les tableaux sont remplaces, jamais modifies en place.
+  const entrees = [["/api/routes", deliveryRoutes], ["/api/orders", orders], ["/api/clients", clients]];
+  ecritureDeLaCopie = ecritureDeLaCopie.then(async () => {
+    try {
+      if (typeof caches === "undefined") return;
+      const noms = (await caches.keys()).filter(nom => nom.startsWith(PREFIXE_CACHE_DONNEES));
+      if (!noms.length) return;
+      const cache = await caches.open(noms[0]);
+      await Promise.all(entrees.map(async ([chemin, valeur]) => {
+        const ancienne = await cache.match(chemin);
+        if (!ancienne || !ancienne.ok || !Array.isArray(valeur)) return;
+        const headers = new Headers(ancienne.headers);
+        for (const nom of ["Content-Encoding", "Content-Length", "ETag", "Last-Modified"]) headers.delete(nom);
+        headers.set("Content-Type", "application/json; charset=utf-8");
+        await cache.put(chemin, new Response(JSON.stringify(valeur), { status: 200, headers }));
+      }));
+    } catch { /* stockage indisponible : la copie restera celle d'avant */ }
+  });
+  return ecritureDeLaCopie;
+}
+
 /** « Données de 14:32 » (aujourd'hui) ou « Données du 21/09 ». Sans date lisible : « Données en cache ». */
 function libelleCopie(date) {
   if (!Number.isFinite(date)) return "Données en cache";
@@ -1178,7 +1578,6 @@ function appliquerDonnees(data) {
   if (a("crmClients")) crmClients = data.crmClients;
   if (a("subscriptions")) abonnementsDonnees = data.subscriptions || { items: [], occurrences: [] };
   if (a("crmRelances")) crmRelances = data.crmRelances;
-  if (a("todayCustomerOrders")) todayCustomerOrders = data.todayCustomerOrders;
   if (a("plannedOrders")) plannedOrders = data.plannedOrders;
   if (a("statistics")) statistics = data.statistics;
   if (a("sectors")) sectors = data.sectors;
@@ -1199,7 +1598,43 @@ function appliquerDonnees(data) {
   route = activeRoute ? activeRoute.stops : (currentIndex >= 0 ? route : [...clients]);
 
   renderAll();
-  renderOperations({operations:data.operations,subscriptions:data.subscriptions,crmClients,stock,orders});
+  // Des donnees PARTIELLES (une reponse tardive, un rechargement frais dont une
+  // partie a echoue) ne vident pas le tableau de bord : ce qui manque garde sa
+  // derniere valeur.
+  if (a("operations")) dernieresOperations = data.operations;
+  renderOperations({
+    operations: dernieresOperations,
+    subscriptions: a("subscriptions") ? data.subscriptions : abonnementsDonnees,
+    crmClients, stock, orders
+  });
+}
+
+// Le dernier /api/operations recu (voir appliquerDonnees).
+let dernieresOperations = null;
+
+/** Les endpoints du chargement complet (loadData, et les reponses tardives). */
+function endpointsDeChargement() {
+  return [
+    { key: "operations", path: "/api/operations", fallback: null },
+    { key: "subscriptions", path: "/api/subscriptions", fallback: {items:[],occurrences:[],today:getTodayDateInput()} },
+    { key: "clients", path: "/api/clients", fallback: [] },
+    { key: "stock", path: "/api/stock", fallback: [] },
+    { key: "ventes", path: "/api/ventes", fallback: [] },
+    { key: "historique", path: "/api/historique", fallback: [] },
+    { key: "orders", path: "/api/orders", fallback: [] },
+    { key: "crmClients", path: "/api/crm/clients", fallback: [] },
+    { key: "crmRelances", path: "/api/reminders", fallback: [] },
+    // Plus de /api/customer-orders/today : l'ecran « Commandes du jour » parti
+    // (23/09), plus rien ne lisait ces commandes. L'ecran Commandes filtre
+    // `orders` (/api/orders) par son propre jour (#cmdJour).
+    { key: "plannedOrders", path: "/api/planned-orders", fallback: [] },
+    { key: "statistics", path: "/api/statistics", fallback: null },
+    { key: "sectors", path: "/api/sectors", fallback: [] },
+    { key: "deliverySectors", path: "/api/delivery-sectors", fallback: [] },
+    { key: "routes", path: "/api/routes", fallback: [] },
+    { key: "stockMovements", path: "/api/stock-movements", fallback: [] },
+    { key: "dashboard", path: "/api/dashboard", fallback: null }
+  ];
 }
 
 async function loadData() {
@@ -1213,30 +1648,24 @@ async function loadData() {
   // orders=[], stock=[]). UX catastrophique sur slow network.
   // Apres : chaque endpoint a son sort. Si le stock timeout, on garde la prep,
   // les clients, etc. Le user voit "Stock indisponible" sans tout perdre.
-  const endpoints = [
-    { key: "operations", path: "/api/operations", fallback: null },
-    { key: "subscriptions", path: "/api/subscriptions", fallback: {items:[],occurrences:[],today:getTodayDateInput()} },
-    { key: "clients", path: "/api/clients", fallback: [] },
-    { key: "stock", path: "/api/stock", fallback: [] },
-    { key: "ventes", path: "/api/ventes", fallback: [] },
-    { key: "historique", path: "/api/historique", fallback: [] },
-    { key: "orders", path: "/api/orders", fallback: [] },
-    { key: "crmClients", path: "/api/crm/clients", fallback: [] },
-    { key: "crmRelances", path: "/api/reminders", fallback: [] },
-    { key: "todayCustomerOrders", path: `/api/customer-orders/today?date=${encodeURIComponent(getTodayOrdersDate())}`, fallback: [], jour: true },
-    { key: "plannedOrders", path: "/api/planned-orders", fallback: [] },
-    { key: "statistics", path: "/api/statistics", fallback: null },
-    { key: "sectors", path: "/api/sectors", fallback: [] },
-    { key: "deliverySectors", path: "/api/delivery-sectors", fallback: [] },
-    { key: "routes", path: "/api/routes", fallback: [] },
-    { key: "stockMovements", path: "/api/stock-movements", fallback: [] },
-    { key: "dashboard", path: "/api/dashboard", fallback: null }
-  ];
+  const endpoints = endpointsDeChargement();
+  // Integration des lots 1 et 5 : une ecriture partie PENDANT ce chargement
+  // (voir la fin de la fonction).
+  const ecritureAuDepart = derniereEcritureA;
+
+  // H4 (lot 1 de l'audit geo) : apres une ecriture, JAMAIS la copie de secours.
+  // Mesure de l'audit : 250 tournees d'historique, « Livre » enregistre (200),
+  // puis le rechargement depasse 3 s -- le service worker rend sa copie
+  // d'avant le geste, et l'ecran remet l'arret « En livraison ». En mode frais,
+  // le service worker attend le reseau ; s'il echoue, l'ecran GARDE ce qu'il
+  // montre (jamais la copie d'avant, jamais une liste vide).
+  const frais = ecritureNonRelue && !premier;
+  const options = frais ? { headers: { "X-Sereo-Frais": "1" } } : {};
 
   for (const e of endpoints) reponsesCopiees.delete(e.path);
   // Le reseau part D'ABORD : lire le cache ne doit rien lui couter.
   let reseauFini = false;
-  const reseau = Promise.allSettled(endpoints.map(e => apiFetch(e.path)));
+  const reseau = Promise.allSettled(endpoints.map(e => apiFetch(e.path, options)));
   reseau.then(() => { reseauFini = true; });
 
   let copie = null;
@@ -1274,11 +1703,15 @@ async function loadData() {
     if (Number.isFinite(date) && !(date >= dateCopie)) dateCopie = date;
   };
   const data = {};
+  // Mode frais : ce que l'ecran montre deja, garde faute de reseau.
+  const gardees = [];
   results.forEach((r, i) => {
     const e = endpoints[i];
     if (r.status === "fulfilled") {
       data[e.key] = r.value;
       if (reponsesCopiees.has(e.path)) noterCopie(e.key, reponsesCopiees.get(e.path));
+    } else if (frais) {
+      gardees.push(e.key);
     } else if (copie && Object.prototype.hasOwnProperty.call(copie.data, e.key)) {
       data[e.key] = copie.data[e.key];
       noterCopie(e.key, copie.date);
@@ -1288,9 +1721,22 @@ async function loadData() {
     }
   });
 
+  clesEnCopie.clear();
+  for (const cle of copiees) clesEnCopie.add(cle);
+  const ecritureCroisee = derniereEcritureA !== ecritureAuDepart;
+  if (frais && gardees.length === 0 && failed.length === 0 && !ecritureCroisee) ecritureNonRelue = false;
+
+  // Integration des lots d'interface (23/09) : en mode frais (lot 1), des
+  // commandes GARDEES faute de reseau restent ce que l'ecran montrait -- son
+  // erreur aussi, si c'etait elle : une liste vide y dirait « Aucune commande ».
+  commandesEnErreur = failed.includes("orders") || (gardees.includes("orders") && commandesEnErreur);
   appliquerDonnees(data);
 
-  if (failed.length === 0 && copiees.length === 0) {
+  if (gardees.length) {
+    // Le geste est parti ou attend dans la file (le bandeau le dit) : on ne
+    // pretend ni « A jour », ni des donnees vides.
+    setStatus("Mise à jour impossible");
+  } else if (failed.length === 0 && copiees.length === 0) {
     setStatus("À jour");
   } else if (failed.length === 0) {
     setStatus(libelleCopie(dateCopie));
@@ -1319,16 +1765,36 @@ async function loadData() {
   // blocs gris : un squelette qui ne finit jamais promet quelque chose qui
   // n'arrive pas.
   retirerSquelettes();
+
+  // Integration des lots 1 et 5 (23/09). Une ecriture est partie PENDANT ce
+  // chargement : ses reponses peuvent dater d'avant elle. Avant le lot 5, le
+  // rechargement qui suivait chaque geste les remplacait ; depuis, la mise a
+  // jour ciblee du geste (appliquerGesteArret) vient d'etre recouverte par les
+  // commandes et les clients d'avant -- la tournee, elle, est gardee par
+  // updatedAt (refreshActiveRoute). Un second chargement, frais, suit : il
+  // n'a lieu que dans ce croisement, jamais apres un geste seul.
+  if (ecritureCroisee) loadData();
 }
 
 function refreshActiveRoute() {
   if (activeRoute) {
     const updated = deliveryRoutes.find(item => String(item.id) === String(activeRoute.id));
-    activeRoute = updated || activeRoute;
+    // H4 : jamais une version PLUS ANCIENNE que celle de l'ecran (une copie de
+    // secours, une reponse tardive). updatedAt est pose par le serveur a
+    // chaque geste d'arret.
+    if (updated && activeRoute.updatedAt && (!updated.updatedAt || updated.updatedAt < activeRoute.updatedAt)) {
+      deliveryRoutes = deliveryRoutes.map(item => (item === updated ? activeRoute : item));
+    } else {
+      // Lot 5 : la liste ne porte plus le trace d'une tournee terminee.
+      activeRoute = updated ? garderTrace(updated, activeRoute) : activeRoute;
+    }
+    chargerTraceOmise();
     if (activeRoute && activeStopIndex >= activeRoute.stops.length) activeStopIndex = 0;
     // Un rechargement pendant les 4 s d'Annuler ne fait pas reapparaitre
     // l'arret qu'on vient de livrer.
     appliquerLivraisonEnSuspens();
+    // Ni un geste qui attend dans la file.
+    appliquerGestesEnFile();
     return;
   }
 
@@ -1336,6 +1802,100 @@ function refreshActiveRoute() {
     || deliveryRoutes.find(item => item.status === "prete")
     || null;
   activeStopIndex = 0;
+  appliquerGestesEnFile();
+}
+
+// --- MISE A JOUR CIBLEE APRES UN GESTE D'ARRET (lot 5, audit geo du 23/09) ---
+//
+// Avant : chaque « Livre », « Absent », deplacement d'arret relancait loadData(),
+// 17 requetes qui relisent toute la base -- 5,5 a 8,8 s apres un an
+// d'historique, sur le telephone du livreur en 4G. La reponse du serveur porte
+// deja ce que le geste a change (la tournee, l'arret, la commande, le client,
+// sous la forme des listes) : on remplace ces objets-la, et on redessine.
+//
+// Ce qui n'est PAS recharge a chaque geste (tableau de bord, statistiques,
+// historique) l'est quand la tournee se termine, et par le sondage de
+// l'accueil. Le point d'entree des gestes ne change pas : seul le rechargement
+// qui les suivait est remplace.
+
+/** Remplace dans `liste` l'element de meme id (ou l'ajoute en tete). Rend la nouvelle liste. */
+function remplacerParId(liste, objet) {
+  if (!objet) return liste;
+  const copie = Array.isArray(liste) ? [...liste] : [];
+  const i = copie.findIndex(item => String(item.id) === String(objet.id));
+  if (i >= 0) copie[i] = objet;
+  else copie.unshift(objet);
+  return copie;
+}
+
+/**
+ * La liste ne porte plus le trace d'une tournee terminee (`traceOmise`) : si
+ * l'ecran l'avait deja, il le garde.
+ */
+function garderTrace(nouvelle, ancienne) {
+  if (!nouvelle || nouvelle.geometry || !nouvelle.traceOmise) return nouvelle;
+  if (ancienne && String(ancienne.id) === String(nouvelle.id) && ancienne.geometry) {
+    return { ...nouvelle, geometry: ancienne.geometry };
+  }
+  return nouvelle;
+}
+
+/** Le trace d'une tournee terminee, demande au serveur quand l'ecran ne l'a pas. */
+let traceEnDemande = null;
+function chargerTraceOmise() {
+  const cible = activeRoute;
+  if (!cible || !cible.traceOmise || cible.geometry || traceEnDemande === String(cible.id)) return;
+  traceEnDemande = String(cible.id);
+  apiFetch(`/api/routes/${encodeURIComponent(cible.id)}`)
+    .then(complete => {
+      if (!complete?.geometry || !activeRoute || String(activeRoute.id) !== String(cible.id)) return;
+      activeRoute = { ...activeRoute, geometry: complete.geometry };
+      renderMap();
+    })
+    .catch(() => { /* sans trace, la carte montre les arrets : rien de faux */ })
+    .finally(() => { traceEnDemande = null; });
+}
+
+/**
+ * Applique la reponse d'un geste d'arret ({ route, stop, order, client }).
+ * Quand le geste termine la tournee, un chargement complet suit : c'est la
+ * qu'on veut le tableau de bord et les statistiques a jour, une fois.
+ */
+async function appliquerGesteArret(resultat) {
+  const recue = resultat && resultat.route;
+  if (!recue || !Array.isArray(recue.stops)) {
+    await loadData();
+    return;
+  }
+  const affichee = activeRoute && String(activeRoute.id) === String(recue.id) ? activeRoute : null;
+  // Integration des lots 1 et 5 (23/09) : les deux gardes que le lot 1 posait
+  // sur le rechargement qui suivait le geste (refreshActiveRoute), et que la
+  // mise a jour ciblee contournait.
+  //  - Jamais une tournee PLUS ANCIENNE que celle de l'ecran (H4, updatedAt) :
+  //    deux reponses de gestes peuvent se croiser, et celle du premier,
+  //    arrivee la derniere, ramenait le second arret « En livraison ».
+  const perimee = Boolean(affichee && affichee.updatedAt && (!recue.updatedAt || recue.updatedAt < affichee.updatedAt));
+  const tournee = perimee ? affichee : recue;
+  deliveryRoutes = remplacerParId(deliveryRoutes, tournee);
+  if (resultat.order) orders = remplacerParId(orders, resultat.order);
+  if (resultat.client) {
+    clients = remplacerParId(clients, { ...resultat.client, statut: resultat.client.statut || "restant" });
+  }
+  if (affichee) {
+    activeRoute = perimee ? affichee : garderTrace(recue, affichee);
+    if (activeStopIndex >= activeRoute.stops.length) activeStopIndex = 0;
+    appliquerLivraisonEnSuspens();
+    //  - Les gestes qui attendent dans la FILE restent a l'ecran : le serveur
+    //    ne les connait pas encore, sa reponse les effacait.
+    appliquerGestesEnFile();
+    route = activeRoute.stops;
+  }
+  if (tournee.status === "terminee") {
+    await loadData();
+    return;
+  }
+  renderAll({ lectures: false });
+  recopierApresGeste();
 }
 
 /**
@@ -1680,7 +2240,7 @@ function renderCommandes() {
       + `<span class="cmd-articles cmd-droite">${colonneArticles}</span>`
       + `<span class="cmd-statut cmd-droite">${badgeDeCommande(order)}</span>`
       + `</div>`;
-  }).join("") : emptyState("Aucune commande", commandesFiltre.recherche || commandesFiltre.bloquees || commandesFiltre.statut !== "toutes"
+  }).join("") : commandesEnErreur && !(orders || []).length ? etatCommandesIndisponibles() : emptyState("Aucune commande", commandesFiltre.recherche || commandesFiltre.bloquees || commandesFiltre.statut !== "toutes"
     || commandesFiltre.completer || commandesFiltre.du || commandesFiltre.au || commandesFiltre.secteur
     ? "Aucune commande ne correspond à ce filtre."
     : "Les commandes importées et saisies apparaîtront ici.");
@@ -1716,6 +2276,12 @@ function renderCommandes() {
 // Le sous-titre de la planche : « 124 bons depuis janvier · 5 en cours ».
 function majSousTitreCommandes() {
   if (!document.getElementById("commandes")?.classList.contains("active")) return;
+  // Lecture echouee : « 0 bon depuis janvier » serait le vide qu'on ne sait
+  // pas. Le sous-titre dit ce que dit la liste (relecture du 23/09).
+  if (commandesEnErreur && !(orders || []).length) {
+    setText("pageSubtitle", "Commandes indisponibles");
+    return;
+  }
   const annee = String(new Date().getFullYear());
   const depuisJanvier = (orders || []).filter(o => String(o.dateCommande || "").startsWith(annee)).length;
   const enCours = (orders || []).filter(o => !["livre", "annulee", "brouillon"].includes(o.status)).length;
@@ -1853,7 +2419,13 @@ function rendreSiAffiche(idSection, rendu) {
   if (document.getElementById(idSection)?.classList.contains("active")) rendu();
 }
 
-function renderAll() {
+/**
+ * @param lectures faux apres un geste d'arret (lot 5) : les trois rendus qui
+ *   relisent le serveur (reglages, archives d'import, comptes) n'ont rien a
+ *   voir avec le geste, et le rechargement qu'on vient d'eviter reviendrait
+ *   par eux.
+ */
+function renderAll({ lectures = true } = {}) {
   majEnteteTableauDeBord(getInitialTab());
   // Premier lancement (planche 10b) : aucune commande -> la carte d'accueil
   // remplace « A regler » et « Cette semaine ».
@@ -1866,16 +2438,15 @@ function renderAll() {
   renderCrm();
   renderRelances();
   renderCustomerOrder();
-  rendreSiAffiche("commandes-jour", renderTodayOrders);
-  rendreSiAffiche("commandes-planifiees", renderPlannedOrders);
   renderStatistics();
   renderExports();
   renderStock();
   renderStockMovements();
   renderPreparation();
   renderRecommande();
-  rendreSiAffiche("commandes-livrees", renderCommandesLivrees);
-  rendreSiAffiche("bons-commande", renderBonsCommande);
+  // Les quatre anciennes listes de commandes n'ont plus de rendu : leurs
+  // sections ont quitte la page le 23/09 (dette 7), l'ecran Commandes les
+  // porte toutes.
   renderCommandes();
   rendreSiAffiche("produits", renderProduits);
   renderVentes();
@@ -1883,11 +2454,16 @@ function renderAll() {
   renderHistorique();
   renderDeliveryFilters();
   renderDeliveryCandidates();
+  // Lot 3 (audit geo) : « N clients a livrer sans position », calcule sur les
+  // donnees deja chargees -- aucune requete de plus.
+  majAlerteAdresses(clients, orders);
   renderRoute();
   renderClients();
-  renderSettings();
-  renderImportsArchives();
-  renderComptes();
+  if (lectures) {
+    renderSettings();
+    renderImportsArchives();
+    renderComptes();
+  }
   renderMap();
   updateRouteProgress();
   renderTourneeDuJour();
@@ -2139,7 +2715,11 @@ const ICONE_CLI = {
   lieu: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path></svg>',
   tel: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6.5 4h3l2 5-2.5 1.5a11 11 0 0 0 4.5 4.5L15 12.5l5 2v3a2 2 0 0 1-2.2 2A15 15 0 0 1 4.5 6.2 2 2 0 0 1 6.5 4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path></svg>',
   retard: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5"></circle><path d="M12 8v4m0 3.5v.5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg>',
-  chevron: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m9 6 6 6-6 6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>'
+  chevron: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m9 6 6 6-6 6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>',
+  // Planche 8c : la fleche de navigation d'« Itineraire » (celle de « Y aller »)
+  // et le crayon de « Modifier », rendus au telephone seulement.
+  trajet: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 4 4 11l7 2 2 7z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path></svg>',
+  crayon: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>'
 };
 
 function nomDuClient(client) {
@@ -2209,6 +2789,18 @@ function clientsFiltres() {
   }).sort((a, b) => nomDuClient(a).localeCompare(nomDuClient(b), "fr"));
 }
 
+// L'ordre de la liste. Au telephone, le tri de la planche 9a : la derniere
+// livraison d'abord (les clients jamais livres ensuite, par nom). Au bureau,
+// le tri n'est pas rendu : la liste reste par nom, comme avant.
+// `livraisonDe` (client -> date ou "") est celle du rendu : le tri et les
+// lignes lisent la meme date, calculee une fois.
+function clientsTries(livraisonDe) {
+  const liste = clientsFiltres();
+  if (!ecranTelephone.matches || crmFilter.tri !== "livraison") return liste;
+  // Tri stable : a date egale, l'ordre par nom de clientsFiltres reste.
+  return liste.sort((a, b) => livraisonDe(b).localeCompare(livraisonDe(a)));
+}
+
 // « 47 clients · 6 abonnes · 1 adresse a corriger » (planche 13e).
 function majSousTitreClients() {
   if (!document.getElementById("crm")?.classList.contains("active")) return;
@@ -2244,8 +2836,19 @@ function renderCrm() {
   setText("cliRappelsCompte", rappels ? ` · ${rappels}` : "");
   majSousTitreClients();
 
-  const list = clientsFiltres();
+  // La derniere livraison, une fois par client et par rendu : chaque calcul
+  // parcourt toutes les commandes, et le tri du telephone la lit aussi.
+  const livraisons = new Map();
+  const livraisonDe = client => {
+    if (!livraisons.has(client.id)) livraisons.set(client.id, derniereLivraison(client.id) || "");
+    return livraisons.get(client.id);
+  };
+  const list = clientsTries(livraisonDe);
   if (!list.some(c => String(c.id) === String(clientChoisi))) clientChoisi = list[0] ? String(list[0].id) : null;
+  // La ligne du telephone (planche 9a) : le compte de la liste FILTREE.
+  setText("cliCompte", `${list.length} client${list.length > 1 ? "s" : ""}`);
+  const tri = document.getElementById("cliTri");
+  if (tri && tri.value !== crmFilter.tri) tri.value = crmFilter.tri;
 
   if (!list.length) {
     container.innerHTML = emptyState("Aucun client", crmClients.length
@@ -2255,7 +2858,7 @@ function renderCrm() {
     container.innerHTML = list.map(client => {
       const choisi = String(client.id) === clientChoisi;
       const abonnement = abonnementDuClient(client.id);
-      const livraison = derniereLivraison(client.id);
+      const livraison = livraisonDe(client);
       const meta = adresseClientACorriger(client)
         ? `<span class="cli-meta cli-alerte">${ICONE_CLI.lieu}Adresse à corriger${client.ville ? ` · ${escapeHtml(client.ville)}` : ""}</span>`
         : `<span class="cli-meta">${escapeHtml([client.ville, livraison ? `livrée le ${dateCourte(livraison)}` : ""].filter(Boolean).join(" · ") || "—")}</span>`;
@@ -2278,8 +2881,12 @@ function renderFicheClient() {
     return;
   }
   const abonnement = abonnementDuClient(client.id);
-  const puces = [client.secteur ? formatSectorLabel(client.secteur) : client.ville, abonnement ? (abonnement.status === "active" ? "Abonné" : "En pause") : ""]
-    .filter(Boolean).map((p, i) => `<span class="cli-badge cli-badge--${i === 1 && abonnement?.status !== "active" ? "tiede" : "froid"} cli-puce">${escapeHtml(p)}</span>`).join("");
+  // Deux puces : le lieu (secteur, sinon ville) et l'abonnement. Leur role est
+  // nomme (cli-puce--lieu / --abonnement) : sur le vert du telephone (planche
+  // 8c), l'une prend la surface sur vert, l'autre le blanc.
+  const lieu = client.secteur ? formatSectorLabel(client.secteur) : client.ville;
+  const puces = (lieu ? `<span class="cli-badge cli-badge--froid cli-puce cli-puce--lieu">${escapeHtml(lieu)}</span>` : "")
+    + (abonnement ? `<span class="cli-badge cli-badge--${abonnement.status === "active" ? "froid" : "tiede"} cli-puce cli-puce--abonnement">${abonnement.status === "active" ? "Abonné" : "En pause"}</span>` : "");
   const appeler = client.telephone
     ? `<a class="button primary cli-appeler" href="tel:${escapeAttribute(String(client.telephone).replace(/[^\d+]/g, ""))}">${ICONE_CLI.tel}<span>Appeler</span></a>`
     : "";
@@ -2287,7 +2894,7 @@ function renderFicheClient() {
   // l'adresse permet un trajet (rue ET ville) -- sinon le lien serait vide.
   const trajet = buildGoogleMapsUrl(client);
   const itineraire = trajet
-    ? `<a class="cli-bouton-contour cli-itineraire" href="${escapeAttribute(trajet)}" target="_blank" rel="noopener noreferrer">Itinéraire</a>`
+    ? `<a class="cli-bouton-contour cli-itineraire" href="${escapeAttribute(trajet)}" target="_blank" rel="noopener noreferrer">${ICONE_CLI.trajet}<span>Itinéraire</span></a>`
     : "";
   const adresse = adresseClientACorriger(client)
     ? `<p class="cli-valeur cli-alerte">Adresse à corriger</p><p class="cli-note">${escapeHtml([client.rue, client.codePostal, client.ville].filter(Boolean).join(" ") || "Aucune adresse")}</p>`
@@ -2331,18 +2938,21 @@ function renderFicheClient() {
     client.notes || ""
   ].filter(Boolean);
 
+  // Au telephone (planches 8c / 12c), l'en-tete de la fiche est le bloc vert :
+  // la fleche de retour y entre, a gauche du nom. Au bureau elle n'est pas
+  // rendue, et les icones des gestes et des champs non plus.
   fiche.innerHTML = `
-    <button class="cli-retour" type="button" data-action="cli-retour" aria-label="Retour à la liste des clients"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m15 18-6-6 6-6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg><span>Clients</span></button>
     <header class="cli-fiche-tete">
+      <button class="cli-retour" type="button" data-action="cli-retour" aria-label="Retour à la liste des clients"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m15 18-6-6 6-6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg><span>Clients</span></button>
       <div class="cli-fiche-identite">
         <h2 class="cli-fiche-nom">${escapeHtml(nomDuClient(client))}</h2>
         <div class="cli-puces">${puces}</div>
       </div>
-      <div class="cli-fiche-gestes">${appeler}${itineraire}<button class="cli-bouton-contour" type="button" data-action="cli-modifier" data-client-id="${escapeAttribute(client.id)}">Modifier</button></div>
+      <div class="cli-fiche-gestes">${appeler}${itineraire}<button class="cli-bouton-contour cli-modifier" type="button" data-action="cli-modifier" data-client-id="${escapeAttribute(client.id)}">${ICONE_CLI.crayon}<span class="cli-modifier-mot">Modifier</span></button></div>
     </header>
     <div class="cli-champs">
-      <div><p class="cli-libelle">Adresse</p>${adresse}</div>
-      <div><p class="cli-libelle">Contact</p>${contact}</div>
+      <div><span class="cli-champ-icone" aria-hidden="true">${ICONE_CLI.lieu}</span><p class="cli-libelle">Adresse</p>${adresse}</div>
+      <div><span class="cli-champ-icone" aria-hidden="true">${ICONE_CLI.tel}</span><p class="cli-libelle">Contact</p>${contact}</div>
     </div>
     ${extras.length ? `<div class="cli-notes">${extras.map(e => `<p class="cli-note">${escapeHtml(e)}</p>`).join("")}</div>` : ""}
     <label class="cli-statut">
@@ -2407,6 +3017,9 @@ function ouvrirVueClient(vue, { depuisHistorique = false } = {}) {
 function bindClients() {
   const ecran = document.getElementById("crm");
   if (!ecran) return;
+  // Le tri du telephone ne vaut pas au bureau : passer le seuil (une tablette
+  // qu'on tourne) redessine la liste dans l'ordre de la largeur.
+  ecranTelephone.addEventListener?.("change", () => renderCrm());
   ecran.addEventListener("click", event => {
     const pilule = event.target.closest("[data-cli-secteur]");
     if (pilule) {
@@ -2458,7 +3071,14 @@ function renderClientSelects() {
   if (customerSelect && customerSelect.options.length !== crmClients.length + 1) customerSelect.innerHTML = options;
 
   const relanceSelect = document.getElementById("relanceClientSelect");
-  if (relanceSelect) relanceSelect.innerHTML = options.replace("Nouveau client", "Choisir un client");
+  if (relanceSelect) {
+    // Redessiner la liste (un rechargement, une tablette qu'on tourne) ne perd
+    // pas le client deja choisi d'un rappel en cours de saisie. Apres l'envoi,
+    // le formulaire est remis a zero AVANT le rechargement : rien ne reste.
+    const choisi = relanceSelect.value;
+    relanceSelect.innerHTML = options.replace("Nouveau client", "Choisir un client");
+    if (choisi && crmClients.some(c => String(c.id) === choisi)) relanceSelect.value = choisi;
+  }
 }
 
 // Ce qui, dans une fiche, est recopie sur ses COMMANDES par /api/clients/:id :
@@ -2549,8 +3169,12 @@ function renderRelances() {
   }
   if (relanceFilter === "upcoming") list = list.filter(item => item.status === "a_faire" && item.datePrevue > today);
 
+  // La pilule choisie se dit aussi a un lecteur d'ecran, pas seulement par
+  // son fond (comme les pilules de la Preparation).
   document.querySelectorAll("[data-relance-filter]").forEach(button => {
-    button.classList.toggle("active-filter", button.dataset.relanceFilter === relanceFilter);
+    const choisie = button.dataset.relanceFilter === relanceFilter;
+    button.classList.toggle("active-filter", choisie);
+    button.setAttribute("aria-pressed", String(choisie));
   });
 
   const todoCount = crmRelances.filter(item => item.status === "a_faire").length;
@@ -2813,97 +3437,8 @@ async function submitCustomerOrder(form) {
   showTab(data.orderType === "planifiee" ? "commandes-planifiees" : "commandes-jour");
 }
 
-function getTodayOrdersDate() {
-  const input = document.getElementById("todayOrdersDate");
-  return input?.value || getTodayDateInput();
-}
-
-async function loadTodayOrders(date = getTodayOrdersDate()) {
-  todayCustomerOrders = await apiFetch(`/api/customer-orders/today?date=${encodeURIComponent(date)}`);
-}
-
-function renderTodayOrders() {
-  const input = document.getElementById("todayOrdersDate");
-  if (input && !input.value) input.value = getTodayDateInput();
-  const container = document.getElementById("todayOrdersList");
-  if (!container) return;
-  if (!todayCustomerOrders.length) {
-    container.innerHTML = emptyState("Aucune commande client", "Les commandes validées chez les clients apparaîtront ici.");
-    return;
-  }
-  container.innerHTML = todayCustomerOrders.map(order => `
-    <article class="item today-order-card ${getOrderPill(order.status)}">
-      <div class="today-order-row">
-        <label class="select-row">
-          <input type="checkbox" data-today-order="${escapeAttribute(order.id)}" ${todayOrdersSelection.has(String(order.id)) ? "checked" : ""} ${order.status !== "commande_client_validee" ? "disabled" : ""}>
-          <span></span>
-        </label>
-        <div>
-          <h4>${escapeHtml(order.clientName)}</h4>
-          <p>${escapeHtml(formatOrderAddress(order))}</p>
-          <p class="muted">${escapeHtml((order.products || []).map(line => `${line.nom} x${line.quantite}`).join(" - "))}</p>
-        </div>
-        <div class="today-order-side">
-          <span class="pill ${getOrderPill(order.status)}">${escapeHtml(formatOrderStatus(order.status))}</span>
-          <strong>${formatMoney(order.total || 0)}</strong>
-        </div>
-      </div>
-    </article>
-  `).join("");
-}
-
-async function sendTodayOrdersToPreparation() {
-  await apiFetch("/api/customer-orders/send-preparation", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ orderIds: Array.from(todayOrdersSelection) })
-  });
-  todayOrdersSelection.clear();
-  await loadData();
-  notify("Commandes envoyées en préparation.", "success");
-}
-
-function renderPlannedOrders() {
-  const container = document.getElementById("plannedOrdersList");
-  const summary = document.getElementById("plannedOrdersSummary");
-  if (!container) return;
-
-  const active = plannedOrders.filter(order => order.status !== "annulee");
-  if (summary) summary.textContent = `${active.length} planifiée${active.length > 1 ? "s" : ""}`;
-
-  if (!plannedOrders.length) {
-    container.innerHTML = emptyState("Aucune commande planifiée", "Crée une commande planifiée depuis l'onglet Commande client.", { libelle: "Commande client", onglet: "commande-client" });
-    return;
-  }
-
-  container.innerHTML = plannedOrders.map(order => {
-    const reminder = crmRelances.find(item => String(item.commandeId) === String(order.id));
-    const canConfirm = ["planifiee", "a_confirmer"].includes(order.status);
-    const canCancel = !["annulee", "stock_a_verifier", "en_preparation", "pret_livraison", "en_livraison", "livre"].includes(order.status);
-    return `
-      <article class="item planned-order-card ${getOrderPill(order.status)}">
-        <div class="item-header">
-          <div>
-            <h4>${escapeHtml(order.clientName)}</h4>
-            <p>${escapeHtml(formatOrderAddress(order))}</p>
-            <p class="muted">${escapeHtml((order.products || []).map(line => `${line.nom} x${line.quantite}`).join(" - "))}</p>
-          </div>
-          <span class="pill ${getOrderPill(order.status)}">${escapeHtml(formatOrderStatus(order.status))}</span>
-        </div>
-        <div class="order-meta">
-          <span>Livraison : ${escapeHtml(order.deliveryDate ? formatDeliveryDate(order.deliveryDate) : "à dater")}</span>
-          <span>Rappel : ${escapeHtml(reminder?.datePrevue ? formatDeliveryDate(reminder.datePrevue) : "-")}</span>
-          <span>Total : ${formatMoney(order.total || 0)}</span>
-        </div>
-        <div class="card-actions">
-          <button class="button ok" type="button" data-action="confirm-planned-order" data-order-id="${escapeAttribute(order.id)}" ${canConfirm ? "" : "disabled"}>Confirmer</button>
-          <button class="button danger" type="button" data-action="cancel-planned-order" data-order-id="${escapeAttribute(order.id)}" ${canCancel ? "" : "disabled"}>Annuler</button>
-        </div>
-      </article>
-    `;
-  }).join("");
-}
-
+// Confirmer / Annuler une planifiee : les gestes du detail de l'ecran
+// Commandes (cmd-confirmer, cmd-annuler).
 async function confirmPlannedOrder(orderId) {
   await apiFetch(`/api/planned-orders/${encodeURIComponent(orderId)}/confirm`, { method: "POST" });
   await loadData();
@@ -2965,22 +3500,17 @@ function renderStatistics() {
     { label: "Nouveaux clients", value: statistics.newClientsMonth || 0, hint: "Ce mois-ci", tone: "warning" },
     { label: "Prospects convertis", value: statistics.convertedProspectsMonth || 0, hint: "Ce mois-ci", tone: "success" }
   ];
+  // Ni point colore dans le coin ni bandeau d'evolution au-dessus (ecrans sans
+  // planche, 23/09) : le point etait un code couleur sans legende, et le
+  // bandeau repetait les deux evolutions des tuiles sans dire laquelle etait
+  // la semaine. Chaque evolution se lit UNE fois, dans sa tuile.
   kpis.innerHTML = items.map(item => `
     <article class="stat-tile stat-tile-${escapeAttribute(item.tone)}">
-      <i aria-hidden="true"></i>
       <span>${escapeHtml(item.label)}</span>
       <strong>${escapeHtml(item.value)}</strong>
       <small>${escapeHtml(item.hint)}</small>
     </article>
   `).join("");
-
-  const evolution = document.getElementById("statsEvolution");
-  if (evolution) {
-    evolution.innerHTML = `
-      <span class="pill ${statistics.week?.evolution?.label === "baisse" ? "pill-danger" : "pill-ok"}">${escapeHtml(formatEvolution(statistics.week?.evolution))}</span>
-      <span class="pill ${statistics.month?.evolution?.label === "baisse" ? "pill-danger" : "pill-blue"}">${escapeHtml(formatEvolution(statistics.month?.evolution))}</span>
-    `;
-  }
 
   renderBarChart("salesChart", statistics.salesByDay || []);
   renderRankList("topProductsChart", statistics.topProducts || [], "quantity");
@@ -3007,14 +3537,21 @@ function renderBarChart(id, rows) {
   // plusieurs lignes et devenait illisible (colonnes de ~20px). On le retire
   // (la valeur reste dans le tooltip title) et la hauteur devient strictement
   // proportionnelle (plancher 3% au lieu de 12% qui aplatissait les ecarts).
-  container.innerHTML = rows.map(row => {
+  // Le rendu de l'histogramme du tableau de bord : la derniere barre (le
+  // serveur finit la serie sur aujourd'hui) est le jour courant, et
+  // l'etiquette ne garde que le jour du mois -- « 09-10 » se cassait en
+  // « 09- / 10 » sous une colonne de 22 px. La date entiere reste dans le nom
+  // accessible et l'infobulle.
+  container.innerHTML = rows.map((row, index) => {
     const total = Number(row.total) || 0;
     const height = total > 0 ? Math.max(3, total / max * 100) : 2;
     const label = `${row.date} : ${formatMoney(row.total)}`;
+    const courant = index === rows.length - 1;
+    const jour = String(Number(String(row.date).slice(8, 10)) || String(row.date).slice(5));
     return `
-    <div class="bar-item ${total > 0 ? "is-active" : ""}" title="${escapeAttribute(label)}" role="img" aria-label="${escapeAttribute(label)}">
+    <div class="bar-item${total > 0 ? " is-active" : ""}${courant ? " bar-courant" : ""}" title="${escapeAttribute(label)}" role="img" aria-label="${escapeAttribute(label)}">
       <span style="height:${height}%"></span>
-      <small>${escapeHtml(String(row.date).slice(5))}</small>
+      <small>${escapeHtml(jour)}</small>
     </div>
   `;
   }).join("");
@@ -3377,7 +3914,10 @@ async function setStock(productId, value) {
   });
 
   await loadData();
-  notify("Stock mis à jour.", "success");
+  // Une cle : chaque − / + du telephone REMPLACE le toast precedent au lieu
+  // d'en empiler un de plus (quatre secondes chacun), qui finissait par
+  // couvrir les boutons eux-memes.
+  notify("Stock mis à jour.", "success", { cle: "stock-maj" });
 }
 
 async function setStockThreshold(productId, value) {
@@ -3560,6 +4100,11 @@ function majSousTitrePreparation() {
     setText("pageSubtitle", titles.preparation.subtitle);
     return;
   }
+  // Lecture echouee : pas « Aucune commande a preparer », comme la liste.
+  if (commandesEnErreur && !(orders || []).length) {
+    setText("pageSubtitle", "Commandes indisponibles");
+    return;
+  }
   const restantes = (orders || []).filter(order => ["importe", "stock_a_verifier", "en_preparation"].includes(order.status)).length;
   setText("pageSubtitle", restantes
     ? `${restantes} commande${restantes > 1 ? "s" : ""} à préparer`
@@ -3589,7 +4134,9 @@ function renderPreparation() {
   container.innerHTML = "";
 
   if (!orders.length) {
-    container.innerHTML = emptyState("Aucune commande à préparer", "Importe les dossiers du jour pour générer la préparation.", { libelle: "Importer les dossiers", onglet: "journee" });
+    container.innerHTML = commandesEnErreur
+      ? etatCommandesIndisponibles()
+      : emptyState("Aucune commande à préparer", "Importe les dossiers du jour pour générer la préparation.", { libelle: "Importer les dossiers", onglet: "journee" });
     return;
   }
 
@@ -3663,24 +4210,21 @@ function etapeDePreparation(order) {
   return { cle: "a-faire", mot: "À faire" };
 }
 
-/** Ce qui manque, en un mot, pour une commande bloquee -- comme « Il manque 2 articles ». */
-function detailDeBlocage(order) {
-  const manquants = (order.stockLines || []).filter(ligne => ligne.status !== "ok").length;
-  if (manquants === 1) return "Il manque 1 article";
-  if (manquants > 1) return `Il manque ${manquants} articles`;
-  return formatStockStatus(order.stockStatus) || "Stock à vérifier";
-}
-
 function createPreparationRow(order, { unique = false } = {}) {
   if (unique) return createPreparationRowMobile(order);
   const etape = etapeDePreparation(order);
-  const lignes = (order.products || []).length;
-  const articles = lignes === 1 ? "1 article" : `${lignes} articles`;
+  // « n articles » compte les QUANTITES, comme au telephone et comme le resume
+  // (« 29 articles au total ») : le bureau comptait les lignes de produit, et
+  // la meme commande disait « 2 articles » ici et « 6 articles » au telephone.
+  const n = getOrderProductCount(order);
+  const articles = n === 1 ? "1 article" : `${n} articles`;
   const ville = order.city ? formatSectorLabel(order.city) : (order.sector ? formatSectorLabel(order.sector) : "");
   // Quatre informations : l'etat (disque), le nom, le detail, le badge. Pour
   // une commande bloquee, le manque REMPLACE le detail, comme sur la planche.
+  // Le manque aussi, en articles (manqueDeLaCommande, celui du telephone) :
+  // « Il manque 1 article » pour cinq gants absents etait la meme confusion.
   const detail = etape.cle === "bloquee"
-    ? `<span class="commande-ligne-alerte">${escapeHtml(detailDeBlocage(order))}</span>`
+    ? `<span class="commande-ligne-alerte">${escapeHtml(manqueDeLaCommande(order))}</span>`
     : `<span>${escapeHtml([ville, articles].filter(Boolean).join(" · "))}</span>`;
   const row = document.createElement("article");
   row.className = `commande-ligne commande-ligne--${etape.cle}`;
@@ -4037,7 +4581,9 @@ function renderRecommande() {
 
 function updateRecommendFilterButtons() {
   document.querySelectorAll("[data-recommend-filter]").forEach(button => {
-    button.classList.toggle("active-filter", button.dataset.recommendFilter === recommendFilter);
+    const choisie = button.dataset.recommendFilter === recommendFilter;
+    button.classList.toggle("active-filter", choisie);
+    button.setAttribute("aria-pressed", String(choisie));
   });
 }
 
@@ -4258,7 +4804,8 @@ function renderHistorique() {
   });
 }
 
-// Helpers ERP v1.11.0 partages entre renderCommandesLivrees et renderBonsCommande
+// Helpers ERP v1.11.0 (les anciennes listes « Commandes livrees » et « Bons de
+// commande » ont quitte la page le 23/09 ; ce format sert le detail et les rappels)
 
 // Format date "seulement jour" : YYYY-MM-DD ou ISO complet -> DD/MM/YYYY (sans heure).
 // Avant on utilisait formatDate qui inclut l'heure 02:00:00 (artefact timezone Excel).
@@ -4274,89 +4821,6 @@ function formatDateDayOnly(value) {
 }
 
 
-function renderCommandesLivrees() {
-  const container = document.getElementById("commandesLivreesList");
-  const summary = document.getElementById("commandesLivreesSummary");
-  if (!container) return;
-
-  const livrees = (orders || []).filter(order => order.status === "livre");
-
-  if (summary) {
-    summary.textContent = livrees.length
-      ? `${livrees.length} commande${livrees.length > 1 ? "s" : ""} livrée${livrees.length > 1 ? "s" : ""}.`
-      : "";
-  }
-
-  if (!livrees.length) {
-    container.innerHTML = emptyState(
-      "Aucune commande livrée",
-      "Les commandes terminées via une tournée ou importées comme déjà livrées apparaîtront ici."
-    );
-    return;
-  }
-
-  const sorted = livrees.slice().sort((a, b) => {
-    const dateA = a.deliveryDate || a.updatedAt || "";
-    const dateB = b.deliveryDate || b.updatedAt || "";
-    return String(dateB).localeCompare(String(dateA));
-  });
-
-  container.innerHTML = sorted.map(order => {
-    const products = Array.isArray(order.products) ? order.products : [];
-    const productsHtml = products.length
-      ? products.map(p => {
-          // Cas 1 : code-barre dans le champ `code` -> on garde tel quel
-          // Cas 2 : code-barre fusionne dans le `nom` -> on le separe
-          const rawName = p.nom || p.code || "Produit";
-          const split = splitProductCode(rawName);
-          const codeDisplay = p.code && p.code !== rawName
-            ? p.code
-            : split.code || "";
-          return `
-            <li class="commandes-livrees-product">
-              <div class="cl-product-main">
-                ${codeDisplay ? `<code class="cl-product-code">${escapeHtml(codeDisplay)}</code>` : ""}
-                <span>${escapeHtml(split.name)}</span>
-              </div>
-              <span class="muted">x ${escapeHtml(p.quantite ?? 0)}</span>
-            </li>
-          `;
-        }).join("")
-      : `<li class="muted">Aucun produit identifié.</li>`;
-
-    const origin = order.importedAsLivre
-      ? `<span class="pill pill-warning">Importée déjà livrée</span>`
-      : `<span class="pill pill-ok">Livrée via tournée</span>`;
-
-    // ERP v1.11.0 : numero CMD-... affiche pour coherence avec page Bons de commande,
-    // et toute la carte est cliquable pour ouvrir le meme modal detail.
-    const numero = order.numero || "(non numéroté)";
-    const dateDisplay = order.dateCommande || order.deliveryDate || order.updatedAt;
-
-    return `
-      <article class="item commandes-livrees-card" data-action="open-bdc-detail" data-order-id="${escapeAttribute(order.id)}" role="button" tabindex="0" aria-label="Ouvrir le détail du bon ${escapeAttribute(numero)}">
-        <header class="item-header">
-          <div>
-            <div class="cl-numero-line">
-              <strong class="cl-numero">${escapeHtml(numero)}</strong>
-              <span class="muted">· ${escapeHtml(formatDateDayOnly(dateDisplay))}</span>
-            </div>
-            <h4>${escapeHtml(order.clientName || "Client")}</h4>
-            <p class="muted">${escapeHtml([order.address, order.postalCode, order.city].filter(Boolean).join(" · "))}</p>
-          </div>
-          ${origin}
-        </header>
-        <div class="item-meta">
-          <span class="muted">Secteur : ${escapeHtml(order.sector || "-")}</span>
-        </div>
-        <ul class="commandes-livrees-products">
-          ${productsHtml}
-        </ul>
-      </article>
-    `;
-  }).join("");
-}
-
 // ============================================================================
 // PAGE "BONS DE COMMANDE" (Phase 3 ERP v1.10.0)
 //
@@ -4366,13 +4830,9 @@ function renderCommandesLivrees() {
 // Tri par defaut : dateCommande desc, puis numero desc (plus recent en haut).
 // ============================================================================
 
+// L'etat de la fenetre de detail. Les filtres de l'ancienne liste (statut,
+// recherche, secteur, dates, vue) sont partis avec elle le 23/09.
 const bdcState = {
-  status: "all",
-  search: "",
-  sector: "",
-  dateFrom: "",
-  dateTo: "",
-  view: "cards",       // "cards" | "table"
   editingClientId: null // id du client en cours d'edition dans le modal detail
 };
 
@@ -4424,185 +4884,13 @@ function bdcFormatDate(iso) {
   return `${m[3]}/${m[2]}/${m[1]}`;
 }
 
-function bdcMatchSearch(order, search) {
-  if (!search) return true;
-  const q = search.toLowerCase();
-  return (
-    (order.numero || "").toLowerCase().includes(q) ||
-    (order.clientName || "").toLowerCase().includes(q) ||
-    (order.id || "").toLowerCase().includes(q)
-  );
-}
-
-function bdcFilterOrders() {
-  return (orders || [])
-    .filter(o => o && o.clientId)
-    .filter(o => {
-      // Filtre statut, avec cas special "to_complete" (filtre meta sur completude profil)
-      if (bdcState.status === "all") return true;
-      if (bdcState.status === "to_complete") return bdcNeedsCompletion(o);
-      return o.status === bdcState.status;
-    })
-    .filter(o => !bdcState.sector || o.sector === bdcState.sector)
-    .filter(o => bdcMatchSearch(o, bdcState.search))
-    .filter(o => {
-      const d = String(o.dateCommande || "").slice(0, 10);
-      if (bdcState.dateFrom && d < bdcState.dateFrom) return false;
-      if (bdcState.dateTo && d > bdcState.dateTo) return false;
-      return true;
-    })
-    .sort((a, b) => {
-      const dateA = String(a.dateCommande || "").slice(0, 10);
-      const dateB = String(b.dateCommande || "").slice(0, 10);
-      if (dateA !== dateB) return dateB.localeCompare(dateA);
-      return String(b.numero || "").localeCompare(String(a.numero || ""));
-    });
-}
-
-function renderBdcSectorOptions() {
-  const select = document.getElementById("bdc-sector");
-  if (!select) return;
-  const currentValue = select.value;
-  const sectors = Array.from(new Set((orders || [])
-    .map(o => o.sector)
-    .filter(Boolean))).sort();
-  select.innerHTML = `<option value="">Tous secteurs</option>` +
-    sectors.map(s => `<option value="${escapeAttribute(s)}">${escapeHtml(s)}</option>`).join("");
-  // Re-set valeur si elle est toujours dispo
-  if (currentValue && sectors.includes(currentValue)) select.value = currentValue;
-}
-
-function renderBonsCommande() {
-  const container = document.getElementById("bdc-list");
-  const summary = document.getElementById("bdc-summary");
-  if (!container) return;
-
-  renderBdcSectorOptions();
-
-  const filtered = bdcFilterOrders();
-  const allOrders = (orders || []).filter(o => o && o.clientId);
-  const total = allOrders.length;
-  const toCompleteCount = allOrders.filter(bdcNeedsCompletion).length;
-
-  // Mettre a jour le compteur du bouton "A completer"
-  const toCompleteBtn = document.querySelector('[data-bdc-status="to_complete"]');
-  if (toCompleteBtn) {
-    const baseLabel = "⚠ À compléter";
-    toCompleteBtn.textContent = toCompleteCount > 0
-      ? `${baseLabel} (${toCompleteCount})`
-      : baseLabel;
-    toCompleteBtn.disabled = toCompleteCount === 0;
-  }
-
-  if (summary) {
-    summary.textContent = total === 0
-      ? "Aucune commande pour l'instant. Importe ton fichier ventes pour commencer."
-      : `${filtered.length} bon${filtered.length > 1 ? "s" : ""} affiché${filtered.length > 1 ? "s" : ""} sur ${total} au total.`;
-  }
-
-  // Toggle classes selon la vue active
-  container.classList.toggle("bdc-list-table-mode", bdcState.view === "table");
-
-  if (!filtered.length) {
-    container.innerHTML = emptyState(
-      "Aucun bon ne correspond aux filtres",
-      total === 0
-        ? "Importe ton fichier de ventes pour voir les bons de commande ici."
-        : "Essaie de réinitialiser les filtres ou d'élargir la plage de dates."
-    );
-    return;
-  }
-
-  if (bdcState.view === "table") {
-    container.innerHTML = renderBdcTable(filtered);
-    return;
-  }
-
-  container.innerHTML = filtered.map(order => {
-    const productsCount = Array.isArray(order.products) ? order.products.length : 0;
-    const totalQty = (order.products || []).reduce((sum, p) => sum + Number(p.quantite || 0), 0);
-    const numero = order.numero || `(non numéroté)`;
-    const address = [order.address, order.postalCode, order.city].filter(Boolean).join(" · ");
-    const livreFromImport = order.importedAsLivre
-      ? `<span class="bdc-pill bdc-pill-neutral" title="Importée comme déjà livrée">📥 import livré</span>`
-      : "";
-    const addressHtml = address
-      ? `<p class="muted">${escapeHtml(address)}</p>`
-      : `<p class="bdc-card-no-address">⚠ Adresse non renseignée</p>`;
-
-    return `
-      <article class="bdc-card" data-action="open-bdc-detail" data-order-id="${escapeAttribute(order.id)}" role="button" tabindex="0" aria-label="Ouvrir le détail du bon ${escapeAttribute(numero)}">
-        <header class="bdc-card-head">
-          <div class="bdc-card-numero">
-            <strong>${escapeHtml(numero)}</strong>
-            <span class="bdc-card-date">${escapeHtml(bdcFormatDate(order.dateCommande))}</span>
-          </div>
-          ${bdcStatusBadge(order.status)}
-        </header>
-        <div class="bdc-card-client">
-          <h4>${escapeHtml(order.clientName || "Client sans nom")}</h4>
-          ${addressHtml}
-        </div>
-        <footer class="bdc-card-foot">
-          <span class="muted">Secteur : <strong>${escapeHtml(order.sector || "—")}</strong></span>
-          <span class="muted">${productsCount} ligne${productsCount > 1 ? "s" : ""} · ${totalQty} unité${totalQty > 1 ? "s" : ""}</span>
-          ${livreFromImport}
-        </footer>
-      </article>
-    `;
-  }).join("");
-}
-
-// Vue tableau dense : utile pour scanner 100+ bons d'un coup. Sticky header,
-// clic sur ligne ouvre le modal detail.
-function renderBdcTable(orders) {
-  const rows = orders.map(order => {
-    const numero = order.numero || "(non numéroté)";
-    const totalQty = (order.products || []).reduce((sum, p) => sum + Number(p.quantite || 0), 0);
-    const productsCount = Array.isArray(order.products) ? order.products.length : 0;
-    const needs = bdcNeedsCompletion(order);
-    return `
-      <tr data-action="open-bdc-detail" data-order-id="${escapeAttribute(order.id)}" tabindex="0" class="${needs ? "bdc-row-warning" : ""}">
-        <td class="bdc-td-numero"><strong>${escapeHtml(numero)}</strong></td>
-        <td class="muted">${escapeHtml(bdcFormatDate(order.dateCommande))}</td>
-        <td>${escapeHtml(order.clientName || "—")}</td>
-        <td class="muted">${escapeHtml(order.sector || "—")}</td>
-        <td>${bdcStatusBadge(order.status)}</td>
-        <td class="bdc-td-num">${productsCount}</td>
-        <td class="bdc-td-num">${totalQty}</td>
-        <td>${needs ? `<span class="bdc-row-warning-flag" title="Profil client à compléter">⚠</span>` : ""}</td>
-      </tr>
-    `;
-  }).join("");
-
-  return `
-    <div class="bdc-table-wrap" role="region" aria-label="Tableau des bons de commande">
-      <table class="bdc-table">
-        <thead>
-          <tr>
-            <th>Numéro</th>
-            <th>Date</th>
-            <th>Client</th>
-            <th>Secteur</th>
-            <th>Statut</th>
-            <th class="bdc-td-num">Lignes</th>
-            <th class="bdc-td-num">Qté</th>
-            <th aria-label="Alertes"></th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>
-  `;
-}
-
 // Export CSV des bons filtres. Pas d'endpoint backend : Blob + download client-side.
 // Format : Numero;Date;Client;Adresse;CP;Ville;Secteur;Statut;Telephone;Lignes;Qté
 // Separateur ; (compatibilite Excel FR), encodage UTF-8 BOM pour les accents.
-function exportBdcCsv(liste = null, prefixe = "sereo-bons-commande") {
-  // Le meme export sert l'ecran Commandes (planche 13c) : on lui passe SA
-  // liste filtree. Sans argument, il garde son comportement d'origine.
-  const filtered = liste || bdcFilterOrders();
+function exportBdcCsv(liste = [], prefixe = "sereo-commandes") {
+  // L'ecran Commandes (planche 13c) lui passe SA liste filtree. L'ancien ecran
+  // « Bons de commande », qui l'appelait sans argument, a quitte la page.
+  const filtered = liste || [];
   if (!filtered.length) {
     notify("Aucun bon à exporter (filtres vides).", "warning");
     return;
@@ -4901,49 +5189,11 @@ function closeBdcDetail() {
 }
 
 function bindBonsCommandeUi() {
-  // Recherche texte (event input pour reactivite immediate)
-  document.addEventListener("input", event => {
-    const search = event.target.closest("#bdc-search");
-    if (search) {
-      bdcState.search = search.value || "";
-      renderBonsCommande();
-    }
-  });
-
-  // Filtres + clic carte + close modal (delegation au document)
+  // La fenetre de detail d'une commande (ouvrir, fermer, editer le client).
+  // Les filtres de l'ancienne liste « Bons de commande » (recherche, statut,
+  // secteur, dates, vue, export) sont partis avec elle le 23/09 : l'ecran
+  // Commandes a les siens.
   document.addEventListener("click", event => {
-    const statusBtn = event.target.closest("[data-bdc-status]");
-    if (statusBtn) {
-      bdcState.status = statusBtn.dataset.bdcStatus;
-      document.querySelectorAll(".bdc-status-filter").forEach(btn => {
-        btn.classList.toggle("active-filter", btn.dataset.bdcStatus === bdcState.status);
-      });
-      renderBonsCommande();
-      return;
-    }
-
-    const reset = event.target.closest('[data-action="bdc-reset-filters"]');
-    if (reset) {
-      bdcState.status = "all";
-      bdcState.search = "";
-      bdcState.sector = "";
-      bdcState.dateFrom = "";
-      bdcState.dateTo = "";
-      const search = document.getElementById("bdc-search");
-      if (search) search.value = "";
-      const sector = document.getElementById("bdc-sector");
-      if (sector) sector.value = "";
-      const dateFrom = document.getElementById("bdc-date-from");
-      if (dateFrom) dateFrom.value = "";
-      const dateTo = document.getElementById("bdc-date-to");
-      if (dateTo) dateTo.value = "";
-      document.querySelectorAll(".bdc-status-filter").forEach(btn => {
-        btn.classList.toggle("active-filter", btn.dataset.bdcStatus === "all");
-      });
-      renderBonsCommande();
-      return;
-    }
-
     const opener = event.target.closest('[data-action="open-bdc-detail"]');
     if (opener) {
       bdcState.editingClientId = null; // reset edit mode a l'ouverture
@@ -4955,23 +5205,6 @@ function bindBonsCommandeUi() {
     if (closer) {
       bdcState.editingClientId = null;
       closeBdcDetail();
-      return;
-    }
-
-    // Toggle vue cartes / tableau
-    const viewBtn = event.target.closest("[data-bdc-view]");
-    if (viewBtn) {
-      bdcState.view = viewBtn.dataset.bdcView;
-      document.querySelectorAll(".bdc-view-btn").forEach(btn => {
-        btn.classList.toggle("active-filter", btn.dataset.bdcView === bdcState.view);
-      });
-      renderBonsCommande();
-      return;
-    }
-
-    // Export CSV
-    if (event.target.closest('[data-action="bdc-export-csv"]')) {
-      exportBdcCsv();
       return;
     }
 
@@ -5001,22 +5234,6 @@ function bindBonsCommandeUi() {
       event.preventDefault();
       saveBdcClientEdit(saveBtn);
       return;
-    }
-  });
-
-  // Selects et date inputs (event change)
-  document.addEventListener("change", event => {
-    if (event.target.id === "bdc-sector") {
-      bdcState.sector = event.target.value || "";
-      renderBonsCommande();
-    }
-    if (event.target.id === "bdc-date-from") {
-      bdcState.dateFrom = event.target.value || "";
-      renderBonsCommande();
-    }
-    if (event.target.id === "bdc-date-to") {
-      bdcState.dateTo = event.target.value || "";
-      renderBonsCommande();
     }
   });
 
@@ -5994,8 +6211,14 @@ function applyDeliveryFilter() {
   renderMap();
 }
 
+// C1 (lot 1 de l'audit geo) : un absent ou un probleme REVIENT ici, marque
+// « A reprogrammer » -- memes listes que le serveur (STATUTS_A_PLANIFIER et
+// STATUTS_A_RELIVRER, server.js). `probleme_livraison` : les commandes
+// bloquees avant le 23/09, qui reviennent aussi.
+const STATUTS_A_RELIVRER = ["a_reprogrammer", "probleme_livraison"];
+
 function getDeliverableOrders() {
-  return orders.filter(order => ["pret_livraison", "a_reprogrammer"].includes(order.status));
+  return orders.filter(order => order.status === "pret_livraison" || STATUTS_A_RELIVRER.includes(order.status));
 }
 
 function getFilteredDeliveryOrders() {
@@ -6003,8 +6226,11 @@ function getFilteredDeliveryOrders() {
   const sectorKey = normalizeTextKey(deliveryFilter.sector);
 
   return getDeliverableOrders().filter(order => {
-    if (deliveryFilter.date && order.deliveryDate && order.deliveryDate !== deliveryFilter.date) return false;
-    if (deliveryFilter.date && !order.deliveryDate) return false;
+    // Une commande a relivrer a deja manque son jour : le filtre de date ne la
+    // cache pas (sinon choisir « demain » la ferait disparaitre).
+    const aRelivrer = STATUTS_A_RELIVRER.includes(order.status);
+    if (!aRelivrer && deliveryFilter.date && order.deliveryDate && order.deliveryDate !== deliveryFilter.date) return false;
+    if (!aRelivrer && deliveryFilter.date && !order.deliveryDate) return false;
     if (sectorKey && sectorKey !== "tous" && normalizeTextKey(order.sector) !== sectorKey) return false;
     if (cityKey && normalizeTextKey(order.city) !== cityKey) return false;
     return true;
@@ -6038,6 +6264,15 @@ function renderDeliveryCandidates() {
 
   container.innerHTML = "";
   filtered.forEach(order => {
+    // Lot 7 : la carte et, dessous, « A livrer en premier » -- une case a
+    // part, hors du <label> de la carte (deux cases dans un meme label, le nom
+    // accessible de la premiere avalait le texte de la seconde). Visible des
+    // que la commande est choisie.
+    const ligne = document.createElement("div");
+    ligne.className = "delivery-card-ligne";
+    // Une commande bloquee avant le 23/09 (probleme_livraison) se lit comme
+    // les autres commandes a relivrer : « A reprogrammer ».
+    const statutAffiche = STATUTS_A_RELIVRER.includes(order.status) ? "a_reprogrammer" : order.status;
     const label = document.createElement("label");
     label.className = "delivery-card";
     label.innerHTML = `
@@ -6056,9 +6291,17 @@ function renderDeliveryCandidates() {
         </span>
         ${getAddressWarning(order) ? `<span class="address-warning">${escapeHtml(getAddressWarning(order))}</span>` : ""}
       </span>
-      <span class="pill ${getOrderPill(order.status)}">${escapeHtml(formatOrderStatus(order.status))}</span>
+      <span class="pill ${getOrderPill(statutAffiche)}">${escapeHtml(formatOrderStatus(statutAffiche))}</span>
     `;
-    container.appendChild(label);
+    const premier = document.createElement("label");
+    premier.className = "delivery-premier";
+    premier.hidden = !deliverySelection.has(String(order.id));
+    premier.innerHTML = `
+      <input type="checkbox" data-delivery-first="${escapeAttribute(order.id)}" ${deliveryFirst.has(String(order.id)) ? "checked" : ""}>
+      <span>À livrer en premier<span class="sr-only"> : ${escapeHtml(order.clientName)}</span></span>
+    `;
+    ligne.append(label, premier);
+    container.appendChild(ligne);
   });
 }
 
@@ -6075,13 +6318,22 @@ function contexteDeCommandePrete(order) {
     order.deliveryDate ? formatDeliveryDate(order.deliveryDate) : "Sans date",
     formatSectorLabel(order.sector),
     priorite && !/normal/i.test(priorite) ? priorite : "",
-    order.status === "a_reprogrammer" ? formatOrderStatus(order.status) : ""
+    STATUTS_A_RELIVRER.includes(order.status) ? formatOrderStatus("a_reprogrammer") : ""
   ].filter(Boolean).join(" · ");
 }
 
 function setDeliverySelection(orderId, checked) {
   if (checked) deliverySelection.add(String(orderId));
-  else deliverySelection.delete(String(orderId));
+  else {
+    deliverySelection.delete(String(orderId));
+    deliveryFirst.delete(String(orderId));
+  }
+  // « A livrer en premier » suit la selection, sans redessiner la liste.
+  const premier = document.querySelector(`[data-delivery-first="${cssEscape(String(orderId))}"]`);
+  if (premier) {
+    premier.closest(".delivery-premier").hidden = !checked;
+    if (!checked) premier.checked = false;
+  }
 
   updateSelectedDeliveryCount();
   renderMap();
@@ -6114,6 +6366,7 @@ function selectAllDelivery(checked) {
     getFilteredDeliveryOrders().forEach(order => deliverySelection.add(String(order.id)));
   } else {
     deliverySelection.clear();
+    deliveryFirst.clear();
   }
 
   renderDeliveryCandidates();
@@ -6136,26 +6389,73 @@ async function createDeliveryRoute() {
   }
 
   const points = getRoutePoints();
-  activeRoute = await apiFetch("/api/routes", {
-    method: "POST",
-    timeoutMs: 90000,
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      ...points,
-      sector: deliveryFilter.sector,
-      city: deliveryFilter.city,
-      deliveryDate: deliveryFilter.date,
-      orderIds
-    })
-  });
+
+  // Lot 7 : au-dela de 50 commandes (plafond d'une tournee), le serveur
+  // propose un decoupage par direction depuis le depart. On cree la premiere
+  // tournee ; les autres commandes restent choisies pour la suivante.
+  let tournee = orderIds;
+  let pourLaSuite = [];
+  if (orderIds.length > 50) {
+    // La proposition de decoupage n'ecrit rien : hors ligne, apiFetch la
+    // mettrait en file et l'ecran dirait « enregistre », alors qu'aucune
+    // tournee ne serait jamais creee (revue du 23/09).
+    if (estDefinitivementHorsLigne()) {
+      throw new Error("Hors ligne : au-delà de 50 commandes, le découpage en tournées demande le réseau. Rien n’a été enregistré.");
+    }
+    const { groupes } = await apiFetch("/api/routes/decoupage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // Les commandes « À livrer en premier » partent dans la premiere tournee.
+      body: JSON.stringify({ orderIds, departure: points.departure, premiers: orderIds.filter(id => deliveryFirst.has(String(id))) })
+    });
+    const tailles = groupes.map(groupe => groupe.length).join(" + ");
+    if (!window.confirm(`${orderIds.length} commandes : une tournée en compte 50 au plus. Séréo propose ${groupes.length} tournées (${tailles}), regroupées par direction depuis le départ.\n\nCréer la première maintenant (${groupes[0].length} commandes) ? Les autres resteront sélectionnées pour la suivante.`)) return;
+    tournee = groupes[0];
+    pourLaSuite = groupes.slice(1).flat();
+  }
+
+  try {
+    activeRoute = await apiFetch("/api/routes", {
+      method: "POST",
+      timeoutMs: 90000,
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        ...points,
+        sector: deliveryFilter.sector,
+        city: deliveryFilter.city,
+        deliveryDate: deliveryFilter.date,
+        orderIds: tournee,
+        premiers: tournee.filter(id => deliveryFirst.has(String(id))),
+        // Un arret injoignable par la route ne bloque plus toute la tournee : il
+        // en est retire, et nomme ci-dessous.
+        retirerInjoignables: true
+      })
+    });
+  } catch (erreur) {
+    // Lot 3 : le serveur nomme TOUTES les adresses douteuses ; chacune
+    // recoit son bouton « Corriger » sous la preparation.
+    afficherErreursTournee(erreur?.details?.adresses || []);
+    throw erreur;
+  }
+  afficherErreursTournee([]);
 
   activeStopIndex = 0;
-  deliverySelection.clear();
+  deliverySelection = new Set(pourLaSuite.map(String));
+  deliveryFirst = new Set([...deliveryFirst].filter(id => deliverySelection.has(id)));
   await loadData();
   showTab("livreur");
-  notify("Tournée optimisée créée.", "success");
+  const retires = (activeRoute.injoignablesRetires || []).map(o => o.clientName).filter(Boolean);
+  // Les deux nouvelles peuvent arriver ensemble : aucune ne masque l'autre.
+  const suite = pourLaSuite.length ? ` ${pourLaSuite.length} commande(s) restent sélectionnées pour la tournée suivante.` : "";
+  if (retires.length) {
+    notify(`Tournée créée sans ${retires.join(", ")} : injoignable par la route. Vérifie l’adresse ; la commande reste prête à livrer.${suite}`, "warning");
+  } else if (pourLaSuite.length) {
+    notify(`Tournée optimisée créée.${suite}`, "success");
+  } else {
+    notify("Tournée optimisée créée.", "success");
+  }
 }
 
 async function startActiveRoute() {
@@ -6215,9 +6515,12 @@ function renderRoute() {
     // etat), le nom, une ligne de detail, le badge. Pour un arret en echec,
     // le motif REMPLACE l'adresse -- comme « Il manque 2 articles » sur la
     // planche Preparation -- au lieu de s'ajouter en cinquieme.
-    const detail = stop.problemReason
+    // Un geste en file (lot 1 de l'audit geo) : l'arret est montre fait, et la
+    // ligne dit que le serveur ne le sait pas encore.
+    const attente = stop.enAttenteEnvoi ? `<span class="route-stop-attente">En attente d’envoi</span>` : "";
+    const detail = attente + (stop.problemReason
       ? `<span class="route-stop-motif">${escapeHtml(stop.problemReason)}</span>`
-      : `<span title="${escapeAttribute(formatStopAddress(stop))}">${escapeHtml(formatStopMeta(stop))}</span>`;
+      : `<span title="${escapeAttribute(formatStopAddress(stop))}">${escapeHtml(formatStopMeta(stop))}</span>`);
     // Les fleches ne sont rendues QUE quand la tournee se reordonne encore.
     // Avant, deux boutons de 60 px etaient rendus desactives sur chaque
     // ligne d'une tournee en cours : 120 px de vide par arret.
@@ -6251,7 +6554,10 @@ function selectStop(index) {
   if (!activeRoute || !activeRoute.stops[index]) return;
   activeStopIndex = index;
   renderRoute();
-  focusEntity(activeRoute.stops[activeStopIndex]);
+  // M3 (audit geo) : le marqueur « en cours » de la CARTE suit l'arret choisi
+  // -- avant, deux arrets semblaient en cours. renderMap met a jour les deux
+  // marqueurs concernes et fait glisser la carte vers l'arret, a son zoom.
+  renderMap();
   updateRouteProgress();
 }
 
@@ -6277,7 +6583,11 @@ async function moveStop(stopId, direction) {
   });
 
   activeStopIndex = nextIndex;
-  await loadData();
+  // Lot 5 : la reponse est la tournee telle que la liste la rend.
+  deliveryRoutes = remplacerParId(deliveryRoutes, activeRoute);
+  route = activeRoute.stops;
+  renderAll({ lectures: false });
+  recopierApresGeste();
   notify("Ordre de tournée mis à jour.", "success");
 }
 
@@ -6525,30 +6835,95 @@ async function marquerArret(status) {
   await updateCurrentDeliveryStatus(status, motif);
 }
 
-async function updateCurrentDeliveryStatus(status, motif = null) {
+async function updateCurrentDeliveryStatus(status, motif = null, faitLe = new Date().toISOString()) {
   if (activeRoute) {
     const stop = activeRoute.stops[activeStopIndex];
     if (!stop) {
       notify("Aucun arrêt sélectionné.", "warning");
       return;
     }
+    // Un second geste sur un arret dont le premier attend dans la file
+    // produirait deux ecritures contradictoires, dont la seconde serait
+    // refusee au renvoi -- et perdue (H3, lot 1 de l'audit geo).
+    if (gestesArretEnFile.has(cleArret(activeRoute.id, stop.id))) {
+      notify(`${stop.clientName || "Cet arrêt"} : un geste attend déjà d’être envoyé.`, "warning");
+      return;
+    }
 
-    const result = await apiFetch(`/api/routes/${encodeURIComponent(activeRoute.id)}/stops/${encodeURIComponent(stop.id)}`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ status, motif })
-    });
+    let result;
+    try {
+      result = await apiFetch(`/api/routes/${encodeURIComponent(activeRoute.id)}/stops/${encodeURIComponent(stop.id)}`, {
+        method: "PATCH",
+        timeoutMs: DELAI_GESTE_ARRET_MS,
+        headers: {
+          "Content-Type": "application/json"
+        },
+        // faitLe : l'heure du geste, pas celle de l'arrivee au serveur (M6).
+        body: JSON.stringify({ status, motif, faitLe }),
+        resume: resumeDeGeste(activeRoute.id, stop, status)
+      });
+    } catch (error) {
+      if (error?.recuParLeServeur) {
+        // Le serveur a applique le geste ; seul le corps de sa reponse s'est
+        // perdu. L'ecran avance comme sur un succes -- sinon le livreur,
+        // devant un echec, referait le geste.
+        const ici = activeRoute.stops.findIndex(s => String(s.id) === String(stop.id));
+        if (ici >= 0) { activeRoute.stops[ici].status = status; activeStopIndex = ici; }
+        avancerALArretSuivant();
+        rafraichirTournee();
+        notify("Statut livraison enregistré.", "success");
+        await loadData();
+        return;
+      }
+      if (!error?.enFile) throw error;
+      // H3 : en file, le geste est FAIT pour le livreur. L'ecran avance comme
+      // en ligne ; avant, il restait sur le meme arret, et le « Livre » suivant
+      // partait sur le meme client.
+      // La mise en file a deja redessine la tournee (rafraichirEtatFile), et
+      // renderRoute a pu sauter au premier arret restant : on repart de
+      // l'arret du geste, pour avancer d'UN cran, comme en ligne.
+      const ici = activeRoute.stops.findIndex(s => String(s.id) === String(stop.id));
+      if (ici >= 0) {
+        activeRoute.stops[ici].status = status;
+        activeRoute.stops[ici].enAttenteEnvoi = true;
+        activeStopIndex = ici;
+      }
+      avancerALArretSuivant();
+      rafraichirTournee();
+      notifyEchec(error);
+      return;
+    }
 
-    activeRoute = result.route;
-    if (activeStopIndex < activeRoute.stops.length - 1) activeStopIndex++;
-    await loadData();
+    // L'ecran avance d'un arret s'il montre encore celui du geste : pendant
+    // l'envoi, le livreur a pu en choisir un autre, et une reponse qui arrive
+    // tard ne le deplace pas (integration des lots 1 et 5).
+    const ici = activeRoute.stops.findIndex(s => String(s.id) === String(stop.id));
+    if (ici === activeStopIndex && activeStopIndex < activeRoute.stops.length - 1) activeStopIndex++;
+    // Lot 5 : mise a jour ciblee, plus le rechargement complet. La tournee de
+    // la reponse n'y remplace l'ecran que si elle n'est pas plus ancienne (H4).
+    await appliquerGesteArret(result);
     notify("Statut livraison enregistré.", "success");
     return;
   }
 
   await updateLegacyClientDeliveryStatus(status);
+}
+
+/** L'arret suivant a traiter : le prochain non termine APRES l'arret courant, sinon le premier qui reste. */
+function avancerALArretSuivant() {
+  if (!activeRoute) return;
+  const apres = activeRoute.stops.findIndex((s, i) => i > activeStopIndex && !isStopTerminal(s.status));
+  const reste = apres >= 0 ? apres : activeRoute.stops.findIndex(s => !isStopTerminal(s.status));
+  if (reste >= 0) activeStopIndex = reste;
+}
+
+function cleArret(routeId, stopId) {
+  return `${routeId}|${stopId}`;
+}
+
+/** Ce que la file garde pour nommer le geste a l'ecran. */
+function resumeDeGeste(routeId, stop, status) {
+  return { nature: "arret", nom: String(stop.clientName || ""), statut: String(status), routeId: String(routeId), stopId: String(stop.id) };
 }
 
 // --- « LIVRE », SANS CONFIRMATION, AVEC ANNULER (planche 4b) ------------------
@@ -6644,17 +7019,18 @@ async function livrerAvecAnnulation() {
   const suspens = {
     routeId: String(activeRoute.id),
     stopId: String(stop.id),
+    clientName: stop.clientName || "",
     statutAvant: stop.status,
     indexAvant: activeStopIndex,
+    // L'heure de l'APPUI, pas celle de l'envoi 4 s (ou 4 h) plus tard (M6).
+    faitLe: new Date().toISOString(),
     toast: null
   };
   livraisonEnSuspens = suspens;
   appliquerLivraisonEnSuspens();
   // L'arret suivant : le prochain non termine APRES celui-ci, sinon le premier
   // qui reste (un arret saute plus tot).
-  const apres = activeRoute.stops.findIndex((s, i) => i > activeStopIndex && !isStopTerminal(s.status));
-  const reste = apres >= 0 ? apres : activeRoute.stops.findIndex(s => !isStopTerminal(s.status));
-  if (reste >= 0) activeStopIndex = reste;
+  avancerALArretSuivant();
   rafraichirTournee();
 
   suspens.toast = notify(`Livré — ${stop.clientName || "arrêt"}`, "success", {
@@ -6700,22 +7076,29 @@ function envoyerLivraisonEnSuspens(attendu = null) {
   livraisonEnSuspens = null;
   retirerToast(s.toast);
   const envoi = (async () => {
+    let resultat;
     try {
-      await apiFetch(`/api/routes/${encodeURIComponent(s.routeId)}/stops/${encodeURIComponent(s.stopId)}`, {
+      resultat = await apiFetch(`/api/routes/${encodeURIComponent(s.routeId)}/stops/${encodeURIComponent(s.stopId)}`, {
         method: "PATCH",
         // keepalive : l'envoi declenche par `pagehide` survit a la page.
         keepalive: true,
+        timeoutMs: DELAI_GESTE_ARRET_MS,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "livre", motif: null })
+        body: JSON.stringify({ status: "livre", motif: null, faitLe: s.faitLe }),
+        resume: resumeDeGeste(s.routeId, { id: s.stopId, clientName: s.clientName }, "livre")
       });
     } catch (error) {
-      // Mise en file hors ligne : l'ecriture partira au retour du reseau.
-      // L'ecran garde « Livre » -- recharger depuis le cache le defairait.
+      // Mise en file (hors ligne, reseau muet, delai depasse) : l'ecriture
+      // partira au retour du reseau. L'ecran garde « Livre » -- recharger
+      // depuis le cache le defairait.
       if (error && error.enFile) throw error;
       await loadData();
+      // Livree au serveur, seule sa reponse s'est perdue : pas un echec.
+      if (error && error.recuParLeServeur) return;
       throw error;
     }
-    await loadData();
+    // Lot 5 : mise a jour ciblee, plus le rechargement complet.
+    await appliquerGesteArret(resultat);
   })();
   envoiLivraison = envoi;
   const liberer = () => { if (envoiLivraison === envoi) envoiLivraison = null; };
@@ -6941,15 +7324,7 @@ function showCurrentClient(client) {
     </div>
     ${renderProducts(client)}
     <div class="coordinate-controls">
-      <label>
-        Latitude
-        <input id="currentLat" type="number" min="-90" max="90" step="any" value="${escapeAttribute(client.lat ?? "")}">
-      </label>
-      <label>
-        Longitude
-        <input id="currentLng" type="number" min="-180" max="180" step="any" value="${escapeAttribute(client.lng ?? "")}">
-      </label>
-      <button class="button primary" type="button" data-action="save-coordinates">Enregistrer coordonnées</button>
+      <button class="button secondary" type="button" data-adr="ouvrir" data-adr-client="${escapeAttribute(client.clientId || client.id)}">Corriger la position</button>
     </div>
   `;
   updateDriverActionButtons(client);
@@ -6981,7 +7356,10 @@ function updateDriverActionButtons(target = getCurrentDeliveryTarget()) {
   const hasNextStop = activeRoute
     ? activeRoute.stops.some((stop, index) => index > activeStopIndex && !isStopTerminal(stop.status))
     : currentIndex >= 0 && currentIndex < route.length - 1;
-  const canReplan = Boolean(target?.orderId && ["livre", "absent", "probleme", "a_reprogrammer"].includes(target.status));
+  // « Planifier la suite » : une commande LIVREE seulement. Un absent revient
+  // de lui-meme dans les commandes pretes (C1) ; le cloner le ferait livrer
+  // deux fois (M1, refuse aussi par le serveur).
+  const canReplan = Boolean(target?.orderId && target.status === "livre");
 
   setButtonDisabled("callClientButton", !hasTarget || !buildPhoneUrl(target?.phone || target?.telephone));
   setButtonDisabled("mapsButton", !hasTarget || !buildGoogleMapsUrl(target));
@@ -6993,39 +7371,27 @@ function updateDriverActionButtons(target = getCurrentDeliveryTarget()) {
   setButtonDisabled("nextClientButton", !hasTarget || !routeStarted || !hasNextStop);
 }
 
-async function saveCurrentCoordinates() {
-  const client = route[currentIndex];
-
-  if (!client) {
-    notify("Aucun client sélectionné.", "warning");
-    return;
-  }
-
-  const lat = document.getElementById("currentLat")?.value ?? "";
-  const lng = document.getElementById("currentLng")?.value ?? "";
-
-  await apiFetch(`/api/clients/${encodeURIComponent(client.id)}/coordinates`, {
-    method: "PATCH",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ lat, lng })
-  });
-
-  await loadData();
-
-  const nextIndex = clients.findIndex(item => String(item.id) === String(client.id));
-  route = [...clients];
-  currentIndex = nextIndex;
-
-  if (currentIndex >= 0) {
-    showCurrentClient(route[currentIndex]);
-    focusEntity(route[currentIndex]);
-  }
-
-  notify("Coordonnées enregistrées.", "success");
-}
-
+/**
+ * La carte de l'ecran Tournee. Lot 4 de l'audit geo (23/09) : « une carte
+ * utilisable au telephone ».
+ *
+ * - MISE A JOUR CIBLEE. Avant, chaque rendu retirait et recreait tous les
+ *   marqueurs (120 a 265 ms par case cochee sur un telephone lent, 300 points).
+ *   Chaque marqueur a maintenant une cle ; on ne touche qu'a ce qui change
+ *   (setIcon, setLatLng, contenu de la bulle), et le trace ne se redessine que
+ *   si la tournee ou sa geometrie changent.
+ * - PLUS DE RECADRAGE A CHAQUE GESTE (H10). Avant, « Livre », « Absent » ou un
+ *   changement d'onglet recadraient sur toute la tournee : le livreur rezoomait
+ *   a chaque arret. On ne cadre que quand la tournee AFFICHEE change (autre
+ *   tournee, arrets ajoutes ou retires) ; sinon la vue du livreur est gardee, et
+ *   la carte glisse vers l'arret en cours QUAND IL CHANGE, a son zoom.
+ *   « Recentrer » remet toute la tournee dans le cadre.
+ * - SANS TOURNEE, pas de faux trajet. Avant, les commandes (ou, a defaut, TOUS
+ *   les clients de la base) etaient numerotees « Arret N » et reliees par un
+ *   pointille dans l'ordre de la liste : un trajet que rien n'avait calcule.
+ *   En preparation, la carte montre les commandes pretes a livrer par des
+ *   points sans numero, cochees ou non ; jamais les clients.
+ */
 function renderMap() {
   if (!map) return;
   // Un conteneur sans taille (onglet masque) ne se cadre pas : fitBounds y
@@ -7033,62 +7399,209 @@ function renderMap() {
   const taille = map.getSize();
   if (!taille.x || !taille.y) return;
 
-  markers.forEach(marker => map.removeLayer(marker));
-  markers = [];
+  const modeTournee = Boolean(activeRoute?.stops?.length);
+  const { voulus, sansPosition, total } = modeTournee ? marqueursDeTournee(activeRoute) : marqueursDePreparation();
+  appliquerMarqueurs(voulus);
+  dessinerTrace(modeTournee);
+  majLegendeCarte(modeTournee, voulus.filter(v => !v.repere).length, sansPosition, total);
 
-  if (routeLine) {
-    map.removeLayer(routeLine);
-    routeLine = null;
+  // Cadrer seulement quand la tournee affichee change. L'ordre des arrets n'en
+  // fait pas partie : reordonner ne deplace pas la vue.
+  const cle = modeTournee
+    ? `r:${activeRoute.id}:${activeRoute.stops.map(s => String(s.id)).sort().join(",")}`
+    : `p:${voulus.map(v => v.cle).sort().join(",")}`;
+  const courant = modeTournee && !isRouteComplete(activeRoute) ? activeRoute.stops[activeStopIndex] : null;
+  if (cle !== cleCadrage) {
+    cleCadrage = cle;
+    cadrerCarte();
+    arretSuivi = courant ? String(courant.id) : null;
+  } else if (courant && String(courant.id) !== arretSuivi) {
+    // L'arret en cours a change (« Livre », choix dans la liste ou sur la
+    // carte) : la carte le suit, au zoom que le livreur a choisi.
+    arretSuivi = String(courant.id);
+    const coords = getEntityCoordinates(courant);
+    if (coords) map.panTo([coords.lat, coords.lng]);
   }
-  if (routeLineLisere) {
-    map.removeLayer(routeLineLisere);
-    routeLineLisere = null;
-  }
+}
 
-  const entities = getMapEntities();
-  const points = [];
+// Lot 4 (carte) sur le champ du lot 3 : la carte ne lit que geoPrecision.
+// Approximatif = rue, lieu-dit, commune (le point n'est pas a la porte) ;
+// « numero » est exact ; « manuel » (pose par une personne ou venu du
+// fichier) n'est pas dit approximatif. Meme partition que
+// geocodage.precisionApproximative cote serveur.
+const POSITION_APPROXIMATIVE = { rue: "au milieu de la rue", "lieu-dit": "au centre du lieu-dit", commune: "au centre de la commune" };
+const positionApproximative = entity => Object.hasOwn(POSITION_APPROXIMATIVE, entity?.geoPrecision || "");
+const mentionApproximative = entity => positionApproximative(entity)
+  ? `<br><em>Position approximative : le point est ${POSITION_APPROXIMATIVE[entity.geoPrecision]}.</em>`
+  : "";
 
-  entities.forEach((entity, index) => {
-    const coords = getEntityCoordinates(entity);
+/** « 3 et 7 », « 3, 5 et 7 ». */
+function listeRangs(rangs) {
+  return rangs.length < 2 ? String(rangs[0]) : `${rangs.slice(0, -1).join(", ")} et ${rangs.at(-1)}`;
+}
 
-    if (!coords) return;
+function iconeCarte(html) {
+  // Le meme marqueur que dans la ligne d'arret. La zone de toucher fait
+  // 44 x 44 (plancher de la charte) ; sur la carte le disque fait 44 lui
+  // aussi (decision du 23/09, planche 4c) -- la zone de toucher EST le disque.
+  return L.divIcon({ className: "marqueur-ancre", html, iconSize: [44, 44], iconAnchor: [22, 22], popupAnchor: [0, -20] });
+}
 
-    // Le meme marqueur que dans la ligne d'arret. La zone de toucher fait
-    // 44 x 44 (plancher de la charte) ; sur la carte le disque fait 44 lui
-    // aussi (decision du 23/09, planche 4c) -- la zone de toucher EST le disque.
-    const etat = marqueurEtat(entity, index);
-    const marker = L.marker([coords.lat, coords.lng], {
-      icon: L.divIcon({
-        className: "marqueur-ancre",
-        html: marqueurHtml(entity, index),
-        iconSize: [44, 44],
-        iconAnchor: [22, 22],
-        popupAnchor: [0, -20]
-      }),
-      // L'arret en cours passe devant les autres, puis les arrets a venir,
-      // puis les faits : ce qu'on cherche des yeux est ce qu'on doit toucher.
-      zIndexOffset: etat === "en-cours" ? 1000 : etat === "a-venir" ? 500 : 0
-    }).addTo(map);
+function bulleArret(stop, index) {
+  return `<strong>Arrêt ${index + 1} · ${escapeHtml(getEntityName(stop))}</strong><br>
+      ${escapeHtml(formatEntityAddress(stop))}<br>
+      ${escapeHtml(formatEntityStatus(stop))}${mentionApproximative(stop)}`;
+}
 
-    marker.bindPopup(`
-      <strong>${escapeHtml(getEntityName(entity))}</strong><br>
-      ${escapeHtml(formatEntityAddress(entity))}<br>
-      ${escapeHtml(formatEntityStatus(entity))}
-    `);
-
-    marker.on("click", () => {
-      if (activeRoute) selectStop(index);
-    });
-
-    markers.push(marker);
-    points.push([coords.lat, coords.lng]);
+/**
+ * Les marqueurs d'une tournee. Les arrets a la MEME position (deux commandes
+ * du meme client) font un seul marqueur « 3·7 » : empiles, un seul restait
+ * visible et l'autre semblait absent. Depart et arrivee sont dessines meme
+ * sans trace routier -- avant, ils disparaissaient apres un reordonnancement
+ * (le serveur efface la geometrie, pas le depart ni l'arrivee).
+ */
+function marqueursDeTournee(tournee) {
+  const groupes = new Map();
+  let sansPosition = 0;
+  tournee.stops.forEach((stop, index) => {
+    const coords = getEntityCoordinates(stop);
+    if (!coords) { sansPosition += 1; return; }
+    const cle = `${coords.lat.toFixed(5)},${coords.lng.toFixed(5)}`;
+    if (!groupes.has(cle)) groupes.set(cle, { coords, membres: [] });
+    groupes.get(cle).membres.push({ stop, index });
   });
 
-  const mapEmpty = document.getElementById("mapEmpty");
-  if (mapEmpty) mapEmpty.hidden = points.length > 0;
+  const voulus = [];
+  for (const { coords, membres } of groupes.values()) {
+    const etats = membres.map(m => marqueurEtat(m.stop, m.index));
+    // L'etat montre est celui qu'on cherche des yeux : l'arret en cours, puis
+    // un arret a venir, puis un echec, puis les faits.
+    const etat = ["en-cours", "a-venir", "echec", "fait"].find(e => etats.includes(e));
+    const cible = membres[etats.indexOf(etat)];
+    voulus.push({
+      cle: `a:${membres.map(m => String(m.stop.id)).join("+")}`,
+      latlng: [coords.lat, coords.lng],
+      html: membres.length === 1 ? marqueurHtml(cible.stop, cible.index, { surCarte: true }) : marqueurGroupeHtml(membres, etat),
+      bulle: membres.map(m => bulleArret(m.stop, m.index)).join("<hr>"),
+      // L'arret en cours passe devant les autres, puis les arrets a venir,
+      // puis les faits : ce qu'on cherche des yeux est ce qu'on doit toucher.
+      zIndexOffset: etat === "en-cours" ? 1000 : etat === "a-venir" ? 500 : 0,
+      clavier: true,
+      surClic: () => selectStop(cible.index)
+    });
+  }
 
-  if (activeRoute?.geometry?.coordinates) {
-    const roadPoints = activeRoute.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+  // Depart et arrivee. Au meme point (retour au depot), un seul repere.
+  const reperes = [[tournee.departure, "Départ", "D"], [tournee.arrival, "Arrivée", "A"]]
+    .map(([point, nom, lettre]) => ({ point, nom, lettre, coords: point ? getEntityCoordinates(point) : null }))
+    .filter(r => r.coords);
+  const memePoint = reperes.length === 2
+    && reperes[0].coords.lat === reperes[1].coords.lat && reperes[0].coords.lng === reperes[1].coords.lng;
+  const aDessiner = memePoint
+    ? [{ ...reperes[0], nom: "Départ et arrivée", lettre: "D·A" }]
+    : reperes;
+  for (const r of aDessiner) {
+    const libelle = `${r.nom} : ${r.point.label || "point choisi"}`;
+    voulus.push({
+      cle: `repere:${r.nom}`,
+      repere: true,
+      latlng: [r.coords.lat, r.coords.lng],
+      html: `<span class="marqueur marqueur--repere" role="img" aria-label="${escapeAttribute(libelle)}">${r.lettre}</span>`,
+      bulle: `<strong>${escapeHtml(r.nom)}</strong><br>${escapeHtml(r.point.label || "Point choisi")}`,
+      zIndexOffset: 100,
+      clavier: true,
+      surClic: null
+    });
+  }
+  return { voulus, sansPosition, total: tournee.stops.length };
+}
+
+function marqueurGroupeHtml(membres, etat) {
+  const rangs = membres.map(m => m.index + 1);
+  const libelle = etat === "fait" ? "livrés" : etat === "echec" ? "dont un en échec" : etat === "en-cours" ? "en cours" : "à venir";
+  const noms = [...new Set(membres.map(m => m.stop.clientName || "client"))].join(" ; ");
+  const approx = membres.some(m => positionApproximative(m.stop));
+  // Deux rangs se lisent « 3·7 » ; au-dela, « 3+2 » (le premier, et combien d'autres).
+  const texte = etat === "fait" || etat === "echec" ? "" : rangs.length === 2 ? rangs.join("·") : `${rangs[0]}+${rangs.length - 1}`;
+  return `<span class="marqueur marqueur--${etat} marqueur--groupe${approx ? " marqueur--approx" : ""}" role="img" aria-label="Arrêts ${listeRangs(rangs)}, ${libelle}${approx ? ", position approximative" : ""} : ${escapeAttribute(noms)}">${texte}</span>`;
+}
+
+/** Preparation : les commandes pretes a livrer (filtrees, plus la selection). */
+function marqueursDePreparation() {
+  const vues = new Map();
+  for (const order of getFilteredDeliveryOrders()) vues.set(String(order.id), order);
+  for (const order of orders) if (deliverySelection.has(String(order.id))) vues.set(String(order.id), order);
+  const voulus = [];
+  let sansPosition = 0;
+  for (const order of vues.values()) {
+    const coords = getEntityCoordinates(order);
+    if (!coords) { sansPosition += 1; continue; }
+    const choisi = deliverySelection.has(String(order.id));
+    const approx = positionApproximative(order);
+    const libelle = `${order.clientName || "Client"}, ${choisi ? "sélectionnée" : "non sélectionnée"}${approx ? ", position approximative" : ""}`;
+    voulus.push({
+      cle: `c:${order.id}`,
+      latlng: [coords.lat, coords.lng],
+      html: `<span class="marqueur marqueur--point${choisi ? " marqueur--choisi" : ""}${approx ? " marqueur--approx" : ""}" role="img" aria-label="${escapeAttribute(libelle)}"></span>`,
+      bulle: `<strong>${escapeHtml(getEntityName(order))}</strong><br>${escapeHtml(formatEntityAddress(order))}${mentionApproximative(order)}`,
+      zIndexOffset: choisi ? 500 : 0,
+      // La liste des commandes est l'equivalent clavier : sans cela, Tab
+      // traversait chacun des points avant la suite de la page.
+      clavier: false,
+      surClic: null
+    });
+  }
+  return { voulus, sansPosition, total: vues.size };
+}
+
+function appliquerMarqueurs(voulus) {
+  const gardes = new Set();
+  for (const v of voulus) {
+    gardes.add(v.cle);
+    let marqueur = marqueursCarte.get(v.cle);
+    if (!marqueur) {
+      marqueur = L.marker(v.latlng, { icon: iconeCarte(v.html), zIndexOffset: v.zIndexOffset, keyboard: v.clavier }).addTo(map);
+      marqueur.bindPopup(v.bulle);
+      marqueur.on("click", () => marqueur.sereoSurClic?.());
+      marqueur.sereoRendu = { html: v.html, lat: v.latlng[0], lng: v.latlng[1], bulle: v.bulle, z: v.zIndexOffset };
+      marqueursCarte.set(v.cle, marqueur);
+    } else {
+      const rendu = marqueur.sereoRendu;
+      // DivIcon reutilise son element : setIcon ne recree rien dans le DOM.
+      if (rendu.html !== v.html) { marqueur.setIcon(iconeCarte(v.html)); rendu.html = v.html; }
+      if (rendu.lat !== v.latlng[0] || rendu.lng !== v.latlng[1]) { marqueur.setLatLng(v.latlng); rendu.lat = v.latlng[0]; rendu.lng = v.latlng[1]; }
+      if (rendu.bulle !== v.bulle) { marqueur.setPopupContent(v.bulle); rendu.bulle = v.bulle; }
+      if (rendu.z !== v.zIndexOffset) { marqueur.setZIndexOffset(v.zIndexOffset); rendu.z = v.zIndexOffset; }
+    }
+    marqueur.sereoSurClic = v.surClic;
+  }
+  for (const [cle, marqueur] of marqueursCarte) {
+    if (gardes.has(cle)) continue;
+    map.removeLayer(marqueur);
+    marqueursCarte.delete(cle);
+  }
+}
+
+/** Le trace : seulement pour une tournee, redessine seulement s'il change. */
+function dessinerTrace(modeTournee) {
+  const geo = modeTournee ? activeRoute.geometry?.coordinates : null;
+  // Sans trace routier, le pointille relie depart, arrets et arrivee dans
+  // l'ORDRE DE LA TOURNEE (reordonnee a la main, ou jamais calculee).
+  const pointille = modeTournee && !geo
+    ? [activeRoute.departure, ...activeRoute.stops, activeRoute.arrival].map(e => e && getEntityCoordinates(e)).filter(Boolean).map(c => [c.lat, c.lng])
+    : [];
+  const signature = !modeTournee ? "" : geo
+    ? `g:${activeRoute.id}:${geo.length}:${geo[0]}:${geo.at(-1)}`
+    : `p:${pointille.map(p => p.join(",")).join(";")}`;
+  if (signature === signatureTrace) return;
+  signatureTrace = signature;
+
+  if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+  if (routeLineLisere) { map.removeLayer(routeLineLisere); routeLineLisere = null; }
+  if (!modeTournee) return;
+
+  if (geo) {
+    const roadPoints = geo.map(([lng, lat]) => [lat, lng]);
     // Planche 4c, decision de Thomas du 23/09 (remplace les 4,5 px du 19/09) :
     // le trace est en ACCENT, 7 px, bouts ronds. Une forme, pas un texte --
     // l'orange y est a sa place. Dessous, un lisere blanc de 2 px de chaque
@@ -7097,41 +7610,62 @@ function renderMap() {
     // esquisse. Le lisere n'est pas interactif : le clic reste au trace.
     routeLineLisere = L.polyline(roadPoints, {color: "#FFFFFF", weight: 11, opacity: 0.9, lineCap: "round", lineJoin: "round", interactive: false}).addTo(map);
     routeLine = L.polyline(roadPoints, {color: couleurCharte("--v8-accent", "#EF9177"), weight: 7, opacity: 1, lineCap: "round", lineJoin: "round"}).addTo(map);
-    for (const [point, label] of [[activeRoute.departure, "Départ"], [activeRoute.arrival, "Arrivée"]]) {
-      if (point) markers.push(L.marker([point.lat, point.lng]).addTo(map).bindPopup(`${label} : ${escapeHtml(point.label || "Point choisi")}`));
-    }
-    map.fitBounds(routeLine.getBounds(), {padding:[30,30]});
-  } else if (points.length > 1) {
+  } else if (pointille.length > 1) {
     // Sans geometrie routiere : un pointille en PRINCIPAL, pas un bleu V7.
-    routeLine = L.polyline(points, {
+    routeLine = L.polyline(pointille, {
       dashArray: "6 8",
       color: couleurCharte("--v8-principal", "#386B6D"),
       weight: 3,
       opacity: 0.8,
       lineCap: "round"
     }).addTo(map);
-
-    map.fitBounds(routeLine.getBounds(), {
-      padding: [30, 30]
-    });
-  } else if (points.length === 1) {
-    // Audit UI 2026-07 : cas frequent "1 arret" -> fitBounds n'etait pas
-    // appele, la carte restait sur le centre code en dur [46.9511,4.9027] et
-    // le marqueur unique tombait hors-cadre. On recentre sur ce point.
-    map.setView(points[0], 14);
   }
 }
 
-function getMapEntities() {
-  if (activeRoute?.stops?.length) return activeRoute.stops;
+/** Sous-titre, legende et message de la carte, selon ce qu'elle montre. */
+function majLegendeCarte(modeTournee, points, sansPosition, total) {
+  const sousTitre = document.getElementById("carteSousTitre");
+  if (sousTitre) {
+    sousTitre.textContent = modeTournee
+      ? (activeRoute.geometry?.coordinates ? "Trajet routier · départ → clients → arrivée" : "Ordre de passage · tracé routier à recalculer")
+      : "Commandes prêtes à livrer · aucune tournée";
+  }
+  const legende = document.getElementById("carteLegende");
+  if (legende) legende.hidden = !modeTournee;
+  const recentrer = document.getElementById("carteRecentrer");
+  if (recentrer) recentrer.title = modeTournee ? "Recentrer sur toute la tournée" : "Recentrer sur les commandes";
 
-  const selectedOrders = orders.filter(order => deliverySelection.has(String(order.id)));
-  if (selectedOrders.length) return selectedOrders;
+  const vide = document.getElementById("mapEmpty");
+  if (!vide) return;
+  let texte = "";
+  if (!points) {
+    texte = modeTournee ? "Aucun arrêt de cette tournée n'a de position."
+      : total ? "Aucune commande prête à livrer n'a de position."
+        : "Aucune tournée ni commande prête à livrer.";
+  } else if (sansPosition) {
+    // Avant, ces arrets disparaissaient de la carte sans un mot.
+    const quoi = modeTournee ? (sansPosition > 1 ? "arrêts" : "arrêt") : (sansPosition > 1 ? "commandes" : "commande");
+    texte = `${sansPosition} ${quoi} sans position, absent${sansPosition > 1 ? "s" : ""} de la carte.`;
+  }
+  vide.textContent = texte;
+  vide.hidden = !texte;
+}
 
-  const filtered = getFilteredDeliveryOrders();
-  if (filtered.length) return filtered;
-
-  return clients;
+/** Toute la tournee (ou les commandes) dans le cadre ; la region s'il n'y a rien. */
+function cadrerCarte() {
+  if (!map) return;
+  const taille = map.getSize();
+  if (!taille.x || !taille.y) return;
+  const bornes = L.latLngBounds([...marqueursCarte.values()].map(m => m.getLatLng()));
+  if (routeLine) bornes.extend(routeLine.getBounds());
+  if (!bornes.isValid()) {
+    map.fitBounds(REGION_PAR_DEFAUT);
+  } else if (bornes.getNorthEast().equals(bornes.getSouthWest())) {
+    // Audit UI 2026-07 : cas frequent "1 arret" -> on centre sur ce point.
+    map.setView(bornes.getCenter(), 14);
+  } else {
+    map.fitBounds(bornes, { padding: [30, 30] });
+  }
 }
 
 function focusEntity(entity) {
@@ -7150,8 +7684,62 @@ function focusEntity(entity) {
 const APIFETCH_DEFAULT_TIMEOUT_MS = 30_000;
 const APIFETCH_UPLOAD_TIMEOUT_MS = 120_000;
 
+// Un geste d'arret (Livre, Absent...) n'attend pas 30 s : au-dela, il part en
+// file et l'ecran avance (lot 1 de l'audit geo, H1). La cle X-Sereo-Geste rend
+// le renvoi sans risque meme si le serveur avait recu le premier envoi.
+const DELAI_GESTE_ARRET_MS = 10_000;
+// La passerelle (SWAG) repond a la place d'un serveur qui redemarre : rien n'a
+// ete applique, l'ecriture se garde comme sur un echec reseau.
+const STATUTS_PASSERELLE = new Set([502, 503, 504]);
+
+function nouvelleCleDeGeste() {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  } catch { /* contexte non securise : repli ci-dessous */ }
+  return `g-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function entetesEnObjet(entetes) {
+  if (!entetes) return {};
+  if (typeof Headers !== "undefined" && entetes instanceof Headers) return Object.fromEntries(entetes.entries());
+  if (Array.isArray(entetes)) return Object.fromEntries(entetes);
+  return { ...entetes };
+}
+
+function erreurMiseEnFile() {
+  const attente = new Error("Réseau indisponible — enregistré, sera envoyé à la reconnexion.");
+  attente.enFile = true;
+  return attente;
+}
+
+/** Lit le corps d'une reponse ; abandonne au-dela de `delaiMs` (le flux est coupe). */
+function lireCorpsAvecDelai(res, delaiMs, abandonner) {
+  return new Promise((ok, ko) => {
+    const minuteur = setTimeout(() => {
+      // Coupe la requete (libere la connexion) ; la course tient meme si le
+      // flux ne reagit pas a l'annulation.
+      try { abandonner(); } catch { /* deja fini */ }
+      ko(new Error("Réponse trop lente."));
+    }, delaiMs);
+    res.text().then(
+      texte => { clearTimeout(minuteur); ok(texte); },
+      erreur => { clearTimeout(minuteur); ko(erreur); }
+    );
+  });
+}
+
 async function apiFetch(url, options = {}) {
   const isUpload = options.body instanceof FormData;
+  const methode = String(options.method || "GET").toUpperCase();
+  const ecriture = METHODES_FILABLES.has(methode);
+  if (ecriture) {
+    // Tout rechargement qui suit une ecriture passe par le reseau, jamais par
+    // la copie de secours du service worker (H4, voir loadData).
+    noterEcriture();
+    // La cle d'idempotence : gardee dans la file avec l'ecriture, elle fait
+    // qu'un renvoi n'est applique qu'une fois (gesteIdempotent, server.js).
+    if (!isUpload) options = { ...options, headers: { ...entetesEnObjet(options.headers), "X-Sereo-Geste": nouvelleCleDeGeste() } };
+  }
   const timeoutMs = options.timeoutMs || (isUpload ? APIFETCH_UPLOAD_TIMEOUT_MS : APIFETCH_DEFAULT_TIMEOUT_MS);
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
@@ -7174,21 +7762,26 @@ async function apiFetch(url, options = {}) {
     res = await fetch(url, { ...options, signal });
   } catch (err) {
     clearTimeout(timer);
-    // L'ecriture est-elle recuperable ? Voir estDefinitivementHorsLigne().
-    if (await tenterMiseEnFile(url, options)) {
-      const attente = new Error("Hors ligne — enregistré, sera envoyé à la reconnexion.");
-      attente.enFile = true;
-      throw attente;
-    }
+    // Si c'est l'appelant qui a abort (pas le timeout), on re-throw l'erreur
+    // originale pour preserver la semantique : il ne voulait plus rien envoyer.
+    if (options.signal && options.signal.aborted) throw err;
+    // L'ecriture est-elle recuperable ? Voir tenterMiseEnFile().
+    if (await tenterMiseEnFile(url, options)) throw erreurMiseEnFile();
     if (err && (err.name === "AbortError" || err.code === "ABORT_ERR")) {
-      // Si c'est l'appelant qui a abort (pas le timeout), on re-throw l'erreur
-      // originale pour preserver la semantique. Sinon notre message "timeout".
-      if (options.signal && options.signal.aborted) throw err;
-      throw new Error(`Reseau trop lent (timeout ${Math.round(timeoutMs / 1000)}s). Verifie ta connexion.`);
+      throw new Error(`Réseau trop lent (plus de ${Math.round(timeoutMs / 1000)} s). Vérifie ta connexion.`);
     }
-    throw err;
+    // Jamais le message brut du navigateur (« Failed to fetch », « Load
+    // failed », « NetworkError... ») : il est anglais et ne dit rien d'utile.
+    throw new Error("Impossible de joindre le serveur. Vérifie ta connexion.");
   }
   clearTimeout(timer);
+
+  if (ecriture && STATUTS_PASSERELLE.has(res.status) && await tenterMiseEnFile(url, options)) {
+    throw erreurMiseEnFile();
+  }
+  // Le serveur vient de repondre : c'est le moment de vider la file, meme si
+  // le telephone n'a jamais annonce « online » (il se croyait deja en ligne).
+  if (res.ok && ecrituresEnAttente > 0 && !(res.headers && res.headers.get("X-Sereo-Cache"))) viderLaFile();
 
   // Une reponse rendue par le cache du service worker (le reseau n'a pas
   // repondu a temps) : loadData() ne l'annoncera pas « A jour ».
@@ -7203,16 +7796,35 @@ async function apiFetch(url, options = {}) {
   // re-redirige pas (boucle infinie possible sur certains navigateurs).
   if ((res.status === 401 || res.status === 429) && !window.location.pathname.startsWith("/login")) {
     const next = window.location.pathname + window.location.search + window.location.hash;
+    // Le geste qui a rencontre la session expiree n'est pas perdu : il attend
+    // dans la file, qui repartira apres la reconnexion (H2, lot 1 de l'audit).
+    if (ecriture) await tenterMiseEnFile(url, options);
     // La session est finie : ses donnees ne doivent pas s'afficher a la
     // prochaine ouverture, avant que le serveur ait reconnu quelqu'un.
     // (Un 429 n'est pas une fin de session : on ne vide que sur 401.)
+    // La FILE, elle, n'est pas un cache : elle reste.
     if (res.status === 401) await viderCacheDeDonnees();
     window.location.href = `/login?next=${encodeURIComponent(next)}`;
     // On throw quand meme pour interrompre proprement le code appelant.
     throw new Error("Session expiree, redirection vers /login");
   }
 
-  const text = await res.text();
+  // Le CORPS a son propre delai (relecture adverse du lot 1). Premier jet :
+  // `await res.text()` sans delai ni traduction. En 4G faible, les en-tetes
+  // arrivaient (le serveur avait APPLIQUE le geste), puis le corps calait :
+  // le bouton restait sur « Envoi... » sans fin ; ou il cassait, et le message
+  // brut du navigateur (« network error », « Load failed ») s'affichait.
+  let text;
+  try {
+    text = await lireCorpsAvecDelai(res, timeoutMs, () => ac.abort());
+  } catch {
+    const coupe = new Error(res.ok
+      ? "Le serveur a bien reçu la demande, mais sa réponse a été coupée en route."
+      : "Impossible de joindre le serveur. Vérifie ta connexion.");
+    // Les en-tetes disent 2xx : l'ecriture EST faite. L'appelant peut avancer.
+    if (res.ok) coupe.recuParLeServeur = true;
+    throw coupe;
+  }
   let body = null;
 
   if (text) {
@@ -7227,7 +7839,10 @@ async function apiFetch(url, options = {}) {
     const message = body && typeof body === "object" && body.error
       ? body.error
       : `Erreur HTTP ${res.status}`;
-    throw new Error(message);
+    const erreur = new Error(message);
+    // Un refus peut porter sa liste (ex. les adresses a verifier d'une tournee).
+    if (body && typeof body === "object" && body.details) erreur.details = body.details;
+    throw erreur;
   }
 
   return body;
@@ -7271,20 +7886,31 @@ const METHODES_FILABLES = new Set(["POST", "PUT", "PATCH", "DELETE"]);
  * promet rien (portail captif, wifi sans internet), on ne s'en sert donc pas
  * pour conclure l'inverse.
  *
- * Cette asymetrie est exactement ce qu'il faut ici. Un TIMEOUT, lui, peut
- * parfaitement signifier que le serveur a RECU et TRAITE la demande : rejouer
- * une ecriture non idempotente apres un timeout la dupliquerait. On ne met donc
- * en file QUE ce dont on sait que le reseau ne l'a pas emporte.
+ * Elle ne sert plus qu'a l'AFFICHAGE (bandeau, imports desactives). La mise en
+ * file, elle, ne la consulte plus depuis le 23/09 (lot 1 de l'audit geo, H1) :
+ * en 4G sans debit, le telephone se croit en ligne, et un « Livre » perdu
+ * derriere le livreur etait le cas COURANT, pas l'exception. Le risque qui
+ * justifiait la prudence -- un delai depasse alors que le serveur a traite la
+ * demande, donc un renvoi qui la dupliquerait -- est tenu autrement : chaque
+ * ecriture porte une cle X-Sereo-Geste, et le serveur n'applique une cle
+ * qu'une fois.
  */
 function estDefinitivementHorsLigne() {
   return typeof navigator !== "undefined" && navigator.onLine === false;
 }
 
+// Des ecritures qu'on ne rejoue JAMAIS plus tard : la purge de la base (rejouee
+// trois heures apres, elle effacerait ce qui a ete saisi entre-temps) et les
+// comptes (un mot de passe n'a rien a faire en clair dans indexedDB). Pour
+// elles, l'echec franc vaut mieux.
+const JAMAIS_EN_FILE = [/^\/api\/comptes(\/|$)/, /^\/api\/orders\/purge$/];
+
 /** Met l'ecriture en file si elle est recuperable. Rend true si c'est fait. */
 async function tenterMiseEnFile(url, options) {
-  if (!estDefinitivementHorsLigne()) return false;
   const methode = String(options.method || "GET").toUpperCase();
   if (!METHODES_FILABLES.has(methode)) return false;
+  const chemin = new URL(url, window.location.origin).pathname;
+  if (JAMAIS_EN_FILE.some(motif => motif.test(chemin))) return false;
   // Un envoi de fichier ne se differe pas : rejouer un import Excel trois
   // heures plus tard, sur un stock qui a bouge, ferait plus de degats que de
   // refuser tout de suite.
@@ -7301,50 +7927,175 @@ async function tenterMiseEnFile(url, options) {
 }
 
 let ecrituresEnAttente = 0;
+// Les gestes d'arret en file, par arret (cleArret) : { status, nom }. L'ecran
+// les montre FAITS, « en attente d'envoi » -- sans quoi un rechargement (ou la
+// copie du service worker) remettrait « En livraison » un arret que le livreur
+// a deja livre, et l'inviterait a le livrer une seconde fois.
+let gestesArretEnFile = new Map();
+// Les resumes des ecritures en file, pour que le bandeau NOMME ce qui attend.
+let resumesEnFile = [];
 
-/** Relit le nombre d'ecritures en attente et le porte a l'ecran. */
+function gesteArretDeLEntree(entree) {
+  const m = /\/api\/routes\/([^/?#]+)\/stops\/([^/?#]+)$/.exec(String(entree.url || ""));
+  if (!m || entree.methode !== "PATCH") return null;
+  let corps = null;
+  try { corps = JSON.parse(entree.corps || "null"); } catch { corps = null; }
+  if (!corps || typeof corps.status !== "string") return null;
+  return {
+    routeId: decodeURIComponent(m[1]),
+    stopId: decodeURIComponent(m[2]),
+    status: corps.status,
+    nom: entree.resume?.nom || ""
+  };
+}
+
+// La tete de file a bout d'essais (5xx repetes) : elle n'est plus renvoyee
+// qu'une fois par quart d'heure (PAUSE_MAX_MS, file-attente.js). Annoncee UNE
+// fois, quand elle le devient -- premier jet : un toast a chaque renvoi, donc
+// toutes les 20 s, pour une situation que le livreur ne peut pas changer.
+let fileBloquee = false;
+
+/** Relit la file et la porte a l'ecran : compteur, bandeau, arrets en attente. */
 async function rafraichirEtatFile() {
-  try {
-    ecrituresEnAttente = await compterFile();
-  } catch {
-    ecrituresEnAttente = 0;
+  const file = await lireFile();
+  ecrituresEnAttente = file.length;
+  resumesEnFile = file.map(entree => entree.resume || null);
+  const bloquee = file.length > 0 && (file[0].essais || 0) >= ESSAIS_MAX;
+  if (bloquee && !fileBloquee) {
+    notify("Des modifications ne passent pas : le serveur répond en erreur. Elles sont gardées et renvoyées tous les quarts d'heure.", "warning");
+  }
+  fileBloquee = bloquee;
+  gestesArretEnFile = new Map();
+  for (const entree of file) {
+    const geste = gesteArretDeLEntree(entree);
+    if (geste) gestesArretEnFile.set(cleArret(geste.routeId, geste.stopId), geste);
   }
   setStatus(dernierStatut);
+  if (appliquerGestesEnFile()) rafraichirTournee();
+}
+
+/**
+ * Pose les gestes en file sur la tournee affichee. Rend true si l'ecran a
+ * change (un statut, ou la mention « en attente d'envoi » qui part).
+ */
+function appliquerGestesEnFile() {
+  if (!activeRoute || !Array.isArray(activeRoute.stops)) return false;
+  let change = false;
+  for (const stop of activeRoute.stops) {
+    const geste = gestesArretEnFile.get(cleArret(activeRoute.id, stop.id));
+    if (geste) {
+      if (stop.status !== geste.status) { stop.status = geste.status; change = true; }
+      if (!stop.enAttenteEnvoi) { stop.enAttenteEnvoi = true; change = true; }
+    } else if (stop.enAttenteEnvoi) {
+      delete stop.enAttenteEnvoi;
+      change = true;
+    }
+  }
+  return change;
 }
 
 /**
  * Vide la file. On envoie avec `fetch` NU, jamais avec apiFetch : apiFetch
  * remettrait en file ce qu'il vient d'en sortir, et la file se rechargerait
  * elle-meme a chaque tentative.
+ *
+ * Un seul renvoi a la fois (M9) : un appel pendant un renvoi rend la meme
+ * promesse, et demande un tour de plus a la fin -- une ecriture deposee
+ * entre-temps n'attend pas le prochain declencheur. (rejouer() tient aussi son
+ * propre verrou, y compris entre onglets.)
  */
-async function viderLaFile() {
-  if (ecrituresEnAttente === 0) return;
-  const bilan = await rejouer((u, o) => fetch(u, { ...o, credentials: "same-origin" }));
-  await rafraichirEtatFile();
+let viderEnCours = null;
+let viderRedemande = false;
 
+function viderLaFile() {
+  if (viderEnCours) {
+    viderRedemande = true;
+    return viderEnCours;
+  }
+  viderEnCours = (async () => {
+    try {
+      let bilan = null;
+      do {
+        viderRedemande = false;
+        await rafraichirEtatFile();
+        if (ecrituresEnAttente === 0) return;
+        bilan = await rejouer((u, o) => fetch(u, { ...o, credentials: "same-origin" }));
+        await rafraichirEtatFile();
+        annoncerBilanDeRenvoi(bilan);
+        // Un tour redemande apres un 5xx n'epuise plus les essais : l'entree
+        // est en pause (pauseApresEchecs, file-attente.js), le tour s'arrete
+        // sans rien envoyer. (Une garde `!bilan.arrete` ici a ete retiree le
+        // 23/09 : aucun banc ne la distinguait, la pause la rend redondante.)
+      } while (viderRedemande && !bilan.authRequise);
+    } finally {
+      viderEnCours = null;
+    }
+  })();
+  return viderEnCours;
+}
+
+function annoncerBilanDeRenvoi(bilan) {
   if (bilan.envoyees > 0) {
     notify(bilan.envoyees === 1
       ? "1 modification envoyée au serveur."
       : `${bilan.envoyees} modifications envoyées au serveur.`, "success");
+    // Le serveur a change : le rechargement qui suit passe par le reseau (H4).
+    noterEcriture();
     loadData();
   }
   if (bilan.refusees > 0) {
+    const noms = bilan.refus.map(r => r.resume?.nom).filter(Boolean);
+    const qui = noms.length ? ` (${noms.join(", ")})` : "";
     notify(bilan.refusees === 1
-      ? "1 modification a été refusée par le serveur et abandonnée."
-      : `${bilan.refusees} modifications ont été refusées par le serveur et abandonnées.`, "warning");
+      ? `1 modification a été refusée par le serveur et abandonnée${qui}.`
+      : `${bilan.refusees} modifications ont été refusées par le serveur et abandonnées${qui}.`, "warning");
   }
-  if (bilan.bloquee) {
-    notify("Des modifications ne passent pas. Elles sont conservées, mais plus renvoyées.", "warning");
+  // Le blocage (bilan.bloquee) est annonce par rafraichirEtatFile, une fois.
+  if (bilan.authRequise) renvoyerVersConnexionPourLaFile();
+}
+
+// Session expiree pendant le renvoi (H2) : la file est GARDEE, et on renvoie
+// vers la connexion ; elle repart a la reouverture (brancherFileHorsLigne).
+// Une seule redirection par minute : si le serveur refusait encore apres la
+// reconnexion, la page ne bouclerait pas entre /login et l'application.
+const CLE_RENVOI_CONNEXION = "sereo:file-connexion";
+
+function renvoyerVersConnexionPourLaFile() {
+  const n = ecrituresEnAttente;
+  let recent = false;
+  try {
+    const avant = Number(sessionStorage.getItem(CLE_RENVOI_CONNEXION) || 0);
+    recent = Date.now() - avant < 60_000;
+    if (!recent) sessionStorage.setItem(CLE_RENVOI_CONNEXION, String(Date.now()));
+  } catch { /* stockage indisponible : on redirige quand meme */ }
+  const quoi = `${n} modification${n > 1 ? "s" : ""} en attente`;
+  if (recent || window.location.pathname.startsWith("/login")) {
+    notify(`Session expirée : reconnecte-toi pour envoyer ${quoi}.`, "warning");
+    return;
   }
+  notify(`Session expirée : ${quoi}, gardée${n > 1 ? "s" : ""}. Reconnexion…`, "warning");
+  const next = window.location.pathname + window.location.search + window.location.hash;
+  window.location.href = `/login?next=${encodeURIComponent(next)}`;
 }
 
 // L'heure de la coupure, captee a l'evenement ; inconnue apres un
 // rechargement fait hors ligne (le bandeau dit alors « Hors ligne », sans heure).
 let horsLigneDepuis = null;
 
+// Le telephone qui se croit en ligne ne dit jamais « online » : sans essai
+// regulier, une ecriture mise en file sur un delai depasse attendrait le
+// prochain rechargement.
+const RENVOI_PERIODIQUE_MS = 20_000;
+
 function brancherFileHorsLigne() {
   window.addEventListener("online", () => { horsLigneDepuis = null; setStatus(dernierStatut); viderLaFile(); });
   window.addEventListener("offline", () => { horsLigneDepuis = new Date(); setStatus(dernierStatut); });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && ecrituresEnAttente > 0 && !estDefinitivementHorsLigne()) viderLaFile();
+  });
+  setInterval(() => {
+    if (ecrituresEnAttente > 0 && !estDefinitivementHorsLigne()) viderLaFile();
+  }, RENVOI_PERIODIQUE_MS);
   // A l'ouverture : l'onglet a pu etre ferme avec des ecritures en attente.
   // C'est le prix de ne pas utiliser Background Sync, absent d'iOS Safari --
   // une solution qui ne marche pas sur la moitie du parc n'en est pas une.
@@ -7402,9 +8153,33 @@ function majBandeauHorsLigne() {
     : "";
   setText("bandeauHorsLigneTitre", horsLigne ? (heure ? `Hors ligne depuis ${heure}` : "Hors ligne") : "Envoi en attente");
   const n = ecrituresEnAttente;
+  const suite = horsLigne ? "Envoi au retour du réseau."
+    : fileBloquee ? "Le serveur répond en erreur : nouvel essai tous les quarts d'heure."
+      : "Envoi dès que le serveur répond.";
   setText("bandeauHorsLigneDetail", n
-    ? `${n} modification${n > 1 ? "s" : ""} en attente d'envoi. ${horsLigne ? "Elles partiront au retour du réseau." : "Envoi en cours."}`
+    ? `${decrireAttente()} ${suite}`
     : "Vos modifications seront gardées et envoyées au retour du réseau. Les imports de fichiers attendront le réseau.");
+}
+
+const MOTS_DU_GESTE = { absent: "absent", probleme: "problème", a_reprogrammer: "à reprogrammer" };
+
+/**
+ * Ce qui attend, NOMME (lot 1 de l'audit geo, H1) : « 1 livraison en attente
+ * d'envoi : Dupont. » Un compteur seul ne dit pas au livreur QUI il devra
+ * peut-etre rappeler si l'envoi echoue.
+ */
+function decrireAttente() {
+  const n = ecrituresEnAttente;
+  const arrets = resumesEnFile.filter(r => r && r.nature === "arret");
+  const noms = [...new Set(arrets.map(r => {
+    const mot = MOTS_DU_GESTE[r.statut];
+    return `${r.nom || "arrêt"}${mot ? ` (${mot})` : ""}`;
+  }))];
+  const liste = noms.length > 3 ? `${noms.slice(0, 3).join(", ")} et ${noms.length - 3} autre${noms.length > 4 ? "s" : ""}` : noms.join(", ");
+  const s = k => (k > 1 ? "s" : "");
+  if (arrets.length && arrets.length === n) return `${n} livraison${s(n)} en attente d'envoi : ${liste}.`;
+  if (arrets.length) return `${n} modification${s(n)} en attente d'envoi, dont ${arrets.length} livraison${s(arrets.length)} : ${liste}.`;
+  return `${n} modification${s(n)} en attente d'envoi.`;
 }
 
 /** Charte §4 : « Toast : bas d'ecran, 4 s, une action possible (Annuler) ». */
@@ -7414,8 +8189,21 @@ function notify(message, type = "info", options = {}) {
   const region = document.getElementById("toastRegion");
   if (!region) return null;
 
+  // `options.cle` : un toast de meme cle encore affiche est RETIRE, pas
+  // doublonne -- un seul message vivant par cle. Reserve aux toasts sans
+  // action ni terme (retirerToast ne declenche ni l'un ni l'autre).
+  if (options.cle) {
+    for (const ancien of region.querySelectorAll(".toast[data-cle]")) {
+      if (ancien.dataset.cle === String(options.cle)) {
+        retirerToast(ancien);
+        ancien.remove();
+      }
+    }
+  }
+
   const toast = document.createElement("div");
   toast.className = `toast toast-${type}`;
+  if (options.cle) toast.dataset.cle = String(options.cle);
   toast.setAttribute("role", type === "error" ? "alert" : "status");
 
   const text = document.createElement("span");
@@ -7700,6 +8488,11 @@ function getEntityName(entity) {
 function getAddressWarning(entity) {
   const parts = getAddressParts(entity);
   if (!String(parts.address).trim() || !String(parts.city).trim()) return "Adresse incomplète";
+  // Lot 3 (audit geo) : un point au milieu de la rue ou au centre de la
+  // commune ne passe plus pour la porte du client.
+  if (entity?.geoPrecision === "rue") return "Position approximative : au milieu de la rue";
+  if (entity?.geoPrecision === "lieu-dit") return "Position approximative : centre du lieu-dit";
+  if (entity?.geoPrecision === "commune") return "Position approximative : centre de la commune";
   return "";
 }
 
@@ -7858,13 +8651,18 @@ function marqueurEtat(stop, index) {
   return "a-venir";
 }
 
-function marqueurHtml(stop, index) {
+function marqueurHtml(stop, index, { surCarte = false } = {}) {
   const etat = marqueurEtat(stop, index);
   // La coche et le « ! » sont dessines en CSS : le numero n'est ecrit que
   // pour les etats qui le montrent.
   const contenu = etat === "fait" || etat === "echec" ? "" : String(index + 1);
   const libelle = etat === "fait" ? "livré" : etat === "echec" ? "en échec" : etat === "en-cours" ? "en cours" : "à venir";
-  return `<span class="marqueur marqueur--${etat}" role="img" aria-label="Arrêt ${index + 1}, ${libelle}">${contenu}</span>`;
+  // Sur la carte, le marqueur est seul : il dit le client (lot 4 de l'audit
+  // geo -- un lecteur d'ecran annoncait « Arret 3, en cours » sans nom) et
+  // s'il est approximatif. Dans la ligne, le nom est deja a cote.
+  const approx = surCarte && positionApproximative(stop);
+  const suite = surCarte ? `${approx ? ", position approximative" : ""} : ${escapeAttribute(stop.clientName || "client")}` : "";
+  return `<span class="marqueur marqueur--${etat}${approx ? " marqueur--approx" : ""}" role="img" aria-label="Arrêt ${index + 1}, ${libelle}${suite}">${contenu}</span>`;
 }
 
 function getStopPill(status) {

@@ -233,6 +233,13 @@
         </svg>
       </button>
 
+      <!-- Aucune planche ne dessine la deconnexion : elle suit le compte, dans
+           la voix de la ligne de version (texte secondaire, 44 px). -->
+      <button class="sidebar-deconnexion" type="submit" form="formDeconnexion">
+        <svg class="sidebar-deconnexion-icone" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M10 16l-4-4 4-4M6 12h10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+        <span>Se déconnecter</span>
+      </button>
+
       <button class="sidebar-version" type="button" data-action="open-version-modal" aria-label="Voir la version et les nouveautes" title="Cliquer pour voir les nouveautés">
         <span class="sidebar-version-label">Version <span class="sidebar-version-value" id="sidebar-version-value">…</span></span>
         <span class="sidebar-version-etat" id="sidebarVersionEtat" hidden>À jour</span>
@@ -292,6 +299,13 @@
         <button class="more-sheet-item" type="button" role="menuitem" data-tab="parametres" data-action="more-menu-pick">
           <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-settings"></use></svg></span>
           <span class="more-sheet-label">Paramètres</span>
+        </button>
+        <!-- Une ACTION, pas une destination : les cinq destinations de la
+             passation restent cinq (.more-sheet-label) ; la deconnexion vient
+             apres un filet, avec son propre libelle. -->
+        <button class="more-sheet-item more-sheet-deconnexion" type="submit" form="formDeconnexion" role="menuitem">
+          <span class="more-sheet-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M10 16l-4-4 4-4M6 12h10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></span>
+          <span class="more-sheet-action">Se déconnecter</span>
         </button>
       </div>
     </div>
@@ -665,6 +679,18 @@
                 </select>
               </label>
             </div>
+            <!-- Au telephone seulement (planche 9a) : le compte de la liste
+                 filtree et le tri. Au bureau la liste reste par nom. -->
+            <div class="cli-resume-ligne">
+              <span id="cliCompte" class="cli-compte" aria-live="polite"></span>
+              <label class="cmd-tri cli-tri">
+                <span class="sr-only">Trier</span>
+                <select id="cliTri" aria-label="Trier les clients">
+                  <option value="livraison">Dernière livraison</option>
+                  <option value="nom">Nom</option>
+                </select>
+              </label>
+            </div>
             <div class="cli-carte cli-liste-carte">
               <div id="crmList" class="cli-liste" role="list" aria-label="Clients"></div>
             </div>
@@ -866,37 +892,6 @@
         </div>
       </section>
 
-      <section id="commandes-jour" class="page" role="tabpanel" aria-labelledby="tab-commandes-jour">
-        <div class="panel">
-          <div class="panel-heading">
-            <div>
-              <h3>Commandes du jour</h3>
-              <p class="muted">Regroupe les commandes terrain avant préparation.</p>
-            </div>
-            <label class="compact-date">Date<input id="todayOrdersDate" type="date" /></label>
-          </div>
-          <div class="delivery-actions">
-            <button class="button secondary" type="button" data-action="select-all-today-orders">Tout sélectionner</button>
-            <button class="button secondary" type="button" data-action="clear-today-orders">Tout désélectionner</button>
-            <button class="button primary" type="button" data-action="send-today-orders-preparation">Envoyer en préparation</button>
-          </div>
-          <div id="todayOrdersList" class="list"></div>
-        </div>
-      </section>
-
-      <section id="commandes-planifiees" class="page" role="tabpanel" aria-labelledby="tab-commandes-planifiees">
-        <div class="panel">
-          <div class="panel-heading">
-            <div>
-              <h3>Commandes planifiées</h3>
-              <p class="muted">Rappels J-7 et confirmations avant préparation.</p>
-            </div>
-            <span id="plannedOrdersSummary" class="status-chip">0 planifiée</span>
-          </div>
-          <div id="plannedOrdersList" class="list"></div>
-        </div>
-      </section>
-
       <section id="relances" class="page" role="tabpanel" aria-label="Rappels">
         <div class="field-app-grid">
           <div class="panel">
@@ -905,11 +900,11 @@
               <span id="relanceSummary" class="status-chip">0 à faire</span>
             </div>
             <div class="recommend-toolbar">
-              <button class="button secondary compact active-filter" type="button" data-relance-filter="today">Aujourd'hui</button>
-              <button class="button secondary compact" type="button" data-relance-filter="late">En retard</button>
-              <button class="button secondary compact" type="button" data-relance-filter="week">Cette semaine</button>
-              <button class="button secondary compact" type="button" data-relance-filter="upcoming">À venir</button>
-              <button class="button secondary compact" type="button" data-relance-filter="all">Toutes</button>
+              <button class="button secondary compact active-filter" type="button" aria-pressed="true" data-relance-filter="today">Aujourd'hui</button>
+              <button class="button secondary compact" type="button" aria-pressed="false" data-relance-filter="late">En retard</button>
+              <button class="button secondary compact" type="button" aria-pressed="false" data-relance-filter="week">Cette semaine</button>
+              <button class="button secondary compact" type="button" aria-pressed="false" data-relance-filter="upcoming">À venir</button>
+              <button class="button secondary compact" type="button" aria-pressed="false" data-relance-filter="all">Toutes</button>
             </div>
             <div id="relanceList" class="list"></div>
           </div>
@@ -930,14 +925,9 @@
 
       <section id="statistiques" class="page" role="tabpanel" aria-labelledby="tab-statistiques">
         <div class="stats-page">
-          <div class="stats-hero panel">
-            <div>
-              <p class="eyebrow">SEREO commercial</p>
-              <h3>Statistiques</h3>
-              <p class="muted">Ventes, clients et produits les plus actifs.</p>
-            </div>
-            <div id="statsEvolution" class="stats-evolution"></div>
-          </div>
+          <!-- Plus de bandeau « SEREO commercial / Statistiques » : il repetait
+               le titre de l'ecran, et ses deux pilules les evolutions que les
+               tuiles portent deja (ecrans sans planche, 23/09). -->
           <div id="statsKpis" class="stats-kpis"></div>
           <div class="stats-grid">
             <section class="panel">
@@ -1105,12 +1095,86 @@
           </article>
         </div>
       </section>
-      <dialog id="subscriptionDialog" class="subscription-dialog" aria-labelledby="subDialogTitle"><form id="subscriptionForm"><div class="panel-heading"><h2 id="subDialogTitle">Nouvel abonnement</h2><button class="button secondary" type="button" data-op="close-sub" aria-label="Fermer">✕</button></div>
-        <label>Client<select id="subClient" required></select></label>
-        <div id="subNewClient" class="op-form-grid" hidden><label>Nom<input id="subLastName" data-required></label><label>Prénom<input id="subFirstName"></label><label>Adresse<input id="subAddress" data-required></label><label>Code postal<input id="subPostal" inputmode="numeric"></label><label>Ville<input id="subCity" data-required></label><label>Téléphone<input id="subPhone" type="tel"></label></div>
-        <h3>Son panier habituel</h3><div id="subProducts"></div><button class="button secondary" type="button" data-op="add-line">+ Ajouter un produit</button>
-        <h3>Son rythme de livraison</h3><div class="op-form-grid"><label>Première livraison<input id="subStart" type="date" required></label><label>Fréquence<select id="subFrequency"><option value="7">Chaque semaine · même jour</option><option value="14">Toutes les 2 semaines · même jour</option><option value="10">Tous les 10 jours</option><option value="15">Tous les 15 jours</option><option value="21">Toutes les 3 semaines · même jour</option><option value="28">Toutes les 4 semaines · même jour</option><option value="monthly">Tous les mois · même date</option><option value="custom">Nombre de jours personnalisé</option></select></label><label id="subCustomWrap" hidden>Nombre de jours<input id="subCustom" type="number" min="1" max="366" value="10"></label><label>Rappel avant livraison (jours)<input id="subReminder" type="number" min="0" max="60" required value="7"></label><label>Statut<select id="subStatus"><option value="active">Actif</option><option value="paused">En pause</option><option value="cancelled">Arrêté</option></select></label></div>
-        <p id="subScheduleHint" class="muted"></p><label>Notes de livraison<textarea id="subNotes" rows="2" maxlength="2000" placeholder="Digicode, consignes, horaire préféré…"></textarea></label><p class="muted">Les modifications s’appliquent aux prochaines échéances. Les commandes déjà créées restent à gérer dans Commandes, filtre « Planifiées ».</p><p id="subError" class="op-error" role="alert"></p><div class="op-dialog-footer"><button class="button secondary" type="button" data-op="close-sub">Annuler</button><button id="subSave" class="button primary" type="submit">Enregistrer l’abonnement</button></div>
+      <!-- Creation et modification d'un abonnement (planches 3b / 5b). Au
+           telephone, une page pleine avec l'en-tete vert ; au bureau, la meme
+           logique dans une fenetre. Tout ce que l'ancien formulaire permettait
+           est garde : fiche client creee a la volee, quantites libres, un
+           nombre de jours (ou de mois) quelconque, rappel de 0 a 60 jours ; le
+           statut et les notes, que la planche ne dessine pas, sont sous
+           « Plus d'options ». -->
+      <dialog id="subscriptionDialog" class="subscription-dialog abo-cr" aria-labelledby="subDialogTitle"><form id="subscriptionForm" class="abo-cr-form">
+        <div class="abo-cr-entete">
+          <button class="abo-cr-fermer" type="button" data-op="close-sub" aria-label="Fermer"><svg class="abo-cr-fleche" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m14 6-6 6 6 6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg><svg class="abo-cr-croix" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button>
+          <h2 id="subDialogTitle">Nouvel abonnement</h2>
+        </div>
+        <div class="abo-cr-corps">
+          <section class="abo-cr-carte abo-cr-client" aria-labelledby="subClientTitre">
+            <h3 id="subClientTitre" class="abo-cr-libelle">Client</h3>
+            <input id="subClient" type="hidden" value="">
+            <div id="subClientChoisi" class="abo-cr-client-choisi" hidden>
+              <div class="abo-cr-client-champ"><span id="subClientNom" class="abo-cr-client-nom"></span><button class="abo-cr-client-changer" type="button" data-op="sub-client-changer" aria-label="Changer de client"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button></div>
+              <p id="subClientAdresse" class="abo-cr-client-adresse"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s7-6.2 7-11.5A7 7 0 0 0 5 9.5C5 14.8 12 21 12 21z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path><circle cx="12" cy="9.5" r="2.5" stroke="currentColor" stroke-width="2"></circle></svg><span></span></p>
+            </div>
+            <div id="subClientRecherche" class="abo-cr-client-recherche">
+              <label class="abo-cr-champ abo-cr-champ--recherche"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"></circle><path d="m20 20-4.35-4.35" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg><input id="subClientSearch" type="search" placeholder="Nom, ville ou téléphone" autocomplete="off" aria-label="Chercher un client" aria-controls="subClientResults"></label>
+              <div id="subClientResults" class="abo-cr-client-cartes" role="list" aria-label="Clients"></div>
+              <p id="subClientReste" class="abo-cr-note" hidden></p>
+            </div>
+            <fieldset id="subNewClient" class="abo-cr-fiche" disabled hidden><legend>Nouvelle fiche client</legend><label>Nom<input id="subLastName" required></label><label>Prénom<input id="subFirstName"></label><label>Adresse<input id="subAddress" required></label><label>Code postal<input id="subPostal" inputmode="numeric"></label><label>Ville<input id="subCity" required></label><label>Téléphone<input id="subPhone" type="tel"></label></fieldset>
+            <button id="subNouveauClient" class="button secondary abo-cr-secondaire" type="button" data-op="sub-nouveau-client" aria-expanded="false" aria-controls="subNewClient">Créer une fiche client</button>
+          </section>
+          <section class="abo-cr-carte abo-cr-produits" aria-labelledby="subProduitsTitre">
+            <div class="abo-cr-tete"><h3 id="subProduitsTitre">Produits</h3><button id="subCatalogueBouton" class="abo-cr-lien" type="button" data-op="sub-catalogue" aria-expanded="false" aria-controls="subCatalogue">Catalogue</button></div>
+            <div id="subProducts" class="abo-cr-panier"></div>
+            <p id="subPanierVide" class="abo-cr-note" hidden>Aucun produit : ajoute-les depuis le catalogue.</p>
+            <div id="subCatalogue" class="abo-cr-catalogue" hidden>
+              <label class="abo-cr-champ abo-cr-champ--recherche"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"></circle><path d="m20 20-4.35-4.35" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg><input id="subCatalogueSearch" type="search" placeholder="Produit ou code" autocomplete="off" aria-label="Chercher dans le catalogue" aria-controls="subCatalogueListe"></label>
+              <div id="subCatalogueListe" class="abo-cr-catalogue-liste" role="list" aria-label="Catalogue"></div>
+            </div>
+          </section>
+          <section class="abo-cr-carte abo-cr-rythme" aria-label="Rythme de livraison">
+            <label class="abo-cr-bloc"><span class="abo-cr-libelle">Première livraison</span><input id="subStart" class="abo-cr-champ" type="date" required></label>
+            <div class="abo-cr-bloc"><span id="subFrequenceTitre" class="abo-cr-libelle">Fréquence</span>
+              <div id="subFrequency" class="abo-cr-pilules" role="radiogroup" aria-labelledby="subFrequenceTitre">
+                <label class="abo-cr-pilule"><input type="radio" name="subFrequence" value="7" aria-label="Tous les 7 jours"><span>7 j</span></label>
+                <label class="abo-cr-pilule"><input type="radio" name="subFrequence" value="10" aria-label="Tous les 10 jours"><span>10 j</span></label>
+                <label class="abo-cr-pilule"><input type="radio" name="subFrequence" value="14" aria-label="Tous les 14 jours"><span>14 j</span></label>
+                <label class="abo-cr-pilule"><input type="radio" name="subFrequence" value="15" aria-label="Tous les 15 jours"><span>15 j</span></label>
+                <label class="abo-cr-pilule"><input type="radio" name="subFrequence" value="21" aria-label="Tous les 21 jours"><span>21 j</span></label>
+                <label class="abo-cr-pilule"><input type="radio" name="subFrequence" value="28" aria-label="Tous les 28 jours"><span>28 j</span></label>
+                <label class="abo-cr-pilule"><input type="radio" name="subFrequence" value="monthly" aria-label="Mensuel : tous les mois, même date"><span>Mensuel</span></label>
+                <label class="abo-cr-pilule"><input type="radio" name="subFrequence" value="custom" aria-label="Autre fréquence"><span>Autre…</span></label>
+              </div>
+              <fieldset id="subCustomWrap" class="abo-cr-autre" disabled hidden><legend class="sr-only">Autre fréquence</legend><label>Tous les<input id="subCustom" type="number" min="1" max="366" step="1" inputmode="numeric" required value="10"></label><label>Unité<select id="subCustomUnit"><option value="days">jours</option><option value="months">mois</option></select></label></fieldset>
+            </div>
+            <div class="abo-cr-apercu" aria-live="polite">
+              <p class="abo-cr-apercu-titre">Trois prochaines livraisons</p>
+              <ol id="subApercu" class="abo-cr-apercu-dates"></ol>
+              <p id="subScheduleHint" class="abo-cr-note"></p>
+            </div>
+          </section>
+          <section class="abo-cr-carte abo-cr-rappel" aria-labelledby="subRappelTitre">
+            <div class="abo-cr-tete abo-cr-tete--base"><span id="subRappelTitre" class="abo-cr-libelle">Rappel avant l’échéance</span><strong id="subRappelValeur" class="abo-cr-valeur"></strong></div>
+            <div class="abo-cr-pilules" role="radiogroup" aria-labelledby="subRappelTitre">
+              <label class="abo-cr-pilule"><input type="radio" name="subRappel" value="0" aria-label="Aucun rappel"><span>Aucun</span></label>
+              <label class="abo-cr-pilule"><input type="radio" name="subRappel" value="2" aria-label="2 jours avant"><span>2 j</span></label>
+              <label class="abo-cr-pilule"><input type="radio" name="subRappel" value="3" aria-label="3 jours avant"><span>3 j</span></label>
+              <label class="abo-cr-pilule"><input type="radio" name="subRappel" value="7" aria-label="7 jours avant"><span>7 j</span></label>
+              <label class="abo-cr-pilule"><input type="radio" name="subRappel" value="15" aria-label="15 jours avant"><span>15 j</span></label>
+              <label class="abo-cr-pilule"><input type="radio" name="subRappel" value="custom" aria-label="Autre rappel"><span>Autre…</span></label>
+            </div>
+            <label id="subReminderWrap" class="abo-cr-autre" hidden>Jours avant l’échéance<input id="subReminder" type="number" min="0" max="60" step="1" inputmode="numeric" required value="7"></label>
+            <p id="subRappelNote" class="abo-cr-note"></p>
+          </section>
+          <details id="subOptions" class="abo-cr-carte abo-cr-options">
+            <summary>Plus d’options</summary>
+            <label>Statut<select id="subStatus"><option value="active">Actif</option><option value="paused">En pause</option><option value="cancelled">Arrêté</option></select></label>
+            <label>Notes de livraison<textarea id="subNotes" rows="3" maxlength="2000" placeholder="Digicode, consignes, horaire préféré…"></textarea></label>
+          </details>
+          <p id="subModifNote" class="abo-cr-note" hidden>Les modifications s’appliquent aux prochaines échéances. Les commandes déjà créées restent à gérer dans Commandes, filtre « Planifiées ».</p>
+          <p id="subError" class="op-error" role="alert"></p>
+        </div>
+        <div class="op-dialog-footer abo-cr-pied"><button class="button secondary" type="button" data-op="close-sub">Annuler</button><button id="subSave" class="button primary" type="submit">Créer l’abonnement</button></div>
       </form></dialog>
       <section id="livreur" class="page" role="tabpanel" aria-label="Tournée">
         <div class="driver-page">
@@ -1175,6 +1239,10 @@
                     <button id="markRescheduleButton" class="button secondary compact" type="button" data-action="mark-reschedule">À reprogrammer</button>
                     <button id="replanCurrentButton" class="button secondary compact" type="button" data-action="replan-current-stop">Planifier suite</button>
                     <button id="nextClientButton" class="button secondary compact" type="button" data-action="next-client">Suivant</button>
+                    <!-- Lot 3 (audit geo, H7) : la position du client de l'arret,
+                         corrigee depuis la route. Remplace les deux champs
+                         numeriques qui envoyaient l'identifiant de l'arret. -->
+                    <button id="corrigerPositionButton" class="button secondary compact" type="button" data-adr="ouvrir-cible">Corriger la position</button>
                   </div>
                 </details>
               </div>
@@ -1192,8 +1260,8 @@
           <div class="panel tournee-carte-panel">
             <div class="panel-heading">
               <h3>Carte tournée</h3>
-              <span class="muted">Trajet routier · départ → clients → arrivée</span>
-              <div class="legend vertical marqueur-legende" aria-label="Légende des marqueurs">
+              <span class="muted" id="carteSousTitre">Trajet routier · départ → clients → arrivée</span>
+              <div class="legend vertical marqueur-legende" id="carteLegende" aria-label="Légende des marqueurs">
                 <span><i class="marqueur marqueur--fait" aria-hidden="true"></i><span>Livré</span></span>
                 <span><i class="marqueur marqueur--en-cours marqueur--calme" aria-hidden="true">3</i><span>En cours</span></span>
                 <span><i class="marqueur marqueur--a-venir" aria-hidden="true">4</i><span>À venir</span></span>
@@ -1202,7 +1270,27 @@
             </div>
             <div class="map-shell">
               <div id="map" aria-label="Carte de la tournée"></div>
-              <div id="mapEmpty" class="map-empty" hidden>Aucun client avec coordonnées.</div>
+              <!-- Lot 4 de l'audit geo (23/09) : les outils de la carte. Des
+                   boutons HORS de #map : Leaflet n'intercepte pas leurs gestes. -->
+              <div class="carte-outils" role="toolbar" aria-label="Outils de la carte">
+                <button type="button" class="carte-outil" id="carteRecentrer" data-action="carte-recentrer" aria-label="Recentrer" title="Recentrer sur toute la tournée">
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v5M12 16v5M3 12h5M16 12h5M9.5 5.5 12 8l2.5-2.5M9.5 18.5 12 16l2.5 2.5M5.5 9.5 8 12l-2.5 2.5M18.5 9.5 16 12l2.5 2.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <button type="button" class="carte-outil" id="cartePosition" data-action="carte-position" aria-label="Ma position" aria-pressed="false" title="Afficher ma position (rien n'est envoyé)">
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="7.5" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+                </button>
+                <button type="button" class="carte-outil" id="cartePleinEcran" data-action="carte-plein-ecran" aria-label="Plein écran" aria-pressed="false" title="Plein écran">
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+              </div>
+              <p id="carteMessage" class="carte-message" role="status" hidden></p>
+              <p id="carteAstuce" class="carte-astuce" aria-hidden="true" hidden>Deux doigts pour déplacer la carte</p>
+              <!-- Le bas de la carte : la precision GPS AU-DESSUS du message
+                   « N arrets sans position », empiles, jamais l'un sur l'autre. -->
+              <div class="carte-bas">
+                <p id="cartePrecision" class="carte-precision" role="status" hidden></p>
+                <div id="mapEmpty" class="map-empty" hidden>Aucun client avec coordonnées.</div>
+              </div>
             </div>
           </div>
 
@@ -1220,6 +1308,13 @@
 
             <div class="route-planner"><div class="route-step"><span class="op-step-number">1</span><div><label>Votre départ<input id="departureQuery" placeholder="Adresse ou ville de départ"></label><div class="quick-actions"><button class="button secondary" type="button" data-op="search-departure">Rechercher</button><button class="button primary" type="button" data-op="locate">Me localiser</button></div><select id="departureResults" aria-label="Confirmer le départ" hidden></select></div></div><div class="route-step"><span class="op-step-number">2</span><div><label>Votre arrivée<input id="arrivalQuery" placeholder="Adresse ou ville d’arrivée"></label><button class="button secondary" type="button" data-op="search-arrival">Rechercher</button><select id="arrivalResults" aria-label="Confirmer l’arrivée" hidden></select><label class="op-check"><input id="returnToStart" type="checkbox"> Retour au point de départ</label></div></div></div>
             <p id="routeLocationStatus" class="muted" role="status">Choisissez le départ et l’arrivée, puis les clients ci-dessous. Le calcul utilise les routes, sans trafic en temps réel.</p>
+            <!-- Lot 3 (audit geo) : les clients a livrer sans position se voient
+                 AVANT le calcul, et un calcul refuse les nomme tous. -->
+            <div id="adressesAlerte" class="adr-alerte" role="status" hidden>
+              <span class="adr-alerte-texte" data-adr-texte></span>
+              <button class="button secondary compact" type="button" data-adr="ouvrir">Vérifier les adresses</button>
+            </div>
+            <div id="adressesTourneeErreurs" class="adr-erreurs" role="alert" hidden></div>
             <div class="delivery-filters">
               <label>
                 Date
@@ -1269,59 +1364,11 @@
         </div>
       </section>
 
-      <section id="bons-commande" class="page" role="tabpanel" aria-labelledby="tab-bons-commande">
-        <div class="panel">
-          <div class="panel-heading">
-            <h3>Bons de commande</h3>
-            <span class="muted">Tous les bons importés, triables et filtrables.</span>
-          </div>
-
-          <div class="bdc-toolbar" role="region" aria-label="Filtres bons de commande">
-            <label class="bdc-search">
-              <span class="sr-only">Rechercher par numéro ou client</span>
-              <input type="search" id="bdc-search" placeholder="Numéro CMD-... ou nom client" autocomplete="off" />
-            </label>
-
-            <div class="bdc-filter-group" role="group" aria-label="Filtrer par statut">
-              <button class="button secondary compact bdc-status-filter active-filter" type="button" data-bdc-status="all">Tous</button>
-              <button class="button secondary compact bdc-status-filter" type="button" data-bdc-status="stock_a_verifier">À vérifier</button>
-              <button class="button secondary compact bdc-status-filter" type="button" data-bdc-status="en_preparation">En préparation</button>
-              <button class="button secondary compact bdc-status-filter" type="button" data-bdc-status="pret_livraison">Prêt livraison</button>
-              <button class="button secondary compact bdc-status-filter" type="button" data-bdc-status="en_livraison">En livraison</button>
-              <button class="button secondary compact bdc-status-filter" type="button" data-bdc-status="livre">Livrées</button>
-              <button class="button secondary compact bdc-status-filter bdc-status-warning" type="button" data-bdc-status="to_complete" title="Bons dont l'adresse ou le téléphone manque">⚠ À compléter</button>
-            </div>
-
-            <div class="bdc-filter-row">
-              <label class="bdc-field">
-                <span>Secteur</span>
-                <select id="bdc-sector"><option value="">Tous secteurs</option></select>
-              </label>
-              <label class="bdc-field">
-                <span>Du</span>
-                <input type="date" id="bdc-date-from" />
-              </label>
-              <label class="bdc-field">
-                <span>Au</span>
-                <input type="date" id="bdc-date-to" />
-              </label>
-              <button class="button secondary compact" type="button" data-action="bdc-reset-filters">Réinitialiser</button>
-            </div>
-
-            <div class="bdc-view-actions">
-              <div class="bdc-view-toggle" role="group" aria-label="Mode d'affichage">
-                <button class="button secondary compact bdc-view-btn active-filter" type="button" data-bdc-view="cards" title="Vue cartes">⊞ Cartes</button>
-                <button class="button secondary compact bdc-view-btn" type="button" data-bdc-view="table" title="Vue tableau dense">≡ Tableau</button>
-              </div>
-              <button class="button secondary compact bdc-export-btn" type="button" data-action="bdc-export-csv" title="Télécharger un CSV des bons actuellement filtrés">📥 Exporter CSV</button>
-            </div>
-          </div>
-
-          <div id="bdc-summary" class="muted" aria-live="polite"></div>
-          <div id="bdc-list" class="list bdc-list"></div>
-        </div>
-      </section>
-
+      <!-- Les quatre anciennes listes (Commandes du jour, Commandes planifiees,
+           Bons de commande, Commandes livrees) ont quitte la page le 23/09 :
+           l'ecran Commandes les a absorbees (planche 13c), et leurs adresses
+           redirigent (config/tabs.js, REDIRECTIONS). Cette fenetre de detail
+           vivait parmi elles ; c'est celle de l'ecran Commandes, elle reste. -->
       <!-- Modal détail bon de commande : meme pattern que versionModal -->
       <div id="bdc-detail-modal" class="version-modal" role="dialog" aria-modal="true" aria-labelledby="bdc-detail-title" aria-hidden="true">
         <div class="version-modal-backdrop" data-action="close-bdc-detail"></div>
@@ -1350,22 +1397,11 @@
             <span class="muted">Stock faible ou rupture</span>
           </div>
           <div class="recommend-toolbar">
-            <button class="button secondary compact active-filter" type="button" data-recommend-filter="urgent">Urgent</button>
-            <button class="button secondary compact" type="button" data-recommend-filter="low">Stock faible</button>
-            <button class="button secondary compact" type="button" data-recommend-filter="all">Tout afficher</button>
+            <button class="button secondary compact active-filter" type="button" aria-pressed="true" data-recommend-filter="urgent">Urgent</button>
+            <button class="button secondary compact" type="button" aria-pressed="false" data-recommend-filter="low">Stock faible</button>
+            <button class="button secondary compact" type="button" aria-pressed="false" data-recommend-filter="all">Tout afficher</button>
           </div>
           <div id="recommandeList" class="list"></div>
-        </div>
-      </section>
-
-      <section id="commandes-livrees" class="page" role="tabpanel" aria-labelledby="tab-commandes-livrees">
-        <div class="panel">
-          <div class="panel-heading">
-            <h3>Commandes livrées</h3>
-            <span class="muted">Historique des livraisons effectuées et des ventes importées comme déjà livrées</span>
-          </div>
-          <div id="commandesLivreesSummary" class="muted" aria-live="polite"></div>
-          <div id="commandesLivreesList" class="list"></div>
         </div>
       </section>
 
@@ -1656,6 +1692,22 @@
     <div id="commandeDetailCorps" class="sheet-corps"></div>
   </dialog>
 
+  <!-- Adresses a verifier (lot 3 de l'audit geo, H7) : sheet au telephone,
+       fenetre au bureau, comme le detail d'une commande. Le contenu est rendu
+       par js/domains/adresses.js. -->
+  <dialog id="adressesDialog" class="sheet adr-sheet" aria-labelledby="adressesTitre">
+    <div class="sheet-poignee" aria-hidden="true"></div>
+    <div class="sheet-entete">
+      <h3 id="adressesTitre">Adresses à vérifier</h3>
+      <button class="button secondary compact sheet-fermer" type="button" data-adr="fermer" aria-label="Fermer">✕</button>
+    </div>
+    <div class="sheet-corps adr-corps">
+      <p id="adressesResume" class="adr-resume" role="status"></p>
+      <div id="adressesListe" class="adr-liste"></div>
+      <p id="adressesSource" class="adr-source">Adresses : Base Adresse Nationale (BAN), Licence Ouverte 2.0.</p>
+    </div>
+  </dialog>
+
   <!-- Le detail d'un abonnement : la ligne l'ouvre, il porte les faits et les actions. -->
   <dialog id="abonnementDetailDialog" class="sheet" aria-labelledby="abonnementDetailTitre">
     <div class="sheet-poignee" aria-hidden="true"></div>
@@ -1688,6 +1740,12 @@
   </dialog>
 
   <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+
+  <!-- SE DECONNECTER (audit du 23/09) : UN formulaire, vise par ses boutons
+       (attribut form) -- celui de la barre laterale au bureau, celui du menu
+       « Plus » au telephone. Un vrai POST /logout qui NAVIGUE : le service
+       worker y vide le cache de donnees (chargement-instantane.spec.js). -->
+  <form id="formDeconnexion" method="post" action="/logout" hidden></form>
 
   <!-- Modal version : affiche les nouveautes de la release courante en clair.
        Pilote par app.js (data-action="open-version-modal"). Aria-hidden tant

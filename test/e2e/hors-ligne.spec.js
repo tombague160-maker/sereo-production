@@ -276,16 +276,19 @@ test("hors ligne — un envoi de FICHIER n'est jamais mis en file", async ({ bro
   await ctx.close();
 });
 
-test("en ligne — un echec reseau n'est PAS mis en file", async ({ browser }) => {
-  // LE CAS DANGEREUX, et celui qu'aucun autre banc de ce fichier ne distingue.
-  // `navigator.onLine` n'est fiable que dans UN sens : `false` garantit que la
-  // requete n'est jamais partie. `true` ne garantit rien -- un timeout peut
-  // parfaitement signifier que le serveur A RECU et TRAITE la demande. Rejouer
-  // une ecriture non idempotente dans ce cas la DUPLIQUERAIT.
+test("en ligne — un echec reseau EST mis en file, avec sa cle de geste", async ({ browser }) => {
+  // RENVERSE le 23/09 (lot 1 de l'audit geo, H1). Ce banc exigeait l'inverse :
+  // `navigator.onLine` n'etant fiable que dans un sens, un echec « en ligne »
+  // pouvait signifier que le serveur avait RECU et TRAITE la demande, et la
+  // rejouer l'aurait DUPLIQUEE. Le prix mesure par l'audit : en 4G sans debit,
+  // le telephone se croit en ligne, et un « Livre » etait perdu derriere le
+  // livreur, sous un toast anglais « Failed to fetch ».
   //
-  // On ne met donc en file QUE ce dont on sait que le reseau ne l'a pas
-  // emporte. Ici le navigateur se croit en ligne et la route est coupee : rien
-  // ne doit etre conserve, et l'utilisateur doit voir une vraie erreur.
+  // Le risque de duplication est desormais tenu par le SERVEUR : chaque
+  // ecriture porte une cle X-Sereo-Geste, gardee dans la file, et une cle deja
+  // vue n'est pas reappliquee (test/livreur-ne-perd-rien.test.js). Ce banc
+  // exige donc la mise en file, ET la cle -- sans elle, la mise en file serait
+  // exactement le danger que l'ancien banc gardait.
   test.setTimeout(120000);
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
@@ -298,10 +301,13 @@ test("en ligne — un echec reseau n'est PAS mis en file", async ({ browser }) =
     "prealable : le navigateur doit se croire EN LIGNE").toBe(true);
   await bouger(page, curseur, 52);
 
-  expect(await lireFile(page),
-    "une ecriture a ete mise en file alors que le reseau pouvait l'avoir emportee").toEqual([]);
+  const file = await lireFile(page);
+  expect(file.length, "un echec reseau « en ligne » a perdu l'ecriture").toBe(1);
+  expect(JSON.parse(file[0].corps).averageSpeedKmh).toBe(52);
+  expect(file[0].entetes["X-Sereo-Geste"], "l'ecriture en file n'a pas de cle : son renvoi pourrait s'appliquer deux fois")
+    .toMatch(/^[A-Za-z0-9_-]{8,}$/);
   const etat = await page.locator("#tourneeSettingsStatus").textContent();
-  expect(etat, `l'echec doit rester un echec : « ${etat} »`).toMatch(/^Erreur/);
+  expect(etat, `la ligne d'etat annonce une perte qui n'a pas eu lieu : « ${etat} »`).not.toMatch(/^Erreur|Failed to fetch/);
 
   await ctx.close();
 });

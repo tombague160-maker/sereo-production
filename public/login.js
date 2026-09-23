@@ -50,6 +50,38 @@
   window.addEventListener("pagehide", function () { clearInterval(intervalId); });
 })();
 
+// Apres un echec, l'identifiant tape est GARDE (planche 9c).
+//
+// Il est garde ici, dans le navigateur (sessionStorage de l'onglet), et nulle
+// part ailleurs : ni dans l'URL de la redirection (historique, journaux du
+// proxy), ni renvoye par le serveur. Le mot de passe, lui, n'est jamais garde.
+// Il n'est rendu que sur la page d'un echec (?error=1) ou d'un blocage
+// (?locked=1) ; toute autre ouverture de la page de connexion l'oublie. Le
+// curseur va alors au mot de passe : c'est lui qu'on retape.
+(function () {
+  var CLE = "sereo:connexion:identifiant";
+  var champ = document.getElementById("username");
+  if (!champ) return;
+  var mdp = document.getElementById("password");
+  var echec = /[?&](error|locked)=1(&|$)/.test(window.location.search);
+  try {
+    if (!echec) {
+      sessionStorage.removeItem(CLE);
+    } else {
+      var garde = sessionStorage.getItem(CLE);
+      if (garde && !champ.value) {
+        champ.value = garde;
+        if (mdp && !mdp.disabled) mdp.focus();
+      }
+    }
+  } catch (e) { /* stockage indisponible : on retape, comme avant */ }
+  if (champ.form) {
+    champ.form.addEventListener("submit", function () {
+      try { sessionStorage.setItem(CLE, champ.value); } catch (e) { /* ignore */ }
+    });
+  }
+})();
+
 // Afficher / masquer le mot de passe (planche 9b). Le bouton est cache sans
 // JS : il n'apparait que s'il fonctionne.
 (function () {

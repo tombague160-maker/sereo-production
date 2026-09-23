@@ -236,10 +236,14 @@ test("geocodage — un introuvable EST mis en cache, lui", async () => {
   scenario.mode = "vide";
   const premier = await geocoderAdresse(adresse);
   assert.equal(premier.statut, GEOCODAGE_STATUTS.INTROUVABLE);
+  // Lot 3 : rien avec le filtre du code postal (CEDEX, code faux) -> un
+  // second essai sans filtre. Le premier geocodage coute donc 2 requetes.
+  const apresPremier = requetesRecues.length;
+  assert.equal(apresPremier, 2);
 
   const second = await geocoderAdresse(adresse);
   assert.equal(second.statut, GEOCODAGE_STATUTS.INTROUVABLE);
-  assert.equal(requetesRecues.length, 1, "un introuvable est une reponse, pas une panne");
+  assert.equal(requetesRecues.length, apresPremier, "un introuvable est une reponse, pas une panne");
 });
 
 test("geocodage — un delai depasse devient une erreur, sans lever", async () => {

@@ -211,6 +211,22 @@ test("page /login affiche le nombre de tentatives restantes apres echec", async 
   assert.match(html, /Il te reste 4 tentative/);
 });
 
+test("page /login : l'échec et les essais restants forment UNE phrase (planche 9c)", async () => {
+  // Audit du 23/09, defaut 5 : les essais restants etaient un <span> a part
+  // dans un conteneur flex -- deux colonnes cote a cote, dans une autre
+  // couleur. La planche ecrit une seule phrase, qui dit aussi la duree.
+  _resetAuthRateLimitForTest();
+  await postLogin("identifiant-du-banc", "mauvais-mot-de-passe");
+  const page = await fetch(`${baseUrl}/login?error=1`);
+  const html = await page.text();
+  const erreur = /<p id="login-erreur" class="login-error" role="alert">([\s\S]*?)<\/p>/.exec(html);
+  assert.ok(erreur, "le message d'erreur est absent");
+  assert.equal(erreur[1], "Identifiant ou mot de passe incorrect. Il te reste 4 tentatives avant un blocage de 2 secondes.");
+  // Le serveur ne renvoie ni l'un ni l'autre : l'identifiant est garde par le navigateur.
+  assert.doesNotMatch(html, /identifiant-du-banc|mauvais-mot-de-passe/);
+  _resetAuthRateLimitForTest();
+});
+
 test("login.js est accessible sans auth (CSP script-src 'self' OK)", async () => {
   const js = await fetch(`${baseUrl}/login.js`);
   assert.equal(js.status, 200);

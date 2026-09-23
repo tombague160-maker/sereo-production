@@ -1788,15 +1788,21 @@ test("v1.11.0 PATCH /api/clients/:id : mise a jour partielle propage vers les co
   assert.equal(r.body.client.rue, "5 nouveau chemin");
   assert.equal(r.body.client.telephone, "06 11 22 33 44");
   assert.equal(r.body.client.notes, "Sonner 2 fois");
-  assert.equal(r.body.ordersUpdated, 2, "Les 2 commandes du client sont mises a jour");
+  // Lot 3 de l'audit geo (H12, decision 8 du 23/09) : la commande LIVREE
+  // n'est plus reecrite -- c'est l'historique. Avant, ce test exigeait 2.
+  assert.equal(r.body.ordersUpdated, 1, "Seule la commande a livrer est mise a jour");
 
   // Verifier que les commandes ont bien ete propagees
   const ordersAfter = await requestJson("/api/orders");
   const cmds = ordersAfter.body.filter(o => o.clientId === "c-edit");
   assert.equal(cmds.length, 2);
-  assert.ok(cmds.every(o => o.address === "5 nouveau chemin"), "address propagee");
-  assert.ok(cmds.every(o => o.phone === "06 11 22 33 44"), "phone propage");
-  assert.ok(cmds.every(o => o.notes === "Sonner 2 fois"), "notes propagees");
+  const aLivrer = cmds.find(o => o.id === "o-edit-1");
+  const livree = cmds.find(o => o.id === "o-edit-2");
+  assert.equal(aLivrer.address, "5 nouveau chemin", "address propagee");
+  assert.equal(aLivrer.phone, "06 11 22 33 44", "phone propage");
+  assert.equal(aLivrer.notes, "Sonner 2 fois", "notes propagees");
+  assert.equal(livree.address, "ancien", "une commande livree garde l'adresse de sa livraison");
+  assert.equal(livree.phone, "", "une commande livree n'est pas reecrite");
 });
 
 test("v1.11.0 PATCH /api/clients/:id : changement de ville recalcule le secteur", async () => {
@@ -3155,7 +3161,9 @@ test("route multi-stops : statuts varies sur 3 stops (livre / absent / probleme)
     body: JSON.stringify({ status: "absent" })
   });
   assert.equal(b.res.status, 200);
-  assert.equal(b.body.order.status, "probleme_livraison");
+  // Lot 1 de l'audit geo (C1) : un absent revient « A reprogrammer » au lieu
+  // de rester bloque en probleme_livraison ; la cause reste dans deliveryStatus.
+  assert.equal(b.body.order.status, "a_reprogrammer");
   assert.equal(b.body.order.deliveryStatus, "absent");
 
   // Stop C : probleme
@@ -3165,7 +3173,7 @@ test("route multi-stops : statuts varies sur 3 stops (livre / absent / probleme)
     body: JSON.stringify({ status: "probleme", notes: "Adresse introuvable" })
   });
   assert.equal(c.res.status, 200);
-  assert.equal(c.body.order.status, "probleme_livraison");
+  assert.equal(c.body.order.status, "a_reprogrammer");
   assert.equal(c.body.order.deliveryStatus, "probleme");
 
   // Verifier les statuts finaux en DB
@@ -3174,8 +3182,8 @@ test("route multi-stops : statuts varies sur 3 stops (livre / absent / probleme)
   const orderB = db.commandes.find(o => o.id === "o-b");
   const orderC = db.commandes.find(o => o.id === "o-c");
   assert.equal(orderA.status, "livre");
-  assert.equal(orderB.status, "probleme_livraison");
-  assert.equal(orderC.status, "probleme_livraison");
+  assert.equal(orderB.status, "a_reprogrammer");
+  assert.equal(orderC.status, "a_reprogrammer");
 });
 
 test("route multi-stops : stop a_reprogrammer met la commande en a_reprogrammer", async () => {

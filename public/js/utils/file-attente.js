@@ -60,6 +60,15 @@ function attendre(requete) {
   });
 }
 
+function resumer(resume) {
+  if (!resume || typeof resume !== "object") return null;
+  const propre = {};
+  for (const cle of ["nature", "nom", "statut", "routeId", "stopId"]) {
+    if (typeof resume[cle] === "string" && resume[cle]) propre[cle] = resume[cle].slice(0, 200);
+  }
+  return Object.keys(propre).length ? propre : null;
+}
+
 /** Ramene des en-tetes, quelle que soit leur forme, a un objet clonable. */
 function normaliserEntetes(entetes) {
   if (!entetes) return {};
@@ -96,6 +105,10 @@ export async function mettreEnAttente(url, options = {}) {
     depose: new Date().toISOString(),
     essais: 0
   };
+  // Ce que l'ecran dira de l'ecriture en attente (« 1 livraison en attente
+  // d'envoi : Dupont »). Recopie champ par champ : seules des chaines passent.
+  const resume = resumer(options.resume);
+  if (resume) entree.resume = resume;
   const id = await attendre(transaction(db, "readwrite").add(entree));
   db.close();
   return id;
@@ -123,17 +136,72 @@ async function retirer(id) {
   db.close();
 }
 
-async function incrementerEssais(entree) {
+async function incrementerEssais(entree, maintenant) {
   const db = await ouvrir();
-  await attendre(transaction(db, "readwrite").put({ ...entree, essais: (entree.essais || 0) + 1 }));
+  await attendre(transaction(db, "readwrite").put({ ...entree, essais: (entree.essais || 0) + 1, dernierEchec: maintenant }));
   db.close();
 }
 
 /**
- * Au-dela, on cesse de rejouer : l'ecriture est conservee mais plus retentee.
- * Ne compte QUE les refus 5xx du serveur, jamais les echecs reseau.
+ * Au-dela, l'ecriture est dite BLOQUEE : conservee, annoncee, et retentee
+ * lentement (PAUSE_MAX_MS). Ne compte QUE les refus 5xx du serveur, jamais
+ * les echecs reseau.
  */
 export const ESSAIS_MAX = 5;
+
+// LA PAUSE APRES UN 5xx (relecture adverse du lot 1, 23/09). Premier jet : un
+// 5xx incrementait le compteur, et le renvoi suivant repartait aussitot -- or
+// il en part un toutes les 20 s, plus un a chaque lecture reussie. Un 500
+// PASSAGER (verrou d'ecriture, deploiement) epuisait les cinq essais en moins
+// de deux minutes, parfois en quelques secondes, et l'entree restait bloquee
+// POUR TOUJOURS : rien dans l'application ne la debloquait. Desormais :
+//  - apres un 5xx, l'entree attend avant d'etre renvoyee : 30 s, 1 min,
+//    2 min, 4 min, puis PAUSE_MAX_MS. Un renvoi demande pendant la pause
+//    n'envoie rien (l'ordre est garde : la suite attend derriere elle) ;
+//  - a bout d'essais, elle n'est plus abandonnee : elle est retentee toutes
+//    les PAUSE_MAX_MS. Un 500 corrige au deploiement suivant finit par passer ;
+//    une entree vraiment empoisonnee coute une requete par quart d'heure, et
+//    la cle X-Sereo-Geste rend chaque renvoi inoffensif.
+export const PAUSE_BASE_MS = 30_000;
+export const PAUSE_MAX_MS = 15 * 60_000;
+
+/** La pause a respecter apres `essais` refus 5xx. */
+export function pauseApresEchecs(essais) {
+  const n = Number(essais) || 0;
+  if (n <= 0) return 0;
+  if (n >= ESSAIS_MAX) return PAUSE_MAX_MS;
+  return Math.min(PAUSE_BASE_MS * 2 ** (n - 1), PAUSE_MAX_MS);
+}
+
+// LE DELAI D'UN RENVOI (relecture adverse du lot 1). Premier jet : `fetch`
+// nu, sans delai. En 4G sans debit, la connexion reste ouverte sans donnees
+// jusqu'a ce que la pile TCP abandonne (plusieurs minutes, plus de dix sous
+// Android) ; pendant ce temps, le verrou du renvoi -- et celui des autres
+// onglets -- restait tenu, et chaque essai toutes les 20 s ne faisait rien.
+// Un renvoi qui depasse ce delai est ABANDONNE (le signal coupe la requete)
+// et compte comme un echec reseau : on s'arrete, sans incrementer. S'il avait
+// ete applique, la cle X-Sereo-Geste le fera reconnaitre au renvoi suivant.
+export const DELAI_RENVOI_MS = 15_000;
+
+function envoyerAvecDelai(envoyer, entree, delaiMs) {
+  const ac = typeof AbortController !== "undefined" ? new AbortController() : null;
+  let minuteur;
+  const delai = new Promise((_, ko) => {
+    minuteur = setTimeout(() => {
+      if (ac) ac.abort();
+      ko(new Error("Renvoi abandonne : delai depasse."));
+    }, delaiMs);
+  });
+  // La course, en plus du signal : un `envoyer` qui ignorerait le signal ne
+  // tiendrait pas la file pour autant.
+  const envoi = Promise.resolve().then(() => envoyer(entree.url, {
+    method: entree.methode,
+    headers: entree.entetes,
+    body: entree.corps,
+    ...(ac ? { signal: ac.signal } : {})
+  }));
+  return Promise.race([envoi, delai]).finally(() => clearTimeout(minuteur));
+}
 
 /**
  * Rejoue la file, dans l'ORDRE DE DEPOT.
@@ -155,25 +223,103 @@ export const ESSAIS_MAX = 5;
  * plafond la premiere. La sauter enverrait la deuxieme ecriture avant la
  * premiere : "livree" avant "en preparation". Bloquer est le comportement
  * correct, et il rend le probleme VISIBLE au lieu de reordonner en silence.
+ * (Depuis le 23/09, bloquer n'est plus abandonner : l'entree est retentee
+ * toutes les PAUSE_MAX_MS, voir plus haut.)
  *
- * @param {Function} envoyer  (url, options) => Response
- * @returns {{envoyees: number, refusees: number, restantes: number, bloquee: boolean}}
+ * CE QUI N'EST PAS UN REFUS (lot 1 de l'audit geo, 23/09) :
+ *  - 401 (session expiree) et 429 (connexion verrouillee) : ce n'est pas
+ *    l'ecriture que le serveur refuse, c'est la PERSONNE qu'il ne reconnait
+ *    pas. Premier jet : un 4xx comme les autres, donc RETIRE -- le livreur qui
+ *    rouvrait l'application le lendemain matin perdait les livraisons faites
+ *    hors ligne la veille. On s'arrete, on GARDE tout, et on rend
+ *    `authRequise` : l'appelant renvoie vers la connexion, et la file repart
+ *    apres.
+ *  - 408, 502, 503, 504 : le serveur (ou la passerelle devant lui) n'a pas
+ *    traite la demande. C'est un echec de transport, comme un fetch qui leve :
+ *    on s'arrete sans incrementer.
+ *
+ * UN SEUL RENVOI A LA FOIS (M9). Le reseau qui clignote en voiture envoie
+ * plusieurs « online » pendant qu'un renvoi tourne ; deux boucles lisaient la
+ * meme file et envoyaient chaque ecriture deux fois. Un appel pendant un
+ * renvoi en cours rend la MEME promesse, et demande un passage de plus a la
+ * fin (une ecriture mise en file entre-temps n'attend pas le prochain
+ * « online »). Entre deux onglets, le verrou du navigateur (Web Locks) fait
+ * la meme chose quand il existe ; la cle X-Sereo-Geste rend de toute facon un
+ * double envoi inoffensif cote serveur.
+ *
+ * Un 5xx met l'entree en PAUSE (pauseApresEchecs) ; `enPause` le dit, et
+ * `arrete` dit que le passage s'est arrete sur un echec -- l'appelant ne doit
+ * pas relancer aussitot un passage qui s'arreterait au meme endroit.
+ *
+ * @param {Function} envoyer  (url, options) => Response ; options.signal coupe l'envoi
+ * @param {{maintenant?: Function, delaiEnvoiMs?: number}} [reglages]  l'horloge et le
+ *        delai d'un envoi (DELAI_RENVOI_MS) ; les bancs les remplacent
+ * @returns {{envoyees: number, refusees: number, restantes: number, bloquee: boolean,
+ *            enPause: boolean, arrete: boolean,
+ *            authRequise: boolean, refus: Array<{resume: object|null, statut: number}>}}
  */
-export async function rejouer(envoyer) {
+const STATUTS_AUTH = new Set([401, 429]);
+const STATUTS_TRANSPORT = new Set([408, 502, 503, 504]);
+
+let rejeuEnCours = null;
+let rejeuRedemande = false;
+
+export function rejouer(envoyer, reglages = {}) {
+  if (rejeuEnCours) {
+    rejeuRedemande = true;
+    return rejeuEnCours;
+  }
+  const maintenant = typeof reglages.maintenant === "function" ? reglages.maintenant : () => Date.now();
+  const delaiEnvoiMs = Number(reglages.delaiEnvoiMs) > 0 ? Number(reglages.delaiEnvoiMs) : DELAI_RENVOI_MS;
+  rejeuEnCours = (async () => {
+    const bilan = { envoyees: 0, refusees: 0, restantes: 0, bloquee: false, enPause: false, arrete: false, authRequise: false, refus: [] };
+    try {
+      let passage;
+      do {
+        rejeuRedemande = false;
+        passage = await sousVerrou(() => unPassage(envoyer, maintenant, delaiEnvoiMs));
+        bilan.envoyees += passage.envoyees;
+        bilan.refusees += passage.refusees;
+        bilan.refus.push(...passage.refus);
+        bilan.bloquee = passage.bloquee;
+        bilan.enPause = passage.enPause;
+        bilan.arrete = passage.arrete;
+        bilan.authRequise = passage.authRequise;
+      } while (rejeuRedemande && !passage.arrete);
+      bilan.restantes = (await lireFile()).length;
+      return bilan;
+    } finally {
+      rejeuEnCours = null;
+    }
+  })();
+  return rejeuEnCours;
+}
+
+function sousVerrou(travail) {
+  const verrous = typeof navigator !== "undefined" ? navigator.locks : null;
+  if (verrous && typeof verrous.request === "function") {
+    return verrous.request("sereo-file-attente", travail);
+  }
+  return travail();
+}
+
+async function unPassage(envoyer, maintenant, delaiEnvoiMs) {
   const file = await lireFile();
-  let envoyees = 0;
-  let refusees = 0;
-  let bloquee = false;
+  const passage = { envoyees: 0, refusees: 0, bloquee: false, enPause: false, authRequise: false, arrete: false, refus: [] };
 
   for (const entree of file) {
-    if ((entree.essais || 0) >= ESSAIS_MAX) { bloquee = true; break; }
+    const essais = entree.essais || 0;
+    // En pause apres un 5xx : rien ne part, la suite attend derriere elle.
+    // Une entree bloquee sans heure d'echec (deposee avant la pause) repart.
+    if (essais > 0 && maintenant() - (Number(entree.dernierEchec) || 0) < pauseApresEchecs(essais)) {
+      passage.bloquee = essais >= ESSAIS_MAX;
+      passage.enPause = true;
+      passage.arrete = true;
+      break;
+    }
     let reponse;
     try {
-      reponse = await envoyer(entree.url, {
-        method: entree.methode,
-        headers: entree.entetes,
-        body: entree.corps
-      });
+      reponse = await envoyerAvecDelai(envoyer, entree, delaiEnvoiMs);
     } catch {
       // Reseau toujours coupe. On s'arrete, l'ordre est preserve -- et on
       // N'INCREMENTE PAS. Le compteur existe pour arreter une entree EMPOISONNEE,
@@ -181,22 +327,36 @@ export async function rejouer(envoyer) {
       // fetch qui leve ne dit rien du contenu de l'ecriture. Premier jet : on
       // incrementait ici, si bien que cinq reconnexions ratees bloquaient
       // definitivement une ecriture parfaitement valide.
+      passage.arrete = true;
       break;
     }
+    const statut = reponse ? reponse.status : 0;
     if (reponse && reponse.ok) {
       await retirer(entree.id);
-      envoyees++;
-    } else if (reponse && reponse.status >= 400 && reponse.status < 500) {
+      passage.envoyees++;
+    } else if (STATUTS_AUTH.has(statut)) {
+      // Session expiree : l'ecriture RESTE, la file aussi. Voir plus haut.
+      passage.authRequise = true;
+      passage.arrete = true;
+      break;
+    } else if (STATUTS_TRANSPORT.has(statut)) {
+      passage.arrete = true;
+      break;
+    } else if (statut >= 400 && statut < 500) {
       // Le serveur a repondu non. La rejouer ferait une file eternelle.
       await retirer(entree.id);
-      refusees++;
+      passage.refusees++;
+      passage.refus.push({ resume: entree.resume || null, statut });
     } else {
-      await incrementerEssais(entree);
+      await incrementerEssais(entree, maintenant());
+      passage.bloquee = essais + 1 >= ESSAIS_MAX;
+      passage.enPause = true;
+      passage.arrete = true;
       break;
     }
   }
 
-  return { envoyees, refusees, restantes: (await lireFile()).length, bloquee };
+  return passage;
 }
 
 /** Vide la file. Reserve a un geste explicite de l'utilisateur. */

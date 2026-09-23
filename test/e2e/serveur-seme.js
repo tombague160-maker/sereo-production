@@ -4,6 +4,7 @@
 // Rien n'est écrit dans l'application réelle : base SQLite dans un dossier
 // temporaire, routage simulé en local, aucun accès réseau sortant.
 const { spawn } = require("node:child_process");
+const net = require("node:net");
 const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
 
 const AUJOURDHUI = new Intl.DateTimeFormat("en-CA", {
@@ -18,7 +19,16 @@ const CLIENTS = [
   { id: "c-ssiad", nom: "SSIAD de la Haute Vallée", rue: "22 rue Neuve", ville: "Champagnole", codePostal: "39300", lat: 46.750, lng: 5.905 },
   { id: "c-veto", nom: "Clinique Vétérinaire du Doubs", rue: "1 place du Marché", ville: "Besançon", codePostal: "25000", lat: 47.245, lng: 6.030 },
   { id: "c-dupont", nom: "Cabinet Infirmier Dupont-Lefebvre", rue: "5 rue des Lilas", ville: "Besançon", codePostal: "25000", lat: 47.230, lng: 6.015 }
-].map(c => ({ ...c, crmStatus: "client_actif" }));
+].map(c => Object.freeze({ ...c, crmStatus: "client_actif" }));
+// GELES (integration des lots, 23/09). jeuDeDonnees() rendait CE tableau comme
+// `clients` du seme : un banc qui y ajoutait ses clients (adresses-a-verifier,
+// clients : `seed.clients.push(...)`) l'allongeait pour tous les bancs lances
+// ensuite dans le MEME processus d'ouvrier Playwright. Le routage simule, qui
+// dimensionne sa table sur CLIENTS.length, rendait alors 8 x 8 a une tournee
+// de 6 points : « Impossible de calculer le trajet routier. » -- le rouge de
+// meilleur-trajet.spec.js:45, seulement en suite complete, selon l'ouvrier.
+// Chaque seme recoit desormais sa COPIE ; le modele ne bouge plus.
+Object.freeze(CLIENTS);
 
 const PRODUITS = [
   { code: "CH-L", nom: "Changes taille L", prixUnitaire: 12 },
@@ -59,7 +69,7 @@ function jeuDeDonnees() {
     status, products: o.products, ...extra
   });
   return {
-    clients: CLIENTS,
+    clients: CLIENTS.map(c => ({ ...c })),
     stock: [...PRODUITS.map(p => ({ id: `st-${p.code}`, code: p.code, nom: p.nom, quantite: 100, tarif: p.prixUnitaire })),
       { id: "st-GANTS", code: "GANTS", nom: "Gants nitrile", quantite: 0, tarif: 8 }],
     commandes,
@@ -86,6 +96,15 @@ function jeuDeDonnees() {
   };
 }
 
+/** Vrai si rien n'ecoute sur 127.0.0.1:`port` (on s'y lie, puis on le rend). */
+function portLibre(port) {
+  return new Promise(resolve => {
+    const essai = net.createServer();
+    essai.once("error", () => resolve(false));
+    essai.listen(port, "127.0.0.1", () => essai.close(() => resolve(true)));
+  });
+}
+
 /** Routage simulé : une matrice de durées et une géométrie plausible. */
 function demarrerRoutage() {
   const n = CLIENTS.length;
@@ -105,7 +124,18 @@ function demarrerRoutage() {
  * Le port doit être distinct de ceux de playwright.config.js (3100, 3101) et
  * des autres bancs à serveur propre (operations.spec.js : 3118).
  */
-async function demarrer({ port, seed = jeuDeDonnees() }) {
+async function demarrer({ port, seed = jeuDeDonnees(), env = {} }) {
+  // Le port doit etre LIBRE avant le lancement (integration des lots 1 a 7,
+  // 23/09). Sinon le serveur seme meurt aussitot (EADDRINUSE, sortie ignoree)
+  // et la boucle d'attente ci-dessous recevait le 200 de /healthz... d'un
+  // AUTRE serveur : le banc parlait a une base semee d'autres donnees, et
+  // rougissait sur l'ecran (« Expected: 4, Received: 1 » dans
+  // meilleur-trajet.spec.js:45, reproduit en occupant 3198). Les ports sont
+  // uniques dans CE depot (test/ports-e2e.test.js), pas entre les worktrees
+  // qui lancent les memes bancs en meme temps.
+  if (!(await portLibre(port))) {
+    throw new Error(`port ${port} deja pris par un autre processus : le banc parlerait a un serveur qui n'est pas le sien`);
+  }
   const routage = await demarrerRoutage();
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "sereo-seme-"));
   fs.writeFileSync(path.join(root, "seed.json"), JSON.stringify(seed));
@@ -118,22 +148,47 @@ async function demarrer({ port, seed = jeuDeDonnees() }) {
       SEREO_STORAGE: "sqlite", SEREO_SQLITE_PATH: path.join(root, "db.sqlite"),
       SEREO_DB_PATH: path.join(root, "seed.json"),
       SEREO_UPLOAD_DIR: path.join(root, "uploads"), SEREO_BACKUP_DIR: path.join(root, "backups"),
-      SEREO_SKIP_RELEASE_FETCH: "1"
+      SEREO_SKIP_RELEASE_FETCH: "1",
+      // Lot 3 (audit geo) : un client cree ou modifie est geocode en fond.
+      // Aucun banc n'appelle la vraie BAN : coupe par defaut, et un banc qui
+      // en a besoin passe son faux geocodeur (SEREO_GEOCODER_URL) dans `env`.
+      SEREO_GEOCODAGE_AUTO: "0",
+      ...env
     },
     stdio: "ignore"
   });
+  // Un serveur qui s'arrete pendant l'attente n'a pas pu repondre : ce qui
+  // repond sur le port est un autre (pris entre le controle et le lancement).
+  // Reste ouvert : un autre processus qui prend le port dans les quelques
+  // millisecondes entre portLibre et le lancement, et repond avant que le
+  // notre ne meure -- /healthz ne dit pas QUI repond.
+  let sortie = null;
+  child.once("exit", code => { sortie = code; });
   const base = `http://127.0.0.1:${port}`;
   const limite = Date.now() + 20000;
+  const arreterRoutage = async () => {
+    routage.server.closeAllConnections();
+    await new Promise(r => routage.server.close(r));
+    fs.rmSync(root, { recursive: true, force: true });
+  };
   for (;;) {
-    try { if ((await fetch(base + "/healthz")).status === 200) break; } catch { /* pas encore levé */ }
+    if (sortie !== null) {
+      await arreterRoutage();
+      throw new Error(`serveur semé sur ${port} arrêté au démarrage (code ${sortie}) : port pris ?`);
+    }
+    try { if ((await fetch(base + "/healthz")).status === 200 && sortie === null) break; } catch { /* pas encore levé */ }
     if (Date.now() > limite) throw new Error(`serveur semé injoignable sur ${base}`);
     await new Promise(r => setTimeout(r, 200));
   }
   return {
     base,
     async arreter() {
-      child.kill();
-      await new Promise(r => child.once("exit", r));
+      // Deja arrete : « exit » ne viendrait plus, l'attente pendait (afterAll).
+      if (sortie === null) {
+        const fin = new Promise(r => child.once("exit", r));
+        child.kill();
+        await fin;
+      }
       // close() attend la fin des connexions keep-alive : on les coupe d'abord.
       routage.server.closeAllConnections();
       await new Promise(r => routage.server.close(r));

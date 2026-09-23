@@ -116,6 +116,15 @@ function envoyeurScripte(reponses) {
   return { envoyer, vues };
 }
 
+/** Une horloge qu'on avance a la main, passee a rejouer(). */
+function horloge(depart = 1_790_000_000_000) {
+  let t = depart;
+  return {
+    reglages: { maintenant: () => t },
+    avancer(ms) { t += ms; }
+  };
+}
+
 test("file — l'ordre de depot est preserve, et un echec ARRETE la file", async () => {
   const { mettreEnAttente, rejouer, lireFile } = await chargerFile();
 
@@ -199,18 +208,24 @@ test("file — le compteur d'essais compte les 5xx, et finit par BLOQUER", async
   // Le contre-temoin du precedent : le compteur doit quand meme exister, sinon
   // une entree empoisonnee serait rejouee a l'infini. Le seuil se prouve dans
   // les deux sens -- il ne se declenche pas sur le reseau, il se declenche ici.
-  const { mettreEnAttente, rejouer, ESSAIS_MAX } = await chargerFile();
+  // Depuis la pause apres un 5xx (relecture adverse du 23/09), chaque essai
+  // attend la fin de la pause precedente : l'horloge est avancee a la main.
+  const { mettreEnAttente, rejouer, ESSAIS_MAX, PAUSE_MAX_MS } = await chargerFile();
+  const h = horloge();
   await mettreEnAttente("/api/orders", { method: "POST", body: '{"a":1}' });
 
-  for (let i = 0; i < ESSAIS_MAX; i++) {
-    const bilan = await rejouer(envoyeurScripte([500]).envoyer);
+  for (let i = 0; i < ESSAIS_MAX - 1; i++) {
+    const bilan = await rejouer(envoyeurScripte([500]).envoyer, h.reglages);
     assert.equal(bilan.bloquee, false, `bloquee trop tot, a la tentative ${i + 1}`);
+    h.avancer(PAUSE_MAX_MS);
   }
+  const dernier = await rejouer(envoyeurScripte([500]).envoyer, h.reglages);
+  assert.equal(dernier.bloquee, true, `non bloquee apres ${ESSAIS_MAX} refus 5xx`);
 
   const { envoyer, vues } = envoyeurScripte([500]);
-  const bilan = await rejouer(envoyer);
-  assert.equal(bilan.bloquee, true, `non bloquee apres ${ESSAIS_MAX} refus 5xx`);
-  assert.equal(vues.length, 0, "une entree a bout d'essais ne doit plus etre envoyee");
+  const bilan = await rejouer(envoyer, h.reglages);
+  assert.equal(bilan.bloquee, true);
+  assert.equal(vues.length, 0, "une entree a bout d'essais est renvoyee sans attendre");
   assert.equal(bilan.restantes, 1, "bloquer n'est pas perdre : l'ecriture reste consultable");
 });
 
@@ -219,18 +234,30 @@ test("file — une entree bloquee BLOQUE, elle ne se saute pas", async () => {
   // echec fait `break` : c'est donc TOUJOURS la tete de file qui atteint le
   // plafond la premiere. La sauter enverrait la deuxieme ecriture avant la
   // premiere -- exactement le reordonnancement que la file existe pour eviter.
-  const { mettreEnAttente, rejouer, ESSAIS_MAX } = await chargerFile();
+  const { mettreEnAttente, rejouer, ESSAIS_MAX, PAUSE_MAX_MS } = await chargerFile();
+  const h = horloge();
   await mettreEnAttente("/api/orders/7", { method: "PATCH", body: '{"statut":"en-preparation"}' });
   await mettreEnAttente("/api/orders/7", { method: "PATCH", body: '{"statut":"livree"}' });
 
-  for (let i = 0; i < ESSAIS_MAX; i++) await rejouer(envoyeurScripte([500]).envoyer);
+  for (let i = 0; i < ESSAIS_MAX; i++) {
+    await rejouer(envoyeurScripte([500]).envoyer, h.reglages);
+    h.avancer(PAUSE_MAX_MS);
+  }
+  h.avancer(-PAUSE_MAX_MS + 1000);
 
   // Le serveur va mieux. La tete reste bloquee : la SUITE ne doit pas passer.
   const { envoyer, vues } = envoyeurScripte([200]);
-  const bilan = await rejouer(envoyer);
+  const bilan = await rejouer(envoyer, h.reglages);
   assert.equal(vues.length, 0, "\"livree\" est parti sans \"en preparation\" : l'ordre est casse");
   assert.equal(bilan.bloquee, true);
   assert.equal(bilan.restantes, 2);
+
+  // Au terme de la pause lente, la tete repart -- et la suite derriere elle.
+  h.avancer(PAUSE_MAX_MS);
+  const apres = envoyeurScripte([200]);
+  const fin = await rejouer(apres.envoyer, h.reglages);
+  assert.deepEqual(apres.vues.map(v => JSON.parse(v.corps).statut), ["en-preparation", "livree"]);
+  assert.equal(fin.restantes, 0);
 });
 
 test("file — un envoi de FICHIER n'est jamais mis en attente", async () => {
@@ -268,4 +295,206 @@ test("file — la methode par defaut est POST, et elle est conservee telle quell
 
   const file = await lireFile();
   assert.deepEqual(file.map(e => e.methode), ["POST", "DELETE"]);
+});
+
+// --- Lot 1 de l'audit geo (23/09) ----------------------------------------------
+//
+// H2 : une session expiree VIDAIT la file. Mesure de l'audit : deux gestes en
+// file, le serveur repond 401, rejouer() rend {"refusees":2,"restantes":0}. Le
+// livreur qui rouvre l'application le lendemain perd les livraisons de la veille.
+// M9 : deux renvois simultanes envoyaient chaque ecriture deux fois (6 requetes
+// pour 3 ecritures).
+
+for (const statut of [401, 429]) {
+  test(`file — un ${statut} (session) GARDE toutes les ecritures et demande la connexion`, async () => {
+    const { mettreEnAttente, rejouer, lireFile } = await chargerFile();
+    await mettreEnAttente("/api/routes/r/stops/s1", { method: "PATCH", body: '{"status":"livre"}' });
+    await mettreEnAttente("/api/routes/r/stops/s2", { method: "PATCH", body: '{"status":"absent"}' });
+
+    const { envoyer, vues } = envoyeurScripte([statut]);
+    const bilan = await rejouer(envoyer);
+
+    assert.equal(bilan.restantes, 2, `un ${statut} a vide la file : les gestes de la veille sont perdus`);
+    assert.equal(bilan.refusees, 0);
+    assert.equal(bilan.authRequise, true, "l'appelant n'apprend pas qu'il faut se reconnecter");
+    assert.equal(vues.length, 1, "la file a continue sans session");
+    assert.equal((await lireFile()).length, 2);
+
+    // Apres reconnexion, tout part, dans l'ordre.
+    const apres = envoyeurScripte([200]);
+    const fin = await rejouer(apres.envoyer);
+    assert.equal(fin.envoyees, 2);
+    assert.deepEqual(apres.vues.map(v => JSON.parse(v.corps).status), ["livre", "absent"]);
+  });
+}
+
+test("file — temoin : un 403 reste un REFUS (retire), il ne passe pas pour une session expiree", async () => {
+  const { mettreEnAttente, rejouer } = await chargerFile();
+  await mettreEnAttente("/api/comptes", { method: "POST", body: "{}" });
+  const bilan = await rejouer(envoyeurScripte([403]).envoyer);
+  assert.equal(bilan.refusees, 1);
+  assert.equal(bilan.authRequise, false);
+  assert.equal(bilan.restantes, 0);
+});
+
+test("file — 502 / 504 (passerelle) : l'ecriture reste, et le compteur d'essais ne bouge pas", async () => {
+  // SWAG rend 502 quand le serveur redemarre : ce n'est pas l'ecriture qui est
+  // en cause. Compter ces reponses bloquerait une ecriture valide.
+  const { mettreEnAttente, rejouer, ESSAIS_MAX } = await chargerFile();
+  await mettreEnAttente("/api/orders", { method: "POST", body: '{"a":1}' });
+  for (let i = 0; i < ESSAIS_MAX + 2; i++) {
+    const bilan = await rejouer(envoyeurScripte([i % 2 ? 504 : 502]).envoyer);
+    assert.equal(bilan.bloquee, false, `bloquee a la tentative ${i + 1} par une passerelle`);
+    assert.equal(bilan.restantes, 1);
+  }
+  const bilan = await rejouer(envoyeurScripte([200]).envoyer);
+  assert.equal(bilan.envoyees, 1);
+});
+
+/** Un envoyeur lent : chaque reponse 200 arrive apres `ms`. */
+function envoyeurLent(ms) {
+  const vues = [];
+  const envoyer = (url, options) => new Promise(resolve => {
+    vues.push({ url, corps: options.body });
+    setTimeout(() => resolve({ ok: true, status: 200 }), ms);
+  });
+  return { envoyer, vues };
+}
+
+test("file — deux renvois SIMULTANES n'envoient chaque ecriture qu'une fois (M9)", async () => {
+  const { mettreEnAttente, rejouer } = await chargerFile();
+  for (const n of [1, 2, 3]) await mettreEnAttente(`/api/customer-orders?n=${n}`, { method: "POST", body: `{"n":${n}}` });
+
+  const { envoyer, vues } = envoyeurLent(15);
+  // Le reseau clignote : trois « online » pendant le renvoi.
+  const [a, b, c] = await Promise.all([rejouer(envoyer), rejouer(envoyer), rejouer(envoyer)]);
+
+  assert.equal(vues.length, 3, `${vues.length} requetes pour 3 ecritures : des commandes terrain sont creees en double`);
+  assert.equal(a.envoyees, 3);
+  assert.equal(b.restantes, 0);
+  assert.equal(c.restantes, 0);
+});
+
+test("file — une ecriture deposee PENDANT un renvoi part dans la foulee", async () => {
+  // Le verrou ne doit pas la laisser attendre le prochain « online ».
+  const { mettreEnAttente, rejouer } = await chargerFile();
+  await mettreEnAttente("/api/a", { method: "POST", body: '{"n":1}' });
+  const vues = [];
+  let deposee = false;
+  let second = null;
+  const envoyer = async (url, options) => {
+    vues.push(JSON.parse(options.body).n);
+    if (!deposee) {
+      deposee = true;
+      await mettreEnAttente("/api/b", { method: "POST", body: '{"n":2}' });
+      second = rejouer(envoyer);
+    }
+    return { ok: true, status: 200 };
+  };
+  const bilan = await rejouer(envoyer);
+  await second;
+  assert.deepEqual(vues, [1, 2]);
+  assert.equal(bilan.restantes, 0, "l'ecriture deposee pendant le renvoi est restee en file");
+});
+
+test("file — le RESUME d'un geste est garde, pour que l'ecran le nomme", async () => {
+  const { mettreEnAttente, lireFile, rejouer } = await chargerFile();
+  await mettreEnAttente("/api/routes/r/stops/s1", {
+    method: "PATCH", body: '{"status":"livre"}',
+    resume: { nature: "arret", nom: "Cabinet Dupont", statut: "livre", intrus: { a: 1 }, vide: "" }
+  });
+  const [entree] = await lireFile();
+  assert.deepEqual(entree.resume, { nature: "arret", nom: "Cabinet Dupont", statut: "livre" });
+
+  // Un refus rend le resume : le message peut nommer ce qui est perdu.
+  const bilan = await rejouer(envoyeurScripte([409]).envoyer);
+  assert.deepEqual(bilan.refus, [{ resume: { nature: "arret", nom: "Cabinet Dupont", statut: "livre" }, statut: 409 }]);
+});
+
+// --- Relecture adverse du lot 1 (23/09) -------------------------------------------
+//
+// 1. Un 500 PASSAGER bloquait la file pour toujours. Le renvoi part toutes les
+//    20 s, et a chaque lecture reussie ; chaque 5xx comptait un essai, sans
+//    pause. Cinq essais en moins de deux minutes, et l'entree n'etait plus
+//    jamais renvoyee -- rien dans l'application ne la debloquait.
+// 2. Le renvoi n'avait aucun delai : une connexion muette (4G sans debit)
+//    tenait la file, et le verrou entre onglets, pendant des minutes.
+
+test("file — un 500 passager : une RAFALE de renvois n'epuise pas les essais", async () => {
+  // Douze renvois en quinze secondes (le minuteur de 20 s, les lectures qui
+  // reussissent, les « online » d'un reseau qui clignote) contre un serveur
+  // qui rend 500. Avant : cinq envois, et l'entree bloquee a vie.
+  const { mettreEnAttente, rejouer, lireFile } = await chargerFile();
+  const h = horloge();
+  await mettreEnAttente("/api/routes/r/stops/s1", { method: "PATCH", body: '{"status":"livre"}' });
+
+  const { envoyer, vues } = envoyeurScripte([500]);
+  let bilan;
+  for (let i = 0; i < 12; i++) {
+    bilan = await rejouer(envoyer, h.reglages);
+    h.avancer(1250);
+  }
+  assert.equal(vues.length, 1, `${vues.length} envois en 15 s : un 500 passager epuise les essais en rafale`);
+  assert.equal(bilan.bloquee, false, "un 500 passager a bloque la file");
+  assert.equal(bilan.enPause, true);
+  assert.equal(bilan.arrete, true, "l'appelant n'apprend pas que le passage s'est arrete");
+  assert.equal((await lireFile())[0].essais, 1);
+
+  // Le serveur va mieux : au terme de la pause, l'ecriture part.
+  h.avancer(30_000);
+  const repris = envoyeurScripte([200]);
+  const fin = await rejouer(repris.envoyer, h.reglages);
+  assert.equal(fin.envoyees, 1, "l'ecriture n'est pas repartie apres la pause");
+  assert.equal(fin.restantes, 0);
+});
+
+test("file — les pauses s'allongent, et une entree a bout d'essais est RETENTEE lentement", async () => {
+  const { pauseApresEchecs, ESSAIS_MAX, PAUSE_MAX_MS } = await chargerFile();
+  assert.equal(pauseApresEchecs(0), 0);
+  assert.deepEqual([1, 2, 3, 4].map(pauseApresEchecs), [30_000, 60_000, 120_000, 240_000]);
+  assert.equal(pauseApresEchecs(ESSAIS_MAX), PAUSE_MAX_MS);
+  assert.equal(pauseApresEchecs(ESSAIS_MAX + 40), PAUSE_MAX_MS, "la pause ne doit pas croitre sans fin");
+});
+
+test("file — une entree bloquee AVANT la pause (sans heure d'echec) repart", async () => {
+  // Les files deja bloquees chez un livreur (essais = 5, pas de dernierEchec)
+  // ne doivent pas rester bloquees a vie apres la mise a jour.
+  const { mettreEnAttente, rejouer, lireFile, ESSAIS_MAX } = await chargerFile();
+  await mettreEnAttente("/api/a", { method: "POST", body: '{"n":1}' });
+  const [entree] = await lireFile();
+  bases.get("sereo-file-attente").donnees.set(entree.id, { ...entree, essais: ESSAIS_MAX });
+  const { envoyer, vues } = envoyeurScripte([200]);
+  const bilan = await rejouer(envoyer, horloge().reglages);
+  assert.equal(vues.length, 1, "une entree bloquee avant la mise a jour ne repart jamais");
+  assert.equal(bilan.restantes, 0);
+});
+
+test("file — un renvoi MUET (connexion sans donnees) est abandonne au delai, sans compter d'essai", async () => {
+  const { mettreEnAttente, rejouer, lireFile } = await chargerFile();
+  await mettreEnAttente("/api/routes/r/stops/s1", { method: "PATCH", body: '{"status":"livre"}' });
+  let signalVu = null;
+  // Une requete qui ne repond jamais, sauf si on la coupe -- comme fetch.
+  const envoyer = (url, options) => new Promise((_, ko) => {
+    signalVu = options.signal || null;
+    if (signalVu) signalVu.addEventListener("abort", () => ko(new DOMException("aborted", "AbortError")));
+  });
+  const pendu = Symbol("pendu");
+  const bilan = await Promise.race([
+    rejouer(envoyer, { delaiEnvoiMs: 60 }),
+    new Promise(resolve => setTimeout(() => resolve(pendu), 2000))
+  ]);
+  assert.notEqual(bilan, pendu, "le renvoi attend toujours une connexion muette : la file est gelee");
+  assert.ok(signalVu, "le renvoi part sans signal : la requete morte n'est jamais coupee");
+  assert.equal(signalVu.aborted, true, "la requete morte n'a pas ete coupee");
+  assert.equal(bilan.arrete, true);
+  assert.equal(bilan.restantes, 1, "un renvoi abandonne ne doit rien perdre");
+  assert.equal((await lireFile())[0].essais, 0, "un delai depasse n'est pas la faute de l'ecriture");
+});
+
+test("file — temoin du delai : une reponse lente mais DANS le delai passe", async () => {
+  const { mettreEnAttente, rejouer } = await chargerFile();
+  await mettreEnAttente("/api/a", { method: "POST", body: '{"n":1}' });
+  const { envoyer } = envoyeurLent(20);
+  const bilan = await rejouer(envoyer, { delaiEnvoiMs: 500 });
+  assert.equal(bilan.envoyees, 1);
 });
