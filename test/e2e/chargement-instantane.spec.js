@@ -240,21 +240,42 @@ test("une session expiree (401) vide le cache de donnees", async ({ browser }) =
 });
 
 test("les polices du premier rendu sont prechargees, et seulement elles", async ({ browser }) => {
+  // Deux mesures par largeur. Les polices « utilisees » se lisent sur une page
+  // dont on a RETIRE les prechargements : une police prechargee est toujours
+  // telechargee, donc toujours dans performance.getEntriesByType("resource"),
+  // qu'elle serve au rendu ou non -- la mesurer avec ses prechargements ne
+  // pourrait jamais dire « prechargee pour rien » (relecture adverse du 23/09).
   test.setTimeout(90000);
+  const polices = page => page.evaluate(() => [...new Set(performance.getEntriesByType("resource")
+    .map(e => new URL(e.name).pathname).filter(p => p.startsWith("/fonts/")))].sort());
   for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
     const ctx = await browser.newContext({ viewport, serviceWorkers: "block" });
     const page = await ctx.newPage();
     await page.goto(mdt.base + "/", { waitUntil: "networkidle" });
     await page.evaluate(() => document.fonts.ready);
-    const r = await page.evaluate(() => ({
-      utilisees: performance.getEntriesByType("resource").map(e => new URL(e.name).pathname).filter(p => p.startsWith("/fonts/")).sort(),
-      prechargees: [...document.querySelectorAll('link[rel="preload"][as="font"]')].map(l => new URL(l.href).pathname).sort()
-    }));
-    expect(r.utilisees.length, "prealable : aucune police chargee").toBeGreaterThan(0);
-    // Chaque police prechargee sert au premier rendu (sinon : octets perdus).
-    for (const p of r.prechargees) expect(r.utilisees, `${viewport.width} px : ${p} prechargee pour rien`).toContain(p);
-    // Et celles du premier rendu sont toutes prechargees.
-    expect(r.prechargees, `${viewport.width} px`).toEqual(expect.arrayContaining(r.utilisees));
+    const prechargees = await page.evaluate(() =>
+      [...document.querySelectorAll('link[rel="preload"][as="font"]')].map(l => new URL(l.href).pathname).sort());
+
+    // La meme page, sans aucun <link rel="preload" as="font">.
+    const nue = await ctx.newPage();
+    let retires = 0;
+    await nue.route(/\/(\?.*)?$/, async route => {
+      if (route.request().resourceType() !== "document") return route.continue();
+      const r = await route.fetch();
+      const html = (await r.text()).replace(/<link\b[^>]*rel="preload"[^>]*as="font"[^>]*>/g, () => { retires++; return ""; });
+      await route.fulfill({ response: r, body: html });
+    });
+    await nue.goto(mdt.base + "/", { waitUntil: "networkidle" });
+    await nue.evaluate(() => document.fonts.ready);
+    const utilisees = await polices(nue);
+    const restants = await nue.evaluate(() => document.querySelectorAll('link[rel="preload"][as="font"]').length);
+    expect(restants, "prealable : des prechargements subsistent dans la page nue").toBe(0);
+    expect(retires, "prealable : aucun prechargement retire").toBe(prechargees.length);
+    expect(utilisees.length, "prealable : aucune police chargee").toBeGreaterThan(0);
+
+    // Chaque police prechargee sert au premier rendu (sinon : octets perdus),
+    // et celles du premier rendu sont toutes prechargees.
+    expect(prechargees, `${viewport.width} px : prechargees != utilisees par le premier rendu`).toEqual(utilisees);
     await ctx.close();
   }
 });
