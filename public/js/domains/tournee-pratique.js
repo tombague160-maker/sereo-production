@@ -43,7 +43,8 @@ function instant(valeur) {
  * @returns {null | {
  *   arrivees: Map<string, number>,   // id d'arret -> instant d'arrivee (ms)
  *   trajets: Map<string, {duree, distance}>, // id -> trajet depuis le restant precedent
- *   retour: number,                  // instant d'arrivee au point d'arrivee
+ *   retour: number,                  // instant d'arrivee au point d'arrivee (ou de fin du dernier arret)
+ *   avecRetour: boolean,             // false : pas d'arrivee, chemin ouvert
  *   metresRestants: number,
  *   premier: string                  // id du premier arret restant
  * }}
@@ -92,6 +93,10 @@ export function horairesDeTournee(route, { maintenant = Date.now(), dureeArretMi
     arrivees,
     trajets,
     retour: heure + arret + fin * 1000,
+    // Relecture adverse du lot 6 : une tournee SANS arrivee (creee « sans
+    // depart ») suit un chemin ouvert -- son dernier troncon est nul. Elle
+    // finit au dernier arret ; l'ecran dit « fin vers », pas « retour vers ».
+    avecRetour: Boolean(route.arrival && getEntityCoordinates(route.arrival)),
     metresRestants: metres + finMetres,
     premier: String(stops[restants[0]].id)
   };
@@ -126,7 +131,8 @@ export function formatDuree(secondes) {
 //
 // Vers les COORDONNEES de l'arret quand elles existent : une position corrigee
 // a la main, un lieu-dit sans rue, une entree d'EHPAD mal nommee y menent. A
-// defaut, l'adresse en texte (la regle d'avant : rue et ville). Google Maps,
+// defaut -- ou quand le point n'est qu'approximatif et qu'une adresse existe --,
+// l'adresse en texte (la regle d'avant : rue et ville). Google Maps,
 // Waze, ou Plans -- ce dernier seulement sur iPhone et iPad.
 
 export const APPLIS_NAVIGATION = [
@@ -158,12 +164,21 @@ function adresseTexte(entity) {
   return [parts.address, parts.postalCode, parts.city].filter(Boolean).join(" ").trim();
 }
 
+// Relecture adverse du lot 6 : un point APPROXIMATIF (lots 3-4 : « au milieu
+// de la rue », « au centre du lieu-dit », « de la commune ») menait au milieu
+// d'une route de plusieurs kilometres, la ou l'adresse complete -- numero
+// compris -- menait a la porte. L'adresse en texte gagne alors, quand il y en
+// a une ; sinon le point reste (il ne fait pas pire que rien). Une position
+// placee a la main porte la precision « manuel » : elle garde son point.
+const PRECISIONS_APPROXIMATIVES = new Set(["rue", "lieu-dit", "commune"]);
+
 export function lienNavigation(entity, appli = "google", { apple = false } = {}) {
   if (!entity) return "";
   const cle = appliRetenue(appli, apple);
-  const coords = getEntityCoordinates(entity);
+  const adresse = adresseTexte(entity);
+  const coords = PRECISIONS_APPROXIMATIVES.has(entity.geoPrecision) && adresse ? null : getEntityCoordinates(entity);
   const point = coords ? `${coords.lat},${coords.lng}` : "";
-  const texte = point ? "" : adresseTexte(entity);
+  const texte = point ? "" : adresse;
   if (!point && !texte) return "";
   const q = encodeURIComponent(texte);
   if (cle === "waze") {

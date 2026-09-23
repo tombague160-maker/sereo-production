@@ -469,4 +469,52 @@ test.describe("Préparer une tournée — dépôt par défaut, réoptimiser", ()
     await expect(page.locator("#returnToStart")).not.toBeChecked();
     await ctx.close();
   });
+
+  // Relecture adverse du lot 6 : une tournee SANS arrivee (creee « sans
+  // depart ») suit un chemin ouvert. L'ecran dit « fin vers », et le dialogue
+  // ne lui impose plus un retour au nouveau depart : il suit « retour au depot ».
+  // La tournee prete du banc precedent, vue SANS depart ni arrivee (reponse
+  // du serveur retouchee) ; la reoptimisation est interceptee pour lire ce
+  // que l'ecran envoie.
+  test("tournee sans arrivee : « fin vers », et « Reoptimiser » suit le reglage « retour au depot »", async ({ browser, request }) => {
+    test.setTimeout(150000);
+    const essayer = async (retourAuDepot) => {
+      expect((await request.patch(`${srv.base}/api/settings/tournee`, { data: { retourAuDepot } })).status()).toBe(200);
+      let sansArrivee = null;
+      const envois = [];
+      const { ctx, page, erreurs } = await ouvrir(browser, srv.base, {
+        avant: async (p) => {
+          await p.route(/\/api\/routes$/, async (route) => {
+            if (route.request().method() !== "GET") return route.fallback();
+            const liste = await (await route.fetch()).json();
+            const r = liste.find((x) => x.status === "prete");
+            sansArrivee = { ...r, departure: null, arrival: null, troncons: [...r.troncons.slice(0, -1), { duree: 0, distance: 0 }] };
+            return route.fulfill({ json: liste.map((x) => (x.id === r.id ? sansArrivee : x)) });
+          });
+          await p.route(/\/api\/routes\/[^/]+\/reoptimiser$/, async (route) => {
+            envois.push(route.request().postDataJSON());
+            return route.fulfill({ json: { route: sansArrivee } });
+          });
+        }
+      });
+      await expect(page.locator("#routeMetrics")).toContainText("fin vers");
+      await expect(page.locator("#routeMetrics")).not.toContainText("retour vers");
+      await page.locator("#reoptimiserButton").click();
+      const dialogue = page.locator("#reoptimiserDialog");
+      await expect(dialogue.locator(".reopt-choix")).toHaveText([`Le dépôt : ${DEPOT.label}`, "Ma position actuelle"]);
+      await dialogue.getByLabel(`Le dépôt : ${DEPOT.label}`).check();
+      await dialogue.getByRole("button", { name: "Réoptimiser" }).click();
+      await expect(dialogue).toBeHidden();
+      expect(erreurs).toEqual([]);
+      await ctx.close();
+      return envois;
+    };
+    // « Retour au depot » decoche : aucune arrivee, le serveur fait un chemin ouvert.
+    const [ouvert] = await essayer(false);
+    expect(ouvert.departure).toMatchObject({ label: DEPOT.label, lat: DEPOT.lat, lng: DEPOT.lng });
+    expect(ouvert).not.toHaveProperty("arrival");
+    // Coche : la tournee revient a son (nouveau) depart, comme a la creation.
+    const [boucle] = await essayer(true);
+    expect(boucle.arrival).toMatchObject({ label: DEPOT.label, lat: DEPOT.lat, lng: DEPOT.lng });
+  });
 });

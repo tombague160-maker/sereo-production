@@ -8383,7 +8383,7 @@ function majEnteteTournee() {
   // reste et l'heure de retour, quand les troncons le permettent.
   const horaires = activeRoute.status === "en_livraison" ? horairesAffiches() : null;
   const reste = horaires
-    ? `${formatDistance(horaires.metresRestants)} restants, retour vers ${formatHeure(horaires.retour)}`
+    ? `${formatDistance(horaires.metresRestants)} restants, ${libelleFin(horaires)} ${formatHeure(horaires.retour)}`
     : "";
   setText("pageSubtitle", [jour, etape, reste]
     .filter(Boolean).join(" · "));
@@ -9271,10 +9271,15 @@ function horairesAffiches() {
   });
 }
 
+/** « retour vers » ; « fin vers » pour une tournee sans arrivee (chemin ouvert). */
+function libelleFin(horaires) {
+  return horaires.avecRetour ? "retour vers" : "fin vers";
+}
+
 /** « · 18 km restants · retour vers 15 h 20 », ou rien sans troncons. */
 function resumeDuReste(horaires) {
   if (!horaires) return "";
-  return ` · ${formatDistance(horaires.metresRestants)} restants · retour vers ${formatHeure(horaires.retour)}`;
+  return ` · ${formatDistance(horaires.metresRestants)} restants · ${libelleFin(horaires)} ${formatHeure(horaires.retour)}`;
 }
 
 // --- « Prevenir » --------------------------------------------------------------------
@@ -9399,8 +9404,12 @@ async function validerReoptimisation() {
     if (choix === "position") depart = await positionDuTelephone();
     if (depart) {
       corps.departure = depart;
-      // Une tournee qui revenait a son depart revient au nouveau.
-      if (!activeRoute.arrival || memePoint(activeRoute.departure, activeRoute.arrival)) corps.arrival = depart;
+      // Une tournee qui revenait a son depart revient au nouveau. Une tournee
+      // SANS arrivee (creee « sans depart ») suit le reglage « retour au
+      // depot » : coche, elle revient au nouveau depart, comme a la creation ;
+      // decoche, pas d'arrivee -- le serveur calcule un chemin ouvert.
+      const sansArrivee = !getEntityCoordinates(activeRoute.arrival || {});
+      if (sansArrivee ? reglagesTournee.retourAuDepot !== false : memePoint(activeRoute.departure, activeRoute.arrival)) corps.arrival = depart;
     }
     const resultat = await apiFetch(`/api/routes/${encodeURIComponent(activeRoute.id)}/reoptimiser`, {
       method: "POST",
