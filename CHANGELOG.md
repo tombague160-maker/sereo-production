@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.38.1](https://github.com/tombague160-maker/sereo-production/compare/v1.38.0...v1.38.1) (2026-09-23)
+
+
+### 🐛 Corrections de bugs
+
+* **mobile:** Stock atteignable au téléphone par le menu « Plus », et un banc pour chaque entrée ([56a4209](https://github.com/tombague160-maker/sereo-production/commit/56a4209ed6fe302009e02ae9325b7f2943e5d039))
+
+
+### ⚡ Optimisations
+
+* compression des réponses, et les écrans décrochés ne se dessinent plus (-72 % du DOM sur 2 000 commandes) ([1962157](https://github.com/tombague160-maker/sereo-production/commit/1962157fbf7ff02b4125a0fe58c884a0c2557e4d))
+* écrans décrochés non dessinés, compression ; mobile : Stock atteignable ([#156](https://github.com/tombague160-maker/sereo-production/issues/156)) ([c99cafd](https://github.com/tombague160-maker/sereo-production/commit/c99cafd13bd2a25d691a3c4e07c2c96e135fbfcb))
+
 ## [1.38.0](https://github.com/tombague160-maker/sereo-production/compare/v1.37.0...v1.38.0) (2026-09-23)
 
 
