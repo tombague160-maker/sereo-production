@@ -1764,7 +1764,11 @@ Sous **820 px** ; au bureau, rien ne change (ce qui est propre au téléphone po
   création, replié par défaut. Il n'est rendu que pour l'administration, comme le
   formulaire ;
 - **les imports en lignes** : « Dernier import de ventes » et « Dernier import de stock »
-  (« 16 septembre à 8 h 42 · 38 lignes »), puis « Archives » (« N fichiers conservés ») ;
+  (« 16 septembre à 8 h 42 · 38 lignes »), puis « Archives » (« N fichiers conservés »).
+  L'année en cours se tait, comme sur la planche ; **une autre année se dit**
+  (« 20 septembre 2025 à 9 h 05 ») : les archives ne sont jamais purgées, et un import
+  d'il y a un an, sans son année, se lirait comme un import de la semaine. « lignes »
+  s'accorde (« 1 ligne »), sur la ligne comme dans la feuille ;
 - **« Ajouter »** sur la ligne du titre des Secteurs : il ouvre la fiche des secteurs et
   place le curseur dans le formulaire ;
 - **la version au pied** (« Version 1.40.2 · À jour ») : au téléphone, la barre latérale
@@ -1779,7 +1783,11 @@ Sous **820 px** ; au bureau, rien ne change (ce qui est propre au téléphone po
   **ligne entière** est le geste : elle ouvre une feuille (`<dialog class="sheet">`, comme
   le détail d'une commande) qui porte les quatre, un par ligne, avec les mêmes
   `data-action` que le tableau. Un geste referme la feuille (la liste se redessine,
-  elle montrerait un état périmé) ;
+  elle montrerait un état périmé), et **le focus revient sur la ligne du compte**
+  redessinée — sur sa voisine si le compte est supprimé — au lieu de tomber sur
+  `<body>`. Le titre de la feuille est l'identifiant (jusqu'à 60 caractères sans
+  espace) : il **se coupe** (`overflow-wrap: anywhere`), sans pousser le ✕ hors de la
+  feuille à 360 px ;
 - **la feuille des imports.** Chaque ligne ouvre la feuille de ses fichiers : ventes,
   stock, ou toutes les archives, du plus récent au plus ancien, chacun avec
   « Télécharger ». C'est ce que porte le tableau du bureau ; la passation laissait
@@ -1807,3 +1815,16 @@ tournée, le diagnostic des dates, la zone dangereuse.
 préparateur et le livreur… » (faux dès qu'un compte par personne existe) ; « Les trois
 secteurs d'origine ne se suppriment pas » (le serveur supprime n'importe quel secteur) ;
 « compte partagé » dans la méta du compte (aucun champ ne le dit d'un compte listé).
+
+**Ce que le banc mesure** (corrigé après relecture, le 23/09) : `contraste-application`
+et `cibles-tactiles` ne voient ni ces lignes ni ces feuilles (leur base n'a ni compte
+ni import, et ils n'ouvrent pas les feuilles). C'est `parametres-mobile.spec.js` qui
+mesure, dans les deux thèmes, le contraste ≥ 4,5:1 des lignes, de la feuille d'un
+compte **et de la feuille des imports** ; et la hauteur ≥ 44 px de **chaque** cible du
+lot : lignes des comptes et des imports, « Ajouter un compte », « Ajouter » des
+secteurs, pied de version, gestes et ✕ des deux feuilles, « Télécharger ». La première
+version du banc ne mesurait ni la feuille des imports ni ces hauteurs, alors que son
+rapport le disait.
+
+**Reste à l'intégrateur** : `CACHE_NAME` du service worker n'est pas changé par ce lot,
+alors que `style.css`, `app.js` et `domains/comptes.js` (APP_SHELL) le sont.
