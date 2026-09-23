@@ -466,9 +466,29 @@ app.use(express.static(path.join(__dirname, "public"), {
   // les fichiers statiques depuis son cache, et s'il est plus vieux que la page,
   // il doit le savoir AVANT qu'elle demande ses scripts (public/service-worker.js).
   setHeaders(res, chemin) {
-    if (SHELL_ANNONCE && path.basename(chemin) === "index.html") res.setHeader("X-Sereo-Shell", SHELL_ANNONCE);
+    if (path.basename(chemin) !== "index.html") return;
+    if (SHELL_ANNONCE) res.setHeader("X-Sereo-Shell", SHELL_ANNONCE);
+    const fin = finDeSessionConnue(res.req);
+    if (fin !== null) res.setHeader("X-Sereo-Session-Fin", String(fin));
   }
 }));
+
+/**
+ * Decision 4 (23/09) : jusqu'a quand la page de l'application peut etre
+ * rouverte HORS LIGNE (ecran Tournee seulement, public/service-worker.js).
+ * La fin de la session du cookie (emission + 12 h), jamais plus : hors ligne,
+ * personne ne peut la prolonger. Sans authentification (developpement, bancs),
+ * 12 h a partir de maintenant. Acces par l'en-tete Basic, sans cookie : rien
+ * n'est annonce (null), la page ne se garde pas -- et ne s'oublie pas non plus.
+ */
+function finDeSessionConnue(req, now = Date.now()) {
+  const duree = AUTH_COOKIE_MAX_AGE_SECONDS * 1000;
+  if (!isAccessAuthEnabled()) return now + duree;
+  const valeur = getAccessSessionCookie(req);
+  if (!valeur || !isValidAccessSessionValue(valeur, now)) return null;
+  const session = readAccessSession(valeur, now);
+  return session ? session.issuedAt + duree : null;
+}
 app.use("/api", requireTrustedApiRequest);
 app.use("/api", gesteIdempotent);
 
@@ -1983,6 +2003,9 @@ function renderLoginPage(req, res) {
 
   const hasError = req.query.error === "1";
   const next = getSafeRedirectTarget(req.query.next);
+  // Decision 4 (23/09) : la page de connexion dit « aucune session ». Le
+  // service worker oublie alors la copie de la tournee ET ses donnees.
+  res.setHeader("X-Sereo-Session-Fin", "0");
 
   // Etat du rate limit pour cette IP, calcule a chaque GET /login.
   // Source de verite serveur (la query ?locked=1 peut etre obsolete si le

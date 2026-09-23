@@ -424,6 +424,17 @@
         </span>
       </div>
 
+      <!-- DECISION 4 (23/09) : l'application rouverte SANS RESEAU ne montre que
+           l'ecran Tournee. Les autres ecrans le disent ici, a la place de leur
+           contenu (app.js, majEcranDemandeReseau). -->
+      <section id="ecranDemandeReseau" class="ecran-demande-reseau" role="status" hidden>
+        <div class="empty-state">
+          <h4>Cet écran demande le réseau</h4>
+          <p>Sans réseau, seule la tournée s’ouvre, avec les dernières données connues. Le reste revient avec le réseau.</p>
+          <a class="button primary empty-state-action" href="#livreur">Ouvrir la tournée</a>
+        </div>
+      </section>
+
       <!-- Les onglets qu'une entree de nav absorbe, rendus par app.js pour le
            SEUL groupe actif. La rangee reste masquee quand le groupe n'a qu'un
            ecran. Forme : les pilules de filtre de la charte, que la planche
