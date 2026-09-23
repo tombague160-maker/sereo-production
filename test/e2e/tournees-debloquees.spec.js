@@ -226,7 +226,7 @@ test("H8 — hors ligne, « Clôturer » echoue franchement : jamais mis en file
   await ctx.setOffline(true);
   page.once("dialog", d => d.accept());
   await page.locator("#cloturerTourneeButton").click();
-  await expect(page.locator(".toast").last()).toContainText("Impossible de joindre le serveur");
+  await page.waitForTimeout(1500);
   const file = await page.evaluate(() => new Promise(resolve => {
     const d = indexedDB.open("sereo-file-attente", 1);
     d.onerror = () => resolve([]);
@@ -239,6 +239,7 @@ test("H8 — hors ligne, « Clôturer » echoue franchement : jamais mis en file
     };
   }));
   expect(file.map(e => e.url), "la cloture attend dans la file").toEqual([]);
+  await expect(page.locator(".toast").last()).toContainText("Impossible de joindre le serveur");
   await ctx.setOffline(false);
   await page.waitForTimeout(1500);
   expect((await tournee(srv.base, "r-1")).status).toBe("en_livraison");
