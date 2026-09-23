@@ -61,6 +61,7 @@ let currentIndex = -1;
 let activeStopIndex = 0;
 let markers = [];
 let routeLine = null;
+let routeLineLisere = null;
 let deliverySelection = new Set();
 let deliveryFilter = {
   sector: "Tous",
@@ -683,7 +684,13 @@ function bindUi() {
     if (action === "reset-tour") runAction(actionButton, "Reset...", resetTour);
     if (action === "purge-orders") purgeOrdersHandler(actionButton);
     if (action === "diagnostic-suspicious-dates") runAction(actionButton, "Scan...", runDiagnosticSuspiciousDates);
-    if (action === "mark-delivered") runAction(actionButton, "Envoi...", () => updateCurrentDeliveryStatus("livre"));
+    // « Livre » : pas de texte d'attente (runAction remplacerait l'icone) --
+    // l'ecran avance tout de suite et l'envoi part au terme d'Annuler.
+    if (action === "mark-delivered") livrerAvecAnnulation().catch(notifyEchec);
+    if (action === "trn-voir-carte") {
+      const carte = document.querySelector("#livreur .tournee-carte-panel");
+      if (carte) carte.scrollIntoView({ block: "start", behavior: "smooth" });
+    }
     if (action === "mark-absent") runAction(actionButton, "Envoi...", () => marquerArret("absent"));
     if (action === "mark-problem") runAction(actionButton, "Envoi...", () => marquerArret("probleme"));
     if (action === "mark-reschedule") runAction(actionButton, "Envoi...", () => marquerArret("a_reprogrammer"));
@@ -1076,6 +1083,9 @@ function refreshActiveRoute() {
     const updated = deliveryRoutes.find(item => String(item.id) === String(activeRoute.id));
     activeRoute = updated || activeRoute;
     if (activeRoute && activeStopIndex >= activeRoute.stops.length) activeStopIndex = 0;
+    // Un rechargement pendant les 4 s d'Annuler ne fait pas reapparaitre
+    // l'arret qu'on vient de livrer.
+    appliquerLivraisonEnSuspens();
     return;
   }
 
@@ -5249,7 +5259,8 @@ function renderDeliveryCandidates() {
       <input type="checkbox" data-delivery-order="${escapeAttribute(order.id)}" ${deliverySelection.has(String(order.id)) ? "checked" : ""}>
       <span class="delivery-card-body">
         <span class="delivery-card-title">${escapeHtml(order.clientName)}</span>
-        <span>${escapeHtml(formatOrderAddress(order))}</span>
+        <span class="delivery-card-court">${escapeHtml([order.numero, articlesDeCommande(order)].filter(Boolean).join(" · "))}</span>
+        <span class="delivery-card-adresse">${escapeHtml(formatOrderAddress(order))}</span>
         <span class="order-meta">
           <span>${escapeHtml(formatSectorLabel(order.sector))}</span>
           <span>${escapeHtml(order.deliveryDate ? formatDeliveryDate(order.deliveryDate) : "Sans date")}</span>
@@ -5359,12 +5370,20 @@ function renderRoute() {
     list.innerHTML = emptyState("Aucune tournée créée", "Sélectionnez des commandes prêtes, puis créez une tournée optimisée.");
     current.textContent = "Aucune tournée créée.";
     if (metrics) metrics.textContent = "Distance estimée indisponible.";
+    document.querySelectorAll('[data-op="recalculate-route"]').forEach(bouton =>
+      bouton.classList.remove("trn-recalculer--requis"));
     setButtonDisabled("startRouteButton", true);
     updateDriverActionButtons(null);
     return;
   }
 
   if (metrics) metrics.textContent = formatRouteMetrics(activeRoute);
+  // Planche 4c : sans trace routier (reordonnee a la main, ou jamais calculee),
+  // la carte dessine un pointille ; « Recalculer le trace » se signale alors,
+  // cercle d'accent. Meme critere que renderMap : la geometrie.
+  const traceARefaire = !activeRoute.geometry?.coordinates && !isRouteComplete(activeRoute);
+  document.querySelectorAll('[data-op="recalculate-route"]').forEach(bouton =>
+    bouton.classList.toggle("trn-recalculer--requis", traceARefaire));
   setButtonDisabled("startRouteButton", activeRoute.status === "en_livraison" || isRouteComplete(activeRoute));
 
   const nextPendingIndex = activeRoute.stops.findIndex(stop => !isStopTerminal(stop.status));
@@ -5473,6 +5492,15 @@ function showCurrentStop(stop) {
       }).join("")}
     </div>` : "";
 
+  // Planche 4b : « Prochain : <client> ». La distance et la duree du trajet
+  // (« 6,2 km · environ 14 min ») ne sont calculees nulle part par arret :
+  // omises. La ville la remplace.
+  const suivant = activeRoute
+    ? activeRoute.stops.find((s, i) => i > index && !isStopTerminal(s.status))
+    : null;
+  const prochain = suivant ? `
+    <p class="arret-prochain"><span class="arret-prochain-mot">Prochain : ${escapeHtml(suivant.clientName)}</span>${suivant.city ? `<span class="arret-prochain-lieu">${escapeHtml(formatSectorLabel(suivant.city))}</span>` : ""}</p>` : "";
+
   container.innerHTML = `
     <div class="current-client-main arret">
       <p class="arret-etat arret-etat--${etat.classe}"><span class="arret-etat-point" aria-hidden="true"></span>${escapeHtml(etat.mot)}</p>
@@ -5486,6 +5514,7 @@ function showCurrentStop(stop) {
       ${getAddressWarning(stop) ? `<span class="address-warning">${escapeHtml(getAddressWarning(stop))}</span>` : ""}
     </div>
     ${articles}
+    ${prochain}
   `;
   updateDriverActionButtons(stop);
 }
@@ -5511,11 +5540,41 @@ function showRouteCompleted(routeData) {
   const absent = routeData.stops.filter(stop => stop.status === "absent").length;
   const problems = routeData.stops.filter(stop => ["probleme", "a_reprogrammer"].includes(stop.status)).length;
 
+  // Planche 4d : les trois chiffres, les problemes NOMMES, le lien vers
+  // l'arrivee. Pas de fete. Les heures de debut et de fin existent
+  // (startedAt, completedAt) ; les kilometres « parcourus » non -- la
+  // distance connue est celle du trace prevu, pas celle roulee : omise.
+  const heure = valeur => {
+    const date = valeur ? new Date(valeur) : null;
+    return date && !Number.isNaN(date.getTime())
+      ? date.toLocaleTimeString("fr-FR", { hour: "numeric", minute: "2-digit" }).replace(":", " h ")
+      : "";
+  };
+  const debut = heure(routeData.startedAt);
+  const fin = heure(routeData.completedAt);
+  // « Tournee Besancon du mercredi 16 septembre » ; sans secteur, « Tournee du
+  // mercredi... » (et non « Tournee du jour du mercredi »).
+  const secteur = routeData.sector && routeData.sector !== "Tous" ? ` ${formatSectorLabel(routeData.sector)}` : "";
+  const jour = formatJourDeTournee(routeData.deliveryDate).toLowerCase();
+  const phrase = `Tournée${secteur} du ${jour}${debut && fin ? `, de ${debut} à ${fin}` : ""}.`;
+  const enEchec = routeData.stops.filter(stop => ["absent", "probleme", "a_reprogrammer"].includes(stop.status));
+  const chiffre = (libelle, valeur, classe = "") => `
+        <div class="fin-chiffre ${classe}"><span class="fin-chiffre-libelle">${libelle}</span><strong>${escapeHtml(valeur)}</strong></div>`;
+
   container.innerHTML = `
-    <div class="route-complete">
-      <strong>Tournée terminée</strong>
-      ${routeData.arrival ? `<p><a class="button primary" href="https://www.google.com/maps/dir/?api=1&destination=${routeData.arrival.lat},${routeData.arrival.lng}" target="_blank" rel="noopener noreferrer">Rejoindre l’arrivée : ${escapeHtml(routeData.arrival.label || "point choisi")}</a></p>` : ""}
-      <p>${escapeHtml(delivered)} livré(s), ${escapeHtml(absent)} absent(s), ${escapeHtml(problems)} problème(s)</p>
+    <div class="route-complete fin-tournee">
+      <strong class="fin-titre">Tournée terminée</strong>
+      <p class="fin-phrase">${escapeHtml(phrase)}</p>
+      <div class="fin-chiffres">
+        ${chiffre("Livrés", delivered)}
+        ${chiffre(absent > 1 ? "Clients absents" : "Client absent", absent, absent ? "fin-chiffre--echec" : "")}
+        ${chiffre(problems > 1 ? "Problèmes" : "Problème", problems, problems ? "fin-chiffre--echec" : "")}
+      </div>
+      ${enEchec.length ? `
+      <ul class="fin-problemes" aria-label="Arrêts non livrés">
+        ${enEchec.map(stop => `<li><strong>${escapeHtml(stop.clientName)}</strong><span>${escapeHtml(stop.problemReason || formatStopStatus(stop.status))}</span></li>`).join("")}
+      </ul>` : ""}
+      ${routeData.arrival ? `<p class="fin-arrivee"><span class="fin-chiffre-libelle">Arrivée</span><span>${escapeHtml(routeData.arrival.label || "Point choisi")}</span><a class="button primary" href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${routeData.arrival.lat},${routeData.arrival.lng}`)}" target="_blank" rel="noopener noreferrer">Y aller</a></p>` : ""}
       <div class="quick-actions">
         <button class="button primary" type="button" data-action="go-tab" data-target-tab="journee">Retour accueil</button>
         <button class="button secondary" type="button" data-action="go-tab" data-target-tab="recommande">Voir à recommander</button>
@@ -5627,6 +5686,8 @@ function demanderMotif(status, motifs) {
 
 /** Le geste complet : demander la raison, puis envoyer. */
 async function marquerArret(status) {
+  // Une livraison en suspens part d'abord : jamais deux gestes en attente.
+  await envoyerLivraisonEnSuspens();
   let motif = null;
   if (STATUTS_DEMANDANT_UN_MOTIF.has(status)) {
     let motifs = [];
@@ -5669,6 +5730,124 @@ async function updateCurrentDeliveryStatus(status, motif = null) {
 
   await updateLegacyClientDeliveryStatus(status);
 }
+
+// --- « LIVRE », SANS CONFIRMATION, AVEC ANNULER (planche 4b) ------------------
+//
+// La planche : « Passage automatique a l'arret suivant, toast "Livre --
+// <client>" avec Annuler pendant 4 s. Pas de confirmation : l'action est
+// reversible tant que le toast est la. »
+//
+// Le serveur, lui, ne sait PAS defaire une livraison : dans la machine d'etat
+// des commandes, `livre` n'a aucune sortie (livre: []), et la livraison
+// consomme la reservation de stock. Plutot que d'ouvrir une transition
+// livre -> en_livraison cote serveur (et de defaire une consommation de
+// stock), l'ENVOI est differe : l'arret passe a « Livre » a l'ecran tout de
+// suite, la tournee avance, et le PATCH ne part qu'au terme des 4 s. Annuler
+// dans ce delai n'a donc rien a defaire cote serveur.
+//
+// Ce qui force l'envoi avant le terme : un autre geste d'arret (on ne garde
+// jamais deux livraisons en suspens), et la page qui passe en arriere-plan
+// (verrouillage du telephone, appel, Google Maps ouvert par « Y aller »).
+let livraisonEnSuspens = null;
+// Le bouton ne se desactive pas (l'arret suivant le reprend aussitot) : un
+// double appui livrerait DEUX arrets. Un second appui trop proche est ignore.
+const LIVRE_DOUBLE_APPUI_MS = 700;
+let dernierAppuiLivre = 0;
+
+async function livrerAvecAnnulation() {
+  const maintenant = Date.now();
+  if (maintenant - dernierAppuiLivre < LIVRE_DOUBLE_APPUI_MS) return;
+  dernierAppuiLivre = maintenant;
+  if (!activeRoute) {
+    await updateCurrentDeliveryStatus("livre");
+    return;
+  }
+  await envoyerLivraisonEnSuspens();
+  const stop = activeRoute.stops[activeStopIndex];
+  if (!stop) {
+    notify("Aucun arrêt sélectionné.", "warning");
+    return;
+  }
+  if (activeRoute.status !== "en_livraison" || isStopTerminal(stop.status)) return;
+
+  const suspens = {
+    routeId: String(activeRoute.id),
+    stopId: String(stop.id),
+    statutAvant: stop.status,
+    indexAvant: activeStopIndex,
+    toast: null
+  };
+  livraisonEnSuspens = suspens;
+  appliquerLivraisonEnSuspens();
+  // L'arret suivant : le prochain non termine APRES celui-ci, sinon le premier
+  // qui reste (un arret saute plus tot).
+  const apres = activeRoute.stops.findIndex((s, i) => i > activeStopIndex && !isStopTerminal(s.status));
+  const reste = apres >= 0 ? apres : activeRoute.stops.findIndex(s => !isStopTerminal(s.status));
+  if (reste >= 0) activeStopIndex = reste;
+  rafraichirTournee();
+
+  suspens.toast = notify(`Livré — ${stop.clientName || "arrêt"}`, "success", {
+    action: { libelle: "Annuler", surClic: () => annulerLivraisonEnSuspens(suspens) },
+    auTerme: () => { envoyerLivraisonEnSuspens().catch(notifyEchec); }
+  });
+}
+
+/** Pose l'etat « livre » en suspens sur la tournee affichee (apres un rechargement aussi). */
+function appliquerLivraisonEnSuspens() {
+  const s = livraisonEnSuspens;
+  if (!s || !activeRoute || String(activeRoute.id) !== s.routeId) return;
+  const stop = activeRoute.stops.find(item => String(item.id) === s.stopId);
+  if (stop && !isStopTerminal(stop.status)) stop.status = "livre";
+}
+
+function rafraichirTournee() {
+  renderRoute();
+  renderMap();
+  updateRouteProgress();
+}
+
+function annulerLivraisonEnSuspens(suspens) {
+  if (livraisonEnSuspens !== suspens) return;
+  livraisonEnSuspens = null;
+  if (activeRoute && String(activeRoute.id) === suspens.routeId) {
+    const stop = activeRoute.stops.find(item => String(item.id) === suspens.stopId);
+    if (stop && stop.status === "livre") stop.status = suspens.statutAvant;
+    activeStopIndex = suspens.indexAvant;
+  }
+  rafraichirTournee();
+  document.getElementById("markDeliveredButton")?.focus({ preventScroll: true });
+}
+
+/** Envoie la livraison en suspens, s'il y en a une. Rend quand c'est fait. */
+async function envoyerLivraisonEnSuspens() {
+  const s = livraisonEnSuspens;
+  if (!s) return;
+  livraisonEnSuspens = null;
+  retirerToast(s.toast);
+  try {
+    await apiFetch(`/api/routes/${encodeURIComponent(s.routeId)}/stops/${encodeURIComponent(s.stopId)}`, {
+      method: "PATCH",
+      // keepalive : l'envoi declenche par `pagehide` survit a la page.
+      keepalive: true,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "livre", motif: null })
+    });
+  } catch (error) {
+    // Mise en file hors ligne : l'ecriture partira au retour du reseau.
+    // L'ecran garde « Livre » -- recharger depuis le cache le defairait.
+    if (error && error.enFile) throw error;
+    await loadData();
+    throw error;
+  }
+  await loadData();
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") envoyerLivraisonEnSuspens().catch(notifyEchec);
+});
+window.addEventListener("pagehide", () => {
+  envoyerLivraisonEnSuspens().catch(() => {});
+});
 
 async function updateLegacyClientDeliveryStatus(status) {
   const client = route[currentIndex];
@@ -5979,6 +6158,10 @@ function renderMap() {
     map.removeLayer(routeLine);
     routeLine = null;
   }
+  if (routeLineLisere) {
+    map.removeLayer(routeLineLisere);
+    routeLineLisere = null;
+  }
 
   const entities = getMapEntities();
   const points = [];
@@ -5989,7 +6172,8 @@ function renderMap() {
     if (!coords) return;
 
     // Le meme marqueur que dans la ligne d'arret. La zone de toucher fait
-    // 44 x 44 (plancher de la charte) ; le disque de 28 ou 34 est centre dedans.
+    // 44 x 44 (plancher de la charte) ; sur la carte le disque fait 44 lui
+    // aussi (decision du 23/09, planche 4c) -- la zone de toucher EST le disque.
     const etat = marqueurEtat(entity, index);
     const marker = L.marker([coords.lat, coords.lng], {
       icon: L.divIcon({
@@ -6023,9 +6207,14 @@ function renderMap() {
 
   if (activeRoute?.geometry?.coordinates) {
     const roadPoints = activeRoute.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
-    // Planche Carte.png : le trace est en ACCENT, 4,5 px, bouts ronds. Une
-    // forme, pas un texte -- l'orange y est a sa place.
-    routeLine = L.polyline(roadPoints, {color: couleurCharte("--v8-accent", "#EF9177"), weight: 4.5, opacity: 1, lineCap: "round", lineJoin: "round"}).addTo(map);
+    // Planche 4c, decision de Thomas du 23/09 (remplace les 4,5 px du 19/09) :
+    // le trace est en ACCENT, 7 px, bouts ronds. Une forme, pas un texte --
+    // l'orange y est a sa place. Dessous, un lisere blanc de 2 px de chaque
+    // cote : sur les tuiles OpenStreetMap reelles (routes orange et jaunes),
+    // l'orange seul se perdait -- la planche le craignait, son fond etait une
+    // esquisse. Le lisere n'est pas interactif : le clic reste au trace.
+    routeLineLisere = L.polyline(roadPoints, {color: "#FFFFFF", weight: 11, opacity: 0.9, lineCap: "round", lineJoin: "round", interactive: false}).addTo(map);
+    routeLine = L.polyline(roadPoints, {color: couleurCharte("--v8-accent", "#EF9177"), weight: 7, opacity: 1, lineCap: "round", lineJoin: "round"}).addTo(map);
     for (const [point, label] of [[activeRoute.departure, "Départ"], [activeRoute.arrival, "Arrivée"]]) {
       if (point) markers.push(L.marker([point.lat, point.lng]).addTo(map).bindPopup(`${label} : ${escapeHtml(point.label || "Point choisi")}`));
     }
@@ -6329,9 +6518,9 @@ function majBandeauHorsLigne() {
 /** Charte §4 : « Toast : bas d'ecran, 4 s, une action possible (Annuler) ». */
 const TOAST_DUREE_MS = 4000;
 
-function notify(message, type = "info") {
+function notify(message, type = "info", options = {}) {
   const region = document.getElementById("toastRegion");
-  if (!region) return;
+  if (!region) return null;
 
   const toast = document.createElement("div");
   toast.className = `toast toast-${type}`;
@@ -6341,6 +6530,23 @@ function notify(message, type = "info") {
   text.className = "toast-message";
   text.textContent = message;
   toast.appendChild(text);
+
+  // La charte : « une action possible (Annuler) ». Le bouton ferme le toast
+  // puis appelle l'action ; un seul clic compte.
+  if (options.action && typeof options.action.surClic === "function") {
+    const bouton = document.createElement("button");
+    bouton.type = "button";
+    bouton.className = "toast-action";
+    bouton.textContent = options.action.libelle || "Annuler";
+    bouton.addEventListener("click", () => {
+      if (toast.dataset.fini) return;
+      toast.dataset.fini = "1";
+      toast.classList.add("toast-out");
+      setTimeout(() => toast.remove(), 250);
+      options.action.surClic();
+    }, { once: true });
+    toast.appendChild(bouton);
+  }
 
   // Bouton de fermeture (utile surtout pour les erreurs persistantes)
   const closeBtn = document.createElement("button");
@@ -6368,8 +6574,21 @@ function notify(message, type = "info") {
     setTimeout(() => {
       toast.classList.add("toast-out");
       setTimeout(() => toast.remove(), 250);
+      if (!toast.dataset.fini) {
+        toast.dataset.fini = "1";
+        if (typeof options.auTerme === "function") options.auTerme();
+      }
     }, TOAST_DUREE_MS);
   }
+  return toast;
+}
+
+/** Retire un toast sans declencher ni son action ni son terme. */
+function retirerToast(toast) {
+  if (!toast || toast.dataset.fini) return;
+  toast.dataset.fini = "1";
+  toast.classList.add("toast-out");
+  setTimeout(() => toast.remove(), 250);
 }
 
 /** Le statut de tournee vu la derniere fois : la planification ne se replie qu'au CHANGEMENT. */
@@ -6658,6 +6877,12 @@ function renderProducts(entity) {
       }).join("")}
     </div>
   `;
+}
+
+/** « 4 articles » : le nombre de LIGNES, le meme mot que « n articles a decharger » de l'arret. */
+function articlesDeCommande(order) {
+  const n = (order.products || []).length;
+  return `${n} article${n > 1 ? "s" : ""}`;
 }
 
 function getOrderProductCount(order) {

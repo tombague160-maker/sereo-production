@@ -333,6 +333,11 @@ test.describe("Abonnements et pilotage", () => {
           await page.request.get(base + "/api/routes")
         ).json();
         return routes[0].stops.filter((s) => s.status === "livre").length;
+      }, {
+        // Depuis le 23/09 (planche 4b), « Livre » n'est ENVOYE qu'au terme
+        // des 4 s d'Annuler : le delai par defaut de 5 s ne laissait qu'une
+        // seconde de marge.
+        timeout: 10000,
       })
       .toBe(1);
     const routes = await (await page.request.get(base + "/api/routes")).json();

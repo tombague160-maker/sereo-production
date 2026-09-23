@@ -4,8 +4,10 @@
 //   - l'en-tete : le jour, le nom de la tournee, « 3 sur 8 », la barre ;
 //   - la carte de l'arret : un point + un mot d'etat, le nom, l'adresse, les
 //     articles a decharger avec leur quantite en disque ;
-//   - les trois gestes sous le pouce : Livraison validee (principal), Client
-//     absent et Probleme (tertiaire) ; Appeler et Itineraire au-dessus ;
+//   - les trois gestes sous le pouce : Livre (principal), Client absent et
+//     Probleme (tertiaire) ; Appeler, Y aller et la carte au-dessus (les mots
+//     de la planche 4b depuis le 23/09 -- « Livraison validee » et
+//     « Itineraire » avant) ;
 //   - le reste replie.
 // Et la planification vient APRES, repliee tant que la tournee roule.
 //
@@ -19,6 +21,10 @@ const { demarrer, jeuDeDonnees } = require("./serveur-seme");
 
 const VUES = { desktop: { width: 1440, height: 900 }, mobile: { width: 390, height: 844 } };
 const HAUTEUR = { desktop: 44, mobile: 48 };
+// Decision de Thomas du 23/09 (planche 4b) : au telephone, « Livre », « Y
+// aller » et les ronds qui les encadrent font 56 px ; Client absent et
+// Probleme restent a 48, moins hauts. Elle remplace les 48 uniformes du 19/09.
+const HAUTEUR_GESTE = { mobile: { appeler: 56, itineraire: 56, livre: 56 } };
 const TOL = 1;
 
 test.describe.configure({ mode: "serial" });
@@ -146,14 +152,16 @@ for (const vue of ["mobile", "desktop"]) {
     expect(contraste(rgb(r.arret.articlesCouleur), rgb(r.arret.articlesFond)), "titre des articles sur peche claire").toBeGreaterThanOrEqual(4.5);
 
     // LES GESTES : les libelles de la planche, les hauteurs de la charte, trois poids.
-    expect(r.gestes.itineraire.texte).toBe("Itinéraire");
+    // Les mots de la planche 4b (decision du 23/09) : « Y aller », « Livre ».
+    expect(r.gestes.itineraire.texte).toBe("Y aller");
     expect(r.gestes.appeler.texte).toBe("Appeler");
-    expect(r.gestes.livre.texte).toBe("Livraison validée");
+    expect(r.gestes.livre.texte).toBe("Livré");
     expect(r.gestes.absent.texte).toBe("Client absent");
     expect(r.gestes.probleme.texte).toBe("Problème");
     for (const [nom, g] of Object.entries(r.gestes)) {
       if (!g.visible) continue;
-      expect(Math.abs(g.h - HAUTEUR[vue]) <= TOL, `${nom} : ${g.h}px au lieu de ${HAUTEUR[vue]}`).toBe(true);
+      const attendu = (HAUTEUR_GESTE[vue] || {})[nom] || HAUTEUR[vue];
+      expect(Math.abs(g.h - attendu) <= TOL, `${nom} : ${g.h}px au lieu de ${attendu}`).toBe(true);
     }
     expect(r.gestes.livre.classes).toContain("primary");
     expect(r.gestes.absent.classes).toContain("tertiary");
