@@ -4,6 +4,7 @@
 // Rien n'est écrit dans l'application réelle : base SQLite dans un dossier
 // temporaire, routage simulé en local, aucun accès réseau sortant.
 const { spawn } = require("node:child_process");
+const net = require("node:net");
 const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
 
 const AUJOURDHUI = new Intl.DateTimeFormat("en-CA", {
@@ -86,6 +87,15 @@ function jeuDeDonnees() {
   };
 }
 
+/** Vrai si rien n'ecoute sur 127.0.0.1:`port` (on s'y lie, puis on le rend). */
+function portLibre(port) {
+  return new Promise(resolve => {
+    const essai = net.createServer();
+    essai.once("error", () => resolve(false));
+    essai.listen(port, "127.0.0.1", () => essai.close(() => resolve(true)));
+  });
+}
+
 /** Routage simulé : une matrice de durées et une géométrie plausible. */
 function demarrerRoutage() {
   const n = CLIENTS.length;
@@ -106,6 +116,17 @@ function demarrerRoutage() {
  * des autres bancs à serveur propre (operations.spec.js : 3118).
  */
 async function demarrer({ port, seed = jeuDeDonnees(), env = {} }) {
+  // Le port doit etre LIBRE avant le lancement (integration des lots 1 a 7,
+  // 23/09). Sinon le serveur seme meurt aussitot (EADDRINUSE, sortie ignoree)
+  // et la boucle d'attente ci-dessous recevait le 200 de /healthz... d'un
+  // AUTRE serveur : le banc parlait a une base semee d'autres donnees, et
+  // rougissait sur l'ecran (« Expected: 4, Received: 1 » dans
+  // meilleur-trajet.spec.js:45, reproduit en occupant 3198). Les ports sont
+  // uniques dans CE depot (test/ports-e2e.test.js), pas entre les worktrees
+  // qui lancent les memes bancs en meme temps.
+  if (!(await portLibre(port))) {
+    throw new Error(`port ${port} deja pris par un autre processus : le banc parlerait a un serveur qui n'est pas le sien`);
+  }
   const routage = await demarrerRoutage();
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "sereo-seme-"));
   fs.writeFileSync(path.join(root, "seed.json"), JSON.stringify(seed));
@@ -127,18 +148,38 @@ async function demarrer({ port, seed = jeuDeDonnees(), env = {} }) {
     },
     stdio: "ignore"
   });
+  // Un serveur qui s'arrete pendant l'attente n'a pas pu repondre : ce qui
+  // repond sur le port est un autre (pris entre le controle et le lancement).
+  // Reste ouvert : un autre processus qui prend le port dans les quelques
+  // millisecondes entre portLibre et le lancement, et repond avant que le
+  // notre ne meure -- /healthz ne dit pas QUI repond.
+  let sortie = null;
+  child.once("exit", code => { sortie = code; });
   const base = `http://127.0.0.1:${port}`;
   const limite = Date.now() + 20000;
+  const arreterRoutage = async () => {
+    routage.server.closeAllConnections();
+    await new Promise(r => routage.server.close(r));
+    fs.rmSync(root, { recursive: true, force: true });
+  };
   for (;;) {
-    try { if ((await fetch(base + "/healthz")).status === 200) break; } catch { /* pas encore levé */ }
+    if (sortie !== null) {
+      await arreterRoutage();
+      throw new Error(`serveur semé sur ${port} arrêté au démarrage (code ${sortie}) : port pris ?`);
+    }
+    try { if ((await fetch(base + "/healthz")).status === 200 && sortie === null) break; } catch { /* pas encore levé */ }
     if (Date.now() > limite) throw new Error(`serveur semé injoignable sur ${base}`);
     await new Promise(r => setTimeout(r, 200));
   }
   return {
     base,
     async arreter() {
-      child.kill();
-      await new Promise(r => child.once("exit", r));
+      // Deja arrete : « exit » ne viendrait plus, l'attente pendait (afterAll).
+      if (sortie === null) {
+        const fin = new Promise(r => child.once("exit", r));
+        child.kill();
+        await fin;
+      }
       // close() attend la fin des connexions keep-alive : on les coupe d'abord.
       routage.server.closeAllConnections();
       await new Promise(r => routage.server.close(r));
