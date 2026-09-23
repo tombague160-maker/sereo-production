@@ -163,6 +163,27 @@ test("lot 5 — la derniere livraison termine la tournee : l'ecran recharge une 
   await ctx.close();
 });
 
+test("lot 5 — « Me localiser » : la position part arrondie a ~100 m (3 decimales)", async ({ browser }) => {
+  test.setTimeout(60000);
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, timezoneId: "Europe/Paris" });
+  const page = await ctx.newPage();
+  await page.addInitScript(() => {
+    navigator.geolocation.getCurrentPosition = ok => ok({ coords: { latitude: 47.2381234, longitude: 6.0241234, accuracy: 12 } });
+  });
+  await page.goto(fin.base + "/#livreur", { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "Me localiser" }).click();
+  await expect(page.locator("#routeLocationStatus")).toHaveText("Position de départ enregistrée.");
+  await page.locator("#returnToStart").check();
+  await expect(page.locator("#deliveryCandidates [data-delivery-order]").first()).toBeVisible();
+  await page.getByRole("button", { name: "Tout sélectionner", exact: true }).click();
+  const envoi = page.waitForRequest(r => r.method() === "POST" && new URL(r.url()).pathname === "/api/routes");
+  await page.locator("#createRouteButton").click();
+  const corps = (await envoi).postDataJSON();
+  expect([corps.departure.lat, corps.departure.lng], "la position exacte a quitte le telephone").toEqual([47.238, 6.024]);
+  expect([corps.arrival.lat, corps.arrival.lng]).toEqual([47.238, 6.024]);
+  await ctx.close();
+});
+
 test("lot 5 — la liste des tournees n'emporte pas les traces de l'historique", async () => {
   const routes = await (await fetch(srv.base + "/api/routes")).json();
   const finies = routes.filter(r => r.status === "terminee");

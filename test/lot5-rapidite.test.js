@@ -340,3 +340,109 @@ test("lot 5 : la reponse d'un geste d'arret porte la tournee, l'arret, la comman
   assert.equal(fin.body.route.status, "terminee");
   assert.equal(fin.body.route.geometry?.coordinates?.length, 50, "la tournee terminee a perdu son trace dans la reponse");
 });
+
+// --- 7. Decision 5 : la position « Me localiser » stockee a ~100 m -----------
+
+test("lot 5 : la position « Me localiser » est stockee arrondie a 3 decimales, une adresse choisie ne l'est pas", () => {
+  const cmd = [commande("g1", "pret_livraison")];
+  writeDb({
+    ...defaultDb(), clients: clients(), commandes: cmd,
+    routes: [
+      tournee("gps", "prete", cmd, {
+        departure: { lat: 46.7512345, lng: 5.9123456, label: "Ma position actuelle" },
+        arrival: { lat: 46.7512345, lng: 5.9123456, label: "Ma position actuelle" }
+      }),
+      tournee("adresse", "prete", [], { departure: { lat: 47.2381234, lng: 6.0241234, label: "4 rue de Dole, Besançon" } })
+    ]
+  }, { backup: false });
+  const db = readDb();
+  const gps = db.routes.find(r => r.id === "gps");
+  assert.deepEqual([gps.departure.lat, gps.departure.lng], [46.751, 5.912], "la position du telephone est stockee au centimetre");
+  assert.deepEqual([gps.arrival.lat, gps.arrival.lng], [46.751, 5.912]);
+  const adresse = db.routes.find(r => r.id === "adresse");
+  assert.deepEqual([adresse.departure.lat, adresse.departure.lng], [47.2381234, 6.0241234], "une adresse choisie a ete arrondie");
+});
+
+// --- 8. Decision 5 : purge des tournees terminees de plus de 12 mois -------------
+
+const MAINTENANT = new Date("2026-09-23T10:00:00.000Z");
+
+function semerPourPurge() {
+  const vieilles = [commande("p1", "livre", 1), commande("p2", "livre", 2)];
+  const recentes = [commande("p3", "livre", 3)];
+  const actives = [commande("p4", "en_livraison", 4)];
+  const sansDate = [commande("p5", "livre", 5)];
+  for (const c of [...vieilles, ...recentes, ...actives, ...sansDate]) {
+    c.products = [{ code: "P1", nom: "Produit", quantite: 2, prixUnitaire: 12 }];
+    c.dateCommande = "2025-06-01";
+  }
+  writeDb({
+    ...defaultDb(), clients: clients(), commandes: [...vieilles, ...recentes, ...actives, ...sansDate],
+    routes: [
+      tournee("vieille", "terminee", vieilles, { completedAt: "2025-08-20T16:00:00.000Z", deliveryDate: "2025-08-20",
+        departure: { lat: 46.751, lng: 5.912, label: "Ma position actuelle" } }),
+      tournee("recente", "terminee", recentes, { completedAt: "2025-10-01T16:00:00.000Z", deliveryDate: "2025-10-01" }),
+      // En cours depuis 14 mois : jamais purgee (ce n'est pas une tournee terminee).
+      tournee("active", "en_livraison", actives, { createdAt: "2025-07-01T08:00:00.000Z", deliveryDate: "2025-07-01" }),
+      // Terminee sans aucune date lisible : dans le doute, gardee.
+      tournee("sans-date", "terminee", sansDate, { createdAt: "", deliveryDate: "" })
+    ]
+  }, { backup: false });
+}
+
+test("lot 5 : la purge supprime les tournees terminees de plus de 12 mois, garde commandes et chiffre d'affaires", async () => {
+  semerPourPurge();
+  const avant = readDb();
+  const statsAvant = await api("/api/statistics");
+  assert.ok(avant.routes.some(r => r.id === "vieille"), "temoin : la vieille tournee n'est pas semee");
+
+  const purger = S.purgerTourneesAnciennes || (async () => ({ purgees: 0 }));
+  const resultat = await purger({ maintenant: MAINTENANT });
+
+  const apres = readDb();
+  assert.deepEqual(apres.routes.map(r => r.id).sort(), ["active", "recente", "sans-date"], "la tournee de 13 mois n'a pas ete purgee");
+  assert.equal(resultat.purgees, 1);
+  // Les commandes, toutes, telles quelles.
+  assert.deepEqual(apres.commandes.map(c => [c.id, c.status]), avant.commandes.map(c => [c.id, c.status]), "des commandes ont change");
+  assert.deepEqual((await api("/api/statistics")).body, statsAvant.body, "les statistiques ont change");
+  // Avec son trace.
+  const { DatabaseSync } = require("node:sqlite");
+  const cnx = new DatabaseSync(process.env.SEREO_SQLITE_PATH);
+  const traces = cnx.prepare("SELECT route_id FROM traces_tournees").all().map(r => r.route_id);
+  cnx.close();
+  assert.ok(!traces.includes("vieille"), "le trace de la tournee purgee est reste");
+  // Journalisee.
+  const entree = apres.historique.find(h => h.type === "Purge");
+  assert.ok(entree, "la purge n'est pas journalisee");
+  assert.match(entree.message, /1 tournée\(s\) terminée\(s\) avant le 2025-09-23/);
+  assert.match(entree.message, /Commandes et chiffre d'affaires intacts/);
+});
+
+test("lot 5 : la purge part APRES une sauvegarde qui contient ce qu'elle efface", async () => {
+  semerPourPurge();
+  const resultat = await S.purgerTourneesAnciennes({ maintenant: MAINTENANT });
+  assert.equal(resultat.purgees, 1);
+  const fichier = path.join(process.env.SEREO_BACKUP_DIR, resultat.sauvegarde);
+  assert.match(resultat.sauvegarde, /avant-purge/);
+  // La sauvegarde est celle d'AVANT : la tournee purgee y est.
+  const zlib = require("node:zlib");
+  const copie = path.join(root, "restauree.sqlite");
+  fs.writeFileSync(copie, zlib.gunzipSync(fs.readFileSync(fichier)));
+  const { DatabaseSync } = require("node:sqlite");
+  const cnx = new DatabaseSync(copie);
+  const ids = cnx.prepare("SELECT id FROM routes").all().map(r => r.id);
+  cnx.close();
+  assert.ok(ids.includes("vieille"), "la sauvegarde ne contient pas la tournee purgee");
+});
+
+test("lot 5 : sans sauvegarde, pas de purge", async () => {
+  semerPourPurge();
+  const echec = await S.purgerTourneesAnciennes({ maintenant: MAINTENANT, sauvegarder: async () => { throw new Error("disque plein"); } });
+  assert.equal(echec.purgees, 0);
+  assert.ok(readDb().routes.some(r => r.id === "vieille"), "la purge est partie sans sauvegarde");
+  const vide = await S.purgerTourneesAnciennes({ maintenant: MAINTENANT, sauvegarder: async () => null });
+  assert.equal(vide.purgees, 0);
+  assert.ok(readDb().routes.some(r => r.id === "vieille"), "la purge est partie sans fichier de sauvegarde");
+  // Temoin : avec une sauvegarde, la meme purge part.
+  assert.equal((await S.purgerTourneesAnciennes({ maintenant: MAINTENANT })).purgees, 1);
+});

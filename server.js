@@ -5450,13 +5450,37 @@ function normalizeRoute(route, orders) {
     };
   });
 
+  // Lot 5 (decision 5 de Thomas, 23/09) : la position « Me localiser » est
+  // stockee arrondie a ~100 m. Ici, a chaque ecriture : les tournees deja
+  // enregistrees au centimetre le sont aussi, a la premiere ecriture qui suit.
+  const positions = {};
+  for (const cle of ["departure", "arrival"]) {
+    if (route[cle]) positions[cle] = arrondirPositionGps(route[cle]);
+  }
+
   return {
     ...route,
+    ...positions,
     deliveryDate: normalizeDateInput(route.deliveryDate),
     status: routeStatus,
     stops: normalizedStops,
     selectedOrderIds: normalizedStops.map(stop => stop.orderId)
   };
+}
+
+// Le libelle que public/js/operations.js donne a la position du telephone.
+// Une adresse choisie (un depot, une ville) n'est pas une position personnelle :
+// elle n'est pas arrondie.
+const LIBELLE_POSITION_GPS = "Ma position actuelle";
+
+/** 3 decimales : ~110 m en latitude, ~75 m en longitude a 46-47° N. */
+function arrondirPositionGps(point) {
+  if (!point || typeof point !== "object" || point.label !== LIBELLE_POSITION_GPS) return point;
+  const arrondi = valeur => {
+    const n = Number(valeur);
+    return valeur === "" || valeur === null || !Number.isFinite(n) ? valeur : Math.round(n * 1000) / 1000;
+  };
+  return { ...point, lat: arrondi(point.lat), lng: arrondi(point.lng) };
 }
 
 function startRoute(db, routeId) {
@@ -7833,10 +7857,107 @@ function addHistoryEntry(categorie, message) {
   }
 }
 
+// ============================================================================
+// Lot 5 (audit geo, decision 5 de Thomas, 23/09) : PURGE DES TOURNEES ANCIENNES
+// ============================================================================
+//
+// Les tournees terminees depuis plus de 12 mois partent, avec leurs arrets et
+// leur trace (la position de depart du livreur y dort). Les COMMANDES restent :
+// le chiffre d'affaires, les statistiques et l'historique des livraisons par
+// client se calculent sur elles, pas sur les tournees.
+//
+// La purge efface pour de bon : elle ne part qu'APRES une sauvegarde forcee
+// (« avant-purge », dans la rotation des sauvegardes), et pas du tout si cette
+// sauvegarde echoue. Elle est journalisee dans l'historique.
+//
+// SEREO_PURGE_TOURNEES_MOIS : 12 par defaut ; 0 coupe la purge.
+const PURGE_TOURNEES_MOIS = (() => {
+  const brut = process.env.SEREO_PURGE_TOURNEES_MOIS;
+  const n = Number(brut === undefined || brut === "" ? 12 : brut);
+  return Number.isFinite(n) && n >= 0 ? n : 12;
+})();
+const PURGE_TOURNEES_INTERVALLE_MS = 24 * 60 * 60 * 1000;
+const STATUTS_TOURNEE_PURGEABLES = new Set(["terminee"]);
+
+/** La date ou la tournee s'est terminee, sinon celle de sa livraison, sinon de sa creation. */
+function dateDeFinTournee(route) {
+  for (const valeur of [route.completedAt, route.deliveryDate, route.createdAt]) {
+    const t = Date.parse(valeur || "");
+    if (Number.isFinite(t)) return t;
+  }
+  return NaN;
+}
+
+function limiteDePurge(maintenant, mois) {
+  const limite = new Date(maintenant);
+  limite.setMonth(limite.getMonth() - mois);
+  return limite;
+}
+
+function tourneesAPurger(db, maintenant = new Date(), mois = PURGE_TOURNEES_MOIS) {
+  if (!(mois > 0)) return [];
+  const limite = limiteDePurge(maintenant, mois).getTime();
+  // Une tournee sans date lisible n'est jamais purgee : dans le doute, on garde.
+  return db.routes.filter(route => STATUTS_TOURNEE_PURGEABLES.has(route.status) && dateDeFinTournee(route) < limite);
+}
+
+/**
+ * @param sauvegarder  la sauvegarde a faire avant (injectable pour les tests) ;
+ *                     doit rendre le chemin du fichier, ou lever.
+ * @returns {{ purgees: number, sauvegarde?: string, raison?: string }}
+ */
+async function purgerTourneesAnciennes({ maintenant = new Date(), mois = PURGE_TOURNEES_MOIS, sauvegarder = writeBackupNowAsync } = {}) {
+  return withWriteLock(async () => {
+    const db = readDb();
+    const cibles = tourneesAPurger(db, maintenant, mois);
+    if (!cibles.length) return { purgees: 0 };
+
+    let sauvegarde = null;
+    try {
+      sauvegarde = await sauvegarder("avant-purge");
+    } catch (error) {
+      console.error(`[purge] sauvegarde impossible, purge annulee : ${error.message || error}`);
+      return { purgees: 0, raison: "sauvegarde impossible" };
+    }
+    if (!sauvegarde) {
+      console.error("[purge] aucune sauvegarde ecrite, purge annulee");
+      return { purgees: 0, raison: "sauvegarde impossible" };
+    }
+
+    const ids = new Set(cibles.map(route => String(route.id)));
+    const arrets = cibles.reduce((n, route) => n + (route.stops || []).length, 0);
+    db.routes = db.routes.filter(route => !ids.has(String(route.id)));
+    const limite = toYmd(limiteDePurge(maintenant, mois));
+    const fichier = path.basename(String(sauvegarde));
+    addHistory(db, "Purge", `${ids.size} tournée(s) terminée(s) avant le ${limite} supprimée(s), ${arrets} arrêt(s) — conservation ${mois} mois. Commandes et chiffre d'affaires intacts. Sauvegarde : ${fichier}`, {
+      tournees: ids.size,
+      arrets,
+      limite,
+      sauvegarde: fichier
+    });
+    writeDb(db, { backup: false });
+    console.log(`[purge] ${ids.size} tournee(s) de plus de ${mois} mois supprimee(s) (sauvegarde ${fichier})`);
+    return { purgees: ids.size, sauvegarde: fichier };
+  });
+}
+
+function planifierPurgeDesTournees() {
+  if (!(PURGE_TOURNEES_MOIS > 0)) return;
+  const lancer = () => purgerTourneesAnciennes().catch(error => {
+    console.error(`[purge] echec : ${error.message || error}`);
+  });
+  // Une minute apres le demarrage (le temps que le serveur reponde), puis chaque jour.
+  const premier = setTimeout(lancer, 60 * 1000);
+  const suivants = setInterval(lancer, PURGE_TOURNEES_INTERVALLE_MS);
+  if (premier.unref) premier.unref();
+  if (suivants.unref) suivants.unref();
+}
+
 function startServer(port = PORT, host = HOST) {
   // P1 v1.14.0 : healing initial pour garantir la coherence apres restart
   // (notamment apres restauration d'un backup ou montee de version)
   healDatabaseAtBoot();
+  planifierPurgeDesTournees();
   return app.listen(port, host, () => {
     console.log(`Sereo lance sur http://${host}:${port}`);
     if (host === "0.0.0.0" || host === "::") {
@@ -7851,6 +7972,9 @@ if (require.main === module) {
 
 module.exports = {
   app,
+  // Lot 5 (audit geo) : purge des tournees anciennes
+  purgerTourneesAnciennes,
+  tourneesAPurger,
   dimancheDePaques,
   joursFeriesFrance,
   alerteDateNonOuvree,
