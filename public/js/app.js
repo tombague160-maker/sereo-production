@@ -1853,15 +1853,24 @@ function tourneesPasseesNonSoldees(aujourdhui = getTodayDateInput()) {
 /**
  * La tournee du jour D'ABORD : celle qui roule, sinon celle qui attend son
  * depart. Sans tournee du jour, une tournee passee non soldee (signalee, avec
- * « Clôturer »), sinon une tournee preparee pour un jour a venir.
+ * « Clôturer »). Sinon la derniere tournee du jour FINIE (terminee ou
+ * cloturee), sinon une tournee preparee pour un jour a venir.
+ *
+ * Relecture adverse du lot 2 : une tournee du jour finie n'etait jamais
+ * choisie. Rouvert, l'ecran disait « Aucune tournée » -- et le selecteur,
+ * cache sous deux options, n'aidait pas : l'arret a corriger (M2) et le bilan
+ * n'etaient plus atteignables qu'avant un rechargement.
  */
 function choisirTourneeAffichee() {
   const duJour = tourneesDuJour();
   const passees = tourneesPasseesNonSoldees();
+  const finie = t => t.completedAt || t.clotureeLe || t.updatedAt || "";
+  const finiesDuJour = duJour.filter(t => !tourneeNonSoldee(t)).sort((a, b) => String(finie(b)).localeCompare(String(finie(a))));
   return duJour.find(t => t.status === "en_livraison")
     || duJour.find(t => t.status === "prete" || t.status === "brouillon")
     || passees.find(t => t.status === "en_livraison")
     || passees[0]
+    || finiesDuJour[0]
     || deliveryRoutes.find(tourneeNonSoldee)
     || null;
 }
@@ -6460,6 +6469,31 @@ function tourneeActiveDeLaCommande(orderId) {
     && (t.stops || []).some(stop => String(stop.orderId) === String(orderId) && !isStopTerminal(stop.status))) || null;
 }
 
+/**
+ * Relecture adverse du lot 2 : la liste s'ouvre sur le jour, et cachait sans
+ * le dire les commandes pretes EN RETARD (prevues un jour passe, jamais mises
+ * en tournee) et celles SANS date. Rend la phrase qui les compte (memes
+ * filtres de secteur et de ville), ou "". Les commandes d'un jour a venir ne
+ * sont pas signalees : elles ne manquent rien.
+ */
+function signalHorsDate() {
+  const jour = deliveryFilter.date;
+  if (!jour) return "";
+  const cityKey = normalizeTextKey(deliveryFilter.city);
+  const sectorKey = normalizeTextKey(deliveryFilter.sector);
+  const cachees = getDeliverableOrders().filter(order => !STATUTS_A_RELIVRER.includes(order.status)
+    && !(sectorKey && sectorKey !== "tous" && normalizeTextKey(order.sector) !== sectorKey)
+    && !(cityKey && normalizeTextKey(order.city) !== cityKey));
+  const enRetard = cachees.filter(order => order.deliveryDate && order.deliveryDate < jour).length;
+  const sansDate = cachees.filter(order => !order.deliveryDate).length;
+  if (!enRetard && !sansDate) return "";
+  const pl = n => (n > 1 ? "s" : "");
+  const parts = [];
+  if (enRetard) parts.push(`${enRetard} commande${pl(enRetard)} prête${pl(enRetard)} en retard`);
+  if (sansDate) parts.push(parts.length ? `${sansDate} sans date` : `${sansDate} commande${pl(sansDate)} prête${pl(sansDate)} sans date`);
+  return `. Hors de cette date : ${parts.join(" et ")} ; vide la date pour ${enRetard + sansDate > 1 ? "les" : "la"} voir.`;
+}
+
 /** Les commandes filtrees qu'on peut encore choisir (pas deja dans une tournee). */
 function commandesChoisissables() {
   return getFilteredDeliveryOrders().filter(order => !tourneeActiveDeLaCommande(order.id));
@@ -6490,7 +6524,7 @@ function renderDeliveryCandidates() {
     const city = deliveryFilter.city ? `, ville ${deliveryFilter.city}` : "";
     const date = deliveryFilter.date ? `, ${formatDeliveryDate(deliveryFilter.date)}` : "";
     const dejaPrises = occupees.size ? ` (dont ${occupees.size} déjà en tournée)` : "";
-    summary.textContent = `${filtered.length} commande(s) prête(s)${dejaPrises} - ${sector}${city}${date}`;
+    summary.textContent = `${filtered.length} commande(s) prête(s)${dejaPrises} - ${sector}${city}${date}${signalHorsDate()}`;
   }
 
   updateSelectedDeliveryCount();
@@ -7013,14 +7047,25 @@ function demanderCorrection(stop, tournee) {
     };
     // Echap ferme le <dialog> : c'est une annulation (comme le motif).
     const surFermeture = () => terminer(null);
+    // Relecture adverse du lot 2 : Entree (ou « OK » du clavier) dans la cause
+    // soumet le formulaire, et `method="dialog"` le fermait -- une annulation
+    // muette, alors que la cause obligatoire pousse justement a y taper.
+    // Entree vaut desormais « Corriger ».
+    const formulaire = document.getElementById("correctionForm");
+    const surEnvoi = evenement => {
+      evenement.preventDefault();
+      dialogue.querySelector('[data-action="correction-valider"]')?.click();
+    };
     function terminer(valeur) {
       dialogue.removeEventListener("click", surClic);
       dialogue.removeEventListener("close", surFermeture);
+      formulaire?.removeEventListener("submit", surEnvoi);
       if (dialogue.open) dialogue.close();
       resolve(valeur);
     }
     dialogue.addEventListener("click", surClic);
     dialogue.addEventListener("close", surFermeture);
+    formulaire?.addEventListener("submit", surEnvoi);
     dialogue.showModal();
   });
 }

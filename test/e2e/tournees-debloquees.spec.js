@@ -358,3 +358,108 @@ test("M2 — hors ligne, une correction attend dans la file, montree faite (« E
   await expect.poll(async () => (await tournee(srv2.base, "r-1")).stops[ici].status, { timeout: 30000 }).toBe("absent");
   await ctx.close();
 });
+
+// --- Relecture adverse du lot 2 (23/09) -------------------------------------------
+//
+// Les deux serveurs sont resemes (memes ports 3330 et 3331) : ce qui suit veut
+// une base que les cas precedents n'ont pas touchee.
+
+/**
+ * La seule tournee du jour est TERMINEE (un « Absent » tape par erreur au
+ * dernier arret l'a finie). Plus, pour la liste de preparation : une commande
+ * prete prevue HIER (jamais mise en tournee) et une commande prete SANS date.
+ */
+function semeTourneeFinie() {
+  const s = jeuDeDonnees();
+  const copie = (depuis, id, extra) => ({ ...structuredClone(s.commandes.find(c => c.id === depuis)), id, ...extra });
+  s.commandes.push(
+    copie("o-8", "o-retard", { clientName: "Maison du Retard", status: "pret_livraison", deliveryDate: HIER }),
+    copie("o-8", "o-sansdate", { clientName: "Foyer Sans Date", status: "pret_livraison", deliveryDate: "" })
+  );
+  const r = s.routes[0];
+  r.status = "terminee";
+  r.startedAt = `${AUJOURDHUI}T07:30:00Z`;
+  r.completedAt = `${AUJOURDHUI}T11:00:00Z`;
+  const fin = { o5: "livre", o6: "absent" };
+  r.stops = r.stops.map(stop => {
+    const cle = stop.orderId.replace("-", "");
+    if (stop.status === "en_livraison") return { ...stop, status: "livre", deliveredAt: `${AUJOURDHUI}T10:00:00Z` };
+    if (fin[cle]) return { ...stop, status: fin[cle], deliveredAt: `${AUJOURDHUI}T10:50:00Z` };
+    return stop;
+  });
+  const statutCommande = { livre: "livre", absent: "a_reprogrammer", probleme: "a_reprogrammer" };
+  for (const stop of r.stops) {
+    const o = s.commandes.find(c => c.id === stop.orderId);
+    o.status = statutCommande[stop.status];
+    o.routeId = r.id;
+    if (stop.status === "absent") o.deliveryStatus = "absent";
+  }
+  return s;
+}
+
+test("relecture — rouverte, l'ecran montre la tournee du jour TERMINEE : un arret se corrige encore apres un rechargement", async ({ browser }) => {
+  test.setTimeout(120000);
+  await srv.arreter();
+  srv = await demarrer({ port: 3330, seed: semeTourneeFinie() });
+  const { ctx, page, erreurs } = await ouvrir(browser, srv.base);
+  await expect(page.locator("#currentClient"), "la tournee terminee du jour n'est pas a l'ecran").toContainText("Tournée terminée");
+  const ligne = page.locator("#routeStopsList .route-stop").nth(5);
+  await expect(ligne).toContainText("Cabinet Infirmier Dupont-Lefebvre");
+  await ligne.locator(".route-stop-main").click();
+  await page.locator('#currentClient [data-action="corriger-statut"]').click();
+  const dialogue = page.locator("#correctionDialog");
+  await dialogue.locator('[data-correction="livre"]').click();
+  await dialogue.locator("#correctionCause").fill("Absent tapé par erreur");
+  await dialogue.locator('[data-action="correction-valider"]').click();
+  await expect.poll(async () => (await tournee(srv.base, "r-1")).stops[5].status).toBe("livre");
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+test("relecture — la liste du jour DIT les commandes pretes qu'elle cache : en retard, sans date", async ({ browser }) => {
+  test.setTimeout(120000);
+  await srv.arreter();
+  srv = await demarrer({ port: 3330, seed: semeTourneeFinie() });
+  const { ctx, page } = await ouvrir(browser, srv.base);
+  const cartes = page.locator("#deliveryCandidates");
+  await expect(cartes).toContainText("EHPAD Résidence Bellevue");
+  await expect(cartes).not.toContainText("Maison du Retard");
+  const resume = page.locator("#deliveryFilterSummary");
+  await expect(resume, "les commandes pretes cachees par la date ne sont pas signalees").toContainText("Hors de cette date : 1 commande prête en retard et 1 sans date ; vide la date pour les voir.");
+  // Vider la date les montre, et le signal disparait (la planification est
+  // ouverte : aucune tournee ne roule).
+  await expect(page.locator("#routePlanning")).toHaveAttribute("open", "");
+  await page.locator("#deliveryDate").fill("");
+  await page.locator("#deliveryDate").dispatchEvent("change");
+  await expect(cartes).toContainText("Maison du Retard");
+  await expect(cartes).toContainText("Foyer Sans Date");
+  await expect(resume).not.toContainText("Hors de cette date");
+  await ctx.close();
+});
+
+test("relecture — « Corriger le statut » : Entree dans la cause ENVOIE la correction (avant : le dialogue se fermait, rien ne partait)", async ({ browser }) => {
+  test.setTimeout(120000);
+  await srv2.arreter();
+  srv2 = await demarrer({ port: 3331, seed: jeuDeDonnees() });
+  const { ctx, page, erreurs } = await ouvrir(browser, srv2.base);
+  await page.locator("#routeStopsList .route-stop").nth(3).locator(".route-stop-main").click();
+  await page.locator('#currentClient [data-action="corriger-statut"]').click();
+  const dialogue = page.locator("#correctionDialog");
+  await dialogue.locator('[data-correction="livre"]').click();
+  const cause = dialogue.locator("#correctionCause");
+  await cause.fill("Problème tapé par erreur");
+  await cause.press("Enter");
+  await expect.poll(async () => (await tournee(srv2.base, "r-1")).stops[3].status, { message: "Entree n'a rien envoye" }).toBe("livre");
+  await expect(dialogue).toBeHidden();
+  // Temoin : sans statut choisi, Entree n'envoie rien et le dialogue reste.
+  await page.locator("#routeStopsList .route-stop").nth(0).locator(".route-stop-main").click();
+  await page.locator('#currentClient [data-action="corriger-statut"]').click();
+  await cause.fill("Sans choix");
+  await cause.press("Enter");
+  await expect(dialogue).toBeVisible();
+  expect((await tournee(srv2.base, "r-1")).stops[0].status).toBe("livre");
+  await dialogue.locator('[data-action="correction-annuler"]').click();
+  await expect(dialogue).toBeHidden();
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
