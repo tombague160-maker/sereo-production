@@ -6547,7 +6547,9 @@ function corrigerArret(db, routeId, stopId, { status, cause } = {}, par = "") {
   if ((order.routeId && String(order.routeId) !== String(route.id)) || tourneeActiveDeLaCommande(db, order.id, route.id)) {
     throw conflit(`La commande ${nom} est repartie dans une autre tournée : corrige-la là-bas.`);
   }
-  const attendus = stop.status === "livre" ? ["livre"] : STATUTS_A_RELIVRER;
+  // Un arret en echec dont la commande est restee « en livraison » (donnee
+  // d'avant le lot 1, ou semee ainsi) se corrige aussi : rien n'est reparti.
+  const attendus = stop.status === "livre" ? ["livre"] : [...STATUTS_A_RELIVRER, "en_livraison"];
   if (!attendus.includes(order.status)) {
     throw conflit(`La commande ${nom} a changé depuis ce geste : corrige-la depuis l'écran Commandes.`);
   }

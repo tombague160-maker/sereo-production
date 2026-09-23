@@ -410,6 +410,17 @@ test("M2 — « à faire » rouvre une tournee terminee ; jamais une tournee clo
   assert.equal((await tourneeLue("r-cours")).status, "cloturee");
 });
 
+test("M2 — un arret en echec dont la commande est restee « en livraison » (donnee d'avant le lot 1) se corrige aussi", async () => {
+  ensemencer();
+  const db = readDb();
+  db.routes[0].stops[1].status = "probleme";
+  writeDb(db, { backup: false });
+  assert.equal(commandeLue("o-b").status, "en_livraison", "prealable");
+  const r = await poster("/api/routes/r-cours/stops/s-o-b/correction", { status: "livre", cause: "Livré au gardien" });
+  assert.equal(r.res.status, 200, JSON.stringify(r.body));
+  assert.equal(commandeLue("o-b").status, "livre");
+});
+
 test("M2 — une correction exige sa cause, un arret traite, et une commande qui n'est pas repartie", async () => {
   ensemencer();
   const sansCause = await poster("/api/routes/r-cours/stops/s-o-a/correction", { status: "absent", cause: "  " });

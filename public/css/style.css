@@ -14836,7 +14836,8 @@ textarea {
 
 /* Les commandes deja dans une tournee active : grisees par le FOND et le
    trait (jamais par l'opacite du texte, qui ferait tomber le contraste). */
-.delivery-card.delivery-card--en-tournee {
+:root[data-color-scheme] .delivery-card.delivery-card--en-tournee,
+:root:not([data-color-scheme]) .delivery-card.delivery-card--en-tournee {
   border-style: dashed;
   background: var(--v8-surface-basse);
   cursor: not-allowed;
