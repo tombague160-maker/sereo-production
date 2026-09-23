@@ -1788,15 +1788,21 @@ test("v1.11.0 PATCH /api/clients/:id : mise a jour partielle propage vers les co
   assert.equal(r.body.client.rue, "5 nouveau chemin");
   assert.equal(r.body.client.telephone, "06 11 22 33 44");
   assert.equal(r.body.client.notes, "Sonner 2 fois");
-  assert.equal(r.body.ordersUpdated, 2, "Les 2 commandes du client sont mises a jour");
+  // Lot 3 de l'audit geo (H12, decision 8 du 23/09) : la commande LIVREE
+  // n'est plus reecrite -- c'est l'historique. Avant, ce test exigeait 2.
+  assert.equal(r.body.ordersUpdated, 1, "Seule la commande a livrer est mise a jour");
 
   // Verifier que les commandes ont bien ete propagees
   const ordersAfter = await requestJson("/api/orders");
   const cmds = ordersAfter.body.filter(o => o.clientId === "c-edit");
   assert.equal(cmds.length, 2);
-  assert.ok(cmds.every(o => o.address === "5 nouveau chemin"), "address propagee");
-  assert.ok(cmds.every(o => o.phone === "06 11 22 33 44"), "phone propage");
-  assert.ok(cmds.every(o => o.notes === "Sonner 2 fois"), "notes propagees");
+  const aLivrer = cmds.find(o => o.id === "o-edit-1");
+  const livree = cmds.find(o => o.id === "o-edit-2");
+  assert.equal(aLivrer.address, "5 nouveau chemin", "address propagee");
+  assert.equal(aLivrer.phone, "06 11 22 33 44", "phone propage");
+  assert.equal(aLivrer.notes, "Sonner 2 fois", "notes propagees");
+  assert.equal(livree.address, "ancien", "une commande livree garde l'adresse de sa livraison");
+  assert.equal(livree.phone, "", "une commande livree n'est pas reecrite");
 });
 
 test("v1.11.0 PATCH /api/clients/:id : changement de ville recalcule le secteur", async () => {
