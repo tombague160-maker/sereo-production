@@ -2349,7 +2349,9 @@ function defaultDb() {
       },
       // Revue R1 NIT-18 : alignement avec normalizeSettings (defaut prod).
       orderNumbering: { prefix: "CMD", resetAnnually: true },
-      tournee: { averageSpeedKmh: 28, stopDurationMin: 6 }
+      // Lot 6 (audit geo) : pas de depot tant qu'on ne l'a pas choisi, retour
+      // au depot coche, texte du SMS « Prevenir » par defaut.
+      tournee: { averageSpeedKmh: 28, stopDurationMin: 6, depot: null, retourAuDepot: true, messagePrevenir: MESSAGE_PREVENIR_DEFAUT }
     }
   };
 }
@@ -2790,6 +2792,12 @@ function ensureOrderNumbers(db) {
   });
 }
 
+// Lot 6 (audit geo) : le depot par defaut. Un libelle (200 caracteres au plus :
+// l'audit a vu 200 000 acceptes pour un depart) et une position valide, ou rien.
+const DEPOT_LIBELLE_MAX = 200;
+const MESSAGE_PREVENIR_MAX = 300;
+const MESSAGE_PREVENIR_DEFAUT = "Bonjour, je passe vers {heure} pour votre livraison.";
+
 function normalizeSettings(settings = {}) {
   const appearance = settings && typeof settings === "object" && settings.appearance && typeof settings.appearance === "object"
     ? settings.appearance
@@ -2820,6 +2828,13 @@ function normalizeSettings(settings = {}) {
   const averageSpeedKmh = Number.isFinite(rawSpeed) && rawSpeed >= 10 && rawSpeed <= 60 ? rawSpeed : 28;
   const rawStop = Number(tourneeRaw.stopDurationMin);
   const stopDurationMin = Number.isFinite(rawStop) && rawStop >= 0 && rawStop <= 30 ? rawStop : 6;
+  // Lot 6 (audit geo) : le depot par defaut (le depart prerempli d'une tournee),
+  // « retour au depot » coche par defaut, et le texte du SMS « Prevenir ».
+  const depot = normaliserDepot(tourneeRaw.depot);
+  const retourAuDepot = tourneeRaw.retourAuDepot !== false;
+  const messagePrevenir = typeof tourneeRaw.messagePrevenir === "string" && tourneeRaw.messagePrevenir.trim()
+    ? tourneeRaw.messagePrevenir.trim().slice(0, MESSAGE_PREVENIR_MAX)
+    : MESSAGE_PREVENIR_DEFAUT;
 
   // Revue R1 NIT-15 + R2 minor : si `settings` est une string corrompue,
   // `...settings` spread les indices de caracteres ("0":"a", "1":"b", ...).
@@ -2839,9 +2854,21 @@ function normalizeSettings(settings = {}) {
     },
     tournee: {
       averageSpeedKmh,
-      stopDurationMin
+      stopDurationMin,
+      depot,
+      retourAuDepot,
+      messagePrevenir
     }
   };
+}
+
+
+function normaliserDepot(brut) {
+  if (!brut || typeof brut !== "object" || Array.isArray(brut)) return null;
+  const point = routing.coordinates(brut);
+  const label = clean(brut.label).slice(0, DEPOT_LIBELLE_MAX);
+  if (!point || !label) return null;
+  return { label, lat: point.lat, lng: point.lng };
 }
 
 function getAppearanceSettings(db) {
@@ -6675,8 +6702,37 @@ app.patch("/api/settings/tournee", async (req, res) => {
         db.settings.tournee.stopDurationMin = Math.round(raw);
       }
 
+      // Lot 6 (audit geo) : le depot par defaut. `null` l'efface ; sinon un
+      // libelle et une position valides, refuses plutot que tronques en silence.
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "depot")) {
+        const brut = req.body.depot;
+        if (brut === null) {
+          db.settings.tournee.depot = null;
+        } else {
+          if (!brut || typeof brut !== "object" || Array.isArray(brut)) throw badRequest("Dépôt invalide.");
+          if (typeof brut.label !== "string" || !brut.label.trim()) throw badRequest("Donne un nom ou une adresse au dépôt.");
+          if (brut.label.trim().length > DEPOT_LIBELLE_MAX) throw badRequest(`Nom du dépôt trop long (${DEPOT_LIBELLE_MAX} caractères au plus).`);
+          if (!routing.coordinates(brut)) throw badRequest("Position du dépôt invalide : confirme une adresse.");
+          db.settings.tournee.depot = normaliserDepot(brut);
+        }
+      }
+
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "retourAuDepot")) {
+        if (typeof req.body.retourAuDepot !== "boolean") throw badRequest("retourAuDepot doit etre vrai ou faux");
+        db.settings.tournee.retourAuDepot = req.body.retourAuDepot;
+      }
+
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "messagePrevenir")) {
+        if (typeof req.body.messagePrevenir !== "string") throw badRequest("Message invalide.");
+        if (req.body.messagePrevenir.trim().length > MESSAGE_PREVENIR_MAX) {
+          throw badRequest(`Message trop long (${MESSAGE_PREVENIR_MAX} caractères au plus).`);
+        }
+        // Vide : le texte par defaut revient (normalizeSettings).
+        db.settings.tournee.messagePrevenir = req.body.messagePrevenir.trim();
+      }
+
       writeDb(db);
-      return db.settings.tournee;
+      return normalizeSettings(db.settings).tournee;
     });
     res.json(result);
   } catch (error) {
@@ -8527,6 +8583,15 @@ require("./lib/operations-api").registerOperations(app, {
   geocoderAdresse, positionPourTournee, memoriserPositionDuCalcul,
   // Lot 5 : la limite de debit du relais de recherche d'adresse, par compte et par IP.
   cleDeDebit: req => `${getRequestIdentity(req)?.identifiant || "anonyme"}|${getClientIp(req)}`
+});
+
+// Lot 6 de l'audit geo (pratique au quotidien) : reoptimiser, « Faire
+// maintenant », « Ajouter a la tournee en cours ».
+require("./lib/tournee-pratique").registerTourneePratique(app, {
+  readDb, writeDb, withWriteLock, badRequest, notFound, handleRouteError, findClient,
+  addHistory, setOrderStatus, createStop, routeAvecTrace, positionPourTournee,
+  memoriserPositionDuCalcul, geocoderAdresse, distanceKm: distance,
+  statutsAPlanifier: STATUTS_A_PLANIFIER, maxArrets: MAX_COMMANDES_PAR_TOURNEE
 });
 
 // --- API des comptes utilisateurs (V8 phase 1) -----------------------------
