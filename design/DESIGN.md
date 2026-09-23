@@ -2748,5 +2748,5 @@ après. Aucun n'était faux.
 - Un client rattaché par la clé secondaire de l'import (nom + code postal, adresse
   légèrement différente) repart d'une fiche vide côté position, comme avant ce lot :
   non traité ici.
-- « Bâtiment C, 3 rue de Dole » en tête SANS virgule n'est pas nettoyé (le motif
+- « Bâtiment C 3 rue de Dole » (complément en tête, SANS virgule) n'est pas nettoyé (le motif
   « en ligne » exige une espace avant) : inchangé, la BAN le trouve souvent quand même.
