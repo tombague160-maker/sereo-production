@@ -2190,7 +2190,8 @@ Client » (pilule sur le vert, à côté des filtres), la pastille de synchronis
 - le toast « Bon CMD-2026-0xx créé » avec **Annuler** : la création reste celle de l'application
   (une notification, sans annulation — aucune route ne supprime une commande d'abonnement) ;
 - la création 3b (sélecteur client en carte, catalogue avec stock, pilules de fréquence, aperçu
-  des trois dates) : l'éditeur actuel est gardé tel quel, c'est un lot à part ;
+  des trois dates) : l'éditeur actuel est gardé tel quel, c'est un lot à part —
+  posé depuis, voir « Création d'abonnement (planches 3b, 5b) » en fin de fichier ;
 - la tache floue rose derrière la liste (décor).
 
 **`CACHE_NAME`** : réglé à l'intégration du 23/09. Le lot « chargement instantané » l'a porté à
@@ -3917,3 +3918,172 @@ corrigé.
   bon marché. Même motif, déjà en place, que « Nouvel abonnement » (Abonnements, 3a). À
   trancher avec lui : l'action principale reste atteinte tôt (le motif du bouton flottant),
   ou les deux boutons passent après leur liste.
+
+### Création d'abonnement (planches 3b, 5b), posé le 23/09
+
+L'ancien formulaire « Nouvel abonnement » (un `<select>` de clients, une ligne
+« Produit / Quantité / Retirer » par produit, une liste déroulante de fréquences) est
+remplacé ; le `<dialog id="subscriptionDialog">` et ses identifiants de champ restent,
+l'intérieur est neuf. `abonnement-creation.spec.js` (12 cas depuis la relecture adverse,
+port 3304) ;
+`operations.spec.js` suit les nouveaux gestes.
+
+**Posé**
+
+- **Au téléphone** (sous 820 px) : une page pleine. L'en-tête vert de la planche
+  (`--v8-carte-tournee`, arrondi 0 0 28 28), sa flèche ronde de 44 px sur la surface sur
+  vert, le titre 24 px/700 ; des cartes blanches de 24 px de rayon, 18 px de marge
+  intérieure ; en bas « Annuler » (contour) et « Créer l'abonnement » (plein, qui prend
+  la largeur), 48 px. En sombre (5b) : les jetons de la planche, le creux des champs en
+  `--v8-fond` (« surface basse → fond en creux » de la passation).
+- **Au bureau** : la même logique dans une fenêtre V8 — 640 px, coins 28, fond `--v8-fond`,
+  les mêmes cartes, le titre à gauche et la croix ronde de 44 px à droite, la barre du
+  bas alignée à droite. Le corps défile, l'en-tête et la barre restent.
+- **Le client en carte** : une recherche (nom, ville, rue, code postal ; ou trois chiffres
+  du téléphone) et des cartes de 60 px (nom ; « rue, CP ville »). Choisie, la carte
+  devient le champ vert clair de la planche (nom en principal appuyé, 7,04:1) avec sa
+  croix ronde « Changer de client », et l'adresse dessous. Entrée sur un résultat unique
+  le choisit ; Entrée n'envoie jamais le formulaire depuis une recherche.
+- **Le catalogue** : « Catalogue » ouvre la liste des produits avec **le stock
+  disponible du serveur** (`quantityAvailable`, sinon la quantité) : « CH-L · 100 en
+  stock », « rupture », « stock à renseigner » ; « N au panier » quand il y est. Chaque
+  produit a son « + » rond de 44 px. Une recherche filtre par nom ou code (40 lignes au
+  plus, puis « N autres : précise la recherche »). Un panier vide ouvre le catalogue
+  d'office : c'est le seul chemin pour le remplir.
+- **Le panier** : une ligne par produit, nom, « code · stock », et le pas de la planche
+  (− rond en creux, quantité 19 px/700, + rond plein). À un, « − » s'appelle « Retirer … »
+  et retire la ligne ; le focus passe à la ligne voisine, sinon à « Catalogue ». Chaque
+  ligne porte aussi un lien « Retirer » sous son stock : le geste d'un clic de l'ancien
+  formulaire, quelle que soit la quantité (voir la relecture adverse, plus bas).
+- **Les pilules de fréquence** : 7 j · 10 j · 14 j · 15 j · 21 j · 28 j · Mensuel ·
+  Autre…, des boutons radio (flèches du clavier, nom accessible « Tous les 15 jours »),
+  44 px, la choisie en plein principal.
+- **Les trois prochaines livraisons** : recalculées à chaque geste, sans validation
+  (règle de `lib/subscriptions.js` recopiée : dernier jour du mois quand il est plus
+  court). La première porte le point pêche et « départ », les suivantes « + 15 j » ou
+  « + 2 mois ». La note dit ce que l'intervalle fait : « Samedi, dimanche, lundi : un
+  intervalle de 15 jours décale le jour de la semaine. Choisis « Mensuel » pour garder la
+  même date, « 14 j » pour garder le même jour », ou « Toujours le mardi », ou « Le 31 de
+  chaque mois ; le dernier jour du mois quand il est plus court ».
+- **Le rappel** : Aucun · 2 j · 3 j · 7 j · 15 j · Autre… (0 à 60), sa valeur en 19 px à
+  droite du titre.
+
+**Gardé de l'ancien formulaire** (rien de ce que l'API reçoit n'est perdu — le banc
+compare le corps du `POST /api/subscriptions` champ par champ) :
+
+- `clientId`, et la **fiche client créée à la volée** (« Créer une fiche client » : nom,
+  prénom, adresse, code postal, ville, téléphone ; `POST /api/crm/clients` puis
+  l'abonnement). Une fiche créée n'est pas recréée si l'enregistrement échoue ensuite ;
+- `products[]` `{ productId, quantite }`, **la quantité saisie au clavier** (1 à 10 000) ;
+- `startDate` (le champ date natif) ;
+- `frequency` : les six intervalles et le mensuel, et **« Autre… » en jours (1 à 366)
+  OU EN MOIS (1 à 12)** — l'API acceptait les mois, l'ancien formulaire non ;
+- `reminderDays` (0 à 60) ;
+- sous **« Plus d'options »** (la planche ne les dessine pas) : `status` (Actif, En pause,
+  Arrêté) et `notes` (« Notes de livraison », 2 000 caractères). Le bloc s'ouvre seul à
+  la modification quand le statut n'est pas « Actif » ou qu'une note existe ;
+- à la modification : le titre « Modifier l'abonnement », « Enregistrer les
+  modifications », et la phrase « Les modifications s'appliquent aux prochaines
+  échéances… ».
+
+**Décisions prises (questions ouvertes)**
+
+- **« Tous les 2 mois » se rouvre en « Autre… 2 mois ».** L'ancien éditeur rouvrait tout
+  abonnement en mois sur « Mensuel », donc `{ unit: "months", interval: 2 }` aussi — et
+  l'enregistrer en faisait « tous les mois » (`interval: 1`). Corrigé, prouvé par
+  mutation. (Écrit d'abord « tous les 2 jours » : faux, relevé par la relecture adverse,
+  mesuré sur les lignes de `ef470c6`.)
+- **Les trois « prochaines » dates** partent d'aujourd'hui quand l'abonnement a commencé
+  avant (modification) : les premières dates d'un abonnement de juin sont passées.
+  « départ » n'est écrit que sur la vraie première livraison.
+- **La note du rappel dit ce que fait le serveur**, pas ce que dit la planche. La planche
+  écrit « Le rappel remonte dans « À régler » du tableau de bord » ; c'est faux : « À
+  régler » ne montre que les échéances EN RETARD. Le rappel fait compter l'échéance dans
+  « Échéances à préparer » (`due = rappel <= aujourd'hui`) et dire « rappel arrivé » dans
+  Les 90 jours. La note : « Le 16 septembre, la livraison du 23 septembre passe dans
+  « Échéances à préparer » du tableau de bord. De 0 à 60 jours. »
+- **Le rappel par défaut reste 7 jours** (l'ancien défaut ; la planche montre 3 j
+  choisi). Changer un défaut change ce que les abonnements créés demain voudront dire.
+- **Le secteur** n'est ajouté à l'adresse (« …, 25000 Besançon · Besançon ») que s'il dit
+  autre chose que la ville.
+- **La barre du bas est opaque** (la planche : fond à 82 %), comme la barre basse du
+  lot 1 : un bouton à contour posé sur un texte qui défile dessous perdait son contraste.
+- **Un produit retiré du catalogue** reste dans le panier d'un abonnement qu'on modifie,
+  nommé « retiré du catalogue » : l'enregistrement le signale plutôt que de le perdre en
+  silence.
+- **Sans client**, le formulaire dit « Choisis un client, ou crée sa fiche. » et n'envoie
+  rien (le `<select required>` le faisait).
+
+**Écarts nommés**
+
+- la première livraison garde le champ date natif (« 23/09/2026 ») au lieu du champ
+  « Mardi 22 septembre 2026 » à icône : la date longue est dite juste dessous, dans
+  l'aperçu, et le sélecteur natif est celui que le téléphone sait ouvrir ;
+- l'en-tête prend 16 px + la zone sûre en haut, pas les 54 px de la planche (qui
+  comptent la barre d'état dessinée) ;
+- la planche ne montre pas la recherche du client (elle montre un client déjà choisi) :
+  les cartes de résultats sont dessinées dans ses jetons (creux, 18 px, nom 15/600,
+  adresse 13/500) ;
+- les pilules ne se replient pas (« Autre… » passe à la ligne à 390 px, comme sur la
+  planche).
+
+**Omis, faute de données** : rien — chaque texte de la planche a sa source. La planche
+invente seulement l'exemple « 42 en stock » : c'est le chiffre du serveur qui s'affiche.
+
+**Relevé, non corrigé (hors de ce lot)** : le jeton `--focus-ring` n'est déclaré que
+sous `:root[data-color-scheme="light"]` (deux fois). En sombre, toute règle
+`box-shadow: var(--focus-ring)` vaut `none` : l'anneau de focus disparaît. Le banc de ce
+lot l'a pris (cas sombre, « Expected: not "none" ») ; ce bloc pose son propre anneau
+(`--abo-anneau`, mêmes valeurs). Les autres écrans qui s'appuient sur `--focus-ring` en
+sombre ne sont pas vérifiés ici.
+
+**Preuves rouges** (index.html, operations.js et style.css de `main` remis, le banc
+neuf lancé sans `serial`, un ouvrier) : 10 rouges sur 10. La croix : attendu 44 × 44,
+reçu **316 × 48** ; au bureau : attendu 640 px et une croix de 44, reçu 740 et 50 ; la
+recherche du client et le catalogue : « Expected: visible — element(s) not found » ; les
+six autres cas s'arrêtent sur le contrôle absent (pilule, recherche, « Créer une fiche
+client », « Ajouter … au panier »). Deux mutations du code neuf : rouvrir « Autre… » en
+jours → « Expected: "months" / Received: "days" » ; l'anneau remis sur `--focus-ring` →
+cas sombre « Expected: not "none" », cas clair vert. Tout restauré par copie depuis le
+commit.
+
+### Relecture adverse de la création d'abonnement (23/09) — cinq défauts, quatre vrais
+
+Relecture de `f0cc23a`. Chaque défaut a été mesuré avant d'être corrigé ; banc :
+`abonnement-creation.spec.js` (port 3304), lancé avec l'ancien code puis avec le nouveau.
+
+- **Le premier « + » du catalogue ne faisait rien après une quantité tapée** (important,
+  VRAI). Le `change` du champ part au mousedown du clic suivant ; il redessinait tout
+  `#subCatalogueListe`, et le « + » sous le pointeur était remplacé avant le mouseup.
+  Corrigé : le `change` met à jour « N au panier » en place (`majComptesCatalogue`),
+  sans toucher aux boutons. Cas « une quantité tapée, puis « + » du catalogue » (saisie
+  au clavier, pas `fill`) : ancien code **Expected 2 / Received 1** ; le compte mis à
+  jour en place, mutant « change inerte » : Received « … · 12 au panier ».
+- **Plus de retrait d'un seul geste pour une ligne au-delà de 1** (mineur, VRAI).
+  L'ancien formulaire avait « Retirer » sur chaque ligne. Rendu : un lien « Retirer »
+  sous le stock de chaque ligne (nom accessible « Retirer … du panier », 44 px, l'anneau
+  du lot ; pas de marge haute négative, l'anneau couvrait « code · stock » en capture).
+  Le focus passe au « Retirer » voisin, sinon à « Catalogue ». « − » à un retire
+  toujours la ligne. Cas « une ligne de 120 se retire d'un seul geste » : ancien code,
+  contrôle absent ; mutant du focus rendu à « − » : Expected focused / Received inactive.
+- **Le fait écrit sur l'ancien formulaire était faux** (mineur, VRAI). Il ne faisait pas
+  « tous les 2 jours » d'un abonnement de 2 mois, il en faisait « tous les mois » :
+  les lignes de `ef470c6` exécutées telles quelles rouvrent sur `monthly` et enregistrent
+  `{"unit":"months","interval":1}`. Corrigé ici (Décisions prises), dans le commentaire
+  d'`openEditor` et dans celui du banc. Rien ne change au code.
+- **Le banc « Entrée n'envoie pas le formulaire » ne pouvait pas voir un envoi**
+  (mineur, VRAI sur le fond, FAUX sur le scénario). Le scénario du relecteur (retirer
+  `preventDefault` de la recherche client fait partir le formulaire) ne se produit pas :
+  mesuré, **0 envoi**. Entrée active « Changer de client », qui vient de prendre le
+  focus, et le banc tombait déjà (Expected "c-bellevue" / Received ""). Le fond est juste :
+  l'assertion `open` ne distinguait rien, et rien ne comptait les envois. Le banc compte
+  désormais les `submit` et presse Entrée sur plusieurs résultats et dans la recherche du
+  catalogue. Deux mutants que l'ancien banc laissait passer (`preventDefault` seulement
+  sur un résultat unique ; `preventDefault` retiré du catalogue) : Expected 0 / Received 1.
+- **Le nom accessible de « Mensuel » ne contenait pas « Mensuel »** (mineur, VRAI,
+  WCAG 2.5.3). Il devient « Mensuel : tous les mois, même date ». Le banc des pilules
+  vérifie que chaque nom contient son texte visible : ancien code, Received
+  `["Mensuel → Tous les mois, même date"]` ; les treize autres pilules passaient.
+
+Tous les mutants ont été restaurés par copie. Au vert : `abonnement-creation.spec.js`
+12 sur 12, et `operations.spec.js` 5 sur 5.

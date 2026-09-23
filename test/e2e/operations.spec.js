@@ -178,15 +178,17 @@ test.describe("Abonnements et pilotage", () => {
       "Crée ton premier abonnement",
     );
     await page.getByRole("button", { name: "Nouvel abonnement", exact: true }).click();
-    await page.locator("#subClient").selectOption("test-client");
-    await page.locator(".sub-product").selectOption("test-changes");
-    await page.locator(".sub-quantity").fill("3");
-    await page.getByRole("button", { name: "+ Ajouter un produit" }).click();
-    await page.locator(".sub-product").nth(1).selectOption("test-aleses");
-    await page.locator(".sub-quantity").nth(1).fill("2");
-    await page.locator("#subFrequency").selectOption("14");
+    // Depuis le 23/09 (planches 3b / 5b) : le client en carte, le panier depuis
+    // le catalogue, la frequence en pilule.
+    await page.getByRole("searchbox", { name: "Chercher un client" }).fill("Alice");
+    await page.locator('#subClientResults [data-op="sub-client"][data-id="test-client"]').click();
+    await page.getByRole("button", { name: "Ajouter Changes taille L au panier" }).click();
+    await page.getByRole("button", { name: "Ajouter Alèses au panier" }).click();
+    await page.locator("#subProducts .sub-product-line").filter({ hasText: "Changes taille L" }).locator(".sub-quantity").fill("3");
+    await page.locator("#subProducts .sub-product-line").filter({ hasText: "Alèses" }).locator(".sub-quantity").fill("2");
+    await page.getByRole("radio", { name: "Tous les 14 jours" }).check({ force: true });
     await page
-      .getByRole("button", { name: "Enregistrer l’abonnement" })
+      .getByRole("button", { name: "Créer l’abonnement" })
       .click();
     await expect(page.locator("#subscriptionDialog")).not.toBeVisible();
     // Depuis le 19/09 (planche Preparation) l'abonnement est une LIGNE ; le
@@ -218,9 +220,9 @@ test.describe("Abonnements et pilotage", () => {
     await ouvrirLeSheet();
     await page.getByRole("button", { name: "Modifier", exact: true }).click();
     await expect(page.locator("#abonnementDetailDialog")).not.toBeVisible();
-    await page.locator("#subFrequency").selectOption("10");
+    await page.getByRole("radio", { name: "Tous les 10 jours" }).check({ force: true });
     await page
-      .getByRole("button", { name: "Enregistrer l’abonnement" })
+      .getByRole("button", { name: "Enregistrer les modifications" })
       .click();
     await expect(ligne).toContainText("Tous les 10 jours");
     // Chaque echeance des 90 jours porte son geste. Creer la premiere : son
