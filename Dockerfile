@@ -18,8 +18,10 @@
 # ============================================================================
 
 # Version EPINGLEE d'OSRM (depot officiel, registre GitHub : l'image Docker Hub
-# osrm/osrm-backend n'est plus publiee depuis 2021). Changer ce tag change le
-# format des cartes : osrm-local.js les refait a la prochaine preparation.
+# osrm/osrm-backend n'est plus publiee depuis 2021). Changer ce tag peut changer
+# le format des cartes : le nouvel osrm-routed refuse alors la carte en place,
+# osrm-local.js la note refusee (erreur dans Parametres, serveur public en
+# attendant) et la refait la nuit suivante, a 3 h.
 FROM ghcr.io/project-osrm/osrm-backend:v26.9.0-debian AS osrm
 
 FROM node:24-trixie-slim

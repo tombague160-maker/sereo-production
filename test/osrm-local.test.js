@@ -585,6 +585,21 @@ test("plancher d'espace libre : la preparation s'arrete avant de remplir le volu
   assert.match(g.etat().derniereErreur?.message || "", /espace disque sous le plancher/);
 });
 
+test("plancher pendant un telechargement : il est interrompu avant de remplir le volume", async () => {
+  const inst = installation();
+  const reseau = fauxReseau({ "europe/a": "extrait A", "europe/b": "extrait B" }, { lent: true });
+  // Le disque se remplit des que le corps de l'extrait arrive.
+  const libre = () => (reseau.appels.some((a) => a.url.endsWith(".osm.pbf")) ? 1 * GO : 100 * GO);
+  const processus = fauxProcessus();
+  const g = gestionnaire(inst, { reseau, processus, libre });
+  g.delais.disque = 5;
+  g.demarrer();
+  await g.demarrage;
+  assert.equal(await g.preparer(ZONE_TEST), false, "telechargement mene a son terme sous le plancher");
+  assert.match(g.etat().derniereErreur?.message || "", /espace disque sous le plancher \(téléchargement de europe\/a\)/);
+  assert.deepEqual(processus.appels, []);
+});
+
 test("plancher dans le choix de la zone ; les extraits d'une autre zone sont rendus au disque", async () => {
   const z = async (libre) => (await gestionnaire(installation(), { libre, memoire: 16 * GO }).zoneVoulue()).zone?.id ?? null;
   assert.equal(await z(9 * GO), "region", "temoin : 9 Go libres suffisent a la region");
