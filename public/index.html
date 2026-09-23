@@ -1617,9 +1617,11 @@
                 <label class="par-case"><input id="parRetourDepot" type="checkbox" checked /> Retour au dépôt coché par défaut</label>
               </article>
               <article class="item">
-                <h4><label for="parMessagePrevenir">Message « Prévenir »</label></h4>
+                <!-- Nomme par son titre (aria-labelledby) : un <label> dans le
+                     titre ferait une cible de 20 px (cibles-tactiles.spec.js). -->
+                <h4 id="parMessageTitre">Message « Prévenir »</h4>
                 <p class="muted" id="parMessageAide">Le SMS que le téléphone prépare pour le client. {heure} devient l’heure d’arrivée estimée.</p>
-                <textarea id="parMessagePrevenir" rows="2" maxlength="300" aria-describedby="parMessageAide"></textarea>
+                <textarea id="parMessagePrevenir" rows="2" maxlength="300" aria-labelledby="parMessageTitre" aria-describedby="parMessageAide"></textarea>
               </article>
               <article class="item">
                 <h4 id="parNavigationTitre">« Y aller » ouvre</h4>
