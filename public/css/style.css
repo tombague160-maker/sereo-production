@@ -12304,3 +12304,902 @@ textarea::placeholder {
 :root:not([data-color-scheme]) .tournee-entete .tournee-progression {
   background: color-mix(in srgb, var(--v8-texte-sur-carte-tournee) 18%, transparent);
 }
+
+/* ==========================================================================
+   TOURNEE MOBILE -- planches 4a (preparer), 4b (cockpit), 4c (carte),
+   4d (fin de tournee) ; 5c, 11a-11c en sombre. Pose le 23/09.
+   Decisions de Thomas : les gestes de la tournee a 56 px avec « Livre » et
+   « Y aller » ; les marqueurs de carte a 44 px et le trace a 7 px (ces
+   deux-la remplacent les 34/28 px et 4,5 px du 19/09).
+   ========================================================================== */
+
+/* --- Le cockpit : trois gestes sous le pouce ------------------------------ */
+.gestes-route { align-items: center; }
+@media (min-width: 1181px) {
+  /* La carte est a gauche, deja visible : le bouton qui y mene n'a rien a faire. */
+  :root[data-color-scheme] #livreur .gestes .geste-carte,
+  :root:not([data-color-scheme]) #livreur .gestes .geste-carte { display: none; }
+}
+/* Au telephone, Appeler et Carte sont des ronds (planche 4b) ; le mot reste
+   pour le lecteur d'ecran. Au bureau, ils gardent leur mot. */
+@media (max-width: 820px) {
+  :root[data-color-scheme] #livreur .gestes .button.geste-rond,
+  :root:not([data-color-scheme]) #livreur .gestes .button.geste-rond {
+    flex: 0 0 56px; width: 56px; height: 56px; min-height: 56px; padding: 0; border-radius: 999px;
+  }
+  #livreur .gestes .geste-rond .geste-libelle {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
+    clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0;
+  }
+  #livreur .gestes .geste-rond svg { width: 21px; height: 21px; }
+  :root[data-color-scheme] #livreur .gestes .button.geste-aller,
+  :root:not([data-color-scheme]) #livreur .gestes .button.geste-aller,
+  :root[data-color-scheme] #livreur .gestes .button.geste-principal,
+  :root:not([data-color-scheme]) #livreur .gestes .button.geste-principal {
+    height: 56px; min-height: 56px; font-size: 16px; font-weight: 600;
+  }
+  :root[data-color-scheme] #livreur .gestes .button.geste-principal,
+  :root:not([data-color-scheme]) #livreur .gestes .button.geste-principal { font-size: 17px; }
+  :root[data-color-scheme] #livreur .gestes .button.geste-aller,
+  :root:not([data-color-scheme]) #livreur .gestes .button.geste-aller { flex: 1 1 auto; }
+  #livreur .gestes .geste-principal svg { width: 22px; height: 22px; }
+  /* Client absent, Probleme : 48 px, moins hauts que « Livre », sans couleur. */
+  :root[data-color-scheme] #livreur .gestes .button.tertiary,
+  :root:not([data-color-scheme]) #livreur .gestes .button.tertiary { height: 48px; min-height: 48px; font-size: 15.5px; }
+
+  /* SOUS LE POUCE, POUR DE BON. Mesure avant : a 390 x 844, le geste
+     principal tombait SOUS la barre basse -- cache par la navigation. Les
+     gestes collent au bas de l'ecran, au-dessus de la barre, tant que la carte
+     de l'arret est a l'ecran ; ils partent avec elle vers la liste. */
+  #livreur .current-driver-card .gestes {
+    position: sticky; bottom: calc(80px + env(safe-area-inset-bottom)); z-index: 5;
+    margin-inline: -16px; padding: 12px 16px; border-radius: 24px 24px 0 0;
+    background: var(--v8-surface);
+  }
+  /* Le toast d'Annuler, au-dessus de la barre basse et non dessous. */
+  .toast-region { bottom: calc(92px + env(safe-area-inset-bottom)); }
+  /* Le jour et le nom de la tournee sont deja le titre de l'en-tete vert
+     (pose le 23/09 avec la planche 13b) : ici ne restent l'anneau et la barre. */
+  #livreur .tournee-entete .tournee-titre { display: none; }
+}
+
+/* « Prochain : <client> » (planche 4b), sans distance : rien ne la calcule. */
+.arret-prochain {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px;
+  margin: 12px 0 0; padding: 12px 16px; border-radius: 18px;
+  background: var(--v8-surface-basse);
+}
+:root[data-color-scheme] .panel p.arret-prochain,
+:root:not([data-color-scheme]) .panel p.arret-prochain { color: var(--v8-principal); }
+.arret-prochain-mot { font-size: 15px; font-weight: 600; }
+:root[data-color-scheme] .panel .arret-prochain-lieu,
+:root:not([data-color-scheme]) .panel .arret-prochain-lieu { font-size: 13.5px; font-weight: 500; color: var(--v8-texte-secondaire); }
+
+/* Le toast « Livre -- <client> » et son Annuler (charte §4 : 4 s, une action). */
+.toast-action {
+  flex: none; align-self: center; min-height: 44px; min-width: 44px; padding: 0 16px;
+  border: 1.5px solid currentColor; border-radius: 999px; background: transparent;
+  color: inherit; font: inherit; font-size: 14.5px; font-weight: 600; cursor: pointer;
+}
+.toast-action:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.toast:has(.toast-action) { align-items: center; }
+
+/* --- La carte (planche 4c) : marqueurs de 44 px ---------------------------- */
+.leaflet-marker-icon.marqueur-ancre .marqueur {
+  width: 44px; height: 44px; font-size: 17px; font-weight: 700;
+}
+.leaflet-marker-icon.marqueur-ancre .marqueur--fait { font-size: 0; }
+.leaflet-marker-icon.marqueur-ancre .marqueur--fait::before { width: 9px; height: 17px; border-width: 0 3px 3px 0; }
+/* Planche 4c : l'ombre portee qui detache le disque des tuiles. */
+.leaflet-marker-icon.marqueur-ancre .marqueur--fait,
+.leaflet-marker-icon.marqueur-ancre .marqueur--echec { box-shadow: 0 6px 16px rgba(15, 61, 61, 0.3); }
+.leaflet-marker-icon.marqueur-ancre .marqueur--a-venir {
+  box-shadow: inset 0 0 0 2.5px var(--v8-principal), 0 6px 16px rgba(15, 61, 61, 0.18);
+}
+
+/* « Recalculer le trace » quand le trace est a refaire : cercle d'accent
+   (une forme, pas un texte). Un contour et non une ombre : les anneaux de
+   focus sont des ombres -- les deux se voient ensemble. */
+:root[data-color-scheme] .button.trn-recalculer--requis,
+:root:not([data-color-scheme]) .button.trn-recalculer--requis {
+  outline: 2.5px solid var(--v8-accent); outline-offset: 2px;
+}
+
+/* --- Preparer (planche 4a) : la ligne « CMD-... · n articles » ------------- */
+.delivery-card-court { display: none; }
+@media (max-width: 820px) {
+  #livreur .delivery-card .delivery-card-court {
+    display: block; font-size: 13.5px; font-weight: 500; color: var(--v8-texte-secondaire);
+  }
+  #livreur .delivery-card .delivery-card-adresse,
+  #livreur .delivery-card .order-meta,
+  #livreur .delivery-card > .pill { display: none; }
+}
+
+/* --- Fin de tournee (planche 4d) : trois chiffres, les problemes nommes ---- */
+.fin-tournee { display: flex; flex-direction: column; gap: 16px; }
+:root[data-color-scheme] .fin-tournee .fin-titre,
+:root:not([data-color-scheme]) .fin-tournee .fin-titre { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; color: var(--v8-principal); }
+:root[data-color-scheme] .panel .fin-tournee p.fin-phrase,
+:root:not([data-color-scheme]) .panel .fin-tournee p.fin-phrase { margin: 0; font-size: 15px; color: var(--v8-texte-secondaire); }
+.fin-chiffres { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.fin-chiffre {
+  display: flex; flex-direction: column; gap: 4px; padding: 14px; border-radius: 18px;
+  background: var(--v8-surface-basse);
+}
+.fin-chiffre strong { font-size: 28px; font-weight: 700; line-height: 1.1; color: var(--v8-principal); font-variant-numeric: tabular-nums; }
+.fin-chiffre-libelle { font-size: 13px; font-weight: 500; color: var(--v8-texte-secondaire); }
+.fin-chiffre--echec { background: var(--v8-peche-claire); }
+.fin-chiffre--echec .fin-chiffre-libelle,
+.fin-chiffre--echec strong { color: var(--v8-principal-appuye); }
+.fin-problemes { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.fin-problemes li {
+  display: flex; flex-direction: column; gap: 2px; padding: 12px 16px; border-radius: 18px;
+  background: var(--v8-peche-claire); color: var(--v8-principal-appuye);
+}
+.fin-problemes strong { font-size: 15px; font-weight: 600; }
+.fin-problemes span { font-size: 13.5px; }
+:root[data-color-scheme] .panel .fin-tournee p.fin-arrivee,
+:root:not([data-color-scheme]) .panel .fin-tournee p.fin-arrivee {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0; color: var(--v8-texte);
+}
+.fin-arrivee .fin-chiffre-libelle { flex: 1 1 100%; }
+.fin-arrivee > span:not(.fin-chiffre-libelle) { flex: 1 1 auto; min-width: 0; font-weight: 600; }
+.fin-arrivee .button { flex: none; }
+
+.gestes-suite { margin-top: 10px; }
+@media (min-width: 921px) { .gestes-suite { max-width: 640px; } }
+@media (max-width: 820px) {
+  /* `overflow-x: hidden` fait de <body> et de <main> des conteneurs de
+     defilement : les gestes s'y collaient au bas de <main> (toute la page),
+     jamais a celui de l'ecran. `clip` rogne pareil, sans conteneur. Limite a
+     l'ecran de la tournee. Barre basse mesuree : 90 px a 390 x 844. */
+  body:has(#livreur.active),
+  body:has(#livreur.active) main.content { overflow-x: clip; }
+  #livreur .current-driver-card .gestes { bottom: calc(90px + env(safe-area-inset-bottom)); }
+}
+
+/* ==========================================================================
+   TOURNEE MOBILE, REVUE DU 23/09 -- corrections apres relecture adverse.
+   ========================================================================== */
+
+/* Preparer (4a) : la ligne « CMD-... · n articles » ne suffit pas a trier.
+   Le filtre par defaut melange les dates et les secteurs, et la carte n'a
+   aucun detail : le jour et le secteur restent, sous la ligne, en petit. */
+.delivery-card-contexte { display: none; }
+@media (max-width: 820px) {
+  #livreur .delivery-card .delivery-card-contexte {
+    display: block; font-size: 13px; font-weight: 500; color: var(--v8-texte-secondaire);
+  }
+  /* Fin de tournee (4d) : les gestes d'arret, tous inertes, ne collent plus
+     200 px au-dessus de la barre basse -- il n'y a plus d'arret. */
+  #livreur .current-driver-card:has(.fin-tournee) .gestes { display: none; }
+}
+
+/* ==========================================================================
+   MOBILE, PREPARATION -- planches 7a (la liste) et 7b (une commande), pose
+   le 23/09. Decision de Thomas : au telephone, UNE liste avec des mots de
+   statut, les filtres dans l'en-tete vert, et le detail en page (7b).
+   Au bureau (> 820 px) rien ne change : ni planche, ni decision pour lui.
+   Les selecteurs passent par des #id : les regles de theme en
+   `:root[data-color-scheme="light"] X` (0,3,x) ne les battent pas.
+   ========================================================================== */
+.prep-loupe,
+.commande-page-retour,
+.commande-page-meta,
+.commande-page-puces { display: none; }
+/* La fente est un conteneur flex : [hidden] doit gagner sur le display: grid
+   du bloc de filtres, a specificite superieure. */
+#preparationFiltres[hidden] { display: none; }
+
+@media (max-width: 820px) {
+  /* --- L'en-tete vert : la loupe en haut a droite, les pilules dessous ---- */
+  :root[data-color-scheme] main.content > .ecran-entete:has(#preparationFiltres:not([hidden])),
+  :root:not([data-color-scheme]) main.content > .ecran-entete:has(#preparationFiltres:not([hidden])) { position: relative; }
+  .ecran-entete:has(#preparationFiltres:not([hidden])) .ecran-entete-texte { padding-right: 56px; }
+  #enteteActions #preparationFiltres { display: grid; gap: 10px; flex: 1 1 100%; min-width: 0; }
+  #enteteActions #preparationFiltres[hidden] { display: none; }
+  #preparationFiltres #preparationLoupe {
+    position: absolute; top: 10px; right: 20px;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 44px; height: 44px; padding: 0; border: 0; border-radius: 999px;
+    background: var(--v8-surface-sur-vert); color: var(--v8-texte-sur-carte-tournee);
+    box-shadow: none; cursor: pointer;
+  }
+  #preparationFiltres #preparationLoupe .icon { width: 20px; height: 20px; }
+  #preparationFiltres #preparationLoupe[aria-expanded="true"] {
+    background: var(--v8-texte-sur-carte-tournee); color: var(--v8-carte-tournee);
+  }
+  /* La recherche se deplie a la demande (la planche n'a que la loupe). */
+  #preparationFiltres:not(.prep-filtres--recherche) #preparationRecherche { display: none; }
+  #preparationFiltres #preparationRecherche { display: block; margin: 0; }
+  #preparationFiltres #preparationSearch {
+    width: 100%; height: 48px; min-height: 48px; padding: 0 18px; border: 0; border-radius: 999px;
+    background: var(--v8-surface-sur-vert); color: var(--v8-texte-sur-carte-tournee);
+    font: inherit; font-size: 15.5px; box-shadow: none;
+  }
+  #preparationFiltres #preparationSearch::placeholder { color: var(--v8-secondaire-sur-carte-tournee); opacity: 1; }
+  #preparationFiltres .filtre-pilules-enveloppe { margin: 0; }
+
+  /* Les pilules sur le vert (planche 7a) : la choisie en blanc a texte vert,
+     les autres sur la surface verte. 48 px et non 44 : la hauteur de pilule
+     mobile de la charte, tenue par preparation-lignes.spec.js. */
+  #preparationFiltres .filtre-pilules .button.filtre-pilule {
+    height: 48px; min-height: 48px; padding: 0 20px; border: 0; border-radius: 999px;
+    background: var(--v8-surface-sur-vert); color: var(--v8-texte-sur-carte-tournee);
+    font-size: 15px; font-weight: 500; box-shadow: none;
+  }
+  #preparationFiltres .filtre-pilules .button.filtre-pilule[aria-pressed="true"] {
+    background: var(--v8-surface); color: var(--v8-principal); font-weight: 600;
+  }
+  #preparationFiltres .filtre-pilules-enveloppe .button.filtre-pilules-plus {
+    min-height: 44px; background: transparent; color: var(--v8-texte-sur-carte-tournee);
+    border: 1.5px solid var(--v8-secondaire-sur-carte-tournee); box-shadow: none;
+  }
+  /* Les anneaux sur le vert : un liseré de la couleur du bloc, puis le clair.
+     Ils battent les box-shadow: none ci-dessus (un #id de plus). */
+  #enteteActions #preparationFiltres #preparationLoupe:focus-visible,
+  #enteteActions #preparationFiltres #preparationSearch:focus-visible,
+  #enteteActions #preparationFiltres .button:focus-visible {
+    outline: none; box-shadow: 0 0 0 3px var(--v8-carte-tournee), 0 0 0 5px var(--v8-texte-sur-carte-tournee);
+  }
+
+  /* --- La liste unique : une carte blanche, des lignes de 72 px ----------- */
+  /* Le titre du panneau redisait celui de l'en-tete ; le panneau s'efface
+     derriere la carte de la liste. */
+  :root[data-color-scheme] #preparation > .panel,
+  :root:not([data-color-scheme]) #preparation > .panel {
+    padding: 0; border: 0; background: none; box-shadow: none;
+  }
+  #preparation > .panel > .panel-heading { display: none; }
+  #preparationList .prep-liste {
+    display: flex; flex-direction: column; padding: 6px; border-radius: 24px;
+    background: var(--v8-surface);
+    box-shadow: 0 1px 2px rgba(15, 61, 61, 0.05), 0 12px 28px rgba(15, 61, 61, 0.05);
+  }
+  :root[data-color-scheme] #preparationList .prep-ligne,
+  :root:not([data-color-scheme]) #preparationList .prep-ligne {
+    position: relative; min-height: 72px; border-radius: 18px; background: transparent; box-shadow: none;
+  }
+  #preparationList .prep-ligne + .prep-ligne::before {
+    content: ""; position: absolute; top: 0; left: 14px; right: 14px; height: 1px; background: var(--v8-surface-basse);
+  }
+  #preparationList .prep-ligne .commande-ligne-main {
+    gap: 14px; min-height: 72px; padding: 8px 14px; border-radius: 18px;
+  }
+  #preparationList .prep-ligne .commande-ligne-main:hover { background: var(--v8-fond); }
+  #preparationList .prep-ligne .commande-ligne-main:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  /* La planche coupe le nom d'une ellipse sur une ligne ; a 390 px, avec le
+     mot « En preparation » a cote, il restait « Pharmacie Centra... » et
+     « Champagnole · 6 artic... ». Le nom passe sur deux lignes au plus, le
+     detail n'est jamais coupe : la ligne grandit (72 px, 96 au plus). */
+  #preparationList .prep-ligne .commande-ligne-corps > strong {
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+    font-size: 16px; font-weight: 600; line-height: 1.3; color: var(--v8-texte); white-space: normal;
+  }
+  #preparationList .prep-ligne .commande-ligne-corps > span { font-size: 13.5px; white-space: normal; overflow: visible; }
+  #preparationList .prep-ligne .commande-ligne-corps > .commande-ligne-alerte { color: var(--v8-alerte); }
+
+  /* Le point d'etat, 10 px (charte : « un point de couleur + un mot »). */
+  .prep-point { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 999px; background: var(--v8-texte-secondaire); }
+  .prep-point--bloquee { background: var(--v8-alerte); }
+  .prep-point--en-preparation { background: var(--v8-accent); }
+  .prep-point--pret { background: var(--v8-principal); }
+
+  /* Le mot : pêche claire pour ce qui reste a faire, vert clair pour ce qui
+     est pret, contour d'alerte et « ! » pour une bloquee. */
+  #preparationList .pill.prep-badge {
+    display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto;
+    height: 24px; min-height: 24px; padding: 0 12px; border: 0; border-radius: 999px;
+    background: var(--v8-peche-claire); color: var(--v8-principal-appuye);
+    font-size: 12.5px; font-weight: 600; white-space: nowrap; box-shadow: none;
+  }
+  #preparationList .pill.prep-badge--pret { background: var(--v8-vert-clair); }
+  #preparationList .pill.prep-badge--bloquee {
+    padding: 0 10px; background: var(--v8-surface); color: var(--v8-alerte);
+    box-shadow: inset 0 0 0 1.5px var(--v8-alerte);
+  }
+  #preparationList .prep-badge-icone { width: 12px; height: 12px; flex: none; }
+
+  /* --- Le detail : la PAGE de la planche 7b ------------------------------
+     [open] obligatoire : un display pose sur le <dialog> ferme le montrerait
+     (la regle de l'agent utilisateur `dialog:not([open])` perd contre l'auteur). */
+  #commandeDetailDialog.commande-page[open] {
+    display: flex; flex-direction: column;
+    width: 100vw; max-width: none; height: 100dvh; max-height: none;
+    margin: 0; padding: 0; border: 0; border-radius: 0; overflow: hidden;
+    background: var(--v8-fond); box-shadow: none;
+  }
+  #commandeDetailDialog.commande-page .sheet-poignee,
+  #commandeDetailDialog.commande-page .sheet-fermer { display: none; }
+  #commandeDetailDialog.commande-page .sheet-entete {
+    display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: center; gap: 14px;
+    flex: none; margin: 0; padding: calc(16px + env(safe-area-inset-top)) 20px 20px;
+    border-radius: 0 0 28px 28px; background: var(--v8-carte-tournee); color: var(--v8-texte-sur-carte-tournee);
+  }
+  #commandeDetailDialog.commande-page .commande-page-retour {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 44px; height: 44px; padding: 0; border: 0; border-radius: 999px;
+    background: var(--v8-surface-sur-vert); color: var(--v8-texte-sur-carte-tournee); cursor: pointer;
+  }
+  #commandeDetailDialog.commande-page .commande-page-retour .icon { width: 20px; height: 20px; }
+  #commandeDetailDialog.commande-page .commande-page-retour:focus-visible {
+    outline: none; box-shadow: 0 0 0 3px var(--v8-carte-tournee), 0 0 0 5px var(--v8-texte-sur-carte-tournee);
+  }
+  #commandeDetailDialog.commande-page .sheet-entete-texte { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  #commandeDetailDialog.commande-page .commande-page-meta {
+    display: block; margin: 0; font-size: 13px; font-weight: 500; letter-spacing: 0.02em;
+    color: var(--v8-secondaire-sur-carte-tournee); font-variant-numeric: tabular-nums;
+  }
+  #commandeDetailDialog.commande-page .commande-page-meta:empty { display: none; }
+  #commandeDetailDialog.commande-page .sheet-entete h3 {
+    margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15;
+    color: var(--v8-texte-sur-carte-tournee); overflow-wrap: anywhere;
+  }
+  #commandeDetailDialog.commande-page .commande-page-puces { display: flex; flex-wrap: wrap; gap: 8px; grid-column: 1 / -1; }
+  .commande-page-puce {
+    display: inline-flex; align-items: center; height: 28px; padding: 0 12px; border-radius: 999px;
+    background: var(--v8-surface-sur-vert); color: var(--v8-texte-sur-carte-tournee); font-size: 13px; font-weight: 600;
+  }
+  .commande-page-puce--statut { background: var(--v8-surface); color: var(--v8-principal-appuye); }
+
+  #commandeDetailDialog.commande-page .sheet-corps { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+  .commande-page-corps { display: flex; flex-direction: column; gap: 12px; padding: 16px 16px 0; min-height: 100%; }
+  .commande-page-carte {
+    padding: 6px; border-radius: 24px; background: var(--v8-surface);
+    box-shadow: 0 1px 2px rgba(15, 61, 61, 0.05), 0 12px 28px rgba(15, 61, 61, 0.05);
+  }
+  .commande-page-compte { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 12px 14px 4px; }
+  .commande-page-compte strong { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; color: var(--v8-texte); }
+  .commande-page-compte span { font-size: 13.5px; font-weight: 500; color: var(--v8-texte-secondaire); font-variant-numeric: tabular-nums; }
+  .commande-page-produits { margin: 0; padding: 0; list-style: none; }
+  .commande-page-produit { position: relative; display: flex; align-items: center; gap: 14px; padding: 14px; }
+  .commande-page-produit + .commande-page-produit::before {
+    content: ""; position: absolute; top: 0; left: 14px; right: 14px; height: 1px; background: var(--v8-surface-basse);
+  }
+  .commande-page-produit-texte { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
+  .commande-page-produit-texte strong { font-size: 15.5px; font-weight: 500; color: var(--v8-texte); overflow-wrap: anywhere; }
+  .commande-page-produit-texte span { font-size: 13px; font-weight: 500; color: var(--v8-texte-secondaire); }
+  .commande-page-quantite { flex: none; font-size: 19px; font-weight: 700; color: var(--v8-texte); font-variant-numeric: tabular-nums; }
+  .commande-page-produit--manque .commande-page-produit-texte span,
+  .commande-page-produit--manque .commande-page-quantite { color: var(--v8-alerte); }
+
+  .commande-page-adresse { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 12px; padding: 18px; }
+  .commande-page-adresse > .icon { width: 20px; height: 20px; margin-top: 2px; color: var(--v8-texte-secondaire); }
+  .commande-page-adresse > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .commande-page-adresse strong { font-size: 15.5px; font-weight: 500; color: var(--v8-texte); overflow-wrap: anywhere; }
+  .commande-page-adresse a {
+    display: inline-flex; align-items: center; align-self: flex-start; min-height: 44px;
+    font-size: 14px; font-weight: 600; color: var(--v8-principal); text-decoration: none;
+  }
+  .commande-page-date, .commande-page-adresse > .button { grid-column: 1 / -1; }
+  .commande-page-date { display: grid; gap: 6px; font-size: 13.5px; font-weight: 600; color: var(--v8-texte-secondaire); }
+
+  /* Le geste sous le pouce, colle au bas de la page (opaque, comme la barre
+     basse : le texte d'alerte ne passe jamais sur un contenu qui defile). */
+  .commande-page-gestes {
+    position: sticky; bottom: 0; display: grid; gap: 10px; margin: auto -16px 0;
+    padding: 14px 16px calc(22px + env(safe-area-inset-bottom)); background: var(--v8-fond);
+  }
+  :root[data-color-scheme] .commande-page-gestes .button,
+  :root:not([data-color-scheme]) .commande-page-gestes .button { width: 100%; min-height: 48px; }
+  /* Desactive : le contour de la planche, jamais un bouton gris muet. */
+  :root[data-color-scheme] #commandeDetailDialog .commande-page-gestes .button[disabled],
+  :root:not([data-color-scheme]) #commandeDetailDialog .commande-page-gestes .button[disabled] {
+    background: transparent; color: var(--v8-texte-secondaire); border: 1.5px solid var(--v8-vert-eau); box-shadow: none; opacity: 1;
+  }
+  .commande-page-raison, .commande-page-note {
+    display: flex; align-items: center; justify-content: center; gap: 8px; margin: 0;
+    font-size: 13.5px; font-weight: 500; text-align: center;
+  }
+  .commande-page-raison { color: var(--v8-alerte); }
+  .commande-page-raison .icon { width: 16px; height: 16px; flex: none; }
+  .commande-page-note { color: var(--v8-texte-secondaire); }
+}
+@media (max-width: 820px) {
+  /* En sombre : la pilule choisie en plein clair sur le vert sombre, comme les
+     boutons pleins de l'en-tete (lot 1). */
+  :root[data-color-scheme="dark"] #preparationFiltres .filtre-pilules .button.filtre-pilule[aria-pressed="true"] {
+    background: var(--v8-principal); color: var(--v8-texte-sur-principal);
+  }
+}
+@media (max-width: 820px) and (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) #preparationFiltres .filtre-pilules .button.filtre-pilule[aria-pressed="true"] {
+    background: var(--v8-principal); color: var(--v8-texte-sur-principal);
+  }
+}
+
+/* ==========================================================================
+   MOBILE, ABONNEMENTS -- planches 3a (liste), 3c (les 90 jours), 5a (sombre).
+   Sous 820 px. Decisions du 23/09 (DESIGN.md) : la ligne fait 96 px (trois
+   rangees : client et etat, echeance et frequence, panier et rappel) ;
+   « Nouvel abonnement » est fixe au-dessus de la barre basse, et la liste lui
+   reserve sa place ; le calendrier de l'en-tete ouvre « Les 90 jours ».
+   ========================================================================== */
+
+/* Les rangees du telephone et les boutons de vue : pas au bureau. */
+#abonnements .abo-rythme, #abonnements .abo-panier-rappel { display: none; }
+.abo-jour-semaine { display: none; }
+.ecran-entete .ecran-entete-fente .abo-agenda-ouvrir,
+.ecran-entete .ecran-entete-fente .abo-agenda-retour { display: none; }
+#abonnements .abo-creer svg { display: none; }
+/* L'emballage des echeances d'une semaine (la carte du telephone) : au bureau
+   il s'efface, et le gap de 8 px de .abo-semaine separe a nouveau les
+   echeances (sans lui, elles se touchaient). */
+.abo-semaine-lignes { display: contents; }
+/* Le sheet de detail dit le retard comme la ligne : en couleur d'alerte. */
+#abonnementDetailCorps .sub-facts strong.abo-alerte { color: var(--v8-alerte); }
+
+@media (max-width: 820px) {
+  /* --- L'en-tete (3a) : le calendrier en haut a droite, les pilules sur le
+     vert. La fente garde la recherche (hors planche, gardee), la pastille de
+     synchro et « Actualiser ». --- */
+  body:has(#abonnements.active) main.content > .ecran-entete { position: relative; }
+  body:has(#abonnements.active) .ecran-entete .ecran-entete-texte { padding-right: 56px; }
+  :root[data-color-scheme] body:has(#abonnements.active:not([data-vue="agenda"])) .ecran-entete .ecran-entete-fente .abo-agenda-ouvrir,
+  :root:not([data-color-scheme]) body:has(#abonnements.active:not([data-vue="agenda"])) .ecran-entete .ecran-entete-fente .abo-agenda-ouvrir,
+  :root[data-color-scheme] body:has(#abonnements.active[data-vue="agenda"]) .ecran-entete .ecran-entete-fente .abo-agenda-retour,
+  :root:not([data-color-scheme]) body:has(#abonnements.active[data-vue="agenda"]) .ecran-entete .ecran-entete-fente .abo-agenda-retour {
+    position: absolute; top: 10px; display: flex; align-items: center; justify-content: center;
+    width: 44px; height: 44px; min-height: 0; padding: 0; border: 0; border-radius: 999px;
+    background: var(--v8-surface-sur-vert); color: var(--v8-texte-sur-carte-tournee); cursor: pointer;
+  }
+  .ecran-entete .ecran-entete-fente .abo-agenda-ouvrir { right: 20px; }
+  .ecran-entete .ecran-entete-fente .abo-agenda-retour { left: 20px; }
+  .ecran-entete .abo-agenda-ouvrir svg, .ecran-entete .abo-agenda-retour svg { width: 20px; height: 20px; }
+  /* [hidden] gagne toujours (showTab les cache hors de l'ecran). */
+  :root[data-color-scheme] body .ecran-entete .ecran-entete-fente .abo-agenda-ouvrir[hidden],
+  :root:not([data-color-scheme]) body .ecran-entete .ecran-entete-fente .abo-agenda-ouvrir[hidden],
+  :root[data-color-scheme] body .ecran-entete .ecran-entete-fente .abo-agenda-retour[hidden],
+  :root:not([data-color-scheme]) body .ecran-entete .ecran-entete-fente .abo-agenda-retour[hidden] { display: none; }
+  :root[data-color-scheme] .ecran-entete .ecran-entete-fente .abo-agenda-ouvrir:focus-visible,
+  :root:not([data-color-scheme]) .ecran-entete .ecran-entete-fente .abo-agenda-ouvrir:focus-visible,
+  :root[data-color-scheme] .ecran-entete .ecran-entete-fente .abo-agenda-retour:focus-visible,
+  :root:not([data-color-scheme]) .ecran-entete .ecran-entete-fente .abo-agenda-retour:focus-visible {
+    outline: none; box-shadow: 0 0 0 3px var(--v8-carte-tournee), 0 0 0 5px var(--v8-texte-sur-carte-tournee);
+  }
+
+  /* L'en-tete se prolonge dans le bloc des filtres : un seul vert, arrondi
+     sous les pilules (3a). Sauf quand le bandeau « Hors ligne » / « Envoi en
+     attente » s'intercale entre les deux (il suit l'en-tete dans le DOM) :
+     l'en-tete garde alors son arrondi, et les filtres deviennent une carte
+     verte fermee sous le bandeau -- sinon le vert etait coupe en deux, et
+     l'en-tete restait a angles droits. */
+  :root[data-color-scheme] body:has(#abonnements.active:not([data-vue="agenda"])):not(:has(#bandeauHorsLigne:not([hidden]))) main.content > .ecran-entete,
+  :root:not([data-color-scheme]) body:has(#abonnements.active:not([data-vue="agenda"])):not(:has(#bandeauHorsLigne:not([hidden]))) main.content > .ecran-entete {
+    margin-bottom: 0; border-radius: 0; padding-bottom: 16px;
+  }
+  body:has(#bandeauHorsLigne:not([hidden])) #abonnements .abo-filtres { margin: 0; padding: 16px; border-radius: 28px; }
+  #abonnements:not([data-vue="agenda"]) .abo-grille { gap: 0; }
+  #abonnements:not([data-vue="agenda"]) .abo-colonne { gap: 16px; }
+  #abonnements .abo-filtres {
+    margin: 0 -16px; padding: 0 20px 20px; gap: 8px;
+    background: var(--v8-carte-tournee); border-radius: 0 0 28px 28px;
+  }
+  :root[data-color-scheme] #abonnements .abo-filtres .abo-pilule,
+  :root:not([data-color-scheme]) #abonnements .abo-filtres .abo-pilule {
+    background: var(--v8-surface-sur-vert); color: var(--v8-texte-sur-carte-tournee);
+  }
+  :root[data-color-scheme] #abonnements .abo-filtres .abo-pilule.abo-pilule--active,
+  :root:not([data-color-scheme]) #abonnements .abo-filtres .abo-pilule.abo-pilule--active {
+    background: var(--v8-surface); color: var(--v8-principal);
+  }
+  /* Le tri (hors planche, garde) : une pilule de la surface sur vert. */
+  :root[data-color-scheme] #abonnements .abo-filtres .cmd-tri,
+  :root:not([data-color-scheme]) #abonnements .abo-filtres .cmd-tri {
+    background: var(--v8-surface-sur-vert); color: var(--v8-texte-sur-carte-tournee);
+  }
+  #abonnements .abo-filtres .cmd-tri select option { color: var(--v8-texte); background: var(--v8-surface); }
+  #abonnements .abo-filtres .cmd-ressort { display: none; }
+  :root[data-color-scheme] #abonnements .abo-filtres .abo-pilule:focus-visible,
+  :root:not([data-color-scheme]) #abonnements .abo-filtres .abo-pilule:focus-visible,
+  :root[data-color-scheme] #abonnements .abo-filtres .cmd-tri:has(select:focus-visible),
+  :root:not([data-color-scheme]) #abonnements .abo-filtres .cmd-tri:has(select:focus-visible) {
+    outline: none; box-shadow: 0 0 0 3px var(--v8-carte-tournee), 0 0 0 5px var(--v8-texte-sur-carte-tournee);
+  }
+
+  /* --- La ligne de 96 px (3a) : trois rangees, sans disque. --- */
+  #abonnements #subscriptionList.subscription-list { gap: 10px; }
+  :root[data-color-scheme] #abonnements .abonnement-ligne,
+  :root:not([data-color-scheme]) #abonnements .abonnement-ligne { min-height: 96px; border-radius: 24px; }
+  :root[data-color-scheme] #abonnements .abonnement-ligne .commande-ligne-main,
+  :root:not([data-color-scheme]) #abonnements .abonnement-ligne .commande-ligne-main {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "nom etat" "rythme rythme" "panier panier";
+    align-items: start; column-gap: 10px; row-gap: 6px;
+    min-height: 96px; padding: 12px 18px; border-radius: 24px;
+  }
+  #abonnements .abonnement-ligne .commande-ligne-corps { display: contents; }
+  #abonnements .abonnement-ligne .etat-commande,
+  #abonnements .abonnement-ligne .abo-detail,
+  #abonnements .abonnement-ligne .abo-panier,
+  #abonnements .abonnement-ligne .abo-cellule { display: none; }
+  #abonnements .abonnement-ligne .commande-ligne-corps > strong {
+    grid-area: nom; font-size: 16px; font-weight: 600; line-height: 20px; letter-spacing: -0.01em; color: var(--v8-texte);
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere;
+  }
+  :root[data-color-scheme] #abonnements .abonnement-ligne .commande-ligne-main .pill,
+  :root:not([data-color-scheme]) #abonnements .abonnement-ligne .commande-ligne-main .pill { grid-area: etat; align-self: start; }
+  #abonnements .abonnement-ligne .commande-ligne-corps > .abo-rythme {
+    grid-area: rythme; display: flex; align-items: baseline; gap: 6px; min-width: 0;
+    font-size: 15px; line-height: 19px; white-space: nowrap; overflow: hidden;
+  }
+  .abo-rythme-date { flex: none; font-weight: 500; color: var(--v8-texte); }
+  .abo-rythme-date.abo-alerte { color: var(--v8-alerte); }
+  .abo-rythme-frequence { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 400; color: var(--v8-texte-secondaire); }
+  #abonnements .abonnement-ligne .commande-ligne-corps > .abo-panier-rappel {
+    grid-area: panier; display: block; min-width: 0;
+    font-size: 13.5px; font-weight: 400; line-height: 17px; color: var(--v8-texte-secondaire);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  :root[data-color-scheme] #abonnements .abonnement-ligne .commande-ligne-main:focus-visible,
+  :root:not([data-color-scheme]) #abonnements .abonnement-ligne .commande-ligne-main:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+  /* --- « Nouvel abonnement », fixe au-dessus de la barre basse (3a). La
+     barre mesure 90 px a 390 (« Tableau de bord » sur deux lignes, + la zone
+     sure) ; 14 px d air au-dessus. Sur la surface de la
+     page, pas sur le vert : le plein de la charte, pas le blanc de l'en-tete. */
+  :root[data-color-scheme] body:has(#abonnements.active:not([data-vue="agenda"])) .ecran-entete .ecran-entete-fente .abo-nouveau,
+  :root:not([data-color-scheme]) body:has(#abonnements.active:not([data-vue="agenda"])) .ecran-entete .ecran-entete-fente .abo-nouveau {
+    position: fixed; left: 16px; right: 16px; bottom: calc(104px + env(safe-area-inset-bottom)); z-index: 1000;
+    width: auto; height: 48px; justify-content: center; padding: 0 24px;
+    background: var(--v8-principal); color: var(--v8-texte-sur-principal); border: 0;
+    font-size: 15.5px; font-weight: 600; box-shadow: 0 8px 24px rgba(15, 61, 61, 0.22);
+  }
+  :root[data-color-scheme] body:has(#abonnements.active:not([data-vue="agenda"])) .ecran-entete .ecran-entete-fente .abo-nouveau:focus-visible,
+  :root:not([data-color-scheme]) body:has(#abonnements.active:not([data-vue="agenda"])) .ecran-entete .ecran-entete-fente .abo-nouveau:focus-visible {
+    outline: none; box-shadow: var(--focus-ring), 0 8px 24px rgba(15, 61, 61, 0.22);
+  }
+  /* La place du bouton : 90 (barre) + 14 + 48 + 20 d air -- le dernier
+     abonnement defile au-dessus, jamais dessous. */
+  :root[data-color-scheme] body:has(#abonnements.active:not([data-vue="agenda"])) main.content,
+  :root:not([data-color-scheme]) body:has(#abonnements.active:not([data-vue="agenda"])) main.content {
+    padding-bottom: calc(172px + env(safe-area-inset-bottom));
+  }
+
+  /* --- Les deux vues. La liste : l'agenda s'ouvre par le calendrier. --- */
+  #abonnements:not([data-vue="agenda"]) .abo-agenda { display: none; }
+  #abonnements[data-vue="agenda"] .abo-colonne { display: none; }
+  body:has(#abonnements.active[data-vue="agenda"]) .ecran-entete .ecran-entete-fente .abo-recherche,
+  body:has(#abonnements.active[data-vue="agenda"]) .ecran-entete .ecran-entete-fente .abo-nouveau { display: none; }
+  body:has(#abonnements.active[data-vue="agenda"]) .ecran-entete .ecran-entete-texte { padding: 0 0 0 58px; min-height: 44px; justify-content: center; }
+  :root[data-color-scheme] body:has(#abonnements.active[data-vue="agenda"]) .ecran-entete .ecran-entete-texte h2,
+  :root:not([data-color-scheme]) body:has(#abonnements.active[data-vue="agenda"]) .ecran-entete .ecran-entete-texte h2 { font-size: 24px; }
+
+  /* --- « Les 90 jours » (3c) : une carte par semaine, le jour en deux
+     etages, le « + » rond de 44 px. --- */
+  :root[data-color-scheme] #abonnements .abo-agenda,
+  :root:not([data-color-scheme]) #abonnements .abo-agenda {
+    padding: 0; background: transparent; box-shadow: none; border-radius: 0; gap: 16px;
+  }
+  #abonnements .abo-agenda-tete { display: none; }
+  #abonnements .abo-agenda-corps { gap: 16px; }
+  #abonnements .abo-separateur { display: none; }
+  #abonnements .abo-semaine { gap: 10px; }
+  #abonnements .abo-semaine-titre { padding: 0 4px; font-size: 14.5px; font-weight: 600; color: var(--v8-texte); }
+  #abonnements .abo-semaine-titre.abo-alerte { color: var(--v8-alerte); }
+  #abonnements .abo-semaine-lignes {
+    display: flex; flex-direction: column; padding: 6px; border-radius: 24px; background: var(--v8-surface);
+    box-shadow: 0 1px 2px rgba(15, 61, 61, 0.05), 0 12px 28px rgba(15, 61, 61, 0.05);
+  }
+  :root[data-color-scheme="dark"] #abonnements .abo-semaine-lignes { box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 28px rgba(0,0,0,.32); }
+  #abonnements .abo-echeance.subscription-card { padding: 12px 14px; min-height: 68px; border-radius: 18px; }
+  #abonnements .abo-echeance + .abo-echeance { box-shadow: 0 -1px 0 var(--v8-surface-basse); border-radius: 0; }
+  #abonnements .abo-jour { display: flex; flex-direction: column; align-items: center; font-size: 17px; color: var(--v8-principal); line-height: 1.2; }
+  #abonnements .abo-jour-semaine {
+    display: block; font-size: 11.5px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; color: var(--v8-texte-secondaire);
+  }
+  #abonnements .abo-echeance-texte strong { font-size: 15px; letter-spacing: -0.01em; }
+  #abonnements .abo-echeance-texte span { overflow-wrap: normal; }
+  :root[data-color-scheme] #abonnements .abo-creer,
+  :root:not([data-color-scheme]) #abonnements .abo-creer {
+    display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0;
+    border: 0; background: var(--v8-principal); color: var(--v8-texte-sur-principal);
+  }
+  #abonnements .abo-creer svg { display: block; width: 18px; height: 18px; }
+  #abonnements .abo-creer .abo-creer-mot { display: none; }
+  :root[data-color-scheme] #abonnements .abo-agenda-plus,
+  :root:not([data-color-scheme]) #abonnements .abo-agenda-plus { background: var(--v8-surface); border-radius: 18px; }
+  :root[data-color-scheme] #abonnements .abo-agenda-plus[hidden],
+  :root:not([data-color-scheme]) #abonnements .abo-agenda-plus[hidden] { display: none; }
+}
+@media (max-width: 820px) and (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) #abonnements .abo-semaine-lignes { box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 28px rgba(0,0,0,.32); }
+}
+@media (max-width: 820px) {
+  /* En sombre (5a) : le filtre actif en plein clair sur le vert sombre. */
+  :root[data-color-scheme="dark"] #abonnements .abo-filtres .abo-pilule.abo-pilule--active { background: var(--v8-principal); color: var(--v8-texte-sur-principal); }
+}
+@media (max-width: 820px) and (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) #abonnements .abo-filtres .abo-pilule.abo-pilule--active { background: var(--v8-principal); color: var(--v8-texte-sur-principal); }
+}
+
+/* ==========================================================================
+   MOBILE, PARAMETRES -- planche 8d (clair) / 12d (sombre). Sous 820 px :
+   les comptes en LIGNES (initiale, nom, role, etat ; la ligne ouvre la
+   feuille du compte), les imports en trois lignes qui ouvrent une feuille,
+   « Ajouter » des secteurs, « Ajouter un compte » qui deplie le formulaire,
+   et la version au pied. Au bureau, rien ne change : ce qui est propre au
+   telephone porte `.par-telephone`, ce qui est propre au bureau `.par-bureau`.
+   ========================================================================== */
+/* Au bureau, le telephone ne se rend pas. #parametres (1,1,0) bat les
+   `:root[data-color-scheme] .button` (0,3,0) qui posent un display. */
+#parametres .par-telephone { display: none; }
+
+@media (max-width: 820px) {
+  #parametres .par-bureau { display: none; }
+
+  /* Les cartes de la planche 8d : rayon 24, marge 18, ecart 14, titre 17. */
+  :root[data-color-scheme] #parametres .par-carte,
+  :root:not([data-color-scheme]) #parametres .par-carte { padding: 18px; gap: 14px; border-radius: 24px; }
+  :root[data-color-scheme] #parametres .par-carte h3,
+  :root:not([data-color-scheme]) #parametres .par-carte h3 { font-size: 17px; }
+  #parametres .par-aide { font-size: 13px; }
+  #parametres .par-grille { gap: 12px; }
+
+  /* « Ajouter » (secteurs) : un lien texte a 44 px, sur la ligne du titre. */
+  #parametres .par-carte-tete { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  :root[data-color-scheme] #parametres .par-lien.par-telephone:not([hidden]),
+  :root:not([data-color-scheme]) #parametres .par-lien.par-telephone:not([hidden]) {
+    display: inline-flex; align-items: center; min-height: 44px; padding: 0 4px; border: 0; border-radius: 12px;
+    background: none; box-shadow: none; color: var(--v8-principal);
+    font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer;
+  }
+
+  /* LES LIGNES (comptes, imports) : un bouton transparent, le texte reste sur
+     la surface de la carte (la paire que mesure le banc de contraste). */
+  #parametres .par-comptes-lignes,
+  #parametres .par-imports-lignes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  #parametres .par-comptes-lignes > li + li,
+  #parametres .par-imports-lignes > li + li { box-shadow: 0 -1px 0 var(--v8-surface-basse); }
+  #parametres .par-telephone.par-imports-lignes:not([hidden]) { display: flex; }
+  #parametres .par-telephone.par-comptes-tel { display: block; }
+  :root[data-color-scheme] #parametres .par-ligne,
+  :root:not([data-color-scheme]) #parametres .par-ligne {
+    display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 6px 0;
+    border: 0; border-radius: 14px; background: none; box-shadow: none; color: var(--v8-texte);
+    font: inherit; text-align: left; cursor: pointer;
+  }
+  :root[data-color-scheme] #parametres .par-ligne:focus-visible,
+  :root:not([data-color-scheme]) #parametres .par-ligne:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  #parametres .par-avatar {
+    display: flex; align-items: center; justify-content: center; flex: none; width: 40px; height: 40px;
+    border-radius: 999px; background: var(--v8-principal); color: var(--v8-texte-sur-principal);
+    font-size: 17px; font-weight: 700;
+  }
+  #parametres .par-chevron { flex: none; width: 18px; height: 18px; color: var(--v8-texte-secondaire); }
+}
+
+/* Le texte d'une ligne : aussi dans les feuilles, qui vivent hors de
+   #parametres (un <dialog> au niveau du document). */
+.par-ligne-texte { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
+.par-ligne-titre { font-size: 15.5px; font-weight: 600; letter-spacing: -0.01em; color: var(--v8-texte); overflow-wrap: anywhere; }
+.par-ligne-toi { font-weight: 500; color: var(--v8-texte-secondaire); }
+.par-ligne-meta { font-size: 13px; font-weight: 500; color: var(--v8-texte-secondaire); overflow-wrap: anywhere; }
+.par-imports-lignes .par-ligne-titre { font-size: 15px; font-weight: 500; }
+
+/* Le badge d'etat (« Actif », « A jour ») : informatif, pas une `.pill` -- il
+   n'est pas une cible. 24 px, la planche. */
+.par-badge {
+  display: inline-flex; align-items: center; flex: none; height: 24px; padding: 0 12px; border-radius: 999px;
+  background: var(--v8-vert-clair); color: var(--v8-principal-appuye); font-size: 12.5px; font-weight: 600; white-space: nowrap;
+}
+.par-badge[hidden] { display: none; }
+.par-badge--eteint { background: var(--v8-surface-basse); color: var(--v8-texte-secondaire); }
+:root[data-color-scheme="dark"] .par-badge:not(.par-badge--eteint) { color: var(--v8-principal); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) .par-badge:not(.par-badge--eteint) { color: var(--v8-principal); }
+}
+
+@media (max-width: 820px) {
+  /* « Ajouter un compte » : un bouton contour pleine largeur ; le formulaire
+     reste replie tant qu'on ne l'a pas demande. */
+  :root[data-color-scheme] #parametres #parAjouterCompte:not([hidden]),
+  :root:not([data-color-scheme]) #parametres #parAjouterCompte:not([hidden]) {
+    display: inline-flex; align-items: center; justify-content: center; width: 100%; min-height: 44px;
+  }
+  #parametres #comptesBlock:not(.par-form-ouvert) #compteForm { display: none; }
+
+  /* La version, au pied de l'ecran. */
+  :root[data-color-scheme] #parametres .par-version.par-telephone,
+  :root:not([data-color-scheme]) #parametres .par-version.par-telephone {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%;
+    min-height: 44px; margin-top: 12px; padding: 4px 10px; border: 0; border-radius: 14px;
+    background: none; box-shadow: none; color: var(--v8-texte-secondaire);
+    font: inherit; font-size: 13px; font-weight: 500; cursor: pointer;
+  }
+  :root[data-color-scheme] #parametres .par-version:focus-visible,
+  :root:not([data-color-scheme]) #parametres .par-version:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+}
+
+/* LES FEUILLES (compte, imports). */
+.par-feuille-corps { display: flex; flex-direction: column; gap: 14px; }
+.par-feuille-corps .par-aide { margin: 0; font-size: 13px; line-height: 1.5; color: var(--v8-texte-secondaire); }
+.par-feuille-gestes { display: grid; gap: 10px; }
+:root[data-color-scheme] .par-feuille-gestes .button,
+:root:not([data-color-scheme]) .par-feuille-gestes .button { width: 100%; min-height: 44px; }
+:root[data-color-scheme] .par-feuille-gestes .par-geste-danger,
+:root:not([data-color-scheme]) .par-feuille-gestes .par-geste-danger { color: var(--v8-alerte); }
+.par-archives { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; max-height: 60vh; overflow-y: auto; }
+.par-archive { display: flex; align-items: center; gap: 12px; padding: 10px 0; }
+.par-archive + .par-archive { box-shadow: 0 -1px 0 var(--v8-surface-basse); }
+:root[data-color-scheme] .par-archive .button,
+:root:not([data-color-scheme]) .par-archive .button { flex: none; width: auto; min-height: 44px; text-decoration: none; }
+/* Le titre d'une feuille est l'identifiant du compte : jusqu'a 60 caracteres
+   sans espace (une adresse e-mail). `.sheet-entete h3` ne se coupe pas et,
+   dans son flex, poussait le ✕ hors de la feuille a 360 px. (1,1,1) bat
+   `.sheet-entete h3` (0,1,1). */
+#parCompteFeuille .sheet-entete h3,
+#parImportsFeuille .sheet-entete h3 { min-width: 0; overflow-wrap: anywhere; }
+
+/* ==========================================================================
+   COMMANDES + STOCK MOBILE + SQUELETTES -- planches 8a, 8b, 10a, 10b (23/09)
+   ========================================================================== */
+
+/* --- Squelettes : des LIGNES a la hauteur des lignes reelles (planche 10b) --
+   La hauteur vient de la zone : c'est la feuille qui sait ce que mesure une
+   ligne de commande ou de stock, au bureau et au telephone. Un banc compare
+   la ligne grise a la ligne reelle (squelette.spec.js). */
+.squelette.squelette-lignes { gap: 0; padding: 0; }
+.squelette-ligne {
+  display: flex; flex-direction: column; justify-content: center; gap: 8px;
+  box-sizing: border-box; height: var(--squelette-ligne, 56px); padding: 0 16px;
+}
+.squelette-ligne .squelette-bloc { height: 12px; border-radius: 6px; }
+.squelette-ligne .squelette-bloc--detail { height: 10px; border-radius: 5px; }
+#cmdLignes, #stockList, #dashboardPreparing, #dashboardDelivering { --squelette-ligne: 56px; }
+#crmList { --squelette-ligne: 60px; }
+#opAlerts { --squelette-ligne: 64px; }
+#dashboardSubscriptions { --squelette-ligne: 74px; }
+/* Entre 821 et 1280 px, Commandes et Stock sont des CARTES a trois rangs
+   (« la relecture » : des 1280 px ; Commandes aussi sous 920 px). La ligne
+   grise de 56 px y attendait une ligne de tableau : la liste sautait de 170
+   (Commandes) a 290 px (Stock) a l'arrivee des donnees. Mesures du 23/09 :
+   carte de commande 95 px, carte de stock 129 px (pas de 36 px), 141 px sous
+   920 px (pas de 44 px). */
+@media (min-width: 821px) and (max-width: 1280px) {
+  #cmdLignes { --squelette-ligne: 95px; }
+}
+@media (min-width: 921px) and (max-width: 1280px) {
+  #stockList { --squelette-ligne: 129px; }
+}
+@media (max-width: 920px) {
+  #stockList { --squelette-ligne: 141px; }
+}
+@media (max-width: 820px) {
+  #cmdLignes, #crmList { --squelette-ligne: 72px; }
+}
+
+/* --- Squelettes : les CHIFFRES (planche 10b, haut) --------------------------
+   « Seuls les chiffres sont des blocs, aux dimensions du chiffre attendu. »
+   L'element est VIDE pendant le chargement (app.js) : un espace sans chasse,
+   en pseudo-element, lui garde sa hauteur de ligne -- donc sa place, au pixel
+   -- et le bloc est dessine par dessus, a la largeur du chiffre attendu. Rien
+   n'est ecrit : la regle « jamais de texte dessus » tient. */
+.squelette-chiffre { position: relative; min-width: var(--squelette-l, 2em); }
+.squelette-chiffre::before { content: "\200b"; }
+.squelette-chiffre::after {
+  content: ""; position: absolute; left: 0; top: 50%;
+  width: var(--squelette-l, 2em); height: var(--squelette-h, 0.8em);
+  transform: translateY(-50%); border-radius: 0.22em; background: var(--v8-squelette);
+}
+.tb-ca-panier .squelette-chiffre::after { left: auto; right: 0; }
+#opRevenue { --squelette-l: 3.8em; --squelette-h: 0.86em; }
+#opBasket { --squelette-l: 2.9em; --squelette-h: 0.8em; }
+#opDelivered { --squelette-l: 9em; --squelette-h: 0.9em; }
+#dashboardPreparingCount, #dashboardDeliveringCount { --squelette-l: 1.1em; --squelette-h: 0.85em; }
+#dashboardPreparingDetail, #dashboardDeliveringDetail { --squelette-l: 5.4em; --squelette-h: 0.9em; }
+/* Une pulsation d'opacite a 1,6 s (planche 10b), coupee sous reduced-motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .squelette-chiffre::after { animation: squelette-pouls 1.6s ease-in-out infinite; }
+}
+@keyframes squelette-pouls {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Le sous-titre du tableau de bord se complete a l'arrivee des donnees (« · 3
+   commandes a preparer · une tournee en cours ») et passait alors sur deux
+   lignes : tout l'ecran descendait de 20 a 22 px. Il reserve ses deux lignes. */
+body:has(#journee.active) .ecran-entete #pageSubtitle { min-height: 2lh; }
+
+/* --- Commandes au telephone (planche 8a) ------------------------------------ */
+.cmd-resume, .cmd-filtres-bouton { display: none; }
+#enteteActions #cmdPilules[hidden] { display: none; }
+@media (max-width: 820px) {
+  /* Les pilules de statut dans l'en-tete vert, sous la recherche. */
+  :root[data-color-scheme] #enteteActions #cmdPilules,
+  :root:not([data-color-scheme]) #enteteActions #cmdPilules { flex: 1 1 100%; flex-wrap: wrap; gap: 8px; margin: 0; }
+  :root[data-color-scheme] #enteteActions #cmdPilules .button.compact.filtre-pilule,
+  :root:not([data-color-scheme]) #enteteActions #cmdPilules .button.compact.filtre-pilule {
+    height: 44px; min-height: 44px; padding: 0 18px; border: 0; border-radius: 999px; box-shadow: none;
+    background: var(--v8-surface-sur-vert); color: var(--v8-texte-sur-carte-tournee);
+    font-size: 15px; font-weight: 500;
+  }
+  :root[data-color-scheme] #enteteActions #cmdPilules .button.compact.filtre-pilule.active-filter,
+  :root:not([data-color-scheme]) #enteteActions #cmdPilules .button.compact.filtre-pilule.active-filter {
+    background: var(--v8-surface); color: var(--v8-principal); font-weight: 600;
+  }
+  :root[data-color-scheme] #enteteActions #cmdPilules .button.compact.filtre-pilule:focus-visible,
+  :root:not([data-color-scheme]) #enteteActions #cmdPilules .button.compact.filtre-pilule:focus-visible {
+    outline: none; box-shadow: 0 0 0 3px var(--v8-carte-tournee), 0 0 0 5px var(--v8-texte-sur-carte-tournee);
+  }
+  #enteteActions #cmdPilules[hidden] { display: none; }
+
+  /* Sous l'en-tete : le compte a gauche, le tri a droite (planche 8a). Les
+     filtres hors planche se replient derriere « Filtres ». */
+  #commandes .cmd-filtres { margin: 0 0 12px; row-gap: 8px; }
+  #commandes .cmd-filtres > .cmd-separateur,
+  #commandes .cmd-filtres > .cmd-ressort,
+  #commandes .cmd-filtres:not(.cmd-filtres--ouverts) > .cmd-filtre-second { display: none; }
+  #commandes .cmd-filtres > .cmd-resume { order: 1; }
+  #commandes .cmd-filtres > .cmd-filtres-bouton { order: 2; }
+  #commandes .cmd-filtres > .cmd-tri:not(.cmd-filtre-second) { order: 3; }
+  #commandes .cmd-filtres > .cmd-filtre-second,
+  #commandes .cmd-filtres > .cmd-client-filtre { order: 4; }
+  :root[data-color-scheme] #commandes .cmd-resume,
+  :root:not([data-color-scheme]) #commandes .cmd-resume {
+    display: block; flex: 1 1 auto; min-width: 0; padding-left: 6px;
+    font-size: 13.5px; font-weight: 500; color: var(--v8-texte-secondaire); font-variant-numeric: tabular-nums;
+  }
+  :root[data-color-scheme] #commandes .cmd-filtres-bouton,
+  :root:not([data-color-scheme]) #commandes .cmd-filtres-bouton {
+    display: inline-flex; align-items: center; flex: none; width: auto;
+    height: 44px; min-height: 44px; padding: 0 16px; border: 0; border-radius: 999px;
+    background: var(--v8-surface); color: var(--v8-principal); box-shadow: 0 1px 2px rgba(15, 61, 61, 0.05);
+    font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  }
+  :root[data-color-scheme] #commandes .cmd-filtres-bouton[aria-expanded="true"],
+  :root:not([data-color-scheme]) #commandes .cmd-filtres-bouton[aria-expanded="true"] {
+    background: var(--v8-principal); color: var(--v8-texte-sur-principal);
+  }
+  :root[data-color-scheme] #commandes .cmd-filtres-bouton:focus-visible,
+  :root:not([data-color-scheme]) #commandes .cmd-filtres-bouton:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+}
+@media (max-width: 820px) {
+  /* En sombre (planche 12a) : la pilule choisie en plein clair. */
+  :root[data-color-scheme="dark"] #enteteActions #cmdPilules .button.compact.filtre-pilule.active-filter {
+    background: var(--v8-principal); color: var(--v8-texte-sur-principal);
+  }
+}
+@media (max-width: 820px) and (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) #enteteActions #cmdPilules .button.compact.filtre-pilule.active-filter {
+    background: var(--v8-principal); color: var(--v8-texte-sur-principal);
+  }
+}
+
+/* --- Stock a plat (planche 10a), et le titre des tuiles (planche 8b) -------- */
+.stk-categories-tete { display: none; }
+:root[data-color-scheme] #stock .stk-a-plat,
+:root:not([data-color-scheme]) #stock .stk-a-plat {
+  grid-column: span 7; display: flex; align-items: flex-start; gap: 14px; padding: 24px 28px;
+}
+:root[data-color-scheme] #stock .stk-a-plat[hidden],
+:root:not([data-color-scheme]) #stock .stk-a-plat[hidden] { display: none; }
+.stk-a-plat-disque {
+  display: flex; align-items: center; justify-content: center; flex: none;
+  width: 40px; height: 40px; border-radius: 999px;
+  background: var(--v8-vert-clair); color: var(--v8-principal-appuye);
+}
+.stk-a-plat-disque svg { width: 20px; height: 20px; }
+:root[data-color-scheme="dark"] .stk-a-plat-disque { color: var(--v8-principal); }
+@media (prefers-color-scheme: dark) { :root:not([data-color-scheme="light"]) .stk-a-plat-disque { color: var(--v8-principal); } }
+.stk-a-plat-texte { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+:root[data-color-scheme] #stock .stk-a-plat-texte h3,
+:root:not([data-color-scheme]) #stock .stk-a-plat-texte h3 {
+  margin: 0; font-size: 15.5px; font-weight: 600; letter-spacing: -0.01em; color: var(--v8-texte);
+}
+#stock .stk-a-plat-texte p { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--v8-texte-secondaire); }
+@media (max-width: 1180px) {
+  :root[data-color-scheme] #stock .stk-a-plat,
+  :root:not([data-color-scheme]) #stock .stk-a-plat { grid-column: span 12; }
+}
+@media (max-width: 820px) {
+  :root[data-color-scheme] #stock .stk-a-plat,
+  :root:not([data-color-scheme]) #stock .stk-a-plat { padding: 18px; border-radius: 24px; }
+  #stock .stk-categories-tete { grid-column: span 12; flex-direction: column; gap: 4px; padding: 0 4px; margin-bottom: -6px; }
+  #stock .stk-categories-tete:not([hidden]) { display: flex; }
+  :root[data-color-scheme] #stock .stk-categories-tete h3,
+  :root:not([data-color-scheme]) #stock .stk-categories-tete h3 { margin: 0; font-size: 14.5px; font-weight: 600; color: var(--v8-principal); }
+  #stock .stk-categories-tete p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--v8-texte-secondaire); }
+}

@@ -33,6 +33,9 @@ import {
 import { mainTabs, MOBILE_OVERFLOW_TABS, titles, GROUPES_NAV, REDIRECTIONS, ECRANS_SECONDAIRES } from "./config/tabs.js";
 import {
   gabaritTableauComptes,
+  gabaritLignesComptes,
+  gabaritFeuilleCompte,
+  CHEVRON_LIGNE,
   gabaritAccesRefuse,
   gabaritAuthDesactivee,
   optionsRoles,
@@ -59,8 +62,15 @@ let route = [];
 let activeRoute = null;
 let currentIndex = -1;
 let activeStopIndex = 0;
+// Nombre d'attentes d'envoi d'une livraison en cours (voir solderLivraisonEnSuspens) :
+// les gestes d'arret sont desactives pendant ce temps. Le livreur voit que son
+// appui est pris, et ne relance pas « Livre » sur un ecran qui n'a pas encore
+// bouge (revue du 23/09 : en reseau lent, l'appui impatient livrait l'arret
+// SUIVANT, jamais vu).
+let gestesVerrouilles = 0;
 let markers = [];
 let routeLine = null;
+let routeLineLisere = null;
 let deliverySelection = new Set();
 let deliveryFilter = {
   sector: "Tous",
@@ -140,6 +150,9 @@ document.addEventListener("DOMContentLoaded", () => {
   initMap();
   registerServiceWorker();
   brancherFileHorsLigne();
+  // Avant showTab : au telephone, les filtres de la Preparation vivent dans
+  // la fente d'en-tete, que showTab montre ou cache par ecran.
+  placerFiltresPreparation();
   showTab(getInitialTab(), { updateHash: false });
   loadAppearance();
   loadVersionInfo();
@@ -435,7 +448,6 @@ function bindUi() {
     renderStock();
   });
 
-  let preparationSearchTimer = null;
   document.getElementById("preparationSearch")?.addEventListener("input", event => {
     const value = event.target.value;
     clearTimeout(preparationSearchTimer);
@@ -502,6 +514,7 @@ function bindUi() {
   document.addEventListener("change", event => {
     const select = event.target.closest('[data-action="changer-role-compte"]');
     if (!select) return;
+    if (select.closest("#parCompteFeuille")) fermerFeuillesParametres();
     runAction(null, null, () => changerRoleCompte(select.dataset.compteId, select.value));
   });
 
@@ -588,6 +601,10 @@ function bindUi() {
     if (action === "refresh") runAction(actionButton, "Actualisation...", loadData);
     if (action === "go-tab") showTab(actionButton.dataset.targetTab || "journee");
     if (action === "cmd-export") exportBdcCsv(commandesFiltrees(), "sereo-commandes");
+    if (action === "cmd-filtres-basculer") {
+      commandesFiltresOuverts = !commandesFiltresOuverts;
+      renderCommandes();
+    }
     if (action === "cmd-confirmer" || action === "cmd-annuler") {
       runAction(actionButton, "...", () => gesteDuDetail(action, actionButton.dataset.orderId));
     }
@@ -665,6 +682,7 @@ function bindUi() {
       document.getElementById("preparationSectorPills")?.classList.toggle("filtre-pilules--depliee");
       ajusterRepliDesSecteurs();
     }
+    if (action === "basculer-recherche-preparation") basculerRecherchePreparation();
     if (action === "open-commande-detail") openCommandeDetail(actionButton.dataset.orderId);
     if (action === "close-commande-detail") closeCommandeDetail();
     if (action === "start-preparation") runAction(actionButton, "Démarrage...", () => startPreparation(actionButton.dataset.orderId));
@@ -683,7 +701,13 @@ function bindUi() {
     if (action === "reset-tour") runAction(actionButton, "Reset...", resetTour);
     if (action === "purge-orders") purgeOrdersHandler(actionButton);
     if (action === "diagnostic-suspicious-dates") runAction(actionButton, "Scan...", runDiagnosticSuspiciousDates);
-    if (action === "mark-delivered") runAction(actionButton, "Envoi...", () => updateCurrentDeliveryStatus("livre"));
+    // « Livre » : pas de texte d'attente (runAction remplacerait l'icone) --
+    // l'ecran avance tout de suite et l'envoi part au terme d'Annuler.
+    if (action === "mark-delivered") livrerAvecAnnulation().catch(notifyEchec);
+    if (action === "trn-voir-carte") {
+      const carte = document.querySelector("#livreur .tournee-carte-panel");
+      if (carte) carte.scrollIntoView({ block: "start", behavior: "smooth" });
+    }
     if (action === "mark-absent") runAction(actionButton, "Envoi...", () => marquerArret("absent"));
     if (action === "mark-problem") runAction(actionButton, "Envoi...", () => marquerArret("probleme"));
     if (action === "mark-reschedule") runAction(actionButton, "Envoi...", () => marquerArret("a_reprogrammer"));
@@ -715,6 +739,18 @@ function bindUi() {
     }
     if (action === "supprimer-compte") {
       runAction(actionButton, "Suppression...", () => supprimerCompte(actionButton.dataset.compteId, actionButton.dataset.compteIdentifiant));
+    }
+    // Parametres au telephone (planche 8d).
+    if (action === "par-ouvrir-compte") ouvrirFeuilleCompte(actionButton.dataset.compteId);
+    if (action === "par-ouvrir-imports") ouvrirFeuilleImports(actionButton.dataset.type || "");
+    if (action === "par-fermer-feuille") fermerFeuillesParametres();
+    if (action === "par-ajouter-compte") basculerFormulaireCompte(actionButton);
+    if (action === "par-ajouter-secteur") ouvrirAjoutSecteur();
+    // Un geste de la feuille d'un compte la referme : le tableau et les lignes
+    // se redessinent, la feuille montrerait un etat perime.
+    if (["basculer-compte", "changer-mot-de-passe-compte", "supprimer-compte"].includes(action)
+      && actionButton.closest("#parCompteFeuille")) {
+      fermerFeuillesParametres();
     }
   });
 
@@ -770,6 +806,10 @@ function showTab(tabName, options = {}) {
   // Quitter Clients referme la fiche : y revenir montre la liste (planche 9a).
   const ecranClients = document.getElementById("crm");
   if (ecranClients && ecranClients.dataset.vue === "fiche" && tabName !== "crm") ecranClients.dataset.vue = "liste";
+  // De meme, l'agenda des abonnements (planche 3c) : tout changement d'ecran,
+  // y compris un toucher sur « Abonnements », ramene la liste.
+  const ecranAbonnements = document.getElementById("abonnements");
+  if (ecranAbonnements && ecranAbonnements.dataset.vue === "agenda") ecranAbonnements.dataset.vue = "liste";
   const { updateHash = true } = options;
   // Les quatre anciens ecrans-listes de commandes : ils ne sont plus des
   // ecrans, mais on les honore -- l'ecran unique s'ouvre sur LEUR filtre.
@@ -787,6 +827,9 @@ function showTab(tabName, options = {}) {
       if (champ) champ.value = "";
     }
     commandesSelection.clear();
+    // « Adresses a corriger » arrive filtre : au telephone, le filtre se montre
+    // deplie, pour que la liste ne paraisse pas amputee sans raison visible.
+    commandesFiltresOuverts = Boolean(redirection.completer);
     tabName = redirection.onglet;
     renderCommandes();
     // L'adresse dit ou l'on est vraiment : #commandes, plus l'ancien nom.
@@ -834,9 +877,19 @@ function showTab(tabName, options = {}) {
   // generique, sans quoi celui-ci l'ecraserait.
   if (nextTab === "commandes") majSousTitreCommandes();
   if (nextTab === "stock") majSousTitreStock();
+  // Rouvrir le Stock refait l'ordre a plat, fige pendant les ajustements.
+  if (nextTab === "stock" && ordreAPlat) {
+    ordreAPlat = null;
+    renderStock();
+  }
   if (nextTab === "crm") majSousTitreClients();
   if (nextTab === "abonnements") majSousTitreAbonnements();
   if (nextTab === "livreur") majEnteteTournee();
+  if (nextTab === "preparation") {
+    majSousTitrePreparation();
+    // Le repli des secteurs se MESURE : cache, la rangee n'a pas de hauteur.
+    ajusterRepliDesSecteurs();
+  }
 
   updateCustomerCartBar();
 
@@ -935,21 +988,73 @@ function initMap() {
  * scintillement gris sur des donnees qu'on avait deja.
  */
 function poserSquelettes() {
+  // Les listes dont on connait la LIGNE (planche 10b) prennent des lignes a sa
+  // hauteur ; les autres gardent les barres de texte.
+  const LIGNES = new Set(["dashboardPreparing", "dashboardDelivering", "dashboardSubscriptions", "opAlerts",
+    "crmList", "stockList", "cmdLignes"]);
   const zones = [
-    ["dashboardPreparing", 3], ["dashboardDelivering", 3], ["dashboardSubscriptions", 3],
-    ["crmList", 4], ["stockList", 5], ["todayOrdersList", 4], ["plannedOrdersList", 4],
+    ["dashboardPreparing", 3], ["dashboardDelivering", 3], ["dashboardSubscriptions", 2],
+    ["crmList", 4], ["stockList", 4], ["todayOrdersList", 4], ["plannedOrdersList", 4],
     ["relanceList", 3], ["exportsList", 3], ["historiqueList", 3], ["stockMovementList", 4],
     // Ajoutes apres mesure : la premiere liste avait ete ecrite de memoire, et
     // le graphique du tableau de bord -- le plus grand vide de l'ecran, 556x184
     // -- n'y figurait pas. On ne devine pas quels conteneurs sont vides, on les
     // releve dans la page pendant que l'API est ralentie.
-    ["revenueChart", 6], ["opAlerts", 3]
+    ["revenueChart", 6], ["opAlerts", 2],
+    // La liste des Commandes restait vide pendant le chargement (23/09).
+    ["cmdLignes", 5]
   ];
   for (const [id, lignes] of zones) {
     const zone = document.getElementById(id);
     if (!zone || zone.children.length) continue;
     zone.setAttribute("aria-busy", "true");
-    zone.innerHTML = squelette(lignes, id === "revenueChart" ? "colonnes" : "liste");
+    zone.innerHTML = squelette(lignes, id === "revenueChart" ? "colonnes" : (LIGNES.has(id) ? "lignes" : "liste"));
+  }
+  poserChiffresEnAttente();
+}
+
+// LES CHIFFRES du tableau de bord (planche 10b, haut) : « les cartes gardent
+// leur forme et leurs libelles ; seuls les chiffres sont des blocs aux
+// dimensions du chiffre attendu ». Avant le 23/09, ils affichaient « 0 » et
+// « — » pendant le chargement : un zero qui MENT (il y avait des commandes),
+// que le sous-titre recopiait (« 0 commande a preparer »), puis un saut de
+// 22 px (bureau) a 72 px (telephone) a l'arrivee des donnees.
+//
+// Le bloc est dessine par la feuille (.squelette-chiffre) ; l'element est
+// VIDE, donc sans glyphe : la regle « jamais de texte dessus » tient, et le
+// sous-titre, qui lit la tuile, ne trouve pas de nombre et n'en invente pas.
+// Premier chargement seulement : a l'actualisation, les chiffres qu'on avait
+// restent lisibles pendant que les neufs arrivent.
+const CHIFFRES_EN_ATTENTE = ["opRevenue", "opBasket", "opDelivered", "dashboardPreparingCount", "dashboardDeliveringCount",
+  "dashboardPreparingDetail", "dashboardDeliveringDetail"];
+let chiffresDejaCharges = false;
+
+function poserChiffresEnAttente() {
+  if (chiffresDejaCharges) return;
+  for (const id of CHIFFRES_EN_ATTENTE) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    // Le texte du balisage est garde : « Commandes livrees » (#opDelivered)
+    // est un LIBELLE tant que le rendu ne l'a pas remplace par un compte.
+    el.dataset.texteInitial = el.textContent.trim();
+    el.textContent = "";
+    el.classList.add("squelette-chiffre");
+  }
+  // Le sous-titre a deja lu « 0 » dans la tuile a l'ouverture de l'ecran : il
+  // relit la tuile vide, et ne dit plus « 0 commande a preparer ».
+  majEnteteTableauDeBord(getInitialTab());
+  // Le mois du chiffre d'affaires : sa pilule etait VIDE (64 px) pendant le
+  // chargement, puis « septembre 2026 » (188 px) -- au telephone, l'import
+  // passait alors a la ligne et tout l'ecran descendait de 52 px. Le mois
+  // courant est connu sans le serveur : c'est celui que le rendu choisit.
+  const mois = document.getElementById("revenueMonth");
+  if (mois && !mois.options.length) {
+    const aujourdhui = new Date();
+    const cle = `${aujourdhui.getFullYear()}-${String(aujourdhui.getMonth() + 1).padStart(2, "0")}`;
+    const option = document.createElement("option");
+    option.value = cle;
+    option.textContent = new Date(`${cle}-01T12:00:00`).toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+    mois.appendChild(option);
   }
 }
 
@@ -960,11 +1065,132 @@ function retirerSquelettes() {
     zone.removeAttribute("aria-busy");
     if (zone.querySelector(".squelette")) zone.innerHTML = "";
   }
+  // Un chiffre que son rendu n'a pas rempli (le tableau de bord en erreur)
+  // redevient « — » : un bloc gris a vie promettrait un nombre qui ne vient pas.
+  // Un LIBELLE, lui, revient tel quel : /api/operations en erreur donnait « — »
+  // au-dessus de « — », et la tuile perdait son nom. Un « 0 » du balisage
+  // n'est pas un libelle (c'est le zero qui ment) : il devient « — » aussi.
+  for (const el of document.querySelectorAll(".squelette-chiffre")) {
+    el.classList.remove("squelette-chiffre");
+    const initial = el.dataset.texteInitial || "";
+    delete el.dataset.texteInitial;
+    if (!el.textContent.trim()) el.textContent = /\p{L}/u.test(initial) ? initial : "—";
+  }
+  chiffresDejaCharges = true;
+}
+
+// --- CHARGEMENT INSTANTANE (lot du 23/09) ------------------------------------
+//
+// A l'ouverture, la page montre TOUT DE SUITE les dernieres donnees connues --
+// celles que le service worker a mises en cache au dernier passage -- puis les
+// remplace par celles du reseau. Pendant ce temps la pastille dit « Mise a
+// jour… » : une copie n'est jamais annoncee comme fraiche.
+//
+// Ce cache n'est lu qu'ici, au PREMIER chargement de la page. Apres une
+// ecriture, loadData() recharge : relire la copie d'avant l'ecriture ferait
+// reculer l'ecran.
+//
+// Ce que le service worker met en cache n'a pas change de nature : les memes
+// reponses d'API, communes a tous les comptes (aucune ne depend de
+// l'identite ; /api/me et /api/comptes restent exclus). Le cache part a la
+// deconnexion (service worker, POST /logout) et a l'expiration de session
+// (apiFetch, 401).
+const PREFIXE_CACHE_DONNEES = "sereo-api-";
+let premierChargementDesDonnees = true;
+// Les URL auxquelles le service worker a repondu par une COPIE (en-tete
+// X-Sereo-Cache : le reseau n'a pas repondu a temps), avec la date de la copie.
+const reponsesCopiees = new Map();
+
+async function viderCacheDeDonnees() {
+  try {
+    if (typeof caches === "undefined") return;
+    const noms = (await caches.keys()).filter(nom => nom.startsWith(PREFIXE_CACHE_DONNEES));
+    await Promise.all(noms.map(nom => caches.delete(nom)));
+  } catch { /* stockage indisponible : rien a vider */ }
+}
+
+/**
+ * Les dernieres donnees connues, lues dans le cache du service worker.
+ * Rend { data, date } ou null. Tout ou presque : une copie a moitie montrerait
+ * des listes vides qui ne le sont pas. Seul l'endpoint date du jour (`jour`)
+ * peut manquer (au premier jour d'ouverture, son URL a change) ; il garde
+ * alors sa valeur courante.
+ */
+async function lireDernieresDonnees(endpoints) {
+  try {
+    if (typeof caches === "undefined") return null;
+    const noms = (await caches.keys()).filter(nom => nom.startsWith(PREFIXE_CACHE_DONNEES));
+    if (!noms.length) return null;
+    const cache = await caches.open(noms[0]);
+    const lus = await Promise.all(endpoints.map(async e => {
+      const reponse = await cache.match(e.path);
+      if (!reponse || !reponse.ok) return null;
+      return { key: e.key, valeur: await reponse.json(), date: Date.parse(reponse.headers.get("Date") || "") };
+    }));
+    const data = {};
+    let date = NaN;
+    for (let i = 0; i < endpoints.length; i++) {
+      const lu = lus[i];
+      if (!lu) {
+        if (endpoints[i].jour) continue;
+        return null;
+      }
+      data[lu.key] = lu.valeur;
+      if (Number.isFinite(lu.date) && !(lu.date >= date)) date = lu.date;
+    }
+    return { data, date };
+  } catch {
+    return null;
+  }
+}
+
+/** « Données de 14:32 » (aujourd'hui) ou « Données du 21/09 ». Sans date lisible : « Données en cache ». */
+function libelleCopie(date) {
+  if (!Number.isFinite(date)) return "Données en cache";
+  const d = new Date(date);
+  const memeJour = d.toDateString() === new Date().toDateString();
+  return memeJour
+    ? `Données de ${d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`
+    : `Données du ${d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })}`;
+}
+
+/** Recopie dans l'etat de la page les cles PRESENTES de `data`. */
+function appliquerDonnees(data) {
+  const a = key => Object.prototype.hasOwnProperty.call(data, key);
+  if (a("clients")) {
+    clients = (data.clients || []).map(client => ({
+      ...client,
+      statut: client.statut || "restant"
+    }));
+  }
+  if (a("stock")) stock = data.stock;
+  if (a("ventes")) ventes = data.ventes;
+  if (a("historique")) historique = data.historique;
+  if (a("orders")) orders = data.orders;
+  if (a("crmClients")) crmClients = data.crmClients;
+  if (a("subscriptions")) abonnementsDonnees = data.subscriptions || { items: [], occurrences: [] };
+  if (a("crmRelances")) crmRelances = data.crmRelances;
+  if (a("todayCustomerOrders")) todayCustomerOrders = data.todayCustomerOrders;
+  if (a("plannedOrders")) plannedOrders = data.plannedOrders;
+  if (a("statistics")) statistics = data.statistics;
+  if (a("sectors")) sectors = data.sectors;
+  if (a("deliverySectors")) deliverySectors = data.deliverySectors;
+  if (a("routes")) deliveryRoutes = data.routes;
+  if (a("stockMovements")) stockMovements = data.stockMovements;
+  if (a("dashboard")) dashboard = data.dashboard;
+
+  refreshActiveRoute();
+  route = activeRoute ? activeRoute.stops : (currentIndex >= 0 ? route : [...clients]);
+
+  renderAll();
+  renderOperations({operations:data.operations,subscriptions:data.subscriptions,crmClients,stock,orders});
 }
 
 async function loadData() {
   setStatus("Chargement...");
   poserSquelettes();
+  const premier = premierChargementDesDonnees;
+  premierChargementDesDonnees = false;
 
   // Chantier 2 (audit 2026-06-04) : Promise.allSettled au lieu de Promise.all.
   // Avant : si UN seul endpoint timeout (30s), tout etait wipe (clients=[],
@@ -981,7 +1207,7 @@ async function loadData() {
     { key: "orders", path: "/api/orders", fallback: [] },
     { key: "crmClients", path: "/api/crm/clients", fallback: [] },
     { key: "crmRelances", path: "/api/reminders", fallback: [] },
-    { key: "todayCustomerOrders", path: `/api/customer-orders/today?date=${encodeURIComponent(getTodayOrdersDate())}`, fallback: [] },
+    { key: "todayCustomerOrders", path: `/api/customer-orders/today?date=${encodeURIComponent(getTodayOrdersDate())}`, fallback: [], jour: true },
     { key: "plannedOrders", path: "/api/planned-orders", fallback: [] },
     { key: "statistics", path: "/api/statistics", fallback: null },
     { key: "sectors", path: "/api/sectors", fallback: [] },
@@ -991,7 +1217,22 @@ async function loadData() {
     { key: "dashboard", path: "/api/dashboard", fallback: null }
   ];
 
-  const results = await Promise.allSettled(endpoints.map(e => apiFetch(e.path)));
+  for (const e of endpoints) reponsesCopiees.delete(e.path);
+  // Le reseau part D'ABORD : lire le cache ne doit rien lui couter.
+  let reseauFini = false;
+  const reseau = Promise.allSettled(endpoints.map(e => apiFetch(e.path)));
+  reseau.then(() => { reseauFini = true; });
+
+  let copie = null;
+  if (premier) {
+    copie = await lireDernieresDonnees(endpoints);
+    if (copie && !reseauFini) {
+      appliquerDonnees(copie.data);
+      setStatus("Mise à jour…");
+    }
+  }
+
+  const results = await reseau;
 
   // Revue R1 P0 #3 : si un endpoint renvoie 401, apiFetch a deja declenche
   // window.location.href = /login. On abandonne loadData proprement (la
@@ -1007,45 +1248,36 @@ async function loadData() {
   }
 
   const failed = [];
+  // Les cles dont la valeur affichee est une COPIE : rendue par le cache du
+  // service worker (reseau trop lent ou coupe), ou reprise de la copie lue au
+  // demarrage quand le reseau a echoue. Elles interdisent « A jour ».
+  const copiees = [];
+  let dateCopie = NaN;
+  const noterCopie = (key, date) => {
+    copiees.push(key);
+    if (Number.isFinite(date) && !(date >= dateCopie)) dateCopie = date;
+  };
   const data = {};
   results.forEach((r, i) => {
     const e = endpoints[i];
     if (r.status === "fulfilled") {
       data[e.key] = r.value;
+      if (reponsesCopiees.has(e.path)) noterCopie(e.key, reponsesCopiees.get(e.path));
+    } else if (copie && Object.prototype.hasOwnProperty.call(copie.data, e.key)) {
+      data[e.key] = copie.data[e.key];
+      noterCopie(e.key, copie.date);
     } else {
       data[e.key] = e.fallback;
       failed.push(e.key);
     }
   });
 
-  clients = (data.clients || []).map(client => ({
-    ...client,
-    statut: client.statut || "restant"
-  }));
-  stock = data.stock;
-  ventes = data.ventes;
-  historique = data.historique;
-  orders = data.orders;
-  crmClients = data.crmClients;
-  abonnementsDonnees = data.subscriptions || { items: [], occurrences: [] };
-  crmRelances = data.crmRelances;
-  todayCustomerOrders = data.todayCustomerOrders;
-  plannedOrders = data.plannedOrders;
-  statistics = data.statistics;
-  sectors = data.sectors;
-  deliverySectors = data.deliverySectors;
-  deliveryRoutes = data.routes;
-  stockMovements = data.stockMovements;
-  dashboard = data.dashboard;
+  appliquerDonnees(data);
 
-  refreshActiveRoute();
-  route = activeRoute ? activeRoute.stops : (currentIndex >= 0 ? route : [...clients]);
-
-  renderAll();
-  renderOperations({operations:data.operations,subscriptions:data.subscriptions,crmClients,stock,orders});
-
-  if (failed.length === 0) {
+  if (failed.length === 0 && copiees.length === 0) {
     setStatus("À jour");
+  } else if (failed.length === 0) {
+    setStatus(libelleCopie(dateCopie));
   } else if (failed.length === endpoints.length) {
     setStatus("Erreur");
     notify("Impossible de joindre le serveur — les données affichées sont vides.", "error");
@@ -1059,7 +1291,9 @@ async function loadData() {
       stockMovements: "mouvements stock", dashboard: "tableau de bord"
     };
     const friendly = failed.map(k => labels[k] || k).join(", ");
-    notify(`Sections indisponibles : ${friendly}. Le reste est à jour.`, "warning");
+    notify(copiees.length
+      ? `Sections indisponibles : ${friendly}. Le reste vient des dernières données connues.`
+      : `Sections indisponibles : ${friendly}. Le reste est à jour.`, "warning");
   }
 
   // TOUJOURS, quel que soit le sort des endpoints. Les zones remplies par leur
@@ -1076,6 +1310,9 @@ function refreshActiveRoute() {
     const updated = deliveryRoutes.find(item => String(item.id) === String(activeRoute.id));
     activeRoute = updated || activeRoute;
     if (activeRoute && activeStopIndex >= activeRoute.stops.length) activeStopIndex = 0;
+    // Un rechargement pendant les 4 s d'Annuler ne fait pas reapparaitre
+    // l'arret qu'on vient de livrer.
+    appliquerLivraisonEnSuspens();
     return;
   }
 
@@ -1223,6 +1460,38 @@ function adresseACorriger(order) {
 }
 const commandesSelection = new Set();
 
+// Au telephone (planche 8a), les filtres hors planche -- « Bloquees
+// seulement », « A completer », le secteur, la periode -- se replient derriere
+// un bouton « Filtres » qui dit combien sont actifs. Ils sont GARDES : ce sont
+// les seuls chemins vers ces listes et vers l'export d'un mois ou d'un secteur.
+let commandesFiltresOuverts = false;
+function filtresSecondsActifs() {
+  return [commandesFiltre.bloquees, commandesFiltre.completer, commandesFiltre.secteur, commandesFiltre.du, commandesFiltre.au]
+    .filter(Boolean).length;
+}
+
+// Le seuil de la barre basse (lot mobile 1) : sous 820 px, l'en-tete est vert.
+const ecranTelephone = window.matchMedia ? window.matchMedia("(max-width: 820px)") : { matches: false };
+
+// Les pilules de statut des Commandes : dans l'en-tete vert au telephone, sous
+// la recherche (planche 8a) ; dans la rangee de filtres au bureau (planche
+// 13c). UN seul groupe, deplace -- deux groupes feraient deux noms pour le
+// meme geste, et l'un des deux serait toujours cache.
+function placerPilulesCommandes() {
+  const pilules = document.getElementById("cmdPilules");
+  const filtres = document.querySelector("#commandes .cmd-filtres");
+  const recherche = document.querySelector('#enteteActions .cmd-recherche[data-ecran="commandes"]');
+  if (!pilules || !filtres || !recherche) return;
+  if (ecranTelephone.matches) {
+    if (pilules.parentElement !== recherche.parentElement) recherche.after(pilules);
+    // showTab ne range la fente qu'en changeant d'ecran : ici, on s'y range seul.
+    pilules.hidden = !document.getElementById("commandes")?.classList.contains("active");
+  } else if (pilules.parentElement !== filtres) {
+    filtres.prepend(pilules);
+    pilules.hidden = false;
+  }
+}
+
 function commandeBloquee(order) {
   return ["importe", "stock_a_verifier"].includes(order.status) && order.canPrepare === false;
 }
@@ -1345,6 +1614,16 @@ function renderCommandes() {
   if (tri) tri.value = commandesFiltre.tri;
 
   const liste = commandesFiltrees();
+  // Le compte de la planche 8a (« 124 bons ») et le bouton des filtres repliés,
+  // au telephone seulement (la feuille les cache au bureau).
+  setText("cmdResume", `${liste.length} bon${liste.length > 1 ? "s" : ""}`);
+  const actifs = filtresSecondsActifs();
+  const boutonFiltres = document.getElementById("cmdFiltresBouton");
+  if (boutonFiltres) {
+    boutonFiltres.textContent = actifs ? `Filtres · ${actifs}` : "Filtres";
+    boutonFiltres.setAttribute("aria-expanded", String(commandesFiltresOuverts));
+  }
+  document.querySelector("#commandes .cmd-filtres")?.classList.toggle("cmd-filtres--ouverts", commandesFiltresOuverts);
   // La selection ne garde que ce qui est A L'ECRAN : une recherche ou un
   // changement de jour ne doit pas laisser partir des commandes masquees.
   const visibles = new Set(liste.map(o => String(o.id)));
@@ -1476,15 +1755,21 @@ async function envoyerCommandesEnPreparation() {
 function bindCommandes() {
   const ecran = document.getElementById("commandes");
   if (!ecran) return;
-  ecran.addEventListener("click", event => {
+  // Les pilules ecoutent ELLES-MEMES : au telephone, elles vivent dans
+  // l'en-tete, hors de l'ecran (placerPilulesCommandes).
+  document.getElementById("cmdPilules")?.addEventListener("click", event => {
     const pilule = event.target.closest("[data-cmd-filtre]");
-    if (pilule) {
-      commandesFiltre.statut = pilule.dataset.cmdFiltre;
-      commandesFiltre.page = 1;
-      commandesSelection.clear();
-      renderCommandes();
-      return;
-    }
+    if (!pilule) return;
+    commandesFiltre.statut = pilule.dataset.cmdFiltre;
+    commandesFiltre.page = 1;
+    commandesSelection.clear();
+    renderCommandes();
+    // Le rendu refait les pilules : le focus clavier reste sur celle choisie.
+    document.querySelector(`#cmdPilules [data-cmd-filtre="${CSS.escape(commandesFiltre.statut)}"]`)?.focus();
+  });
+  placerPilulesCommandes();
+  ecranTelephone.addEventListener?.("change", placerPilulesCommandes);
+  ecran.addEventListener("click", event => {
     if (event.target.closest(".cmd-col-choix")) return;   // la case ne doit pas ouvrir le detail
     const ligne = event.target.closest("[data-cmd-ouvrir]");
     if (ligne) ouvrirDetailCommande(ligne.dataset.cmdOuvrir);
@@ -2757,7 +3042,7 @@ function renderStock() {
     return;
   }
 
-  const filtered = getFilteredStock();
+  const filtered = stockAPlat() ? ordonnerAPlat(getFilteredStock()) : getFilteredStock();
 
   if (!filtered.length) {
     container.innerHTML = emptyState("Aucun produit trouvé", "Modifie la recherche ou le filtre de statut.");
@@ -2774,6 +3059,38 @@ function categorieDuProduit(product) {
   return String(product.category || product.type || "");
 }
 
+// Le stock est « a plat » quand ses produits n'ont aucune categorie, ou tous
+// la meme : il n'y a rien a trier (planche 10a).
+function stockAPlat() {
+  return stock.length > 0 && new Set(stock.map(categorieDuProduit)).size <= 1;
+}
+
+// A plat, « du plus bas au plus haut » (planche 10a) : ce qui est sous le seuil
+// d'abord, puis ce qui est a renseigner (une quantite inconnue appelle aussi
+// un geste), puis le reste ; dans chaque groupe, la plus petite quantite en tete.
+function trierAPlat(produits) {
+  const groupe = p => (sousLeSeuil(p) ? 0 : getStockLevel(p).status === "a_renseigner" ? 1 : 2);
+  const quantite = p => Number(p.quantityAvailable ?? getProductQuantity(p) ?? 0) || 0;
+  return [...produits].sort((a, b) => groupe(a) - groupe(b) || quantite(a) - quantite(b)
+    || String(getProductName(a)).localeCompare(getProductName(b), "fr"));
+}
+
+// L'ordre a plat est FIGE tant qu'on reste sur l'ecran. Chaque −/+ et chaque
+// seuil rechargent la liste : retriee sur la quantite du moment, la ligne
+// qu'on touchait changeait de place sous le doigt, et le tap suivant, au meme
+// endroit, modifiait le stock d'un AUTRE produit (relecture du 23/09 : Gants
+// a 2, six « + », il passe sous Desinfectant a 7, le septieme tombe sur
+// Desinfectant). L'ordre se refait en rouvrant l'ecran (showTab), ou quand un
+// produit inconnu arrive (un import) ; un produit neuf n'y a pas de rang.
+let ordreAPlat = null;
+
+function ordonnerAPlat(produits) {
+  if (!ordreAPlat || stock.some(p => !ordreAPlat.has(String(p.id)))) {
+    ordreAPlat = new Map(trierAPlat(stock).map((p, rang) => [String(p.id), rang]));
+  }
+  return [...produits].sort((a, b) => ordreAPlat.get(String(a.id)) - ordreAPlat.get(String(b.id)));
+}
+
 function sousLeSeuil(product) {
   return ["stock_faible", "rupture"].includes(getStockLevel(product).status);
 }
@@ -2785,9 +3102,15 @@ function majSousTitreStock() {
   if (!document.getElementById("stock")?.classList.contains("active")) return;
   const n = stock.length;
   const sous = getLowStockProducts().length;
-  const categories = new Set(stock.map(categorieDuProduit)).size;
+  const cles = new Set(stock.map(categorieDuProduit));
+  const categories = cles.size;
+  // Sans aucune categorie, « 1 categorie » comptait « Sans categorie » comme
+  // une categorie. La planche 10a dit « sans catégorie ».
+  const compte = categories === 1 && cles.has("")
+    ? "sans catégorie"
+    : `${categories} catégorie${categories > 1 ? "s" : ""}`;
   setText("pageSubtitle", n
-    ? `${n} référence${n > 1 ? "s" : ""} · ${sous} sous le seuil · ${categories} catégorie${categories > 1 ? "s" : ""}`
+    ? `${n} référence${n > 1 ? "s" : ""} · ${sous} sous le seuil · ${compte}`
     : "Aucun produit importé");
 }
 
@@ -2837,7 +3160,30 @@ function renderStockCategories() {
     .sort((a, b) => (a.cle ? 0 : 1) - (b.cle ? 0 : 1) || a.cle.localeCompare(b.cle, "fr"));
   if (stockFilter.category !== "all" && !parCategorie.has(stockFilter.category)) stockFilter.category = "all";
   bloc.classList.toggle("stk-categories--liste", categories.length > 12);
-  bloc.hidden = !categories.length;
+  // A PLAT (planche 10a) : sans categorie, ou avec une seule, une tuile ne
+  // trie rien -- elle montrait « Sans categorie · 200 » au-dessus d'un tableau
+  // qui disait deja tout. La carte dit ce qui manque, le tableau suit.
+  const aPlat = stockAPlat();
+  bloc.hidden = !categories.length || aPlat;
+  const tete = document.getElementById("stkCategoriesTete");
+  if (tete) tete.hidden = bloc.hidden;
+  setText("stkCategoriesCompte", `${categories.length} catégorie${categories.length > 1 ? "s" : ""}`);
+  const carte = document.getElementById("stkAPlat");
+  if (carte) {
+    carte.hidden = !aPlat;
+    const seule = categories[0]?.cle;
+    setText("stkAPlatTitre", seule ? `Une seule catégorie : ${seule}` : "Pas de catégories dans ce fichier");
+    setText("stkAPlatDetail", seule
+      ? "Tous les produits sont dans la même catégorie : des tuiles ne trieraient rien. Ils sont affichés à plat, sous le seuil en premier."
+      // L'import ne distingue pas une colonne ABSENTE d'une colonne VIDE (le
+      // serveur lit "" dans les deux cas) : la carte dit ce qui se voit -- aucun
+      // produit n'a de categorie --, pas une cause qu'elle ne connait pas.
+      : "Aucun produit de ce fichier n’a de catégorie. Ils sont affichés à plat, sous le seuil en premier. Remplissez la colonne « Catégorie » de votre fichier (ajoutez-la si elle manque) et réimportez-le pour retrouver les tuiles.");
+  }
+  if (aPlat) {
+    bloc.innerHTML = "";
+    return;
+  }
   bloc.innerHTML = categories.map((c, i) => {
     const nom = c.cle || "Sans catégorie";
     const ligne = c.sous
@@ -3100,9 +3446,126 @@ function ajusterRepliDesSecteurs() {
   bouton.textContent = ouvert ? "Moins de secteurs" : "Tous les secteurs";
 }
 
+/*
+ * PREPARATION AU TELEPHONE -- planches 7a (la liste) et 7b (une commande).
+ * Sous 820 px, la ou la barre basse remplace la barre laterale. Au bureau,
+ * rien ne change : les groupes et le sheet restent (aucune planche bureau
+ * pour cet ecran).
+ */
+const PREPARATION_MOBILE = window.matchMedia("(max-width: 820px)");
+// Le minuteur de frappe de la recherche (bindUi) : au niveau du module pour
+// que refermer la loupe puisse l'annuler.
+let preparationSearchTimer = null;
+
+function preparationEnListeUnique() {
+  return PREPARATION_MOBILE.matches;
+}
+
+/**
+ * Le mot de STATUT d'une commande a preparer, celui de la planche 7a et de la
+ * charte §4 (En preparation, A verifier, Pret livraison), plus « Bloquee ».
+ * Au bureau, la ligne garde le mot de l'ETAPE (A faire, En cours...) : le
+ * titre de son groupe dit deja le reste.
+ */
+function motDeStatutPreparation(order) {
+  if (["importe", "stock_a_verifier"].includes(order.status) && !order.canPrepare) return { cle: "bloquee", mot: "Bloquée", rang: 0 };
+  if (order.status === "en_preparation") return { cle: "en-preparation", mot: "En préparation", rang: 1 };
+  if (order.status === "stock_a_verifier") return { cle: "a-verifier", mot: "À vérifier", rang: 2 };
+  if (order.status === "pret_livraison") return { cle: "pret", mot: "Prêt livraison", rang: 3 };
+  return { cle: "a-preparer", mot: "À préparer", rang: 2 };
+}
+
+/**
+ * Le tri de la planche 7a : bloquees d'abord, puis en preparation, a
+ * verifier (et a preparer), pret livraison ; a statut egal, par secteur puis
+ * par numero de bon. Recalcule a chaque rendu : une commande qui se debloque
+ * remonte au rendu suivant.
+ */
+function comparerPourLaPreparation(a, b) {
+  return motDeStatutPreparation(a).rang - motDeStatutPreparation(b).rang
+    || String(a.sector || "").localeCompare(String(b.sector || ""), "fr")
+    || String(a.numero || "").localeCompare(String(b.numero || ""), "fr", { numeric: true })
+    || String(a.clientName || "").localeCompare(String(b.clientName || ""), "fr");
+}
+
+/**
+ * Les filtres dans l'en-tete vert au telephone (planche 7a), dans le panneau
+ * au bureau. On DEPLACE le bloc (memes elements, memes identifiants, memes
+ * ecouteurs) : deux copies auraient deux etats a synchroniser.
+ */
+function placerFiltresPreparation() {
+  const filtres = document.getElementById("preparationFiltres");
+  const fente = document.getElementById("enteteActions");
+  const panneau = document.querySelector("#preparation .panel");
+  const liste = document.getElementById("preparationList");
+  if (!filtres || !fente || !panneau || !liste) return;
+  if (preparationEnListeUnique()) {
+    if (filtres.parentElement !== fente) fente.appendChild(filtres);
+    filtres.hidden = !document.getElementById("preparation")?.classList.contains("active");
+    // Une recherche tapee au bureau survit au passage sous 820 px : la loupe
+    // la montre depliee (sans focus : une rotation n'ouvre pas le clavier).
+    // Repliee, elle filtrerait la liste sans rien en dire.
+    if (document.getElementById("preparationSearch")?.value) basculerRecherchePreparation(true, { focus: false });
+  } else {
+    if (filtres.parentElement !== panneau) panneau.insertBefore(filtres, liste);
+    filtres.hidden = false;
+  }
+  ajusterRepliDesSecteurs();
+}
+
+/** La loupe de la planche 7a : la recherche se deplie a la demande. */
+function basculerRecherchePreparation(ouvrir, { focus = true } = {}) {
+  const filtres = document.getElementById("preparationFiltres");
+  const loupe = document.getElementById("preparationLoupe");
+  const champ = document.getElementById("preparationSearch");
+  if (!filtres || !loupe || !champ) return;
+  const ouverte = typeof ouvrir === "boolean" ? ouvrir : !filtres.classList.contains("prep-filtres--recherche");
+  filtres.classList.toggle("prep-filtres--recherche", ouverte);
+  loupe.setAttribute("aria-expanded", String(ouverte));
+  if (ouverte) {
+    if (focus) champ.focus();
+  } else if (champ.value || preparationFilter.query) {
+    // Refermer la loupe efface la recherche : un filtre qu'on ne voit plus
+    // cacherait des commandes sans le dire. La frappe encore en attente
+    // (200 ms) est annulee, sinon elle reappliquerait le filtre efface.
+    clearTimeout(preparationSearchTimer);
+    champ.value = "";
+    preparationFilter.query = "";
+    renderPreparation();
+  }
+}
+
+// Le sous-titre de la planche 7a : « 3 commandes a preparer ». Au telephone
+// seulement : au bureau (aucune planche, aucune decision), le sous-titre reste
+// celui de tabs.js.
+function majSousTitrePreparation() {
+  if (!document.getElementById("preparation")?.classList.contains("active")) return;
+  if (!preparationEnListeUnique()) {
+    setText("pageSubtitle", titles.preparation.subtitle);
+    return;
+  }
+  const restantes = (orders || []).filter(order => ["importe", "stock_a_verifier", "en_preparation"].includes(order.status)).length;
+  setText("pageSubtitle", restantes
+    ? `${restantes} commande${restantes > 1 ? "s" : ""} à préparer`
+    : "Aucune commande à préparer");
+}
+
+// Franchir 820 px (rotation, fenetre redimensionnee) : la liste change de
+// forme et les filtres changent de place. Garde « legacy Safari » (< 14, sans
+// MediaQueryList.addEventListener) comme watchSystemColorScheme : au premier
+// niveau du module, l'appel nu leverait et l'application ne demarrerait pas.
+function surFranchissementPreparation() {
+  closeCommandeDetail();
+  placerFiltresPreparation();
+  renderPreparation();
+}
+if (PREPARATION_MOBILE.addEventListener) PREPARATION_MOBILE.addEventListener("change", surFranchissementPreparation);
+else if (PREPARATION_MOBILE.addListener) PREPARATION_MOBILE.addListener(surFranchissementPreparation);
+
 function renderPreparation() {
   renderPreparationStats();
   renderPreparationFilterOptions();
+  majSousTitrePreparation();
 
   const container = document.getElementById("preparationList");
   if (!container) return;
@@ -3145,6 +3608,18 @@ function renderPreparation() {
     return;
   }
 
+  // Au telephone (planche 7a, decision de Thomas du 23/09) : UNE liste, sans
+  // groupes, et chaque ligne dit son statut en toutes lettres -- le titre de
+  // groupe qui le disait n'est plus la.
+  if (preparationEnListeUnique()) {
+    const toutes = groups.flatMap(group => group.orders).sort(comparerPourLaPreparation);
+    const liste = document.createElement("div");
+    liste.className = "prep-liste";
+    toutes.forEach(order => liste.appendChild(createPreparationRow(order, { unique: true })));
+    container.appendChild(liste);
+    return;
+  }
+
   // Planche Preparation.png : UNE LIGNE PAR COMMANDE. Les quatre colonnes
   // deviennent quatre sections empilees ; une section vide ne s'affiche pas
   // (avant : quatre « Rien ici », un par colonne).
@@ -3180,7 +3655,8 @@ function detailDeBlocage(order) {
   return formatStockStatus(order.stockStatus) || "Stock à vérifier";
 }
 
-function createPreparationRow(order) {
+function createPreparationRow(order, { unique = false } = {}) {
+  if (unique) return createPreparationRowMobile(order);
   const etape = etapeDePreparation(order);
   const lignes = (order.products || []).length;
   const articles = lignes === 1 ? "1 article" : `${lignes} articles`;
@@ -3205,6 +3681,55 @@ function createPreparationRow(order) {
   return row;
 }
 
+/**
+ * La ligne de la planche 7a : un point de couleur, le nom, « ville · n
+ * articles » (ou le manque, en alerte), et le mot de statut. Quatre
+ * informations. « n articles » compte les ARTICLES (les quantites), comme le
+ * resume au-dessus -- pas les lignes de produit.
+ */
+/**
+ * Le manque d'une bloquee en ARTICLES, comme la planche (« Il manque 2
+ * articles » ; 7b : « 2 en stock, 2 manquants ») : la somme des quantites
+ * manquantes, pas le nombre de produits. Un stock non renseigne n'est pas un
+ * manque : il se dit tel quel.
+ */
+function manqueDeLaCommande(order) {
+  const manquants = (order.stockLines || [])
+    .filter(ligne => ligne.status === "missing")
+    .reduce((somme, ligne) => somme + Math.max(0, (Number(ligne.required) || 0) - Math.max(0, Number(ligne.available) || 0)), 0);
+  if (manquants === 1) return "Il manque 1 article";
+  if (manquants > 1) return `Il manque ${manquants} articles`;
+  if ((order.stockLines || []).some(ligne => ligne.status === "unknown")) return "Stock non renseigné";
+  return formatStockStatus(order.stockStatus) === "à vérifier" ? "Stock à vérifier" : `Stock ${formatStockStatus(order.stockStatus)}`;
+}
+
+function createPreparationRowMobile(order) {
+  const statut = motDeStatutPreparation(order);
+  const n = getOrderProductCount(order);
+  const articles = n === 1 ? "1 article" : `${n} articles`;
+  const ville = order.city ? formatSectorLabel(order.city) : (order.sector ? formatSectorLabel(order.sector) : "");
+  const detail = statut.cle === "bloquee"
+    ? `<span class="commande-ligne-alerte">${escapeHtml(manqueDeLaCommande(order))}</span>`
+    : `<span>${escapeHtml([ville, articles].filter(Boolean).join(" · "))}</span>`;
+  // Le « ! » de la planche sur le badge Bloquee : l'alerte voyage avec une forme.
+  const icone = statut.cle === "bloquee"
+    ? `<svg class="prep-badge-icone" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5"></circle><path d="M12 8v4m0 3.5v.5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg>`
+    : "";
+  const row = document.createElement("article");
+  row.className = `commande-ligne prep-ligne prep-ligne--${statut.cle}`;
+  row.innerHTML = `
+    <button class="commande-ligne-main" type="button" data-action="open-commande-detail" data-order-id="${escapeAttribute(order.id)}" aria-label="Ouvrir ${escapeAttribute(order.clientName)}, ${escapeAttribute(statut.mot)}">
+      <span class="prep-point prep-point--${statut.cle}" aria-hidden="true"></span>
+      <span class="commande-ligne-corps">
+        <strong>${escapeHtml(order.clientName)}</strong>
+        ${detail}
+      </span>
+      <span class="pill prep-badge prep-badge--${statut.cle}">${icone}${escapeHtml(statut.mot)}</span>
+    </button>
+  `;
+  return row;
+}
+
 /** Le detail d'une commande, en sheet : l'adresse, la date, le stock, et les actions. */
 function openCommandeDetail(orderId) {
   const dialogue = document.getElementById("commandeDetailDialog");
@@ -3212,10 +3737,123 @@ function openCommandeDetail(orderId) {
   const order = orders.find(item => String(item.id) === String(orderId));
   if (!dialogue || !corps || !order || typeof dialogue.showModal !== "function") return;
   corps.innerHTML = "";
-  corps.appendChild(createPreparationCard(order));
+  const mobile = preparationEnListeUnique();
+  // Au telephone, la page de la planche 7b ; au bureau, le sheet d'avant.
+  dialogue.classList.toggle("commande-page", mobile);
+  corps.appendChild(mobile ? createPreparationDetailMobile(order) : createPreparationCard(order));
   const titre = document.getElementById("commandeDetailTitre");
   if (titre) titre.textContent = order.clientName;
+  remplirEnteteDetailCommande(mobile ? order : null);
   dialogue.showModal();
+}
+
+/**
+ * L'en-tete vert de la planche 7b : « CMD-2026-007 · 16 septembre » au-dessus
+ * du nom, puis deux puces, le secteur et le statut. Vide au bureau.
+ */
+function remplirEnteteDetailCommande(order) {
+  const meta = document.getElementById("commandeDetailMeta");
+  const puces = document.getElementById("commandeDetailPuces");
+  if (!meta || !puces) return;
+  if (!order) {
+    meta.textContent = "";
+    puces.innerHTML = "";
+    return;
+  }
+  const date = order.dateCommande ? new Date(`${String(order.dateCommande).slice(0, 10)}T12:00:00`) : null;
+  const jour = date && !Number.isNaN(date.getTime()) ? date.toLocaleDateString("fr-FR", { day: "numeric", month: "long" }) : "";
+  meta.textContent = [order.numero, jour].filter(Boolean).join(" · ");
+  const secteur = order.sector ? formatSectorLabel(order.sector) : (order.city ? formatSectorLabel(order.city) : "");
+  puces.innerHTML = `
+    ${secteur ? `<span class="commande-page-puce">${escapeHtml(secteur)}</span>` : ""}
+    <span class="commande-page-puce commande-page-puce--statut">${escapeHtml(motDeStatutPreparation(order).mot)}</span>
+  `;
+}
+
+/** Une ligne de produit de la planche 7b : nom, code, quantite ; le manque en clair. */
+function ligneDeProduitPreparation(ligne, reservee) {
+  const requis = Number(ligne.required) || 0;
+  let sous = escapeHtml(ligne.code || "");
+  let alerte = false;
+  // Stock reserve (en preparation, prete) : le manque d'aujourd'hui ne la
+  // concerne plus, ses articles sont deja mis de cote.
+  if (!reservee && ligne.status === "missing") {
+    const dispo = Math.max(0, Number(ligne.available) || 0);
+    const manque = Math.max(0, requis - dispo);
+    sous = `${dispo} en stock, ${manque} manquant${manque > 1 ? "s" : ""}`;
+    alerte = true;
+  } else if (!reservee && ligne.status === "unknown") {
+    sous = [ligne.code, "stock non renseigné"].filter(Boolean).map(escapeHtml).join(" · ");
+    alerte = true;
+  }
+  return `
+    <li class="commande-page-produit${alerte ? " commande-page-produit--manque" : ""}">
+      <span class="commande-page-produit-texte">
+        <strong>${escapeHtml(ligne.nom || ligne.code || "Produit")}</strong>
+        <span>${sous}</span>
+      </span>
+      <span class="commande-page-quantite">${escapeHtml(requis)}</span>
+    </li>
+  `;
+}
+
+/**
+ * Le corps de la planche 7b : les produits, l'adresse, puis le geste du
+ * statut en bas, sous le pouce. Un bouton desactive dit toujours pourquoi
+ * (planche : « jamais un bouton gris sans explication »).
+ */
+function createPreparationDetailMobile(order) {
+  const statut = motDeStatutPreparation(order);
+  const reservee = order.stockStatus === "reserve";
+  const lignes = (order.stockLines && order.stockLines.length)
+    ? order.stockLines
+    : (order.products || []).map(p => ({ nom: p.nom, code: p.code, required: Number(p.quantite || 1), status: "ok" }));
+  const n = getOrderProductCount(order);
+  const deliveryDate = order.deliveryDate || getTodayDateInput();
+  const id = escapeAttribute(order.id);
+
+  let geste = "";
+  if (statut.cle === "bloquee") {
+    const manque = manqueDeLaCommande(order);
+    const raison = /^Il manque/.test(manque) ? `${manque} en stock pour commencer` : `${manque} : impossible de commencer`;
+    geste = `
+      <button class="button primary" type="button" data-action="start-preparation" data-order-id="${id}" disabled aria-describedby="commandeGesteRaison">Passer en préparation</button>
+      <p id="commandeGesteRaison" class="commande-page-raison"><svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"></circle><path d="M12 8v4m0 3.5v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg><span>${escapeHtml(raison)}</span></p>`;
+  } else if (statut.cle === "en-preparation") {
+    geste = `<button class="button primary" type="button" data-action="finish-preparation" data-order-id="${id}">Préparation terminée</button>`;
+  } else if (statut.cle === "pret") {
+    geste = `<p class="commande-page-note">Préparation terminée : la commande attend sa tournée.</p>`;
+  } else {
+    geste = `<button class="button primary" type="button" data-action="start-preparation" data-order-id="${id}">Passer en préparation</button>`;
+  }
+
+  const article = document.createElement("div");
+  article.className = "commande-page-corps";
+  article.innerHTML = `
+    <section class="commande-page-carte" aria-label="Produits">
+      <div class="commande-page-compte">
+        <strong>${lignes.length} produit${lignes.length > 1 ? "s" : ""}</strong>
+        <span>${n} article${n > 1 ? "s" : ""}</span>
+      </div>
+      <ul class="commande-page-produits">
+        ${lignes.map(ligne => ligneDeProduitPreparation(ligne, reservee)).join("")}
+      </ul>
+    </section>
+    <section class="commande-page-carte commande-page-adresse" aria-label="Livraison">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path><circle cx="12" cy="10" r="2.4" stroke="currentColor" stroke-width="2"></circle></svg>
+      <div>
+        <strong>${escapeHtml(formatOrderAddress(order))}</strong>
+        ${order.phone ? `<a href="tel:${escapeAttribute(String(order.phone).replace(/\s+/g, ""))}">${escapeHtml(formatPhone(order.phone))}</a>` : ""}
+      </div>
+      <label class="commande-page-date">
+        Date de livraison
+        <input data-delivery-date-input="${id}" type="date" value="${escapeAttribute(deliveryDate)}">
+      </label>
+      <button class="button secondary" type="button" data-action="open-order-maps" data-order-id="${id}">Itinéraire</button>
+    </section>
+    <div class="commande-page-gestes">${geste}</div>
+  `;
+  return article;
 }
 
 function closeCommandeDetail() {
@@ -4956,15 +5594,20 @@ async function renderComptes() {
   // /api/me n'a pas encore repondu : on laisse le message de chargement.
   if (!moi) return;
 
+  // « Ajouter un compte » (telephone) suit le formulaire qu'il deplie.
+  const ajouter = document.getElementById("parAjouterCompte");
+
   if (!moi.administration) {
     container.innerHTML = gabaritAccesRefuse(moi.roleLibelle || libelleRole(moi.role));
     if (form) form.hidden = true;
+    if (ajouter) ajouter.hidden = true;
     return;
   }
 
   const select = document.getElementById("compteFormRole");
   if (select && !select.options.length) select.innerHTML = optionsRoles("livreur");
   if (form) form.hidden = false;
+  if (ajouter) ajouter.hidden = false;
 
   try {
     comptes = await apiFetch("/api/comptes");
@@ -4977,7 +5620,62 @@ async function renderComptes() {
     ? gabaritAuthDesactivee()
     : "";
 
-  container.innerHTML = entete + gabaritTableauComptes(comptes, { identifiantCourant: moi.identifiant });
+  // Le tableau pour le bureau, les lignes pour le telephone : la feuille de
+  // style n'en montre qu'un (planche 8d).
+  const tableau = gabaritTableauComptes(comptes, { identifiantCourant: moi.identifiant });
+  const lignes = gabaritLignesComptes(comptes, { identifiantCourant: moi.identifiant });
+  // Une ligne du telephone avait le focus -- la feuille d'un compte le lui
+  // rend en se fermant apres un geste. Le rechargement la redessine : on rend
+  // le focus a la meme ligne (ou a sa voisine si le compte a ete supprime),
+  // sinon il tombe sur <body> et le clavier repart du haut.
+  const anciennes = [...container.querySelectorAll(".par-compte-ligne")];
+  const rangFocus = anciennes.indexOf(document.activeElement);
+  const idFocus = rangFocus >= 0 ? document.activeElement.dataset.compteId : null;
+  container.innerHTML = entete + (lignes
+    ? `<div class="par-bureau">${tableau}</div><div class="par-telephone par-comptes-tel">${lignes}</div>`
+    : tableau);
+  if (rangFocus >= 0) {
+    const nouvelles = [...container.querySelectorAll(".par-compte-ligne")];
+    const cible = nouvelles.find(l => l.dataset.compteId === idFocus)
+      || nouvelles[Math.min(rangFocus, nouvelles.length - 1)]
+      || document.getElementById("parAjouterCompte");
+    cible?.focus();
+  }
+}
+
+// La feuille d'un compte (telephone, planche 8d) : ses gestes, un par ligne.
+function ouvrirFeuilleCompte(id) {
+  const dialogue = document.getElementById("parCompteFeuille");
+  const corps = document.getElementById("parCompteFeuilleCorps");
+  const compte = comptes.find(c => String(c.id) === String(id));
+  if (!dialogue || !corps || !compte || typeof dialogue.showModal !== "function") return;
+  setText("parCompteFeuilleTitre", compte.identifiant);
+  corps.innerHTML = gabaritFeuilleCompte(compte, { identifiantCourant: moi?.identifiant });
+  dialogue.showModal();
+}
+
+function fermerFeuillesParametres() {
+  for (const id of ["parCompteFeuille", "parImportsFeuille"]) {
+    const dialogue = document.getElementById(id);
+    if (dialogue?.open) dialogue.close();
+  }
+}
+
+// « Ajouter un compte » (telephone) : deplie ou replie le formulaire.
+function basculerFormulaireCompte(bouton) {
+  const bloc = document.getElementById("comptesBlock");
+  if (!bloc) return;
+  const ouvert = bloc.classList.toggle("par-form-ouvert");
+  bouton.setAttribute("aria-expanded", ouvert ? "true" : "false");
+  if (ouvert) document.querySelector('#compteForm input[name="identifiant"]')?.focus();
+}
+
+// « Ajouter » des secteurs (telephone) : ouvre la fiche et son formulaire.
+function ouvrirAjoutSecteur() {
+  const details = document.getElementById("parSecteursDetails");
+  if (!details) return;
+  details.open = true;
+  document.querySelector('#deliverySectorForm input[name="secteur"]')?.focus();
 }
 
 async function creerCompte(form) {
@@ -5052,13 +5750,15 @@ async function renderImportsArchives() {
   try {
     const archives = await apiFetch("/api/imports/archives");
 
+    archivesImports = archives;
+
     if (!archives.length) {
       container.innerHTML = `<p class="muted">Aucun import archivé pour l'instant. Tes prochains imports apparaitront ici.</p>`;
       return;
     }
 
-    container.innerHTML = `
-      <div class="imports-archives-table-wrap">
+    container.innerHTML = gabaritLignesImports(archives) + `
+      <div class="imports-archives-table-wrap par-bureau">
         <table class="imports-archives-table">
           <thead>
             <tr>
@@ -5094,6 +5794,80 @@ async function renderImportsArchives() {
   } catch (error) {
     container.innerHTML = `<p class="muted">Impossible de charger l'historique : ${escapeHtml(error.message || "erreur réseau")}</p>`;
   }
+}
+
+// Les archives lues au dernier rendu : la feuille du telephone s'en sert.
+let archivesImports = [];
+
+// « 16 septembre à 8 h 42 » (planche 8d) -- l'annee en cours se tait. Une
+// autre annee se dit : les archives ne sont jamais purgees, et un import d'il
+// y a un an, sans son annee, se lirait comme un import de la semaine.
+function formatDateLongue(iso) {
+  const d = new Date(iso);
+  if (!iso || Number.isNaN(d.getTime())) return "—";
+  const options = { day: "numeric", month: "long" };
+  if (d.getFullYear() !== new Date().getFullYear()) options.year = "numeric";
+  const jour = d.toLocaleDateString("fr-FR", options);
+  return `${jour} à ${d.getHours()} h ${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+// « 1 ligne », « 38 lignes » ; un nombre inconnu garde « — lignes ».
+function nombreDeLignes(n) {
+  if (n === null || n === undefined || n === "" || !Number.isFinite(Number(n))) return "— lignes";
+  return `${n} ligne${Number(n) > 1 ? "s" : ""}`;
+}
+
+// Au telephone (planche 8d), des lignes a la place du tableau : le dernier
+// import de ventes, le dernier de stock, les archives. Chacune ouvre la
+// feuille qui liste les fichiers et les rend telechargeables.
+function gabaritLignesImports(archives) {
+  const ligne = (type, titre, meta) => `
+    <li>
+      <button type="button" class="par-ligne" data-action="par-ouvrir-imports" data-type="${type}">
+        <span class="par-ligne-texte">
+          <span class="par-ligne-titre">${titre}</span>
+          <span class="par-ligne-meta">${escapeHtml(meta)}</span>
+        </span>
+        ${CHEVRON_LIGNE}
+      </button>
+    </li>`;
+  const dernier = type => archives.find(a => a.type === type);
+  const ventes = dernier("ventes");
+  const stock = dernier("stock");
+  const n = archives.length;
+  return `
+    <ul class="par-imports-lignes par-telephone" aria-label="Imports et archives">
+      ${ventes ? ligne("ventes", "Dernier import de ventes", `${formatDateLongue(ventes.importedAt)} · ${nombreDeLignes(ventes.rowsCount ?? 0)}`) : ""}
+      ${stock ? ligne("stock", "Dernier import de stock", `${formatDateLongue(stock.importedAt)} · ${nombreDeLignes(stock.rowsCount ?? 0)}`) : ""}
+      ${ligne("", "Archives", `${n} fichier${n > 1 ? "s" : ""} conservé${n > 1 ? "s" : ""}`)}
+    </ul>
+  `;
+}
+
+// La feuille des imports : les fichiers d'un type (ou tous), du plus recent au
+// plus ancien, chacun telechargeable -- ce que porte le tableau du bureau.
+function ouvrirFeuilleImports(type) {
+  const dialogue = document.getElementById("parImportsFeuille");
+  const corps = document.getElementById("parImportsFeuilleCorps");
+  if (!dialogue || !corps || typeof dialogue.showModal !== "function") return;
+  const liste = type ? archivesImports.filter(a => a.type === type) : archivesImports;
+  setText("parImportsFeuilleTitre", type === "ventes" ? "Imports de ventes" : type === "stock" ? "Imports de stock" : "Archives");
+  corps.innerHTML = `
+    <p class="par-aide">Chaque fichier .xlsx importé est archivé et reste téléchargeable.</p>
+    <ul class="par-archives">
+      ${liste.map(a => `
+        <li class="par-archive">
+          <span class="par-ligne-texte">
+            <span class="par-ligne-titre par-archive-nom">${escapeHtml(a.filename || "—")}</span>
+            <span class="par-ligne-meta">${escapeHtml(formatDateLongue(a.importedAt))} · ${a.type === "ventes" ? "Ventes" : "Stock"} · ${escapeHtml(nombreDeLignes(a.rowsCount))} ·${formatFileSize(a.fileSize)}</span>
+            <span class="par-ligne-meta">${formatImportStats(a.stats, a.type)}</span>
+          </span>
+          <a class="button secondary compact" href="/api/imports/archives/${encodeURIComponent(a.id)}/download" download="${escapeAttribute(a.filename || "import.xlsx")}" aria-label="Télécharger ${escapeAttribute(a.filename || "le fichier")}">Télécharger</a>
+        </li>
+      `).join("")}
+    </ul>
+  `;
+  dialogue.showModal();
 }
 
 function formatDateTimeShort(iso) {
@@ -5249,7 +6023,9 @@ function renderDeliveryCandidates() {
       <input type="checkbox" data-delivery-order="${escapeAttribute(order.id)}" ${deliverySelection.has(String(order.id)) ? "checked" : ""}>
       <span class="delivery-card-body">
         <span class="delivery-card-title">${escapeHtml(order.clientName)}</span>
-        <span>${escapeHtml(formatOrderAddress(order))}</span>
+        <span class="delivery-card-court">${escapeHtml([order.numero, articlesDeCommande(order)].filter(Boolean).join(" · "))}</span>
+        <span class="delivery-card-contexte">${escapeHtml(contexteDeCommandePrete(order))}</span>
+        <span class="delivery-card-adresse">${escapeHtml(formatOrderAddress(order))}</span>
         <span class="order-meta">
           <span>${escapeHtml(formatSectorLabel(order.sector))}</span>
           <span>${escapeHtml(order.deliveryDate ? formatDeliveryDate(order.deliveryDate) : "Sans date")}</span>
@@ -5263,6 +6039,23 @@ function renderDeliveryCandidates() {
     `;
     container.appendChild(label);
   });
+}
+
+/**
+ * Planche 4a, au telephone : ce qui DISTINGUE deux commandes pretes du meme
+ * client. La planche n'en a pas besoin (son en-tete dit le jour) ; ici le
+ * filtre par defaut melange les dates et les secteurs, et la ligne n'a pas de
+ * detail ou les lire. Le jour et le secteur toujours ; la priorite si elle
+ * n'est pas la normale ; « A reprogrammer », seul statut qui n'est pas « Pret ».
+ */
+function contexteDeCommandePrete(order) {
+  const priorite = String(order.priority || "").trim();
+  return [
+    order.deliveryDate ? formatDeliveryDate(order.deliveryDate) : "Sans date",
+    formatSectorLabel(order.sector),
+    priorite && !/normal/i.test(priorite) ? priorite : "",
+    order.status === "a_reprogrammer" ? formatOrderStatus(order.status) : ""
+  ].filter(Boolean).join(" · ");
 }
 
 function setDeliverySelection(orderId, checked) {
@@ -5359,12 +6152,22 @@ function renderRoute() {
     list.innerHTML = emptyState("Aucune tournée créée", "Sélectionnez des commandes prêtes, puis créez une tournée optimisée.");
     current.textContent = "Aucune tournée créée.";
     if (metrics) metrics.textContent = "Distance estimée indisponible.";
+    document.querySelectorAll('[data-op="recalculate-route"]').forEach(bouton =>
+      bouton.classList.remove("trn-recalculer--requis"));
     setButtonDisabled("startRouteButton", true);
     updateDriverActionButtons(null);
     return;
   }
 
   if (metrics) metrics.textContent = formatRouteMetrics(activeRoute);
+  // Planche 4c : sans trace routier (reordonnee a la main, ou jamais calculee),
+  // la carte dessine un pointille ; « Recalculer le trace » se signale alors,
+  // cercle d'accent. Meme critere que renderMap : la geometrie.
+  // Seulement AVANT le depart : le serveur refuse le recalcul d'une tournee
+  // partie (« Recalcule avant le départ. ») -- un cercle y inviterait a un refus.
+  const traceARefaire = activeRoute.status === "prete" && !activeRoute.geometry?.coordinates;
+  document.querySelectorAll('[data-op="recalculate-route"]').forEach(bouton =>
+    bouton.classList.toggle("trn-recalculer--requis", traceARefaire));
   setButtonDisabled("startRouteButton", activeRoute.status === "en_livraison" || isRouteComplete(activeRoute));
 
   const nextPendingIndex = activeRoute.stops.findIndex(stop => !isStopTerminal(stop.status));
@@ -5473,6 +6276,15 @@ function showCurrentStop(stop) {
       }).join("")}
     </div>` : "";
 
+  // Planche 4b : « Prochain : <client> ». La distance et la duree du trajet
+  // (« 6,2 km · environ 14 min ») ne sont calculees nulle part par arret :
+  // omises. La ville la remplace.
+  const suivant = activeRoute
+    ? activeRoute.stops.find((s, i) => i > index && !isStopTerminal(s.status))
+    : null;
+  const prochain = suivant ? `
+    <p class="arret-prochain"><span class="arret-prochain-mot">Prochain : ${escapeHtml(suivant.clientName)}</span>${suivant.city ? `<span class="arret-prochain-lieu">${escapeHtml(formatSectorLabel(suivant.city))}</span>` : ""}</p>` : "";
+
   container.innerHTML = `
     <div class="current-client-main arret">
       <p class="arret-etat arret-etat--${etat.classe}"><span class="arret-etat-point" aria-hidden="true"></span>${escapeHtml(etat.mot)}</p>
@@ -5486,6 +6298,7 @@ function showCurrentStop(stop) {
       ${getAddressWarning(stop) ? `<span class="address-warning">${escapeHtml(getAddressWarning(stop))}</span>` : ""}
     </div>
     ${articles}
+    ${prochain}
   `;
   updateDriverActionButtons(stop);
 }
@@ -5511,11 +6324,41 @@ function showRouteCompleted(routeData) {
   const absent = routeData.stops.filter(stop => stop.status === "absent").length;
   const problems = routeData.stops.filter(stop => ["probleme", "a_reprogrammer"].includes(stop.status)).length;
 
+  // Planche 4d : les trois chiffres, les problemes NOMMES, le lien vers
+  // l'arrivee. Pas de fete. Les heures de debut et de fin existent
+  // (startedAt, completedAt) ; les kilometres « parcourus » non -- la
+  // distance connue est celle du trace prevu, pas celle roulee : omise.
+  const heure = valeur => {
+    const date = valeur ? new Date(valeur) : null;
+    return date && !Number.isNaN(date.getTime())
+      ? date.toLocaleTimeString("fr-FR", { hour: "numeric", minute: "2-digit" }).replace(":", " h ")
+      : "";
+  };
+  const debut = heure(routeData.startedAt);
+  const fin = heure(routeData.completedAt);
+  // « Tournee Besancon du mercredi 16 septembre » ; sans secteur, « Tournee du
+  // mercredi... » (et non « Tournee du jour du mercredi »).
+  const secteur = routeData.sector && routeData.sector !== "Tous" ? ` ${formatSectorLabel(routeData.sector)}` : "";
+  const jour = formatJourDeTournee(routeData.deliveryDate).toLowerCase();
+  const phrase = `Tournée${secteur} du ${jour}${debut && fin ? `, de ${debut} à ${fin}` : ""}.`;
+  const enEchec = routeData.stops.filter(stop => ["absent", "probleme", "a_reprogrammer"].includes(stop.status));
+  const chiffre = (libelle, valeur, classe = "") => `
+        <div class="fin-chiffre ${classe}"><span class="fin-chiffre-libelle">${libelle}</span><strong>${escapeHtml(valeur)}</strong></div>`;
+
   container.innerHTML = `
-    <div class="route-complete">
-      <strong>Tournée terminée</strong>
-      ${routeData.arrival ? `<p><a class="button primary" href="https://www.google.com/maps/dir/?api=1&destination=${routeData.arrival.lat},${routeData.arrival.lng}" target="_blank" rel="noopener noreferrer">Rejoindre l’arrivée : ${escapeHtml(routeData.arrival.label || "point choisi")}</a></p>` : ""}
-      <p>${escapeHtml(delivered)} livré(s), ${escapeHtml(absent)} absent(s), ${escapeHtml(problems)} problème(s)</p>
+    <div class="route-complete fin-tournee">
+      <strong class="fin-titre">Tournée terminée</strong>
+      <p class="fin-phrase">${escapeHtml(phrase)}</p>
+      <div class="fin-chiffres">
+        ${chiffre("Livrés", delivered)}
+        ${chiffre(absent > 1 ? "Clients absents" : "Client absent", absent, absent ? "fin-chiffre--echec" : "")}
+        ${chiffre(problems > 1 ? "Problèmes" : "Problème", problems, problems ? "fin-chiffre--echec" : "")}
+      </div>
+      ${enEchec.length ? `
+      <ul class="fin-problemes" aria-label="Arrêts non livrés">
+        ${enEchec.map(stop => `<li><strong>${escapeHtml(stop.clientName)}</strong><span>${escapeHtml(stop.problemReason || formatStopStatus(stop.status))}</span></li>`).join("")}
+      </ul>` : ""}
+      ${routeData.arrival ? `<p class="fin-arrivee"><span class="fin-chiffre-libelle">Arrivée</span><span>${escapeHtml(routeData.arrival.label || "Point choisi")}</span><a class="button primary" href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${routeData.arrival.lat},${routeData.arrival.lng}`)}" target="_blank" rel="noopener noreferrer">Y aller</a></p>` : ""}
       <div class="quick-actions">
         <button class="button primary" type="button" data-action="go-tab" data-target-tab="journee">Retour accueil</button>
         <button class="button secondary" type="button" data-action="go-tab" data-target-tab="recommande">Voir à recommander</button>
@@ -5627,6 +6470,12 @@ function demanderMotif(status, motifs) {
 
 /** Le geste complet : demander la raison, puis envoyer. */
 async function marquerArret(status) {
+  // Une livraison en suspens part d'abord : jamais deux gestes en attente.
+  // Le geste vise l'arret de l'ecran a l'appui ; si l'attente l'a change, on
+  // n'agit pas sur un autre.
+  const vise = activeRoute ? arretVise() : null;
+  await solderLivraisonEnSuspens();
+  if (vise && !arretToujoursVise(vise)) return;
   let motif = null;
   if (STATUTS_DEMANDANT_UN_MOTIF.has(status)) {
     let motifs = [];
@@ -5669,6 +6518,185 @@ async function updateCurrentDeliveryStatus(status, motif = null) {
 
   await updateLegacyClientDeliveryStatus(status);
 }
+
+// --- « LIVRE », SANS CONFIRMATION, AVEC ANNULER (planche 4b) ------------------
+//
+// La planche : « Passage automatique a l'arret suivant, toast "Livre --
+// <client>" avec Annuler pendant 4 s. Pas de confirmation : l'action est
+// reversible tant que le toast est la. »
+//
+// Le serveur, lui, ne sait PAS defaire une livraison : dans la machine d'etat
+// des commandes, `livre` n'a aucune sortie (livre: []), et la livraison
+// consomme la reservation de stock. Plutot que d'ouvrir une transition
+// livre -> en_livraison cote serveur (et de defaire une consommation de
+// stock), l'ENVOI est differe : l'arret passe a « Livre » a l'ecran tout de
+// suite, la tournee avance, et le PATCH ne part qu'au terme des 4 s. Annuler
+// dans ce delai n'a donc rien a defaire cote serveur.
+//
+// Ce qui force l'envoi avant le terme : un autre geste d'arret (on ne garde
+// jamais deux livraisons en suspens), et la page qui passe en arriere-plan
+// (verrouillage du telephone, appel, Google Maps ouvert par « Y aller »).
+let livraisonEnSuspens = null;
+// L'envoi en route d'une livraison (sa promesse), du PATCH a la fin du
+// rechargement. Un geste d'arret l'attend avant d'agir.
+let envoiLivraison = null;
+// Pendant cette attente, les gestes d'arret sont desactives (gestesVerrouilles,
+// declare en tete : updateDriverActionButtons le lit des le premier rendu).
+// Le bouton ne se desactive pas (l'arret suivant le reprend aussitot) : un
+// double appui livrerait DEUX arrets. Un second appui trop proche est ignore.
+const LIVRE_DOUBLE_APPUI_MS = 700;
+let dernierAppuiLivre = 0;
+
+/** L'arret que le livreur a sous les yeux au moment de son geste. */
+function arretVise() {
+  const stop = activeRoute?.stops[activeStopIndex];
+  return stop ? { routeId: String(activeRoute.id), stopId: String(stop.id) } : null;
+}
+
+/** Cet arret est-il encore celui de l'ecran ? (apres une attente reseau) */
+function arretToujoursVise(vise) {
+  const stop = activeRoute?.stops[activeStopIndex];
+  return Boolean(vise && stop && String(activeRoute.id) === vise.routeId && String(stop.id) === vise.stopId);
+}
+
+/**
+ * Avant un geste d'arret : la livraison en suspens part, et tout envoi deja en
+ * route est attendu. Hors ligne, la livraison est mise en file -- ce n'est pas
+ * un echec : on l'annonce, et le geste continue (il n'etait pas perdu, le
+ * suivant non plus). Un refus du serveur, lui, arrete le geste : l'ecran vient
+ * d'etre recharge.
+ */
+async function solderLivraisonEnSuspens() {
+  const lanceIci = Boolean(livraisonEnSuspens);
+  const envoi = lanceIci ? envoyerLivraisonEnSuspens() : envoiLivraison;
+  if (!envoi) return;
+  gestesVerrouilles++;
+  updateDriverActionButtons();
+  try {
+    await envoi;
+  } catch (error) {
+    // Un envoi lance ailleurs (terme du toast) annonce lui-meme son echec.
+    if (lanceIci) {
+      if (error && error.enFile) notifyEchec(error);
+      else throw error;
+    }
+  } finally {
+    gestesVerrouilles--;
+    updateDriverActionButtons();
+  }
+}
+
+async function livrerAvecAnnulation() {
+  const maintenant = Date.now();
+  if (maintenant - dernierAppuiLivre < LIVRE_DOUBLE_APPUI_MS) return;
+  dernierAppuiLivre = maintenant;
+  if (!activeRoute) {
+    await updateCurrentDeliveryStatus("livre");
+    return;
+  }
+  // L'arret livre est celui de l'ecran A L'APPUI, jamais celui qu'on trouve
+  // apres l'attente reseau.
+  const vise = arretVise();
+  if (!vise) {
+    notify("Aucun arrêt sélectionné.", "warning");
+    return;
+  }
+  await solderLivraisonEnSuspens();
+  // Pendant l'attente, l'ecran a pu avancer (un autre appui, un rechargement) :
+  // on ne livre que l'arret vise, s'il est encore a l'ecran, et jamais
+  // par-dessus une autre livraison en suspens.
+  if (livraisonEnSuspens || !arretToujoursVise(vise)) return;
+  const stop = activeRoute.stops[activeStopIndex];
+  if (activeRoute.status !== "en_livraison" || isStopTerminal(stop.status)) return;
+
+  const suspens = {
+    routeId: String(activeRoute.id),
+    stopId: String(stop.id),
+    statutAvant: stop.status,
+    indexAvant: activeStopIndex,
+    toast: null
+  };
+  livraisonEnSuspens = suspens;
+  appliquerLivraisonEnSuspens();
+  // L'arret suivant : le prochain non termine APRES celui-ci, sinon le premier
+  // qui reste (un arret saute plus tot).
+  const apres = activeRoute.stops.findIndex((s, i) => i > activeStopIndex && !isStopTerminal(s.status));
+  const reste = apres >= 0 ? apres : activeRoute.stops.findIndex(s => !isStopTerminal(s.status));
+  if (reste >= 0) activeStopIndex = reste;
+  rafraichirTournee();
+
+  suspens.toast = notify(`Livré — ${stop.clientName || "arrêt"}`, "success", {
+    action: { libelle: "Annuler", surClic: () => annulerLivraisonEnSuspens(suspens) },
+    // Au terme, c'est CETTE livraison qui part, pas celle du moment.
+    auTerme: () => { envoyerLivraisonEnSuspens(suspens).catch(notifyEchec); }
+  });
+}
+
+/** Pose l'etat « livre » en suspens sur la tournee affichee (apres un rechargement aussi). */
+function appliquerLivraisonEnSuspens() {
+  const s = livraisonEnSuspens;
+  if (!s || !activeRoute || String(activeRoute.id) !== s.routeId) return;
+  const stop = activeRoute.stops.find(item => String(item.id) === s.stopId);
+  if (stop && !isStopTerminal(stop.status)) stop.status = "livre";
+}
+
+function rafraichirTournee() {
+  renderRoute();
+  renderMap();
+  updateRouteProgress();
+}
+
+function annulerLivraisonEnSuspens(suspens) {
+  if (livraisonEnSuspens !== suspens) return;
+  livraisonEnSuspens = null;
+  if (activeRoute && String(activeRoute.id) === suspens.routeId) {
+    const stop = activeRoute.stops.find(item => String(item.id) === suspens.stopId);
+    if (stop && stop.status === "livre") stop.status = suspens.statutAvant;
+    activeStopIndex = suspens.indexAvant;
+  }
+  rafraichirTournee();
+  document.getElementById("markDeliveredButton")?.focus({ preventScroll: true });
+}
+
+/**
+ * Envoie la livraison en suspens, s'il y en a une (et, si `attendu` est donne,
+ * seulement si c'est encore elle). Rend quand c'est fait.
+ */
+function envoyerLivraisonEnSuspens(attendu = null) {
+  const s = livraisonEnSuspens;
+  if (!s || (attendu && s !== attendu)) return Promise.resolve();
+  livraisonEnSuspens = null;
+  retirerToast(s.toast);
+  const envoi = (async () => {
+    try {
+      await apiFetch(`/api/routes/${encodeURIComponent(s.routeId)}/stops/${encodeURIComponent(s.stopId)}`, {
+        method: "PATCH",
+        // keepalive : l'envoi declenche par `pagehide` survit a la page.
+        keepalive: true,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "livre", motif: null })
+      });
+    } catch (error) {
+      // Mise en file hors ligne : l'ecriture partira au retour du reseau.
+      // L'ecran garde « Livre » -- recharger depuis le cache le defairait.
+      if (error && error.enFile) throw error;
+      await loadData();
+      throw error;
+    }
+    await loadData();
+  })();
+  envoiLivraison = envoi;
+  const liberer = () => { if (envoiLivraison === envoi) envoiLivraison = null; };
+  envoi.then(liberer, liberer);
+  return envoi;
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") envoyerLivraisonEnSuspens().catch(notifyEchec);
+});
+window.addEventListener("pagehide", () => {
+  envoyerLivraisonEnSuspens().catch(() => {});
+});
 
 async function updateLegacyClientDeliveryStatus(status) {
   const client = route[currentIndex];
@@ -5916,7 +6944,8 @@ function updateDriverActionButtons(target = getCurrentDeliveryTarget()) {
   const hasTarget = Boolean(target);
   const routeStarted = activeRoute ? activeRoute.status === "en_livraison" : hasTarget;
   const terminalStop = activeRoute ? isStopTerminal(target?.status) : false;
-  const canChangeStatus = hasTarget && routeStarted && !terminalStop;
+  // Pendant l'envoi d'une livraison, les gestes d'arret attendent (solderLivraisonEnSuspens).
+  const canChangeStatus = hasTarget && routeStarted && !terminalStop && !gestesVerrouilles;
   const hasNextStop = activeRoute
     ? activeRoute.stops.some((stop, index) => index > activeStopIndex && !isStopTerminal(stop.status))
     : currentIndex >= 0 && currentIndex < route.length - 1;
@@ -5979,6 +7008,10 @@ function renderMap() {
     map.removeLayer(routeLine);
     routeLine = null;
   }
+  if (routeLineLisere) {
+    map.removeLayer(routeLineLisere);
+    routeLineLisere = null;
+  }
 
   const entities = getMapEntities();
   const points = [];
@@ -5989,7 +7022,8 @@ function renderMap() {
     if (!coords) return;
 
     // Le meme marqueur que dans la ligne d'arret. La zone de toucher fait
-    // 44 x 44 (plancher de la charte) ; le disque de 28 ou 34 est centre dedans.
+    // 44 x 44 (plancher de la charte) ; sur la carte le disque fait 44 lui
+    // aussi (decision du 23/09, planche 4c) -- la zone de toucher EST le disque.
     const etat = marqueurEtat(entity, index);
     const marker = L.marker([coords.lat, coords.lng], {
       icon: L.divIcon({
@@ -6023,9 +7057,14 @@ function renderMap() {
 
   if (activeRoute?.geometry?.coordinates) {
     const roadPoints = activeRoute.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
-    // Planche Carte.png : le trace est en ACCENT, 4,5 px, bouts ronds. Une
-    // forme, pas un texte -- l'orange y est a sa place.
-    routeLine = L.polyline(roadPoints, {color: couleurCharte("--v8-accent", "#EF9177"), weight: 4.5, opacity: 1, lineCap: "round", lineJoin: "round"}).addTo(map);
+    // Planche 4c, decision de Thomas du 23/09 (remplace les 4,5 px du 19/09) :
+    // le trace est en ACCENT, 7 px, bouts ronds. Une forme, pas un texte --
+    // l'orange y est a sa place. Dessous, un lisere blanc de 2 px de chaque
+    // cote : sur les tuiles OpenStreetMap reelles (routes orange et jaunes),
+    // l'orange seul se perdait -- la planche le craignait, son fond etait une
+    // esquisse. Le lisere n'est pas interactif : le clic reste au trace.
+    routeLineLisere = L.polyline(roadPoints, {color: "#FFFFFF", weight: 11, opacity: 0.9, lineCap: "round", lineJoin: "round", interactive: false}).addTo(map);
+    routeLine = L.polyline(roadPoints, {color: couleurCharte("--v8-accent", "#EF9177"), weight: 7, opacity: 1, lineCap: "round", lineJoin: "round"}).addTo(map);
     for (const [point, label] of [[activeRoute.departure, "Départ"], [activeRoute.arrival, "Arrivée"]]) {
       if (point) markers.push(L.marker([point.lat, point.lng]).addTo(map).bindPopup(`${label} : ${escapeHtml(point.label || "Point choisi")}`));
     }
@@ -6119,6 +7158,12 @@ async function apiFetch(url, options = {}) {
   }
   clearTimeout(timer);
 
+  // Une reponse rendue par le cache du service worker (le reseau n'a pas
+  // repondu a temps) : loadData() ne l'annoncera pas « A jour ».
+  if (res.headers && res.headers.get("X-Sereo-Cache")) {
+    reponsesCopiees.set(url, Date.parse(res.headers.get("Date") || ""));
+  }
+
   // Session expiree (cookie 12h) -> redirige vers /login en preservant l'URL courante.
   // 429 = IP verrouillee (rate-limit auth) : on redirige aussi vers /login, qui
   // affiche le compte a rebours de lockout (sinon l'app afficherait un toast
@@ -6126,6 +7171,10 @@ async function apiFetch(url, options = {}) {
   // re-redirige pas (boucle infinie possible sur certains navigateurs).
   if ((res.status === 401 || res.status === 429) && !window.location.pathname.startsWith("/login")) {
     const next = window.location.pathname + window.location.search + window.location.hash;
+    // La session est finie : ses donnees ne doivent pas s'afficher a la
+    // prochaine ouverture, avant que le serveur ait reconnu quelqu'un.
+    // (Un 429 n'est pas une fin de session : on ne vide que sur 401.)
+    if (res.status === 401) await viderCacheDeDonnees();
     window.location.href = `/login?next=${encodeURIComponent(next)}`;
     // On throw quand meme pour interrompre proprement le code appelant.
     throw new Error("Session expiree, redirection vers /login");
@@ -6329,9 +7378,9 @@ function majBandeauHorsLigne() {
 /** Charte §4 : « Toast : bas d'ecran, 4 s, une action possible (Annuler) ». */
 const TOAST_DUREE_MS = 4000;
 
-function notify(message, type = "info") {
+function notify(message, type = "info", options = {}) {
   const region = document.getElementById("toastRegion");
-  if (!region) return;
+  if (!region) return null;
 
   const toast = document.createElement("div");
   toast.className = `toast toast-${type}`;
@@ -6341,6 +7390,23 @@ function notify(message, type = "info") {
   text.className = "toast-message";
   text.textContent = message;
   toast.appendChild(text);
+
+  // La charte : « une action possible (Annuler) ». Le bouton ferme le toast
+  // puis appelle l'action ; un seul clic compte.
+  if (options.action && typeof options.action.surClic === "function") {
+    const bouton = document.createElement("button");
+    bouton.type = "button";
+    bouton.className = "toast-action";
+    bouton.textContent = options.action.libelle || "Annuler";
+    bouton.addEventListener("click", () => {
+      if (toast.dataset.fini) return;
+      toast.dataset.fini = "1";
+      toast.classList.add("toast-out");
+      setTimeout(() => toast.remove(), 250);
+      options.action.surClic();
+    }, { once: true });
+    toast.appendChild(bouton);
+  }
 
   // Bouton de fermeture (utile surtout pour les erreurs persistantes)
   const closeBtn = document.createElement("button");
@@ -6368,8 +7434,21 @@ function notify(message, type = "info") {
     setTimeout(() => {
       toast.classList.add("toast-out");
       setTimeout(() => toast.remove(), 250);
+      if (!toast.dataset.fini) {
+        toast.dataset.fini = "1";
+        if (typeof options.auTerme === "function") options.auTerme();
+      }
     }, TOAST_DUREE_MS);
   }
+  return toast;
+}
+
+/** Retire un toast sans declencher ni son action ni son terme. */
+function retirerToast(toast) {
+  if (!toast || toast.dataset.fini) return;
+  toast.dataset.fini = "1";
+  toast.classList.add("toast-out");
+  setTimeout(() => toast.remove(), 250);
 }
 
 /** Le statut de tournee vu la derniere fois : la planification ne se replie qu'au CHANGEMENT. */
@@ -6660,6 +7739,12 @@ function renderProducts(entity) {
   `;
 }
 
+/** « 4 articles » : le nombre de LIGNES, le meme mot que « n articles a decharger » de l'arret. */
+function articlesDeCommande(order) {
+  const n = (order.products || []).length;
+  return `${n} article${n > 1 ? "s" : ""}`;
+}
+
 function getOrderProductCount(order) {
   return (order.products || []).reduce((total, product) => total + Number(product.quantite || 1), 0);
 }
@@ -6879,10 +7964,14 @@ async function loadVersionInfo() {
   // version n'avait pas pu etre lue. /api/version ne connait pas la derniere
   // version publiee ; elle ne peut donc dire qu'une chose vraie -- la page
   // tourne sur la version du serveur -- et seulement si elle l'a lue.
-  const etat = document.getElementById("sidebarVersionEtat");
-  if (etat && !swUpdateNotificationShown) {
-    etat.textContent = "À jour";
-    etat.hidden = !versionInfoCache?.version;
+  setText("parVersionValeur", versionInfoCache?.version || "—");
+  if (!swUpdateNotificationShown) {
+    // La barre laterale au bureau, le pied de Parametres au telephone.
+    for (const etat of [document.getElementById("sidebarVersionEtat"), document.getElementById("parVersionEtat")]) {
+      if (!etat) continue;
+      etat.textContent = "À jour";
+      etat.hidden = !versionInfoCache?.version;
+    }
   }
 }
 
@@ -7027,8 +8116,8 @@ function showSwUpdateNotification() {
   swUpdateNotificationShown = true;
   // Une nouvelle version attend un rechargement : la pastille cesse de dire
   // « A jour », ce qui serait faux, et le dit.
-  const etat = document.getElementById("sidebarVersionEtat");
-  if (etat) {
+  for (const etat of [document.getElementById("sidebarVersionEtat"), document.getElementById("parVersionEtat")]) {
+    if (!etat) continue;
     etat.textContent = "Mise à jour";
     etat.hidden = false;
   }

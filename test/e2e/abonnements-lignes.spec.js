@@ -5,6 +5,9 @@
 // chip, panier, quatre faits, deux boutons), en colonnes de 330 px.
 // Apres : une ligne (disque d'etat, nom, « ville · frequence », badge) ; les
 // faits, le panier et les actions dans le sheet que la ligne ouvre.
+// 23/09 (planche 3a, decision de Thomas) : au telephone, la ligne passe a
+// 96 px et trois rangees (client et etat, echeance et frequence, panier et
+// rappel) ; le disque se retire, le badge porte l'etat.
 const { test, expect } = require("./tuiles");
 const { demarrer } = require("./serveur-seme");
 
@@ -58,6 +61,14 @@ for (const vue of ["mobile", "desktop"]) {
           detail: [...corps.querySelectorAll("span")].find(e => e.checkVisibility())?.textContent.trim(),
           frequence: l.querySelector(".abo-frequence")?.checkVisibility() ? l.querySelector(".abo-frequence").textContent.trim() : null,
           mot: l.querySelector(".pill").textContent.trim(),
+          // Au telephone : les rangees visibles de la ligne (nom, badge,
+          // echeance, panier), le disque, et le texte des deux rangees.
+          rangees: [titre, l.querySelector(".pill"), l.querySelector(".abo-rythme"), l.querySelector(".abo-panier-rappel"),
+            ...[...corps.children].filter(e => !e.matches("strong, .abo-rythme, .abo-panier-rappel"))]
+            .filter(e => e && e.checkVisibility()).length,
+          disque: etat.checkVisibility(),
+          rythme: l.querySelector(".abo-rythme")?.textContent.replace(/\s+/g, " ").trim(),
+          panierRappel: l.querySelector(".abo-panier-rappel")?.textContent.trim(),
           x: Math.round(l.getBoundingClientRect().left)
         };
       });
@@ -74,19 +85,25 @@ for (const vue of ["mobile", "desktop"]) {
     expect(r.cartes, "plus aucune carte dans la liste").toBe(0);
     // Empilees : toutes a la meme abscisse (avant : colonnes de 330 px).
     expect(new Set(r.lignes.map(l => l.x)).size, "les lignes doivent etre empilees, pas en colonnes").toBe(1);
-    expect(r.lignes.filter(l => l.lignesDeTitre <= 1 && (l.h < 64 - TOL || l.h > 72 + TOL)).map(l => `${l.nom} : ${l.h}px`)).toEqual([]);
-    expect(r.lignes.filter(l => l.lignesDeTitre > 1 && l.h > 96)).toEqual([]);
     const parMot = Object.fromEntries(r.lignes.map(l => [l.mot, l]));
     expect(Object.keys(parMot).sort()).toEqual(["Actif", "Arrêté", "En pause"]);
     if (vue === "mobile") {
-      // La ligne de la charte : quatre informations, le disque porte l'etat.
-      expect(r.lignes.map(l => l.infos)).toEqual([4, 4, 4]);
-      expect(hex(parMot["Actif"].etatFond)).toBe(r.tokens.vertClair);
-      expect(hex(parMot["En pause"].etatFond)).toBe(r.tokens.pecheClaire);
-      expect(hex(parMot["Arrêté"].etatFond)).toBe(r.tokens.surfaceBasse);
-      expect(parMot["Actif"].detail).toBe("Besançon · Toutes les 2 semaines");
-      expect(parMot["En pause"].detail).toBe("Dole · Tous les mois");
+      // Decision du 23/09 (planche 3a) : la ligne fait 96 px, trois rangees --
+      // client et etat, echeance et frequence, panier et rappel. Un nom sur
+      // deux lignes l'allonge d'une ligne de nom (20 px), pas plus.
+      expect(r.lignes.filter(l => l.lignesDeTitre <= 1 && Math.abs(l.h - 96) > TOL).map(l => `${l.nom} : ${l.h}px`)).toEqual([]);
+      expect(r.lignes.filter(l => l.lignesDeTitre > 1 && l.h > 116 + TOL).map(l => `${l.nom} : ${l.h}px`)).toEqual([]);
+      // Nom, badge, echeance, panier : quatre informations VISIBLES, sans disque.
+      expect(r.lignes.map(l => l.rangees)).toEqual([4, 4, 4]);
+      expect(r.lignes.map(l => l.disque)).toEqual([false, false, false]);
+      expect(parMot["Actif"].rythme).toMatch(/^[A-Z][a-z]+ (1er|\d+) [a-zéû]+( \d{4})? · tous les 14 j$/);
+      expect(parMot["Actif"].panierRappel).toBe("4 Changes taille L · rappel 2 j");
+      expect(parMot["En pause"].rythme).toBe("Livraisons suspendues");
+      expect(parMot["En pause"].panierRappel).toBe("10 Alèses · mensuel");
+      expect(parMot["Arrêté"].rythme).toBe("Plus de livraison");
     } else {
+      expect(r.lignes.filter(l => l.lignesDeTitre <= 1 && (l.h < 64 - TOL || l.h > 72 + TOL)).map(l => `${l.nom} : ${l.h}px`)).toEqual([]);
+      expect(r.lignes.filter(l => l.lignesDeTitre > 1 && l.h > 96)).toEqual([]);
       // La ligne de la planche 13a : nom et panier, frequence, prochaine, etat.
       expect(r.lignes.map(l => l.infos)).toEqual([5, 5, 5]);
       expect(parMot["Actif"].detail).toBe("4 Changes taille L");

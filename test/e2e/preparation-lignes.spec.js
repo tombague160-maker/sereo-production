@@ -13,8 +13,12 @@
 const { test, expect } = require("./tuiles");
 const { demarrer, jeuDeDonnees } = require("./serveur-seme");
 
-const VUES = { desktop: { width: 1440, height: 900 }, mobile: { width: 390, height: 844 } };
-const HAUTEUR_PILULE = { desktop: 44, mobile: 48 };
+// « tablette » : entre 821 et 920 px, la liste garde ses groupes (bureau) et
+// le detail reste un sheet colle au bas de l'ecran. Au telephone (sous
+// 820 px), la decision du 23/09 en fait une liste unique et une page :
+// preparation-mobile.spec.js.
+const VUES = { desktop: { width: 1440, height: 900 }, mobile: { width: 390, height: 844 }, tablette: { width: 900, height: 844 } };
+const HAUTEUR_PILULE = { desktop: 44, mobile: 48, tablette: 44 };
 const TOL = 1;
 
 test.describe.configure({ mode: "serial" });
@@ -39,7 +43,7 @@ function hex(chaine) {
   return m ? "#" + [m[1], m[2], m[3]].map(v => (+v).toString(16).padStart(2, "0")).join("").toUpperCase() : null;
 }
 
-for (const vue of ["mobile", "desktop"]) {
+for (const vue of ["tablette", "desktop"]) {
   test(`planche Preparation — une LIGNE par commande, des PILULES de secteur, un RESUME, en ${vue}`, async ({ browser }) => {
     test.setTimeout(180000);
     const { ctx, page, erreurs } = await ouvrir(browser, vue);
@@ -138,9 +142,9 @@ for (const vue of ["mobile", "desktop"]) {
   });
 }
 
-test("la ligne OUVRE un sheet (coins 28, poignee en mobile) qui porte les actions ; Echap et ✕ le ferment", async ({ browser }) => {
+test("la ligne OUVRE un sheet (coins 28, poignee sous 921 px) qui porte les actions ; Echap et ✕ le ferment", async ({ browser }) => {
   test.setTimeout(180000);
-  const { ctx, page, erreurs } = await ouvrir(browser, "mobile");
+  const { ctx, page, erreurs } = await ouvrir(browser, "tablette");
   await page.locator("#preparationList .commande-ligne-main").first().click();
   await page.waitForTimeout(300);
   const r = await page.evaluate(() => {
@@ -156,7 +160,7 @@ test("la ligne OUVRE un sheet (coins 28, poignee en mobile) qui porte les action
     };
   });
   expect(erreurs).toEqual([]);
-  console.log(`[sheet/mobile] ${r.titre} · actions ${r.actions.join(" / ")} · bas ${r.bas}`);
+  console.log(`[sheet/tablette] ${r.titre} · actions ${r.actions.join(" / ")} · bas ${r.bas}`);
   expect(r.ouvert).toBe(true);
   expect(r.rayon).toBe("28px");
   expect(r.rayonBas, "en mobile le sheet colle au bas de l'ecran, coins bas droits").toBe("0px");
@@ -196,7 +200,7 @@ test("en desktop le sheet est centre, sans poignee", async ({ browser }) => {
 
 test("« Passer en preparation » depuis le sheet : le sheet se ferme et la ligne change de mot", async ({ browser }) => {
   test.setTimeout(180000);
-  const { ctx, page, erreurs } = await ouvrir(browser, "mobile");
+  const { ctx, page, erreurs } = await ouvrir(browser, "tablette");
   const ligne = page.locator("#preparationList .commande-ligne", { hasText: "À faire" }).first();
   const nom = await ligne.locator("strong").textContent();
   await ligne.locator(".commande-ligne-main").click();

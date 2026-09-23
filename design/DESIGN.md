@@ -925,7 +925,7 @@ d'arrêt (`test/e2e/serveur-seme.js`). *Rien n'écrit dans l'application réelle
 | Ligne d'arrêt, mobile | 64–72 px | **184–209 px** | 64 (titre sur une ligne), 75 (sur deux) |
 | Informations par ligne | quatre au plus | 3 à 4, plus deux boutons | quatre, exactement |
 | Marqueur | corps vert, numéro blanc, halo orange | **`circleMarker` rayon 9, quatre couleurs V7, sans numéro** | trois états de la planche + un |
-| Tracé | orange (planche) | `#2b7062` plein / `#2563eb` pointillé | accent 4,5 px / principal pointillé |
+| Tracé | orange (planche) | `#2b7062` plein / `#2563eb` pointillé | accent 4,5 px / principal pointillé — **7 px depuis le 23/09** |
 | Badge d'arrêt « prêt » | **« Prêt »** (§4, statuts d'arrêt) | « Prêt livraison » | « Prêt » |
 
 #### D'où venaient les 120 px de trop
@@ -1022,7 +1022,8 @@ et la planification qui ne se referme pas sous les doigts du livreur.*
 - **Le mot d'état est en principal, pas en orange.** La planche écrit « ARRÊT
   EN COURS » en accent ; la charte l'interdit en texte (2,34:1 sur blanc). Le
   point reste en accent — c'est une forme.
-- **Les boutons gardent 48 / 44.** La planche fait « Livraison validée » à
+- **Les boutons gardent 48 / 44** *(au téléphone, remplacé le 23/09 : « Livré », « Y aller »
+  et leurs deux ronds font 56 — voir « Tournée mobile »)*. La planche fait « Livraison validée » à
   62 px et « Appeler » à 56. La charte dit 48 mobile, 44 desktop, et c'est ce
   que les bancs tiennent depuis le 18/09. Le geste principal se distingue par
   son poids (plein, ombre portée, 17 px), pas par sa hauteur.
@@ -1644,7 +1645,9 @@ planifier la suite, suivant) — ils existent et servent sur la route.
 
 - les flèches de réordonnancement ne s'affichent que sur une tournée **prête**, pas sur
   une tournée qui roule (la planche les montre en livraison) ;
-- les marqueurs de carte gardent 34 / 28 px et le tracé 4,5 px (la planche : 44 et 7) ;
+- ~~les marqueurs de carte gardent 34 / 28 px et le tracé 4,5 px (la planche : 44 et 7)~~ —
+  **remplacé le 23/09** par la décision de Thomas : marqueurs de 44 px, tracé de 7 px (voir
+  « Tournée mobile ») ;
 - pas de distance par arrêt ni de « km restants » : la planche ne dit pas de quoi c'est la
   distance, et rien ne la calcule côté navigateur.
 
@@ -1738,8 +1741,8 @@ Sous **820 px** (le seuil réel de la barre basse — pas 920) :
 - **Premier lancement** : sans aucune commande, une carte « Commencez par importer vos
   ventes » remplace « À régler » et « Cette semaine », avec le bouton d'import.
 
-Pas encore faits : le chargement en blocs de la taille d'un chiffre (10b haut — les
-squelettes actuels remplacent des zones entières), et le Stock sans catégorie à plat (10a).
+Le chargement en blocs de la taille d'un chiffre (10b haut) et le Stock sans catégorie à
+plat (10a) : posés le 23/09, voir « Commandes + Stock mobile + squelettes » en fin de fichier.
 
 ## 10. Guide pour l'agent
 
@@ -1748,3 +1751,627 @@ squelettes actuels remplacent des zones entières), et le Stock sans catégorie 
 - Réutiliser le vocabulaire des six planches jointes (`design/maquettes-v8/captures/*.png`) : pilules, grands rayons, sourire de la marque, une ligne par commande, trois gestes sous le pouce.
 - Données réelles plutôt que du faux texte : secteurs Besançon / Champagnole / Dole ; clients de démonstration EHPAD Les Tilleuls du Val de Loue, SSIAD de la Haute Vallée, Clinique Vétérinaire ; produits changes molletonnés taille L, alèses ; numéros de commande `CMD-2026-001`.
 - Le résultat sera codé à la main en HTML, CSS et JavaScript natifs, sans framework : composants simples, tokens en variables CSS, aucune bibliothèque d'animation.
+
+## Chargement instantané, posé le 23/09
+
+But : le moins d'attente possible à l'ouverture. Aucune planche ne dessine ce lot ; il ne
+change aucun écran, seulement **quand** ils se remplissent et ce que dit la pastille de
+synchro (`#syncStatus`).
+
+### Ce qui est posé
+
+- **Fichiers statiques depuis le cache** (CSS, JS, polices, icônes, Leaflet) : le service
+  worker répond depuis son cache puis revalide en arrière-plan (*stale-while-revalidate*).
+  Shell renommé `sereo-shell-20260923-instantane`. `file-attente.js` (importé par `app.js`,
+  absent de la liste) et les quatre graisses Poppins entrent dans la liste préchargée.
+- **Dernières données connues tout de suite** : au premier chargement de la page, `app.js`
+  lit le cache de données du service worker et dessine tout ce qu'il contient, **pendant**
+  que le réseau part (il part d'abord ; lire le cache ne lui coûte rien). La pastille dit
+  « Mise à jour… » jusqu'à la réponse, puis « À jour ». Relu seulement au premier
+  chargement : après une écriture, relire la copie d'avant ferait reculer l'écran.
+- **Une copie n'est jamais dite fraîche** : toute réponse que le service worker tire de son
+  cache (réseau coupé ou plus lent que 3 s) porte l'en-tête `X-Sereo-Cache`. La pastille
+  dit alors « Données de 14:32 » (« Données du 21/09 » si ce n'est pas le jour même) et
+  jamais « À jour ». Avant ce lot, le repli sur le cache était annoncé « À jour ».
+- **Polices préchargées** : `<link rel="preload">` des quatre graisses `poppins-{400,500,600,700}-latin.woff2`,
+  les seules que le tableau de bord charge à 1440 et 390 px (mesuré ; aucune `latin-ext`).
+- **La nouvelle version arrive** : au démarrage, le serveur calcule le nom du shell =
+  `CACHE_NAME` de `service-worker.js` **suivi de l'empreinte du contenu** de `public/` et de
+  Leaflet (`lib/empreinte-shell.js`, SHA-256 tronqué à 12). Il l'annonce dans l'en-tête
+  `X-Sereo-Shell` de la page et sert `service-worker.js` avec ce nom à la place de
+  `CACHE_NAME`. Un octet change dans `public/` : le nom change, le navigateur installe un
+  nouveau service worker, et l'ancien, plus vieux que la page, sert CE chargement par le
+  réseau (l'ancienne stratégie). Aucun bump à la main n'est requis (voir « Relecture
+  adverse » plus bas).
+- **Fin de session** : `POST /logout` vide le cache de données (dans le service worker, quelle
+  que soit la page qui déconnecte) ; un 401 le vide aussi avant de renvoyer vers `/login`.
+
+### Décisions prises
+
+1. **`/api/operations` et `/api/subscriptions` entrent dans le cache de données.** Ils
+   étaient exclus depuis le 16/09 sans raison écrite, et ils portent les chiffres du tableau
+   de bord : sans eux, rien d'instantané. Justification : aucun des deux ne lit l'identité
+   (comme `/api/orders`, déjà en cache) ; le défaut que l'exclusion évitait — une copie
+   montrée comme fraîche — est tenu désormais par `X-Sereo-Cache`. `/api/me`,
+   `/api/comptes`, `/api/version`, `/api/storage/status`, `/api/geocode` restent exclus.
+2. **Le HTML reste servi par le réseau, jamais du cache.** C'est la requête de la page qui
+   porte le contrôle de session : sans session, le serveur rend la page de connexion et
+   l'application ne tourne pas, donc aucune donnée en cache ne s'affiche avant que le
+   serveur ait reconnu quelqu'un. Le coût : l'application ne se rouvre toujours pas hors
+   ligne (dette déjà nommée, inchangée).
+3. **Tout ou rien** pour l'affichage immédiat : une copie partielle montrerait des listes
+   vides qui ne le sont pas. Seule exception, les commandes du jour (leur URL porte la
+   date : à la première ouverture du jour, elle manque ; elles gardent alors leur valeur).
+4. **« Mise à jour… » et non un horodatage** pendant la mise à jour : elle dure moins d'une
+   seconde en ligne. L'heure de la copie n'apparaît que si la copie **reste** affichée.
+5. **Pas de *navigation preload*** : il aurait doublé la requête de `/login`, que le service
+   worker laisse passer. Gain possible, à mesurer sur téléphone.
+
+### Écarts nommés
+
+- `X-Sereo-Shell` repose sur une mémoire du service worker : si le navigateur l'arrête entre
+  la page et ses scripts (rare, quelques secondes), ce chargement-là retombe sur le cache
+  d'abord, donc sur l'ancienne version une fois ; le chargement suivant a la nouvelle.
+- L'empreinte est calculée **au démarrage** : un fichier de `public/` modifié à chaud, sans
+  redémarrer le serveur, n'est pas vu (en production, chaque livraison redémarre le
+  conteneur). Toute livraison qui touche `public/` réinstalle le shell complet chez chaque
+  utilisateur (≈ 1 Mo, polices comprises), ce que faisait déjà un bump.
+- Aucune déconnexion n'existe dans l'interface aujourd'hui (seulement la route `POST /logout`) ;
+  le vidage est posé dans le service worker pour qu'il vaille pour tout futur bouton.
+
+### Mesure, avant / après
+
+Banc `test/e2e/chargement-instantane.spec.js`, test « mesure » : serveur semé, second
+chargement à cache chaud, temps depuis le début de la navigation jusqu'au premier chiffre du
+tableau de bord (`#opRevenue`), médiane de 5 (min–max), machine partagée par plusieurs
+agents — les écarts absolus bougent, l'ordre de grandeur non.
+
+| Réseau simulé sur l'API | Avant (main, 3 passes) | Après (ce lot, 3 passes) |
+|---|---|---|
+| aucun (localhost) | médianes 320, 245, 220 ms | médianes 277, 242, 269 ms |
+| +300 ms par réponse | médianes 1 470, 1 435, 1 461 ms | médianes 223, 333, 208 ms |
+
+Sur localhost, **aucun gain mesurable** : le réseau y est instantané, les deux colonnes
+sont dans le bruit. Avec 300 ms par réponse (un téléphone en 4G moyenne), le premier chiffre
+passe d'environ 1,45 s à environ 0,25 s : il ne dépend plus du réseau. Une première passe
+« avant », machine plus chargée, avait donné 551 ms et 1 753 ms.
+
+Pourquoi 1,45 s pour 300 ms de latence, avant : dix-sept appels sur six connexions HTTP/1.1
+font trois vagues, et le chiffre attend la plus lente.
+
+### Bancs
+
+`test/e2e/chargement-instantane.spec.js` (port 3174 et un mandataire HTTP sur port libre,
+qui sait retenir, retarder ou réécrire les réponses) : chiffres affichés avant le réseau
+sous « Mise à jour… » · repli sur le cache jamais « À jour » · statique servi quand le réseau
+se tait · nouveau shell dès le premier chargement · revalidation au chargement suivant ·
+déconnexion et 401 vident le cache · polices préchargées = polices du premier rendu (mesurées
+sur la même page **sans** ses préchargements).
+`test/api.test.js` : la page annonce `X-Sereo-Shell` = le `CACHE_NAME` du service worker servi,
+et seulement la page ; ce nom = `CACHE_NAME` du fichier + empreinte du contenu.
+`test/empreinte-shell.test.js` : un octet modifié, un fichier ajouté ou renommé changent
+l'empreinte ; un dossier absent ne fait pas échouer le démarrage.
+
+### Relecture adverse, 23/09
+
+1. **Livraison sans bump de `CACHE_NAME` — vrai, corrigé.** Le nom du shell ne changeait
+   qu'à la main ; or 8 des 15 derniers commits de `main` touchant `public/js` ne touchent pas
+   `service-worker.js` (ex. 19fa441 : nouvel export `GROUPES_NAV` importé par `app.js`, sans
+   bump). Au premier chargement après une telle livraison, la page neuve (réseau) tournait sur
+   l'`app.js` et le `style.css` de l'ancien cache. Décision : le nom est désormais dérivé du
+   contenu par le serveur (voir « La nouvelle version arrive »), plutôt qu'un garde de CI qui
+   exigerait le bump : un garde se contourne ou s'oublie, une empreinte ne demande aucun geste.
+   L'ancienne phrase « une page neuve ne tourne jamais sur un vieux script » est vraie
+   désormais, à l'exception nommée plus haut (service worker arrêté entre la page et ses
+   fichiers).
+2. **Banc des polices, moitié « et seulement elles » — vrai, corrigé.** Une police préchargée
+   est toujours téléchargée, donc toujours dans les ressources mesurées : l'inclusion était
+   vraie par construction. Le banc mesure maintenant les polices utilisées sur la même page
+   dont les `<link rel="preload" as="font">` sont retirés (route Playwright), et exige
+   l'égalité des deux ensembles.
+
+### Tournée mobile (planches 4a, 4b, 4c, 4d ; 5c, 11a-11c en sombre), posé le 23/09
+
+**Le cockpit (4b).** Trois gestes sous le pouce, selon la décision de Thomas : une rangée
+Appeler (rond de 56) · **« Y aller »** (56, plein) · Carte (rond de 56) ; **« Livré »** en 56
+pleine largeur ; « Client absent » et « Problème » dessous, à 48, surface basse, sans couleur.
+« Y aller » est l'ancien « Itinéraire » : il ouvrait déjà Google Maps sur
+`https://www.google.com/maps/dir/?api=1&destination=<adresse encodée>` — le libellé change,
+le mécanisme reste. Au bureau, les gestes gardent 44 px (planche 13b).
+
+- **Mesure avant : le geste principal était SOUS la barre basse.** À 390 × 844, « Livraison
+  validée » tombait à y ≈ 740, la barre basse commence à 754. Les gestes collent maintenant
+  au bas de l'écran, au-dessus de la barre (`position: sticky`), tant que la carte de l'arrêt
+  est à l'écran. Il a fallu `overflow-x: clip` au lieu de `hidden` sur `<body>` et `<main>`
+  (sur cet écran seul) : `hidden` en fait des conteneurs de défilement, et le collage se
+  faisait au bas de la page entière, jamais à celui de l'écran.
+- **« Autres actions »** (À reprogrammer, Planifier suite, Suivant) sort du bloc des gestes :
+  gardée, repliée, sous la carte de l'arrêt — elle n'a pas à coller au pouce.
+- **« Prochain : <client> · ville »** sous les articles. **Omis** : « 6,2 km · environ
+  14 min » — aucune distance par arrêt n'est calculée, ni au serveur ni au navigateur.
+
+**Après « Livré » : sans confirmation, avec Annuler.** L'arrêt passe à « Livré » à l'écran,
+la tournée avance d'elle-même à l'arrêt suivant non terminé, et un toast « Livré — <client> »
+porte **Annuler** pendant 4 s (la durée de la charte). **Décision** : le serveur ne sait pas
+défaire une livraison — dans la machine d'état des commandes, `livre` n'a aucune sortie, et la
+livraison consomme la réservation de stock. Plutôt que d'ouvrir une transition
+`livre → en_livraison` (et de défaire une consommation de stock), **l'envoi est différé** :
+le `PATCH` part au terme des 4 s. Annuler n'a donc rien à défaire côté serveur. L'envoi part
+plus tôt si un autre geste d'arrêt suit (jamais deux livraisons en suspens), ou si la page
+passe en arrière-plan (téléphone verrouillé, Google Maps ouvert) — `keepalive` pour
+`pagehide`. Hors ligne, l'écriture rejoint la file existante. Un double appui dans les
+700 ms est ignoré : sans cela il livrait deux arrêts. **Risque nommé** : si le navigateur
+est tué dans les 4 s sans passer par `visibilitychange`/`pagehide`, la livraison n'est pas
+envoyée ; l'arrêt reste « En livraison » au rechargement, visible, à refaire.
+
+**« Problème » : motifs prédéfinis + précision libre — tranché, et c'était déjà là.** La
+question ouverte de la planche (« sheet à motifs prédéfinis ou champ libre ? ») est tranchée
+par ce qui existe depuis le 18/09 : le dialogue `#motifProblemeDialog` propose les motifs du
+serveur (`MOTIFS_PROBLEME` : personne sur place, adresse introuvable, accès impossible
+— portail, code, étage —, établissement fermé, commande refusée, produit manquant ou abîmé,
+autre) **et** un champ « Précision » libre de 120 caractères, stocké avec le motif. Les trois
+motifs de la planche (portail fermé, refus, erreur d'adresse) y sont. Rien n'est ajouté.
+
+**La carte (4c).** Décision de Thomas, qui **remplace** celle du 19/09 : marqueurs de
+**44 px** (la zone de toucher est le disque ; chiffre 17 px, ombre portée de la planche) et
+tracé de **7 px**. **Décision** : un **liseré blanc** de 2 px de chaque côté, sous le tracé,
+non interactif — sur les vraies tuiles OpenStreetMap, dont les routes sont orange et jaunes,
+l'orange seul se perdait ; la planche le craignait elle-même (« le fond de carte ici est une
+esquisse »). Les marqueurs de la **liste** gardent 28 / 34 : la ligne tient 64–72 px.
+**Gardé** : réordonner invalide le tracé (le serveur efface la géométrie ; la carte dessine le
+pointillé en principal). Nouveau : « Recalculer le tracé » est alors **cerclé d'accent** (un
+contour, pas une ombre — l'anneau de focus reste visible avec). **Écarts** : la carte n'est
+pas un mode plein écran à « sheet » en surimpression ; le bouton Carte du cockpit y fait
+défiler. Pas de puce « 18 km restants » : le reste n'est calculé nulle part.
+
+**Préparer (4a).** Au téléphone, la commande prête se lit comme la planche : le client, puis
+« CMD-2026-009 · 2 articles » (articles = lignes, le même mot que « n articles à décharger »).
+L'adresse, le téléphone et le badge quittent la ligne ; l'avertissement d'adresse
+incomplète reste. Le jour et le secteur restent, dessous (corrigé par la revue du 23/09, voir
+plus bas). **Gardés hors planche** : les filtres date / secteur / ville et les trois
+boutons de sélection. **Omis** : « 38 km · 1 h 25 » recalculés à chaque coche (aucun calcul
+avant la création de la tournée), les pilules de secteur de la planche (le filtre « Secteur »
+existe), et le pied collant « n arrêts sélectionnés · Créer la tournée » (le compte et le
+bouton existent dans la planification) — non faits dans ce lot.
+
+**Fin de tournée (4d).** « Tournée terminée », la phrase « Tournée <secteur> du <jour>, de
+13 h 40 à 17 h 05 » (heures depuis `startedAt` / `completedAt`, omises si l'une manque), les
+**trois chiffres** (Livrés, Clients absents, Problèmes — `a_reprogrammer` compté en
+problème), les **problèmes nommés** (client + motif enregistré), l'arrivée et son « Y aller ».
+Pas de fête. **Omis** : « 62 km parcourus » (la distance connue est celle du tracé prévu, pas
+celle roulée) et « 3 h 25 sur la route » en chiffre séparé (l'intervalle est dans la phrase) ;
+**« Clôturer »** — aucune clôture n'existe côté serveur, la tournée passe `terminee` d'elle-même
+au dernier arrêt ; **« Reprogrammer »** sur l'écran de fin (« Planifier suite » existe sur
+l'arrêt). Gardés : « Retour accueil », « Voir à recommander ».
+
+**Écarts nommés.**
+
+- **La barre basse reste** sur le cockpit et la carte. La planche la retire (« la barre
+  basse cède la place aux trois gestes », « retour par la flèche ») ; le cadre commun du lot 1
+  la tient sur tous les écrans, et aucune flèche de retour n'existe. Les gestes collent
+  au-dessus d'elle.
+- **Le bouton de droite est la carte, pas les articles.** L'annotation dit « articles à
+  droite », le dessin montre une carte pliée ; les articles sont déjà sur la carte de l'arrêt.
+- **Les ronds font 56** (48 sur la planche), pour tenir la rangée de « Y aller » à 56.
+- **L'en-tête de tournée** ne garde au téléphone que l'anneau et la barre : le jour et le nom
+  sont déjà le titre de l'en-tête vert (même donnée, deux fois).
+- **Le toast couvre la rangée « Client absent / Problème »** pendant ses 4 s : il se pose
+  au-dessus de la barre basse, et Annuler tombe sous le pouce.
+
+*Bancs : `tournee-mobile.spec.js` (9 cas, ports 3175 et 3181) ; `ecran-livreur.spec.js` et
+`carte-et-lignes.spec.js` mis à jour (libellés et 56 px ; 44 px, 7 px et liseré) ;
+`operations.spec.js` attend l'envoi différé (10 s au lieu de 5).*
+
+### Tournée mobile — revue adverse, corrigée le 23/09
+
+Une relecture adverse du lot a nommé cinq défauts. Les cinq sont vrais ; les cinq sont
+corrigés, chacun avec un banc qui échoue sans le correctif.
+
+- **« Livré » en réseau lent livrait un arrêt jamais vu.** L'envoi d'une livraison en
+  suspens attendait le `PATCH` et le rechargement sans rien bloquer : un appui impatient
+  posait B en suspens, l'appui précédent reprenait, lisait l'arrêt de l'écran (devenu C)
+  et écrasait B ; au terme du toast de B, c'est C qui partait. **Décision** : le geste vise
+  l'arrêt de l'écran **à l'appui** ; après l'attente, il n'agit que si cet arrêt est encore
+  à l'écran et qu'aucune autre livraison n'est en suspens. Pendant l'attente, les gestes
+  d'arrêt sont **désactivés** (le livreur voit que l'appui est pris). Le terme d'un toast
+  n'envoie que **sa** livraison. Le garde de 700 ms du double appui reste.
+- **Hors ligne, le geste qui suivait un « Livré » était perdu sous « enregistré ».** La mise
+  en file de la livraison en suspens arrêtait le geste suivant (Livré, Client absent,
+  Problème). **Décision** : une mise en file n'est pas un échec — elle est annoncée, et le
+  geste continue ; il rejoint la file à son tour. Un refus du serveur, lui, arrête toujours
+  le geste (l'écran vient d'être rechargé).
+- **Préparer (4a) : la ligne ne disait plus le jour.** Le filtre par défaut mélange les dates
+  et les secteurs, et la carte n'a **aucun détail** (une case à cocher) : deux commandes du
+  même EHPAD, aujourd'hui et demain, se lisaient pareil. **Décision** : sous « CMD-… · n
+  articles », une ligne de contexte, 13 px, texte secondaire : le **jour** et le **secteur**
+  toujours, la **priorité** si elle n'est pas la normale, « **À reprogrammer** » (le seul
+  statut qui n'est pas « Prêt »). **Écart nommé** : la planche n'a pas cette ligne — son
+  en-tête dit le jour, et ses pilules de secteur, non posées, disaient le secteur.
+- **« Recalculer le tracé » cerclé sur une tournée partie.** Le serveur refuse le recalcul
+  dès le départ (« Recalcule avant le départ. ») : le cercle invitait à un refus. Il ne se
+  pose plus que sur une tournée **prête** sans tracé — le cas de la planche (réordonner
+  n'est possible qu'avant le départ).
+- **Fin de tournée (4d) : les gestes d'arrêt restaient collés.** Six boutons inertes, ~200 px
+  au-dessus de la barre basse, sur la lecture des chiffres. Au téléphone, ils disparaissent
+  quand l'écran de fin est rendu ; « Retour accueil » et « Voir à recommander » restent.
+  **Gardé** : au bureau (ils n'y collent pas), les gestes désactivés restent visibles, comme
+  avant ce lot.
+
+*Bancs : `tournee-mobile.spec.js`, 12 cas (ports 3175 et 3181, inchangés) — deux neufs
+(réseau lent : `PATCH` retardé de 2,5 s ; hors ligne : la file indexedDB réelle, puis le
+rejeu), trois renforcés (4a : le jour et deux commandes du même client ; 4c : une tournée
+« prête » lue par interception, et la tournée partie ; 4d : les gestes masqués).*
+
+### Mobile, Préparation (planches 7a, 7b), posé le 23/09 — une liste, une page
+
+Décision de Thomas (OUI du 23/09) : au téléphone, la Préparation devient **une liste
+unique avec des mots de statut** ; les pilules de filtre passent dans l'**en-tête vert** ;
+le détail d'une commande suit la planche **7b**. Tout vaut **sous 820 px**.
+
+| élément | planche | avant | après |
+|---|---|---|---|
+| La liste | une carte, cinq lignes de 72 px | quatre sections « À préparer / En cours / Prêtes livraison / Bloquées stock » | **une** carte blanche, sans titre de groupe, triée |
+| L'état | point de 10 px + mot de statut | disque de 40 px + mot d'**étape** (À faire, En cours, Prête) | point de 10 px + mot de **statut** : Bloquée · En préparation · À vérifier · À préparer · Prêt livraison |
+| Le tri | bloquées, en préparation, à vérifier, prêt livraison ; puis secteur, puis numéro | l'ordre des groupes | celui de la planche, recalculé à chaque rendu (une commande débloquée remonte) |
+| Filtres | pilules sur le vert, loupe en haut à droite | pilules et recherche dans un panneau blanc sous l'en-tête | le même bloc **déplacé** dans la fente de l'en-tête ; la loupe déplie la recherche |
+| Détail | une page : retour, « CMD-… · date », nom, puces secteur + statut, produits, adresse, un geste en bas | un sheet à trois boutons, deux grisés sans raison | la page 7b (le même `<dialog>`, plein écran) ; **un** geste selon le statut, et sa raison quand il est désactivé |
+
+*Bancs : `preparation-mobile.spec.js`, 11 cas (ports 3176 et 3182) — liste et tri,
+en-tête et loupe, sombre, page 7b, geste depuis la page, franchissement de 820 px, tri à
+statut égal ; et, après relecture adverse : recherche tapée au bureau puis rotation,
+loupe refermée avant les 200 ms, Safari < 14 (sans `MediaQueryList.addEventListener`),
+sous-titre au téléphone seulement. `preparation-lignes.spec.js` : ses cas « mobile » passent à **900 px**
+(entre 821 et 920 px, la liste garde ses groupes et le détail reste un sheet collé en
+bas) — la couverture du sheet n'est pas perdue, elle change de largeur.
+`navigation-mobile.spec.js` : l'en-tête de la Préparation rejoint les six en-têtes
+jugés « vert, rien n'y déborde ».*
+
+**Décisions prises là où la planche ne tranche pas** :
+
+- **« À préparer »** pour une commande importée dont le stock suffit. La planche ne
+  montre que « À vérifier » avant la préparation ; la charte dit « Importée », qui ne
+  dit rien à qui prépare. « À préparer » est le mot de la pilule de Commandes et du
+  tableau de bord. « À vérifier » reste pour le statut `stock_a_verifier`. Même rang de
+  tri que « À vérifier ».
+- **Le manque se compte en articles**, pas en produits : « Il manque 5 articles » (la
+  somme des quantités manquantes), comme la planche (« Il manque 2 articles » / « 2 en
+  stock, 2 manquants »). Un stock non renseigné n'est pas un manque : « Stock non
+  renseigné ». Au bureau, la ligne garde « Il manque 1 article » (un produit) : le
+  banc du bureau le tient, et c'est un écart **nommé** entre les deux vues.
+- **« n articles »** sur la ligne mobile compte les quantités (6 pour deux produits à
+  3), comme le résumé au-dessus (« 29 articles au total »). La ligne du bureau compte
+  encore les **produits** (« 2 articles ») : les deux nombres se contredisaient déjà
+  sur le même écran ; **relevé, non corrigé au bureau** (hors de la décision).
+- **Le sous-titre** : « 3 commandes à préparer » = les commandes **restantes**
+  (importées, bloquées comprises, et en préparation), le même nombre que « 3
+  restantes » du résumé. La planche écrit « 5 commandes à préparer aujourd'hui » en
+  comptant les prêtes, et « aujourd'hui » serait faux : la liste n'est pas bornée au
+  jour. Posé **au téléphone seulement** (sous 820 px) : au bureau, le sous-titre reste
+  celui de `tabs.js` (« Contrôle le stock, prépare les commandes… »), et franchir 820 px
+  le remet. Les autres écrans (Commandes, Stock, Clients, Abonnements) gardent leur
+  sous-titre-compte à toutes les largeurs ; celui-ci vient de la planche 7a, une
+  planche **téléphone**, et la Préparation n'a pas de planche bureau. (Une première
+  version le posait partout et la documentation disait à la fois « rien ne change au
+  bureau » et « seul changement visible au bureau » : relevé en relecture, tranché
+  pour « rien ne change ».)
+- **Le nom passe sur deux lignes** au lieu de l'ellipse de la planche : à 390 px, avec
+  « En préparation » à côté, il restait « Pharmacie Centra… » et « Champagnole · 6
+  artic… ». La ligne fait 72 px et monte à 96 au plus ; le détail n'est jamais coupé.
+- **La loupe** replie la recherche (gardée : la planche ne la dessine pas) ; la
+  refermer **efface** la recherche — un filtre qu'on ne voit plus cacherait des
+  commandes sans le dire. Même règle dans les deux cas limites : une recherche tapée
+  **au bureau** qui passe sous 820 px (rotation d'une tablette) arrive **dépliée**
+  derrière la loupe, sans focus (une rotation n'ouvre pas le clavier) ; refermer la
+  loupe **pendant** les 200 ms d'attente de la frappe annule cette frappe.
+- **Un seul geste** en bas de la page 7b, celui du statut : « Passer en préparation »
+  (à préparer, à vérifier), « Préparation terminée » (en préparation), rien pour une
+  prête (une phrase le dit). Bloquée : le bouton est **désactivé et dit pourquoi**
+  (« Il manque 5 articles en stock pour commencer », relié par `aria-describedby`),
+  dessiné au contour de la planche plutôt qu'en plein grisé.
+- **Au bureau (> 820 px), rien ne change** : il n'existe **aucune planche bureau** de
+  la Préparation dans l'export (7a/7b sont des planches téléphone) ; la décision de
+  Thomas vise le téléphone. Groupes, mots d'étape et sheet restent. Franchir 820 px
+  (rotation, fenêtre) redessine la liste et replace les filtres — mesuré.
+
+**Écarts nommés** :
+
+- pilules de **48 px** et non 44 : la hauteur de pilule mobile de la charte, déjà
+  tenue par `preparation-lignes.spec.js` ;
+- pas de pilules de **statut** : la décision les autorise, la planche 7a n'en dessine
+  aucune (seulement les secteurs) ; ne pas les inventer ;
+- le fond du geste en bas est **opaque** (planche : 82 % flouté), pour la même raison que
+  la barre basse du lot 1 : la raison en alerte ne passe jamais sur un contenu qui défile ;
+- la puce de statut de 7b porte le mot de statut de la ligne (« Bloquée », « À
+  préparer »), pas le statut technique.
+
+**Gardés, hors planche** (ils existent et servent) : la **recherche** (derrière la
+loupe), le **repli des secteurs** (« Tous les secteurs », le secteur choisi passe en
+tête), la **date de livraison** (lue par « Préparation terminée ») et l'**Itinéraire**,
+dans la carte d'adresse de 7b ; la pastille de synchro et « Actualiser » de l'en-tête
+(lot 1).
+
+**Omis faute de données** (règle : ce qu'une planche invente sans données est omis) :
+
+- **cocher les lignes** une à une, « 4 lignes sur 6 préparées », la barre de progression,
+  et « Préparation terminée » désactivé tant que tout n'est pas coché : aucune donnée ne
+  garde une ligne cochée (la planche veut qu'elle survive à la fermeture de
+  l'application), et le serveur ne conditionne pas la fin de préparation à un pointage.
+  La planche elle-même hésite (« Cocher ligne par ligne, ou une seule case ? »). La
+  consigne de départ parlait de « garder le cocher » : **il n'existait pas** dans la
+  Préparation — les seules cases de l'application sont la sélection des Commandes
+  (« À envoyer ») et celle de la planification de Tournée, intactes ;
+- « Commander » / « Livrer partiellement » sur une ligne manquante : aucune route ne
+  commande à un fournisseur ni ne livre une partie (même écart que le Stock du 23/09) ;
+- « livraison le matin » sous le téléphone : aucun champ d'instruction de livraison.
+
+**Relevé, hors lot** : entre 821 et 920 px, les pilules font 44 px mais le plafond de
+repli est calculé sur 48 (`calc(2 * 48px + 8px)`) — un demi-rang de trop visible. Pas
+touché : ni téléphone ni bureau.
+
+### Mobile, Abonnements (planches 3a, 3c, 5a), posé le 23/09
+
+Sous **820 px**. `abonnements-mobile.spec.js` (12 cas, port 3177) ; `abonnements-lignes.spec.js`
+et `abonnements.spec.js` suivent la nouvelle ligne.
+
+**Posé**
+
+- **La ligne de 96 px** (décision de Thomas) : trois rangées — le client et son badge d'état ;
+  l'échéance et la fréquence (« Mercredi 23 septembre · tous les 14 j », ou « Échéance du
+  13 septembre » en couleur d'alerte quand elle est en retard) ; le panier et le rappel
+  (« 4 Changes taille L · rappel 2 j »). Carte blanche de 24 px de rayon, 12 × 18 px de marge
+  intérieure : 12 + 24 (badge) + 6 + 19 + 6 + 17 + 12 = 96. Le disque d'état se retire : le badge
+  porte l'état, comme sur la planche. Le tap ouvre toujours le sheet de détail.
+- **« Nouvel abonnement » fixé en bas**, pleine largeur moins 16 px de chaque côté, 48 px, à 14 px
+  au-dessus de la barre basse. La liste lui **réserve sa place** (172 px sous le dernier
+  abonnement, zone sûre en plus) : tout en bas, le dernier abonnement est entièrement au-dessus
+  du bouton — mesuré. Le bouton reste le même élément que celui de l'en-tête du bureau (un seul
+  geste, deux positions). Il disparaît dans l'agenda (3c n'en a pas).
+- **L'en-tête vert** prolongé dans le bloc des filtres : les pilules Tous / Actifs / En pause
+  sur le vert (inactives en surface sur vert, active en blanc à texte vert ; en sombre, plein
+  clair), un seul bloc arrondi de 28 px sous les pilules.
+- **Le calendrier** rond de 44 px en haut à droite de l'en-tête ouvre **« Les 90 jours »** (3c) :
+  l'en-tête dit « Les 90 jours » et « N livraisons prévues », une flèche de retour à gauche du
+  titre ; chaque semaine est une carte, chaque échéance a son jour en deux étages (« MER » / 23)
+  et son **« + » rond de 44 px** (nom accessible : « Créer la commande du … pour … »). Le
+  retour du téléphone, la flèche, ou tout changement d'écran ramènent la liste.
+
+**Décisions prises (questions ouvertes de la planche)**
+
+- La fréquence prend, **au téléphone seulement**, la forme courte de la planche (« tous les
+  15 j », « mensuel », « tous les 2 mois ») : la forme longue (« toutes les 2 semaines ») était
+  coupée derrière l'échéance à 390 px. Le bureau, le sheet et l'éditeur gardent la forme longue.
+- Un nom sur deux lignes est gardé (deux lignes au plus, puis ellipse) : la ligne passe alors à
+  112 px. Couper un nom de client pour tenir 96 px aurait caché ce qui distingue deux EHPAD.
+- Une ligne **en pause** dit « Livraisons suspendues » et descend la fréquence au panier ; une
+  ligne **arrêtée** dit « Plus de livraison ». Un abonnement actif sans échéance dans l'horizon :
+  « Aucune échéance prévue ».
+- **« La prochaine échéance »** ne compte plus une échéance passée déjà commandée : commander le
+  plus ancien de deux retards faisait afficher sa date passée, sans alerte, comme « prochaine ».
+  Le correctif vaut aussi pour la colonne « Prochaine » du bureau, le tri, **et le sheet de
+  détail** que la ligne ouvre (il gardait l'ancien calcul : la ligne disait « Échéance du 20 »,
+  le sheet « Prochaine échéance : 13 », une date passée déjà commandée). Le sheet dit aussi le
+  retard comme la ligne : « … · en retard », en couleur d'alerte.
+- **Le bandeau « Hors ligne » / « Envoi en attente »** s'intercale dans le DOM entre l'en-tête et
+  les filtres. Tant qu'il est là, l'en-tête garde son arrondi de 28 px et les filtres deviennent
+  une carte verte fermée (28 px, dans la gouttière) sous le bandeau : deux verts fermés plutôt
+  qu'un vert coupé à angles droits. Le réseau revenu, l'en-tête se prolonge à nouveau.
+- **L'écran passe au-dessus de 820 px, l'agenda ouvert** (tablette qu'on tourne) : la vue revient
+  à la liste, le titre « Abonnements » et son compte, et l'entrée d'historique de l'agenda est
+  neutralisée (sinon la flèche, revenu au téléphone, aurait demandé deux touchers).
+- **Un rechargement depuis l'agenda** repart sur la liste et efface l'état `{ aboVue: "agenda" }`
+  de l'entrée courante : la flèche ramène la liste du premier toucher. Le même motif existe pour
+  la fiche client (`app.js`), hors de ce lot, non corrigé ici.
+- **Au bureau**, l'emballage des échéances d'une semaine (`.abo-semaine-lignes`, la carte du
+  téléphone) est en `display: contents` : les échéances retrouvent leurs 8 px d'écart (elles se
+  touchaient sur la première version du lot).
+
+**Gardés, hors planche** : la recherche (dans l'en-tête), le tri « Prochaine livraison /
+Client » (pilule sur le vert, à côté des filtres), la pastille de synchronisation et
+« Actualiser », le statut de commande d'une échéance déjà commandée (il mène à Commandes).
+
+**Écarts nommés**
+
+- pas d'opacité sur la ligne en pause (la planche : 0,78) — même raison qu'au bureau, le
+  contraste tombait sous 4,5 ;
+- les titres de semaine gardent le vocabulaire du bureau (« Cette semaine · 3 », « Semaine du
+  28 septembre · 2 ») au lieu de « Semaine du 21 septembre » + « 3 livraisons » ;
+- « En retard · N » reste en tête de l'agenda (la planche 3c n'en montre pas ; décision du bureau
+  maintenue) ;
+- le bouton fixe est à 14 px de la barre basse telle qu'elle est rendue (90 px à 390, « Tableau de
+  bord » sur deux lignes) — pas des 88 px de la planche ;
+- un retour arrière depuis l'agenda, après un changement d'écran, consomme une entrée
+  d'historique vide (l'agenda pose une entrée pour que le retour du téléphone le ferme).
+
+**Omis, faute de données**
+
+- « En pause depuis le 4 septembre » : aucun champ ne date la pause ;
+- le toast « Bon CMD-2026-0xx créé » avec **Annuler** : la création reste celle de l'application
+  (une notification, sans annulation — aucune route ne supprime une commande d'abonnement) ;
+- la création 3b (sélecteur client en carte, catalogue avec stock, pilules de fréquence, aperçu
+  des trois dates) : l'éditeur actuel est gardé tel quel, c'est un lot à part ;
+- la tache floue rose derrière la liste (décor).
+
+**`CACHE_NAME`** : réglé à l'intégration du 23/09. Le lot « chargement instantané » l'a porté à
+`sereo-shell-20260923-instantane`, et surtout le nom annoncé porte désormais l'empreinte du
+contenu de `public/` : tout fichier modifié renouvelle le shell sans geste de personne.
+
+### Mobile, Paramètres (planches 8d/12d), posé le 23/09
+
+Sous **820 px** ; au bureau, rien ne change (ce qui est propre au téléphone porte
+`.par-telephone`, ce qui est propre au bureau `.par-bureau`). Banc :
+`test/e2e/parametres-mobile.spec.js` (port 3179), comptes et archives servis par le banc.
+
+**Posé, d'après la planche** :
+
+- les cartes à la mesure de 8d : rayon 24, marge 18, écart 14, titre 17 px, aide 13 px ;
+- **les comptes en lignes** : initiale sur disque vert (40 px), nom, rôle, et le badge
+  d'état (« Actif » / « Désactivé ») — le tableau à cinq colonnes n'est plus rendu ;
+- **« Ajouter un compte »**, bouton contour pleine largeur : il déplie le formulaire de
+  création, replié par défaut. Il n'est rendu que pour l'administration, comme le
+  formulaire ;
+- **les imports en lignes** : « Dernier import de ventes » et « Dernier import de stock »
+  (« 16 septembre à 8 h 42 · 38 lignes »), puis « Archives » (« N fichiers conservés »).
+  L'année en cours se tait, comme sur la planche ; **une autre année se dit**
+  (« 20 septembre 2025 à 9 h 05 ») : les archives ne sont jamais purgées, et un import
+  d'il y a un an, sans son année, se lirait comme un import de la semaine. « lignes »
+  s'accorde (« 1 ligne »), sur la ligne comme dans la feuille ;
+- **« Ajouter »** sur la ligne du titre des Secteurs : il ouvre la fiche des secteurs et
+  place le curseur dans le formulaire ;
+- **la version au pied** (« Version 1.40.2 · À jour ») : au téléphone, la barre latérale
+  qui la porte n'est pas rendue. La pastille suit la même règle que celle de la barre
+  latérale : « À jour » seulement si la version a été lue, « Mise à jour » si une
+  nouvelle version attend.
+
+**Décisions prises** (les questions que la planche laisse ouvertes) :
+
+- **la feuille d'un compte.** La planche ne montre qu'une ligne, sans geste ; or le
+  tableau porte quatre gestes (rôle, désactivation, mot de passe, suppression). La
+  **ligne entière** est le geste : elle ouvre une feuille (`<dialog class="sheet">`, comme
+  le détail d'une commande) qui porte les quatre, un par ligne, avec les mêmes
+  `data-action` que le tableau. Un geste referme la feuille (la liste se redessine,
+  elle montrerait un état périmé), et **le focus revient sur la ligne du compte**
+  redessinée — sur sa voisine si le compte est supprimé — au lieu de tomber sur
+  `<body>`. Le titre de la feuille est l'identifiant (jusqu'à 60 caractères sans
+  espace) : il **se coupe** (`overflow-wrap: anywhere`), sans pousser le ✕ hors de la
+  feuille à 360 px ;
+- **la feuille des imports.** Chaque ligne ouvre la feuille de ses fichiers : ventes,
+  stock, ou toutes les archives, du plus récent au plus ancien, chacun avec
+  « Télécharger ». C'est ce que porte le tableau du bureau ; la passation laissait
+  l'écran de destination non dessiné ;
+- **« Actif » n'est pas une `.pill`** : un badge informatif de 24 px (`.par-badge`),
+  pour ne pas compter comme une cible à marge nulle dans `cibles-tactiles` ;
+- le badge « Désactivé » prend le fond bas et le texte secondaire (et non le rouge de
+  l'ancien tableau) : un compte éteint n'est pas une alerte.
+
+**Écarts nommés** :
+
+- la **zone dangereuse** reste une carte au téléphone : la planche la met derrière
+  « Archives » ; une purge définitive garde son bloc, son contour d'alerte et sa liste
+  (même décision qu'au bureau) ;
+- le texte d'aide du Thème garde la phrase du bureau (« Réglage de cet appareil… ») :
+  celle de la planche dit la même chose, et changer l'élément aurait changé le bureau ;
+- l'aide « Chaque fichier .xlsx importé est archivé… » passe dans la feuille des
+  imports, au téléphone.
+
+**Gardés hors planche** (au téléphone aussi, dans leur carte) : Numérotation des bons,
+le logo (derrière « Logo de l'application »), la fiche des secteurs, les réglages de
+tournée, le diagnostic des dates, la zone dangereuse.
+
+**Omis faute de données** : « Un seul compte aujourd'hui, partagé par le bureau, le
+préparateur et le livreur… » (faux dès qu'un compte par personne existe) ; « Les trois
+secteurs d'origine ne se suppriment pas » (le serveur supprime n'importe quel secteur) ;
+« compte partagé » dans la méta du compte (aucun champ ne le dit d'un compte listé).
+
+**Ce que le banc mesure** (corrigé après relecture, le 23/09) : `contraste-application`
+et `cibles-tactiles` ne voient ni ces lignes ni ces feuilles (leur base n'a ni compte
+ni import, et ils n'ouvrent pas les feuilles). C'est `parametres-mobile.spec.js` qui
+mesure, dans les deux thèmes, le contraste ≥ 4,5:1 des lignes, de la feuille d'un
+compte **et de la feuille des imports** ; et la hauteur ≥ 44 px de **chaque** cible du
+lot : lignes des comptes et des imports, « Ajouter un compte », « Ajouter » des
+secteurs, pied de version, gestes et ✕ des deux feuilles, « Télécharger ». La première
+version du banc ne mesurait ni la feuille des imports ni ces hauteurs, alors que son
+rapport le disait.
+
+**`CACHE_NAME`** : réglé à l'intégration du 23/09. Le lot « chargement instantané » l'a porté à
+`sereo-shell-20260923-instantane`, et surtout le nom annoncé porte désormais l'empreinte du
+contenu de `public/` : tout fichier modifié renouvelle le shell sans geste de personne.
+
+### Commandes + Stock mobile + squelettes (planches 8a, 8b, 10a, 10b), posé le 23/09
+
+**Commandes au téléphone (planche 8a).**
+
+- Les **pilules de statut** passent dans l'en-tête vert, sous la recherche, en 44 px :
+  la choisie en blanc à texte vert (plein clair en sombre), les autres sur la surface
+  sur vert. C'est **le même groupe**, déplacé par `placerPilulesCommandes()` au seuil de
+  820 px, et remis dans la rangée de filtres au bureau (planche 13c) : deux groupes
+  auraient fait deux noms pour le même geste, dont un toujours caché. Il écoute ses
+  propres clics (il vit hors de l'écran au téléphone) et, rangé dans la fente, suit la
+  règle `data-ecran` : il ne suit pas sur un autre écran.
+- Sous l'en-tête, la ligne de la planche : **le compte** à gauche (« 10 bons », le compte
+  de la liste filtrée), **le tri** à droite.
+- **Gardés hors planche, repliés** : « Bloquées seulement », « À compléter », le secteur
+  et la période n'ont pas de place sur la planche 8a ; ce sont les seuls chemins vers ces
+  listes et vers l'export d'un mois ou d'un secteur. Ils se replient derrière un bouton
+  « Filtres » (44 px, `aria-expanded`) qui **dit combien sont actifs** (« Filtres · 1 »),
+  même replié : un filtre actif ne se cache jamais sans le dire. L'alerte « adresses à
+  corriger » du tableau de bord arrive filtres dépliés. Le filtre client (« Client : … ✕ »)
+  reste toujours visible.
+- **Écart** : « Exporter en CSV » et « Nouvelle commande » restent dans l'en-tête (lot 1) ;
+  la planche ne les dessine pas, ce sont les seuls chemins de l'export et de la saisie.
+- Le balayage de contraste de l'application tourne à 1440 px et ne voit pas l'en-tête
+  vert : un banc de ce lot mesure pilules, compte et « Filtres » dans les deux thèmes
+  (≥ 4,5:1), et l'anneau clavier de la pilule sur le vert.
+
+**Stock au téléphone (planches 8b, 10a).**
+
+- **À plat** (planche 10a) : quand aucun produit n'a de catégorie, **ou tous la même**,
+  plus de tuiles — une seule tuile « Sans catégorie · 200 » ne triait rien. À leur place,
+  au bureau comme au téléphone, une carte qui dit ce qui manque et comment le retrouver :
+  « Pas de catégories dans ce fichier » (ou « Une seule catégorie : Hygiène »), puis le
+  tableau **à plat, du plus bas au plus haut** : sous le seuil d'abord, puis « à
+  renseigner » (une quantité inconnue appelle aussi un geste), puis le reste, chaque
+  groupe par quantité croissante. Le sous-titre dit « sans catégorie » au lieu de
+  « 1 catégorie ».
+- **L'ordre à plat est figé tant qu'on reste sur l'écran** (relecture du 23/09). Chaque
+  − / + et chaque seuil rechargent la liste ; retriée sur la quantité du moment, la ligne
+  touchée changeait de place sous le doigt, et le tap suivant, au même endroit, ajustait
+  **un autre produit** (Gants à 2, Désinfectant à 7 : au 6ᵉ « + », le doigt tombait sur
+  Désinfectant). L'ordre se refait en **rouvrant l'écran** ou quand un produit inconnu
+  arrive (un import). Prix nommé : un produit réassorti reste en tête jusque-là.
+- La carte dit **ce qui se voit** : « Aucun produit de ce fichier n'a de catégorie ». Le
+  premier jet affirmait « le fichier n'a pas de colonne « Catégorie » », or l'import lit
+  une colonne absente et une colonne vide de la même façon ; il disait « ajoutez » à qui
+  l'avait déjà. Elle dit maintenant « Remplissez la colonne… (ajoutez-la si elle manque) ».
+- Deux catégories ou plus : les tuiles, et au téléphone leur **titre** « Catégories » et
+  leur compte (planche 8b).
+- **Décision** : la carte « à plat » s'applique aussi au bureau. Le cas est une propriété
+  des données, pas de l'écran ; et une tuile unique était aussi vide de sens à 1440 px.
+- **Décision** : vouvoiement dans la carte (« Remplissez la colonne… »), comme la carte de
+  premier lancement ; la planche tutoie.
+- **Omis faute de données** : « Commander » (aucune route ne commande à un fournisseur,
+  déjà nommé au 23/09) ; « trouvées dans le dernier import » (rien ne rattache une
+  catégorie à un import) — le titre des tuiles dit « 4 catégories ».
+- **Gardé hors planche** : la ligne de stock garde ses champs Seuil et Stock et ses pas
+  − / + (seuls chemins pour les poser) ; la planche 10a montre une liste en lecture seule.
+
+**Squelettes (planche 10b).**
+
+- **Les chiffres** du tableau de bord (chiffre d'affaires, panier moyen, commandes
+  livrées, les deux tuiles et leur détail) sont, pendant le **premier** chargement, des
+  blocs gris **à la taille du chiffre attendu** (le montant ≈ 3,8 em sur 0,86 em, un
+  compte de tuile ≈ 1,1 em). L'élément est vide — un espace sans chasse en
+  pseudo-élément lui garde sa hauteur de ligne — et le bloc est dessiné par-dessus : rien
+  n'est écrit, la règle « jamais de texte dessus » tient. Pulsation d'opacité à 1,6 s,
+  coupée sous `prefers-reduced-motion`. À l'actualisation, les chiffres qu'on avait
+  restent lisibles.
+- Avant : « 0 » et « — » pendant le chargement — un **zéro qui mentait**, que le
+  sous-titre recopiait (« 0 commande à préparer ») — puis tout l'écran descendait de
+  **22 px** au bureau et **72 px** au téléphone. Trois causes, trois remèdes : les
+  chiffres (ci-dessus) ; la pilule du mois, vide (64 px) puis « septembre 2026 » (188 px),
+  qui faisait passer l'import à la ligne — elle porte le mois courant dès le départ (il
+  est connu sans serveur) ; le sous-titre, qui passait sur deux lignes en se complétant —
+  il **réserve deux lignes** sur le tableau de bord (**écart** : jusqu'à 22 px d'air sous
+  un sous-titre d'une ligne, le prix d'un écran qui ne saute plus).
+- **Les lignes** : les listes dont on connaît la ligne (commandes, stock, clients, « À
+  régler », « Cette semaine », « À préparer », « À livrer ») prennent des lignes grises à
+  la hauteur de la ligne réelle — 56 / 72 px pour une commande, 56 / 141 px pour un
+  produit, 60 / 72 px pour un client, au bureau / au téléphone. La liste des Commandes,
+  vide pendant le chargement, a maintenant les siennes.
+- **Entre 821 et 1280 px**, Commandes et Stock sont des **cartes à trois rangs** : la ligne
+  grise y mesure **95 px** (commande, de 821 à 1280 px) et **129 px** (produit, de 921 à
+  1280 px). Le premier jet gardait 56 px et la liste sautait de ~170 à ~290 px ; son banc
+  ne mesurait qu'à 1440 et 390 px, il ne pouvait pas le voir (relecture du 23/09).
+- **Un libellé n'est pas un chiffre** : « Commandes livrées » est vidé pendant le
+  chargement comme les chiffres (le rendu y écrit « 12 commandes livrées »). Si
+  `/api/operations` échoue, le libellé revient ; les chiffres, eux, disent « — ». Le premier
+  jet montrait « — » au-dessus de « — ».
+- Banc : les chiffres et ce qui les suit bougent de **0 px** à l'arrivée des données, à
+  1440 et à 390 px (tolérance 2 px) ; une ligne grise mesure la ligne réelle à 2 px près, à
+  1440, 1280, 1024, 880 et 390 px.
+- **Non fait, nommé** : le **nombre** de lignes grises reste une estimation (on ne le sait
+  qu'avec les données) — ce qui est **sous** une liste peut encore bouger. La colonne
+  droite du tableau de bord change de carte à l'arrivée des données (« À livrer » laisse
+  la place à la tournée du jour) : un changement de contenu, pas un squelette. Le compte
+  « Cette semaine » affiche encore « 0 » pendant le chargement. Au téléphone, les toasts
+  « Stock mis à jour » s'empilent depuis le bas et peuvent couvrir un bouton − / + après
+  cinq ou six ajustements rapides (constat du banc, antérieur à ce lot, non traité).
