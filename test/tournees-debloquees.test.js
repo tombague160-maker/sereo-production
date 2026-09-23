@@ -239,6 +239,47 @@ test("H8 — un geste en retard ne s'applique plus si la commande est repartie d
   assert.equal(commandeLue("o-b").status, "a_reprogrammer");
 });
 
+// Relecture adverse du lot 2 : entre la cloture et l'arrivee du « Livre » en
+// file, le bureau libere la reservation (release-stock, admis sur « a
+// reprogrammer ») : le rayon recompte la marchandise. Le « Livre » en retard
+// passait, ne consommait rien (plus de reservation) : le rayon comptait une
+// marchandise deja chez le client.
+test("H8 — un « Livré » en retard apres une liberation du stock a la main : le rayon ne compte plus la marchandise livree", async () => {
+  ensemencer();
+  const depart = await stock();
+  const avantCloture = new Date(Date.now() - 60 * 1000).toISOString();
+  assert.equal((await poster("/api/routes/r-cours/cloturer")).res.status, 200);
+  const libere = await poster("/api/orders/o-b/release-stock");
+  assert.equal(libere.res.status, 200, JSON.stringify(libere.body));
+  assert.equal(libere.body.released, true, "prealable : la reservation de o-b doit etre liberee");
+  assert.equal((await stock()).rayon, depart.rayon + 4, "prealable : la liberation rend 4 au rayon");
+
+  const tard = await patcher("/api/routes/r-cours/stops/s-o-b", { status: "livre", faitLe: avantCloture });
+  assert.equal(tard.res.status, 200, `la livraison faite avant la cloture est refusee : ${JSON.stringify(tard.body)}`);
+  assert.equal(commandeLue("o-b").status, "livre");
+  assert.deepEqual(await stock(), { rayon: depart.rayon, reserve: depart.reserve - 4 },
+    "la marchandise livree est encore comptee en rayon");
+  assert.equal(commandeLue("o-b").stockReleaseReason, "consumed_by_delivery");
+});
+
+test("H8 — le meme « Livré » en retard, quand le rayon n'a plus de quoi : refuse en le disant, rien ne bouge", async () => {
+  ensemencer();
+  const avantCloture = new Date(Date.now() - 60 * 1000).toISOString();
+  assert.equal((await poster("/api/routes/r-cours/cloturer")).res.status, 200);
+  assert.equal((await poster("/api/orders/o-b/release-stock")).res.status, 200);
+  // Les 4 rendus au rayon sont repartis ailleurs : il en reste 2.
+  const db = readDb();
+  db.stock.find(p => p.id === "p1").quantite = 2;
+  writeDb(db, { backup: false });
+  const avant = await stock();
+
+  const tard = await patcher("/api/routes/r-cours/stops/s-o-b", { status: "livre", faitLe: avantCloture });
+  assert.equal(tard.res.status, 409, JSON.stringify(tard.body));
+  assert.match(tard.body.error, /stock/i);
+  assert.equal(commandeLue("o-b").status, "a_reprogrammer");
+  assert.deepEqual(await stock(), avant, "un refus a quand meme touche au stock");
+});
+
 test("H8 — une tournee cloturee est FINIE partout : liste sans trace (rendu a la demande), purgeable a 12 mois", async () => {
   ensemencer();
   const db = readDb();
@@ -462,4 +503,28 @@ test("D7 — POST /api/optimize-route n'existe plus, et ne reecrit plus la table
   const r = await poster("/api/optimize-route");
   assert.equal(r.res.status, 404, `l'ancienne route repond encore : ${r.res.status}`);
   assert.deepEqual(readDb().clients.map(c => c.id), ordre);
+});
+
+// Relecture adverse du lot 2 : POST /api/livraison (l'ancien panneau, sans
+// appelant depuis ce lot) livrait un CLIENT sans solder l'arret de sa tournee
+// -- M7 par une autre porte. Elle refuse desormais une commande qui attend son
+// arret dans une tournee active ; hors tournee, rien ne change (C1.R2).
+test("M7 — POST /api/livraison ne livre plus une commande qui attend son arret dans une tournee", async () => {
+  ensemencer();
+  const r = await poster("/api/livraison", { clientId: "c-o-b", statut: "livree" });
+  assert.equal(r.res.status, 409, JSON.stringify(r.body));
+  assert.match(r.body.error, /tournée/);
+  assert.equal(commandeLue("o-b").status, "en_livraison");
+  assert.equal((await tourneeLue("r-cours")).stops.find(s => s.id === "s-o-b").status, "en_livraison");
+  const absent = await poster("/api/livraison", { clientId: "c-o-c", statut: "absent" });
+  assert.equal(absent.res.status, 409, JSON.stringify(absent.body));
+  assert.equal(commandeLue("o-c").status, "en_livraison");
+
+  // Temoin : une commande hors de toute tournee passe toujours.
+  const db = readDb();
+  db.commandes.find(o => o.id === "o-p1").status = "en_livraison";
+  writeDb(db, { backup: false });
+  const hors = await poster("/api/livraison", { clientId: "c-o-p1", statut: "livree" });
+  assert.equal(hors.res.status, 200, JSON.stringify(hors.body));
+  assert.equal(commandeLue("o-p1").status, "livre");
 });

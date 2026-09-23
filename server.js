@@ -6335,6 +6335,7 @@ function updateRouteStop(db, routeId, stopId, status, notes = "", motif = null, 
   // L'heure du GESTE, pas celle de l'arrivee ici (M6) : une livraison faite
   // hors ligne a 9 h 10 et envoyee a 11 h 30 est datee de 9 h 10.
   const now = horodatageDuGeste(faitLe, { plancher: route.startedAt });
+  if (retard && status === "livre") reprendreStockLibere(db, findOrder(db, stop.orderId));
   if (retard) {
     // Le livreur l'a fait AVANT la cloture : c'est la verite du terrain, la
     // cloture avait devine « a reprogrammer ». L'arret n'est plus une
@@ -6670,6 +6671,29 @@ function gesteArriveApresCloture(db, route, stop, status, faitLe) {
   if (!order || (order.routeId && String(order.routeId) !== String(route.id))) return false;
   if (!STATUTS_A_RELIVRER.includes(order.status)) return false;
   return !tourneeActiveDeLaCommande(db, order.id, route.id);
+}
+
+/**
+ * Relecture adverse du lot 2 : un « Livre » arrive apres la cloture, alors que
+ * le bureau a libere entre-temps la reservation de la commande (release-stock,
+ * admis sur « a reprogrammer ») -- le rayon recompte une marchandise qui est
+ * chez le client. La livraison reste la verite du terrain : la reservation est
+ * reprise (le rayon est deduit de nouveau), puis consommee par la livraison
+ * (setOrderStatus). Si le rayon n'en a plus assez, le geste est refuse, en le
+ * disant : le stock ne passe jamais sous zero en silence.
+ * A appeler AVANT toute ecriture de l'arret (un refus ne laisse rien).
+ */
+function reprendreStockLibere(db, order) {
+  if (order.stockReservedAt || !order.stockReleaseReason || order.stockReleaseReason === "consumed_by_delivery") return;
+  try {
+    reserveStockForOrder(db, order);
+  } catch {
+    throw conflit(`Le stock de la commande ${nomDeCommande(order)} a été libéré après la clôture, et le rayon n'en a plus assez : la livraison n'est pas enregistrée, la commande reste à reprogrammer.`);
+  }
+  addHistory(db, "Stock deduit", `Commande ${order.numero || order.id} : livree apres la liberation de son stock (geste arrive apres la cloture)`, {
+    orderId: order.id,
+    numero: order.numero
+  });
 }
 
 /**
@@ -8886,7 +8910,6 @@ app.post("/api/livraison", async (req, res) => {
       if (!c) {
         throw notFound("Client introuvable");
       }
-      c.statut = statut;
 
       // Filtre des commandes a affecter :
       // - si orderId est fourni : juste cette commande (precis)
@@ -8897,6 +8920,17 @@ app.post("/api/livraison", async (req, res) => {
             String(item.clientId) === String(clientId)
             && !["livre"].includes(item.status)
           );
+      // Relecture adverse du lot 2 (M7) : une commande qui attend son arret
+      // dans une tournee active ne se livre que par cet arret. Avant, ce
+      // chemin la passait « livre » et l'arret restait « en livraison » : la
+      // tournee ne se terminait jamais.
+      for (const order of candidateOrders) {
+        const tournee = tourneeActiveDeLaCommande(db, order.id);
+        if (tournee) {
+          throw conflit(`La commande ${nomDeCommande(order)} attend son arrêt dans la tournée « ${nomDeTournee(tournee)} » : marque-la depuis l'écran Tournée.`);
+        }
+      }
+      c.statut = statut;
 
       let ordersUpdated = 0;
       candidateOrders.forEach(order => {
