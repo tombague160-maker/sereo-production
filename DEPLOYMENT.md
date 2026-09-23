@@ -149,7 +149,8 @@ developpement, CI), les binaires OSRM n'existent pas et rien ne se passe.
    la zone, ou une carte locale en panne, repasse par le serveur public (repli).
 5. Ensuite, **chaque mois**, la nuit (3 h, heure de Paris), la carte est refaite a
    cote de l'ancienne ; l'ancienne sert jusqu'a la bascule et reste en service si la
-   nouvelle echoue. Les anciennes versions sont supprimees.
+   nouvelle echoue, y compris si `osrm-routed` refuse de la charger. L'ancienne version
+   n'est supprimee qu'une fois la nouvelle chargee.
 
 ### Zone, espace, memoire, duree (estimations)
 
@@ -171,6 +172,12 @@ Ordres de grandeur attendus, a confirmer par la premiere preparation :
 - Memoire : pendant la preparation, `osrm-extract` prend de l'ordre de 2,5 fois la
   taille telechargee ; ensuite, `osrm-routed` lit la carte sur le disque (`--mmap`) et
   garde peu de memoire propre.
+- **Place de la base** : Sereo laisse toujours **2 Go libres** sur le volume de donnees
+  (la base SQLite, ses sauvegardes et les archives d'import vivent au meme endroit).
+  Le choix de la zone les retire du disque disponible ; un telechargement ou une etape
+  qui ferait passer le volume en dessous est arrete, la preparation est notee en echec
+  et l'ancienne carte reste en service. Les extraits d'une zone abandonnee sont
+  supprimes au debut de la preparation suivante.
 
 ### Verifier que ca marche
 
@@ -191,13 +198,18 @@ Ordres de grandeur attendus, a confirmer par la premiere preparation :
   comme `europe/monaco`) force la zone.
 - Les cartes vivent dans `/app/data/osrm/` : on peut supprimer ce dossier entier ;
   Sereo le refait de lui-meme dans le quart d'heure (le suivi des essais part avec
-  lui), puis chaque mois comme d'habitude.
+  lui ; l'essai suivant est de nouveau note : un echec n'est retente que la nuit, a
+  3 h), puis chaque mois comme d'habitude.
 
 ### Risque
 
 La **premiere preparation est lourde** (processeur, disque, memoire), d'autant plus que
 la zone est grande. Elle tourne en priorite basse (`nice -n 19`, `ionice -c 3`, moitie
 des coeurs) et a cote du service : Sereo continue de repondre, et une preparation qui
-echoue (memoire insuffisante, disque plein, reseau) ne casse rien — elle est notee, et
-reessayee la nuit suivante a 3 h. Si le serveur souffre malgre tout, `SEREO_OSRM_ZONE=region`
-reduit la charge, `SEREO_OSRM_LOCAL=0` la supprime.
+echoue (memoire insuffisante, plancher de 2 Go atteint, reseau, etape de plus de 24 h)
+ne casse rien — elle est notee, et reessayee la nuit suivante a 3 h. Une preparation
+coupee par un redemarrage du conteneur (release) reprend 2 minutes apres, sauf apres
+trois coupures de suite. Une carte que `osrm-routed` refuse (par exemple apres une
+nouvelle version d'OSRM dans l'image) est signalee dans Parametres et refaite la nuit
+suivante ; le serveur public calcule en attendant. Si le serveur souffre malgre tout,
+`SEREO_OSRM_ZONE=region` reduit la charge, `SEREO_OSRM_LOCAL=0` la supprime.

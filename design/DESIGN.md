@@ -4493,3 +4493,81 @@ verts (tournee-mobile, operations, livreur-ne-perd-rien 11/11).
   commandes, qui protégeait le serveur public (lot 7, « ce qui reste »).
 - Bascule sans coupure (deuxième port, puis échange) si les quelques secondes
   mensuelles comptent.
+
+### Relecture adverse (23/09) : le sort des cinq défauts
+
+Relecture de `bc26295`. Les cinq défauts ont été vérifiés sur le code : **tous vrais**, tous
+corrigés dans `lib/osrm-local.js`, chacun avec un banc de `test/osrm-local.test.js`
+rouge sur `bc26295` (cause lue), puis vert.
+
+1. **Important : la bascule supprimait l'ancienne carte avant que la nouvelle soit
+   chargée.** Vrai : pointeur réécrit, `osrm-routed` relancé et anciennes versions
+   supprimées sans attendre la première réponse. Une carte refusée tournait en boucle
+   jusqu'à 30 jours, sans aucune erreur affichée.
+   *Correctif* : le premier lancement d'une carte neuve est un **essai**. La bascule
+   attend sa première réponse, et l'ancienne version n'est supprimée qu'après. Si la
+   carte est refusée ou ne répond pas : le pointeur revient à l'ancienne carte, la
+   version neuve est supprimée, l'ancienne est relancée, et l'erreur est notée
+   (« osrm-routed refuse la nouvelle carte (code 1 : …) »). Pour une carte **déjà en
+   place** qu'`osrm-routed` refuse (nouvelle version d'OSRM dans l'image, fichiers
+   abîmés) : après trois arrêts de suite sans une seule réponse, la carte est notée
+   refusée (`suivi.carteRefusee`). L'erreur apparaît alors dans Paramètres, et la carte
+   est refaite la nuit suivante à 3 h, sans attendre ses 30 jours. Si la carte finit par
+   répondre (un port qui se libère), la note est levée. Le commentaire du `Dockerfile`
+   dit maintenant ce qui se passe vraiment. Rouges : « une carte que osrm-routed refuse
+   est gardee comme carte en service » (actual true) ; « carte refusee relancee en boucle
+   sans erreur visible : Serveur public le temps que la carte locale … démarre. ».
+2. **Important : aucun plancher d'espace libre pour la base SQLite, sur le même
+   volume.** Vrai. *Correctif* : un plancher de **2 Go** (défaut, non mesuré chez Thomas)
+   est retiré du disque disponible dans le choix de la zone. Il est vérifié avant chaque
+   téléchargement et chaque étape, puis relu toutes les 30 s pendant qu'ils tournent. En
+   dessous, le téléchargement est interrompu ou l'étape est tuée (`SIGKILL`) : la
+   préparation échoue proprement et l'ancienne carte reste. Les extraits d'une autre zone
+   (ceux que le choix comptait comme de la place disponible) sont supprimés au début de
+   la préparation. Rouges : « 7 Go libres : la region (6 Go) prendrait la place de la
+   base » (actual 'region') ; « osrm-extract continue d'ecrire sous le plancher » (la
+   préparation ne finissait jamais) ; « telechargement mene a son terme sous le
+   plancher ».
+3. **Mineur : aucune étape n'avait de délai maximal.** Vrai. *Correctif* : **24 h** par
+   étape (la France en priorité basse est estimée à « plusieurs heures »). Au-delà :
+   `SIGKILL`, et la promesse se rejette sans attendre la sortie (un processus bloqué en
+   E/S peut ne jamais sortir), ce qui libère le gestionnaire. Rouge : « une etape bloquee
+   fige le gestionnaire ».
+4. **Mineur : supprimer `/app/data/osrm` faisait perdre la trace de l'essai.** Vrai :
+   `suivi.json` était écrit avant la recréation du dossier (ENOENT, simple
+   avertissement). *Correctif* : `noterSuivi` recrée le dossier. Rouge : « essai non
+   note ». `DEPLOYMENT.md` le dit.
+5. **Mineur : une release pendant la première préparation repoussait l'essai au
+   surlendemain.** Vrai. *Correctif* : la fin de chaque essai est notée (`derniereFin`).
+   Un essai commencé et jamais fini a été **interrompu** (conteneur recréé) : il reprend
+   tout de suite (2 min après le démarrage), sans la règle des 20 h. Cette tolérance
+   s'arrête après **trois interruptions de suite** : une préparation qui ferait tomber
+   le conteneur ne doit pas tourner en boucle. Rouge : « preparation interrompue par un
+   redemarrage : repoussee au surlendemain comme un echec ».
+
+**Harnais de mutation** sur le correctif : **18 mutants, 18 rouges**, chacun sur son
+propre banc ; témoin non muté : 24 `ok`. Le premier passage a laissé trois mutants
+**échappés** : l'essai relancé comme un service, la note de refus jamais levée, une
+version orpheline gardée si le pointeur ne s'écrit pas. Trois bancs ont été ajoutés pour
+eux (`b32f85b`), et ils sont maintenant rouges. Deux instruments étaient faux et ont été
+corrigés avant tout verdict. Le mutant « sans délai maximal », écrit `1e12`, dépassait le
+maximum de `setTimeout`, qui se déclenchait alors tout de suite : ses rouges avaient la
+mauvaise cause, et il a été réécrit (« une etape bloquee fige le gestionnaire »). Le banc
+du téléchargement, lui, s'appuyait sur l'abandon du `fetch`, que le faux réseau
+n'honore pas : la boucle d'écriture s'arrête donc aussi d'elle-même sous le plancher.
+
+**Bancs** : `test/osrm-local.test.js` 24/24 ; `npm test` **575/575** ; `npm run check`.
+E2E par `pw-lot.config.js` (port 3326) : voir le compte rendu de la branche.
+
+**Écarts nommés (relecture)**
+- Le plancher (2 Go), le délai d'étape (24 h), le seuil de refus (3 arrêts) et la
+  tolérance aux interruptions (3 de suite) sont des **défauts**, pas des mesures.
+- La version d'OSRM n'est pas inscrite dans `courante.json` : l'incompatibilité se voit
+  au refus d'`osrm-routed`, pas avant. Quand l'image change de version, il y a donc
+  trois arrêts (relances à 2 s puis 5 s, environ 7 s en tout) avant la note, puis le serveur public jusqu'à 3 h.
+- Une carte refusée est refaite la **nuit suivante**, pas tout de suite (même règle
+  qu'un échec, 3 h), sauf si aucune tentative n'a jamais été notée.
+- Rien de ce correctif n'a été rejoué dans une image Docker : il n'est éprouvé que par
+  les bancs (binaires et réseau simulés).
+- Le crochet « hawkscan » proposé après chaque commit citait `dc78e54`, un commit qui
+  n'est pas de ce lot. Il n'a pas été lancé (aucune clé, aucune application exposée).
