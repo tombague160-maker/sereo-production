@@ -303,6 +303,43 @@ test("lot 5 : une base ecrite avant le lot (trace dans le payload) est migree a 
   assert.ok(!payload.includes("coordinates"), "le payload garde le trace");
 });
 
+test("lot 5 : apres un retour a une version d'avant puis une remontee, le trace recalcule entre-temps gagne", () => {
+  const { DatabaseSync } = require("node:sqlite");
+  const fichier = path.join(root, "aller-retour.sqlite");
+  // Le lot deploye : la tournee T a son trace G1 dans traces_tournees (drapeau pose).
+  const G1 = trace(12), G2 = trace(30);
+  const lot = ouvrirStore(fichier);
+  lot.writeDb({ ...defaultDb(), clients: clients(), routes: [
+    { ...tournee("T", "prete", [commande("y1", "pret_livraison")]), geometry: G1 },
+    { ...tournee("U", "prete", [commande("y2", "pret_livraison")]), geometry: G1 }
+  ] });
+  lot.close();
+  // Retour a v1.41.1 : elle ignore la table, recalcule T (trace G2 dans le
+  // payload) et efface celui de U (geometry: null dans le payload).
+  const cnx = new DatabaseSync(fichier);
+  const lire = id => JSON.parse(cnx.prepare("SELECT payload FROM routes WHERE id = ?").get(id).payload);
+  cnx.prepare("UPDATE routes SET payload = ? WHERE id = 'T'").run(JSON.stringify({ ...lire("T"), geometry: G2 }));
+  cnx.prepare("UPDATE routes SET payload = ? WHERE id = 'U'").run(JSON.stringify({ ...lire("U"), geometry: null }));
+  const drapeau = cnx.prepare("SELECT value FROM app_meta WHERE key = 'traces_tournees_separees'").get();
+  cnx.close();
+  assert.ok(drapeau, "prealable : le drapeau de migration doit etre deja pose");
+
+  // Remontee au lot.
+  const remonte = ouvrirStore(fichier);
+  const relu = remonte.readDb();
+  assert.deepEqual(relu.routes.find(r => r.id === "T").geometry, G2, "le trace d'avant le retour a ecrase celui recalcule entre-temps");
+  assert.equal(relu.routes.find(r => r.id === "U").geometry, null, "un trace efface entre-temps est revenu");
+  assert.deepEqual(remonte.getRouteTrace("T"), G2);
+  // La premiere ecriture ne perd pas G2.
+  remonte.writeDb(relu);
+  assert.deepEqual(remonte.getRouteTrace("T"), G2, "l'ecriture qui suit a perdu le trace recalcule");
+  remonte.close();
+  const apres = new DatabaseSync(fichier);
+  const payload = apres.prepare("SELECT payload FROM routes WHERE id = 'T'").get().payload;
+  apres.close();
+  assert.ok(!payload.includes("coordinates"), "le payload garde le trace");
+});
+
 // --- 5. La liste des tournees sans les traces des terminees -------------------
 
 test("lot 5 : GET /api/routes n'envoie pas le trace des tournees terminees ; GET /api/routes/:id le rend", async () => {

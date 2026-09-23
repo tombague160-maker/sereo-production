@@ -1052,12 +1052,21 @@ function ecrireTraces(database, routes, next) {
 
 /**
  * Migration (lot 5) : les traces sortent du payload des tournees vers
- * traces_tournees. Une fois par base ; une base restauree depuis une sauvegarde
- * d'avant repasse par ici (le drapeau est DANS la base).
+ * traces_tournees.
+ *
+ * A CHAQUE ouverture, pas une fois par base : cette version n'ecrit jamais de
+ * trace dans le payload, donc un payload qui en porte un a ete ecrit par une
+ * version d'avant (sauvegarde restauree, ou retour a une version anterieure
+ * puis remontee). Ce trace-la est le plus recent : il remplace celui de la
+ * table, et un `geometry: null` l'efface. Avant la revue du 23/09, le drapeau
+ * arretait tout a la remontee : le trace d'avant le retour ecrasait celui
+ * recalcule entre-temps. Le drapeau reste ecrit (il date la premiere migration).
  */
 function migrateTraces(database) {
+  // instr() ecarte sans les decoder les payloads sans trace : le cas courant.
+  const candidates = database.prepare("SELECT id, payload FROM routes WHERE instr(payload, '\"geometry\"') > 0").all();
   const done = database.prepare("SELECT value FROM app_meta WHERE key = ?").get("traces_tournees_separees");
-  if (done) return;
+  if (done && !candidates.length) return;
 
   database.exec("BEGIN IMMEDIATE TRANSACTION");
   try {
@@ -1065,12 +1074,14 @@ function migrateTraces(database) {
     const upsert = database.prepare(
       "INSERT INTO traces_tournees (route_id, trace) VALUES (?, ?) ON CONFLICT(route_id) DO UPDATE SET trace = excluded.trace"
     );
-    for (const row of database.prepare("SELECT id, payload FROM routes").all()) {
+    const del = database.prepare("DELETE FROM traces_tournees WHERE route_id = ?");
+    for (const row of candidates) {
       let route;
       try { route = JSON.parse(row.payload); } catch { continue; }
       if (!route || typeof route !== "object" || !Object.prototype.hasOwnProperty.call(route, "geometry")) continue;
       const { geometry, ...sansTrace } = route;
       if (geometry !== null && geometry !== undefined) upsert.run(String(row.id), stringify(geometry));
+      else del.run(String(row.id));
       update.run(stringify(sansTrace), row.id);
     }
     database.prepare(`
