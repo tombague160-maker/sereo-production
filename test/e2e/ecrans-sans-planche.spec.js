@@ -146,16 +146,24 @@ for (const schema of ["light", "dark"]) {
     const graphe = page.locator("#salesChart");
     // Ni grille ni fond degrade derriere les barres.
     expect.soft(await graphe.evaluate(el => getComputedStyle(el).backgroundImage)).toBe("none");
+    const vide = await jeton(page, "--v8-vert-eau");
     const barres = await page.locator("#salesChart .bar-item > span").evaluateAll(els => els.map(el => {
       const cs = getComputedStyle(el);
-      return { image: cs.backgroundImage, couleur: cs.backgroundColor, rayon: cs.borderTopLeftRadius };
+      return { image: cs.backgroundImage, couleur: cs.backgroundColor, rayon: cs.borderTopLeftRadius,
+        vente: el.parentElement.classList.contains("is-active") };
     }));
     expect(barres).toHaveLength(14);
+    // Le jeu seme : des ventes aujourd'hui, aucune les autres jours. Les deux
+    // cas existent, sinon la regle d'un des deux ne serait jamais lue.
+    expect(barres.filter(b => b.vente).length).toBeGreaterThan(0);
+    expect(barres.filter(b => !b.vente).length).toBeGreaterThan(0);
     barres.forEach((b, i) => {
       expect.soft(b.image, `barre ${i} : degrade`).toBe("none");
       // Aujourd'hui, la derniere barre : l'accent de donnee, comme le mois
-      // courant du tableau de bord ; les autres, le principal.
-      expect.soft(b.couleur, `barre ${i}`).toBe(i === barres.length - 1 ? accent : principal);
+      // courant du tableau de bord ; un jour vendu, le principal ; un jour
+      // SANS vente, un moignon vert d'eau.
+      const attendu = !b.vente ? vide : (i === barres.length - 1 ? accent : principal);
+      expect.soft(b.couleur, `barre ${i}${b.vente ? "" : " (sans vente)"}`).toBe(attendu);
     });
     // L'etiquette d'un jour tient sur une ligne (« 09- / 10 » se cassait).
     const etiquettes = await page.locator("#salesChart .bar-item small").evaluateAll(els => els
@@ -177,6 +185,38 @@ for (const schema of ["light", "dark"]) {
     }
     const montants = await page.locator("#statistiques .rank-row > em").evaluateAll(els => els.map(el => getComputedStyle(el).fontVariantNumeric));
     for (const m of montants) expect.soft(m, "montant de rang").toContain("tabular-nums");
+  });
+
+  test(`Analyse (${schema}) : un jour sans vente ne se lit pas comme une petite vente`, async ({ page }) => {
+    // Le cas de la relecture du 23/09 : peints tous au principal, un jour a
+    // 0 € (2 %, releve au plancher de 6 px) ressemblait a un jour de petite
+    // vente. On sert une serie ou les deux se cotoient, et ou AUJOURD'HUI est
+    // a zero : le moignon l'emporte sur l'accent -- l'etiquette en gras dit
+    // encore quel jour est aujourd'hui.
+    await page.route("**/api/statistics", async route => {
+      const reponse = await route.fetch();
+      const corps = await reponse.json();
+      corps.salesByDay.forEach(j => { j.total = 0; });
+      corps.salesByDay[3].total = 10000;
+      corps.salesByDay[6].total = 100;
+      await route.fulfill({ response: reponse, json: corps });
+    });
+    await ouvrir(page, "statistiques", { schema });
+    const principal = await jeton(page, "--v8-principal");
+    const vide = await jeton(page, "--v8-vert-eau");
+    const barres = await page.locator("#salesChart .bar-item").evaluateAll(els => els.map(el => ({
+      couleur: getComputedStyle(el.querySelector("span")).backgroundColor,
+      graisse: Number(getComputedStyle(el.querySelector("small")).fontWeight)
+    })));
+    expect(barres).toHaveLength(14);
+    expect.soft(barres[3].couleur, "jour a 10 000").toBe(principal);
+    expect.soft(barres[6].couleur, "petite vente (1 %)").toBe(principal);
+    expect.soft(barres[5].couleur, "jour sans vente").toBe(vide);
+    expect.soft(barres[13].couleur, "aujourd'hui, sans vente").toBe(vide);
+    expect.soft(barres[13].graisse, "aujourd'hui se dit encore par la graisse").toBeGreaterThanOrEqual(700);
+    // Les deux etats se distinguent d'un coup d'oeil : 3:1 entre eux, le seuil
+    // d'un objet graphique.
+    expect.soft(contraste(principal, vide), `${principal} / ${vide}`).toBeGreaterThanOrEqual(3);
   });
 
   test(`Exports, Rappels, À recommander, Commande client (${schema}) : aucune carte à trait coloré`, async ({ page }) => {
@@ -246,7 +286,11 @@ for (const schema of ["light", "dark"]) {
         const cs = getComputedStyle(el);
         const rangee = el.parentElement.getBoundingClientRect();
         return {
-          texte: el.textContent.trim(), l: r.width, h: r.height, haut: Math.round(r.top), rangee: rangee.width,
+          // Au centieme : l'ecran qui s'active glisse (pageFadeIn, translateY
+          // fractionnaire), et un bouton de 44 px a rendu 43,999969 -- un ulp
+          // de flottant, une fois sur une douzaine. La mise en page compte en
+          // 1/64 px : un vrai deficit (43,98 au plus) reste pris.
+          texte: el.textContent.trim(), l: r.width, h: Math.round(r.height * 100) / 100, haut: Math.round(r.top), rangee: rangee.width,
           rayon: parseFloat(cs.borderTopLeftRadius), fond: cs.backgroundColor, couleur: cs.color
         };
       }));
@@ -313,6 +357,22 @@ test("Analyse : l'ancien nom « Statistiques » mène encore à l'écran par la 
   await page.press("#menuSearch", "Enter");
   await expect(page.locator("#statistiques")).toHaveClass(/active/);
   await expect(page.locator("#pageTitle")).toHaveText("Analyse");
+});
+
+test("dette 7 : loadData ne demande plus les commandes du jour, que plus rien ne montre", async ({ page }) => {
+  // L'ancien ecran « Commandes du jour » parti, /api/customer-orders/today
+  // n'etait plus qu'affecte, jamais lu. Une requete par chargement pour rien ;
+  // et si elle echouait, « Partiel (1 indispo) » et un toast nommant la cle
+  // brute « todayCustomerOrders », sur des donnees qu'aucun ecran n'affiche.
+  const demandes = [];
+  page.on("request", r => {
+    const chemin = new URL(r.url()).pathname;
+    if (chemin.startsWith("/api/")) demandes.push(chemin);
+  });
+  await ouvrir(page, "commandes");
+  // TEMOIN : l'enregistreur voit bien les requetes de loadData.
+  expect(demandes).toContain("/api/orders");
+  expect(demandes.filter(c => c.startsWith("/api/customer-orders"))).toEqual([]);
 });
 
 test("dette 7 : les quatre anciennes listes ont quitté la page, leurs adresses redirigent", async ({ page }) => {

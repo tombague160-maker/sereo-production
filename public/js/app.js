@@ -51,7 +51,6 @@ let ventes = [];
 let historique = [];
 let crmClients = [];
 let crmRelances = [];
-let todayCustomerOrders = [];
 let plannedOrders = [];
 let statistics = null;
 let sectors = [];
@@ -1097,9 +1096,10 @@ async function viderCacheDeDonnees() {
 /**
  * Les dernieres donnees connues, lues dans le cache du service worker.
  * Rend { data, date } ou null. Tout ou presque : une copie a moitie montrerait
- * des listes vides qui ne le sont pas. Seul l'endpoint date du jour (`jour`)
+ * des listes vides qui ne le sont pas. Seul un endpoint date du jour (`jour`)
  * peut manquer (au premier jour d'ouverture, son URL a change) ; il garde
- * alors sa valeur courante.
+ * alors sa valeur courante. Aucun n'en porte depuis le 23/09 (les commandes
+ * du jour ont quitte loadData) : la porte reste pour le prochain.
  */
 async function lireDernieresDonnees(endpoints) {
   try {
@@ -1155,7 +1155,6 @@ function appliquerDonnees(data) {
   if (a("crmClients")) crmClients = data.crmClients;
   if (a("subscriptions")) abonnementsDonnees = data.subscriptions || { items: [], occurrences: [] };
   if (a("crmRelances")) crmRelances = data.crmRelances;
-  if (a("todayCustomerOrders")) todayCustomerOrders = data.todayCustomerOrders;
   if (a("plannedOrders")) plannedOrders = data.plannedOrders;
   if (a("statistics")) statistics = data.statistics;
   if (a("sectors")) sectors = data.sectors;
@@ -1200,7 +1199,9 @@ async function loadData() {
     { key: "orders", path: "/api/orders", fallback: [] },
     { key: "crmClients", path: "/api/crm/clients", fallback: [] },
     { key: "crmRelances", path: "/api/reminders", fallback: [] },
-    { key: "todayCustomerOrders", path: `/api/customer-orders/today?date=${encodeURIComponent(getTodayOrdersDate())}`, fallback: [], jour: true },
+    // Plus de /api/customer-orders/today : l'ecran « Commandes du jour » parti
+    // (23/09), plus rien ne lisait ces commandes. L'ecran Commandes filtre
+    // `orders` (/api/orders) par son propre jour (#cmdJour).
     { key: "plannedOrders", path: "/api/planned-orders", fallback: [] },
     { key: "statistics", path: "/api/statistics", fallback: null },
     { key: "sectors", path: "/api/sectors", fallback: [] },
@@ -2791,13 +2792,6 @@ async function submitCustomerOrder(form) {
   await loadData();
   notify(data.orderType === "planifiee" ? "Commande planifiée créée." : "Commande client validée.", "success");
   showTab(data.orderType === "planifiee" ? "commandes-planifiees" : "commandes-jour");
-}
-
-// Le jour des commandes terrain que charge loadData. Son champ vivait dans
-// l'ancien ecran « Commandes du jour », retire le 23/09 : le jour choisi par
-// l'ecran Commandes (#cmdJour) filtre la liste chargee, pas cette requete.
-function getTodayOrdersDate() {
-  return getTodayDateInput();
 }
 
 // Confirmer / Annuler une planifiee : les gestes du detail de l'ecran

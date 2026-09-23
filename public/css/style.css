@@ -13271,6 +13271,14 @@ body:has(#journee.active) .ecran-entete #pageSubtitle { min-height: 2lh; }
 }
 :root[data-color-scheme] #statistiques .bar-item.bar-courant span,
 :root:not([data-color-scheme]) #statistiques .bar-item.bar-courant span { background: var(--v8-accent-donnee); }
+/* Un jour SANS vente (pas de .is-active, pose par renderBarChart) : un moignon
+   vert d'eau, pas une barre au principal. Releve au plancher de 6 px, il se
+   lisait comme une petite vente. 3,20:1 avec le principal en clair, ~6 en
+   sombre : les deux etats se distinguent d'un coup d'oeil. Apres le jour
+   courant : aujourd'hui sans vente reste un moignon, son etiquette en gras dit
+   encore quel jour c'est. */
+:root[data-color-scheme] #statistiques .bar-item:not(.is-active) span,
+:root:not([data-color-scheme]) #statistiques .bar-item:not(.is-active) span { background: var(--v8-vert-eau); }
 :root[data-color-scheme] #statistiques .bar-item small,
 :root:not([data-color-scheme]) #statistiques .bar-item small {
   font-size: 12.5px; font-weight: 500; line-height: 1.3; white-space: nowrap;

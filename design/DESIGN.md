@@ -2629,7 +2629,11 @@ ses règles portent l'`#id` de l'écran (elles battent les
   garde que le **jour du mois** (« 09-10 » se cassait en « 09- / 10 » sous une colonne
   de 22 px) ; la date entière reste dans le nom accessible et l'infobulle. Au
   téléphone, tous les jours sont lisibles (l'ancienne règle en cachait un sur deux, à
-  9 px).
+  9 px). Un **jour sans vente** est un moignon **vert d'eau**, pas une barre au
+  principal : relevé au plancher de 6 px, il se lisait comme une petite vente (relecture
+  du 23/09 ; en sombre, l'ancien écran les distinguait). 3,20:1 entre les deux états en
+  clair, ~6:1 en sombre. Aujourd'hui sans vente reste un moignon ; son étiquette en gras
+  dit encore quel jour c'est.
 - Les **classements** (meilleurs clients, produits) : des lignes à filet, rang en
   pastille, montant en `tabular-nums`, une jauge plate au principal (plus de dégradé
   corail-vert).
@@ -2669,9 +2673,36 @@ passaient ; `etats-vides.test.js` vise la clé « livrees »). **Gardé** :
   détail), `bdcNeedsCompletion` (la case « À compléter ») et `exportBdcCsv` (l'export
   de l'écran Commandes, qui lui passe sa liste filtrée).
 
-Le jour des commandes terrain que charge `loadData` vivait dans le champ de l'ancien
-écran « Commandes du jour » ; c'est maintenant aujourd'hui, et le jour choisi dans
-l'écran Commandes filtre la liste chargée.
+`loadData` ne demande **plus** `/api/customer-orders/today` : seul l'ancien écran
+« Commandes du jour » lisait ces commandes. La requête partait encore à chaque
+chargement, et son échec affichait « Partiel (1 indispo) » avec un toast nommant la clé
+brute `todayCustomerOrders`, pour des données qu'aucun écran ne montre. L'écran
+Commandes filtre `orders` (`/api/orders`) par son propre jour (`#cmdJour`). La route
+serveur reste (`test/api.test.js` la tient) ; la porte « endpoint du jour » de
+`lireDernieresDonnees` aussi, sans occupant.
+
+**Croisement avec `fix/interface-finitions`** (relecture du 23/09). Ce lot-là, point 12
+de l'audit, pose `data-attend-commandes disabled` sur « Tout sélectionner » / « Tout
+désélectionner » de `#commandes-jour` — la section que celui-ci retire. Les deux lots
+entrent en conflit dans `public/index.html` (et, sans enjeu, en fin de `style.css` et de
+ce fichier : deux ajouts à garder tous deux). **Résolution** : garder la **suppression**
+(les gestionnaires `select-all-today-orders` / `clear-today-orders` ont quitté `app.js` ;
+reprendre la section ramènerait deux boutons inertes, et
+`test/ecrans-sans-planche.test.js` le refuse). Le test « 12 » de
+`test/e2e/interface-finitions.spec.js` perd alors son objet (il attend 2 boutons, en
+trouve 0) : le **réécrire**, pas le supprimer — ce qu'il protège (aucun « Tout
+sélectionner » actif avant les commandes) vaut pour les boutons qui restent, ceux de la
+tournée :
+
+```js
+// « Tout sélectionner » des commandes du jour est parti avec son écran (lot
+// « écrans sans planche ») ; la règle vaut pour ceux qui restent.
+const boutons = page.locator("[data-attend-commandes]");
+expect(await boutons.count()).toBeGreaterThan(0);
+await expect(page.locator('[data-action="select-all-today-orders"]')).toHaveCount(0);
+for (const b of await boutons.all()) await expect(b).toBeDisabled();
+for (const b of await boutons.all()) await expect(b).toBeEnabled({ timeout: 15000 });
+```
 
 **Non fait, nommé** : les règles CSS des anciennes listes (`.bdc-list`, `.bdc-search`,
 `.stats-hero`, `.commandes-livrees-card`…) restent dans `style.css`, sans élément à
