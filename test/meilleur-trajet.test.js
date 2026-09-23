@@ -12,7 +12,7 @@
 // 3. « A livrer en premier » : les arrets epingles passent en tete, et l'ordre
 //    reste optimal SOUS cette contrainte (force brute contrainte).
 // 4. Un arret injoignable par la route est NOMME ; sur demande, il est retire.
-// 5. Le geocodeur n'est plus interroge apres un premier echec.
+// 5. (Cede au lot 3 : la resolution des adresses, voir plus bas.)
 // 6. Les durees par troncon d'OSRM sont gardees.
 // 7. Serveur OSRM configurable, repli sur le serveur public s'il ne repond pas.
 // 8. Le decoupage au-dela de 50 commandes.
@@ -232,7 +232,9 @@ test("injoignable par la route : l'arret fautif est NOMME ; retire sur demande, 
   reseau(fauxOsrm({ isoles: ["6.02,47.22"] }));
   await assert.rejects(roadPlan(orders, DEPART, DEPART), (e) => {
     assert.match(e.message, /Client b : injoignable par la route/);
-    assert.deepEqual(e.injoignables, [{ id: "b", clientName: "Client b" }]);
+    // Meme convention que le lot 3 (fix/adresses-justes) : le detail d'un
+    // refus est range sous `details`, jamais a la racine de l'erreur.
+    assert.deepEqual(e.details, { injoignables: [{ id: "b", clientName: "Client b" }] });
     return true;
   });
   reseau(fauxOsrm({ isoles: ["6.02,47.22"] }));
@@ -246,32 +248,12 @@ test("injoignable par la route : l'arret fautif est NOMME ; retire sur demande, 
   await assert.rejects(roadPlan(orders, DEPART, { lat: 47.3, lng: 6.1 }), /point de départ est injoignable/);
 });
 
-// --- 5. Geocodeur -------------------------------------------------------------
-test("geocodeur : plus d'appel apres un premier echec, ni pour une commande sans rue", async () => {
-  process.env.SEREO_ROUTING_URL = "http://osrm.local";
-  const sansCoordonnees = Array.from({ length: 10 }, (_, i) =>
-    ({ id: `o${i}`, clientName: `Client ${i}`, address: `${i} rue du Bois`, postalCode: "25000", city: "Besançon" }));
-  // Seule la PREMIERE adresse est introuvable : les autres se trouvent. Un
-  // worker qui echoue s'arrete de lui-meme ; ce sont les trois AUTRES qui
-  // continuaient, commande apres commande, pour une tournee deja refusee.
-  reseau(async (url) => {
-    assert.ok(url.includes("geocodage"), `appel inattendu : ${url}`);
-    await new Promise((r) => setTimeout(r, 5));
-    if (decodeURIComponent(url).includes("q=0 rue")) return { features: [] };
-    return { features: [{ properties: { label: "x", score: 0.9, type: "housenumber", postcode: "25000", city: "Besançon" },
-      geometry: { coordinates: [6.02, 47.24] } }] };
-  });
-  await assert.rejects(roadPlan(sansCoordonnees, DEPART, DEPART), /Adresse à préciser pour Client 0\./);
-  await new Promise((r) => setTimeout(r, 80)); // laisser finir les workers
-  assert.ok(appels.length <= 4, `${appels.length} appels au geocodeur pour une tournee deja refusee`);
-
-  reseau(() => ({ features: [] }));
-  await assert.rejects(
-    roadPlan([{ id: "v", clientName: "Ville Seule", address: "", postalCode: "25000", city: "Besançon" }], DEPART, DEPART),
-    /Adresse à préciser pour Ville Seule/,
-  );
-  assert.equal(appels.length, 0, "une commande sans rue ne doit pas interroger le geocodeur");
-});
+// --- 5. Geocodeur : cede au lot 3 ---------------------------------------------
+// Revue du 23/09 : la resolution des adresses d'une tournee appartient au lot 3
+// (fix/adresses-justes, « un seul module de geocodage »), qui resout TOUTES les
+// commandes pour nommer TOUTES les adresses douteuses. « Arreter au premier
+// echec » (ce lot) disait l'inverse, dans les memes lignes. La boucle est
+// rendue telle que sur main ; son banc part avec elle.
 
 // --- 6. Troncons ----------------------------------------------------------------
 test("les durees par troncon d'OSRM sont gardees (une par trajet, depart -> ... -> arrivee)", async () => {

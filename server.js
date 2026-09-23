@@ -5426,10 +5426,10 @@ function createStop(routeId, order, index, livrerEnPremier = false) {
     deliveryDate: order.deliveryDate || "",
     products: order.products,
     status: "pret_livraison",
+    livrerEnPremier: Boolean(livrerEnPremier),
     notes: order.notes || "",
     lat: order.lat,
-    lng: order.lng,
-    livrerEnPremier: Boolean(livrerEnPremier)
+    lng: order.lng
   };
 }
 
