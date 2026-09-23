@@ -1891,7 +1891,9 @@ le mécanisme reste. Au bureau, les gestes gardent 44 px (planche 13b).
   au bas de l'écran, au-dessus de la barre (`position: sticky`), tant que la carte de l'arrêt
   est à l'écran. Il a fallu `overflow-x: clip` au lieu de `hidden` sur `<body>` et `<main>`
   (sur cet écran seul) : `hidden` en fait des conteneurs de défilement, et le collage se
-  faisait au bas de la page entière, jamais à celui de l'écran.
+  faisait au bas de la page entière, jamais à celui de l'écran. (Depuis le 23/09, `clip`
+  vaut pour toute l'application : « Panier collant et ordre du clavier », en fin de
+  fichier.)
 - **« Autres actions »** (À reprogrammer, Planifier suite, Suivant) sort du bloc des gestes :
   gardée, repliée, sous la carte de l'arrêt — elle n'a pas à coller au pouce.
 - **« Prochain : <client> · ville »** sous les articles. **Omis** : « 6,2 km · environ
@@ -3337,6 +3339,7 @@ au second passage. Au premier, à deux ouvriers, deux rouges non reproduits seul
 au second passage : `tournee-mobile` « Annuler DÉFAIT » (le clic est tombé après les
 4 s du toast : l'envoi est parti) et `chargement-instantane` « requêtes retenues »
 (précondition : aucune requête encore arrivée au mandataire). Dits, non corrigés.
+*(Le second est fermé le 23/09 : voir « Banc chargement-instantane stabilisé ».)*
 
 ### Écarts nommés, hors de ce lot
 
@@ -3715,7 +3718,9 @@ correction a un banc qui rougit sans elle.
   le réparer (`overflow-x: clip` au lieu de `hidden` sur `html`, `body` et
   `.content`) réveillerait **tous** les `position: sticky` de la feuille à la
   fois. C'est un lot à part, qui les passerait tous en revue. Tant qu'il n'est
-  pas fait, le panier ne suit pas le défilement, à aucune largeur.
+  pas fait, le panier ne suit pas le défilement, à aucune largeur. **Fermé le
+  23/09** : ce lot est fait (« Panier collant et ordre du clavier », en fin de
+  fichier).
 - **De 1181 à 1599 px, le premier écran est le formulaire** : catalogue et
   panier commencent sous la ligne de flottaison, comme dans la colonne unique.
   C'est le prix d'un panier au niveau du catalogue sans casser les champs.
@@ -3922,7 +3927,9 @@ corrigé.
   téléphone déplacerait aussi le bouton du bureau, ou le dédoublerait : pas un correctif
   bon marché. Même motif, déjà en place, que « Nouvel abonnement » (Abonnements, 3a). À
   trancher avec lui : l'action principale reste atteinte tôt (le motif du bouton flottant),
-  ou les deux boutons passent après leur liste.
+  ou les deux boutons passent après leur liste. **Fermé le 23/09** : Thomas a retenu la
+  seconde ; au téléphone, les deux boutons sont déplacés après les écrans dans le DOM, et
+  le bureau garde le sien dans l'en-tête (« Panier collant et ordre du clavier »).
 
 ### Création d'abonnement (planches 3b, 5b), posé le 23/09
 
@@ -4294,7 +4301,9 @@ authentifié, que le lot écrans n'avait pas rejoués sur l'arbre fusionné).
   écrans).
 - Les écarts nommés par chaque lot restent les leurs (le collant inerte de Commande
   client, « Se déconnecter » sans authentification, « Nouveau client » tôt dans
-  l'ordre du clavier, « Itinéraire » visible au bureau…).
+  l'ordre du clavier, « Itinéraire » visible au bureau…). Le collant inerte et
+  l'ordre du clavier sont fermés depuis (« Panier collant et ordre du clavier »,
+  23/09).
 
 ## Lot 2 de l audit géo : débloquer les tournées (23/09)
 
@@ -4512,7 +4521,9 @@ Relus sur `f063247`, chacun vérifié sur le code avant d'y toucher.
   Si le rayon n'en a plus assez, le geste est **refusé en le disant** (409) : le stock ne
   passe jamais sous zéro en silence, la commande reste à reprogrammer. Rouge sur
   l'ancien code : `actual: { rayon: 24, reserve: 16 }`, attendu `{ rayon: 20, reserve: 16 }` ;
-  le refus : `actual: 200, expected: 409`.
+  le refus : `actual: 200, expected: 409`. **Le refus est remplacé le 23/09** (décision
+  de Thomas, section « Livré en retard sur un stock à zéro », en fin de fichier) : le
+  geste est accepté, le rayon passe en négatif, et c'est signalé.
 - **Important, vrai : rouvert, l'écran ne montrait jamais une tournée finie.**
   `choisirTourneeAffichee` ne prenait que les tournées non soldées : la seule tournée du
   jour, terminée, donnait « Aucune tournée créée. » après un rechargement, et le
@@ -4547,11 +4558,13 @@ Ce qui reste après la relecture :
 
 - Le dialogue du **motif** (« Client absent », « Problème », lot 1) a la même forme :
   Entrée dans la précision ferme sans enregistrer. Hors de cette relecture, non touché.
-- `corrigerArret` refuse toujours « Livré » sur une commande dont le stock a été libéré
+- ~~`corrigerArret` refuse toujours « Livré » sur une commande dont le stock a été libéré
   (choix du lot) ; le geste en retard, lui, reprend le stock. Aligner les deux est une
-  décision.
-- Un « Livré » en retard refusé faute de stock n'a aujourd'hui aucun chemin pour être
-  enregistré (`corrigerArret` le refuse aussi) : la commande reste à reprogrammer. À décider.
+  décision.~~ **Fermé le 23/09** (décision de Thomas) : les deux reprennent le stock.
+- ~~Un « Livré » en retard refusé faute de stock n'a aujourd'hui aucun chemin pour être
+  enregistré (`corrigerArret` le refuse aussi) : la commande reste à reprogrammer. À décider.~~
+  **Fermé le 23/09** (décision de Thomas) : il est accepté, le rayon passe en négatif et
+  c'est signalé. Voir « Livré en retard sur un stock à zéro », en fin de fichier.
 
 ## Lot 6 de l audit géo : pratique au quotidien (23/09)
 
@@ -4879,7 +4892,8 @@ rouvre sans réseau — onglet fermé, téléphone redémarré. Branche
 - **La session ne glisse pas** : elle finit 12 h après la connexion. Un livreur
   connecté la veille au soir ne rouvre pas sa tournée hors ligne le matin — le
   serveur l'aurait refusé de toute façon. Allonger la session est une décision de
-  sécurité, hors de ce lot.
+  sécurité, hors de ce lot. **Tranché le 23/09** : Thomas garde 12 h (« Session de
+  12 h gardée », en fin de fichier).
 - **Une session qui expire pendant que la page rouverte est affichée** : la page ne
   se referme pas d'elle-même ; seule la réouverture suivante est refusée.
 - **Un compte désactivé, ou une session invalidée côté serveur**, pendant que le
@@ -4889,7 +4903,9 @@ rouvre sans réseau — onglet fermé, téléphone redémarré. Branche
   lecture), le refus arrive : page de connexion ou 401, et le cache de données part.
   Fermer cet écart demanderait de ne rien rouvrir hors ligne — contraire à la
   décision 4 ; raccourcir la fenêtre, c'est raccourcir la session (décision de
-  sécurité, hors de ce lot).
+  sécurité, hors de ce lot). **Tranché le 23/09 par Thomas (défaut validé)** : la
+  session de 12 h est gardée, et cet écart est accepté comme le prix de la
+  décision 4. Voir « Session de 12 h gardée », en fin de fichier.
 - **Safari et l'ancre** : non mesuré (aucun banc WebKit). Le bouton « Ouvrir la
   tournée » passe par `?ecran=livreur`, que le service worker reconnaît sans l'ancre ;
   un favori `/#livreur` sur iPhone, lui, reste non vérifié.
@@ -4988,8 +5004,9 @@ interface-finitions, abonnements-mobile, clients-mobile : 45/45.
 
 - Vérifier sur un vrai téléphone (Android Chrome, iPhone Safari) : icône de l'écran
   d'accueil hors ligne, puis « Ouvrir la tournée » ; redémarrage du téléphone.
-- La durée de session (12 h, sans glissement) décide de ce qui se rouvre le matin :
-  à trancher si les tournées commencent loin de la connexion.
+- ~~La durée de session (12 h, sans glissement) décide de ce qui se rouvre le matin :
+  à trancher si les tournées commencent loin de la connexion.~~ **Fermé le 23/09** :
+  Thomas garde la session de 12 h (« Session de 12 h gardée », en fin de fichier).
 - Relecture adverse de ce lot.
 
 ## Calcul routier OSRM intégré à l image Séréo (23/09)
@@ -5335,7 +5352,8 @@ numerotation-admin, connexion, rapidite-tournee) : **150/150**. Suite e2e compl�
 2ᵉ passe **505/505**. Le rouge : `chargement-instantane.spec.js:118`, préalable
 « les requêtes d'API doivent être retenues » (reçu 0) — vert seul 3/3 (9/9 chaque
 fois), et déjà vu rouge sous charge, pour la même précondition, au lot 1 (section de la
-file hors ligne). **Instable, antérieur à la vague 2**, non corrigé.
+file hors ligne). **Instable, antérieur à la vague 2**, non corrigé ici — *fermé le 23/09 : voir
+« Banc chargement-instantane stabilisé ».*
 
 ### Docker (Docker Desktop 29.7.2, builder legacy `DOCKER_BUILDKIT=0`, 23/09)
 
@@ -5371,7 +5389,8 @@ et l'image OSRM, absents avant ; `node:24-alpine`, présente avant, gardée).
 
 ### Ce qui reste
 
-- `chargement-instantane.spec.js:118` : sa précondition se lit trop tôt sous charge.
+- ~~`chargement-instantane.spec.js:118` : sa précondition se lit trop tôt sous charge.~~ Fermé le
+  23/09 : voir « Banc chargement-instantane stabilisé ».
 - La priorité basse (`nice`, `ionice`) n'est pas observable sur Monaco (étapes de 0 s) :
   elle reste éprouvée par les seuls bancs ; les seuils de zone restent des estimations
   (lot OSRM).
@@ -5381,3 +5400,572 @@ et l'image OSRM, absents avant ; `node:24-alpine`, présente avant, gardée).
 - Les écarts nommés par chaque lot restent les leurs.
 - Le crochet « hawkscan » proposé après chaque commit n'a pas été lancé (aucune clé
   `HAWK_API_KEY`, aucune application exposée pour lui).
+
+## 23/09 — Livré en retard sur un stock à zéro (décision de Thomas)
+
+Décision de Thomas (défaut validé) : un « Livré » qui arrive **en retard** et qui
+serait refusé parce que le stock a été libéré puis repris entre-temps est
+**accepté** : la livraison a physiquement eu lieu. Le stock peut alors passer en
+négatif ; ce négatif est **signalé**, jamais caché ni corrigé en silence. Branche
+`fix/livre-en-retard-stock`, partie de `main` 1.43.0 (`67c382e`).
+
+### Les chemins de refus trouvés, et ce qu'ils deviennent
+
+Le stock en rayon est déduit à la **préparation** (`reserveStockForOrder`) ; la
+livraison ne fait que consommer la réservation (`setOrderStatus`). Un « Livré » ne
+touche donc au rayon que si la réservation a été **libérée à la main** entre-temps
+(`POST /api/orders/:id/release-stock`, admis seulement sur « à reprogrammer » et
+« problème de livraison »). Deux chemins y menaient en refusant (un troisième, et
+deux voisins, n'y menaient qu'en silence : voir « Relecture adverse » plus bas) :
+
+1. **Le geste de la file, arrivé après la clôture** (`updateRouteStop` →
+   `gesteArriveApresCloture` → `reprendreStockLibere`) : refusé (409, « le rayon n'en
+   a plus assez ») si le rayon ne couvrait plus la commande.
+2. **« Corriger le statut » vers « Livré »** (`corrigerArret`) : refusé (409, « le stock
+   a été libéré ») **toujours**, même avec un rayon plein.
+
+Les deux passent désormais par `reprendreStockLibere(db, commande, origine)` :
+
+- rayon suffisant : la réservation est reprise (le rayon est déduit de nouveau) puis
+  consommée ; historique « Stock deduit » (comme avant pour la file ; nouveau pour la
+  correction) ;
+- rayon insuffisant : chaque ligne suivie est déduite quand même, **le rayon passe en
+  négatif** (écriture directe : `setStockQuantity` ramène à zéro), et l'historique
+  reçoit une entrée « Stock » : « Livraison acceptée sur stock insuffisant : commande
+  CMD-… (client) (geste arrivé après la clôture | correction du statut | livrée en
+  tournée | écran Commandes | livraison du client) — Alèses : 2 en rayon pour 4 livrés,
+  stock à -2 ». Un produit absent du stock, ou sans quantité, n'est pas déduit et y est
+  nommé (« absent du stock, rien déduit ») ; si **aucun** rayon ne passe en négatif,
+  l'entrée dit « Livraison acceptée sur un stock non suivi », pas « insuffisant ». Ces
+  lignes non déduites sont gardées sur la commande (`stockNonDeduit`) : la libération
+  ne les rend jamais au rayon.
+
+Ce qui ne change pas :
+
+- **Le « Livré » en temps réel d'une commande réservée** (tournée en cours) ne consulte
+  pas le rayon : la réservation a été prise à la préparation, la livraison la consomme.
+  Il n'a jamais été refusé faute de stock ; c'est volontaire (revue R1 du chantier 1 :
+  le stock est déduit une fois, à la préparation). Banc témoin : rayon à zéro, « Livré »
+  accepté, rayon inchangé, aucune alerte. Celui d'une commande dont le stock a été
+  **libéré** reprend désormais la réservation : voir « Relecture adverse ».
+- **L'idempotence** (lot 1) : le même geste rejoué avec sa clé `X-Sereo-Geste` rend
+  la première réponse sans rien réappliquer ; sans clé, l'arrêt n'est plus « supposé »
+  par la clôture et le geste est refusé (409) — le stock n'est déduit qu'une fois. La
+  même correction renvoyée est refusée (« déjà Livré », 400).
+- **La réservation** : défaire la livraison (correction vers « Absent ») redonne la
+  réservation sans toucher au rayon ; la refaire la consomme. Le rayon négatif ne
+  bouge pas pendant l'aller-retour.
+- `POST /api/livraison` (hérité, plus appelé par aucun écran) ne refuse toujours rien
+  faute de stock ; il reprend seulement une réservation libérée (relecture adverse).
+- Aucune saisie ne produit un négatif : `PATCH /api/stock/:id` refuse une quantité
+  négative, les imports ramènent à zéro. Saisir la quantité comptée **régularise** le
+  négatif (mouvement de stock journalisé comme toute saisie).
+
+### Le négatif se voit
+
+- **Stock** : la ligne du produit porte « Stock négatif · à recompter » (couleur
+  d'alerte, sur sa propre ligne sous le nom : en ligne, l'ellipse du nom la coupait) ;
+  le nom accessible du champ dit « négatif, à recompter ». Contraste mesuré : 5,85:1
+  (clair), 5,23:1 (sombre). Le produit reste « Rupture » pour les filtres, la pastille
+  et « À recommander ».
+- **Les boutons −/+** ne ramènent plus un stock négatif à zéro : `Math.max(0, …)`
+  faisait de « −1 » sur −2 un **ajout** de deux unités. Ils n'écrivent rien et
+  disent : « Stock négatif (-2) : recompte le rayon et saisis la quantité comptée. »
+- **Tableau de bord, « À régler »** : une ligne « N produit(s) en stock négatif »,
+  détail « Livré sur stock insuffisant, à recompter : Alèses (-2) », vers le Stock ;
+  placée avant les ruptures, et ces produits ne sont plus comptés une seconde fois
+  dans « en rupture ».
+- **Historique** : l'entrée ci-dessus, une par livraison acceptée.
+
+### Bancs, et le rouge de chacun
+
+`test/livre-en-retard-stock.test.js` (serveur semé, SQLite), 6 cas ; sur `67c382e`
+(bancs écrits avant le code) :
+
+| Cas | Rouge sur l'ancien code |
+|---|---|
+| file, rayon à 2 pour 4 : accepté, rayon -2, journalisé | `actual: 409, expected: 200` (« le rayon n'en a plus assez ») |
+| file, même geste rejoué avec sa clé, puis sans clé : une seule déduction | `actual: 409, expected: 200` |
+| file, un produit absent du stock : accepté, nommé | `actual: 409, expected: 200` |
+| correction, rayon suffisant : accepté, rayon déduit de nouveau | `actual: 409, expected: 200` (« le stock a été libéré ») |
+| correction, rayon à 0 : -4, journalisé ; renvoi 400 ; aller-retour Absent/Livré | `actual: 409, expected: 200` |
+| témoin : « Livré » en temps réel, rayon à 0 | vert avant et après (comportement gardé) |
+
+Mutant (par copie, restauré par copie) : l'écriture directe remplacée par
+`setStockQuantity` (le négatif ramené à zéro en silence) → 3 rouges,
+`actual: { rayon: 0, reserve: 4 }`, attendu `{ rayon: -2, reserve: 4 }`.
+
+`test/tournees-debloquees.test.js` : le cas « le même Livré en retard, quand le rayon
+n'a plus de quoi : refusé » affirmait l'ancien refus ; il est retiré (un commentaire
+renvoie au nouveau banc).
+
+`test/e2e/stock-negatif.spec.js` (serveur semé, port **3352**), 6 cas ; front de
+`67c382e` copié, chaque cas lancé seul :
+
+| Cas | Rouge |
+|---|---|
+| Stock, clair/sombre, 1440/390 : badge visible, entier, ≥ 4,5:1 ; témoin à 0 sans badge | `expect(locator).toBeVisible()` : `element(s) not found` |
+| « À régler » : sa ligne, avant les ruptures, pas comptée deux fois | `Expected: 1, Received: 0` |
+| −/+ sur un négatif n'écrivent rien ; témoin positif écrit | sans la garde seule : « « − » a ecrit le stock », 1 écriture reçue |
+| règle `display: block` du badge retirée seule | « le badge est coupe », `Expected: false, Received: true` |
+
+Le contrôle « entier » mesurait d'abord `scrollWidth > clientWidth` : sur un badge en
+ligne, les deux valent 0, et le mutant sans `display: block` passait (vert). Il mesure
+désormais les boîtes (le badge dans celle du nom) ; le mutant rougit.
+
+**Exécutions** (arbre final) : `npm run check` ; `npm test` 661/661 ; e2e stock-negatif,
+stock, stock-a-plat, stock-categories, tableau-de-bord, tableau-de-bord-relecture,
+operations, tournees-debloquees : 69/69 ; tabs, livreur-ne-perd-rien : 15/15.
+
+### Écarts nommés
+
+- Le téléphone du livreur n'affiche rien de particulier quand sa livraison en file est
+  acceptée sur un stock insuffisant : le signal est au Stock, dans « À régler » et à
+  l'historique, là où le bureau recompte.
+- Un produit « à renseigner » (quantité inconnue) n'est pas déduit : le rendre négatif
+  inventerait une quantité. Il est nommé dans l'historique, et la libération ne le rend
+  pas (`stockNonDeduit`).
+- Entre « défaire la livraison » et la libération, la ligne non déduite compte encore
+  dans la **réserve** affichée du produit (mesuré : Draps « à renseigner », réservé 3) :
+  `calculateReservedStock` compte toutes les lignes d'une commande réservée. Affichage
+  seul ; le rayon est juste. Non corrigé.
+- Le négatif n'a pas de filtre propre au Stock (il est dans « Rupture ») ; à plat, il
+  vient en tête par l'ordre « du plus bas au plus haut » de l'écran.
+
+### Relecture adverse (23/09) : trois défauts, leur sort
+
+Relecture adverse de `fix/livre-en-retard-stock` à `19dec82`. Les trois sont vrais,
+et corrigés.
+
+1. **Important — un troisième chemin, silencieux.** Une commande « Absent » dont le
+   bureau libère le stock reste « à reprogrammer », donc livrable : remise dans une
+   nouvelle tournée (`createRoute` et `startRoute` ne réservent rien), son « Livré » en
+   temps réel la sortait **sans rien déduire** (rayon 14 au lieu de 10, raison
+   `manual_release`), sans rien journaliser — déjà vrai sur `67c382e`. La section
+   ci-dessus disait « deux chemins » et « volontaire » : c'était faux. Même défaut,
+   même classe, sur deux voisins : `PATCH /api/orders/:id` (« en livraison » puis
+   « livré », hors tournée) et `POST /api/livraison`. Les trois appellent désormais
+   `reprendreStockLibere` (origine « livrée en tournée », « écran Commandes »,
+   « livraison du client ») ; `updateRouteStop` l'appelle pour tout « Livré », plus
+   seulement en retard. Une commande réservée n'est pas concernée (retour immédiat).
+2. **Mineur — la libération inventait une quantité.** Sur le chemin « rayon
+   insuffisant », la commande était marquée réservée pour toutes ses lignes, même
+   celles qu'il n'avait pas déduites ; défaire la livraison puis libérer ajoutait
+   `(null ?? 0) + 3` au produit « à renseigner » (et 3 à un produit réimporté
+   entre-temps). Les lignes non déduites sont gardées (`stockNonDeduit`, préservé par
+   `normalizeOrder`), sautées par `releaseOrderStockReservation`, effacées par la
+   libération et par toute réservation complète (`reserveStockForOrder`).
+3. **Mineur — « stock insuffisant » sans manque.** Une ligne inconnue suffit à rendre
+   `canPrepare` faux : l'entrée disait « insuffisant » alors que le rayon couvrait tout.
+   Elle dit désormais « Livraison acceptée sur un stock non suivi » quand aucun rayon ne
+   passe en négatif. Le banc qui figeait l'ancien texte semait une commande réservée
+   avec un produit absent du stock, état que l'API ne produit pas (`reserveStockForOrder`
+   exige toutes les lignes connues) : il sème désormais la réservation avec le produit
+   présent, puis le retire du stock après la libération.
+
+Bancs (`test/livre-en-retard-stock.test.js`, désormais 13 cas), rouges sur `19dec82` :
+
+| Cas | Rouge sur `19dec82` |
+|---|---|
+| temps réel, nouvelle tournée, rayon suffisant : rayon déduit, « Stock deduit » | `actual: 'manual_release', expected: 'consumed_by_delivery'` |
+| temps réel, rayon à 1 : -3, journalisé | `actual: 1, expected: -3` |
+| écran Commandes, « en livraison » puis « livré » | `actual: { rayon: 14, reserve: 4 }`, attendu `{ rayon: 10, reserve: 4 }` |
+| `POST /api/livraison` « livrée » | `actual: { rayon: 14, reserve: 4 }`, attendu `{ rayon: 10, reserve: 4 }` |
+| aller-retour, Draps « à renseigner » : la libération ne leur rend rien | `actual: 3, expected: null` |
+| aller-retour, Draps retirés puis réimportés à 5 | `actual: 8, expected: 5` |
+| produit retiré après la libération : pas « insuffisant », « non suivi » nommé | `actual: 1, expected: 0` |
+| témoin : une libération ordinaire rend chaque ligne | vert avant et après |
+
+Mutants (par copie, restaurés par copie), chacun tué par son banc et lui seul :
+`retard &&` remis dans `updateRouteStop` → les 2 cas « temps réel » ; l'appel de l'écran
+Commandes retiré → son cas ; celui de `/api/livraison` retiré → son cas ; le saut des
+lignes non déduites retiré → les 2 « aller-retour » ; `stockNonDeduit` perdu par
+`normalizeOrder` → les 2 mêmes ; le titre toujours « insuffisant » → le cas « non suivi ».
+
+**Exécutions** (arbre final) : `npm run check` ; `npm test` 668/668 ; e2e stock-negatif,
+tournees-debloquees, livreur-ne-perd-rien, tournee-hors-ligne, stock, tournee, operations :
+73/73.
+
+## 23/09 — Session de 12 h gardée (décision de Thomas)
+
+Question ouverte par la décision 4 (« L écran Tournée se rouvre sans réseau ») :
+**tranchée par Thomas, défaut validé**. La session reste de **12 h, sans glissement**
+(`AUTH_COOKIE_MAX_AGE_SECONDS = 12 * 60 * 60`, inchangé). Conséquence acceptée : un
+compte désactivé, ou une session invalidée côté serveur, peut rouvrir l'écran Tournée
+**hors ligne** jusqu'à la fin de sa session de 12 h (émission du cookie + 12 h), avec
+les noms, adresses et téléphones de la tournée ; au premier contact avec le serveur, le
+refus arrive et le cache de données part. C'est le prix de la décision 4 : fermer
+l'écart demanderait de ne rien rouvrir hors ligne. Aucun code de session n'a changé ;
+les écarts de la section de la décision 4 renvoient ici.
+
+## Banc chargement-instantane stabilisé (23/09)
+
+`test/e2e/chargement-instantane.spec.js:118` (« les chiffres du tableau de bord s'affichent
+AVANT la réponse du réseau, sous « Mise à jour » ») rougissait par intermittence sous charge
+sur son préalable « les requêtes d'API doivent être retenues », reçu 0. Vu trois fois le
+23/09, jamais seul. **Défaut du banc, pas de l'application** : l'application tient sa
+promesse, et c'est elle qui rend le zéro possible.
+
+### Reproduction et cause
+
+Charge : une configuration non suivie dérivée de `pw-lot.config.js` (même serveur 3344,
+même base), `--workers=12`. Ce fichier démarre un serveur semé sur un port **fixe** (3174) :
+un seul ouvrier pour lui, 20 répétitions ; les onze autres tournent en boucle des bancs
+lourds sur le serveur commun (contraste-application, themes, navigation-mobile, tabs,
+charte-composants, typographie, texte-coupe, cibles-tactiles, focus-clavier,
+barre-laterale-finitions, nav-plate). À `--workers=4`, 0 rouge sur 20 : cette machine
+(20 cœurs) n'était pas assez chargée.
+
+- Code de `main` (`67c382e`), sans instrument : **3 rouges sur 20**, tous `prealable : les
+  requetes d'API doivent etre retenues`, `Expected: > 0`, `Received: 0`.
+- Même code, instrumenté (journal du mandataire : chaque requête, son instant, retenue ou
+  passée ; côté page, l'instant de chaque appel `fetch` vers `/api/` et celui du chiffre
+  peint) : **2 rouges sur 20**. Sur le rouge n° 1, en millisecondes depuis le
+  rechargement : la page appelle l'API à **99**, peint le chiffre du cache à **150**, le
+  banc le voit à 216, et la première requête d'API n'arrive au mandataire qu'à **263**.
+  Entre-temps, les fichiers statiques y arrivent en cascade (134, 175, 194, 261 pour
+  `/js/config/tabs.js`) : ce sont les revalidations en arrière-plan du service worker
+  (`cacheDabord`), et chacune attend que la précédente libère une connexion. Relu après
+  un tour de boucle d'événements du banc (qui lit les entrées en attente) : toujours 0 ; et
+  le témoin ci-dessous produit le même zéro en ne faisant qu'occuper les connexions.
+- Le compte des verts le confirme : au chiffre, le mandataire tient **exactement 6**
+  requêtes d'API, jamais plus, alors que la page en appelle 25. Chrome n'ouvre que six
+  connexions par hôte en HTTP/1.1 ; les requêtes retenues les gardent, les autres attendent
+  dans le navigateur.
+
+La page lance le réseau d'abord (`loadData`), lit le cache ensuite, et peint : sur une
+machine calme, les requêtes sont parties avant le chiffre ; sous charge, les six
+connexions sont prises par les revalidations, et le chiffre du cache est à l'écran avant
+qu'une seule requête d'API ait quitté le navigateur. Lire le préalable **à l'instant du
+chiffre** confondait « pas encore partie » avec « pas retenue ».
+
+### Correction (dans le banc seul)
+
+- Le préalable attend l'**arrivée** des requêtes au mandataire (`expect.poll`, délai
+  d'`expect` par défaut) : un événement, pas une durée ; ni nouvel essai, ni attente
+  allongée. Il compte **`/api/operations`**, la requête dont vient le chiffre lu
+  (`#opRevenue`, voir `renderDashboard`) : servie par le cache HTTP ou contournant le
+  mandataire, elle n'arrive jamais, et il rougit. *(Relecture du 23/09 : il comptait
+  jusque-là toutes les requêtes d'API ; un contournement de `/api/operations` seule, les
+  autres retenues, le laissait vert. Voir « Relecture : le préalable compte la source du
+  chiffre ».)*
+- La pastille se lit **à l'instant du chiffre** (une lecture, pas une attente) : `loadData`
+  pose « Mise à jour… » dans la même tâche que la copie, et le repli de 3 s du service
+  worker la changerait si on la lisait après l'attente du préalable.
+- **Témoin** (nouveau test du même fichier) : le mandataire **bloque** les revalidations des
+  fichiers statiques (une seconde file, que `retenues()` ne compte pas) jusqu'après le
+  chiffre. Les six connexions sont prises : l'API ne peut pas partir avant le chiffre. Le
+  cas du rouge, produit à coup sûr, sur une machine calme. Son propre préalable exige 0
+  requête arrivée au chiffre (sinon « le cas n'est pas produit »). Aucun port nouveau.
+
+Le test reste le même ; il est désormais à la ligne 192 (son corps est passé dans
+`chiffreAvantLeReseau`, partagé avec le témoin).
+
+### Preuves
+
+| Mutation | Banc | Résultat |
+|---|---|---|
+| Ancien code : préalable lu à l'instant du chiffre | témoin, 5 fois, machine calme | **5/5 rouges**, `prealable : les requetes d'API doivent etre retenues`, `Expected: > 0`, `Received: 0` |
+| La retenue ne prend plus l'API (`/^\/rien\//`) | le test (alors ligne 181), 2 fois | 2/2 rouges sur le nouveau préalable (`expect.poll`), `Received: 0` |
+| Le témoin ne bloque plus rien | témoin, 2 fois | 2/2 rouges, `prealable du temoin … le cas n'est pas produit`, `Expected: 0`, `Received: 6` |
+
+Après correction, **même charge** (12 ouvriers, mêmes bancs lourds) : le test **60/60**, témoin
+**60/60** ; 1 035 tests passés, 0 rouge (12,6 min). Le fichier seul : 10/10. `npm test`
+656/656.
+
+### Ce qui reste
+
+- **Côté application, non traité (hors périmètre)** : en HTTP/1.1, les requêtes d'API de
+  l'ouverture attendent derrière les revalidations en arrière-plan des fichiers statiques
+  (six connexions par hôte). La promesse (le chiffre avant le réseau) n'en souffre pas ;
+  la fraîcheur, si. Non mesuré sur le déploiement réel : cela dépend du protocole entre le
+  navigateur et le serveur.
+
+### Relecture : le préalable compte la source du chiffre (23/09)
+
+Un relecteur adverse (sur `a21cac4`) : le commentaire du banc et le paragraphe
+« Correction » ci-dessus affirmaient qu'un contournement du mandataire fait **toujours**
+rougir le préalable. **Vrai défaut, mineur, du texte et du banc** : le préalable comptait
+n'importe quelle requête d'API retenue. Si seule `/api/operations` (celle dont vient
+`#opRevenue`) contournait le mandataire — par exemple servie par le service worker sans
+réseau —, les autres restaient retenues, le compte dépassait 0, et le banc restait vert.
+Ce n'était pas une régression (l'ancien préalable avait le même angle mort), et la
+promesse de l'application n'en dépend pas ; mais le texte promettait une garde que le
+banc ne fournissait pas.
+
+- **Correction (banc seul)** : le mandataire garde l'adresse de chaque requête retenue ;
+  `retenues(motif)` compte celles qui y répondent. Le préalable attend
+  `retenues(/^\/api\/operations(\?|$)/) > 0` (message « prealable : la requete
+  /api/operations doit etre retenue »). Les autres requêtes d'API ne sont pas gardées une
+  par une : aucune ne produit le chiffre lu. Le témoin garde son préalable à lui (0
+  requête d'API arrivée au chiffre, toutes confondues).
+- **Preuve rouge**, mutation du banc qui simule le contournement partiel (le mandataire
+  laisse passer `/api/operations` sans la retenir, les autres restent retenues) :
+  - ancien banc (`a21cac4`), le test et le témoin, 2 fois chacun : **4/4 verts** — le
+    défaut, mesuré ;
+  - nouveau banc, le test, 2 fois : **2/2 rouges**, `prealable : la requete
+    /api/operations doit etre retenue`, `Expected: > 0`, `Received: 0` ; le témoin seul,
+    2 fois : **2/2 rouges**, même message, même `Received: 0`.
+- **Vert** : machine calme, le test et le témoin 5 fois chacun, 10/10. Sous charge
+  (12 ouvriers, mêmes bancs lourds en boucle, 3 répétitions) : le test **20/20**, le
+  témoin **20/20**, entrelacés avec la charge jusqu'au bout ; 223 passés, 0 rouge
+  (3,7 min). Le mandataire ne tient que six requêtes d'API (six connexions) :
+  `/api/operations`, appelée la première par `loadData`, est parmi elles sur les 40
+  passages. Le fichier seul : 10/10. `npm test` 656/656.
+
+## Panier collant et ordre du clavier (23/09)
+
+Branche `fix/collant-et-clavier`, partie de `67c382e` (release 1.43.0). CSS : le bloc
+« PANIER COLLANT ET ORDRE DU CLAVIER » en fin de `style.css`. Banc :
+`test/e2e/collant-et-clavier.spec.js` (13 cas, serveur semé sur 3350). Ferme deux écarts
+nommés plus haut : « le collant inerte » (Finitions d'interface) et « Nouveau client tôt
+dans l'ordre du clavier » (Clients au téléphone).
+
+### 1. Le panier collant, réparé à la cause
+
+**La cause, mesurée.** Aucun ancêtre du panier n'était en `overflow: auto` : c'était
+`overflow-x: hidden` sur `html`, `body` et `.content`. `hidden` sur un axe met l'autre en
+`auto` : `body` et `.content` devenaient des conteneurs de défilement (mesuré :
+`hidden/auto` sur les trois) — qui ne défilent jamais, puisque c'est la fenêtre qui défile.
+Tout `position: sticky` de la feuille collait à un conteneur immobile et partait avec la
+page. Le remède : `overflow-x: clip` sur les trois. `clip` rogne pareil, sans créer de
+conteneur (mesuré : `clip/visible`). La règle propre à Tournée (`clip` sur cet écran seul)
+reste, désormais redondante.
+
+**Le panier.** Il colle à **24 px** du haut (la marge du contenu), dans les deux thèmes, de
+1181 à 1920 px. Le thème clair disait 84 px (la hauteur d'une barre du haut qui n'existe
+plus), le sombre 18. Il est **borné à la fenêtre** : un long panier fait défiler sa liste,
+l'en-tête « Panier » et le total restent à l'écran. Sans cette borne, 24 produits font un
+panier de 1 870 px pour 800 px de fenêtre, et le total resterait hors de l'écran tant que
+le catalogue défile. Sous 1181 px, rien ne change : une colonne, le panier après le
+catalogue, et la barre panier fixe sous 560 px.
+
+**L'inventaire des `position: sticky`** (grep, 11 déclarations), chacune mesurée à 1440 et
+390 px, clair et sombre, en défilant (300, 800, 1600, 3000 px et le bas) sur les treize
+écrans, avant et après :
+
+| Ligne | Élément | Avant | Après | Verdict |
+|---|---|---|---|---|
+| 1388, 13729 | panier (`.customer-cart-panel`) ≥ 1181 px | inerte | colle à 24 px | **le but** ; top commun, hauteur bornée |
+| 1388 | formulaire client (`.customer-client-panel`) | déjà `static` à toutes les largeurs | idem | rien à faire |
+| 9747 | barre latérale, bureau | inerte : partait avec la page (−800 px) — depuis juillet, jamais collée | idem | **neutralisé** (`position: relative`, l'étage 40 reste). D'abord gardé (« c'est sa déclaration ») ; la relecture adverse l'a pris : le même cas que le bandeau du téléphone, un changement que tout utilisateur de bureau verrait, jamais décidé. Question à Thomas (écarts) |
+| 10101 | bandeau de marque, téléphone (76 px) | ne collait que sur Tournée | idem | **neutralisé** hors Tournée (`position: relative`, l'étage 950 reste) : 76 px tenus en haut sur 844 n'étaient pas une décision prise |
+| 4022 | bannière de récupération de la base | inerte | aurait collé en haut, par-dessus la barre latérale (mesuré : 0..101 px, quand la barre collait) | **neutralisé** (`position: relative`, l'étage 1500 reste) |
+| 2700, 12353 | gestes de l'arrêt, Tournée (≤ 820 px) | déjà actifs (le `clip` de Tournée) | idem | inchangé (mesuré) |
+| 12679 | gestes de la page de commande (dialogue) | collés à `.sheet-corps`, qui défile | idem | hors d'atteinte du changement |
+| 3567 | `.bdc-table thead` | — | — | aucun élément ne porte `.bdc-table` (dans un `overflow-x: auto` de toute façon) |
+| 4249, 5261 | `.topbar` (thème clair) | — | — | aucun élément ne porte `.topbar` |
+
+**Pas de débordement.** À 360, 390, 820, 921, 1024, 1200 et 1440 px, sur onze écrans
+(données semées) : aucun élément ne dépasse le bord, hors des conteneurs qui défilent
+d'eux-mêmes. La première version de ce lot disait « identique avant et après » et
+excluait la rangée d'actions de l'en-tête, qui dépassait : c'était faux au clavier (voir
+la relecture adverse, ci-dessous).
+
+### 2. L'ordre du clavier au téléphone
+
+Décision de Thomas (défauts validés) : le bouton reste fixé en bas, mais passe **après sa
+liste** dans l'ordre du document. `placerGestesBas` (app.js) **déplace** « Nouveau client »
+et « Nouvel abonnement » — mêmes éléments, mêmes écouteurs (les clics sont délégués au
+document) — dans `#gestesBas`, un conteneur vide placé après les écrans, dans `<main>`
+mais hors des `.page` (leur transform résiduel piégerait `position: fixed`). Au bureau (et
+en franchissant 820 px dans un sens ou dans l'autre), chacun revient à sa place exacte
+dans l'en-tête, marquée par un commentaire. `showTab` range les boutons de `#gestesBas`
+comme ceux de la fente. Les règles du bouton fixe sont reprises pour `#gestesBas` à
+l'identique : 27 propriétés calculées comparées avant/après (boîte 16,692 358 × 48,
+couleurs, ombre, anneau au repos et au focus), clair et sombre, **identiques**.
+
+Mesuré à 390 px, en partant du début du document :
+
+- avant : … recherche, « Rappels », **« Nouveau client »**, « Actualiser », les pilules,
+  le statut, le tri, puis les six clients ;
+- après : … recherche, « Rappels », « Actualiser », les pilules, le statut, le tri, les
+  six clients, **« Nouveau client »**. Même chose pour « Nouvel abonnement » (après les
+  trois abonnements).
+
+Au bureau, rien ne change : le bouton reste dans l'en-tête, `static`, avant la liste.
+`clients-mobile.spec.js` et `abonnements-mobile.spec.js` visent le bouton du téléphone à
+sa nouvelle place (`#gestesBas …`) ; le cas « caché dans l'agenda » vérifie d'abord que
+le bouton existe (un « caché » introuvable passait sans rien juger).
+
+### Preuves rouges
+
+Le banc, sur le code de `67c382e` (avant) :
+
+- « le panier suit le défilement » : `panier hors de la fenetre (haut -1654, bas -1285,
+  fenetre 900)`, dix fois (clair et sombre, 1181 à 1920 px) ;
+- « un long panier garde son total » : `total hors de la fenetre (1140..1193, fenetre
+  800)`, `panier de 1870px pour 800px de fenetre` ;
+- « rien ne se chevauche » : `barre laterale de -2642 a -1742 pour 900px` ;
+- « Tab parcourt la liste AVANT » : `« Nouveau client » atteint au pas 8, la derniere
+  ligne au pas 22` (Expected > 22, Received 8) ; `« Nouvel abonnement » atteint au pas 7,
+  la derniere ligne au pas 16` ;
+- « revient dans l'en-tête » : `#enteteActions .abo-nouveau` au téléphone, Expected 0,
+  Received 1.
+
+Les gardes (verts avant : ils protègent de l'effet du remède), mutés un à un sur le code
+du lot, restauré par copie :
+
+- sans la neutralisation du bandeau : `stock : le bandeau part avec la page`, Expected
+  −250, Received 0 ;
+- sans celle de la bannière : `la banniere part avec la page`, Expected ≤ 0, Received 101 ;
+- `overflow-x: visible` au lieu de `clip` : `1024px #crm : la page defile de cote (1091
+  pour 1024)` ;
+- sans la borne du panier : `total hors de la fenetre (1816..1869, fenetre 800)` ;
+- sans le `top` commun : `panier colle a 84px du haut (attendu 24, top 84px)` (clair) et
+  18 px (sombre) ;
+- `showTab` sans `#gestesBas` : le bouton reste caché sur son écran (`toBeVisible`,
+  Received hidden) ;
+- le bouton déplacé à toutes les largeurs : les deux cas « au bureau » rougissent
+  (`element(s) not found` dans l'en-tête).
+
+### Écarts nommés
+
+- ~~« Actualiser » coupé à 1024 px~~ : **fermé** par la relecture adverse (ci-dessous).
+  La rangée passe à la ligne ; plus aucune exclusion dans le banc.
+- **La barre latérale du bureau** ne colle pas, comme depuis juillet : sa règle déclare
+  `sticky`, mais `hidden` l'avait toujours rendue inerte. La faire coller (100 vh, sa
+  propre barre de défilement, la navigation toujours à portée) est une décision de mise
+  en page, visible de tout utilisateur de bureau : **à trancher par Thomas**, avec le
+  bandeau du téléphone. Défaut proposé : la laisser coller au bureau (une ligne à
+  retirer, `@media (min-width: 821px) { .sidebar { position: relative; } }`), le
+  bandeau du téléphone restant neutralisé (76 px sur 844).
+- **Le bandeau de marque du téléphone** ne colle toujours que sur Tournée. Le faire
+  coller partout (ce que sa règle déclare) est une décision de mise en page, pas une
+  réparation : à trancher par Thomas.
+- **La liste d'un long panier** défile à la souris ou au doigt ; ses lignes n'ont rien de
+  focalisable, et le clavier compte sur le navigateur (Chrome rend focalisable un
+  conteneur qui défile sans enfant focalisable). Aucun `tabindex` ajouté.
+- Sous 1181 px, le panier ne colle pas (une colonne) : voulu, inchangé.
+
+### Relecture adverse (23/09) : quatre défauts, quatre vrais
+
+Quatre défauts relevés sur `626bc59`, chacun mesuré avant d'être jugé. CSS : le bloc
+« PANIER COLLANT, RELECTURE DU 23/09 » en fin de `style.css`.
+
+1. **« `clip` coupe à l'identique » n'était vrai qu'au repos — vrai.** Mesuré : sous
+   `hidden`, le focus faisait défiler `.content` de côté et montrait « Actualiser »
+   (Commandes à 1024 et 1100 px, `scrollLeft` 202 et 126) ; sous `clip`, il le recevait
+   hors de l'écran (1105..1226 à 1024 px). Et la rangée dépassait plus largement que dit :
+   de **921 à 1225 px**, sur Clients, Commandes, **Stock et Abonnements** (pas « 821 à
+   ~1180, Clients et Commandes »). Même sous `hidden`, le focus restait invisible dans
+   certains cas (Clients à 1024). La cause : `.ecran-entete-actions { flex: none }` la
+   gardait à sa largeur d'une ligne, son `flex-wrap: wrap` ne servait jamais. **Remède**
+   (≥ 921 px) : la rangée et la fente sont bornées à la largeur de l'en-tête et passent
+   à la ligne, alignées à droite. Mesuré, 11 écrans de 921 à 1920 px, boîtes de
+   l'en-tête avec et sans le remède : seules changent les rangées qui dépassaient
+   l'en-tête (dans la marge du contenu, ou au-delà du bord). Clair et sombre regardés.
+2. **Le banc de débordement excluait la rangée partout, et `scrollWidth` ne pouvait
+   presque plus échouer — vrai.** L'exclusion est retirée ; 921, 1024 et 1200 px
+   s'ajoutent ; le commentaire dit que c'est la liste des éléments hors du bord qui
+   juge. Nouveau cas : Tab parcourt l'en-tête de six écrans à 921, 1024, 1200 et
+   1440 px, et chaque élément focalisé doit être dans la fenêtre (136 focus).
+3. **texte-coupe ne voyait plus les deux boutons déplacés au téléphone — vrai.**
+   `#gestesBas *` rejoint son sélecteur (442 textes jugés au téléphone, contre 440).
+4. **La barre latérale du bureau collait sans décision — vrai.** Neutralisée comme le
+   bandeau du téléphone ; la question est dans les écarts, avec un défaut proposé.
+
+**Preuves rouges**, les bancs de ce commit sur le code de `626bc59` :
+
+- « aucun débordement » : 21 défauts, dont `1024px #commandes : button.button
+  [1105..1226] depasse le bord` et `921px #stock : button.button [835..956]` ;
+- « au clavier, chaque commande de l'en-tête » : 8 défauts, dont `1024px #crm :
+  « refreshButton » a le focus hors de l'ecran (970..1091, fenetre 1024)` ;
+- « la barre latérale défile avec la page » : `stock`, Expected −400, Received 0.
+
+texte-coupe, par mutant (le libellé de « Nouveau client » rogné à 40 px dans
+`#gestesBas`, restauré par copie) : le banc d'avant reste **vert** (440 textes, 0 coupé) ;
+celui-ci rougit, `[crm] SPAN « Nouveau client » : 79px de trop`.
+
+## 24/09 — Le jour calendaire est celui de Paris
+
+Branche `integration/derniers-points`, commit `78679b0` sur `d80eadf`.
+
+**Le défaut** (le « défaut 7 », laissé ouvert au lot 1 de l'audit géo). Mesuré en CI le
+23/09 à 22:10 UTC (00:10 à Paris le 24) : `ecrans-sans-planche.spec.js:142` rouge 3 fois
+sur 3, « barres avec vente : Expected > 0, Received 0 ». En production le conteneur n'a
+pas de `TZ` : le processus tourne en **UTC**. `computeStatistics` prenait « aujourd'hui »
+par `getDate()` et le jour d'une vente en tronquant `deliveredAt` (ISO en UTC) : entre
+minuit et 2 h (1 h l'hiver), heure de Paris, le serveur vivait **la veille**. Reproduit en
+local le 23/09 à 22:45 UTC en lançant le banc avec `TZ=UTC` (rouge identique ; sans `TZ`,
+vert : le poste est à Paris).
+
+**La règle.** Tout jour calendaire tiré d'un **instant** (maintenant, `deliveredAt`,
+`createdAt`, `confirmedAt`, `dateImport`) est le jour **à Paris**, quel que soit le fuseau
+du processus. Une **date sans heure** (`deliveryDate`, `dateCommande`, `datePrevue`,
+`startDate`, une date Excel) ne se décale jamais. Un seul module, `lib/jour-paris.js` :
+`jourParis(instant)` (Intl, `Europe/Paris`, par `formatToParts`) ; `jourDeLInstant(v)`
+(un ISO **avec fuseau** est un instant ; sans fuseau, c'est l'heure du mur, lue telle
+quelle) ; l'arithmétique des clés `YYYY-MM-DD` en UTC pur (`ajouterJours`,
+`debutSemaine` au lundi, `debutMois`, `moisSuivant`, `moisPrecedent`).
+`lib/operations-api.js` (qui lisait déjà Paris) délègue désormais à ce module.
+`startOfLocalDay` et `startOfWeekMonday` sont retirées : elles n'existaient que pour ce
+calcul faux.
+
+**Les occurrences, classées.** (a) = instant → jour : passe par `jourParis` ;
+(b) = date sans heure déjà, ou arithmétique symétrique : inchangée.
+
+| Où (`server.js` sauf mention) | Quoi | Classe |
+|---|---|---|
+| `computeStatistics` | aujourd'hui, semaine, mois, mois précédent, 14 jours, nouveaux clients (`createdAt`), convertis (`crmConvertedAt`) ; jour d'une vente = `jourParis(deliveredAt)`, sinon `deliveryDate`, sinon `dateCommande` | (a) |
+| `orderDate` | `createdAt` quand `dateCommande` manque ; `dateCommande` telle quelle | (a) / (b) |
+| `normalizeOrder` | défaut « aujourd'hui », et le jour de `dateImport`/`createdAt` si `dateCommande` manque ; une `dateCommande` ISO avec heure reste tronquée (banc `p1-verify` Lot2.c) | (a) / (b) |
+| `ensureOrderNumbers` | `dateCommande` manquante tirée de `dateImport`/`createdAt` | (a) |
+| `extractYear` | année de repli (le 31/12 à 23:30 UTC, c'est déjà l'an neuf) | (a) |
+| `getDashboardSummary`, `getReminderViews` (+ « 7 jours »), `GET /api/crm/clients` | « aujourd'hui » | (a) |
+| `normalizeCrmReminder`, `validateCrmClientPayload`, `createCustomerOrder`, `createPlannedOrder`, commande de repli d'un client, import des ventes sans date, validation de préparation sans `deliveryDate`, `getCustomerOrdersForDate` | date du jour **par défaut** | (a) |
+| `confirmPlannedOrder` | `dateRealisation` du rappel et `lastVisitDate` tirés de `confirmedAt` | (a) |
+| `nextSectorDeliveryDate` | le point de départ (« aujourd'hui ») ; le reste en clés UTC | (a) |
+| purge des tournées | la date du **libellé** (la borne compare des instants, sans jour) | (a) |
+| `nomDeTournee` | jour de `createdAt` | déjà Paris |
+| `lib/operations-api.js` | `todayParis`, jour d'une vente | déjà Paris (délègue) |
+| `lib/subscriptions.js` | `ymd`, `occurrenceDate`, `schedule`, `isOccurrence` : clés ancrées à `T12:00:00Z`, `today` reçu de l'appelant | (b) |
+| `dimancheDePaques`, `joursFeriesFrance`, `alerteDateNonOuvree` | clés construites en heure locale **et relues** en heure locale : aucun instant ne traverse un fuseau | (b) |
+| `createAutomaticOrderReminder` (`dateFromYmd`, `addDays`, `toYmd`) | J-7 d'une `deliveryDate` : même symétrie | (b) |
+| `normalizeDateInput(Date)`, `excelDate` | dates Excel (minuit UTC) : lues en UTC | (b) |
+| `computeOrderHash`, `normalizeClient` (`firstContactDate`, `datePremierContact`, `dateCreation`), `crmClientView` | dates sans heure | (b) |
+| `storage/sqliteStore.js` | horodatages seulement, jamais un jour | hors classe |
+
+**Bancs.** `test/jour-paris.test.js` (13 cas) : le processus passe en UTC avant tout
+calcul (`process.env.TZ = "UTC"` : Node le prend en cours de route, Windows compris) et
+un **témoin** le vérifie (décalage 0 l'été et l'hiver, `getDate()` rend la veille de
+Paris) ; l'instant est **injecté** (`mock.timers` sur `Date`) : le banc ne dépend pas de
+l'heure où on le lance. Cas : 23:30 UTC le 23/09 (livraison de la nuit comptée le 24,
+« aujourd'hui » = 24, commande, rappel et premier contact sans date = 24, tableau de bord,
+secteur) ; hiver, lundi 02/11 00:30 (+1 h seulement : 22:30 UTC reste dimanche ; la
+semaine commence le lundi de Paris) ; réveillon 31/12 23:30 UTC (mois, année, numéro de
+commande 2027, nouveaux clients de janvier, année de repli).
+
+**Preuves rouges** (le banc sur le `server.js` de `d80eadf`, restauré par copie) : 9 cas
+sur 13 rouges, chacun de la bonne cause — `'2026-09-23'` au lieu de `'2026-09-24'`
+(dernière barre, commande sans date, rappel sans date), `'2026-11-01'` au lieu de
+`'2026-11-02'`, `'2026-12-31'` au lieu de `'2027-01-01'` (barre et commande),
+`deliveryToday` 0 au lieu de 1, secteur `'2026-09-23'` au lieu de `'2026-10-23'`, année
+2026 au lieu de 2027. Les 4 verts sont le témoin et le module (neuf). **Mutants** sur le
+nouveau code : décalage fixe « +2 h » → rouge (hiver : `'2026-11-02'` au lieu de
+`'2026-11-01'`, `today` 2 commandes au lieu d'1) ; nouveaux clients par troncature UTC →
+rouge (0 au lieu de 1) ; `deliveredAt` tronqué en UTC → rouge (la livraison de 01:15 :
+0 au lieu d'1). **Contre-témoin** : sans la ligne `TZ`, le témoin rougit (décalage −120),
+les 12 autres passent — le nouveau code ne dépend plus du fuseau.
+
+**Deux oracles de bancs existants** calculaient « aujourd'hui » en heure du processus :
+`api.test.js` (deux cas de statistiques, `getDate()`) et `p1-verify.test.js` Lot2.b/d
+(`toISOString`). Lancés en UTC entre 22 h et minuit UTC, ils rougissaient **avec** le
+correctif (ils encodaient le défaut) ; ils calculent désormais le jour de Paris, sans
+passer par le module (un oracle ne se valide pas avec le code qu'il juge).
+
+**e2e, serveur en `TZ=UTC`, dans la fenêtre** (le 23/09 entre 22:45 et 23:21 UTC, soit
+00:45–01:21 à Paris) : ancien code, `ecrans-sans-planche:142` rouge (`Expected > 0,
+Received 0`), vert sans `TZ` ; nouveau code, les dix fichiers qui montrent des dates
+(143 cas) verts — au second passage : le premier, lancé juste après le correctif, en
+avait 5 rouges et 76 non joués (dont un dialogue d'abonnement pas ouvert en 5 s), et
+ces cinq fichiers repassent tous seuls en UTC (81 cas). Suite complète : un premier passage à 524/525 (`parametres-mobile:309`,
+un tableau pas encore rendu sous charge : 16/16 dans son fichier et 5/5 seul, en UTC —
+pas une date), puis, sur l'arbre final, **525/525** (23:17–23:21 UTC).
+
+**Ce qui reste.** Côté navigateur (hors de ce lot) : `public/js/app.js` nomme le CSV
+exporté par `toISOString().slice(0, 10)`, et `public/js/domains/tournee-pratique.js`
+`jourDe()` range une tournée sans `deliveryDate` au jour UTC de `completedAt` — même
+classe, entre minuit et 2 h. Deux oracles e2e prennent l'année par `getFullYear()`
+(`parametres.spec.js`, `parametres-mobile.spec.js`) : faux une heure par an, le
+31/12 après 23 h UTC.

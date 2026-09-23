@@ -262,23 +262,9 @@ test("H8 — un « Livré » en retard apres une liberation du stock a la main :
   assert.equal(commandeLue("o-b").stockReleaseReason, "consumed_by_delivery");
 });
 
-test("H8 — le meme « Livré » en retard, quand le rayon n'a plus de quoi : refuse en le disant, rien ne bouge", async () => {
-  ensemencer();
-  const avantCloture = new Date(Date.now() - 60 * 1000).toISOString();
-  assert.equal((await poster("/api/routes/r-cours/cloturer")).res.status, 200);
-  assert.equal((await poster("/api/orders/o-b/release-stock")).res.status, 200);
-  // Les 4 rendus au rayon sont repartis ailleurs : il en reste 2.
-  const db = readDb();
-  db.stock.find(p => p.id === "p1").quantite = 2;
-  writeDb(db, { backup: false });
-  const avant = await stock();
-
-  const tard = await patcher("/api/routes/r-cours/stops/s-o-b", { status: "livre", faitLe: avantCloture });
-  assert.equal(tard.res.status, 409, JSON.stringify(tard.body));
-  assert.match(tard.body.error, /stock/i);
-  assert.equal(commandeLue("o-b").status, "a_reprogrammer");
-  assert.deepEqual(await stock(), avant, "un refus a quand meme touche au stock");
-});
+// Le meme « Livre » en retard, quand le rayon n'a plus de quoi : il etait
+// refuse (409). Decision de Thomas du 23/09 : il est accepte, le rayon passe en
+// negatif et c'est journalise. Ses bancs : test/livre-en-retard-stock.test.js.
 
 test("H8 — une tournee cloturee est FINIE partout : liste sans trace (rendu a la demande), purgeable a 12 mois", async () => {
   ensemencer();

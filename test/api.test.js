@@ -46,6 +46,16 @@ function seedDb(db) {
   writeDb(db, { backup: false });
 }
 
+// Le jour a Paris, "YYYY-MM-DD", calcule ICI sans passer par le serveur : un
+// oracle qui reprendrait lib/jour-paris.js validerait ce qu'il vient de produire.
+function jourParisIso(instant = new Date()) {
+  const p = {};
+  for (const { type, value } of new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit"
+  }).formatToParts(instant)) p[type] = value;
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
 function listUploadFiles() {
   if (!fs.existsSync(uploadDir)) return [];
   return fs.readdirSync(uploadDir).filter(name => name !== ".gitkeep");
@@ -445,12 +455,9 @@ test("customer order joins preparation flow without counting undelivered revenue
 test("import ventes feeds statistics from TTC/HT amounts", async () => {
   seedDb(defaultDb());
 
-  const now = new Date();
-  const todayFr = [
-    String(now.getDate()).padStart(2, "0"),
-    String(now.getMonth() + 1).padStart(2, "0"),
-    now.getFullYear()
-  ].join("/");
+  // « Aujourd'hui » est le jour a PARIS (24/09), celui des statistiques : lu par
+  // getDate(), il etait celui du processus -- la veille en CI (UTC) apres 22 h.
+  const todayFr = jourParisIso().split("-").reverse().join("/");
 
   const form = new FormData();
   form.append("file", workbookBlob([
@@ -649,12 +656,7 @@ test("annex orders export returns a real xlsx file", async () => {
 });
 
 test("statistics recover revenue from imported ventes for legacy zero-total orders", async () => {
-  const now = new Date();
-  const todayIso = [
-    now.getFullYear(),
-    String(now.getMonth() + 1).padStart(2, "0"),
-    String(now.getDate()).padStart(2, "0")
-  ].join("-");
+  const todayIso = jourParisIso();
   seedDb({
     ...defaultDb(),
     ventes: [{

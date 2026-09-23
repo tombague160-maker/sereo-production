@@ -91,10 +91,10 @@ test("la ligne fait 96 px : client et état, échéance et fréquence, panier et
 
 test("« Nouvel abonnement » est fixé au-dessus de la barre basse, et ne recouvre jamais le dernier abonnement", async ({ page }) => {
   await ouvrir(page);
-  const bouton = page.locator(".ecran-entete .abo-nouveau");
+  const bouton = page.locator("#gestesBas .abo-nouveau");
   await expect(bouton).toBeVisible();
   const mesure = () => page.evaluate(() => {
-    const b = document.querySelector(".ecran-entete .abo-nouveau").getBoundingClientRect();
+    const b = document.querySelector("#gestesBas .abo-nouveau").getBoundingClientRect();
     const barre = document.querySelector("nav.mobile-tabbar").getBoundingClientRect();
     const toutes = [...document.querySelectorAll("#subscriptionList .abonnement-ligne")];
     const derniere = toutes[toutes.length - 1].getBoundingClientRect();
@@ -179,7 +179,9 @@ test("le calendrier ouvre « Les 90 jours » ; la flèche et le retour du télé
   await expect(page.locator("#pageSubtitle")).toHaveText(/^\d+ livraisons? prévues?$/);
   await expect(page.locator("#abonnements .abo-agenda")).toBeVisible();
   await expect(page.locator("#abonnements .abo-colonne")).toBeHidden();
-  await expect(page.locator(".ecran-entete .abo-nouveau")).toBeHidden();
+  // Present (un « cache » introuvable passerait sans rien juger), mais cache.
+  await expect(page.locator("#gestesBas .abo-nouveau")).toHaveCount(1);
+  await expect(page.locator("#gestesBas .abo-nouveau")).toBeHidden();
   await expect(page.locator(".ecran-entete .abo-recherche")).toBeHidden();
   const retour = page.getByRole("button", { name: "Retour aux abonnements" });
   await expect(retour).toBeFocused();

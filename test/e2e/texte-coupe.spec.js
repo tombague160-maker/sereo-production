@@ -61,7 +61,10 @@ for (const vue of [["desktop", 1440, 900], ["mobile", 390, 844]]) {
         let juges = 0;
         // .ecran-entete remplace .topbar, qui n'existe plus : viser l'ancienne
         // classe ne trouvait rien, et le banc restait vert sans l'avoir lue.
-        for (const el of document.querySelectorAll("section.page.active *, .sidebar *, .ecran-entete *")) {
+        // #gestesBas (23/09) : au telephone, « Nouveau client » et « Nouvel
+        // abonnement » y vivent, hors de .ecran-entete et hors des .page --
+        // meme motif, meme remede.
+        for (const el of document.querySelectorAll("section.page.active *, .sidebar *, .ecran-entete *, #gestesBas *")) {
           const texte = [...el.childNodes].filter(n => n.nodeType === 3)
             .map(n => n.textContent).join("").trim();
           if (!texte) continue;

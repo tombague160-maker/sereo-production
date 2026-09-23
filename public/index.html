@@ -1723,6 +1723,13 @@
           <span class="par-badge" id="parVersionEtat" hidden>À jour</span>
         </button>
       </section>
+      <!-- Au telephone, « Nouveau client » et « Nouvel abonnement » sont fixes
+           en bas de l'ecran. Dans la fente d'en-tete, Tab les atteignait AVANT
+           leur liste : placerGestesBas les deplace ici, APRES les ecrans dans
+           l'ordre du document (memes elements). Au bureau, ils reviennent dans
+           l'en-tete. Hors des .page : leur transform residuel piegerait
+           position: fixed. -->
+      <div id="gestesBas" class="gestes-bas"></div>
     </main>
 
     <!-- Barre panier collante (mobile). Placee APRES <main> (donc apres le

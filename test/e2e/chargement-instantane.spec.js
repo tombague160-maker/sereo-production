@@ -21,7 +21,10 @@ test.describe.configure({ mode: "serial" });
 
 /** Un mandataire qui peut retenir, retarder ou reecrire. */
 async function mandataire(cible) {
-  const etat = { retenir: null, attente: [], delaiApi: 0, reecrire: null, entete: null };
+  // `bloquer` : une seconde file, que `retenues()` ne compte pas. Elle sert au
+  // temoin du prealable (voir chiffreAvantLeReseau) : des revalidations de
+  // fichiers statiques qui occupent les connexions du navigateur.
+  const etat = { retenir: null, attente: [], bloquer: null, bloquees: [], delaiApi: 0, reecrire: null, entete: null };
   const server = http.createServer((req, res) => {
     const passer = () => {
       const amont = http.request(cible + req.url, { method: req.method, headers: req.headers }, r => {
@@ -55,7 +58,10 @@ async function mandataire(cible) {
       res.end('{"error":"Connexion requise"}');
       return;
     }
+    // L'adresse suit la requete retenue : `retenues(motif)` compte par adresse.
+    passer.url = req.url;
     if (etat.retenir && etat.retenir.test(req.url)) etat.attente.push(passer);
+    else if (etat.bloquer && etat.bloquer.test(req.url)) etat.bloquees.push(passer);
     else if (etat.delaiApi && req.url.startsWith("/api/")) setTimeout(passer, etat.delaiApi);
     else passer();
   });
@@ -65,8 +71,12 @@ async function mandataire(cible) {
     base: `http://127.0.0.1:${server.address().port}`,
     etat,
     retenir(motif) { etat.retenir = motif; },
-    liberer() { etat.retenir = null; for (const f of etat.attente.splice(0)) f(); },
-    retenues() { return etat.attente.length; },
+    liberer() { etat.retenir = null; for (const f of etat.attente.splice(0)) f(); this.debloquer(); },
+    // Sans motif : toutes les requetes retenues ; avec : celles dont l'adresse
+    // y repond.
+    retenues(motif) { return motif ? etat.attente.filter(f => motif.test(f.url)).length : etat.attente.length; },
+    bloquer(motif) { etat.bloquer = motif; },
+    debloquer() { etat.bloquer = null; for (const f of etat.bloquees.splice(0)) f(); },
     async arreter() {
       this.liberer();
       server.closeAllConnections();
@@ -90,6 +100,8 @@ test.afterEach(() => {
 });
 
 const CHIFFRE = "#opRevenue";
+// La requete dont vient CHIFFRE (renderDashboard lit data.operations).
+const SOURCE_DU_CHIFFRE = /^\/api\/operations(\?|$)/;
 const VIDE = "—";
 
 /** Ouvre l'app, attend que le service worker controle la page, recharge une
@@ -115,25 +127,76 @@ function cleDuCacheDeDonnees(page) {
   });
 }
 
-test("les chiffres du tableau de bord s'affichent AVANT la reponse du reseau, sous « Mise a jour »", async ({ browser }) => {
-  test.setTimeout(90000);
+const STATIQUES = /^\/(css|js|fonts|vendor|brand|icons)\//;
+
+/**
+ * Le chiffre a l'ecran pendant que TOUTES les requetes d'API sont retenues.
+ *
+ * LE PREALABLE SE LIT QUAND LES REQUETES SONT ARRIVEES, PAS A L'INSTANT DU
+ * CHIFFRE (banc stabilise le 23/09). Il se lisait juste apres le chiffre, et
+ * rougissait sous charge : « retenues » recu 0, 2 a 3 fois sur 20 avec douze
+ * ouvriers. Journal du mandataire sur un rouge : la page appelle l'API a
+ * 99 ms, peint le chiffre du cache a 150 ms, et la premiere requete d'API
+ * n'arrive au mandataire qu'a 263 ms. Entre les deux, elle attend une
+ * connexion : Chrome n'en ouvre que six par hote, et le service worker les
+ * occupe a revalider en arriere-plan les fichiers statiques qu'il vient de
+ * servir du cache (/js/config/tabs.js arrive a 261 ms, 66 ms apres le
+ * precedent). L'application fait ce qu'elle promet -- le chiffre AVANT la
+ * reponse -- et c'est justement ce qui rend « aucune requete encore partie »
+ * possible a l'instant du chiffre.
+ *
+ * Le prealable garde que la requete dont vient le chiffre (/api/operations,
+ * voir renderDashboard) passe bien par le mandataire et y est retenue (pas
+ * servie par le cache HTTP, pas contournee). Il attend donc son ARRIVEE -- un
+ * evenement, pas une duree -- et la compte, ELLE : compter toutes les
+ * requetes d'API laissait passer un contournement partiel (/api/operations
+ * servie sans le mandataire, d'autres retenues, compte > 0). Un
+ * contournement de /api/operations le fait rougir, au bout du delai d'expect.
+ * Les autres requetes d'API ne sont pas gardees une par une : aucune ne
+ * produit le chiffre lu ici.
+ * La pastille, elle, se lit a l'instant du chiffre : loadData pose « Mise a
+ * jour… » dans la meme tache que la copie, et le repli de 3 s du service
+ * worker la changerait si on la lisait apres l'attente.
+ *
+ * `statiquesBloques` : le temoin. Les revalidations des fichiers statiques
+ * sont bloquees au mandataire jusqu'apres le chiffre ; les six connexions sont
+ * prises, l'API ne peut pas partir avant. Le cas du rouge, produit a coup sur.
+ */
+async function chiffreAvantLeReseau(browser, { statiquesBloques = false } = {}) {
   const { ctx, page } = await ouvrirACacheChaud(browser);
   const attendu = await page.locator(CHIFFRE).textContent();
 
   // Aucune reponse d'API ne revient tant qu'on ne libere pas.
   mdt.retenir(/^\/api\//);
+  if (statiquesBloques) mdt.bloquer(STATIQUES);
   await page.reload({ waitUntil: "domcontentloaded" });
 
   // Le chiffre est la, et c'est celui de la derniere fois -- AVANT le reseau.
   // Sous 2 s : le repli du service worker (3 s) ne peut pas l'expliquer.
   await expect(page.locator(CHIFFRE), "le chiffre attend le reseau").toHaveText(attendu, { timeout: 2000 });
-  expect(mdt.retenues(), "prealable : les requetes d'API doivent etre retenues").toBeGreaterThan(0);
+  const statut = await page.locator("#syncStatus").textContent();
+
+  if (statiquesBloques) {
+    expect(mdt.retenues(), "prealable du temoin : l'API est arrivee avant le chiffre, le cas n'est pas produit").toBe(0);
+    mdt.debloquer();
+  }
+  await expect.poll(() => mdt.retenues(SOURCE_DU_CHIFFRE), { message: "prealable : la requete /api/operations doit etre retenue" }).toBeGreaterThan(0);
   // Et il n'est pas presente comme frais.
-  await expect(page.locator("#syncStatus")).toHaveText(/^Mise à jour…/);
+  expect(statut, "le chiffre du cache est presente comme frais").toMatch(/^Mise à jour…/);
 
   mdt.liberer();
   await expect(page.locator("#syncStatus")).toHaveText(/^À jour/, { timeout: 10000 });
   await ctx.close();
+}
+
+test("les chiffres du tableau de bord s'affichent AVANT la reponse du reseau, sous « Mise a jour »", async ({ browser }) => {
+  test.setTimeout(90000);
+  await chiffreAvantLeReseau(browser);
+});
+
+test("temoin du prealable : l'API qui part APRES le chiffre (connexions prises) est encore vue retenue", async ({ browser }) => {
+  test.setTimeout(90000);
+  await chiffreAvantLeReseau(browser, { statiquesBloques: true });
 });
 
 test("un repli sur le cache n'est jamais annonce « A jour »", async ({ browser }) => {

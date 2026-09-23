@@ -74,7 +74,7 @@ test("Lot2.a — ISO datetime complet est ACCEPTE (tronque a la date), plus reje
 });
 
 test("Lot2.b — normalizeOrder PRESERVE une date brute non normalisable (jamais today)", () => {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
   const o = _normalizeOrder({ id: "x", clientId: "c", dateCommande: "2025-13-31" });
   assert.equal(o.dateCommande, "2025-13-31", "date invalide preservee telle quelle");
   assert.notEqual(o.dateCommande, today, "surtout PAS mutee vers today");
@@ -86,7 +86,9 @@ test("Lot2.c — normalizeOrder normalise un datetime en date canonique (sans pe
 });
 
 test("Lot2.d — normalizeOrder : commande SANS date -> defaut aujourd'hui", () => {
-  const today = new Date().toISOString().slice(0, 10);
+  // « Aujourd'hui » est le jour a PARIS (24/09) : la date UTC, entre 22 h et minuit
+  // UTC, est la veille -- l'oracle d'avant rougissait a cette heure-la.
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
   const o = _normalizeOrder({ id: "x", clientId: "c" });
   assert.equal(o.dateCommande, today, "nouvelle commande sans date = today (defaut acceptable)");
 });
