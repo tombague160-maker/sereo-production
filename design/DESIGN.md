@@ -2191,9 +2191,9 @@ Client » (pilule sur le vert, à côté des filtres), la pastille de synchronis
   des trois dates) : l'éditeur actuel est gardé tel quel, c'est un lot à part ;
 - la tache floue rose derrière la liste (décor).
 
-**Non fait dans ce lot** : `CACHE_NAME` (`public/service-worker.js`) n'est pas changé alors que
-`style.css`, `app.js` et `operations.js` sont dans `APP_SHELL` — la consigne du lot confie ce
-changement à l'intégrateur, qui le fait une fois pour tous les lots fusionnés.
+**`CACHE_NAME`** : réglé à l'intégration du 23/09. Le lot « chargement instantané » l'a porté à
+`sereo-shell-20260923-instantane`, et surtout le nom annoncé porte désormais l'empreinte du
+contenu de `public/` : tout fichier modifié renouvelle le shell sans geste de personne.
 
 ### Mobile, Paramètres (planches 8d/12d), posé le 23/09
 
@@ -2272,8 +2272,9 @@ secteurs, pied de version, gestes et ✕ des deux feuilles, « Télécharger ».
 version du banc ne mesurait ni la feuille des imports ni ces hauteurs, alors que son
 rapport le disait.
 
-**Reste à l'intégrateur** : `CACHE_NAME` du service worker n'est pas changé par ce lot,
-alors que `style.css`, `app.js` et `domains/comptes.js` (APP_SHELL) le sont.
+**`CACHE_NAME`** : réglé à l'intégration du 23/09. Le lot « chargement instantané » l'a porté à
+`sereo-shell-20260923-instantane`, et surtout le nom annoncé porte désormais l'empreinte du
+contenu de `public/` : tout fichier modifié renouvelle le shell sans geste de personne.
 
 ### Commandes + Stock mobile + squelettes (planches 8a, 8b, 10a, 10b), posé le 23/09
 
