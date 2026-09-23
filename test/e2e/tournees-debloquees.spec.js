@@ -397,10 +397,20 @@ function semeTourneeFinie() {
   return s;
 }
 
+/**
+ * Arrete un serveur seme de ce fichier et le relance sur SON port, avec un
+ * autre seme. Le port est relu dans `base` : il n'est ecrit qu'une fois, dans
+ * beforeAll (test/ports-e2e.test.js compte chaque port litteral demarre).
+ */
+async function resemer(serveur, seed) {
+  const port = Number(new URL(serveur.base).port);
+  await serveur.arreter();
+  return demarrer({ port, seed });
+}
+
 test("relecture — rouverte, l'ecran montre la tournee du jour TERMINEE : un arret se corrige encore apres un rechargement", async ({ browser }) => {
   test.setTimeout(120000);
-  await srv.arreter();
-  srv = await demarrer({ port: 3330, seed: semeTourneeFinie() });
+  srv = await resemer(srv, semeTourneeFinie());
   const { ctx, page, erreurs } = await ouvrir(browser, srv.base);
   await expect(page.locator("#currentClient"), "la tournee terminee du jour n'est pas a l'ecran").toContainText("Tournée terminée");
   const ligne = page.locator("#routeStopsList .route-stop").nth(5);
@@ -418,8 +428,7 @@ test("relecture — rouverte, l'ecran montre la tournee du jour TERMINEE : un ar
 
 test("relecture — la liste du jour DIT les commandes pretes qu'elle cache : en retard, sans date", async ({ browser }) => {
   test.setTimeout(120000);
-  await srv.arreter();
-  srv = await demarrer({ port: 3330, seed: semeTourneeFinie() });
+  srv = await resemer(srv, semeTourneeFinie());
   const { ctx, page } = await ouvrir(browser, srv.base);
   const cartes = page.locator("#deliveryCandidates");
   await expect(cartes).toContainText("EHPAD Résidence Bellevue");
@@ -439,8 +448,7 @@ test("relecture — la liste du jour DIT les commandes pretes qu'elle cache : en
 
 test("relecture — « Corriger le statut » : Entree dans la cause ENVOIE la correction (avant : le dialogue se fermait, rien ne partait)", async ({ browser }) => {
   test.setTimeout(120000);
-  await srv2.arreter();
-  srv2 = await demarrer({ port: 3331, seed: jeuDeDonnees() });
+  srv2 = await resemer(srv2, jeuDeDonnees());
   const { ctx, page, erreurs } = await ouvrir(browser, srv2.base);
   await page.locator("#routeStopsList .route-stop").nth(3).locator(".route-stop-main").click();
   await page.locator('#currentClient [data-action="corriger-statut"]').click();

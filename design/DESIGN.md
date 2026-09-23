@@ -4493,3 +4493,58 @@ verts.
 - Une commande « À reprogrammer » ne s'annule toujours pas (écart du lot 1).
 - Un sélecteur des tournées d'autres jours (hors « du jour » et « à solder ») n'existe
   pas : une tournée terminée hier ne se rouvre pas à l'écran (le serveur la rend).
+
+### Relecture adverse du lot 2 (23/09) — cinq défauts, cinq vrais, cinq corrigés
+
+Relus sur `f063247`, chacun vérifié sur le code avant d'y toucher.
+
+- **Important, vrai : un « Livré » arrivé après la clôture ignorait une libération du
+  stock faite entre-temps.** Clôture (la commande passe « À reprogrammer », réservée),
+  puis `release-stock` à la main (le rayon recompte 4), puis le « Livré » en file, fait
+  avant la clôture : il passait (`gesteArriveApresCloture` ne regarde pas le stock), ne
+  consommait rien (plus de réservation) : le rayon comptait une marchandise livrée.
+  Corrigé (`reprendreStockLibere`) : la réservation est reprise (le rayon est déduit de
+  nouveau), puis consommée par la livraison, et l'historique le dit (« Stock deduit »).
+  Si le rayon n'en a plus assez, le geste est **refusé en le disant** (409) : le stock ne
+  passe jamais sous zéro en silence, la commande reste à reprogrammer. Rouge sur
+  l'ancien code : `actual: { rayon: 24, reserve: 16 }`, attendu `{ rayon: 20, reserve: 16 }` ;
+  le refus : `actual: 200, expected: 409`.
+- **Important, vrai : rouvert, l'écran ne montrait jamais une tournée finie.**
+  `choisirTourneeAffichee` ne prenait que les tournées non soldées : la seule tournée du
+  jour, terminée, donnait « Aucune tournée créée. » après un rechargement, et le
+  sélecteur (caché sous deux options) n'y menait pas : l'arrêt à corriger (M2) et le
+  bilan n'étaient atteignables qu'avant un rechargement. Corrigé : la dernière tournée
+  du jour finie (terminée ou clôturée) est choisie après les tournées passées à solder,
+  avant une tournée d'un jour à venir. Rouge : `Expected substring: "Tournée terminée"`,
+  `Received string: "Aucune tournée créée."`.
+- **Mineur, vrai : Entrée dans la cause de « Corriger le statut » annulait en silence.**
+  Un seul champ texte, aucun bouton `submit` : Entrée soumet, `method="dialog"` ferme, et
+  la fermeture valait « Annuler ». Corrigé : Entrée vaut « Corriger » (sans statut
+  choisi, le dialogue reste et le dit). Rouge : `Expected: "livre"`, `Received: "probleme"`.
+- **Mineur, vrai : la liste du jour cachait sans le dire les commandes prêtes en retard
+  et sans date.** Corrigé par un signal dans le résumé (« Hors de cette date : 1
+  commande prête en retard et 1 sans date ; vide la date pour les voir. »). Les
+  commandes d'un jour à venir ne sont pas signalées : elles ne manquent rien. Rouge :
+  `Received string: "3 commande(s) prête(s) - tous secteurs, mer. 23/09"`.
+- **Mineur, vrai : `POST /api/livraison` restait une porte vers M7.** Elle livrait une
+  commande qui attend son arrêt dans une tournée active sans solder l'arrêt. Elle
+  **refuse** désormais (409, la tournée nommée) ; hors tournée, rien ne change (C1.R2
+  verts). La route n'est pas retirée : son sort reste une décision (écart nommé plus
+  haut). Rouge : `actual: 200, expected: 409`.
+
+Bancs : `test/tournees-debloquees.test.js` (+3 cas, 24/24), `test/e2e/tournees-debloquees.spec.js`
+(+3 cas, 14/14 ; les serveurs sont resemés sur leurs ports par `resemer`, le port
+n'est écrit qu'une fois : `test/ports-e2e.test.js` vert). Verts aussi : tournee,
+tournee-mobile, ecran-livreur, carte-telephone, meilleur-trajet, livreur-ne-perd-rien,
+integration-lots-1-5, operations, hors-ligne (87/87 avec le banc du lot) et `npm test`
+(569/569).
+
+Ce qui reste après la relecture :
+
+- Le dialogue du **motif** (« Client absent », « Problème », lot 1) a la même forme :
+  Entrée dans la précision ferme sans enregistrer. Hors de cette relecture, non touché.
+- `corrigerArret` refuse toujours « Livré » sur une commande dont le stock a été libéré
+  (choix du lot) ; le geste en retard, lui, reprend le stock. Aligner les deux est une
+  décision.
+- Un « Livré » en retard refusé faute de stock n'a pas d'autre chemin que de corriger le
+  stock puis la commande depuis l'écran Commandes.
