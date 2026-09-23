@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.40.0](https://github.com/tombague160-maker/sereo-production/compare/v1.39.0...v1.40.0) (2026-09-23)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **etats:** bandeau hors ligne (depuis quand, ce qui attend) et carte de premier lancement (planches 10b, 10c) ([b64ca30](https://github.com/tombague160-maker/sereo-production/commit/b64ca3007f6dd442e045471cba6f8d9636d3a94d))
+* **etats:** bandeau hors ligne et carte de premier lancement ([#160](https://github.com/tombague160-maker/sereo-production/issues/160)) ([e383146](https://github.com/tombague160-maker/sereo-production/commit/e3831460444670f3a2f44ced22d96b83963b4172))
+
+
+### 🧪 Tests
+
+* **tdb:** le banc vise le bouton d'import de l'en-tête (la carte de premier lancement en porte un second) ([8cda32a](https://github.com/tombague160-maker/sereo-production/commit/8cda32a02170cf9e11c6c0b88de214b82475c793))
+
 ## [1.39.0](https://github.com/tombague160-maker/sereo-production/compare/v1.38.1...v1.39.0) (2026-09-23)
 
 
