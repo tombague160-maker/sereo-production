@@ -72,6 +72,10 @@ let markers = [];
 let routeLine = null;
 let routeLineLisere = null;
 let deliverySelection = new Set();
+// Faux tant que le PREMIER loadData() n'a pas rendu les commandes. Avant, la
+// liste « vide » ne veut rien dire : ni « aucune commande », ni une selection
+// possible (voir renderDeliveryCandidates et activerSelectionLivraison).
+let commandesChargees = false;
 let deliveryFilter = {
   sector: "Tous",
   city: "",
@@ -1002,7 +1006,11 @@ function poserSquelettes() {
     // releve dans la page pendant que l'API est ralentie.
     ["revenueChart", 6], ["opAlerts", 2],
     // La liste des Commandes restait vide pendant le chargement (23/09).
-    ["cmdLignes", 5]
+    ["cmdLignes", 5],
+    // Releve le 23/09 : la liste des commandes a livrer restait une boite vide
+    // pendant le chargement -- et un « Tout sélectionner » touche a ce moment y
+    // affichait « Aucune commande prête à livrer », un faux etat vide.
+    ["deliveryCandidates", 3]
   ];
   for (const [id, lignes] of zones) {
     const zone = document.getElementById(id);
@@ -1178,6 +1186,14 @@ function appliquerDonnees(data) {
   if (a("routes")) deliveryRoutes = data.routes;
   if (a("stockMovements")) stockMovements = data.stockMovements;
   if (a("dashboard")) dashboard = data.dashboard;
+
+  // Les commandes sont la (ou leur repli, si la route a echoue ; ou la copie du
+  // cache au demarrage) : la liste peut dire ce qu'elle contient, et la
+  // selection peut porter sur quelque chose.
+  if (a("orders")) {
+    commandesChargees = true;
+    activerSelectionLivraison();
+  }
 
   refreshActiveRoute();
   route = activeRoute ? activeRoute.stops : (currentIndex >= 0 ? route : [...clients]);
@@ -5998,6 +6014,11 @@ function getFilteredDeliveryOrders() {
 function renderDeliveryCandidates() {
   const container = document.getElementById("deliveryCandidates");
   if (!container) return;
+  // Avant les commandes, une liste filtree vide ne prouve rien : on laisse le
+  // squelette pose par poserSquelettes() au lieu d'affirmer « Aucune commande
+  // prête à livrer ». Le filtre choisi entre-temps est garde et s'appliquera
+  // au rendu de loadData().
+  if (!commandesChargees) return;
 
   const filtered = getFilteredDeliveryOrders();
   const summary = document.getElementById("deliveryFilterSummary");
@@ -6075,6 +6096,17 @@ function updateSelectedDeliveryCount() {
     createButton.disabled = deliverySelection.size === 0;
     createButton.title = deliverySelection.size === 0 ? "Sélectionnez au moins un client pour créer une tournée" : "";
   }
+}
+
+/**
+ * Les boutons de selection de la tournee naissent desactives (index.html,
+ * `data-attend-commandes`) : touches avant l'arrivee des commandes, ils
+ * selectionnaient une liste vide, et le geste etait perdu sans rien dire -- les
+ * commandes arrivaient decochees. Un bouton desactive le dit ; loadData() les
+ * active des que les commandes sont la.
+ */
+function activerSelectionLivraison() {
+  for (const bouton of document.querySelectorAll("[data-attend-commandes]")) bouton.disabled = false;
 }
 
 function selectAllDelivery(checked) {

@@ -1237,9 +1237,12 @@
             </div>
 
             <div class="delivery-actions">
-              <button class="button secondary" type="button" data-action="select-all-delivery">Tout sélectionner</button>
-              <button class="button secondary" type="button" data-action="clear-delivery-selection">Tout désélectionner</button>
-              <button class="button secondary" type="button" data-action="select-current-sector">Sélectionner ce secteur</button>
+              <!-- Desactives jusqu'a l'arrivee des commandes : app.js les active
+                   (activerSelectionLivraison). Avant, ils selectionnaient une
+                   liste vide et le geste se perdait. -->
+              <button class="button secondary" type="button" data-action="select-all-delivery" data-attend-commandes disabled>Tout sélectionner</button>
+              <button class="button secondary" type="button" data-action="clear-delivery-selection" data-attend-commandes disabled>Tout désélectionner</button>
+              <button class="button secondary" type="button" data-action="select-current-sector" data-attend-commandes disabled>Sélectionner ce secteur</button>
               <button id="createRouteButton" class="button primary" type="button" data-action="create-route">Créer une tournée optimisée</button>
             </div>
           </details>

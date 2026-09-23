@@ -311,6 +311,19 @@ test.describe("Abonnements et pilotage", () => {
         ],
       });
     });
+    // Le STIMULUS du rouge intermittent, commite pour qu'il se rejoue : la
+    // PREMIERE reponse des commandes arrive 2,5 s apres les autres, comme sous
+    // la charge d'une suite complete. Sans lui, ce cas ne passait par la course
+    // qu'une fois sur soixante ; avec lui, a chaque fois. Les rechargements
+    // suivants (apres creation, depart, livraison) ne sont pas ralentis.
+    let premieresCommandes = true;
+    await page.route("**/api/orders", async (route) => {
+      if (premieresCommandes) {
+        premieresCommandes = false;
+        await new Promise((r) => setTimeout(r, 2500));
+      }
+      await route.continue();
+    });
     await page.goto(base + "/#livreur");
     await page.locator("#departureQuery").fill("Départ");
     await page.locator('[data-op="search-departure"]').click();
@@ -318,9 +331,22 @@ test.describe("Abonnements et pilotage", () => {
     await page.locator("#arrivalQuery").fill("Arrivée");
     await page.locator('[data-op="search-arrival"]').click();
     await page.locator("#arrivalResults").selectOption("0");
+    // « Tout sélectionner » prend les commandes DEJA CHARGEES. loadData() part
+    // au DOMContentLoaded sans etre attendu par goto(), et interroge dix-sept
+    // routes : sous la charge d'une suite complete, il peut finir APRES ce clic.
+    // La selection etait alors vide, « Créer une tournée » restait desactive,
+    // et le banc mourait d'un timeout. Ce n'etait PAS qu'un defaut de banc : un
+    // livreur sur reseau lent perdait le meme geste. Le produit est corrige
+    // (boutons de selection desactives jusqu'aux commandes, squelette au lieu
+    // du faux etat vide ; banc : livraison-chargement.spec.js). On garde ici
+    // l'attente de l'etat reel : les deux commandes pretes affichees.
+    await expect(
+      page.locator("#deliveryCandidates [data-delivery-order]"),
+    ).toHaveCount(2);
     await page
       .getByRole("button", { name: "Tout sélectionner", exact: true })
       .click();
+    await expect(page.locator("#createRouteButton")).toBeEnabled();
     await page.locator("#createRouteButton").click();
     await expect(page.locator("#routeMetrics")).toContainText("trajet routier");
     await expect(page.locator("#routeMetrics")).toContainText("12 km");
