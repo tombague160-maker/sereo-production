@@ -515,8 +515,14 @@ test("bascule : une nouvelle carte que osrm-routed refuse ne remplace pas l'anci
   assert.ok(await jusqua(() => g.urlSiPret() !== ""));
 
   // Un mois plus tard : customize reussit, mais osrm-routed refuse les fichiers.
+  // Relance plus rapide que la sonde : la mort de l'essai ne doit pas etre
+  // traitee comme celle du service (relance sur la carte refusee).
+  g.delais.relances = [1, 1];
+  g.delais.sondage = 40;
   jour = new Date("2026-09-24T01:00:00Z");
   assert.equal(await sousDelai(g.preparer(ZONE_TEST)), false, "une carte que osrm-routed refuse est gardee comme carte en service");
+  assert.equal(routeds(processus).filter((a) => !a.args.at(-1).includes(ancienne.version)).length, 1,
+    "osrm-routed relance sur la nouvelle carte apres son refus");
   assert.deepEqual(lirePointeur(inst), ancienne, "le pointeur designe une carte refusee");
   assert.deepEqual(fs.readdirSync(path.join(inst.dossier, "versions")), [ancienne.version],
     "l'ancienne carte supprimee avant que la nouvelle ait demarre, ou la carte refusee gardee");
@@ -558,6 +564,50 @@ test("carte refusee par osrm-routed (montee de version d'OSRM) : erreur visible,
   assert.notEqual(lirePointeur(inst).version, ancienne.version);
   assert.ok(await jusqua(() => g2.urlSiPret() !== ""), "la nouvelle carte ne sert pas");
   assert.equal(g2.etat().derniereErreur, null);
+});
+
+test("carte notee refusee qui finit par repondre (port libere) : l'erreur s'efface, pas de preparation avant ses 30 jours", async () => {
+  const inst = installation();
+  let refusee = null;
+  const processus = fauxProcessus({ refuse: (base) => refusee !== null && base.includes(refusee) });
+  const reseau = fauxReseau({ "europe/a": "extrait A", "europe/b": "extrait B" }, { sonde: sondeDuDernier(() => processus) });
+  let jour = new Date("2026-08-20T01:00:00Z");
+  const env = { SEREO_OSRM_ZONE: "europe/a,europe/b" };
+  const g = gestionnaire(inst, { env, reseau, processus, maintenant: () => jour });
+  g.demarrer();
+  await g.demarrage;
+  assert.equal(await g.preparer(ZONE_TEST), true);
+  const carte = lirePointeur(inst);
+  await g.arreter();
+  refusee = carte.version;
+  jour = new Date("2026-08-25T12:00:00Z");
+  const g2 = gestionnaire(inst, { env, reseau, processus, maintenant: () => jour });
+  g2.demarrer();
+  await g2.demarrage;
+  assert.ok(await jusqua(() => g2.etat().derniereErreur !== null), "refus jamais note");
+  refusee = null; // la cause passagere disparait
+  assert.ok(await jusqua(() => g2.urlSiPret() !== ""), "jamais relancee");
+  assert.equal(g2.etat().derniereErreur, null, "l'erreur d'une carte qui sert reste affichee");
+  jour = new Date("2026-08-26T01:00:00Z");
+  assert.equal(await g2.verifierPlanning(), false, "carte qui sert refaite avant ses 30 jours");
+  assert.equal(lirePointeur(inst).version, carte.version);
+});
+
+test("pointeur impossible a ecrire a la bascule : la version preparee ne reste pas sur le disque", async () => {
+  const inst = installation();
+  const reseau = fauxReseau({ "europe/a": "extrait A", "europe/b": "extrait B" });
+  let jour = new Date("2026-08-20T01:00:00Z");
+  const g = gestionnaire(inst, { reseau, processus: fauxProcessus(), maintenant: () => jour });
+  g.demarrer();
+  await g.demarrage;
+  assert.equal(await g.preparer(ZONE_TEST), true);
+  const ancienne = lirePointeur(inst);
+  // Un dossier a la place du fichier temporaire : l'ecriture du pointeur echoue.
+  fs.mkdirSync(path.join(inst.dossier, "courante.json.tmp"));
+  jour = new Date("2026-09-24T01:00:00Z");
+  assert.equal(await g.preparer(ZONE_TEST), false);
+  assert.deepEqual(lirePointeur(inst), ancienne);
+  assert.deepEqual(fs.readdirSync(path.join(inst.dossier, "versions")), [ancienne.version], "version preparee laissee sur le disque");
 });
 
 test("plancher d'espace libre : la preparation s'arrete avant de remplir le volume de la base, et ne demarre pas en dessous", async () => {
