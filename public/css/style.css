@@ -12319,6 +12319,12 @@ textarea::placeholder {
 .ecran-entete .ecran-entete-fente .abo-agenda-ouvrir,
 .ecran-entete .ecran-entete-fente .abo-agenda-retour { display: none; }
 #abonnements .abo-creer svg { display: none; }
+/* L'emballage des echeances d'une semaine (la carte du telephone) : au bureau
+   il s'efface, et le gap de 8 px de .abo-semaine separe a nouveau les
+   echeances (sans lui, elles se touchaient). */
+.abo-semaine-lignes { display: contents; }
+/* Le sheet de detail dit le retard comme la ligne : en couleur d'alerte. */
+#abonnementDetailCorps .sub-facts strong.abo-alerte { color: var(--v8-alerte); }
 
 @media (max-width: 820px) {
   /* --- L'en-tete (3a) : le calendrier en haut a droite, les pilules sur le
@@ -12350,11 +12356,16 @@ textarea::placeholder {
   }
 
   /* L'en-tete se prolonge dans le bloc des filtres : un seul vert, arrondi
-     sous les pilules (3a). */
-  :root[data-color-scheme] body:has(#abonnements.active:not([data-vue="agenda"])) main.content > .ecran-entete,
-  :root:not([data-color-scheme]) body:has(#abonnements.active:not([data-vue="agenda"])) main.content > .ecran-entete {
+     sous les pilules (3a). Sauf quand le bandeau « Hors ligne » / « Envoi en
+     attente » s'intercale entre les deux (il suit l'en-tete dans le DOM) :
+     l'en-tete garde alors son arrondi, et les filtres deviennent une carte
+     verte fermee sous le bandeau -- sinon le vert etait coupe en deux, et
+     l'en-tete restait a angles droits. */
+  :root[data-color-scheme] body:has(#abonnements.active:not([data-vue="agenda"])):not(:has(#bandeauHorsLigne:not([hidden]))) main.content > .ecran-entete,
+  :root:not([data-color-scheme]) body:has(#abonnements.active:not([data-vue="agenda"])):not(:has(#bandeauHorsLigne:not([hidden]))) main.content > .ecran-entete {
     margin-bottom: 0; border-radius: 0; padding-bottom: 16px;
   }
+  body:has(#bandeauHorsLigne:not([hidden])) #abonnements .abo-filtres { margin: 0; padding: 16px; border-radius: 28px; }
   #abonnements:not([data-vue="agenda"]) .abo-grille { gap: 0; }
   #abonnements:not([data-vue="agenda"]) .abo-colonne { gap: 16px; }
   #abonnements .abo-filtres {

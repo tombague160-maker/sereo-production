@@ -81,11 +81,14 @@ function openSubDetail(id) {
   const s = data.subscriptions.items.find((item) => item.id === id);
   if (!dialogue || !corps || !s || typeof dialogue.showModal !== "function") return;
   const client = data.crmClients.find((c) => String(c.id) === String(s.clientId));
-  const next = data.subscriptions.occurrences.find((o) => o.subscriptionId === s.id);
+  // La meme echeance que la ligne (prochaineEcheance), et dite en retard comme
+  // elle : une echeance passee deja commandee n'est plus « la prochaine ».
+  const next = prochaineEcheance(s);
+  const retard = s.status === "active" && enRetard(next);
   const etat = etatAbonnement(s);
   document.getElementById("abonnementDetailTitre").textContent = name(client || {}) || "Client introuvable";
   // .subscription-card : le dispatcher y desactive les boutons freres pendant une action.
-  corps.innerHTML = `<div class="subscription-card"><p class="arret-adresse"><span>${h(client?.ville || "Adresse à compléter")}</span><span class="pill ${etat.pill}">${h(etat.mot)}</span></p><p class="sub-basket">${h(products(s.products))}</p><div class="sub-facts"><div><small>Fréquence</small><strong>${h(frequency(s))}</strong></div><div><small>Prochaine échéance</small><strong>${h(next ? day(next.date) : "—")}</strong></div><div><small>Rappel</small><strong>${s.reminderDays} jour(s) avant</strong></div><div><small>Panier prévu</small><strong>${h(money(s.products.reduce((sum, p) => sum + p.totalLigne, 0)))}</strong></div></div><div class="card-actions">${button("edit-sub", "Modifier", `data-id="${h(s.id)}"`, "primary")}${button("toggle-sub", s.status === "active" ? "Mettre en pause" : "Réactiver", `data-id="${h(s.id)}"`)}</div></div>`;
+  corps.innerHTML = `<div class="subscription-card"><p class="arret-adresse"><span>${h(client?.ville || "Adresse à compléter")}</span><span class="pill ${etat.pill}">${h(etat.mot)}</span></p><p class="sub-basket">${h(products(s.products))}</p><div class="sub-facts"><div><small>Fréquence</small><strong>${h(frequency(s))}</strong></div><div><small>Prochaine échéance</small><strong${retard ? ' class="abo-alerte"' : ""}>${h(next ? day(next.date) + (retard ? " · en retard" : "") : "—")}</strong></div><div><small>Rappel</small><strong>${s.reminderDays} jour(s) avant</strong></div><div><small>Panier prévu</small><strong>${h(money(s.products.reduce((sum, p) => sum + p.totalLigne, 0)))}</strong></div></div><div class="card-actions">${button("edit-sub", "Modifier", `data-id="${h(s.id)}"`, "primary")}${button("toggle-sub", s.status === "active" ? "Mettre en pause" : "Réactiver", `data-id="${h(s.id)}"`)}</div></div>`;
   dialogue.showModal();
 }
 
@@ -190,6 +193,19 @@ export function initOperations(api) {
   // Le bouton retour du telephone, depuis l'agenda : la liste.
   window.addEventListener("popstate", () => {
     if (vueAbonnements() === "agenda" && history.state?.aboVue !== "agenda") ouvrirVueAbonnements("liste", { depuisHistorique: true });
+  });
+  // Un rechargement depuis l'agenda repart sur la liste, mais l'entree
+  // d'historique garde { aboVue: "agenda" } : la fleche retombait dessus, et
+  // popstate ne faisait rien (il fallait toucher deux fois). On l'efface.
+  if (history.state?.aboVue === "agenda") history.replaceState(null, "", location.href);
+  // L'agenda ouvert, l'ecran passe au-dessus de 820 px (une tablette qu'on
+  // tourne) : le bureau montre la liste et l'agenda cote a cote, sans fleche.
+  // Il retrouve la vue liste, son titre, et une entree d'historique neutre.
+  window.matchMedia?.("(max-width: 820px)").addEventListener?.("change", (event) => {
+    if (event.matches || vueAbonnements() !== "agenda") return;
+    if (history.state?.aboVue === "agenda") history.replaceState(null, "", location.href);
+    document.getElementById("abonnements").dataset.vue = "liste";
+    majSousTitreAbonnements();
   });
   document.getElementById("aboTri")?.addEventListener("change", (event) => {
     aboTri = event.target.value;

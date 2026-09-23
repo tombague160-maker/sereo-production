@@ -1751,7 +1751,7 @@ squelettes actuels remplacent des zones entières), et le Stock sans catégorie 
 
 ### Mobile, Abonnements (planches 3a, 3c, 5a), posé le 23/09
 
-Sous **820 px**. `abonnements-mobile.spec.js` (8 cas, port 3177) ; `abonnements-lignes.spec.js`
+Sous **820 px**. `abonnements-mobile.spec.js` (12 cas, port 3177) ; `abonnements-lignes.spec.js`
 et `abonnements.spec.js` suivent la nouvelle ligne.
 
 **Posé**
@@ -1788,7 +1788,23 @@ et `abonnements.spec.js` suivent la nouvelle ligne.
   « Aucune échéance prévue ».
 - **« La prochaine échéance »** ne compte plus une échéance passée déjà commandée : commander le
   plus ancien de deux retards faisait afficher sa date passée, sans alerte, comme « prochaine ».
-  Le correctif vaut aussi pour la colonne « Prochaine » du bureau et le tri.
+  Le correctif vaut aussi pour la colonne « Prochaine » du bureau, le tri, **et le sheet de
+  détail** que la ligne ouvre (il gardait l'ancien calcul : la ligne disait « Échéance du 20 »,
+  le sheet « Prochaine échéance : 13 », une date passée déjà commandée). Le sheet dit aussi le
+  retard comme la ligne : « … · en retard », en couleur d'alerte.
+- **Le bandeau « Hors ligne » / « Envoi en attente »** s'intercale dans le DOM entre l'en-tête et
+  les filtres. Tant qu'il est là, l'en-tête garde son arrondi de 28 px et les filtres deviennent
+  une carte verte fermée (28 px, dans la gouttière) sous le bandeau : deux verts fermés plutôt
+  qu'un vert coupé à angles droits. Le réseau revenu, l'en-tête se prolonge à nouveau.
+- **L'écran passe au-dessus de 820 px, l'agenda ouvert** (tablette qu'on tourne) : la vue revient
+  à la liste, le titre « Abonnements » et son compte, et l'entrée d'historique de l'agenda est
+  neutralisée (sinon la flèche, revenu au téléphone, aurait demandé deux touchers).
+- **Un rechargement depuis l'agenda** repart sur la liste et efface l'état `{ aboVue: "agenda" }`
+  de l'entrée courante : la flèche ramène la liste du premier toucher. Le même motif existe pour
+  la fiche client (`app.js`), hors de ce lot, non corrigé ici.
+- **Au bureau**, l'emballage des échéances d'une semaine (`.abo-semaine-lignes`, la carte du
+  téléphone) est en `display: contents` : les échéances retrouvent leurs 8 px d'écart (elles se
+  touchaient sur la première version du lot).
 
 **Gardés, hors planche** : la recherche (dans l'en-tête), le tri « Prochaine livraison /
 Client » (pilule sur le vert, à côté des filtres), la pastille de synchronisation et
@@ -1815,3 +1831,7 @@ Client » (pilule sur le vert, à côté des filtres), la pastille de synchronis
 - la création 3b (sélecteur client en carte, catalogue avec stock, pilules de fréquence, aperçu
   des trois dates) : l'éditeur actuel est gardé tel quel, c'est un lot à part ;
 - la tache floue rose derrière la liste (décor).
+
+**Non fait dans ce lot** : `CACHE_NAME` (`public/service-worker.js`) n'est pas changé alors que
+`style.css`, `app.js` et `operations.js` sont dans `APP_SHELL` — la consigne du lot confie ce
+changement à l'intégrateur, qui le fait une fois pour tous les lots fusionnés.

@@ -235,4 +235,106 @@ test("au bureau, rien du téléphone : ni calendrier, ni rangées, ni « + » ro
   await expect(page.locator("#abonnements .abo-agenda")).toBeVisible();
   const pos = await page.locator(".ecran-entete .abo-nouveau").evaluate(e => getComputedStyle(e).position);
   expect(pos).not.toBe("fixed");
+  // Les echeances d'une meme semaine gardent leurs 8 px d'ecart (le gap de
+  // .abo-semaine) : l'emballage des cartes du telephone ne se voit pas ici.
+  const ecarts = await page.locator("#subscriptionAgenda .abo-semaine").evaluateAll(semaines => semaines.flatMap(s => {
+    const lignes = [...s.querySelectorAll(".abo-echeance")].map(e => e.getBoundingClientRect());
+    return lignes.slice(1).map((r, i) => Math.round(r.top - lignes[i].bottom));
+  }));
+  // Temoin : au moins une semaine a deux echeances (sinon rien n'est juge).
+  expect(ecarts.length).toBeGreaterThan(0);
+  expect(ecarts).toEqual(ecarts.map(() => 8));
+});
+
+test("hors ligne, le bandeau ne coupe pas le vert : l'en-tête et les filtres se ferment chacun", async ({ page }) => {
+  await ouvrir(page);
+  await page.context().setOffline(true);
+  await expect(page.locator("#bandeauHorsLigne")).toBeVisible();
+  const r = await page.evaluate(() => {
+    const entete = document.querySelector("main.content > .ecran-entete");
+    const bloc = document.querySelector("#abonnements .abo-filtres");
+    const bandeau = document.getElementById("bandeauHorsLigne").getBoundingClientRect();
+    return {
+      enteteBas: getComputedStyle(entete).borderBottomLeftRadius,
+      blocHaut: getComputedStyle(bloc).borderTopLeftRadius,
+      blocBas: getComputedStyle(bloc).borderBottomLeftRadius,
+      // Le bandeau est bien entre les deux (sinon le cas ne juge rien).
+      entre: entete.getBoundingClientRect().bottom <= bandeau.top && bandeau.bottom <= bloc.getBoundingClientRect().top
+    };
+  });
+  await page.context().setOffline(false);
+  expect(r.entre).toBe(true);
+  // Chaque vert se ferme : ni en-tete a angles droits, ni bloc ouvert en haut.
+  expect(r.enteteBas).toBe("28px");
+  expect(r.blocHaut).toBe("28px");
+  expect(r.blocBas).toBe("28px");
+  await expect(page.locator("#bandeauHorsLigne")).toBeHidden();
+  // Le reseau revenu, l'en-tete se prolonge a nouveau dans les filtres.
+  const apres = await page.locator("main.content > .ecran-entete").evaluate(e => getComputedStyle(e).borderBottomLeftRadius);
+  expect(apres).toBe("0px");
+});
+
+test("après un rechargement depuis l'agenda, la flèche ramène la liste du premier coup", async ({ page }) => {
+  await ouvrir(page);
+  await page.getByRole("button", { name: "Les 90 jours" }).click();
+  await expect(page.locator("#pageTitle")).toHaveText("Les 90 jours");
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForTimeout(600);
+  await expect(page.locator("#pageTitle")).toHaveText("Abonnements");
+  await page.getByRole("button", { name: "Les 90 jours" }).click();
+  await expect(page.locator("#pageTitle")).toHaveText("Les 90 jours");
+  await page.getByRole("button", { name: "Retour aux abonnements" }).click();
+  await expect(page.locator("#pageTitle")).toHaveText("Abonnements", { timeout: 2000 });
+  await expect(page.locator("#abonnements .abo-colonne")).toBeVisible();
+});
+
+test("l'agenda ouvert, l'écran passe au-dessus de 820 px : le bureau retrouve son titre", async ({ page }) => {
+  await ouvrir(page);
+  await page.getByRole("button", { name: "Les 90 jours" }).click();
+  await expect(page.locator("#pageTitle")).toHaveText("Les 90 jours");
+  // La tablette de 820 px qu'on tourne.
+  await page.setViewportSize({ width: 1180, height: 820 });
+  await expect(page.locator("#pageTitle")).toHaveText("Abonnements");
+  await expect(page.locator("#pageSubtitle")).toHaveText(/actifs? · \d+ en pause/);
+  await expect(page.locator("#abonnements")).toHaveAttribute("data-vue", "liste");
+  // Revenu au telephone : la liste, et le calendrier rouvre l'agenda.
+  await page.setViewportSize(TELEPHONE);
+  await expect(page.locator("#abonnements .abo-colonne")).toBeVisible();
+  await page.getByRole("button", { name: "Les 90 jours" }).click();
+  await expect(page.locator("#pageTitle")).toHaveText("Les 90 jours");
+  await page.getByRole("button", { name: "Retour aux abonnements" }).click();
+  await expect(page.locator("#pageTitle")).toHaveText("Abonnements", { timeout: 2000 });
+});
+
+// DERNIER CAS : il cree une commande (l'etat du serveur change).
+test("le sheet de détail dit la même prochaine échéance que la ligne, une fois le plus ancien retard commandé", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(srv.base + "/#abonnements", { waitUntil: "networkidle" });
+  await page.waitForTimeout(600);
+  // sub-retard : echeances a J-10 et J-3, aucune commandee. On commande J-10.
+  const d1 = jourDecale(-10), d2 = jourDecale(-3);
+  const creer = page.locator(`#subscriptionAgenda [data-op="generate-sub"][data-id="sub-retard"][data-date="${d1}"]`);
+  await expect(creer).toHaveCount(1);
+  await creer.click();
+  await expect(creer).toHaveCount(0);
+  await expect(page.locator(`#subscriptionAgenda [data-op="generate-sub"][data-id="sub-retard"][data-date="${d2}"]`)).toHaveCount(1);
+  await page.locator('#subscriptionList [data-op="open-sub-detail"][data-id="sub-retard"]').click();
+  await expect(page.locator("#abonnementDetailDialog")).toHaveAttribute("open", "");
+  const attendu = await page.evaluate(v => new Date(`${v}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "short" }), d2);
+  const fait = page.locator("#abonnementDetailCorps .sub-facts > div").filter({ hasText: "Prochaine échéance" }).locator("strong");
+  // J-3, la meme que la ligne -- et dite en retard, comme la ligne.
+  await expect(fait).toHaveText(`${attendu} · en retard`);
+  await expect(fait).toHaveClass(/abo-alerte/);
+  const c = await fait.evaluate(e => {
+    let f = e, fond = "rgba(0, 0, 0, 0)";
+    while (f && (fond === "rgba(0, 0, 0, 0)" || fond === "transparent")) { fond = getComputedStyle(f).backgroundColor; f = f.parentElement; }
+    const i = document.createElement("i");
+    i.style.color = getComputedStyle(document.documentElement).getPropertyValue("--v8-alerte").trim();
+    document.body.append(i);
+    const alerte = getComputedStyle(i).color;
+    i.remove();
+    return { texte: getComputedStyle(e).color, fond, alerte };
+  });
+  expect(c.texte).toBe(c.alerte);
+  expect(contraste(c.texte, c.fond)).toBeGreaterThanOrEqual(4.5);
 });
