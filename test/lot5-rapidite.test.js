@@ -124,7 +124,8 @@ function poserJournal() {
   const cnx = new DatabaseSync(process.env.SEREO_SQLITE_PATH);
   cnx.exec("PRAGMA busy_timeout = 5000");
   cnx.exec("CREATE TABLE IF NOT EXISTS journal_lot5 (t TEXT, op TEXT, id TEXT)");
-  for (const t of TABLES_JOURNAL) {
+  const existantes = new Set(cnx.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map(r => r.name));
+  for (const t of TABLES_JOURNAL.filter(t => existantes.has(t))) {
     const cle = t === "traces_tournees" ? "route_id" : "id";
     cnx.exec(`
       CREATE TRIGGER IF NOT EXISTS j5_${t}_i AFTER INSERT ON ${t} BEGIN INSERT INTO journal_lot5 VALUES ('${t}', 'I', NEW.${cle}); END;
