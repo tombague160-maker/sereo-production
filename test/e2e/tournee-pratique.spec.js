@@ -312,6 +312,13 @@ test.describe("Tournée en cours — pratique au quotidien", () => {
     await expect(page.locator("body")).toContainText("Hors ligne : réoptimiser demande le réseau");
     expect(await lireFile(page)).toEqual([]);
     await ctx.setOffline(false);
+    // Reseau muet alors que le telephone se croit en ligne (4G sans debit) :
+    // le lot 1 met en file tout echec d'envoi ; une reoptimisation, jamais.
+    await page.route("**/api/routes/r-1/reoptimiser", (route) => route.abort("internetdisconnected"));
+    await bouton.click();
+    await expect(page.locator("body")).toContainText("Impossible de joindre le serveur");
+    expect(await lireFile(page)).toEqual([]);
+    await page.unroute("**/api/routes/r-1/reoptimiser");
 
     const envoi = page.waitForRequest((q) => q.url().endsWith("/api/routes/r-1/reoptimiser") && q.method() === "POST");
     await bouton.click();
