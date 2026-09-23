@@ -13447,6 +13447,15 @@ body:has(#journee.active) .ecran-entete #pageSubtitle { min-height: 2lh; }
   :root:not([data-color-scheme]) #crm .cli-fiche .cli-autres:focus-visible {
     outline: none; box-shadow: 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus); border-radius: 12px;
   }
+  /* Meme chose pour les lignes de la liste et « Creer la commande » (la carte
+     Abonnement, hors du vert) : leurs regles communes ne comptent que sur
+     `--focus-ring` et posent `outline: none` -- en sombre, aucun anneau. */
+  :root[data-color-scheme] #crm .cli-ligne:focus-visible,
+  :root:not([data-color-scheme]) #crm .cli-ligne:focus-visible,
+  :root[data-color-scheme] #crm .cli-abonnement .cli-bouton-contour:focus-visible,
+  :root:not([data-color-scheme]) #crm .cli-abonnement .cli-bouton-contour:focus-visible {
+    outline: none; box-shadow: 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus);
+  }
 }
 @media (max-width: 820px) {
   /* En sombre (12c) : le plein clair sur le vert sombre, les contours en

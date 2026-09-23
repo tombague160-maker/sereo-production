@@ -401,12 +401,13 @@ test("fiche : la flèche, puis le retour du téléphone, ramènent la liste ; le
   expect(await page.evaluate(() => [location.hash, history.state?.cliVue ?? null])).toEqual(["#crm", "fiche"]);
 });
 
-// L'anneau clavier HORS du vert : le tri, « Nouveau client » fixe, une
-// commande de la fiche et « Les N autres ». `--focus-ring` n'est defini que
-// sous le theme clair : en sombre, une regle qui ne compte que sur lui ne
-// dessine rien (la declaration box-shadow devient invalide).
+// L'anneau clavier HORS du vert : le tri, « Nouveau client » fixe, une ligne
+// de la liste, puis dans la fiche « Creer la commande » (l'abonnement), une
+// commande et « Les N autres ». `--focus-ring` n'est defini que sous le theme
+// clair : en sombre, une regle qui ne compte que sur lui ne dessine rien (la
+// declaration box-shadow devient invalide).
 for (const schema of ["light", "dark"]) {
-  test(`au clavier, l'anneau se voit hors du vert : tri, Nouveau client, commandes (${schema})`, async ({ page }) => {
+  test(`au clavier, l'anneau se voit hors du vert : tri, Nouveau client, lignes, Créer la commande, commandes (${schema})`, async ({ page }) => {
     await ouvrir(page, schema);
     await page.keyboard.press("Tab");
     // `porteur` dessine l'anneau : le select du tri le dessine sur son
@@ -423,9 +424,13 @@ for (const schema of ["light", "dark"]) {
     vus.tri = await anneau("#crm .cli-tri");
     await page.locator(".ecran-entete .cli-nouveau").focus();
     vus.nouveau = await anneau(".ecran-entete .cli-nouveau");
+    await page.locator("#crmList .cli-ligne").first().focus();
+    vus.ligne = await anneau("#crmList .cli-ligne");
     await ligne(page, "Tilleuls").click();
     await expect(page.locator("#cliFiche")).toBeVisible();
     await page.keyboard.press("Tab");
+    await page.locator('#cliFiche [data-op="generate-sub"]').focus();
+    vus.creer = await anneau('#cliFiche [data-op="generate-sub"]');
     await page.locator("#cliFiche .cli-commande").first().focus();
     vus.commande = await anneau("#cliFiche .cli-commande");
     await page.locator("#cliFiche .cli-autres").focus();
@@ -490,4 +495,73 @@ test("au bureau, rien ne change : pas de ligne de tri, pas de bouton fixe, la fi
   await expect.poll(async () => (await noms(page)).slice(0, 5)).toEqual(ORDRE_LIVRAISON);
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect.poll(() => noms(page)).toEqual(parNom);
+});
+
+// Passer le seuil de 820 px (une tablette qu'on tourne) redessine la liste
+// des clients -- et, avec elle, la liste du formulaire « Nouveau rappel ». Le
+// client deja choisi pour un rappel en cours de saisie doit y rester.
+test("tourner la tablette ne perd pas le client choisi d'un rappel en cours de saisie", async ({ page }) => {
+  await page.setViewportSize({ width: 1180, height: 820 });
+  await page.goto(srv.base + "/#relances", { waitUntil: "networkidle" });
+  const choix = page.locator("#relanceClientSelect");
+  await expect(choix).toBeVisible();
+  await choix.selectOption("c-tilleuls");
+  const parNom = await noms(page);
+  await page.setViewportSize({ width: 820, height: 1180 });
+  // Temoin : le seuil a bien ete franchi -- la liste des clients est
+  // redessinee dans l'ordre du telephone.
+  await expect.poll(async () => (await noms(page)).slice(0, 5)).toEqual(ORDRE_LIVRAISON);
+  expect(await noms(page)).not.toEqual(parNom);
+  await expect(choix).toHaveValue("c-tilleuls");
+  // Et le retour au bureau non plus.
+  await page.setViewportSize({ width: 1180, height: 820 });
+  await expect.poll(() => noms(page)).toEqual(parNom);
+  await expect(choix).toHaveValue("c-tilleuls");
+});
+
+// Au telephone, le tri « Derniere livraison » ne recalcule pas les dates : la
+// liste les calcule une fois par client, pour le tri ET pour les lignes. On
+// compte les jours pris a Paris (toLocaleDateString, fuseau Europe/Paris) :
+// autant avec le tri par livraison qu'avec le tri par nom.
+test("liste (9a) : le tri par livraison ne calcule pas deux fois la dernière livraison", async ({ page }) => {
+  await ouvrir(page);
+  await page.evaluate(() => {
+    const original = Date.prototype.toLocaleDateString;
+    window.joursAParis = 0;
+    Date.prototype.toLocaleDateString = function (...args) {
+      if (args[1]?.timeZone === "Europe/Paris") window.joursAParis++;
+      return original.apply(this, args);
+    };
+  });
+  const compter = async tri => {
+    await page.evaluate(() => { window.joursAParis = 0; });
+    await page.selectOption("#cliTri", tri);
+    return page.evaluate(() => window.joursAParis);
+  };
+  const parNom = await compter("nom");
+  const parLivraison = await compter("livraison");
+  // Temoins : le compteur voit les livraisons, et le tri a bien joue.
+  expect(parNom).toBeGreaterThan(0);
+  expect((await noms(page)).slice(0, 5)).toEqual(ORDRE_LIVRAISON);
+  expect(parLivraison).toBe(parNom);
+});
+
+// La puce « En pause » de la fiche est tiede, comme le badge de la ligne --
+// aussi pour un client sans secteur ni ville (la puce d'abonnement est alors
+// la seule). Seul effet du lot au bureau, sur ce seul cas.
+test("au bureau, « En pause » garde la teinte tiède dans la fiche, même sans secteur ni ville", async ({ page }) => {
+  await page.route("**/api/crm/clients", async route => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const reponse = await route.fetch();
+    const corps = await reponse.json();
+    const sansLieu = c => (c.id === "c-bellevue" ? { ...c, secteur: "", ville: "" } : c);
+    await route.fulfill({ response: reponse, json: Array.isArray(corps) ? corps.map(sansLieu) : { ...corps, items: (corps.items || []).map(sansLieu) } });
+  });
+  await ouvrir(page, "light", { width: 1440, height: 900 });
+  await ligne(page, "Bellevue").click();
+  await expect(page.locator("#cliFiche .cli-fiche-nom")).toHaveText("EHPAD Résidence Bellevue");
+  const puces = page.locator("#cliFiche .cli-puce");
+  await expect(puces).toHaveText(["En pause"]);
+  await expect(ligne(page, "Bellevue").locator(".cli-badge")).toHaveClass(/cli-badge--tiede/);
+  await expect(puces.first()).toHaveClass(/cli-badge--tiede/);
 });

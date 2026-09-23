@@ -2224,13 +2224,13 @@ function clientsFiltres() {
 // L'ordre de la liste. Au telephone, le tri de la planche 9a : la derniere
 // livraison d'abord (les clients jamais livres ensuite, par nom). Au bureau,
 // le tri n'est pas rendu : la liste reste par nom, comme avant.
-function clientsTries() {
+// `livraisonDe` (client -> date ou "") est celle du rendu : le tri et les
+// lignes lisent la meme date, calculee une fois.
+function clientsTries(livraisonDe) {
   const liste = clientsFiltres();
   if (!ecranTelephone.matches || crmFilter.tri !== "livraison") return liste;
-  // Une fois par client : derniereLivraison parcourt toutes les commandes.
-  const dates = new Map(liste.map(c => [c, derniereLivraison(c.id) || ""]));
   // Tri stable : a date egale, l'ordre par nom de clientsFiltres reste.
-  return liste.sort((a, b) => dates.get(b).localeCompare(dates.get(a)));
+  return liste.sort((a, b) => livraisonDe(b).localeCompare(livraisonDe(a)));
 }
 
 // « 47 clients · 6 abonnes · 1 adresse a corriger » (planche 13e).
@@ -2268,7 +2268,14 @@ function renderCrm() {
   setText("cliRappelsCompte", rappels ? ` · ${rappels}` : "");
   majSousTitreClients();
 
-  const list = clientsTries();
+  // La derniere livraison, une fois par client et par rendu : chaque calcul
+  // parcourt toutes les commandes, et le tri du telephone la lit aussi.
+  const livraisons = new Map();
+  const livraisonDe = client => {
+    if (!livraisons.has(client.id)) livraisons.set(client.id, derniereLivraison(client.id) || "");
+    return livraisons.get(client.id);
+  };
+  const list = clientsTries(livraisonDe);
   if (!list.some(c => String(c.id) === String(clientChoisi))) clientChoisi = list[0] ? String(list[0].id) : null;
   // La ligne du telephone (planche 9a) : le compte de la liste FILTREE.
   setText("cliCompte", `${list.length} client${list.length > 1 ? "s" : ""}`);
@@ -2283,7 +2290,7 @@ function renderCrm() {
     container.innerHTML = list.map(client => {
       const choisi = String(client.id) === clientChoisi;
       const abonnement = abonnementDuClient(client.id);
-      const livraison = derniereLivraison(client.id);
+      const livraison = livraisonDe(client);
       const meta = adresseClientACorriger(client)
         ? `<span class="cli-meta cli-alerte">${ICONE_CLI.lieu}Adresse à corriger${client.ville ? ` · ${escapeHtml(client.ville)}` : ""}</span>`
         : `<span class="cli-meta">${escapeHtml([client.ville, livraison ? `livrée le ${dateCourte(livraison)}` : ""].filter(Boolean).join(" · ") || "—")}</span>`;
@@ -2496,7 +2503,14 @@ function renderClientSelects() {
   if (customerSelect && customerSelect.options.length !== crmClients.length + 1) customerSelect.innerHTML = options;
 
   const relanceSelect = document.getElementById("relanceClientSelect");
-  if (relanceSelect) relanceSelect.innerHTML = options.replace("Nouveau client", "Choisir un client");
+  if (relanceSelect) {
+    // Redessiner la liste (un rechargement, une tablette qu'on tourne) ne perd
+    // pas le client deja choisi d'un rappel en cours de saisie. Apres l'envoi,
+    // le formulaire est remis a zero AVANT le rechargement : rien ne reste.
+    const choisi = relanceSelect.value;
+    relanceSelect.innerHTML = options.replace("Nouveau client", "Choisir un client");
+    if (choisi && crmClients.some(c => String(c.id) === choisi)) relanceSelect.value = choisi;
+  }
 }
 
 // Ce qui, dans une fiche, est recopie sur ses COMMANDES par /api/clients/:id :
