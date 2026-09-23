@@ -96,6 +96,76 @@ export function gabaritTableauComptes(comptes, { identifiantCourant = "" } = {})
   `;
 }
 
+/**
+ * Les comptes en LIGNES, pour le telephone (planche 8d) : l'initiale, le nom,
+ * le role, l'etat -- et la ligne entiere est le geste, elle ouvre la feuille du
+ * compte (role, desactivation, mot de passe, suppression). Le tableau a cinq
+ * colonnes ne tient pas dans 322 px.
+ *
+ * Rendue A COTE du tableau ; la feuille de style montre l'un ou l'autre selon
+ * la largeur.
+ */
+export function gabaritLignesComptes(comptes, { identifiantCourant = "" } = {}) {
+  if (!comptes.length) return "";
+  return `
+    <ul class="par-comptes-lignes" aria-label="Comptes">
+      ${comptes.map(compte => {
+        const estMoi = compte.identifiant === identifiantCourant;
+        const initiale = String(compte.identifiant || "?").charAt(0).toUpperCase();
+        return `
+          <li>
+            <button type="button" class="par-ligne par-compte-ligne" data-action="par-ouvrir-compte" data-compte-id="${escapeAttribute(compte.id)}">
+              <span class="par-avatar" aria-hidden="true">${escapeHtml(initiale)}</span>
+              <span class="par-ligne-texte">
+                <span class="par-ligne-titre">${escapeHtml(compte.identifiant)}${estMoi ? ` <span class="par-ligne-toi">(toi)</span>` : ""}</span>
+                <span class="par-ligne-meta">${escapeHtml(libelleRole(compte.role))}</span>
+              </span>
+              <span class="par-badge${compte.actif ? "" : " par-badge--eteint"}">${compte.actif ? "Actif" : "Désactivé"}</span>
+              ${CHEVRON}
+            </button>
+          </li>
+        `;
+      }).join("")}
+    </ul>
+  `;
+}
+
+/**
+ * Le corps de la feuille d'un compte : les gestes du tableau, un par ligne.
+ * Memes `data-action` que le tableau : les ecouteurs d'app.js les servent sans
+ * savoir d'ou ils viennent.
+ */
+export function gabaritFeuilleCompte(compte, { identifiantCourant = "" } = {}) {
+  const id = escapeAttribute(compte.id);
+  const nom = escapeAttribute(compte.identifiant);
+  const estMoi = compte.identifiant === identifiantCourant;
+  return `
+    <p class="par-aide">${estMoi ? "C'est ton compte. " : ""}Dernière connexion : ${escapeHtml(formatDateCompte(compte.derniereConnexion))}.</p>
+    <label class="par-champ">Rôle
+      <select class="compte-role" data-action="changer-role-compte" data-compte-id="${id}">
+        ${optionsRoles(compte.role)}
+      </select>
+    </label>
+    <div class="par-feuille-gestes">
+      <button class="button secondary" type="button"
+              data-action="basculer-compte" data-compte-id="${id}" data-compte-actif="${compte.actif ? "1" : "0"}">
+        ${compte.actif ? "Désactiver" : "Réactiver"}
+      </button>
+      <button class="button secondary" type="button"
+              data-action="changer-mot-de-passe-compte" data-compte-id="${id}" data-compte-identifiant="${nom}">
+        Changer le mot de passe
+      </button>
+      <button class="button ghost par-geste-danger" type="button"
+              data-action="supprimer-compte" data-compte-id="${id}" data-compte-identifiant="${nom}">
+        Supprimer le compte
+      </button>
+    </div>
+  `;
+}
+
+const CHEVRON = `<svg class="par-chevron" viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+export { CHEVRON as CHEVRON_LIGNE };
+
 function gabaritLigneCompte(compte, identifiantCourant) {
   const estMoi = compte.identifiant === identifiantCourant;
   const id = escapeAttribute(compte.id);

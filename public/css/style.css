@@ -12304,3 +12304,115 @@ textarea::placeholder {
 :root:not([data-color-scheme]) .tournee-entete .tournee-progression {
   background: color-mix(in srgb, var(--v8-texte-sur-carte-tournee) 18%, transparent);
 }
+
+/* ==========================================================================
+   MOBILE, PARAMETRES -- planche 8d (clair) / 12d (sombre). Sous 820 px :
+   les comptes en LIGNES (initiale, nom, role, etat ; la ligne ouvre la
+   feuille du compte), les imports en trois lignes qui ouvrent une feuille,
+   « Ajouter » des secteurs, « Ajouter un compte » qui deplie le formulaire,
+   et la version au pied. Au bureau, rien ne change : ce qui est propre au
+   telephone porte `.par-telephone`, ce qui est propre au bureau `.par-bureau`.
+   ========================================================================== */
+/* Au bureau, le telephone ne se rend pas. #parametres (1,1,0) bat les
+   `:root[data-color-scheme] .button` (0,3,0) qui posent un display. */
+#parametres .par-telephone { display: none; }
+
+@media (max-width: 820px) {
+  #parametres .par-bureau { display: none; }
+
+  /* Les cartes de la planche 8d : rayon 24, marge 18, ecart 14, titre 17. */
+  :root[data-color-scheme] #parametres .par-carte,
+  :root:not([data-color-scheme]) #parametres .par-carte { padding: 18px; gap: 14px; border-radius: 24px; }
+  :root[data-color-scheme] #parametres .par-carte h3,
+  :root:not([data-color-scheme]) #parametres .par-carte h3 { font-size: 17px; }
+  #parametres .par-aide { font-size: 13px; }
+  #parametres .par-grille { gap: 12px; }
+
+  /* « Ajouter » (secteurs) : un lien texte a 44 px, sur la ligne du titre. */
+  #parametres .par-carte-tete { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  :root[data-color-scheme] #parametres .par-lien.par-telephone:not([hidden]),
+  :root:not([data-color-scheme]) #parametres .par-lien.par-telephone:not([hidden]) {
+    display: inline-flex; align-items: center; min-height: 44px; padding: 0 4px; border: 0; border-radius: 12px;
+    background: none; box-shadow: none; color: var(--v8-principal);
+    font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer;
+  }
+
+  /* LES LIGNES (comptes, imports) : un bouton transparent, le texte reste sur
+     la surface de la carte (la paire que mesure le banc de contraste). */
+  #parametres .par-comptes-lignes,
+  #parametres .par-imports-lignes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  #parametres .par-comptes-lignes > li + li,
+  #parametres .par-imports-lignes > li + li { box-shadow: 0 -1px 0 var(--v8-surface-basse); }
+  #parametres .par-telephone.par-imports-lignes:not([hidden]) { display: flex; }
+  #parametres .par-telephone.par-comptes-tel { display: block; }
+  :root[data-color-scheme] #parametres .par-ligne,
+  :root:not([data-color-scheme]) #parametres .par-ligne {
+    display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 6px 0;
+    border: 0; border-radius: 14px; background: none; box-shadow: none; color: var(--v8-texte);
+    font: inherit; text-align: left; cursor: pointer;
+  }
+  :root[data-color-scheme] #parametres .par-ligne:focus-visible,
+  :root:not([data-color-scheme]) #parametres .par-ligne:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  #parametres .par-avatar {
+    display: flex; align-items: center; justify-content: center; flex: none; width: 40px; height: 40px;
+    border-radius: 999px; background: var(--v8-principal); color: var(--v8-texte-sur-principal);
+    font-size: 17px; font-weight: 700;
+  }
+  #parametres .par-chevron { flex: none; width: 18px; height: 18px; color: var(--v8-texte-secondaire); }
+}
+
+/* Le texte d'une ligne : aussi dans les feuilles, qui vivent hors de
+   #parametres (un <dialog> au niveau du document). */
+.par-ligne-texte { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
+.par-ligne-titre { font-size: 15.5px; font-weight: 600; letter-spacing: -0.01em; color: var(--v8-texte); overflow-wrap: anywhere; }
+.par-ligne-toi { font-weight: 500; color: var(--v8-texte-secondaire); }
+.par-ligne-meta { font-size: 13px; font-weight: 500; color: var(--v8-texte-secondaire); overflow-wrap: anywhere; }
+.par-imports-lignes .par-ligne-titre { font-size: 15px; font-weight: 500; }
+
+/* Le badge d'etat (« Actif », « A jour ») : informatif, pas une `.pill` -- il
+   n'est pas une cible. 24 px, la planche. */
+.par-badge {
+  display: inline-flex; align-items: center; flex: none; height: 24px; padding: 0 12px; border-radius: 999px;
+  background: var(--v8-vert-clair); color: var(--v8-principal-appuye); font-size: 12.5px; font-weight: 600; white-space: nowrap;
+}
+.par-badge[hidden] { display: none; }
+.par-badge--eteint { background: var(--v8-surface-basse); color: var(--v8-texte-secondaire); }
+:root[data-color-scheme="dark"] .par-badge:not(.par-badge--eteint) { color: var(--v8-principal); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) .par-badge:not(.par-badge--eteint) { color: var(--v8-principal); }
+}
+
+@media (max-width: 820px) {
+  /* « Ajouter un compte » : un bouton contour pleine largeur ; le formulaire
+     reste replie tant qu'on ne l'a pas demande. */
+  :root[data-color-scheme] #parametres #parAjouterCompte:not([hidden]),
+  :root:not([data-color-scheme]) #parametres #parAjouterCompte:not([hidden]) {
+    display: inline-flex; align-items: center; justify-content: center; width: 100%; min-height: 44px;
+  }
+  #parametres #comptesBlock:not(.par-form-ouvert) #compteForm { display: none; }
+
+  /* La version, au pied de l'ecran. */
+  :root[data-color-scheme] #parametres .par-version.par-telephone,
+  :root:not([data-color-scheme]) #parametres .par-version.par-telephone {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%;
+    min-height: 44px; margin-top: 12px; padding: 4px 10px; border: 0; border-radius: 14px;
+    background: none; box-shadow: none; color: var(--v8-texte-secondaire);
+    font: inherit; font-size: 13px; font-weight: 500; cursor: pointer;
+  }
+  :root[data-color-scheme] #parametres .par-version:focus-visible,
+  :root:not([data-color-scheme]) #parametres .par-version:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+}
+
+/* LES FEUILLES (compte, imports). */
+.par-feuille-corps { display: flex; flex-direction: column; gap: 14px; }
+.par-feuille-corps .par-aide { margin: 0; font-size: 13px; line-height: 1.5; color: var(--v8-texte-secondaire); }
+.par-feuille-gestes { display: grid; gap: 10px; }
+:root[data-color-scheme] .par-feuille-gestes .button,
+:root:not([data-color-scheme]) .par-feuille-gestes .button { width: 100%; min-height: 44px; }
+:root[data-color-scheme] .par-feuille-gestes .par-geste-danger,
+:root:not([data-color-scheme]) .par-feuille-gestes .par-geste-danger { color: var(--v8-alerte); }
+.par-archives { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; max-height: 60vh; overflow-y: auto; }
+.par-archive { display: flex; align-items: center; gap: 12px; padding: 10px 0; }
+.par-archive + .par-archive { box-shadow: 0 -1px 0 var(--v8-surface-basse); }
+:root[data-color-scheme] .par-archive .button,
+:root:not([data-color-scheme]) .par-archive .button { flex: none; width: auto; min-height: 44px; text-decoration: none; }

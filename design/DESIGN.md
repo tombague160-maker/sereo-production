@@ -1748,3 +1748,62 @@ squelettes actuels remplacent des zones entières), et le Stock sans catégorie 
 - Réutiliser le vocabulaire des six planches jointes (`design/maquettes-v8/captures/*.png`) : pilules, grands rayons, sourire de la marque, une ligne par commande, trois gestes sous le pouce.
 - Données réelles plutôt que du faux texte : secteurs Besançon / Champagnole / Dole ; clients de démonstration EHPAD Les Tilleuls du Val de Loue, SSIAD de la Haute Vallée, Clinique Vétérinaire ; produits changes molletonnés taille L, alèses ; numéros de commande `CMD-2026-001`.
 - Le résultat sera codé à la main en HTML, CSS et JavaScript natifs, sans framework : composants simples, tokens en variables CSS, aucune bibliothèque d'animation.
+
+### Mobile, Paramètres (planches 8d/12d), posé le 23/09
+
+Sous **820 px** ; au bureau, rien ne change (ce qui est propre au téléphone porte
+`.par-telephone`, ce qui est propre au bureau `.par-bureau`). Banc :
+`test/e2e/parametres-mobile.spec.js` (port 3179), comptes et archives servis par le banc.
+
+**Posé, d'après la planche** :
+
+- les cartes à la mesure de 8d : rayon 24, marge 18, écart 14, titre 17 px, aide 13 px ;
+- **les comptes en lignes** : initiale sur disque vert (40 px), nom, rôle, et le badge
+  d'état (« Actif » / « Désactivé ») — le tableau à cinq colonnes n'est plus rendu ;
+- **« Ajouter un compte »**, bouton contour pleine largeur : il déplie le formulaire de
+  création, replié par défaut. Il n'est rendu que pour l'administration, comme le
+  formulaire ;
+- **les imports en lignes** : « Dernier import de ventes » et « Dernier import de stock »
+  (« 16 septembre à 8 h 42 · 38 lignes »), puis « Archives » (« N fichiers conservés ») ;
+- **« Ajouter »** sur la ligne du titre des Secteurs : il ouvre la fiche des secteurs et
+  place le curseur dans le formulaire ;
+- **la version au pied** (« Version 1.40.2 · À jour ») : au téléphone, la barre latérale
+  qui la porte n'est pas rendue. La pastille suit la même règle que celle de la barre
+  latérale : « À jour » seulement si la version a été lue, « Mise à jour » si une
+  nouvelle version attend.
+
+**Décisions prises** (les questions que la planche laisse ouvertes) :
+
+- **la feuille d'un compte.** La planche ne montre qu'une ligne, sans geste ; or le
+  tableau porte quatre gestes (rôle, désactivation, mot de passe, suppression). La
+  **ligne entière** est le geste : elle ouvre une feuille (`<dialog class="sheet">`, comme
+  le détail d'une commande) qui porte les quatre, un par ligne, avec les mêmes
+  `data-action` que le tableau. Un geste referme la feuille (la liste se redessine,
+  elle montrerait un état périmé) ;
+- **la feuille des imports.** Chaque ligne ouvre la feuille de ses fichiers : ventes,
+  stock, ou toutes les archives, du plus récent au plus ancien, chacun avec
+  « Télécharger ». C'est ce que porte le tableau du bureau ; la passation laissait
+  l'écran de destination non dessiné ;
+- **« Actif » n'est pas une `.pill`** : un badge informatif de 24 px (`.par-badge`),
+  pour ne pas compter comme une cible à marge nulle dans `cibles-tactiles` ;
+- le badge « Désactivé » prend le fond bas et le texte secondaire (et non le rouge de
+  l'ancien tableau) : un compte éteint n'est pas une alerte.
+
+**Écarts nommés** :
+
+- la **zone dangereuse** reste une carte au téléphone : la planche la met derrière
+  « Archives » ; une purge définitive garde son bloc, son contour d'alerte et sa liste
+  (même décision qu'au bureau) ;
+- le texte d'aide du Thème garde la phrase du bureau (« Réglage de cet appareil… ») :
+  celle de la planche dit la même chose, et changer l'élément aurait changé le bureau ;
+- l'aide « Chaque fichier .xlsx importé est archivé… » passe dans la feuille des
+  imports, au téléphone.
+
+**Gardés hors planche** (au téléphone aussi, dans leur carte) : Numérotation des bons,
+le logo (derrière « Logo de l'application »), la fiche des secteurs, les réglages de
+tournée, le diagnostic des dates, la zone dangereuse.
+
+**Omis faute de données** : « Un seul compte aujourd'hui, partagé par le bureau, le
+préparateur et le livreur… » (faux dès qu'un compte par personne existe) ; « Les trois
+secteurs d'origine ne se suppriment pas » (le serveur supprime n'importe quel secteur) ;
+« compte partagé » dans la méta du compte (aucun champ ne le dit d'un compte listé).
