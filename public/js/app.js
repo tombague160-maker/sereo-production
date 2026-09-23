@@ -5220,7 +5220,9 @@ function exportBdcCsv(liste = [], prefixe = "sereo-commandes") {
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  const date = new Date().toISOString().slice(0, 10);
+  // Le jour a Paris (24/09) : en UTC, un export fait entre minuit et 2 h
+  // portait la date de la veille.
+  const date = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Paris" });
   a.href = url;
   a.download = `${prefixe}-${date}.csv`;
   document.body.appendChild(a);

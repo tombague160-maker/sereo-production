@@ -260,3 +260,14 @@ test("heures : une tournee SANS arrivee (chemin ouvert) finit, elle ne « revien
   assert.equal(horairesDeTournee({ ...base, arrival: null }, { maintenant: T0 }).avecRetour, false);
   assert.equal(horairesDeTournee({ ...base, arrival: { lat: 47.2, lng: 6 } }, { maintenant: T0 }).avecRetour, true);
 });
+
+test("historique : une tournee sans date prend le jour de sa fin A PARIS, pas en UTC (24/09)", async () => {
+  const { historiqueDesTournees } = await charger();
+  // 30/09 22:30 UTC = 1er octobre 00:30 a Paris : ni le jour ni le mois ne
+  // doivent retomber sur septembre.
+  const r = { id: "n", status: "terminee", sector: "Dole", totalDistance: 10,
+    startedAt: "2026-09-30T21:00:00Z", completedAt: "2026-09-30T22:30:00Z", stops: [{ status: "livre" }] };
+  const h = historiqueDesTournees([r]);
+  assert.equal(h.tournees[0].jour, "2026-10-01");
+  assert.deepEqual(h.mois.map((m) => m.mois), ["2026-10"]);
+});

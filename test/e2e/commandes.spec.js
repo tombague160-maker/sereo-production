@@ -176,6 +176,19 @@ test("« Exporter en CSV » télécharge le filtre courant", async ({ page }) =>
   expect(telechargement.suggestedFilename()).toMatch(/^sereo-commandes-\d{4}-\d{2}-\d{2}\.csv$/);
 });
 
+test("l'export fait à 0 h 30 à Paris porte la date du jour, pas celle de la veille (24/09)", async ({ page }) => {
+  // 30/09 22:30 UTC = 1er octobre 0 h 30 a Paris (le navigateur de test vit a
+  // Paris, playwright.config.js). Seul Date est fige, pas les minuteries.
+  await page.clock.setFixedTime(new Date("2026-09-30T22:30:00Z"));
+  await ouvrir(page);
+  await page.locator('[data-cmd-filtre="livrees"]').click();
+  const [telechargement] = await Promise.all([
+    page.waitForEvent("download"),
+    page.locator('#enteteActions [data-action="cmd-export"]').click()
+  ]);
+  expect(telechargement.suggestedFilename()).toBe("sereo-commandes-2026-10-01.csv");
+});
+
 test("le sous-titre compte les bons, comme la planche", async ({ page }) => {
   await ouvrir(page);
   await expect(page.locator("#pageSubtitle")).toHaveText(/^\d+ bons? depuis janvier · \d+ en cours$/);

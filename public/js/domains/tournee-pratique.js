@@ -235,7 +235,9 @@ function jourDe(route) {
   const date = String(route.deliveryDate || "").slice(0, 10);
   if (/^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
   const fin = instant(route.completedAt);
-  return Number.isFinite(fin) ? new Date(fin).toISOString().slice(0, 10) : "";
+  // Le jour a PARIS (24/09) : en UTC, une tournee finie entre minuit et 2 h
+  // tombait la veille, et le dernier soir du mois dans le mois d'avant.
+  return Number.isFinite(fin) ? new Date(fin).toLocaleDateString("en-CA", { timeZone: "Europe/Paris" }) : "";
 }
 
 export function historiqueDesTournees(routes) {
