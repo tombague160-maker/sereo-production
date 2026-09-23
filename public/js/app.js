@@ -60,8 +60,12 @@ let deliveryRoutes = [];
 let dashboard = null;
 let route = [];
 let activeRoute = null;
-let currentIndex = -1;
 let activeStopIndex = 0;
+// Lot 2 de l'audit geo (M2) : l'arret DEJA TRAITE que le livreur a touche
+// pour le relire. renderRoute ne le remplace plus par l'arret suivant (qui
+// s'affichait avec « Livre » actif) : il se montre en lecture seule, avec
+// « Corriger le statut ». Tout autre changement d'arret l'oublie.
+let arretConsulte = null;
 // Nombre d'attentes d'envoi d'une livraison en cours (voir solderLivraisonEnSuspens) :
 // les gestes d'arret sont desactives pendant ce temps. Le livreur voit que son
 // appui est pris, et ne relance pas « Livre » sur un ecran qui n'a pas encore
@@ -97,10 +101,13 @@ function etatCommandesIndisponibles() {
     </div>
   `;
 }
+// Lot 2 de l'audit geo : la liste des commandes a mettre en tournee s'ouvre
+// sur le JOUR (avant : toutes les dates melangees). Les commandes « a
+// reprogrammer » passent le filtre de date (lot 1).
 let deliveryFilter = {
   sector: "Tous",
   city: "",
-  date: ""
+  date: getTodayDateInput()
 };
 let stockFilter = {
   query: "",
@@ -607,6 +614,11 @@ function bindUi() {
     applyDeliveryFilter();
   });
 
+  // Lot 2 (H9) : « Tournées du jour ».
+  document.getElementById("tourneeChoix")?.addEventListener("change", event => {
+    choisirTournee(event.target.value);
+  });
+
   document.getElementById("brandImageInput")?.addEventListener("change", event => {
     handleBrandImageImport(event.target);
   });
@@ -761,8 +773,12 @@ function bindUi() {
     if (action === "select-stop") selectStop(Number(actionButton.dataset.stopIndex));
     if (action === "move-stop-up") runAction(actionButton, "...", () => moveStop(actionButton.dataset.stopId, -1));
     if (action === "move-stop-down") runAction(actionButton, "...", () => moveStop(actionButton.dataset.stopId, 1));
-    if (action === "start-tour") startTour();
-    if (action === "reset-tour") runAction(actionButton, "Reset...", resetTour);
+    // Lot 2 de l'audit geo (H8, M2) : annuler, cloturer, corriger.
+    if (action === "annuler-tournee") runAction(actionButton, "Annulation...", () => annulerTourneeAvecConfirmation(actionButton.dataset.routeId || activeRoute?.id));
+    if (action === "cloturer-tournee") runAction(actionButton, "Clôture...", () => cloturerTourneeAvecConfirmation(actionButton.dataset.routeId || activeRoute?.id));
+    if (action === "voir-tournee") choisirTournee(actionButton.dataset.routeId);
+    if (action === "corriger-statut") runAction(actionButton, "...", corrigerStatutArret);
+    if (action === "revenir-arret-en-cours") revenirALArretEnCours();
     if (action === "purge-orders") purgeOrdersHandler(actionButton);
     if (action === "diagnostic-suspicious-dates") runAction(actionButton, "Scan...", runDiagnosticSuspiciousDates);
     // « Livre » : pas de texte d'attente (runAction remplacerait l'icone) --
@@ -1595,7 +1611,7 @@ function appliquerDonnees(data) {
   }
 
   refreshActiveRoute();
-  route = activeRoute ? activeRoute.stops : (currentIndex >= 0 ? route : [...clients]);
+  route = activeRoute ? activeRoute.stops : [];
 
   renderAll();
   // Des donnees PARTIELLES (une reponse tardive, un rechargement frais dont une
@@ -1798,11 +1814,182 @@ function refreshActiveRoute() {
     return;
   }
 
-  activeRoute = deliveryRoutes.find(item => item.status === "en_livraison")
-    || deliveryRoutes.find(item => item.status === "prete")
-    || null;
+  activeRoute = choisirTourneeAffichee();
   activeStopIndex = 0;
+  arretConsulte = null;
   appliquerGestesEnFile();
+}
+
+// --- QUELLE TOURNEE A L'ECRAN (lot 2 de l'audit geo, H9) ----------------------
+//
+// Avant : la premiere tournee « en livraison » de la liste, sinon la premiere
+// « prete » -- sans regarder le jour. La tournee d'hier, pas soldee, masquait
+// celle du jour a chaque ouverture, sur le cockpit comme sur la carte, et rien
+// ne permettait d'en choisir une autre.
+
+const STATUTS_TOURNEE_NON_SOLDEE = ["brouillon", "prete", "en_livraison"];
+
+/** Le jour d'une tournee (AAAA-MM-JJ) ; sans date de livraison, celui de sa creation. */
+function jourDeTournee(tournee) {
+  if (tournee?.deliveryDate) return String(tournee.deliveryDate).slice(0, 10);
+  const t = Date.parse(tournee?.createdAt || "");
+  return Number.isFinite(t) ? getTodayDateInput(new Date(t)) : "";
+}
+
+function tourneeNonSoldee(tournee) {
+  return STATUTS_TOURNEE_NON_SOLDEE.includes(tournee?.status);
+}
+
+/** Les tournees du jour (une annulee n'en est plus une). */
+function tourneesDuJour(aujourdhui = getTodayDateInput()) {
+  return deliveryRoutes.filter(t => t.status !== "annulee" && jourDeTournee(t) === aujourdhui);
+}
+
+/** Les tournees d'un jour PASSE qui ne sont pas soldees : a cloturer (ou a annuler). */
+function tourneesPasseesNonSoldees(aujourdhui = getTodayDateInput()) {
+  return deliveryRoutes.filter(t => tourneeNonSoldee(t) && jourDeTournee(t) && jourDeTournee(t) < aujourdhui);
+}
+
+/**
+ * La tournee du jour D'ABORD : celle qui roule, sinon celle qui attend son
+ * depart. Sans tournee du jour, une tournee passee non soldee (signalee, avec
+ * « Clôturer »), sinon une tournee preparee pour un jour a venir.
+ */
+function choisirTourneeAffichee() {
+  const duJour = tourneesDuJour();
+  const passees = tourneesPasseesNonSoldees();
+  return duJour.find(t => t.status === "en_livraison")
+    || duJour.find(t => t.status === "prete" || t.status === "brouillon")
+    || passees.find(t => t.status === "en_livraison")
+    || passees[0]
+    || deliveryRoutes.find(tourneeNonSoldee)
+    || null;
+}
+
+/** « Tournée Dole du mercredi 23 septembre » : le nom d'une tournee dans une phrase. */
+function nomDeTourneeEcran(tournee) {
+  const secteur = tournee?.sector && tournee.sector !== "Tous" ? ` ${formatSectorLabel(tournee.sector)}` : "";
+  const jour = jourDeTournee(tournee);
+  return `Tournée${secteur}${jour ? ` du ${formatJourDeTournee(jour).toLowerCase()}` : ""}`;
+}
+
+const MOTS_STATUT_TOURNEE = {
+  brouillon: "brouillon", prete: "prête", en_livraison: "en cours",
+  terminee: "terminée", cloturee: "clôturée", annulee: "annulée"
+};
+
+/** Le premier arret a faire (ou 0) : la ou l'on reprend une tournee choisie. */
+function premierArretAFaire(tournee) {
+  const i = (tournee?.stops || []).findIndex(stop => !isStopTerminal(stop.status));
+  return i >= 0 ? i : 0;
+}
+
+/** Le selecteur : on regarde une autre tournee (du jour, ou passee a solder). */
+function choisirTournee(routeId) {
+  const choisie = deliveryRoutes.find(t => String(t.id) === String(routeId));
+  if (!choisie || (activeRoute && String(activeRoute.id) === String(choisie.id))) return;
+  activeRoute = choisie;
+  activeStopIndex = premierArretAFaire(choisie);
+  arretConsulte = null;
+  route = activeRoute.stops;
+  appliquerLivraisonEnSuspens();
+  appliquerGestesEnFile();
+  chargerTraceOmise();
+  rafraichirTournee();
+  renderTourneeDuJour();
+}
+
+/**
+ * Le selecteur « Tournées du jour », le signal des tournees passees non
+ * soldees, et « Clôturer » dans « Autres actions ». Appele a chaque rendu de
+ * l'avancement (updateRouteProgress).
+ */
+function majGestionDesTournees() {
+  const aujourdhui = getTodayDateInput();
+  const passees = tourneesPasseesNonSoldees(aujourdhui);
+
+  // Le choix : les tournees du jour, les passees a solder, et celle qu'on
+  // regarde si elle n'est ni l'une ni l'autre (une tournee a venir).
+  const bloc = document.getElementById("tourneeChoixBloc");
+  const select = document.getElementById("tourneeChoix");
+  if (bloc && select) {
+    const options = [...tourneesDuJour(aujourdhui), ...passees];
+    if (activeRoute && !options.some(t => String(t.id) === String(activeRoute.id))) options.push(activeRoute);
+    const faits = t => (t.stops || []).filter(stop => isStopTerminal(stop.status)).length;
+    const libelle = t => {
+      const passee = jourDeTournee(t) < aujourdhui ? `${nomDeTourneeEcran(t)}` : (t.sector && t.sector !== "Tous" ? `Tournée ${formatSectorLabel(t.sector)}` : "Tournée du jour");
+      return `${passee} · ${MOTS_STATUT_TOURNEE[t.status] || t.status} · ${faits(t)}/${(t.stops || []).length}`;
+    };
+    const html = options.map(t => `<option value="${escapeAttribute(t.id)}" ${activeRoute && String(t.id) === String(activeRoute.id) ? "selected" : ""}>${escapeHtml(libelle(t))}</option>`).join("");
+    if (select.innerHTML !== html) select.innerHTML = html;
+    bloc.hidden = options.length < 2;
+  }
+
+  // Le signal : une tournee d'un jour passe, pas soldee. Le geste qui la solde
+  // est a cote : « Clôturer » si elle est partie, « Annuler » sinon.
+  const signal = document.getElementById("tourneesNonSoldees");
+  if (signal) {
+    const html = passees.map(t => {
+      const restants = (t.stops || []).filter(stop => !isStopTerminal(stop.status)).length;
+      const partie = t.status === "en_livraison";
+      const regardee = activeRoute && String(activeRoute.id) === String(t.id);
+      return `<p class="tournee-retard-ligne">
+        <span class="tournee-retard-texte"><strong>${escapeHtml(nomDeTourneeEcran(t))}</strong> n’est pas soldée : ${escapeHtml(partie ? `${restants} arrêt${restants > 1 ? "s" : ""} à faire` : "elle n’est jamais partie")}.</span>
+        <span class="tournee-retard-gestes">
+          ${regardee ? "" : `<button class="button secondary compact" type="button" data-action="voir-tournee" data-route-id="${escapeAttribute(t.id)}">Voir</button>`}
+          <button class="button secondary compact" type="button" data-action="${partie ? "cloturer-tournee" : "annuler-tournee"}" data-route-id="${escapeAttribute(t.id)}">${partie ? "Clôturer" : "Annuler"}</button>
+        </span>
+      </p>`;
+    }).join("");
+    if (signal.innerHTML !== html) signal.innerHTML = html;
+    signal.hidden = !passees.length;
+    document.querySelector("#livreur .driver-page")?.classList.toggle("avec-retard", passees.length > 0);
+  }
+
+  const cloturer = document.getElementById("cloturerTourneeButton");
+  if (cloturer) cloturer.hidden = activeRoute?.status !== "en_livraison";
+}
+
+/** Annuler une tournee PRETE, apres une confirmation qui dit ce qui va se passer (H8). */
+async function annulerTourneeAvecConfirmation(routeId) {
+  const tournee = deliveryRoutes.find(t => String(t.id) === String(routeId)) || (activeRoute && String(activeRoute.id) === String(routeId) ? activeRoute : null);
+  if (!tournee) return;
+  const n = (tournee.stops || []).length;
+  if (!window.confirm(`Annuler « ${nomDeTourneeEcran(tournee)} » ?\n\nElle n’est pas partie : ${n > 1 ? `ses ${n} commandes redeviennent prêtes` : "sa commande redevient prête"} à livrer, et le stock ne bouge pas.`)) return;
+  const recue = await apiFetch(`/api/routes/${encodeURIComponent(tournee.id)}/annuler`, { method: "POST" });
+  apresFinDeTournee(recue);
+  await loadData();
+  notify(`${nomDeTourneeEcran(tournee)} annulée : ${n > 1 ? `ses ${n} commandes sont` : "sa commande est"} de nouveau prête${n > 1 ? "s" : ""} à livrer.`, "success");
+}
+
+/** Cloturer une tournee EN COURS. Irreversible : la confirmation le dit, et nomme les arrets reprogrammes (H8). */
+async function cloturerTourneeAvecConfirmation(routeId) {
+  const tournee = deliveryRoutes.find(t => String(t.id) === String(routeId)) || (activeRoute && String(activeRoute.id) === String(routeId) ? activeRoute : null);
+  if (!tournee) return;
+  // Une livraison en suspens (les 4 s d'Annuler) part AVANT : sinon la cloture
+  // la ferait « a reprogrammer ».
+  await solderLivraisonEnSuspens();
+  const stops = tournee.stops || [];
+  const livres = stops.filter(stop => stop.status === "livre").length;
+  const restants = stops.filter(stop => !isStopTerminal(stop.status)).map(stop => stop.clientName).filter(Boolean);
+  const liste = restants.length ? `\n\nÀ reprogrammer (${restants.length}) : ${restants.slice(0, 8).join(", ")}${restants.length > 8 ? "…" : ""}. Ces commandes reviennent dans les commandes prêtes.` : "";
+  if (!window.confirm(`Clôturer « ${nomDeTourneeEcran(tournee)} » ?\n\n${livres} livraison${livres > 1 ? "s restent livrées" : " reste livrée"}.${liste}\n\nC’est définitif : la tournée ne pourra plus repartir.`)) return;
+  const recue = await apiFetch(`/api/routes/${encodeURIComponent(tournee.id)}/cloturer`, { method: "POST" });
+  apresFinDeTournee(recue);
+  await loadData();
+  notify(`${nomDeTourneeEcran(tournee)} clôturée${restants.length ? ` : ${restants.length} commande${restants.length > 1 ? "s" : ""} à reprogrammer` : ""}.`, "success");
+}
+
+/** Apres une annulation ou une cloture : la tournee regardee change si c'etait elle. */
+function apresFinDeTournee(recue) {
+  if (!recue?.id) return;
+  deliveryRoutes = remplacerParId(deliveryRoutes, recue);
+  if (activeRoute && String(activeRoute.id) === String(recue.id)) {
+    // Annulee : elle quitte l'ecran (le choix repart de zero). Cloturee : on
+    // la garde a l'ecran, avec son bilan.
+    activeRoute = recue.status === "annulee" ? null : garderTrace(recue, activeRoute);
+    arretConsulte = null;
+  }
 }
 
 // --- MISE A JOUR CIBLEE APRES UN GESTE D'ARRET (lot 5, audit geo du 23/09) ---
@@ -2458,7 +2645,6 @@ function renderAll({ lectures = true } = {}) {
   // donnees deja chargees -- aucune requete de plus.
   majAlerteAdresses(clients, orders);
   renderRoute();
-  renderClients();
   if (lectures) {
     renderSettings();
     renderImportsArchives();
@@ -4942,6 +5128,24 @@ function exportBdcCsv(liste = [], prefixe = "sereo-commandes") {
   notify(`${filtered.length} bon${filtered.length > 1 ? "s" : ""} exporté${filtered.length > 1 ? "s" : ""} en CSV.`, "success");
 }
 
+/**
+ * Decision 10 (lot 2 de l'audit geo) : une commande livree dit QUAND, et, si
+ * le livreur l'a note, A QUI elle a ete remise (« remis a… »).
+ */
+function livraisonFaiteHtml(order) {
+  if (order.status !== "livre" || (!order.deliveredAt && !order.remisA)) return "";
+  const date = order.deliveredAt ? new Date(order.deliveredAt) : null;
+  const quand = date && !Number.isNaN(date.getTime())
+    ? `${date.toLocaleDateString("fr-FR", { day: "numeric", month: "long" })} à ${heureCourte(order.deliveredAt)}`
+    : "";
+  return `
+      <div class="bdc-detail-field">
+        <span class="bdc-detail-label">Livrée</span>
+        <strong>${escapeHtml(quand || "—")}</strong>
+        ${order.remisA ? `<span class="bdc-detail-remis">Remis à ${escapeHtml(order.remisA)}</span>` : ""}
+      </div>`;
+}
+
 function openBdcDetail(orderId) {
   const order = (orders || []).find(o => String(o.id) === String(orderId));
   if (!order) return;
@@ -5020,6 +5224,7 @@ function openBdcDetail(orderId) {
         <span class="bdc-detail-label">Date livraison souhaitée</span>
         ${dateLivraisonHtml}
       </div>
+      ${livraisonFaiteHtml(order)}
     </div>
 
     ${clientSection}
@@ -6237,6 +6442,21 @@ function getFilteredDeliveryOrders() {
   });
 }
 
+/**
+ * Lot 2 de l'audit geo : la tournee ACTIVE ou la commande attend deja son
+ * arret, sinon null. Meme regle que le serveur (tourneeActiveDeLaCommande) :
+ * un arret deja traite ne retient plus sa commande.
+ */
+function tourneeActiveDeLaCommande(orderId) {
+  return deliveryRoutes.find(t => tourneeNonSoldee(t)
+    && (t.stops || []).some(stop => String(stop.orderId) === String(orderId) && !isStopTerminal(stop.status))) || null;
+}
+
+/** Les commandes filtrees qu'on peut encore choisir (pas deja dans une tournee). */
+function commandesChoisissables() {
+  return getFilteredDeliveryOrders().filter(order => !tourneeActiveDeLaCommande(order.id));
+}
+
 function renderDeliveryCandidates() {
   const container = document.getElementById("deliveryCandidates");
   if (!container) return;
@@ -6246,13 +6466,23 @@ function renderDeliveryCandidates() {
   // au rendu de loadData().
   if (!commandesChargees) return;
 
-  const filtered = getFilteredDeliveryOrders();
+  // Lot 2 : une commande deja dans une tournee active est GRISEE, avec le nom
+  // de la tournee (avant : cochable, puis refusee a la creation par « appartient
+  // déjà à une tournée active », sans dire laquelle). En fin de liste.
+  const toutes = getFilteredDeliveryOrders();
+  const occupees = new Map(toutes.map(order => [String(order.id), tourneeActiveDeLaCommande(order.id)]).filter(([, t]) => t));
+  for (const id of occupees.keys()) {
+    deliverySelection.delete(id);
+    deliveryFirst.delete(id);
+  }
+  const filtered = [...toutes.filter(order => !occupees.has(String(order.id))), ...toutes.filter(order => occupees.has(String(order.id)))];
   const summary = document.getElementById("deliveryFilterSummary");
   if (summary) {
     const sector = deliveryFilter.sector && deliveryFilter.sector !== "Tous" ? formatSectorLabel(deliveryFilter.sector) : "tous secteurs";
     const city = deliveryFilter.city ? `, ville ${deliveryFilter.city}` : "";
     const date = deliveryFilter.date ? `, ${formatDeliveryDate(deliveryFilter.date)}` : "";
-    summary.textContent = `${filtered.length} commande(s) prête(s) - ${sector}${city}${date}`;
+    const dejaPrises = occupees.size ? ` (dont ${occupees.size} déjà en tournée)` : "";
+    summary.textContent = `${filtered.length} commande(s) prête(s)${dejaPrises} - ${sector}${city}${date}`;
   }
 
   updateSelectedDeliveryCount();
@@ -6273,12 +6503,14 @@ function renderDeliveryCandidates() {
     // Une commande bloquee avant le 23/09 (probleme_livraison) se lit comme
     // les autres commandes a relivrer : « A reprogrammer ».
     const statutAffiche = STATUTS_A_RELIVRER.includes(order.status) ? "a_reprogrammer" : order.status;
+    const occupee = occupees.get(String(order.id));
     const label = document.createElement("label");
-    label.className = "delivery-card";
+    label.className = `delivery-card${occupee ? " delivery-card--en-tournee" : ""}`;
     label.innerHTML = `
-      <input type="checkbox" data-delivery-order="${escapeAttribute(order.id)}" ${deliverySelection.has(String(order.id)) ? "checked" : ""}>
+      <input type="checkbox" data-delivery-order="${escapeAttribute(order.id)}" ${deliverySelection.has(String(order.id)) ? "checked" : ""} ${occupee ? "disabled" : ""}>
       <span class="delivery-card-body">
         <span class="delivery-card-title">${escapeHtml(order.clientName)}</span>
+        ${occupee ? `<span class="delivery-card-tournee">Déjà dans « ${escapeHtml(nomDeTourneeEcran(occupee))} » (${escapeHtml(MOTS_STATUT_TOURNEE[occupee.status] || occupee.status)})</span>` : ""}
         <span class="delivery-card-court">${escapeHtml([order.numero, articlesDeCommande(order)].filter(Boolean).join(" · "))}</span>
         <span class="delivery-card-contexte">${escapeHtml(contexteDeCommandePrete(order))}</span>
         <span class="delivery-card-adresse">${escapeHtml(formatOrderAddress(order))}</span>
@@ -6363,7 +6595,8 @@ function activerSelectionLivraison() {
 
 function selectAllDelivery(checked) {
   if (checked) {
-    getFilteredDeliveryOrders().forEach(order => deliverySelection.add(String(order.id)));
+    // Lot 2 : jamais une commande deja dans une tournee active.
+    commandesChoisissables().forEach(order => deliverySelection.add(String(order.id)));
   } else {
     deliverySelection.clear();
     deliveryFirst.clear();
@@ -6375,7 +6608,7 @@ function selectAllDelivery(checked) {
 
 function selectCurrentSector() {
   deliverySelection.clear();
-  getFilteredDeliveryOrders().forEach(order => deliverySelection.add(String(order.id)));
+  commandesChoisissables().forEach(order => deliverySelection.add(String(order.id)));
   renderDeliveryCandidates();
   renderMap();
 }
@@ -6502,8 +6735,13 @@ function renderRoute() {
     bouton.classList.toggle("trn-recalculer--requis", traceARefaire));
   setButtonDisabled("startRouteButton", activeRoute.status === "en_livraison" || isRouteComplete(activeRoute));
 
+  // M2 (lot 2 de l'audit geo) : un arret deja traite que le livreur a TOUCHE
+  // reste a l'ecran, en lecture seule. Avant, l'ecran sautait a l'arret
+  // suivant, « Livre » actif, sans que le nom ait change sous le doigt.
+  const consulte = Boolean(arretConsulte && String(activeRoute.stops[activeStopIndex]?.id) === arretConsulte);
+  if (!consulte) arretConsulte = null;
   const nextPendingIndex = activeRoute.stops.findIndex(stop => !isStopTerminal(stop.status));
-  if (nextPendingIndex >= 0 && isStopTerminal(activeRoute.stops[activeStopIndex]?.status)) {
+  if (!consulte && nextPendingIndex >= 0 && isStopTerminal(activeRoute.stops[activeStopIndex]?.status)) {
     activeStopIndex = nextPendingIndex;
   }
 
@@ -6543,7 +6781,9 @@ function renderRoute() {
     list.appendChild(row);
   });
 
-  if (isRouteComplete(activeRoute)) {
+  // Une tournee finie montre son bilan -- sauf l'arret qu'on vient de toucher
+  // pour le relire (ou le corriger).
+  if (isRouteComplete(activeRoute) && !consulte) {
     showRouteCompleted(activeRoute);
   } else {
     showCurrentStop(activeRoute.stops[activeStopIndex]);
@@ -6553,6 +6793,9 @@ function renderRoute() {
 function selectStop(index) {
   if (!activeRoute || !activeRoute.stops[index]) return;
   activeStopIndex = index;
+  // M2 : un arret deja traite se relit, il ne se remplace pas par le suivant.
+  const stop = activeRoute.stops[index];
+  arretConsulte = isStopTerminal(stop.status) ? String(stop.id) : null;
   renderRoute();
   // M3 (audit geo) : le marqueur « en cours » de la CARTE suit l'arret choisi
   // -- avant, deux arrets semblaient en cours. renderMap met a jour les deux
@@ -6639,10 +6882,173 @@ function showCurrentStop(stop) {
       ${stop.notes ? `<span class="current-client-note">${escapeHtml(stop.notes)}</span>` : ""}
       ${getAddressWarning(stop) ? `<span class="address-warning">${escapeHtml(getAddressWarning(stop))}</span>` : ""}
     </div>
+    ${blocArretTraite(stop)}
     ${articles}
     ${prochain}
   `;
+  // Decision 10 : « remis a… » appartient a UN arret. Un autre arret a
+  // l'ecran repart d'un champ vide (jamais la note du client precedent).
+  const remis = document.getElementById("remisAInput");
+  if (remis && remis.dataset.arret !== String(stop.id)) {
+    remis.value = "";
+    remis.dataset.arret = String(stop.id);
+  }
   updateDriverActionButtons(stop);
+}
+
+/** « 9 h 10 » ; vide si l'instant est illisible. */
+function heureCourte(valeur) {
+  const date = valeur ? new Date(valeur) : null;
+  return date && !Number.isNaN(date.getTime())
+    ? date.toLocaleTimeString("fr-FR", { hour: "numeric", minute: "2-digit" }).replace(":", " h ")
+    : "";
+}
+
+/**
+ * M2 (lot 2 de l'audit geo) : un arret DEJA TRAITE, en lecture seule. Ce qui
+ * a ete fait (statut, heure, cause ou « remis a… »), puis « Corriger le
+ * statut ». Les gestes de livraison, eux, sont desactives
+ * (updateDriverActionButtons). Un bouton desactive dit pourquoi.
+ */
+function blocArretTraite(stop) {
+  if (!activeRoute || !isStopTerminal(stop.status)) return "";
+  const heure = heureCourte(stop.deliveredAt);
+  const detail = stop.status === "livre"
+    ? (stop.remisA ? `remis à ${stop.remisA}` : "")
+    : (stop.problemReason || "");
+  const fait = [`${formatStopStatus(stop.status)}${heure ? ` à ${heure}` : ""}`, detail].filter(Boolean).join(" · ");
+  let raison = "";
+  if (activeRoute.status === "annulee") raison = "La tournée est annulée : rien à corriger.";
+  else if (stop.enAttenteEnvoi) raison = "Ce geste attend d’être envoyé : la correction attendra qu’il soit parti.";
+  else if (livraisonEnSuspens && String(livraisonEnSuspens.stopId) === String(stop.id)) raison = "Livraison en cours d’envoi : touche « Annuler » dans le message pour la défaire.";
+  const autre = activeRoute.stops.some(s => !isStopTerminal(s.status));
+  return `
+    <div class="arret-traite">
+      <p class="arret-traite-texte"><span>Arrêt déjà traité :</span> <strong>${escapeHtml(fait)}</strong></p>
+      <div class="arret-traite-gestes">
+        <button class="button secondary" type="button" data-action="corriger-statut" ${raison ? 'disabled aria-describedby="arretTraiteRaison"' : ""}>Corriger le statut</button>
+        ${autre ? `<button class="button secondary" type="button" data-action="revenir-arret-en-cours">Revenir à l’arrêt à faire</button>` : ""}
+      </div>
+      ${raison ? `<p id="arretTraiteRaison" class="arret-traite-raison">${escapeHtml(raison)}</p>` : ""}
+    </div>`;
+}
+
+/** Quitte la relecture d'un arret traite : retour au premier arret a faire. */
+function revenirALArretEnCours() {
+  if (!activeRoute) return;
+  arretConsulte = null;
+  activeStopIndex = premierArretAFaire(activeRoute);
+  rafraichirTournee();
+}
+
+// M2 : les statuts vers lesquels un arret traite se corrige. « A faire » :
+// le livreur y repasse (jamais sur une tournee cloturee, irreversible).
+const CHOIX_DE_CORRECTION = [
+  { status: "livre", libelle: "Livré" },
+  { status: "absent", libelle: "Client absent" },
+  { status: "probleme", libelle: "Problème" },
+  { status: "en_livraison", libelle: "À faire : j’y repasse" }
+];
+
+/**
+ * Demande le statut corrige et sa cause. Rend `{ status, cause }`, ou null si
+ * le livreur renonce (Annuler, Echap). La cause est obligatoire : elle part
+ * dans l'historique, avec la correction.
+ */
+function demanderCorrection(stop, tournee) {
+  const dialogue = document.getElementById("correctionDialog");
+  const liste = document.getElementById("correctionListe");
+  const champ = document.getElementById("correctionCause");
+  if (!dialogue || !liste || !champ || typeof dialogue.showModal !== "function") return Promise.resolve(null);
+
+  const admis = CHOIX_DE_CORRECTION.filter(c => c.status !== stop.status
+    && !(c.status === "en_livraison" && tournee.status === "cloturee"));
+  let choisi = "";
+  champ.value = "";
+  liste.innerHTML = "";
+  for (const c of admis) {
+    const bouton = document.createElement("button");
+    bouton.type = "button";
+    bouton.className = "motif-choix";
+    bouton.setAttribute("role", "radio");
+    bouton.setAttribute("aria-checked", "false");
+    bouton.dataset.correction = c.status;
+    bouton.textContent = c.libelle;
+    liste.appendChild(bouton);
+  }
+  const sousTitre = document.getElementById("correctionSousTitre");
+  if (sousTitre) sousTitre.textContent = `${stop.clientName || "Cet arrêt"} : actuellement « ${formatStopStatus(stop.status)} ». La correction et sa raison sont gardées dans l’historique.`;
+
+  return new Promise(resolve => {
+    const surClic = evenement => {
+      const choix = evenement.target.closest("[data-correction]");
+      if (choix) {
+        choisi = choix.dataset.correction;
+        liste.querySelectorAll("[data-correction]").forEach(b => b.setAttribute("aria-checked", String(b === choix)));
+        return;
+      }
+      const action = evenement.target.closest("[data-action]")?.dataset.action;
+      if (action === "correction-annuler") terminer(null);
+      if (action === "correction-valider") {
+        if (!choisi) {
+          notify("Choisis le bon statut, ou annule.", "warning");
+          return;
+        }
+        const cause = champ.value.trim();
+        if (!cause) {
+          notify("Dis pourquoi tu corriges : la raison est gardée.", "warning");
+          champ.focus();
+          return;
+        }
+        terminer({ status: choisi, cause });
+      }
+    };
+    // Echap ferme le <dialog> : c'est une annulation (comme le motif).
+    const surFermeture = () => terminer(null);
+    function terminer(valeur) {
+      dialogue.removeEventListener("click", surClic);
+      dialogue.removeEventListener("close", surFermeture);
+      if (dialogue.open) dialogue.close();
+      resolve(valeur);
+    }
+    dialogue.addEventListener("click", surClic);
+    dialogue.addEventListener("close", surFermeture);
+    dialogue.showModal();
+  });
+}
+
+/** « Corriger le statut » de l'arret traite a l'ecran (M2). */
+async function corrigerStatutArret() {
+  const stop = activeRoute?.stops[activeStopIndex];
+  if (!stop || !isStopTerminal(stop.status)) return;
+  const vise = arretVise();
+  const tournee = activeRoute;
+  const choix = await demanderCorrection(stop, tournee);
+  if (!choix || !arretToujoursVise(vise)) return;
+  let result;
+  try {
+    result = await apiFetch(`/api/routes/${encodeURIComponent(tournee.id)}/stops/${encodeURIComponent(stop.id)}/correction`, {
+      method: "POST",
+      timeoutMs: DELAI_GESTE_ARRET_MS,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(choix),
+      resume: { ...resumeDeGeste(tournee.id, stop, choix.status), correction: true }
+    });
+  } catch (error) {
+    // En file (hors ligne) : la correction partira au retour du reseau ; la
+    // file la montre deja faite (appliquerGestesEnFile), « en attente d'envoi ».
+    if (error?.enFile) {
+      rafraichirTournee();
+      notifyEchec(error);
+      return;
+    }
+    throw error;
+  }
+  // L'arret reste a l'ecran : corrige vers « a faire », il redevient l'arret
+  // en cours ; sinon il se relit, corrige.
+  arretConsulte = choix.status === "en_livraison" ? null : String(stop.id);
+  await appliquerGesteArret(result);
+  notify(`${stop.clientName || "Arrêt"} : statut corrigé en « ${formatStopStatus(choix.status)} ».`, "success");
 }
 
 /**
@@ -6661,6 +7067,8 @@ function etatDeLArret(stop, index) {
 function showRouteCompleted(routeData) {
   const container = document.getElementById("currentClient");
   if (!container) return;
+  // Lot 2 (H8) : une tournee cloturee a le meme bilan, sous son vrai nom.
+  const cloturee = routeData.status === "cloturee";
 
   const delivered = routeData.stops.filter(stop => stop.status === "livre").length;
   const absent = routeData.stops.filter(stop => stop.status === "absent").length;
@@ -6689,7 +7097,7 @@ function showRouteCompleted(routeData) {
 
   container.innerHTML = `
     <div class="route-complete fin-tournee">
-      <strong class="fin-titre">Tournée terminée</strong>
+      <strong class="fin-titre">${cloturee ? "Tournée clôturée" : "Tournée terminée"}</strong>
       <p class="fin-phrase">${escapeHtml(phrase)}</p>
       <div class="fin-chiffres">
         ${chiffre("Livrés", delivered)}
@@ -6906,7 +7314,9 @@ async function updateCurrentDeliveryStatus(status, motif = null, faitLe = new Da
     return;
   }
 
-  await updateLegacyClientDeliveryStatus(status);
+  // Lot 2 (decision 7) : plus de chemin « client sans tournee » (l'ancien
+  // panneau « Clients tournee », dont le « Livre » ne soldait aucun arret).
+  notify("Aucune tournée : crée une tournée pour livrer.", "warning");
 }
 
 /** L'arret suivant a traiter : le prochain non termine APRES l'arret courant, sinon le premier qui reste. */
@@ -7024,6 +7434,9 @@ async function livrerAvecAnnulation() {
     indexAvant: activeStopIndex,
     // L'heure de l'APPUI, pas celle de l'envoi 4 s (ou 4 h) plus tard (M6).
     faitLe: new Date().toISOString(),
+    // Decision 10 (lot 2) : « remis a… », lu A L'APPUI, part avec le geste
+    // (et avec lui dans la file hors ligne).
+    remisA: lireRemisA(stop),
     toast: null
   };
   livraisonEnSuspens = suspens;
@@ -7038,6 +7451,18 @@ async function livrerAvecAnnulation() {
     // Au terme, c'est CETTE livraison qui part, pas celle du moment.
     auTerme: () => { envoyerLivraisonEnSuspens(suspens).catch(notifyEchec); }
   });
+}
+
+/**
+ * « Remis a… » tape pour CET arret (decision 10), puis le champ se vide : la
+ * note ne suit pas le livreur a l'arret suivant.
+ */
+function lireRemisA(stop) {
+  const champ = document.getElementById("remisAInput");
+  if (!champ || champ.dataset.arret !== String(stop.id)) return "";
+  const valeur = champ.value.trim().slice(0, 80);
+  champ.value = "";
+  return valeur;
 }
 
 /** Pose l'etat « livre » en suspens sur la tournee affichee (apres un rechargement aussi). */
@@ -7063,6 +7488,9 @@ function annulerLivraisonEnSuspens(suspens) {
     activeStopIndex = suspens.indexAvant;
   }
   rafraichirTournee();
+  // La note « remis a… » revient dans le champ, avec l'arret.
+  const champ = document.getElementById("remisAInput");
+  if (champ && suspens.remisA && champ.dataset.arret === suspens.stopId) champ.value = suspens.remisA;
   document.getElementById("markDeliveredButton")?.focus({ preventScroll: true });
 }
 
@@ -7084,7 +7512,7 @@ function envoyerLivraisonEnSuspens(attendu = null) {
         keepalive: true,
         timeoutMs: DELAI_GESTE_ARRET_MS,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "livre", motif: null, faitLe: s.faitLe }),
+        body: JSON.stringify({ status: "livre", motif: null, faitLe: s.faitLe, ...(s.remisA ? { remisA: s.remisA } : {}) }),
         resume: resumeDeGeste(s.routeId, { id: s.stopId, clientName: s.clientName }, "livre")
       });
     } catch (error) {
@@ -7113,36 +7541,6 @@ window.addEventListener("pagehide", () => {
   envoyerLivraisonEnSuspens().catch(() => {});
 });
 
-async function updateLegacyClientDeliveryStatus(status) {
-  const client = route[currentIndex];
-
-  if (!client) {
-    notify("Aucun client sélectionné.", "warning");
-    return;
-  }
-
-  const legacyStatus = {
-    livre: "livree",
-    absent: "absent",
-    probleme: "probleme",
-    a_reprogrammer: "non_livre"
-  }[status] || status;
-
-  await apiFetch("/api/livraison", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      clientId: client.id,
-      statut: legacyStatus
-    })
-  });
-
-  await loadData();
-  notify("Statut livraison enregistré.", "success");
-}
-
 async function replanCurrentStop() {
   const target = getCurrentDeliveryTarget();
   if (!target?.orderId) {
@@ -7164,113 +7562,18 @@ async function replanCurrentStop() {
   showTab("commandes-planifiees");
 }
 
-function renderClients() {
-  const container = document.getElementById("clientsList");
-  if (!container) return;
-
-  container.innerHTML = "";
-
-  if (!clients.length) {
-    container.innerHTML = emptyState("Aucun client", "Importe les dossiers du jour pour générer la tournée.", { libelle: "Importer les dossiers", onglet: "journee" });
-    return;
-  }
-
-  clients.forEach((client, index) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `item client-button ${getClientClass(client.statut)}`;
-    button.addEventListener("click", () => selectClient(index));
-
-    button.innerHTML = `
-      <span>
-        <strong>${escapeHtml(getClientName(client))}</strong>
-        <small>${escapeHtml(formatAddress(client))}</small>
-      </span>
-      <span class="pill ${getClientPill(client.statut)}">${escapeHtml(formatClientStatus(client.statut))}</span>
-    `;
-
-    container.appendChild(button);
-  });
-}
-
-function selectClient(index) {
-  currentIndex = index;
-  activeRoute = null;
-  route = [...clients];
-
-  const client = clients[index];
-
-  showCurrentClient(client);
-  focusEntity(client);
-  updateRouteProgress();
-}
-
-function startTour() {
-  if (!clients.length) {
-    notify("Aucun client à livrer.", "warning");
-    return;
-  }
-
-  activeRoute = null;
-  route = clients.filter(client => client.statut === "restant");
-
-  if (!route.length) {
-    setCurrentClientMessage("Tous les clients sont terminés.");
-    currentIndex = -1;
-    updateRouteProgress();
-    return;
-  }
-
-  currentIndex = 0;
-
-  showCurrentClient(route[currentIndex]);
-  focusEntity(route[currentIndex]);
-  updateRouteProgress();
-}
-
+// Lot 2 de l'audit geo, decision 7 (23/09) : l'ancien panneau « Clients
+// tournee » (renderClients, selectClient, startTour, resetTour et le chemin
+// « client sans tournee » de nextClient) est retire. Il livrait un CLIENT
+// par /api/livraison sans solder l'arret de sa tournee (M7).
 function nextClient() {
-  if (activeRoute) {
-    const nextIndex = activeRoute.stops.findIndex((stop, index) => index > activeStopIndex && !isStopTerminal(stop.status));
-    if (nextIndex < 0) {
-      showRouteCompleted(activeRoute);
-      return;
-    }
-
-    selectStop(nextIndex);
+  if (!activeRoute) return;
+  const nextIndex = activeRoute.stops.findIndex((stop, index) => index > activeStopIndex && !isStopTerminal(stop.status));
+  if (nextIndex < 0) {
+    showRouteCompleted(activeRoute);
     return;
   }
-
-  if (!route.length) return;
-
-  currentIndex++;
-
-  if (currentIndex >= route.length) {
-    setCurrentClientMessage("Tournée terminée.");
-    currentIndex = -1;
-    updateRouteProgress();
-    return;
-  }
-
-  showCurrentClient(route[currentIndex]);
-  focusEntity(route[currentIndex]);
-  updateRouteProgress();
-}
-
-async function resetTour() {
-  const confirmed = window.confirm("Réinitialiser tous les statuts de livraison en restant ?");
-  if (!confirmed) return;
-
-  await apiFetch("/api/reset-tournee", {
-    method: "POST"
-  });
-
-  currentIndex = -1;
-  activeRoute = null;
-  route = [];
-  setCurrentClientMessage("Aucune tournée démarrée.");
-
-  await loadData();
-  notify("Tournée réinitialisée.", "success");
+  selectStop(nextIndex);
 }
 
 function openGoogleMaps() {
@@ -7307,38 +7610,8 @@ function callCurrentClient() {
   window.location.href = phoneUrl;
 }
 
-function showCurrentClient(client) {
-  if (!client) return;
-
-  const container = document.getElementById("currentClient");
-  if (!container) return;
-
-  container.innerHTML = `
-    <div class="current-client-main">
-      <strong>${escapeHtml(getClientName(client))}</strong>
-      <span>${escapeHtml(formatAddress(client))}</span>
-      <span>${escapeHtml(formatPhone(client.telephone || client.phone))}</span>
-      <span>Statut : ${escapeHtml(formatClientStatus(client.statut))}</span>
-      ${client.notes ? `<span class="current-client-note">${escapeHtml(client.notes)}</span>` : ""}
-      ${getAddressWarning(client) ? `<span class="address-warning">${escapeHtml(getAddressWarning(client))}</span>` : ""}
-    </div>
-    ${renderProducts(client)}
-    <div class="coordinate-controls">
-      <button class="button secondary" type="button" data-adr="ouvrir" data-adr-client="${escapeAttribute(client.clientId || client.id)}">Corriger la position</button>
-    </div>
-  `;
-  updateDriverActionButtons(client);
-}
-
-function setCurrentClientMessage(message) {
-  const currentClient = document.getElementById("currentClient");
-  if (currentClient) currentClient.textContent = message;
-  updateDriverActionButtons(null);
-}
-
 function getCurrentDeliveryTarget() {
   if (activeRoute?.stops?.length) return activeRoute.stops[activeStopIndex] || null;
-  if (currentIndex >= 0 && route[currentIndex]) return route[currentIndex];
   return null;
 }
 
@@ -7353,9 +7626,8 @@ function updateDriverActionButtons(target = getCurrentDeliveryTarget()) {
   const terminalStop = activeRoute ? isStopTerminal(target?.status) : false;
   // Pendant l'envoi d'une livraison, les gestes d'arret attendent (solderLivraisonEnSuspens).
   const canChangeStatus = hasTarget && routeStarted && !terminalStop && !gestesVerrouilles;
-  const hasNextStop = activeRoute
-    ? activeRoute.stops.some((stop, index) => index > activeStopIndex && !isStopTerminal(stop.status))
-    : currentIndex >= 0 && currentIndex < route.length - 1;
+  const hasNextStop = Boolean(activeRoute
+    && activeRoute.stops.some((stop, index) => index > activeStopIndex && !isStopTerminal(stop.status)));
   // « Planifier la suite » : une commande LIVREE seulement. Un absent revient
   // de lui-meme dans les commandes pretes (C1) ; le cloner le ferait livrer
   // deux fois (M1, refuse aussi par le serveur).
@@ -7369,6 +7641,9 @@ function updateDriverActionButtons(target = getCurrentDeliveryTarget()) {
   setButtonDisabled("markRescheduleButton", !canChangeStatus);
   setButtonDisabled("replanCurrentButton", !canReplan);
   setButtonDisabled("nextClientButton", !hasTarget || !routeStarted || !hasNextStop);
+  // Decision 10 : « remis a… » n'a de sens que pour l'arret qu'on va livrer.
+  const remis = document.getElementById("remisABloc");
+  if (remis) remis.hidden = !(hasTarget && routeStarted && !terminalStop);
 }
 
 /**
@@ -7668,16 +7943,6 @@ function cadrerCarte() {
   }
 }
 
-function focusEntity(entity) {
-  if (!map) return;
-
-  const coords = getEntityCoordinates(entity);
-
-  if (coords) {
-    map.setView([coords.lat, coords.lng], 15);
-  }
-}
-
 // T4 (v1.16.1) : timeout par defaut sur fetch pour eviter une attente infinie
 // si le reseau est dégrade (livreur en zone blanche, OMV qui ne repond plus).
 // Plus long pour les imports (peuvent legitimement durer > 30s sur 5000 lignes).
@@ -7903,7 +8168,11 @@ function estDefinitivementHorsLigne() {
 // trois heures apres, elle effacerait ce qui a ete saisi entre-temps) et les
 // comptes (un mot de passe n'a rien a faire en clair dans indexedDB). Pour
 // elles, l'echec franc vaut mieux.
-const JAMAIS_EN_FILE = [/^\/api\/comptes(\/|$)/, /^\/api\/orders\/purge$/];
+// Lot 2 : annuler ou cloturer une tournee se decide sur ce qu'on voit, a
+// l'instant ; rejouee des heures plus tard, une cloture arreterait une
+// tournee que le livreur a continuee entre-temps. Sans reseau, elle echoue
+// franchement.
+const JAMAIS_EN_FILE = [/^\/api\/comptes(\/|$)/, /^\/api\/orders\/purge$/, /^\/api\/routes\/[^/]+\/(annuler|cloturer)$/];
 
 /** Met l'ecriture en file si elle est recuperable. Rend true si c'est fait. */
 async function tenterMiseEnFile(url, options) {
@@ -7936,8 +8205,10 @@ let gestesArretEnFile = new Map();
 let resumesEnFile = [];
 
 function gesteArretDeLEntree(entree) {
-  const m = /\/api\/routes\/([^/?#]+)\/stops\/([^/?#]+)$/.exec(String(entree.url || ""));
-  if (!m || entree.methode !== "PATCH") return null;
+  // Lot 2 (M2) : une correction en file (POST .../correction) se montre comme
+  // un geste : l'arret porte le statut corrige, « en attente d'envoi ».
+  const m = /\/api\/routes\/([^/?#]+)\/stops\/([^/?#]+)(\/correction)?$/.exec(String(entree.url || ""));
+  if (!m || entree.methode !== (m[3] ? "POST" : "PATCH")) return null;
   let corps = null;
   try { corps = JSON.parse(entree.corps || "null"); } catch { corps = null; }
   if (!corps || typeof corps.status !== "string") return null;
@@ -8289,7 +8560,8 @@ function majEnteteTournee() {
   const rang = isRouteComplete(activeRoute) ? total : Math.min(activeStopIndex + 1, total);
   setText("pageTitle", document.getElementById("tourneeNom")?.textContent || "Tournée");
   const jour = document.getElementById("tourneeJour")?.textContent || "";
-  const etape = isRouteComplete(activeRoute) ? "tournée terminée"
+  const etape = activeRoute.status === "cloturee" ? "tournée clôturée"
+    : isRouteComplete(activeRoute) ? "tournée terminée"
     : activeRoute.status === "prete" ? `${total} arrêt${total > 1 ? "s" : ""}, prête à partir`
     : `arrêt ${rang} sur ${total}`;
   setText("pageSubtitle", [jour, etape]
@@ -8332,17 +8604,14 @@ function updateRouteProgress() {
     if (barre) barre.style.width = `${Math.round((faits / total) * 100)}%`;
     if (depart) depart.hidden = activeRoute.status !== "prete";
     majEnteteTournee();
+    majGestionDesTournees();
     return;
   }
 
   if (bloc) bloc.hidden = true;
   majEnteteTournee();
-  if (!route.length || currentIndex < 0) {
-    element.textContent = "Aucune tournée";
-    return;
-  }
-
-  element.textContent = `${currentIndex + 1}/${route.length}`;
+  majGestionDesTournees();
+  element.textContent = "Aucune tournée";
 }
 
 /** « Mercredi 2 septembre » -- le jour de la tournee, comme sur la planche. */
@@ -8476,10 +8745,6 @@ function getNeededQuantityForProduct(product) {
   }, 0);
 }
 
-function getClientName(client) {
-  return client.nom || client.client || client.Client || "Client";
-}
-
 function getEntityName(entity) {
   return entity.clientName || entity.nom || entity.client || "Client";
 }
@@ -8545,25 +8810,6 @@ function formatEntityAddress(entity) {
   return formatAddress(entity);
 }
 
-function renderProducts(entity) {
-  const products = entity.produits || entity.products || [];
-
-  if (!Array.isArray(products) || !products.length) return "";
-
-  return `
-    <div class="product-lines">
-      ${products.map(product => {
-        const quantity = typeof product === "object" ? product.quantite || product.quantity || 1 : 1;
-        const name = typeof product === "object"
-          ? product.nom || product.produit || product.code || "Produit"
-          : product;
-
-        return `<div>${escapeHtml(quantity)}x ${escapeHtml(name)}</div>`;
-      }).join("")}
-    </div>
-  `;
-}
-
 /** « 4 articles » : le nombre de LIGNES, le meme mot que « n articles a decharger » de l'arret. */
 function articlesDeCommande(order) {
   const n = (order.products || []).length;
@@ -8572,20 +8818,6 @@ function articlesDeCommande(order) {
 
 function getOrderProductCount(order) {
   return (order.products || []).reduce((total, product) => total + Number(product.quantite || 1), 0);
-}
-
-function getClientClass(status) {
-  if (status === "livree") return "status-ok";
-  if (["absent", "probleme", "non_livre"].includes(status)) return "status-danger";
-  if (status === "en_cours") return "status-warning";
-  return "status-neutral";
-}
-
-function getClientPill(status) {
-  if (status === "livree") return "pill-ok";
-  if (["absent", "probleme", "non_livre"].includes(status)) return "pill-danger";
-  if (status === "en_cours") return "pill-warning";
-  return "pill-blue";
 }
 
 function formatClientStatus(status) {
@@ -8698,7 +8930,10 @@ function formatRouteStatus(status) {
     brouillon: "Brouillon",
     prete: "Prête",
     en_livraison: "En livraison",
-    terminee: "Terminée"
+    terminee: "Terminée",
+    // Lot 2 (H8) : les deux fins ajoutees.
+    cloturee: "Clôturée",
+    annulee: "Annulée"
   };
 
   return labels[status] || "Prête";

@@ -14702,3 +14702,173 @@ textarea {
 :root {
   --focus-ring: 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus);
 }
+
+/* ==========================================================================
+   LOT 2 DE L'AUDIT GEO : DEBLOQUER LES TOURNEES (23/09)
+   --------------------------------------------------------------------------
+   Le signal d'une tournee passee non soldee (H9), le choix « Tournees du
+   jour », « Annuler la tournee » a cote du depart (H8), la note « remis a… »
+   (decision 10), l'arret deja traite en lecture seule (M2), et les commandes
+   deja en tournee grisees. Jetons V8 seulement : le sombre suit. Contrastes
+   des paires utilisees (valeurs de :root) : avertissement sur son fond 4,89
+   (clair) ; secondaire sur surface basse 4,56 (clair), 9,28 (sombre).
+   ========================================================================== */
+
+/* [hidden] gagne toujours, meme sur un display pose plus haut. */
+.tournee-retard[hidden],
+.tournee-choix[hidden],
+.remis-a[hidden],
+.arret-traite-raison[hidden] {
+  display: none !important;
+}
+
+/* H9 : une tournee d'un jour passe, pas soldee. En tete de page, au
+   telephone comme au bureau. */
+.tournee-retard {
+  display: grid;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid var(--v8-avertissement);
+  border-radius: 18px;
+  background: var(--v8-avertissement-fond);
+  color: var(--v8-avertissement);
+  order: -3;
+}
+.tournee-retard-ligne {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin: 0;
+}
+.tournee-retard-texte strong { color: inherit; }
+.tournee-retard-gestes { display: flex; flex-wrap: wrap; gap: 8px; }
+:root[data-color-scheme] .tournee-retard .button,
+:root:not([data-color-scheme]) .tournee-retard .button {
+  min-height: 44px;
+}
+
+/* H9 : « Tournees du jour ». */
+.tournee-choix {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 12px;
+  color: var(--v8-texte-secondaire);
+  font-size: 0.9rem;
+}
+.tournee-choix select {
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid var(--v8-vert-eau);
+  border-radius: 14px;
+  background: var(--v8-surface-basse);
+  color: var(--v8-texte);
+  font: inherit;
+  font-size: 16px;
+}
+.tournee-choix select:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* H8 : « Annuler la tournee » a cote de « Demarrer ». */
+.tournee-depart-gestes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+:root[data-color-scheme] .tournee-depart-gestes .button,
+:root:not([data-color-scheme]) .tournee-depart-gestes .button {
+  min-height: 44px;
+}
+
+/* Decision 10 : « remis a… », une ligne au-dessus des gestes. */
+.remis-a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+  color: var(--v8-texte-secondaire);
+  font-size: 0.9rem;
+}
+.remis-a span { flex: 0 0 auto; }
+.remis-a input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--v8-vert-eau);
+  border-radius: 14px;
+  background: var(--v8-surface-basse);
+  color: var(--v8-texte);
+  font: inherit;
+  font-size: 16px;
+}
+.remis-a input:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* M2 : l'arret deja traite, en lecture seule. */
+.arret-traite {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0 4px;
+  padding: 12px 14px;
+  border: 1px dashed var(--v8-vert-eau);
+  border-radius: 16px;
+  background: var(--v8-surface-basse);
+  color: var(--v8-texte);
+}
+.arret-traite-texte { margin: 0; }
+.arret-traite-texte span { color: var(--v8-texte-secondaire); }
+.arret-traite-gestes { display: flex; flex-wrap: wrap; gap: 8px; }
+:root[data-color-scheme] .arret-traite .button,
+:root:not([data-color-scheme]) .arret-traite .button {
+  min-height: 44px;
+}
+.arret-traite-raison {
+  margin: 0;
+  color: var(--v8-texte-secondaire);
+  font-size: 0.85rem;
+}
+
+/* Les commandes deja dans une tournee active : grisees par le FOND et le
+   trait (jamais par l'opacite du texte, qui ferait tomber le contraste). */
+.delivery-card.delivery-card--en-tournee {
+  border-style: dashed;
+  background: var(--v8-surface-basse);
+  cursor: not-allowed;
+}
+.delivery-card-tournee {
+  display: block;
+  color: var(--v8-texte-secondaire);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+/* Decision 10 : « remis a… » dans le detail d'une commande livree. */
+.bdc-detail-remis {
+  display: block;
+  color: var(--v8-texte-secondaire);
+  font-size: 0.9rem;
+}
+
+/* La grille du bureau, sans la rangee de l'ancien panneau « Clients tournee »
+   (retire, decision 7), et avec celle du signal quand il y en a un. */
+@media (min-width: 1181px) {
+  #livreur .driver-page {
+    grid-template-areas: "carte tournee" "carte liste" "plan plan" "cand cand";
+  }
+  #livreur .driver-page.sans-tournee {
+    grid-template-areas: "plan plan" "cand cand" "carte liste";
+  }
+  #livreur .driver-page.avec-retard {
+    grid-template-areas: "retard retard" "carte tournee" "carte liste" "plan plan" "cand cand";
+  }
+  #livreur .driver-page.sans-tournee.avec-retard {
+    grid-template-areas: "retard retard" "plan plan" "cand cand" "carte liste";
+  }
+  #livreur .driver-page.avec-retard > #tourneesNonSoldees { grid-area: retard; }
+}

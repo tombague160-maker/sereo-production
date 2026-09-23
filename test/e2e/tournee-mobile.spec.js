@@ -216,6 +216,14 @@ test("4c — tournee PARTIE sans trace : pas de cercle, le serveur refuserait le
 test("4a — la commande prete se lit « CMD-... · n articles », puis son jour et son secteur", async ({ browser }) => {
   test.setTimeout(120000);
   const { ctx, page } = await ouvrir(browser, srv.base);
+  // Lot 2 de l'audit geo (23/09) : la liste s'ouvre sur le JOUR. Les deux
+  // jours du meme client se comparent filtre de date retire (toutes dates) --
+  // ce que le livreur fait pour preparer demain.
+  await page.evaluate(() => {
+    const champ = document.getElementById("deliveryDate");
+    champ.value = "";
+    champ.dispatchEvent(new Event("change", { bubbles: true }));
+  });
   const r = await page.evaluate(() => [...document.querySelectorAll("#deliveryCandidates .delivery-card")].map(c => {
     const vu = sel => (c.querySelector(sel)?.checkVisibility() ? c.querySelector(sel).textContent.trim() : null);
     return {
@@ -229,8 +237,8 @@ test("4a — la commande prete se lit « CMD-... · n articles », puis son jour
   for (const c of r) {
     expect(c.court).toMatch(/^CMD-\d{4}-\d{3,} · \d+ articles?$/);
     // La carte n'a pas de detail : l'adresse quitte la ligne (la planche),
-    // mais le jour et le secteur y restent -- le filtre par defaut melange
-    // les dates et les secteurs.
+    // mais le jour et le secteur y restent -- sans filtre de date, la liste
+    // melange les dates et les secteurs.
     expect(c.adresse, "l'adresse quitte la ligne au telephone").toBe(false);
     expect(c.contexte, "le jour et le secteur de la commande ont disparu de la ligne").toMatch(/^[a-zé]+\.? \d{2}\/\d{2} · .+/);
   }
