@@ -4326,6 +4326,8 @@ premier » est gardé par chaque réoptimisation). Branche `feat/tournee-pratiqu
   sélectionner », « Créer » — **deux gestes** (banc : deux clics, départ et arrivée = dépôt).
 - **« Y aller »** vers les **coordonnées** de l'arrêt quand elles existent, sinon l'adresse
   (rue et ville, la règle d'avant) : un lieu-dit sans rue, placé à la main, a son bouton.
+  Un point **approximatif** (rue, lieu-dit, commune) cède à l'adresse complète quand elle
+  existe (relecture adverse, ci-dessous).
   Google Maps, Waze, Plans (**seulement sur iPhone/iPad**, iPadOS compris) ; le choix vit
   dans Paramètres, **par appareil** (`localStorage`, repli sur la session), titre du bouton
   « Ouvrir l'itinéraire dans Waze ». L'écran de fin suit le même choix.
@@ -4467,3 +4469,73 @@ chargement-instantane verts.
   « Y aller » si les livreurs ne vont pas dans Paramètres.
 - Réoptimiser en route sans GPS (depuis le dernier arrêt soldé).
 - L'historique : km **roulés** (aucune trace n'est enregistrée), export.
+
+### Relecture adverse du 23/09 : six défauts, six vrais
+
+Relecture de `f5c572d`. Chaque défaut a été vérifié par un banc écrit AVANT le correctif et
+commité rouge (`8a2991a`, sur le code de `f5c572d`) ; correctifs `4e610bd` (serveur) et
+`5110ba7` (écran).
+
+1. **Important, vrai : « Y aller » préférait tout point, même approximatif.** Une commande
+   géocodée « au milieu de la rue » (type BAN `street`, accepté comme TROUVÉ) ouvrait
+   Google Maps au milieu d'une route de plusieurs kilomètres, là où le texte « 48 route de
+   Lons 39300 Champagnole » menait au numéro (la règle d'avant le lot). Corrigé :
+   `lienNavigation` lit `geoPrecision` ; `rue`, `lieu-dit`, `commune` cèdent à l'adresse
+   complète quand elle existe. Sans adresse, le point reste (le texte ne ferait pas mieux) ;
+   `numero`, `manuel` (position placée à la main) et une précision vide gardent le point.
+   Rouge : `actual: '…destination=46.75,5.91'`, `expected: '…destination=48%20route%20de%20Lons…'`.
+2. **Important, vrai : l'ajout en route pouvait passer devant un « À livrer en premier ».**
+   `meilleurePlace` comparait toutes les places de 0 à n. Corrigé : un argument `depuis`, la
+   place qui suit le dernier « en premier » des restants. Rouge : tournée [d (en premier),
+   c, b, a], `u` près du dépôt → `expected: 'd'`, `actual: 'u'` ; témoin sans épingle : `u`
+   passe bien en tête.
+3. **Important, vrai : une tournée sans arrivée se réoptimisait en boucle.** En route,
+   l'arrivée devenait la position du livreur : ordre de circuit fermé, retour fictif dans
+   les km restants, l'heure de « retour » et `totalDistance` (repris par l'historique).
+   Avant le départ, le serveur refusait une réoptimisation sans arrivée, et le dialogue en
+   imposait une (le nouveau départ) sans lire « retour au dépôt ». Corrigé : `roadPlan`
+   prend `arriveeLibre` — le chemin OUVERT du lot 7 (l'arrivée coûte 0 depuis chaque arrêt,
+   le tracé s'arrête au dernier, le tronçon « vers l'arrivée » est nul : toujours un par
+   arrêt, plus un) ; le serveur l'emploie dès qu'aucune arrivée n'existe ; le dialogue,
+   pour une tournée sans arrivée, n'en envoie une (le nouveau départ) que si « retour au
+   dépôt » est coché ; l'écran dit « fin vers » au lieu de « retour vers »
+   (`horairesDeTournee` rend `avecRetour`). Rouges : `totalDistance` `expected: 3.5`,
+   `actual: 6` (en route) ; `400 « Confirme un point de départ et un point d'arrivée. »`
+   (prête) ; e2e « Expected substring: "fin vers" / Received: "… retour vers 23 h 25" » ;
+   mutant du seul dialogue : « Expected path: not "arrival" / Received value: {Entrepôt…} ».
+4. **Mineur, vrai : une position corrigée pendant le calcul était écrasée.** L'empreinte de
+   la tournée ne contrôle que ids et statuts ; `memoriserPositionDuCalcul` réécrivait le
+   point de l'instantané en gardant `geoSource: "manuel"`. Corrigé : l'empreinte des
+   positions lues pour le calcul (celle de `positionPourTournee`, client compris) est
+   recomparée sous le verrou, pour les restants (réoptimiser) et pour la commande
+   (ajouter) ; même refus que `createRoute` : « Une position a été corrigée pendant le
+   calcul. Recommence. ». Rouges : `[47.2, 6.02, 'manuel']` au lieu de `[47.21, 6.022,
+   'manuel']` (et de même pour l'ajout). Le banc joue la correction PENDANT la requête OSRM
+   (crochet `pendantLeCalcul` du faux OSRM).
+5. **Mineur, vrai : une commande absente rajoutée à SA tournée n'était plus retirée par un
+   report.** Décision : l'ajout reste permis (repasser l'après-midi chez un absent du matin
+   est un usage) ; c'est `retirerDesTourneesSiReportee` (M4, lot 1) qui prend désormais
+   l'arrêt ENCORE À FAIRE de la commande, pas le premier. Un arrêt soldé n'est toujours
+   jamais retiré. Rouge : `['absent', 'en_livraison']` au lieu de `['absent']`.
+6. **Mineur, vrai : « déjà dans une tournée active » n'était vérifié que sur
+   l'instantané.** Une tournée prête créée au bureau pendant le calcul prenait la commande
+   sans changer son statut. Corrigé : le contrôle est refait sous le verrou. Rouge :
+   `expected: 400`, `actual: 201` (la tournée concurrente créée par le crochet du faux OSRM).
+
+**Écarts nommés.** Une précision vide (point d'origine inconnue, antérieur au lot 3) garde
+le point : rien ne dit qu'il est approximatif. Une position placée à la main dans
+« Adresses à vérifier » sans déplacer le marqueur garde la précision d'origine (`rue`…) ;
+l'arrêt ne porte pas `geoSource`, « Y aller » la traite donc comme approximative et suit
+l'adresse. « Faire maintenant » et « Ajouter » sur une tournée sans arrivée font toujours
+tomber les heures (`trajetDansLOrdre` exige une arrivée) : rien de faux n'est affiché.
+Constaté hors du lot, non corrigé : `createRoute` SANS départ (pas de `plan`) ne vérifie
+pas « déjà dans une tournée active » ; une tournée prête peut donc reprendre une commande
+d'une autre tournée prête. Deux mutations temporaires d'`app.js` faites par script
+(copie, restaurée par `cp` et `cmp`), rien de commité ainsi.
+
+**Bancs.** `test/tournee-pratique.test.js` +2 (14), `test/tournee-pratique-serveur.test.js`
++7 (22), `test/e2e/tournee-pratique.spec.js` +1 (15, port 3333, réponse du serveur
+retouchée pour une tournée sans départ). Résultats sur `5110ba7` : `npm test` 581/581 ;
+e2e tournee-pratique, tournee, tournee-mobile, ecran-livreur, carte-telephone,
+meilleur-trajet, livreur-ne-perd-rien, integration-lots-1-5, operations, hors-ligne :
+88/88.
