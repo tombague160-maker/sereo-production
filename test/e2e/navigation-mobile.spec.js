@@ -79,3 +79,18 @@ test("la barre basse est opaque : ses libellés ne passent pas sur le contenu", 
   const fond = await page.locator(".mobile-tabbar").evaluate(e => getComputedStyle(e).backgroundColor);
   expect(fond).not.toMatch(/rgba\(.*, 0\.\d+\)$/);
 });
+
+test("tableau de bord : le montant et le panier côte à côte, le lien sur la ligne du titre", async ({ page }) => {
+  await page.goto("/", { waitUntil: "networkidle" });
+  const r = await page.evaluate(() => {
+    const y = s => document.querySelector(s).getBoundingClientRect().top;
+    const lien = document.querySelector("#journee .tb-semaine .tb-lien");
+    return {
+      montant: y("#opRevenue"), panier: y("#journee .tb-ca-panier"),
+      lien: lien.getBoundingClientRect(), titre: document.querySelector("#journee .tb-semaine h3").getBoundingClientRect(),
+      souligne: getComputedStyle(lien).textDecorationLine
+    };
+  });
+  expect(Math.abs(r.lien.top + r.lien.height / 2 - (r.titre.top + r.titre.height / 2))).toBeLessThan(12);
+  expect(r.souligne).toBe("none");
+});

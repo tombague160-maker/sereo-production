@@ -50,3 +50,17 @@ test.describe("douze catégories (le témoin)", () => {
     expect(gauches).toBe(3);
   });
 });
+
+test.describe("douze catégories au téléphone", () => {
+  // Passation : « grille jusqu'a HUIT (mobile) ou douze (desktop) ». Douze
+  // categories au telephone : des lignes, pas six rangs de tuiles.
+  let srv;
+  test.beforeAll(async () => { srv = await demarrer({ port: 3169, seed: semer(12) }); });
+  test.afterAll(async () => { if (srv) await srv.arreter(); });
+
+  test("des lignes, une seule colonne", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const { gauches } = await colonnes(page, srv.base);
+    expect(gauches).toBe(1);
+  });
+});

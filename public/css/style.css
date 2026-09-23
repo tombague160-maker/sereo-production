@@ -12118,3 +12118,66 @@ textarea::placeholder {
   body:has(#crm.active[data-vue="fiche"]) .ecran-entete .cli-recherche,
   body:has(#crm.active[data-vue="fiche"]) .ecran-entete .cli-nouveau { display: none; }
 }
+
+/* --- Mobile, lot 2 : Tableau de bord, Stock, Parametres -------------------- */
+@media (max-width: 820px) {
+  /* Tableau de bord (planche 1b). Le montant et le panier cote a cote quand
+     ils tiennent, l'un sous l'autre sinon (les grands montants se
+     chevauchaient : la regle d'empilement reste le repli). */
+  #journee .tb-ca-tetes { flex-direction: row; flex-wrap: wrap; align-items: flex-end; gap: 8px 16px; }
+  #journee .tb-ca-tetes > .tb-ca-bloc { flex: 0 0 auto; }
+  #journee .tb-ca-tetes > .tb-ca-panier { margin-left: auto; align-items: flex-end; text-align: right; }
+  #journee .tb-montant { font-size: 40px; }
+  #journee .tb-valeur { font-size: 22px; }
+  #journee .tb-libelle { font-size: 13px; }
+  #journee .revenue-chart { height: 104px; gap: 6px; }
+  .tb-grille, #journee .tb-colonne, .tb-tuiles { gap: 12px; }
+  /* « Cette semaine » : le lien sur la ligne du titre, sans soulignement bleu
+     (il passait sous le titre, bleu et souligne). */
+  :root[data-color-scheme] #journee .tb-semaine .panel-heading,
+  :root:not([data-color-scheme]) #journee .tb-semaine .panel-heading {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  }
+  :root[data-color-scheme] #journee .tb-semaine .tb-lien,
+  :root:not([data-color-scheme]) #journee .tb-semaine .tb-lien {
+    display: inline-flex; align-items: center; min-height: 44px; flex: none;
+    color: var(--v8-principal); text-decoration: none; font-size: 13.5px; font-weight: 600;
+  }
+
+  /* Stock (planche 8b) : les tuiles a la mesure de la planche, et au-dela de
+     HUIT categories, des lignes (passation : « huit au telephone »). */
+  #stock .stk-tuile { gap: 10px; }
+  #stock .stk-tuile-pastille { width: 40px; height: 40px; }
+  #stock .stk-tuile-pastille svg { width: 20px; height: 20px; }
+  #stock .stk-tuile-total { font-size: 30px; }
+  #stock .stk-tuile-nom { font-size: 14.5px; }
+  #stock .stk-tuile-sous { font-size: 13px; }
+  .stk-categories:has(> .stk-tuile:nth-child(9)) { grid-template-columns: 1fr; gap: 8px; }
+  :root[data-color-scheme] #stock .stk-categories:has(> .stk-tuile:nth-child(9)) .stk-tuile,
+  :root:not([data-color-scheme]) #stock .stk-categories:has(> .stk-tuile:nth-child(9)) .stk-tuile {
+    flex-direction: row; align-items: center; gap: 14px; min-height: 72px; padding: 8px 16px; border-radius: 18px;
+  }
+  .stk-categories:has(> .stk-tuile:nth-child(9)) .stk-tuile-total { order: 3; margin-left: auto; font-size: 17px; }
+  .stk-categories:has(> .stk-tuile:nth-child(9)) .stk-tuile-texte { flex-direction: column; }
+
+  /* Parametres (planche 8d) : la piste du theme se voit sur la carte blanche,
+     les secteurs en pilules de 44. */
+  #parametres .par-segments { background: var(--v8-surface-basse); }
+  .par-pilule { height: 44px; padding: 0 18px; font-size: 15px; }
+}
+/* Le lien « Cette semaine » : le mot de la planche au telephone (1b), la
+   phrase longue au bureau -- l'une des deux seulement est rendue, donc un seul
+   nom accessible. */
+.tb-lien-court { display: none; }
+@media (max-width: 820px) {
+  .tb-lien .tb-lien-long { display: none; }
+  .tb-lien .tb-lien-court { display: inline; }
+}
+@media (max-width: 820px) {
+  /* Une autre regle passait cette rangee en flex-wrap : le titre (227 px) et
+     le lien (114 px) ne tenaient pas dans 318 px, le lien tombait dessous. Le
+     titre peut se resserrer ; le lien garde sa place. */
+  :root[data-color-scheme] #journee .tb-semaine .panel-heading,
+  :root:not([data-color-scheme]) #journee .tb-semaine .panel-heading { flex-wrap: nowrap; }
+  #journee .tb-semaine .panel-heading h3 { flex: 1 1 auto; min-width: 0; }
+}
