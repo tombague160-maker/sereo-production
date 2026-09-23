@@ -64,4 +64,14 @@
     bouton.setAttribute("aria-label", visible ? "Masquer le mot de passe" : "Afficher le mot de passe");
     champ.focus();
   });
+  // Le mot de passe ne reste jamais en clair : ni a l'envoi, ni au retour
+  // arriere (la page peut revenir du cache du navigateur).
+  function masquer() {
+    champ.type = "password";
+    bouton.setAttribute("aria-pressed", "false");
+    bouton.setAttribute("aria-label", "Afficher le mot de passe");
+  }
+  var formulaire = champ.form;
+  if (formulaire) formulaire.addEventListener("submit", masquer);
+  window.addEventListener("pageshow", masquer);
 })();

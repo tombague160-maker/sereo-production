@@ -19,8 +19,12 @@ test("la page de la planche : la marque, les deux champs, le bouton, le pied", a
 test("les polices de la charte se chargent AVANT toute session", async ({ page }) => {
   // /fonts etait derriere l'authentification : la page de connexion tombait
   // sur la police systeme.
+  // Sans la route, une requete anonyme repond AUSSI 200 -- avec la page de
+  // connexion en HTML. On exige donc une police.
   const reponse = await page.request.get(BASE + "/fonts/poppins-600-latin.woff2");
   expect(reponse.status()).toBe(200);
+  expect(reponse.headers()["content-type"]).toContain("font/woff2");
+  expect((await reponse.body()).length).toBeGreaterThan(5000);
   await page.goto(BASE + "/login", { waitUntil: "networkidle" });
   const chargee = await page.evaluate(async () => { await document.fonts.ready; return document.fonts.check('600 16px "Poppins"'); });
   expect(chargee).toBe(true);
@@ -55,4 +59,22 @@ test("au téléphone : rien ne déborde", async ({ browser }) => {
     .filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.right > window.innerWidth + 0.5; }).length);
   expect(deborde).toBe(0);
   await ctx.close();
+});
+
+test("au téléphone, le pied reste lisible sur son fond (pas sur les taches)", async ({ browser }) => {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const page = await ctx.newPage();
+  await page.goto(BASE + "/login", { waitUntil: "networkidle" });
+  const fond = await page.locator(".pied").evaluate(e => getComputedStyle(e).backgroundColor);
+  expect(fond).not.toBe("rgba(0, 0, 0, 0)");
+  await ctx.close();
+});
+
+test("le mot de passe affiché repasse masqué à l'envoi", async ({ page }) => {
+  await page.goto(BASE + "/login", { waitUntil: "networkidle" });
+  await page.fill("#password", "secret");
+  await page.locator(".voir").click();
+  await expect(page.locator("#password")).toHaveAttribute("type", "text");
+  await page.evaluate(() => document.querySelector("form").dispatchEvent(new Event("submit", { cancelable: true })));
+  await expect(page.locator("#password")).toHaveAttribute("type", "password");
 });

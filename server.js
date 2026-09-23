@@ -320,7 +320,8 @@ app.use(securityHeaders);
 app.use("/brand", express.static(path.join(__dirname, "public", "brand"), { immutable: true, maxAge: "1d" }));
 // Les polices : la page de connexion les charge avant toute session. Rien de
 // sensible (des fichiers de police libres, OFL).
-app.use("/fonts", express.static(path.join(__dirname, "public", "fonts"), { immutable: true, maxAge: "30d" }));
+// Pas d'« immutable » : les noms de fichiers n'ont pas d'empreinte.
+app.use("/fonts", express.static(path.join(__dirname, "public", "fonts"), { maxAge: "7d" }));
 app.get("/favicon.svg", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "favicon.svg"));
 });
@@ -1688,9 +1689,11 @@ function renderLoginPage(req, res) {
     button[type="submit"]:active:not(:disabled) { transform: scale(.97); }
     button[type="submit"]:disabled { opacity: .55; cursor: not-allowed; }
     button[type="submit"]:focus-visible { outline: none; box-shadow: var(--focus); }
+    /* Le pied a son fond (planche 9b) : sur les taches floues, le texte
+       secondaire tombait sous 4,5:1 au telephone. */
     .pied {
-      position: relative; z-index: 1; width: 100%; max-width: 420px; margin-top: 24px; padding: 0 12px;
-      display: flex; flex-direction: column; gap: 6px;
+      position: relative; z-index: 1; width: 100%; max-width: 420px; margin-top: 24px; padding: 8px 12px;
+      display: flex; flex-direction: column; gap: 6px; background: var(--fond); border-radius: 16px;
     }
     .pied p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--secondaire); }
     .pied a {
@@ -1718,7 +1721,7 @@ function renderLoginPage(req, res) {
       <div class="champ${(hasError || isLocked) ? " champ--erreur" : ""}">
         <label for="password">Mot de passe</label>
         <div class="saisie saisie--mdp">
-          <input id="password" name="password" type="password" autocomplete="current-password" ${isLocked ? "disabled" : "required"}${(hasError || isLocked) ? ' aria-describedby="login-erreur"' : ""}>
+          <input id="password" name="password" type="password" autocomplete="current-password" ${isLocked ? "disabled" : "required"}${(hasError || isLocked) ? ' aria-describedby="login-erreur"' : ""}${hasError && !isLocked ? ' aria-invalid="true"' : ""}>
           <button class="voir" type="button" aria-label="Afficher le mot de passe" aria-pressed="false" hidden>
             <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/></svg>
           </button>
