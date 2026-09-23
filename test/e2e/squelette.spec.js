@@ -85,8 +85,9 @@ for (const mode of ["light", "dark"]) {
     const { ctx, page } = await chargerAuRalenti(browser, mode);
     await page.waitForTimeout(1200);
 
+    // Les chiffres en attente (planche 10b) sont des squelettes aussi.
     const avecTexte = await page.evaluate(() =>
-      [...document.querySelectorAll(".squelette")]
+      [...document.querySelectorAll(".squelette, .squelette-chiffre")]
         .filter(s => s.textContent.trim().length > 0)
         .map(s => s.textContent.trim().slice(0, 40)));
 
@@ -107,11 +108,124 @@ for (const mode of ["light", "dark"]) {
     await page.waitForTimeout(LENTEUR_MS * 2 + 2000);
     const apres = await page.evaluate(() => ({
       squelettes: document.querySelectorAll(".squelette").length,
+      chiffres: document.querySelectorAll(".squelette-chiffre").length,
       busy: document.querySelectorAll('[aria-busy="true"]').length
     }));
 
     expect(apres.squelettes, "des squelettes survivent au chargement").toBe(0);
+    expect(apres.chiffres, "des chiffres restent des blocs gris apres le chargement").toBe(0);
     expect(apres.busy, 'aria-busy="true" survit : un lecteur d\'ecran annoncerait un chargement termine').toBe(0);
     await ctx.close();
   });
 }
+
+// --- A la taille de ce qu'ils remplacent (planche 10b, 23/09) ----------------
+//
+// « Les cartes gardent leur forme et leurs libelles ; seuls les chiffres sont
+// des blocs aux dimensions du chiffre attendu. [...] La page ne bouge pas quand
+// les donnees arrivent. » Mesure du 23/09 avant ce lot, API ralentie : les
+// chiffres affichaient « 0 » et « — », le sous-titre recopiait « 0 commande a
+// preparer », et TOUT l'ecran descendait a l'arrivee des donnees -- de 22 px au
+// bureau, de 72 px au telephone (la pilule du mois, vide, puis large ; le
+// sous-titre, sur une ligne, puis deux).
+//
+// Un serveur SEME : a vide, les chiffres finaux seraient « 0 » et le banc ne
+// distinguerait pas un bloc a la taille d'un nombre d'un bloc quelconque.
+
+const { demarrer } = require("./serveur-seme");
+
+test.describe("à la taille de ce qu'ils remplacent", () => {
+  // UN serveur, donc un seul ouvrier : deux ouvriers en demarraient chacun un
+  // sur le meme port, et le premier arrete coupait le second.
+  test.describe.configure({ mode: "serial" });
+  let srv;
+  test.beforeAll(async () => { srv = await demarrer({ port: 3178 }); });
+  test.afterAll(async () => { if (srv) await srv.arreter(); });
+
+  async function auRalenti(browser, largeur, ancre = "") {
+    const ctx = await browser.newContext({ viewport: { width: largeur, height: largeur > 820 ? 900 : 844 }, colorScheme: "light" });
+    const page = await ctx.newPage();
+    await page.route("**/api/**", async route => {
+      await new Promise(r => setTimeout(r, LENTEUR_MS));
+      route.continue();
+    });
+    await page.goto(srv.base + "/" + (ancre ? "#" + ancre : ""), { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(1200);
+    return { ctx, page };
+  }
+
+  async function chargementFini(page) {
+    await page.waitForFunction(() => !document.querySelector('.squelette, .squelette-chiffre, [aria-busy="true"]'), null, { timeout: 30000 });
+    await page.waitForTimeout(300);
+  }
+
+  const CHIFFRES = ["#opRevenue", "#opBasket", "#dashboardPreparingCount", "#dashboardDeliveringCount",
+    "#dashboardPreparingDetail", "#dashboardDeliveringDetail"];
+  // Ce qui suit les chiffres dans la page : si l'un bouge, c'est que la page a saute.
+  const REPERES = [...CHIFFRES, ".tb-tuile-titre", "#revenueChart"];
+
+  const releve = page => page.evaluate(sel => Object.fromEntries(sel.map(s => {
+    const r = document.querySelector(s).getBoundingClientRect();
+    return [s, { haut: r.top, gauche: r.left, droite: r.right, hauteur: r.height }];
+  })), REPERES);
+
+  for (const largeur of [1440, 390]) {
+    test(`les chiffres ne bougent pas à l'arrivée des données, à ${largeur} px`, async ({ browser }) => {
+      test.setTimeout(120000);
+      const { ctx, page } = await auRalenti(browser, largeur);
+
+      const pendant = await page.evaluate(ids => ({
+        blocs: ids.map(s => {
+          const el = document.querySelector(s);
+          const apres = getComputedStyle(el, "::after");
+          return { s, bloc: el.classList.contains("squelette-chiffre"), texte: el.textContent.trim(),
+            l: parseFloat(apres.width) || 0, h: parseFloat(apres.height) || 0, taille: parseFloat(getComputedStyle(el).fontSize) };
+        }),
+        sousTitre: document.getElementById("pageSubtitle").textContent
+      }), CHIFFRES);
+      for (const b of pendant.blocs) {
+        expect(b.bloc, `${b.s} : pas de bloc pendant le chargement`).toBe(true);
+        expect(b.texte, `${b.s} : un chiffre affiche avant les donnees`).toBe("");
+        // A la taille d'un chiffre : ni un filet, ni un pave plus haut que la ligne.
+        expect(b.h, `${b.s} : hauteur du bloc`).toBeGreaterThan(b.taille * 0.6);
+        expect(b.h, `${b.s} : hauteur du bloc`).toBeLessThanOrEqual(b.taille);
+        expect(b.l, `${b.s} : largeur du bloc`).toBeGreaterThan(b.taille * 0.9);
+      }
+      // Le sous-titre lit la tuile : il ne doit pas annoncer un compte qu'il n'a pas.
+      expect(pendant.sousTitre).not.toMatch(/\d+ commandes? à préparer/);
+
+      const avant = await releve(page);
+      await chargementFini(page);
+      await expect(page.locator("#opRevenue")).toHaveText(/€/);
+      const apres = await releve(page);
+
+      const sauts = REPERES.flatMap(s => {
+        // Le panier moyen est aligne a DROITE : c'est son bord droit qui tient.
+        const bord = s === "#opBasket" ? "droite" : "gauche";
+        const dy = Math.abs(apres[s].haut - avant[s].haut), dx = Math.abs(apres[s][bord] - avant[s][bord]);
+        const dh = Math.abs(apres[s].hauteur - avant[s].hauteur);
+        return dy > 2 || dx > 2 || dh > 2
+          ? [`${s} : ${Math.round(dy)} px en haut, ${Math.round(dx)} px de cote, ${Math.round(dh)} px de hauteur`] : [];
+      });
+      expect(sauts, "la page a saute a l'arrivee des donnees").toEqual([]);
+      await ctx.close();
+    });
+
+    test(`une ligne grise a la hauteur d'une ligne réelle, à ${largeur} px`, async ({ browser }) => {
+      test.setTimeout(180000);
+      const ZONES = [["commandes", "#cmdLignes", ".cmd-ligne"], ["stock", "#stockList", ".stk-ligne"], ["crm", "#crmList", ":scope > *"]];
+      const ecarts = [];
+      for (const [ancre, zone, ligne] of ZONES) {
+        const { ctx, page } = await auRalenti(browser, largeur, ancre);
+        const grise = await page.evaluate(z => document.querySelector(`${z} .squelette-ligne`)?.getBoundingClientRect().height ?? 0, zone);
+        expect(grise, `${zone} : aucune ligne grise pendant le chargement`).toBeGreaterThan(0);
+        await chargementFini(page);
+        const reelle = await page.evaluate(([z, l]) => document.querySelector(z).querySelector(l)?.getBoundingClientRect().height ?? 0, [zone, ligne]);
+        expect(reelle, `${zone} : aucune ligne reelle -- rien a comparer`).toBeGreaterThan(0);
+        if (Math.abs(grise - reelle) > 2) ecarts.push(`${zone} : ${Math.round(grise)} px gris pour ${Math.round(reelle)} px reels`);
+        await ctx.close();
+      }
+      expect(ecarts).toEqual([]);
+    });
+  }
+});

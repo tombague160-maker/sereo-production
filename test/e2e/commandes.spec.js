@@ -408,3 +408,150 @@ test("les étiquettes de date suivent la planche (600), pas le label générique
   const g = await page.locator("#commandes .cmd-periode label").first().evaluate(e => getComputedStyle(e).fontWeight);
   expect(g).toBe("600");
 });
+
+// --- Au telephone : la planche 8a (23/09) ---------------------------------
+//
+// Les pilules de statut passent dans l'en-tete vert, sous la recherche ; sous
+// l'en-tete, le compte et le tri ; les filtres hors planche (gardes) se
+// replient derriere « Filtres ».
+
+async function ouvrirTelephone(page, ancre = "commandes") {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(srv.base + "/#" + ancre, { waitUntil: "networkidle" });
+  await page.waitForTimeout(700);
+}
+
+test("téléphone : les pilules de statut sont DANS l'en-tête vert, sous la recherche", async ({ page }) => {
+  await ouvrirTelephone(page);
+  const pilules = page.locator("#cmdPilules");
+  await expect(pilules).toBeVisible();
+  // Dans l'en-tete, pas seulement dessus : un deplacement par position ne
+  // resisterait pas au prochain changement de hauteur.
+  expect(await pilules.evaluate(e => Boolean(e.closest(".ecran-entete")))).toBe(true);
+  const entete = await page.locator(".ecran-entete").boundingBox();
+  const recherche = await page.locator('#enteteActions .cmd-recherche[data-ecran="commandes"]').boundingBox();
+  const boite = await pilules.boundingBox();
+  expect(boite.y).toBeGreaterThanOrEqual(recherche.y + recherche.height);
+  expect(boite.y + boite.height).toBeLessThanOrEqual(entete.y + entete.height);
+  // 44 px sous le pouce, et le fond de la pilule choisie tranche sur le vert.
+  const toutes = pilules.locator('[data-cmd-filtre="toutes"]');
+  expect((await toutes.boundingBox()).height).toBeGreaterThanOrEqual(44);
+  const [fondChoisie, fondAutre, fondEntete] = await page.evaluate(() => [
+    getComputedStyle(document.querySelector('#cmdPilules [data-cmd-filtre="toutes"]')).backgroundColor,
+    getComputedStyle(document.querySelector('#cmdPilules [data-cmd-filtre="livrees"]')).backgroundColor,
+    getComputedStyle(document.querySelector(".ecran-entete")).backgroundColor]);
+  expect(fondChoisie).not.toBe(fondAutre);
+  expect(fondAutre).not.toBe(fondEntete);
+});
+
+test("téléphone : une pilule de l'en-tête filtre la liste", async ({ page }) => {
+  await ouvrirTelephone(page);
+  await page.locator('#cmdPilules [data-cmd-filtre="livrees"]').click();
+  await expect(page.locator('#cmdPilules [data-cmd-filtre="livrees"]')).toHaveAttribute("aria-pressed", "true");
+  const statuts = await page.locator("#cmdLignes .cmd-badge").allTextContents();
+  expect(statuts.length).toBeGreaterThan(0);
+  for (const s of statuts) expect(s).toMatch(/Livrée/);
+});
+
+test("téléphone : les pilules ne suivent pas sur un autre écran", async ({ page }) => {
+  await ouvrirTelephone(page);
+  await page.goto(srv.base + "/#stock", { waitUntil: "networkidle" });
+  await expect(page.locator("#cmdPilules")).toBeHidden();
+});
+
+test("bureau (le témoin) : les pilules restent dans la rangée de filtres, et y reviennent", async ({ page }) => {
+  await ouvrirTelephone(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.waitForTimeout(200);
+  expect(await page.locator("#cmdPilules").evaluate(e => e.parentElement.classList.contains("cmd-filtres"))).toBe(true);
+  await expect(page.locator("#cmdPilules")).toBeVisible();
+  await expect(page.locator("#cmdFiltresBouton")).toBeHidden();
+  await expect(page.locator("#cmdBloquees").locator("xpath=..")).toBeVisible();
+});
+
+test("téléphone : le compte et le tri sous l'en-tête, les filtres hors planche repliés", async ({ page }) => {
+  await ouvrirTelephone(page);
+  await expect(page.locator("#cmdResume")).toHaveText(/^\d+ bons?$/);
+  await expect(page.locator("#cmdTri")).toBeVisible();
+  const caseBloquees = page.locator("label.cmd-case", { has: page.locator("#cmdBloquees") });
+  await expect(caseBloquees).toBeHidden();
+  await expect(page.locator("#commandes .cmd-periode")).toBeHidden();
+  const bouton = page.locator("#cmdFiltresBouton");
+  await expect(bouton).toHaveAttribute("aria-expanded", "false");
+  expect((await bouton.boundingBox()).height).toBeGreaterThanOrEqual(44);
+  await bouton.click();
+  await expect(bouton).toHaveAttribute("aria-expanded", "true");
+  await expect(caseBloquees).toBeVisible();
+  await expect(page.locator("#commandes .cmd-periode")).toBeVisible();
+  // Gardes, donc utilisables : la case filtre vraiment.
+  await caseBloquees.click();
+  await expect(page.locator("#cmdLignes .cmd-badge--alerte").first()).toBeVisible();
+  await expect(bouton).toHaveText("Filtres · 1");
+});
+
+test("téléphone : un filtre actif se dit sur le bouton, même replié", async ({ page }) => {
+  await ouvrirTelephone(page);
+  await page.locator("#cmdFiltresBouton").click();
+  await page.fill("#cmdDu", "2026-01-01");
+  await page.locator("#cmdFiltresBouton").click();
+  await expect(page.locator("#cmdFiltresBouton")).toHaveText("Filtres · 1");
+  await expect(page.locator("#commandes .cmd-periode")).toBeHidden();
+});
+
+test("téléphone : « adresses à corriger » arrive avec son filtre déplié", async ({ page }) => {
+  await ouvrirTelephone(page, "commandes-a-completer");
+  await expect(page.locator("#cmdFiltresBouton")).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator("#cmdACompleterLibelle")).toBeVisible();
+  await expect(page.locator("#cmdACompleterLibelle")).toHaveText("Adresses à corriger");
+});
+
+// Le balayage de contraste de l'application se fait a 1440 px : il ne voit
+// jamais l'en-tete vert du telephone. On mesure ici, dans les deux themes, le
+// texte de ce que ce lot y pose, contre son propre fond (tous opaques).
+for (const mode of ["light", "dark"]) {
+  test(`téléphone : pilules, compte et « Filtres » lisibles (4,5:1), en ${mode}`, async ({ page }) => {
+    await ouvrirTelephone(page);
+    await page.evaluate(m => document.documentElement.setAttribute("data-color-scheme", m), mode);
+    await page.locator("#cmdFiltresBouton").click();   // aussi l'etat deplie
+    // Les boutons ont une transition de couleur : mesure pendant le fondu, et
+    // le banc lisait une couleur intermediaire (3,23 au lieu de la finale).
+    await page.waitForTimeout(600);
+    const mesures = await page.evaluate(() => {
+      const rgb = c => (c.match(/[\d.]+/g) || []).slice(0, 4).map(Number);
+      const lum = ([r, g, b]) => {
+        const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+        return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+      };
+      // Le fond est celui du premier ancetre opaque.
+      const fond = el => {
+        for (let e = el; e; e = e.parentElement) {
+          const c = rgb(getComputedStyle(e).backgroundColor);
+          if (c.length === 3 || c[3] === 1) return c.slice(0, 3);
+        }
+        return [255, 255, 255];
+      };
+      const elements = [...document.querySelectorAll("#cmdPilules .filtre-pilule, #cmdResume, #cmdFiltresBouton")];
+      return elements.map(e => {
+        const a = lum(rgb(getComputedStyle(e).color)), b = lum(fond(e));
+        return { nom: e.textContent.trim(), ratio: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) };
+      });
+    });
+    expect(mesures.length).toBe(9);
+    const faibles = mesures.filter(m => m.ratio < 4.5).map(m => `${m.nom} : ${m.ratio.toFixed(2)}`);
+    expect(faibles).toEqual([]);
+  });
+}
+
+test("téléphone : au clavier, la pilule de l'en-tête montre son anneau", async ({ page }) => {
+  // La forme de la pilule pose box-shadow: none a (2,5,0) : sans regle de
+  // focus plus forte, l'anneau de l'en-tete vert ne se voyait plus.
+  await ouvrirTelephone(page);
+  await page.locator("#cmdRecherche").focus();
+  await page.keyboard.press("Tab");
+  const focus = await page.evaluate(() => ({
+    filtre: document.activeElement?.dataset?.cmdFiltre,
+    ombre: getComputedStyle(document.activeElement).boxShadow
+  }));
+  expect(focus.filtre).toBe("toutes");
+  expect(focus.ombre).not.toBe("none");
+});
