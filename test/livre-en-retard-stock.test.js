@@ -12,6 +12,11 @@
 // assez ») et « Corriger le statut » refusait TOUJOURS un « Livre » sur une
 // commande dont le stock avait ete libere (409), meme avec un rayon plein.
 //
+// Relecture adverse : le meme « Livre » en TEMPS REEL (la commande liberee
+// repart dans une nouvelle tournee), par l'ecran Commandes ou par
+// POST /api/livraison ne deduisait rien, en silence ; et une ligne non deduite
+// (hors stock, « a renseigner ») etait rendue au rayon par la liberation.
+//
 // Chaque cas mesure le stock avant et apres (rayon = quantityAvailable,
 // reserve = quantityReserved de GET /api/stock).
 
@@ -87,7 +92,7 @@ function arret(o, status, extra = {}) {
  * Une tournee EN COURS « r-cours » : B et C en livraison, reservees (4 Aleses
  * chacune, deduites du rayon a la preparation). `rayon` : ce qui reste en rayon.
  */
-function ensemencer({ rayon = 20, produitsB = null } = {}) {
+function ensemencer({ rayon = 20, produitsB = null, autresProduits = [] } = {}) {
   const reserve = { stockReservedAt: `${JOUR}T07:00:00Z` };
   const b = commande("o-b", "Cabinet Dupont", "en_livraison", { ...reserve, routeId: "r-cours", ...(produitsB ? { products: produitsB } : {}) });
   const c = commande("o-c", "EHPAD Bellevue", "en_livraison", { ...reserve, routeId: "r-cours" });
@@ -102,8 +107,25 @@ function ensemencer({ rayon = 20, produitsB = null } = {}) {
       selectedOrderIds: [b.id, c.id],
       stops: [arret(b, "en_livraison"), arret(c, "en_livraison")]
     }],
-    stock: [{ id: "p1", code: "A1", nom: "Alèses", quantite: rayon }]
+    stock: [{ id: "p1", code: "A1", nom: "Alèses", quantite: rayon }, ...autresProduits]
   }, { backup: false });
+}
+
+/** La quantite en rayon d'un produit du stock (null : « a renseigner »). */
+async function enRayon(id) {
+  const { body } = await demander("/api/stock");
+  const p = body.find(item => item.id === id);
+  return p ? p.quantityAvailable : undefined;
+}
+
+/** Le catalogue change a la main (un import, une saisie) : `quantite` null = « a renseigner », undefined = retire. */
+function produitA(id, quantite, gabarit = null) {
+  const db = readDb();
+  const i = db.stock.findIndex(p => p.id === id);
+  if (quantite === undefined) db.stock.splice(i, 1);
+  else if (i < 0) db.stock.push({ ...gabarit, id, quantite });
+  else db.stock[i].quantite = quantite;
+  writeDb(db, { backup: false });
 }
 
 async function stock() {
@@ -187,19 +209,29 @@ test("file — le même « Livré » rejoué (même clé, puis sans clé) ne dé
   assert.equal((await alertesStockInsuffisant()).length, 1, "un renvoi a journalise une seconde fois");
 });
 
-test("file — un produit de la commande absent du stock : la livraison passe, et l'historique le nomme", async () => {
-  ensemencer({ produitsB: [{ code: "A1", nom: "Alèses", quantite: 4 }, { code: "Z9", nom: "Draps jetables", quantite: 2 }] });
+test("file — un produit retiré du stock après la libération : la livraison passe, l'historique le nomme, sans parler de stock insuffisant", async () => {
+  // L'etat que l'API produit : la reservation a ete prise quand les draps
+  // etaient au stock (reserveStockForOrder exige toutes les lignes connues),
+  // puis le catalogue a change apres la liberation (un import les a retires).
+  const draps = { code: "Z9", nom: "Draps jetables" };
+  ensemencer({
+    produitsB: [{ code: "A1", nom: "Alèses", quantite: 4 }, { ...draps, quantite: 2 }],
+    autresProduits: [{ id: "p2", ...draps, quantite: 5 }]
+  });
   const avantCloture = new Date(Date.now() - 60 * 1000).toISOString();
   await clotureEtLiberation();
+  produitA("p2", undefined);
   const depart = await stock();
 
   const tard = await patcher("/api/routes/r-cours/stops/s-o-b", { status: "livre", faitLe: avantCloture });
   assert.equal(tard.res.status, 200, JSON.stringify(tard.body));
   // Les Aleses, suivies, sont deduites (le rayon en avait assez) ; les draps ne le sont nulle part.
   assert.equal((await stock()).rayon, depart.rayon - 4);
-  const alertes = await alertesStockInsuffisant();
-  assert.equal(alertes.length, 1);
-  assert.match(alertes[0].message, /Draps jetables : absent du stock, rien déduit/);
+  // Aucune ligne ne manque : dire « stock insuffisant » serait faux.
+  assert.equal((await alertesStockInsuffisant()).length, 0, "l'historique dit « stock insuffisant » alors que le rayon couvrait tout");
+  const nonSuivi = (await historique()).filter(h => /livraison acceptée sur un stock non suivi/i.test(h.message));
+  assert.equal(nonSuivi.length, 1, "la ligne non deduite n'est pas journalisee (ou l'est deux fois)");
+  assert.match(nonSuivi[0].message, /Draps jetables : absent du stock, rien déduit/);
 });
 
 // --- « Corriger le statut » vers « Livre » -------------------------------------
@@ -257,4 +289,133 @@ test("témoin — un « Livré » en temps réel, rayon à zéro : la réservati
   assert.equal(r.res.status, 200, JSON.stringify(r.body));
   assert.deepEqual(await stock(), { rayon: 0, reserve: depart.reserve - 4 }, "le Livre en temps reel a touche au rayon");
   assert.equal((await alertesStockInsuffisant()).length, 0);
+});
+
+// --- Relecture adverse : les autres chemins vers « Livre » ----------------------
+//
+// Une commande « a reprogrammer » dont le stock a ete libere reste livrable :
+// elle repart dans une nouvelle tournee, ou passe par l'ecran Commandes. Son
+// « Livre » la faisait sortir sans rien deduire du rayon (stockReservedAt nul :
+// rien a consommer), ni rien dire -- la marchandise, chez le client, restait
+// comptee en rayon.
+
+/** Absent + liberation, puis une nouvelle tournee avec la commande, demarree. Rend l'arret. */
+async function nouvelleTourneeApresLiberation() {
+  await absentEtLiberation();
+  const cree = await poster("/api/routes", { orderIds: ["o-b"] });
+  assert.equal(cree.res.status, 201, `prealable : la nouvelle tournee : ${JSON.stringify(cree.body)}`);
+  const depart = await poster(`/api/routes/${cree.body.id}/start`);
+  assert.equal(depart.res.status, 200, `prealable : le depart : ${JSON.stringify(depart.body)}`);
+  const s = cree.body.stops.find(item => item.orderId === "o-b");
+  return `/api/routes/${cree.body.id}/stops/${s.id}`;
+}
+
+test("temps réel — « Livré » dans une nouvelle tournée après une libération, rayon suffisant : le rayon est déduit de nouveau", async () => {
+  ensemencer({ rayon: 10 });
+  const depart = await stock();
+  const chemin = await nouvelleTourneeApresLiberation();
+  assert.equal((await stock()).rayon, depart.rayon + 4, "prealable : la liberation rend 4 au rayon");
+
+  const r = await patcher(chemin, { status: "livre" });
+  assert.equal(r.res.status, 200, JSON.stringify(r.body));
+  assert.equal(commandeLue("o-b").status, "livre");
+  assert.equal(commandeLue("o-b").stockReleaseReason, "consumed_by_delivery", "la livraison n'a rien consomme");
+  assert.deepEqual(await stock(), { rayon: depart.rayon, reserve: depart.reserve - 4 }, "la marchandise livree est encore comptee en rayon");
+  const deduits = (await historique()).filter(h => /livree apres la liberation de son stock/i.test(h.message));
+  assert.equal(deduits.length, 1, "la deduction n'est pas journalisee");
+  assert.match(deduits[0].message, /en tournée/);
+  assert.equal((await alertesStockInsuffisant()).length, 0);
+});
+
+test("temps réel — même chemin, rayon à 1 : accepté, le rayon passe à -3, journalisé", async () => {
+  ensemencer({ rayon: 10 });
+  const chemin = await nouvelleTourneeApresLiberation();
+  rayonA(1);
+
+  const r = await patcher(chemin, { status: "livre" });
+  assert.equal(r.res.status, 200, JSON.stringify(r.body));
+  assert.equal((await stock()).rayon, -3, "le Livre en temps reel n'a rien deduit");
+  const alertes = await alertesStockInsuffisant();
+  assert.equal(alertes.length, 1);
+  assert.match(alertes[0].message, /Alèses : 1 en rayon pour 4 livrés, stock à -3/);
+});
+
+test("écran Commandes — « en livraison » puis « livré » après une libération : le rayon est déduit de nouveau", async () => {
+  ensemencer({ rayon: 10 });
+  const depart = await stock();
+  await absentEtLiberation();
+
+  assert.equal((await patcher("/api/orders/o-b", { status: "en_livraison" })).res.status, 200, "prealable : en livraison");
+  const r = await patcher("/api/orders/o-b", { status: "livre" });
+  assert.equal(r.res.status, 200, JSON.stringify(r.body));
+  assert.equal(commandeLue("o-b").status, "livre");
+  assert.deepEqual(await stock(), { rayon: depart.rayon, reserve: depart.reserve - 4 }, "la marchandise livree est encore comptee en rayon");
+});
+
+test("POST /api/livraison (hérité) — « livrée » après une libération : le rayon est déduit de nouveau", async () => {
+  ensemencer({ rayon: 10 });
+  const depart = await stock();
+  await absentEtLiberation();
+
+  assert.equal((await patcher("/api/orders/o-b", { status: "en_livraison" })).res.status, 200, "prealable : en livraison");
+  const r = await poster("/api/livraison", { clientId: "c-o-b", orderId: "o-b", statut: "livree" });
+  assert.equal(r.res.status, 200, JSON.stringify(r.body));
+  assert.equal(commandeLue("o-b").status, "livre");
+  assert.deepEqual(await stock(), { rayon: depart.rayon, reserve: depart.reserve - 4 }, "la marchandise livree est encore comptee en rayon");
+});
+
+// --- Relecture adverse : une ligne non deduite n'est jamais « restituee » -------
+
+const drapsB = {
+  produitsB: [{ code: "A1", nom: "Alèses", quantite: 4 }, { code: "Z9", nom: "Draps jetables", quantite: 3 }],
+  autresProduits: [{ id: "p2", code: "Z9", nom: "Draps jetables", quantite: 10 }]
+};
+
+test("aller-retour — Draps « à renseigner » à la livraison : défaire la livraison puis libérer ne leur invente pas de quantité", async () => {
+  ensemencer(drapsB);
+  await absentEtLiberation();
+  rayonA(2);
+  produitA("p2", null);
+
+  const livre = await poster("/api/routes/r-cours/stops/s-o-b/correction", { status: "livre", cause: "Livré, bon signé" });
+  assert.equal(livre.res.status, 200, JSON.stringify(livre.body));
+  assert.equal(await enRayon("p1"), -2);
+  assert.equal(await enRayon("p2"), null, "prealable : les draps restent « a renseigner »");
+
+  const absent = await poster("/api/routes/r-cours/stops/s-o-b/correction", { status: "absent", cause: "Finalement pas livré" });
+  assert.equal(absent.res.status, 200, JSON.stringify(absent.body));
+  const libere = await poster("/api/orders/o-b/release-stock");
+  assert.equal(libere.res.status, 200, JSON.stringify(libere.body));
+  assert.equal(libere.body.released, true);
+
+  assert.equal(await enRayon("p1"), 2, "les Aleses deduites ne sont pas rendues");
+  assert.equal(await enRayon("p2"), null, "la liberation a invente une quantite de draps jamais comptee");
+  assert.equal(commandeLue("o-b").stockNonDeduit, undefined, "la marque des lignes non deduites survit a la liberation");
+});
+
+test("aller-retour — Draps retirés du stock à la livraison puis réimportés : la libération ne rend que ce qui a été déduit", async () => {
+  ensemencer(drapsB);
+  await absentEtLiberation();
+  rayonA(2);
+  produitA("p2", undefined);
+
+  const livre = await poster("/api/routes/r-cours/stops/s-o-b/correction", { status: "livre", cause: "Livré, bon signé" });
+  assert.equal(livre.res.status, 200, JSON.stringify(livre.body));
+  assert.equal(await enRayon("p1"), -2);
+
+  const absent = await poster("/api/routes/r-cours/stops/s-o-b/correction", { status: "absent", cause: "Finalement pas livré" });
+  assert.equal(absent.res.status, 200, JSON.stringify(absent.body));
+  produitA("p2", 5, { code: "Z9", nom: "Draps jetables" });
+  const libere = await poster("/api/orders/o-b/release-stock");
+  assert.equal(libere.res.status, 200, JSON.stringify(libere.body));
+
+  assert.equal(await enRayon("p1"), 2);
+  assert.equal(await enRayon("p2"), 5, "la liberation a rendu des draps jamais deduits");
+});
+
+test("témoin — une réservation ordinaire (toutes lignes déduites à la préparation) : la libération rend chaque ligne", async () => {
+  ensemencer(drapsB);
+  await absentEtLiberation();
+  assert.equal(await enRayon("p1"), 24);
+  assert.equal(await enRayon("p2"), 13, "la liberation ordinaire ne rend plus les draps");
 });
