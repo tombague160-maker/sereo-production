@@ -5430,8 +5430,12 @@ chiffre** confondait « pas encore partie » avec « pas retenue ».
 
 - Le préalable attend l'**arrivée** des requêtes au mandataire (`expect.poll`, délai
   d'`expect` par défaut) : un événement, pas une durée ; ni nouvel essai, ni attente
-  allongée. Il garde ce qu'il gardait : une requête servie par le cache HTTP ou qui
-  contourne le mandataire n'arrive jamais, et il rougit.
+  allongée. Il compte **`/api/operations`**, la requête dont vient le chiffre lu
+  (`#opRevenue`, voir `renderDashboard`) : servie par le cache HTTP ou contournant le
+  mandataire, elle n'arrive jamais, et il rougit. *(Relecture du 23/09 : il comptait
+  jusque-là toutes les requêtes d'API ; un contournement de `/api/operations` seule, les
+  autres retenues, le laissait vert. Voir « Relecture : le préalable compte la source du
+  chiffre ».)*
 - La pastille se lit **à l'instant du chiffre** (une lecture, pas une attente) : `loadData`
   pose « Mise à jour… » dans la même tâche que la copie, et le repli de 3 s du service
   worker la changerait si on la lisait après l'attente du préalable.
@@ -5441,7 +5445,7 @@ chiffre** confondait « pas encore partie » avec « pas retenue ».
   cas du rouge, produit à coup sûr, sur une machine calme. Son propre préalable exige 0
   requête arrivée au chiffre (sinon « le cas n'est pas produit »). Aucun port nouveau.
 
-Le test reste le même ; il est désormais à la ligne 181 (son corps est passé dans
+Le test reste le même ; il est désormais à la ligne 192 (son corps est passé dans
 `chiffreAvantLeReseau`, partagé avec le témoin).
 
 ### Preuves
@@ -5449,7 +5453,7 @@ Le test reste le même ; il est désormais à la ligne 181 (son corps est passé
 | Mutation | Banc | Résultat |
 |---|---|---|
 | Ancien code : préalable lu à l'instant du chiffre | témoin, 5 fois, machine calme | **5/5 rouges**, `prealable : les requetes d'API doivent etre retenues`, `Expected: > 0`, `Received: 0` |
-| La retenue ne prend plus l'API (`/^\/rien\//`) | le test (ligne 181), 2 fois | 2/2 rouges sur le nouveau préalable (`expect.poll`), `Received: 0` |
+| La retenue ne prend plus l'API (`/^\/rien\//`) | le test (alors ligne 181), 2 fois | 2/2 rouges sur le nouveau préalable (`expect.poll`), `Received: 0` |
 | Le témoin ne bloque plus rien | témoin, 2 fois | 2/2 rouges, `prealable du temoin … le cas n'est pas produit`, `Expected: 0`, `Received: 6` |
 
 Après correction, **même charge** (12 ouvriers, mêmes bancs lourds) : le test **60/60**, témoin
@@ -5463,3 +5467,35 @@ Après correction, **même charge** (12 ouvriers, mêmes bancs lourds) : le test
   (six connexions par hôte). La promesse (le chiffre avant le réseau) n'en souffre pas ;
   la fraîcheur, si. Non mesuré sur le déploiement réel : cela dépend du protocole entre le
   navigateur et le serveur.
+
+### Relecture : le préalable compte la source du chiffre (23/09)
+
+Un relecteur adverse (sur `a21cac4`) : le commentaire du banc et le paragraphe
+« Correction » ci-dessus affirmaient qu'un contournement du mandataire fait **toujours**
+rougir le préalable. **Vrai défaut, mineur, du texte et du banc** : le préalable comptait
+n'importe quelle requête d'API retenue. Si seule `/api/operations` (celle dont vient
+`#opRevenue`) contournait le mandataire — par exemple servie par le service worker sans
+réseau —, les autres restaient retenues, le compte dépassait 0, et le banc restait vert.
+Ce n'était pas une régression (l'ancien préalable avait le même angle mort), et la
+promesse de l'application n'en dépend pas ; mais le texte promettait une garde que le
+banc ne fournissait pas.
+
+- **Correction (banc seul)** : le mandataire garde l'adresse de chaque requête retenue ;
+  `retenues(motif)` compte celles qui y répondent. Le préalable attend
+  `retenues(/^\/api\/operations(\?|$)/) > 0` (message « prealable : la requete
+  /api/operations doit etre retenue »). Les autres requêtes d'API ne sont pas gardées une
+  par une : aucune ne produit le chiffre lu. Le témoin garde son préalable à lui (0
+  requête d'API arrivée au chiffre, toutes confondues).
+- **Preuve rouge**, mutation du banc qui simule le contournement partiel (le mandataire
+  laisse passer `/api/operations` sans la retenir, les autres restent retenues) :
+  - ancien banc (`a21cac4`), le test et le témoin, 2 fois chacun : **4/4 verts** — le
+    défaut, mesuré ;
+  - nouveau banc, le test, 2 fois : **2/2 rouges**, `prealable : la requete
+    /api/operations doit etre retenue`, `Expected: > 0`, `Received: 0` ; le témoin seul,
+    2 fois : **2/2 rouges**, même message, même `Received: 0`.
+- **Vert** : machine calme, le test et le témoin 5 fois chacun, 10/10. Sous charge
+  (12 ouvriers, mêmes bancs lourds en boucle, 3 répétitions) : le test **20/20**, le
+  témoin **20/20**, entrelacés avec la charge jusqu'au bout ; 223 passés, 0 rouge
+  (3,7 min). Le mandataire ne tient que six requêtes d'API (six connexions) :
+  `/api/operations`, appelée la première par `loadData`, est parmi elles sur les 40
+  passages. Le fichier seul : 10/10. `npm test` 656/656.
