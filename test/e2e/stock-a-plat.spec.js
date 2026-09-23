@@ -51,6 +51,11 @@ for (const largeur of [1440, 390]) {
     await expect(carte).toBeVisible();
     await expect(carte.locator("h3")).toHaveText("Pas de catégories dans ce fichier");
     await expect(carte).toContainText("colonne « Catégorie »");
+    // Une colonne presente mais VIDE donne le meme etat que pas de colonne
+    // (l'import lit "" dans les deux cas) : la carte ne doit pas affirmer
+    // l'absence, ni dire « ajoutez » a qui l'a deja (relecture du 23/09).
+    await expect(carte).toContainText("Aucun produit de ce fichier n’a de catégorie");
+    await expect(carte).not.toContainText("n’a pas de colonne");
     await expect(page.locator("#pageSubtitle")).toHaveText("6 références · 3 sous le seuil · sans catégorie");
     // La carte ne deborde pas, et tient dans la grille.
     const boite = await carte.boundingBox();
@@ -83,4 +88,46 @@ test("une seule catégorie : à plat aussi, et la carte la nomme", async ({ page
   await expect(page.locator("#stkAPlat h3")).toHaveText("Une seule catégorie : Hygiène");
   await expect(page.locator("#pageSubtitle")).toHaveText("6 références · 3 sous le seuil · 1 catégorie");
   expect((await noms(page))[0]).toBe("Gants nitrile taille M");
+});
+
+// --- L'ordre ne bouge pas sous le doigt (relecture du 23/09) ----------------
+//
+// Chaque « + » recharge la liste. Le premier jet la retriait sur la quantite
+// du moment : Gants (2) passait sous Desinfectant (7) au sixieme tap, et le
+// septieme, au MEME endroit de l'ecran, ajoutait une unite a Desinfectant.
+// Le banc tape aux coordonnees, comme un doigt : il ne suit pas la ligne.
+// Dernier du fichier : il modifie le stock du serveur, et le remet a la fin.
+test("à plat, au téléphone : sept « + » au même endroit restent sur le même produit", async ({ page }) => {
+  test.setTimeout(120000);
+  await ouvrir(page, 390);
+  const ordreInitial = await noms(page);
+  expect(ordreInitial[0]).toBe("Gants nitrile taille M");
+  const plus = page.locator('#stockList [data-product-id="p-gants"][data-stock-delta="1"]');
+  // La ligne en HAUT de l'ecran : les toasts « Stock mis a jour » s'empilent
+  // depuis le bas, et le sixieme couvrait un bouton place au milieu.
+  await plus.evaluate(el => { el.scrollIntoView({ block: "start" }); window.scrollBy(0, -40); });
+  const boite = await plus.boundingBox();
+  const x = boite.x + boite.width / 2, y = boite.y + boite.height / 2;
+  const quantite = id => page.locator(`#stk-qte-${id}`).inputValue();
+  try {
+    for (let tap = 1; tap <= 7; tap++) {
+      // Le doigt tombe sur un « + » (lequel : c'est ce que le banc juge), pas sur un toast.
+      expect(await page.evaluate(([px, py]) => document.elementFromPoint(px, py)?.closest("button")?.dataset.stockDelta, [x, y]),
+        `tap ${tap} : pas de « + » sous le doigt`).toBe("1");
+      await page.mouse.click(x, y);
+      await expect.poll(() => quantite("p-gants"), { message: `tap ${tap} : Gants attendu à ${2 + tap}` })
+        .toBe(String(2 + tap));
+    }
+    expect(await quantite("p-desinf")).toBe("7");
+    expect(await noms(page), "la liste a bougé pendant les ajustements").toEqual(ordreInitial);
+    // Rouvrir l'ecran refait l'ordre : Desinfectant (7) passe devant Gants (9).
+    await page.evaluate(() => { location.hash = "#journee"; });
+    await expect(page.locator("#journee")).toHaveClass(/active/);
+    await page.evaluate(() => { location.hash = "#stock"; });
+    await expect(page.locator("#stock")).toHaveClass(/active/);
+    await expect.poll(() => noms(page).then(n => n.slice(0, 2)))
+      .toEqual(["Désinfectant surfaces 5 L", "Gants nitrile taille M"]);
+  } finally {
+    await page.request.patch(srv.base + "/api/stock/p-gants", { data: { quantite: 2, reason: "remise en etat du banc" } });
+  }
 });

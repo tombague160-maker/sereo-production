@@ -841,6 +841,11 @@ function showTab(tabName, options = {}) {
   // generique, sans quoi celui-ci l'ecraserait.
   if (nextTab === "commandes") majSousTitreCommandes();
   if (nextTab === "stock") majSousTitreStock();
+  // Rouvrir le Stock refait l'ordre a plat, fige pendant les ajustements.
+  if (nextTab === "stock" && ordreAPlat) {
+    ordreAPlat = null;
+    renderStock();
+  }
   if (nextTab === "crm") majSousTitreClients();
   if (nextTab === "abonnements") majSousTitreAbonnements();
   if (nextTab === "livreur") majEnteteTournee();
@@ -2876,7 +2881,7 @@ function renderStock() {
     return;
   }
 
-  const filtered = stockAPlat() ? trierAPlat(getFilteredStock()) : getFilteredStock();
+  const filtered = stockAPlat() ? ordonnerAPlat(getFilteredStock()) : getFilteredStock();
 
   if (!filtered.length) {
     container.innerHTML = emptyState("Aucun produit trouvé", "Modifie la recherche ou le filtre de statut.");
@@ -2907,6 +2912,22 @@ function trierAPlat(produits) {
   const quantite = p => Number(p.quantityAvailable ?? getProductQuantity(p) ?? 0) || 0;
   return [...produits].sort((a, b) => groupe(a) - groupe(b) || quantite(a) - quantite(b)
     || String(getProductName(a)).localeCompare(getProductName(b), "fr"));
+}
+
+// L'ordre a plat est FIGE tant qu'on reste sur l'ecran. Chaque −/+ et chaque
+// seuil rechargent la liste : retriee sur la quantite du moment, la ligne
+// qu'on touchait changeait de place sous le doigt, et le tap suivant, au meme
+// endroit, modifiait le stock d'un AUTRE produit (relecture du 23/09 : Gants
+// a 2, six « + », il passe sous Desinfectant a 7, le septieme tombe sur
+// Desinfectant). L'ordre se refait en rouvrant l'ecran (showTab), ou quand un
+// produit inconnu arrive (un import) ; un produit neuf n'y a pas de rang.
+let ordreAPlat = null;
+
+function ordonnerAPlat(produits) {
+  if (!ordreAPlat || stock.some(p => !ordreAPlat.has(String(p.id)))) {
+    ordreAPlat = new Map(trierAPlat(stock).map((p, rang) => [String(p.id), rang]));
+  }
+  return [...produits].sort((a, b) => ordreAPlat.get(String(a.id)) - ordreAPlat.get(String(b.id)));
 }
 
 function sousLeSeuil(product) {
@@ -2993,7 +3014,10 @@ function renderStockCategories() {
     setText("stkAPlatTitre", seule ? `Une seule catégorie : ${seule}` : "Pas de catégories dans ce fichier");
     setText("stkAPlatDetail", seule
       ? "Tous les produits sont dans la même catégorie : des tuiles ne trieraient rien. Ils sont affichés à plat, sous le seuil en premier."
-      : "Le fichier de stock importé n’a pas de colonne « Catégorie ». Les produits sont affichés à plat, sous le seuil en premier. Ajoutez la colonne à votre fichier et réimportez-le pour retrouver les tuiles.");
+      // L'import ne distingue pas une colonne ABSENTE d'une colonne VIDE (le
+      // serveur lit "" dans les deux cas) : la carte dit ce qui se voit -- aucun
+      // produit n'a de categorie --, pas une cause qu'elle ne connait pas.
+      : "Aucun produit de ce fichier n’a de catégorie. Ils sont affichés à plat, sous le seuil en premier. Remplissez la colonne « Catégorie » de votre fichier (ajoutez-la si elle manque) et réimportez-le pour retrouver les tuiles.");
   }
   if (aPlat) {
     bloc.innerHTML = "";
