@@ -1342,9 +1342,9 @@
           <article class="par-carte par-span-4" aria-labelledby="parThemeTitre">
             <h3 id="parThemeTitre">Thème</h3>
             <div id="colorSchemeToggle" class="par-segments" role="group" aria-label="Mode d'affichage">
-              <button type="button" class="par-segment color-scheme-option" data-action="select-color-scheme" data-color-scheme="light" aria-pressed="false">Clair</button>
-              <button type="button" class="par-segment color-scheme-option" data-action="select-color-scheme" data-color-scheme="dark" aria-pressed="false">Sombre</button>
-              <button type="button" class="par-segment color-scheme-option" data-action="select-color-scheme" data-color-scheme="auto" aria-pressed="true">Système</button>
+              <button type="button" class="par-segment" data-action="select-color-scheme" data-color-scheme="light" aria-pressed="false">Clair</button>
+              <button type="button" class="par-segment" data-action="select-color-scheme" data-color-scheme="dark" aria-pressed="false">Sombre</button>
+              <button type="button" class="par-segment" data-action="select-color-scheme" data-color-scheme="auto" aria-pressed="true">Système</button>
             </div>
             <p class="par-aide">Réglage de cet appareil. « Système » suit le mode clair ou sombre de l'appareil.</p>
             <!-- Le logo : hors planche, garde. -->
@@ -1398,10 +1398,10 @@
             <h3 id="parNumeroTitre">Numérotation des bons</h3>
             <form id="numerotationForm" class="par-numerotation">
               <label class="par-champ">Préfixe
-                <input id="parPrefixe" name="prefix" maxlength="8" pattern="[A-Za-z0-9]{2,8}" autocomplete="off" required />
+                <input id="parPrefixe" name="prefix" maxlength="8" pattern="\s*[A-Za-z0-9]{2,8}\s*" title="2 à 8 lettres ou chiffres, sans espace ni tiret" autocomplete="off" required />
               </label>
               <label class="par-case"><input id="parRemiseAnnuelle" name="resetAnnually" type="checkbox" /> Repartir de 1 chaque année</label>
-              <p class="par-aide">Prochain bon : <strong id="parExemple">—</strong></p>
+              <p class="par-aide" aria-live="polite">Prochain bon : <strong id="parExemple">—</strong></p>
               <button class="button primary" type="submit">Enregistrer</button>
             </form>
           </article>
@@ -1433,7 +1433,7 @@
             </form>
           </article>
 
-          <article class="par-carte par-span-6" aria-labelledby="parImportsTitre">
+          <article class="par-carte par-span-6 par-imports" aria-labelledby="parImportsTitre">
             <h3 id="parImportsTitre">Imports et archives</h3>
             <p class="par-aide">Chaque fichier .xlsx importé est archivé et reste téléchargeable.</p>
             <div id="importsArchivesList" class="imports-archives-list" aria-live="polite">
@@ -1504,7 +1504,7 @@
               <button class="button danger" type="button" data-action="purge-orders">
                 🗑️ Purger les bons de commande
               </button>
-              <p class="muted danger-note">Après purge, va dans <strong>Historique des imports</strong> ci-dessus pour re-télécharger tes Excel et les ré-importer depuis le Tableau de bord.</p>
+              <p class="muted danger-note">Après purge, va dans <strong>Imports et archives</strong> ci-dessus pour re-télécharger tes Excel et les ré-importer depuis le Tableau de bord.</p>
             </div>
           </article>
         </div>

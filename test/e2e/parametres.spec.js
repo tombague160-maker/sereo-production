@@ -21,14 +21,15 @@ async function ouvrir(page, largeur = 1440) {
 }
 const carte = (page, titre) => page.locator("#parametres .par-carte", { has: page.locator("h3", { hasText: titre }) });
 
-test("la grille de la planche : trois cartes, puis deux", async ({ page }) => {
+test("la grille : trois cartes en tête, puis les tableaux", async ({ page }) => {
   await ouvrir(page);
   const y = async titre => Math.round((await carte(page, titre).boundingBox()).y);
   const rangee1 = [await y("Thème"), await y("Secteurs"), await y("Numérotation des bons")];
   expect(new Set(rangee1).size).toBe(1);
-  const rangee2 = [await y("Comptes"), await y("Imports et archives")];
-  expect(new Set(rangee2).size).toBe(1);
-  expect(rangee2[0]).toBeGreaterThan(rangee1[0]);
+  // Comptes puis Imports, chacun sur toute la largeur (ecart nomme : a demi-
+  // largeur le tableau des comptes cassait ses libelles lettre par lettre).
+  expect(await y("Comptes")).toBeGreaterThan(rangee1[0]);
+  expect(await y("Imports et archives")).toBeGreaterThan(await y("Comptes"));
 });
 
 test("le thème : trois segments, Clair · Sombre · Système", async ({ page }) => {
@@ -54,8 +55,14 @@ test("les secteurs en pilules, la fiche derrière « Gérer les secteurs »", as
 test("la numérotation des bons se lit, se modifie et persiste", async ({ page }) => {
   await ouvrir(page);
   await expect(page.locator("#parPrefixe")).toHaveValue("CMD");
+  // Le VRAI prochain numero : le plus grand de l'annee, plus un -- la base
+  // semee en a deja (numerotes au demarrage), « -001 » serait faux.
   const annee = new Date().getFullYear();
-  await expect(page.locator("#parExemple")).toHaveText(`CMD-${annee}-001`);
+  const numeros = await page.evaluate(async () => (await (await fetch("/api/orders")).json()).map(o => o.numero));
+  const max = numeros.map(n => (String(n).match(new RegExp(`^CMD-${new Date().getFullYear()}-(\\d+)$`)) || [])[1])
+    .filter(Boolean).map(Number).reduce((a, b) => Math.max(a, b), 0);
+  expect(max).toBeGreaterThan(0);
+  await expect(page.locator("#parExemple")).toHaveText(`CMD-${annee}-${String(max + 1).padStart(3, "0")}`);
   await page.fill("#parPrefixe", "bc");
   await expect(page.locator("#parExemple")).toHaveText(`BC-${annee}-001`);
   const envoi = page.waitForRequest(r => r.method() === "PATCH" && r.url().includes("/api/settings/order-numbering"));
@@ -92,4 +99,29 @@ test("au téléphone : une colonne, rien ne déborde", async ({ page }) => {
     .filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.right > window.innerWidth + 0.5; })
     .map(e => e.id || e.className || e.tagName));
   expect(deborde).toEqual([]);
+});
+
+test("au clavier, le segment de thème montre son anneau de focus", async ({ page }) => {
+  await ouvrir(page);
+  await page.locator("#colorSchemeToggle .par-segment").first().focus();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Shift+Tab");
+  const ombre = await page.evaluate(() => getComputedStyle(document.activeElement).boxShadow);
+  expect(ombre).not.toBe("none");
+});
+
+test("en sombre, la zone dangereuse garde son contour d'alerte", async ({ page }) => {
+  await ouvrir(page);
+  await page.evaluate(() => document.documentElement.setAttribute("data-color-scheme", "dark"));
+  const ombre = await carte(page, "Zone dangereuse").evaluate(e => getComputedStyle(e).boxShadow);
+  expect(ombre).toContain("inset");
+});
+
+test("les tableaux des comptes et des imports prennent la pleine largeur", async ({ page }) => {
+  await ouvrir(page);
+  const grille = await page.locator("#parametres .par-grille").boundingBox();
+  for (const titre of ["Comptes", "Imports et archives"]) {
+    const b = await carte(page, titre).boundingBox();
+    expect(b.width, titre).toBeGreaterThan(grille.width - 2);
+  }
 });

@@ -176,7 +176,7 @@ function showStorageRecoveryBanner(recovery) {
       <strong>${escapeHtml(titre)}</strong>
       <p>${escapeHtml(recovery.message || "Une récupération de la base de données a eu lieu.")}</p>
       <p class="muted">Vérifie tes données avant de continuer. ${isFresh
-        ? "Tu peux ré-importer tes fichiers Excel depuis Paramètres → Historique des imports."
+        ? "Tu peux ré-importer tes fichiers Excel depuis Paramètres → Imports et archives."
         : "Les saisies les plus récentes (avant la dernière sauvegarde) peuvent manquer."}</p>
     </div>
     <button class="storage-recovery-dismiss" type="button" aria-label="Fermer">×</button>
@@ -4427,7 +4427,7 @@ function applyColorScheme(scheme, options = {}) {
   }
 
   if (notifyUser) {
-    const label = next === "auto" ? "automatique" : (next === "dark" ? "sombre" : "clair");
+    const label = next === "auto" ? "système" : (next === "dark" ? "sombre" : "clair");
     notify(`Mode d'affichage : ${label}.`, "success");
   }
 
@@ -4736,9 +4736,22 @@ function renderParSecteursPilules() {
 
 // Numerotation des bons (planche 13f) : GET / PATCH /api/settings/order-numbering.
 let numerotationChargee = false;
+// Le VRAI prochain numero, par la regle du serveur (generateOrderNumber) : le
+// plus grand numero existant de ce prefixe (et de cette annee), plus un --
+// 3 chiffres par annee, 5 en compteur continu. « -001 » aurait promis un
+// numero que le serveur ne donnera jamais sur une base qui a des commandes.
 function exempleDeNumero(prefix, resetAnnually) {
-  const p = String(prefix || "CMD").toUpperCase();
-  return resetAnnually ? `${p}-${new Date().getFullYear()}-001` : `${p}-0001`;
+  // Le prefixe n'a que des lettres et des chiffres (serveur : ^[A-Z0-9]{2,8}$) :
+  // on retire le reste plutot que de l'echapper dans l'expression.
+  const p = String(prefix || "CMD").toUpperCase().replace(/[^A-Z0-9]/g, "") || "CMD";
+  const annee = String(new Date().getFullYear());
+  const motif = resetAnnually ? new RegExp(`^${p}-${annee}-(\\d+)$`) : new RegExp(`^${p}-(\\d+)$`);
+  const max = (orders || []).reduce((m, o) => {
+    const trouve = String(o.numero || "").match(motif);
+    const n = trouve ? Number(trouve[1]) : 0;
+    return Number.isFinite(n) && n > m ? n : m;
+  }, 0);
+  return resetAnnually ? `${p}-${annee}-${String(max + 1).padStart(3, "0")}` : `${p}-${String(max + 1).padStart(5, "0")}`;
 }
 function majExempleNumero() {
   const prefixe = document.getElementById("parPrefixe")?.value || "";
@@ -5073,7 +5086,7 @@ async function purgeOrdersHandler(btn) {
   await runAction(btn, "Purge en cours...", async () => {
     const result = await apiFetch("/api/orders/purge", { method: "POST" });
     notify(
-      `Purge OK : ${result.purged.commandes} bon(s), ${result.purged.clients} client(s), ${result.purged.ventes} vente(s), ${result.purged.routes} tournée(s) supprimés. Va dans Historique des imports ci-dessus pour ré-importer tes Excel.`,
+      `Purge OK : ${result.purged.commandes} bon(s), ${result.purged.clients} client(s), ${result.purged.ventes} vente(s), ${result.purged.routes} tournée(s) supprimés. Va dans Imports et archives ci-dessus pour ré-importer tes Excel.`,
       "success"
     );
     await loadData();
