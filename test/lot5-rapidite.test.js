@@ -286,7 +286,8 @@ test("lot 5 : une base ecrite avant le lot (trace dans le payload) est migree a 
   const r = tournee("vieille", "terminee", [commande("x1", "livre")]);
   cnx.prepare("INSERT INTO routes (id, statut, secteur, date_livraison, payload, sort_order) VALUES (?, ?, ?, ?, ?, 0)")
     .run("vieille", "terminee", "Champagnole", "2026-01-01", JSON.stringify(r));
-  cnx.prepare("DELETE FROM traces_tournees").run();
+  const tables = cnx.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map(t => t.name);
+  if (tables.includes("traces_tournees")) cnx.prepare("DELETE FROM traces_tournees").run();
   cnx.prepare("DELETE FROM app_meta WHERE key = 'traces_tournees_separees'").run();
   cnx.close();
 
