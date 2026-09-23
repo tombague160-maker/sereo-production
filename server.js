@@ -1198,7 +1198,7 @@ const STATUTS_ACTIFS = new Set([
  * proposition vient du cache (un "ambigu" a deja un point) ; accepter la
  * proposition, c'est l'enregistrer comme une saisie manuelle.
  */
-function listerAdressesAVerifier(db) {
+function listerAdressesAVerifier(db, { inclure = "" } = {}) {
   const store = useSqliteStorage() ? getSqliteStore() : null;
   const commandesParClient = new Map();
   const aLivrerParClient = new Map();
@@ -1215,13 +1215,19 @@ function listerAdressesAVerifier(db) {
     const actives = commandesParClient.get(id) || 0;
     const adresse = adresseDuClient(client);
     const geocodable = adresseGeocodable(adresse);
-    if (!actives && !geocodable) continue;
+    const demande = Boolean(inclure) && String(inclure) === id;
+    if (!actives && !geocodable && !demande) continue;
 
     const position = getCoordinates(client);
     let raison = "";
     if (!position) raison = "sans-position";
     else if (client.geoAVerifier === "adresse-modifiee") raison = "adresse-modifiee";
-    else if (geocodage.precisionApproximative(client.geoPrecision)) raison = "approximative";
+    // Une position approximative VALIDEE par une personne (proposition
+    // acceptee) ne revient pas dans la liste : sa precision reste affichee.
+    else if (geocodage.precisionApproximative(client.geoPrecision) && client.geoSource !== "manuel") raison = "approximative";
+    // "Corriger la position" depuis un arret : le client est montre meme
+    // quand rien ne le signale (la BAN peut se tromper de porte).
+    if (!raison && demande) raison = "demandee";
     if (!raison) continue;
 
     const nettoyee = geocodage.nettoyerAdresse(adresse);
@@ -7551,7 +7557,7 @@ app.patch("/api/clients/:id/coordinates", async (req, res) => {
 app.get("/api/adresses/a-verifier", (req, res) => {
   try {
     res.set("Cache-Control", "no-store");
-    res.json(listerAdressesAVerifier(readDb()));
+    res.json(listerAdressesAVerifier(readDb(), { inclure: clean(req.query.client) }));
   } catch (error) {
     handleRouteError(error, res, "Erreur adresses a verifier");
   }

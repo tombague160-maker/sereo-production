@@ -105,7 +105,7 @@ function demarrerRoutage() {
  * Le port doit être distinct de ceux de playwright.config.js (3100, 3101) et
  * des autres bancs à serveur propre (operations.spec.js : 3118).
  */
-async function demarrer({ port, seed = jeuDeDonnees() }) {
+async function demarrer({ port, seed = jeuDeDonnees(), env = {} }) {
   const routage = await demarrerRoutage();
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "sereo-seme-"));
   fs.writeFileSync(path.join(root, "seed.json"), JSON.stringify(seed));
@@ -118,7 +118,12 @@ async function demarrer({ port, seed = jeuDeDonnees() }) {
       SEREO_STORAGE: "sqlite", SEREO_SQLITE_PATH: path.join(root, "db.sqlite"),
       SEREO_DB_PATH: path.join(root, "seed.json"),
       SEREO_UPLOAD_DIR: path.join(root, "uploads"), SEREO_BACKUP_DIR: path.join(root, "backups"),
-      SEREO_SKIP_RELEASE_FETCH: "1"
+      SEREO_SKIP_RELEASE_FETCH: "1",
+      // Lot 3 (audit geo) : un client cree ou modifie est geocode en fond.
+      // Aucun banc n'appelle la vraie BAN : coupe par defaut, et un banc qui
+      // en a besoin passe son faux geocodeur (SEREO_GEOCODER_URL) dans `env`.
+      SEREO_GEOCODAGE_AUTO: "0",
+      ...env
     },
     stdio: "ignore"
   });
