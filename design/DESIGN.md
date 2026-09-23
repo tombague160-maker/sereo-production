@@ -2748,8 +2748,9 @@ l'ancien code (ou sur un mutant qui ne retire que lui).
   cinq essais en quelques secondes, puis l'entrée n'était plus jamais renvoyée, sous un
   toast répété. Désormais : pause après un 5xx (30 s, 1 min, 2 min, 4 min, puis 15 min),
   une entrée à bout d'essais est **retentée tous les quarts d'heure** au lieu d'être
-  abandonnée, le blocage est annoncé **une fois** (et dans le bandeau), et un passage
-  arrêté sur un échec ne se relance plus aussitôt. Bancs : `file-attente.test.js`
+  abandonnée, et le blocage est annoncé **une fois** (et dans le bandeau). (Une garde
+  « un passage arrêté ne se relance pas » a été retirée à la reprise, voir plus bas.)
+  Bancs : `file-attente.test.js`
   (rafale : 5 envois → 1 ; entrée bloquée avant la mise à jour : repart),
   `livreur-ne-perd-rien.spec.js` « 500 passager » (ancien code : `Received: 5` ; mutant
   « toast à chaque fois » : `Received: 8`).
@@ -2781,3 +2782,38 @@ Vu en passant, non corrigé : `tournee-mobile` « 4b — hors ligne : les gestes
 un Livre » échoue lancé seul (`-g`, 4 fois sur 4) **aussi sur `main` (ef470c6)** ; il
 passe dans son fichier complet. Le banc H2 de ce lot avait une course (le vrai « online »
 de `setOffline(false)` renvoie vers `/login` pendant le `page.evaluate`) : tolérée.
+
+### Reprise de la correction (23/09, après une limite d'utilisation) — chaque rouge rejoué
+
+L'agent de correction a été coupé après ses commits, avant son compte rendu. Chaque
+correctif annoncé ci-dessus a été rejoué **contre l'ancien code**, par copie restaurée :
+
+- `file-attente.js` de 1b33cdc : « rafale » `5` envois au lieu de `1` ; « bloquée avant la
+  mise à jour » `0` au lieu de `1` ; « renvoi MUET » : la file reste gelée.
+- `service-worker.js` de 1b33cdc : la copie revient à `{ arret: 'en_livraison' }` ; le
+  témoin (réponse tardive sans requête plus récente) reste vert.
+- `gesteIdempotent` libérant à la fermeture : `6` commandes au lieu de `5`.
+- `.dockerignore` de 1b33cdc : `data/session-secret` n'est pas exclu ; le témoin reste vert.
+- `app.js` de 1b33cdc, file neuve : le blocage annoncé `4` fois au lieu d'`1` ; app et file
+  de 1b33cdc : `Received: 5` renvois. « corps CASSE » et « corps qui ne vient JAMAIS » :
+  l'écran reste sur « EHPAD Les Tilleuls… ». (Attention : lancés ensemble, en mode
+  `serial`, un premier rouge laisse les suivants « did not run » ; chaque rouge a été
+  rejoué seul.)
+
+Deux écarts trouvés, et réglés :
+
+- **Un correctif sans banc.** La garde `!bilan.arrete` de `viderLaFile` (« un passage
+  arrêté ne se relance pas aussitôt ») : retirée seule, **tout reste vert** — la pause
+  après un 5xx fait déjà qu'un tour redemandé s'arrête sans rien envoyer. Retirée du code
+  plutôt que gardée sans preuve.
+- **Le chemin le plus fréquent n'avait pas de banc.** Les bancs « corps » passent par
+  « Absent ». Le `return` sur `recuParLeServeur` de `envoyerLivraisonEnSuspens` (le
+  « Livré » différé, soldé par le geste suivant) n'était distingué par rien. Nouveau banc
+  « « Livré » dont le corps CASSE, puis « Absent » aussitôt » : sans ce `return` (mutant, et
+  app.js de 1b33cdc), l'erreur remonte, `solderLivraisonEnSuspens` la prend pour un refus
+  et **arrête le geste suivant** — `Received: "pret_livraison"` pour l'arrêt qui devait
+  passer « Absent ».
+
+Toujours ouvert : `withWriteLock` qui expire à 60 s (voir plus haut). Et une lecture
+(GET) dont le corps casse lève « Le serveur a bien reçu la demande… » (lu dans
+`apiFetch`, non mesuré à l'écran) : exact, mais écrit pour une écriture.
