@@ -7,7 +7,7 @@ import { initOperations, renderOperations, getRoutePoints, majSousTitreAbonnemen
 // rendu, qui seront decoupes par domaine dans les increments suivants.
 
 import { escapeHtml, escapeAttribute, cssEscape, emptyState, squelette } from "./utils/dom.js";
-import { mettreEnAttente, compterFile, rejouer } from "./utils/file-attente.js";
+import { mettreEnAttente, lireFile, rejouer } from "./utils/file-attente.js";
 import {
   normalizeTextKey,
   normalizePhoneNumber,
@@ -153,6 +153,7 @@ document.addEventListener("DOMContentLoaded", () => {
   bindBonsCommandeUi();
   initMap();
   registerServiceWorker();
+  ecouterReponsesTardives();
   brancherFileHorsLigne();
   // Avant showTab : au telephone, les filtres de la Preparation vivent dans
   // la fente d'en-tete, que showTab montre ou cache par ecran.
@@ -1108,6 +1109,19 @@ let premierChargementDesDonnees = true;
 // Les URL auxquelles le service worker a repondu par une COPIE (en-tete
 // X-Sereo-Cache : le reseau n'a pas repondu a temps), avec la date de la copie.
 const reponsesCopiees = new Map();
+// H4 (lot 1 de l'audit geo) : vrai des qu'une ecriture est partie (ou mise en
+// file, ou renvoyee) et tant qu'aucun rechargement COMPLET ne l'a relue au
+// serveur. Pendant ce temps, loadData demande au service worker de NE PAS
+// servir sa copie de secours (en-tete X-Sereo-Frais) : la copie date d'avant
+// le geste, et remettrait « En livraison » un arret que le serveur sait livre.
+let ecritureNonRelue = false;
+// L'instant ou la derniere ecriture est partie : une reponse TARDIVE (arrivee
+// apres le repli de 3 s du service worker) a une requete plus ancienne ne
+// remplace jamais ce que l'ecran sait de plus recent.
+let derniereEcritureA = 0;
+// Les cles dont l'ecran montre une COPIE (reseau trop lent), depuis le dernier
+// chargement : une reponse tardive les rafraichit (ecouterReponsesTardives).
+const clesEnCopie = new Set();
 
 async function viderCacheDeDonnees() {
   try {
@@ -1150,6 +1164,60 @@ async function lireDernieresDonnees(endpoints) {
   } catch {
     return null;
   }
+}
+
+/**
+ * H4 (lot 1 de l'audit geo) : la reponse du reseau qui arrive APRES le repli
+ * de 3 s du service worker. Avant, elle etait jetee -- ni mise en cache, ni
+ * montree : l'ecran gardait la copie, et la copie ne se rafraichissait plus
+ * tant que le reseau restait lent. Le service worker la met desormais en
+ * cache et previent la page (message « sereo-api-tardive ») ; la page relit
+ * la reponse dans le cache et remplace la copie a l'ecran.
+ */
+const DELAI_REGROUPEMENT_TARDIVES_MS = 300;
+const reponsesTardives = new Map();
+let minuteurTardives = null;
+
+function ecouterReponsesTardives() {
+  if (typeof navigator === "undefined" || !navigator.serviceWorker) return;
+  navigator.serviceWorker.addEventListener("message", evenement => {
+    const message = evenement.data;
+    if (!message || message.type !== "sereo-api-tardive" || typeof message.url !== "string") return;
+    // Une requete partie AVANT la derniere ecriture decrit un etat anterieur
+    // au geste : on ne la montre pas.
+    if (Number(message.debut) < derniereEcritureA) return;
+    let chemin;
+    try {
+      const url = new URL(message.url, window.location.origin);
+      chemin = url.pathname + url.search;
+    } catch { return; }
+    const endpoint = endpointsDeChargement().find(e => e.path === chemin);
+    if (!endpoint) return;
+    reponsesTardives.set(endpoint.key, chemin);
+    clearTimeout(minuteurTardives);
+    minuteurTardives = setTimeout(appliquerReponsesTardives, DELAI_REGROUPEMENT_TARDIVES_MS);
+  });
+}
+
+async function appliquerReponsesTardives() {
+  const lots = [...reponsesTardives];
+  reponsesTardives.clear();
+  const data = {};
+  try {
+    const noms = (await caches.keys()).filter(nom => nom.startsWith(PREFIXE_CACHE_DONNEES));
+    if (!noms.length) return;
+    const cache = await caches.open(noms[0]);
+    for (const [cle, chemin] of lots) {
+      const reponse = await cache.match(chemin);
+      if (!reponse || !reponse.ok) continue;
+      data[cle] = await reponse.json();
+    }
+  } catch { return; }
+  const cles = Object.keys(data);
+  if (!cles.length) return;
+  appliquerDonnees(data);
+  for (const cle of cles) clesEnCopie.delete(cle);
+  if (clesEnCopie.size === 0 && /^Données (de|du|en cache)/.test(dernierStatut)) setStatus("À jour");
 }
 
 /** « Données de 14:32 » (aujourd'hui) ou « Données du 21/09 ». Sans date lisible : « Données en cache ». */
@@ -1199,21 +1267,23 @@ function appliquerDonnees(data) {
   route = activeRoute ? activeRoute.stops : (currentIndex >= 0 ? route : [...clients]);
 
   renderAll();
-  renderOperations({operations:data.operations,subscriptions:data.subscriptions,crmClients,stock,orders});
+  // Des donnees PARTIELLES (une reponse tardive, un rechargement frais dont une
+  // partie a echoue) ne vident pas le tableau de bord : ce qui manque garde sa
+  // derniere valeur.
+  if (a("operations")) dernieresOperations = data.operations;
+  renderOperations({
+    operations: dernieresOperations,
+    subscriptions: a("subscriptions") ? data.subscriptions : abonnementsDonnees,
+    crmClients, stock, orders
+  });
 }
 
-async function loadData() {
-  setStatus("Chargement...");
-  poserSquelettes();
-  const premier = premierChargementDesDonnees;
-  premierChargementDesDonnees = false;
+// Le dernier /api/operations recu (voir appliquerDonnees).
+let dernieresOperations = null;
 
-  // Chantier 2 (audit 2026-06-04) : Promise.allSettled au lieu de Promise.all.
-  // Avant : si UN seul endpoint timeout (30s), tout etait wipe (clients=[],
-  // orders=[], stock=[]). UX catastrophique sur slow network.
-  // Apres : chaque endpoint a son sort. Si le stock timeout, on garde la prep,
-  // les clients, etc. Le user voit "Stock indisponible" sans tout perdre.
-  const endpoints = [
+/** Les endpoints du chargement complet (loadData, et les reponses tardives). */
+function endpointsDeChargement() {
+  return [
     { key: "operations", path: "/api/operations", fallback: null },
     { key: "subscriptions", path: "/api/subscriptions", fallback: {items:[],occurrences:[],today:getTodayDateInput()} },
     { key: "clients", path: "/api/clients", fallback: [] },
@@ -1232,11 +1302,34 @@ async function loadData() {
     { key: "stockMovements", path: "/api/stock-movements", fallback: [] },
     { key: "dashboard", path: "/api/dashboard", fallback: null }
   ];
+}
+
+async function loadData() {
+  setStatus("Chargement...");
+  poserSquelettes();
+  const premier = premierChargementDesDonnees;
+  premierChargementDesDonnees = false;
+
+  // Chantier 2 (audit 2026-06-04) : Promise.allSettled au lieu de Promise.all.
+  // Avant : si UN seul endpoint timeout (30s), tout etait wipe (clients=[],
+  // orders=[], stock=[]). UX catastrophique sur slow network.
+  // Apres : chaque endpoint a son sort. Si le stock timeout, on garde la prep,
+  // les clients, etc. Le user voit "Stock indisponible" sans tout perdre.
+  const endpoints = endpointsDeChargement();
+
+  // H4 (lot 1 de l'audit geo) : apres une ecriture, JAMAIS la copie de secours.
+  // Mesure de l'audit : 250 tournees d'historique, « Livre » enregistre (200),
+  // puis le rechargement depasse 3 s -- le service worker rend sa copie
+  // d'avant le geste, et l'ecran remet l'arret « En livraison ». En mode frais,
+  // le service worker attend le reseau ; s'il echoue, l'ecran GARDE ce qu'il
+  // montre (jamais la copie d'avant, jamais une liste vide).
+  const frais = ecritureNonRelue && !premier;
+  const options = frais ? { headers: { "X-Sereo-Frais": "1" } } : {};
 
   for (const e of endpoints) reponsesCopiees.delete(e.path);
   // Le reseau part D'ABORD : lire le cache ne doit rien lui couter.
   let reseauFini = false;
-  const reseau = Promise.allSettled(endpoints.map(e => apiFetch(e.path)));
+  const reseau = Promise.allSettled(endpoints.map(e => apiFetch(e.path, options)));
   reseau.then(() => { reseauFini = true; });
 
   let copie = null;
@@ -1274,11 +1367,15 @@ async function loadData() {
     if (Number.isFinite(date) && !(date >= dateCopie)) dateCopie = date;
   };
   const data = {};
+  // Mode frais : ce que l'ecran montre deja, garde faute de reseau.
+  const gardees = [];
   results.forEach((r, i) => {
     const e = endpoints[i];
     if (r.status === "fulfilled") {
       data[e.key] = r.value;
       if (reponsesCopiees.has(e.path)) noterCopie(e.key, reponsesCopiees.get(e.path));
+    } else if (frais) {
+      gardees.push(e.key);
     } else if (copie && Object.prototype.hasOwnProperty.call(copie.data, e.key)) {
       data[e.key] = copie.data[e.key];
       noterCopie(e.key, copie.date);
@@ -1288,9 +1385,17 @@ async function loadData() {
     }
   });
 
+  clesEnCopie.clear();
+  for (const cle of copiees) clesEnCopie.add(cle);
+  if (frais && gardees.length === 0 && failed.length === 0) ecritureNonRelue = false;
+
   appliquerDonnees(data);
 
-  if (failed.length === 0 && copiees.length === 0) {
+  if (gardees.length) {
+    // Le geste est parti ou attend dans la file (le bandeau le dit) : on ne
+    // pretend ni « A jour », ni des donnees vides.
+    setStatus("Mise à jour impossible");
+  } else if (failed.length === 0 && copiees.length === 0) {
     setStatus("À jour");
   } else if (failed.length === 0) {
     setStatus(libelleCopie(dateCopie));
@@ -1324,11 +1429,20 @@ async function loadData() {
 function refreshActiveRoute() {
   if (activeRoute) {
     const updated = deliveryRoutes.find(item => String(item.id) === String(activeRoute.id));
-    activeRoute = updated || activeRoute;
+    // H4 : jamais une version PLUS ANCIENNE que celle de l'ecran (une copie de
+    // secours, une reponse tardive). updatedAt est pose par le serveur a
+    // chaque geste d'arret.
+    if (updated && activeRoute.updatedAt && (!updated.updatedAt || updated.updatedAt < activeRoute.updatedAt)) {
+      deliveryRoutes = deliveryRoutes.map(item => (item === updated ? activeRoute : item));
+    } else {
+      activeRoute = updated || activeRoute;
+    }
     if (activeRoute && activeStopIndex >= activeRoute.stops.length) activeStopIndex = 0;
     // Un rechargement pendant les 4 s d'Annuler ne fait pas reapparaitre
     // l'arret qu'on vient de livrer.
     appliquerLivraisonEnSuspens();
+    // Ni un geste qui attend dans la file.
+    appliquerGestesEnFile();
     return;
   }
 
@@ -1336,6 +1450,7 @@ function refreshActiveRoute() {
     || deliveryRoutes.find(item => item.status === "prete")
     || null;
   activeStopIndex = 0;
+  appliquerGestesEnFile();
 }
 
 /**
@@ -5994,8 +6109,14 @@ function applyDeliveryFilter() {
   renderMap();
 }
 
+// C1 (lot 1 de l'audit geo) : un absent ou un probleme REVIENT ici, marque
+// « A reprogrammer » -- memes listes que le serveur (STATUTS_A_PLANIFIER et
+// STATUTS_A_RELIVRER, server.js). `probleme_livraison` : les commandes
+// bloquees avant le 23/09, qui reviennent aussi.
+const STATUTS_A_RELIVRER = ["a_reprogrammer", "probleme_livraison"];
+
 function getDeliverableOrders() {
-  return orders.filter(order => ["pret_livraison", "a_reprogrammer"].includes(order.status));
+  return orders.filter(order => order.status === "pret_livraison" || STATUTS_A_RELIVRER.includes(order.status));
 }
 
 function getFilteredDeliveryOrders() {
@@ -6003,8 +6124,11 @@ function getFilteredDeliveryOrders() {
   const sectorKey = normalizeTextKey(deliveryFilter.sector);
 
   return getDeliverableOrders().filter(order => {
-    if (deliveryFilter.date && order.deliveryDate && order.deliveryDate !== deliveryFilter.date) return false;
-    if (deliveryFilter.date && !order.deliveryDate) return false;
+    // Une commande a relivrer a deja manque son jour : le filtre de date ne la
+    // cache pas (sinon choisir « demain » la ferait disparaitre).
+    const aRelivrer = STATUTS_A_RELIVRER.includes(order.status);
+    if (!aRelivrer && deliveryFilter.date && order.deliveryDate && order.deliveryDate !== deliveryFilter.date) return false;
+    if (!aRelivrer && deliveryFilter.date && !order.deliveryDate) return false;
     if (sectorKey && sectorKey !== "tous" && normalizeTextKey(order.sector) !== sectorKey) return false;
     if (cityKey && normalizeTextKey(order.city) !== cityKey) return false;
     return true;
@@ -6038,6 +6162,9 @@ function renderDeliveryCandidates() {
 
   container.innerHTML = "";
   filtered.forEach(order => {
+    // Une commande bloquee avant le 23/09 (probleme_livraison) se lit comme
+    // les autres commandes a relivrer : « A reprogrammer ».
+    const statutAffiche = STATUTS_A_RELIVRER.includes(order.status) ? "a_reprogrammer" : order.status;
     const label = document.createElement("label");
     label.className = "delivery-card";
     label.innerHTML = `
@@ -6056,7 +6183,7 @@ function renderDeliveryCandidates() {
         </span>
         ${getAddressWarning(order) ? `<span class="address-warning">${escapeHtml(getAddressWarning(order))}</span>` : ""}
       </span>
-      <span class="pill ${getOrderPill(order.status)}">${escapeHtml(formatOrderStatus(order.status))}</span>
+      <span class="pill ${getOrderPill(statutAffiche)}">${escapeHtml(formatOrderStatus(statutAffiche))}</span>
     `;
     container.appendChild(label);
   });
@@ -6075,7 +6202,7 @@ function contexteDeCommandePrete(order) {
     order.deliveryDate ? formatDeliveryDate(order.deliveryDate) : "Sans date",
     formatSectorLabel(order.sector),
     priorite && !/normal/i.test(priorite) ? priorite : "",
-    order.status === "a_reprogrammer" ? formatOrderStatus(order.status) : ""
+    STATUTS_A_RELIVRER.includes(order.status) ? formatOrderStatus("a_reprogrammer") : ""
   ].filter(Boolean).join(" · ");
 }
 
@@ -6215,9 +6342,12 @@ function renderRoute() {
     // etat), le nom, une ligne de detail, le badge. Pour un arret en echec,
     // le motif REMPLACE l'adresse -- comme « Il manque 2 articles » sur la
     // planche Preparation -- au lieu de s'ajouter en cinquieme.
-    const detail = stop.problemReason
+    // Un geste en file (lot 1 de l'audit geo) : l'arret est montre fait, et la
+    // ligne dit que le serveur ne le sait pas encore.
+    const attente = stop.enAttenteEnvoi ? `<span class="route-stop-attente">En attente d’envoi</span>` : "";
+    const detail = attente + (stop.problemReason
       ? `<span class="route-stop-motif">${escapeHtml(stop.problemReason)}</span>`
-      : `<span title="${escapeAttribute(formatStopAddress(stop))}">${escapeHtml(formatStopMeta(stop))}</span>`;
+      : `<span title="${escapeAttribute(formatStopAddress(stop))}">${escapeHtml(formatStopMeta(stop))}</span>`);
     // Les fleches ne sont rendues QUE quand la tournee se reordonne encore.
     // Avant, deux boutons de 60 px etaient rendus desactives sur chaque
     // ligne d'une tournee en cours : 120 px de vide par arret.
@@ -6525,21 +6655,52 @@ async function marquerArret(status) {
   await updateCurrentDeliveryStatus(status, motif);
 }
 
-async function updateCurrentDeliveryStatus(status, motif = null) {
+async function updateCurrentDeliveryStatus(status, motif = null, faitLe = new Date().toISOString()) {
   if (activeRoute) {
     const stop = activeRoute.stops[activeStopIndex];
     if (!stop) {
       notify("Aucun arrêt sélectionné.", "warning");
       return;
     }
+    // Un second geste sur un arret dont le premier attend dans la file
+    // produirait deux ecritures contradictoires, dont la seconde serait
+    // refusee au renvoi -- et perdue (H3, lot 1 de l'audit geo).
+    if (gestesArretEnFile.has(cleArret(activeRoute.id, stop.id))) {
+      notify(`${stop.clientName || "Cet arrêt"} : un geste attend déjà d’être envoyé.`, "warning");
+      return;
+    }
 
-    const result = await apiFetch(`/api/routes/${encodeURIComponent(activeRoute.id)}/stops/${encodeURIComponent(stop.id)}`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ status, motif })
-    });
+    let result;
+    try {
+      result = await apiFetch(`/api/routes/${encodeURIComponent(activeRoute.id)}/stops/${encodeURIComponent(stop.id)}`, {
+        method: "PATCH",
+        timeoutMs: DELAI_GESTE_ARRET_MS,
+        headers: {
+          "Content-Type": "application/json"
+        },
+        // faitLe : l'heure du geste, pas celle de l'arrivee au serveur (M6).
+        body: JSON.stringify({ status, motif, faitLe }),
+        resume: resumeDeGeste(activeRoute.id, stop, status)
+      });
+    } catch (error) {
+      if (!error?.enFile) throw error;
+      // H3 : en file, le geste est FAIT pour le livreur. L'ecran avance comme
+      // en ligne ; avant, il restait sur le meme arret, et le « Livre » suivant
+      // partait sur le meme client.
+      // La mise en file a deja redessine la tournee (rafraichirEtatFile), et
+      // renderRoute a pu sauter au premier arret restant : on repart de
+      // l'arret du geste, pour avancer d'UN cran, comme en ligne.
+      const ici = activeRoute.stops.findIndex(s => String(s.id) === String(stop.id));
+      if (ici >= 0) {
+        activeRoute.stops[ici].status = status;
+        activeRoute.stops[ici].enAttenteEnvoi = true;
+        activeStopIndex = ici;
+      }
+      avancerALArretSuivant();
+      rafraichirTournee();
+      notifyEchec(error);
+      return;
+    }
 
     activeRoute = result.route;
     if (activeStopIndex < activeRoute.stops.length - 1) activeStopIndex++;
@@ -6549,6 +6710,23 @@ async function updateCurrentDeliveryStatus(status, motif = null) {
   }
 
   await updateLegacyClientDeliveryStatus(status);
+}
+
+/** L'arret suivant a traiter : le prochain non termine APRES l'arret courant, sinon le premier qui reste. */
+function avancerALArretSuivant() {
+  if (!activeRoute) return;
+  const apres = activeRoute.stops.findIndex((s, i) => i > activeStopIndex && !isStopTerminal(s.status));
+  const reste = apres >= 0 ? apres : activeRoute.stops.findIndex(s => !isStopTerminal(s.status));
+  if (reste >= 0) activeStopIndex = reste;
+}
+
+function cleArret(routeId, stopId) {
+  return `${routeId}|${stopId}`;
+}
+
+/** Ce que la file garde pour nommer le geste a l'ecran. */
+function resumeDeGeste(routeId, stop, status) {
+  return { nature: "arret", nom: String(stop.clientName || ""), statut: String(status), routeId: String(routeId), stopId: String(stop.id) };
 }
 
 // --- « LIVRE », SANS CONFIRMATION, AVEC ANNULER (planche 4b) ------------------
@@ -6644,17 +6822,18 @@ async function livrerAvecAnnulation() {
   const suspens = {
     routeId: String(activeRoute.id),
     stopId: String(stop.id),
+    clientName: stop.clientName || "",
     statutAvant: stop.status,
     indexAvant: activeStopIndex,
+    // L'heure de l'APPUI, pas celle de l'envoi 4 s (ou 4 h) plus tard (M6).
+    faitLe: new Date().toISOString(),
     toast: null
   };
   livraisonEnSuspens = suspens;
   appliquerLivraisonEnSuspens();
   // L'arret suivant : le prochain non termine APRES celui-ci, sinon le premier
   // qui reste (un arret saute plus tot).
-  const apres = activeRoute.stops.findIndex((s, i) => i > activeStopIndex && !isStopTerminal(s.status));
-  const reste = apres >= 0 ? apres : activeRoute.stops.findIndex(s => !isStopTerminal(s.status));
-  if (reste >= 0) activeStopIndex = reste;
+  avancerALArretSuivant();
   rafraichirTournee();
 
   suspens.toast = notify(`Livré — ${stop.clientName || "arrêt"}`, "success", {
@@ -6705,12 +6884,15 @@ function envoyerLivraisonEnSuspens(attendu = null) {
         method: "PATCH",
         // keepalive : l'envoi declenche par `pagehide` survit a la page.
         keepalive: true,
+        timeoutMs: DELAI_GESTE_ARRET_MS,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "livre", motif: null })
+        body: JSON.stringify({ status: "livre", motif: null, faitLe: s.faitLe }),
+        resume: resumeDeGeste(s.routeId, { id: s.stopId, clientName: s.clientName }, "livre")
       });
     } catch (error) {
-      // Mise en file hors ligne : l'ecriture partira au retour du reseau.
-      // L'ecran garde « Livre » -- recharger depuis le cache le defairait.
+      // Mise en file (hors ligne, reseau muet, delai depasse) : l'ecriture
+      // partira au retour du reseau. L'ecran garde « Livre » -- recharger
+      // depuis le cache le defairait.
       if (error && error.enFile) throw error;
       await loadData();
       throw error;
@@ -6981,7 +7163,10 @@ function updateDriverActionButtons(target = getCurrentDeliveryTarget()) {
   const hasNextStop = activeRoute
     ? activeRoute.stops.some((stop, index) => index > activeStopIndex && !isStopTerminal(stop.status))
     : currentIndex >= 0 && currentIndex < route.length - 1;
-  const canReplan = Boolean(target?.orderId && ["livre", "absent", "probleme", "a_reprogrammer"].includes(target.status));
+  // « Planifier la suite » : une commande LIVREE seulement. Un absent revient
+  // de lui-meme dans les commandes pretes (C1) ; le cloner le ferait livrer
+  // deux fois (M1, refuse aussi par le serveur).
+  const canReplan = Boolean(target?.orderId && target.status === "livre");
 
   setButtonDisabled("callClientButton", !hasTarget || !buildPhoneUrl(target?.phone || target?.telephone));
   setButtonDisabled("mapsButton", !hasTarget || !buildGoogleMapsUrl(target));
@@ -7150,8 +7335,47 @@ function focusEntity(entity) {
 const APIFETCH_DEFAULT_TIMEOUT_MS = 30_000;
 const APIFETCH_UPLOAD_TIMEOUT_MS = 120_000;
 
+// Un geste d'arret (Livre, Absent...) n'attend pas 30 s : au-dela, il part en
+// file et l'ecran avance (lot 1 de l'audit geo, H1). La cle X-Sereo-Geste rend
+// le renvoi sans risque meme si le serveur avait recu le premier envoi.
+const DELAI_GESTE_ARRET_MS = 10_000;
+// La passerelle (SWAG) repond a la place d'un serveur qui redemarre : rien n'a
+// ete applique, l'ecriture se garde comme sur un echec reseau.
+const STATUTS_PASSERELLE = new Set([502, 503, 504]);
+
+function nouvelleCleDeGeste() {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  } catch { /* contexte non securise : repli ci-dessous */ }
+  return `g-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function entetesEnObjet(entetes) {
+  if (!entetes) return {};
+  if (typeof Headers !== "undefined" && entetes instanceof Headers) return Object.fromEntries(entetes.entries());
+  if (Array.isArray(entetes)) return Object.fromEntries(entetes);
+  return { ...entetes };
+}
+
+function erreurMiseEnFile() {
+  const attente = new Error("Réseau indisponible — enregistré, sera envoyé à la reconnexion.");
+  attente.enFile = true;
+  return attente;
+}
+
 async function apiFetch(url, options = {}) {
   const isUpload = options.body instanceof FormData;
+  const methode = String(options.method || "GET").toUpperCase();
+  const ecriture = METHODES_FILABLES.has(methode);
+  if (ecriture) {
+    // Tout rechargement qui suit une ecriture passe par le reseau, jamais par
+    // la copie de secours du service worker (H4, voir loadData).
+    ecritureNonRelue = true;
+    derniereEcritureA = Date.now();
+    // La cle d'idempotence : gardee dans la file avec l'ecriture, elle fait
+    // qu'un renvoi n'est applique qu'une fois (gesteIdempotent, server.js).
+    if (!isUpload) options = { ...options, headers: { ...entetesEnObjet(options.headers), "X-Sereo-Geste": nouvelleCleDeGeste() } };
+  }
   const timeoutMs = options.timeoutMs || (isUpload ? APIFETCH_UPLOAD_TIMEOUT_MS : APIFETCH_DEFAULT_TIMEOUT_MS);
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
@@ -7174,21 +7398,26 @@ async function apiFetch(url, options = {}) {
     res = await fetch(url, { ...options, signal });
   } catch (err) {
     clearTimeout(timer);
-    // L'ecriture est-elle recuperable ? Voir estDefinitivementHorsLigne().
-    if (await tenterMiseEnFile(url, options)) {
-      const attente = new Error("Hors ligne — enregistré, sera envoyé à la reconnexion.");
-      attente.enFile = true;
-      throw attente;
-    }
+    // Si c'est l'appelant qui a abort (pas le timeout), on re-throw l'erreur
+    // originale pour preserver la semantique : il ne voulait plus rien envoyer.
+    if (options.signal && options.signal.aborted) throw err;
+    // L'ecriture est-elle recuperable ? Voir tenterMiseEnFile().
+    if (await tenterMiseEnFile(url, options)) throw erreurMiseEnFile();
     if (err && (err.name === "AbortError" || err.code === "ABORT_ERR")) {
-      // Si c'est l'appelant qui a abort (pas le timeout), on re-throw l'erreur
-      // originale pour preserver la semantique. Sinon notre message "timeout".
-      if (options.signal && options.signal.aborted) throw err;
-      throw new Error(`Reseau trop lent (timeout ${Math.round(timeoutMs / 1000)}s). Verifie ta connexion.`);
+      throw new Error(`Réseau trop lent (plus de ${Math.round(timeoutMs / 1000)} s). Vérifie ta connexion.`);
     }
-    throw err;
+    // Jamais le message brut du navigateur (« Failed to fetch », « Load
+    // failed », « NetworkError... ») : il est anglais et ne dit rien d'utile.
+    throw new Error("Impossible de joindre le serveur. Vérifie ta connexion.");
   }
   clearTimeout(timer);
+
+  if (ecriture && STATUTS_PASSERELLE.has(res.status) && await tenterMiseEnFile(url, options)) {
+    throw erreurMiseEnFile();
+  }
+  // Le serveur vient de repondre : c'est le moment de vider la file, meme si
+  // le telephone n'a jamais annonce « online » (il se croyait deja en ligne).
+  if (res.ok && ecrituresEnAttente > 0 && !(res.headers && res.headers.get("X-Sereo-Cache"))) viderLaFile();
 
   // Une reponse rendue par le cache du service worker (le reseau n'a pas
   // repondu a temps) : loadData() ne l'annoncera pas « A jour ».
@@ -7203,9 +7432,13 @@ async function apiFetch(url, options = {}) {
   // re-redirige pas (boucle infinie possible sur certains navigateurs).
   if ((res.status === 401 || res.status === 429) && !window.location.pathname.startsWith("/login")) {
     const next = window.location.pathname + window.location.search + window.location.hash;
+    // Le geste qui a rencontre la session expiree n'est pas perdu : il attend
+    // dans la file, qui repartira apres la reconnexion (H2, lot 1 de l'audit).
+    if (ecriture) await tenterMiseEnFile(url, options);
     // La session est finie : ses donnees ne doivent pas s'afficher a la
     // prochaine ouverture, avant que le serveur ait reconnu quelqu'un.
     // (Un 429 n'est pas une fin de session : on ne vide que sur 401.)
+    // La FILE, elle, n'est pas un cache : elle reste.
     if (res.status === 401) await viderCacheDeDonnees();
     window.location.href = `/login?next=${encodeURIComponent(next)}`;
     // On throw quand meme pour interrompre proprement le code appelant.
@@ -7271,20 +7504,31 @@ const METHODES_FILABLES = new Set(["POST", "PUT", "PATCH", "DELETE"]);
  * promet rien (portail captif, wifi sans internet), on ne s'en sert donc pas
  * pour conclure l'inverse.
  *
- * Cette asymetrie est exactement ce qu'il faut ici. Un TIMEOUT, lui, peut
- * parfaitement signifier que le serveur a RECU et TRAITE la demande : rejouer
- * une ecriture non idempotente apres un timeout la dupliquerait. On ne met donc
- * en file QUE ce dont on sait que le reseau ne l'a pas emporte.
+ * Elle ne sert plus qu'a l'AFFICHAGE (bandeau, imports desactives). La mise en
+ * file, elle, ne la consulte plus depuis le 23/09 (lot 1 de l'audit geo, H1) :
+ * en 4G sans debit, le telephone se croit en ligne, et un « Livre » perdu
+ * derriere le livreur etait le cas COURANT, pas l'exception. Le risque qui
+ * justifiait la prudence -- un delai depasse alors que le serveur a traite la
+ * demande, donc un renvoi qui la dupliquerait -- est tenu autrement : chaque
+ * ecriture porte une cle X-Sereo-Geste, et le serveur n'applique une cle
+ * qu'une fois.
  */
 function estDefinitivementHorsLigne() {
   return typeof navigator !== "undefined" && navigator.onLine === false;
 }
 
+// Des ecritures qu'on ne rejoue JAMAIS plus tard : la purge de la base (rejouee
+// trois heures apres, elle effacerait ce qui a ete saisi entre-temps) et les
+// comptes (un mot de passe n'a rien a faire en clair dans indexedDB). Pour
+// elles, l'echec franc vaut mieux.
+const JAMAIS_EN_FILE = [/^\/api\/comptes(\/|$)/, /^\/api\/orders\/purge$/];
+
 /** Met l'ecriture en file si elle est recuperable. Rend true si c'est fait. */
 async function tenterMiseEnFile(url, options) {
-  if (!estDefinitivementHorsLigne()) return false;
   const methode = String(options.method || "GET").toUpperCase();
   if (!METHODES_FILABLES.has(methode)) return false;
+  const chemin = new URL(url, window.location.origin).pathname;
+  if (JAMAIS_EN_FILE.some(motif => motif.test(chemin))) return false;
   // Un envoi de fichier ne se differe pas : rejouer un import Excel trois
   // heures plus tard, sur un stock qui a bouge, ferait plus de degats que de
   // refuser tout de suite.
@@ -7301,50 +7545,163 @@ async function tenterMiseEnFile(url, options) {
 }
 
 let ecrituresEnAttente = 0;
+// Les gestes d'arret en file, par arret (cleArret) : { status, nom }. L'ecran
+// les montre FAITS, « en attente d'envoi » -- sans quoi un rechargement (ou la
+// copie du service worker) remettrait « En livraison » un arret que le livreur
+// a deja livre, et l'inviterait a le livrer une seconde fois.
+let gestesArretEnFile = new Map();
+// Les resumes des ecritures en file, pour que le bandeau NOMME ce qui attend.
+let resumesEnFile = [];
 
-/** Relit le nombre d'ecritures en attente et le porte a l'ecran. */
+function gesteArretDeLEntree(entree) {
+  const m = /\/api\/routes\/([^/?#]+)\/stops\/([^/?#]+)$/.exec(String(entree.url || ""));
+  if (!m || entree.methode !== "PATCH") return null;
+  let corps = null;
+  try { corps = JSON.parse(entree.corps || "null"); } catch { corps = null; }
+  if (!corps || typeof corps.status !== "string") return null;
+  return {
+    routeId: decodeURIComponent(m[1]),
+    stopId: decodeURIComponent(m[2]),
+    status: corps.status,
+    nom: entree.resume?.nom || ""
+  };
+}
+
+/** Relit la file et la porte a l'ecran : compteur, bandeau, arrets en attente. */
 async function rafraichirEtatFile() {
-  try {
-    ecrituresEnAttente = await compterFile();
-  } catch {
-    ecrituresEnAttente = 0;
+  const file = await lireFile();
+  ecrituresEnAttente = file.length;
+  resumesEnFile = file.map(entree => entree.resume || null);
+  gestesArretEnFile = new Map();
+  for (const entree of file) {
+    const geste = gesteArretDeLEntree(entree);
+    if (geste) gestesArretEnFile.set(cleArret(geste.routeId, geste.stopId), geste);
   }
   setStatus(dernierStatut);
+  if (appliquerGestesEnFile()) rafraichirTournee();
+}
+
+/**
+ * Pose les gestes en file sur la tournee affichee. Rend true si l'ecran a
+ * change (un statut, ou la mention « en attente d'envoi » qui part).
+ */
+function appliquerGestesEnFile() {
+  if (!activeRoute || !Array.isArray(activeRoute.stops)) return false;
+  let change = false;
+  for (const stop of activeRoute.stops) {
+    const geste = gestesArretEnFile.get(cleArret(activeRoute.id, stop.id));
+    if (geste) {
+      if (stop.status !== geste.status) { stop.status = geste.status; change = true; }
+      if (!stop.enAttenteEnvoi) { stop.enAttenteEnvoi = true; change = true; }
+    } else if (stop.enAttenteEnvoi) {
+      delete stop.enAttenteEnvoi;
+      change = true;
+    }
+  }
+  return change;
 }
 
 /**
  * Vide la file. On envoie avec `fetch` NU, jamais avec apiFetch : apiFetch
  * remettrait en file ce qu'il vient d'en sortir, et la file se rechargerait
  * elle-meme a chaque tentative.
+ *
+ * Un seul renvoi a la fois (M9) : un appel pendant un renvoi rend la meme
+ * promesse, et demande un tour de plus a la fin -- une ecriture deposee
+ * entre-temps n'attend pas le prochain declencheur. (rejouer() tient aussi son
+ * propre verrou, y compris entre onglets.)
  */
-async function viderLaFile() {
-  if (ecrituresEnAttente === 0) return;
-  const bilan = await rejouer((u, o) => fetch(u, { ...o, credentials: "same-origin" }));
-  await rafraichirEtatFile();
+let viderEnCours = null;
+let viderRedemande = false;
 
+function viderLaFile() {
+  if (viderEnCours) {
+    viderRedemande = true;
+    return viderEnCours;
+  }
+  viderEnCours = (async () => {
+    try {
+      let bilan = null;
+      do {
+        viderRedemande = false;
+        await rafraichirEtatFile();
+        if (ecrituresEnAttente === 0) return;
+        bilan = await rejouer((u, o) => fetch(u, { ...o, credentials: "same-origin" }));
+        await rafraichirEtatFile();
+        annoncerBilanDeRenvoi(bilan);
+      } while (viderRedemande && !bilan.authRequise);
+    } finally {
+      viderEnCours = null;
+    }
+  })();
+  return viderEnCours;
+}
+
+function annoncerBilanDeRenvoi(bilan) {
   if (bilan.envoyees > 0) {
     notify(bilan.envoyees === 1
       ? "1 modification envoyée au serveur."
       : `${bilan.envoyees} modifications envoyées au serveur.`, "success");
+    // Le serveur a change : le rechargement qui suit passe par le reseau (H4).
+    ecritureNonRelue = true;
+    derniereEcritureA = Date.now();
     loadData();
   }
   if (bilan.refusees > 0) {
+    const noms = bilan.refus.map(r => r.resume?.nom).filter(Boolean);
+    const qui = noms.length ? ` (${noms.join(", ")})` : "";
     notify(bilan.refusees === 1
-      ? "1 modification a été refusée par le serveur et abandonnée."
-      : `${bilan.refusees} modifications ont été refusées par le serveur et abandonnées.`, "warning");
+      ? `1 modification a été refusée par le serveur et abandonnée${qui}.`
+      : `${bilan.refusees} modifications ont été refusées par le serveur et abandonnées${qui}.`, "warning");
   }
   if (bilan.bloquee) {
     notify("Des modifications ne passent pas. Elles sont conservées, mais plus renvoyées.", "warning");
   }
+  if (bilan.authRequise) renvoyerVersConnexionPourLaFile();
+}
+
+// Session expiree pendant le renvoi (H2) : la file est GARDEE, et on renvoie
+// vers la connexion ; elle repart a la reouverture (brancherFileHorsLigne).
+// Une seule redirection par minute : si le serveur refusait encore apres la
+// reconnexion, la page ne bouclerait pas entre /login et l'application.
+const CLE_RENVOI_CONNEXION = "sereo:file-connexion";
+
+function renvoyerVersConnexionPourLaFile() {
+  const n = ecrituresEnAttente;
+  let recent = false;
+  try {
+    const avant = Number(sessionStorage.getItem(CLE_RENVOI_CONNEXION) || 0);
+    recent = Date.now() - avant < 60_000;
+    if (!recent) sessionStorage.setItem(CLE_RENVOI_CONNEXION, String(Date.now()));
+  } catch { /* stockage indisponible : on redirige quand meme */ }
+  const quoi = `${n} modification${n > 1 ? "s" : ""} en attente`;
+  if (recent || window.location.pathname.startsWith("/login")) {
+    notify(`Session expirée : reconnecte-toi pour envoyer ${quoi}.`, "warning");
+    return;
+  }
+  notify(`Session expirée : ${quoi}, gardée${n > 1 ? "s" : ""}. Reconnexion…`, "warning");
+  const next = window.location.pathname + window.location.search + window.location.hash;
+  window.location.href = `/login?next=${encodeURIComponent(next)}`;
 }
 
 // L'heure de la coupure, captee a l'evenement ; inconnue apres un
 // rechargement fait hors ligne (le bandeau dit alors « Hors ligne », sans heure).
 let horsLigneDepuis = null;
 
+// Le telephone qui se croit en ligne ne dit jamais « online » : sans essai
+// regulier, une ecriture mise en file sur un delai depasse attendrait le
+// prochain rechargement.
+const RENVOI_PERIODIQUE_MS = 20_000;
+
 function brancherFileHorsLigne() {
   window.addEventListener("online", () => { horsLigneDepuis = null; setStatus(dernierStatut); viderLaFile(); });
   window.addEventListener("offline", () => { horsLigneDepuis = new Date(); setStatus(dernierStatut); });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && ecrituresEnAttente > 0 && !estDefinitivementHorsLigne()) viderLaFile();
+  });
+  setInterval(() => {
+    if (ecrituresEnAttente > 0 && !estDefinitivementHorsLigne()) viderLaFile();
+  }, RENVOI_PERIODIQUE_MS);
   // A l'ouverture : l'onglet a pu etre ferme avec des ecritures en attente.
   // C'est le prix de ne pas utiliser Background Sync, absent d'iOS Safari --
   // une solution qui ne marche pas sur la moitie du parc n'en est pas une.
@@ -7403,8 +7760,29 @@ function majBandeauHorsLigne() {
   setText("bandeauHorsLigneTitre", horsLigne ? (heure ? `Hors ligne depuis ${heure}` : "Hors ligne") : "Envoi en attente");
   const n = ecrituresEnAttente;
   setText("bandeauHorsLigneDetail", n
-    ? `${n} modification${n > 1 ? "s" : ""} en attente d'envoi. ${horsLigne ? "Elles partiront au retour du réseau." : "Envoi en cours."}`
+    ? `${decrireAttente()} ${horsLigne ? "Envoi au retour du réseau." : "Envoi dès que le serveur répond."}`
     : "Vos modifications seront gardées et envoyées au retour du réseau. Les imports de fichiers attendront le réseau.");
+}
+
+const MOTS_DU_GESTE = { absent: "absent", probleme: "problème", a_reprogrammer: "à reprogrammer" };
+
+/**
+ * Ce qui attend, NOMME (lot 1 de l'audit geo, H1) : « 1 livraison en attente
+ * d'envoi : Dupont. » Un compteur seul ne dit pas au livreur QUI il devra
+ * peut-etre rappeler si l'envoi echoue.
+ */
+function decrireAttente() {
+  const n = ecrituresEnAttente;
+  const arrets = resumesEnFile.filter(r => r && r.nature === "arret");
+  const noms = [...new Set(arrets.map(r => {
+    const mot = MOTS_DU_GESTE[r.statut];
+    return `${r.nom || "arrêt"}${mot ? ` (${mot})` : ""}`;
+  }))];
+  const liste = noms.length > 3 ? `${noms.slice(0, 3).join(", ")} et ${noms.length - 3} autre${noms.length > 4 ? "s" : ""}` : noms.join(", ");
+  const s = k => (k > 1 ? "s" : "");
+  if (arrets.length && arrets.length === n) return `${n} livraison${s(n)} en attente d'envoi : ${liste}.`;
+  if (arrets.length) return `${n} modification${s(n)} en attente d'envoi, dont ${arrets.length} livraison${s(arrets.length)} : ${liste}.`;
+  return `${n} modification${s(n)} en attente d'envoi.`;
 }
 
 /** Charte §4 : « Toast : bas d'ecran, 4 s, une action possible (Annuler) ». */

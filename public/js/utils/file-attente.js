@@ -60,6 +60,15 @@ function attendre(requete) {
   });
 }
 
+function resumer(resume) {
+  if (!resume || typeof resume !== "object") return null;
+  const propre = {};
+  for (const cle of ["nature", "nom", "statut", "routeId", "stopId"]) {
+    if (typeof resume[cle] === "string" && resume[cle]) propre[cle] = resume[cle].slice(0, 200);
+  }
+  return Object.keys(propre).length ? propre : null;
+}
+
 /** Ramene des en-tetes, quelle que soit leur forme, a un objet clonable. */
 function normaliserEntetes(entetes) {
   if (!entetes) return {};
@@ -96,6 +105,10 @@ export async function mettreEnAttente(url, options = {}) {
     depose: new Date().toISOString(),
     essais: 0
   };
+  // Ce que l'ecran dira de l'ecriture en attente (« 1 livraison en attente
+  // d'envoi : Dupont »). Recopie champ par champ : seules des chaines passent.
+  const resume = resumer(options.resume);
+  if (resume) entree.resume = resume;
   const id = await attendre(transaction(db, "readwrite").add(entree));
   db.close();
   return id;
@@ -156,17 +169,78 @@ export const ESSAIS_MAX = 5;
  * premiere : "livree" avant "en preparation". Bloquer est le comportement
  * correct, et il rend le probleme VISIBLE au lieu de reordonner en silence.
  *
+ * CE QUI N'EST PAS UN REFUS (lot 1 de l'audit geo, 23/09) :
+ *  - 401 (session expiree) et 429 (connexion verrouillee) : ce n'est pas
+ *    l'ecriture que le serveur refuse, c'est la PERSONNE qu'il ne reconnait
+ *    pas. Premier jet : un 4xx comme les autres, donc RETIRE -- le livreur qui
+ *    rouvrait l'application le lendemain matin perdait les livraisons faites
+ *    hors ligne la veille. On s'arrete, on GARDE tout, et on rend
+ *    `authRequise` : l'appelant renvoie vers la connexion, et la file repart
+ *    apres.
+ *  - 408, 502, 503, 504 : le serveur (ou la passerelle devant lui) n'a pas
+ *    traite la demande. C'est un echec de transport, comme un fetch qui leve :
+ *    on s'arrete sans incrementer.
+ *
+ * UN SEUL RENVOI A LA FOIS (M9). Le reseau qui clignote en voiture envoie
+ * plusieurs « online » pendant qu'un renvoi tourne ; deux boucles lisaient la
+ * meme file et envoyaient chaque ecriture deux fois. Un appel pendant un
+ * renvoi en cours rend la MEME promesse, et demande un passage de plus a la
+ * fin (une ecriture mise en file entre-temps n'attend pas le prochain
+ * « online »). Entre deux onglets, le verrou du navigateur (Web Locks) fait
+ * la meme chose quand il existe ; la cle X-Sereo-Geste rend de toute facon un
+ * double envoi inoffensif cote serveur.
+ *
  * @param {Function} envoyer  (url, options) => Response
- * @returns {{envoyees: number, refusees: number, restantes: number, bloquee: boolean}}
+ * @returns {{envoyees: number, refusees: number, restantes: number, bloquee: boolean,
+ *            authRequise: boolean, refus: Array<{resume: object|null, statut: number}>}}
  */
-export async function rejouer(envoyer) {
+const STATUTS_AUTH = new Set([401, 429]);
+const STATUTS_TRANSPORT = new Set([408, 502, 503, 504]);
+
+let rejeuEnCours = null;
+let rejeuRedemande = false;
+
+export function rejouer(envoyer) {
+  if (rejeuEnCours) {
+    rejeuRedemande = true;
+    return rejeuEnCours;
+  }
+  rejeuEnCours = (async () => {
+    const bilan = { envoyees: 0, refusees: 0, restantes: 0, bloquee: false, authRequise: false, refus: [] };
+    try {
+      let passage;
+      do {
+        rejeuRedemande = false;
+        passage = await sousVerrou(() => unPassage(envoyer));
+        bilan.envoyees += passage.envoyees;
+        bilan.refusees += passage.refusees;
+        bilan.refus.push(...passage.refus);
+        bilan.bloquee = passage.bloquee;
+        bilan.authRequise = passage.authRequise;
+      } while (rejeuRedemande && !passage.arrete);
+      bilan.restantes = (await lireFile()).length;
+      return bilan;
+    } finally {
+      rejeuEnCours = null;
+    }
+  })();
+  return rejeuEnCours;
+}
+
+function sousVerrou(travail) {
+  const verrous = typeof navigator !== "undefined" ? navigator.locks : null;
+  if (verrous && typeof verrous.request === "function") {
+    return verrous.request("sereo-file-attente", travail);
+  }
+  return travail();
+}
+
+async function unPassage(envoyer) {
   const file = await lireFile();
-  let envoyees = 0;
-  let refusees = 0;
-  let bloquee = false;
+  const passage = { envoyees: 0, refusees: 0, bloquee: false, authRequise: false, arrete: false, refus: [] };
 
   for (const entree of file) {
-    if ((entree.essais || 0) >= ESSAIS_MAX) { bloquee = true; break; }
+    if ((entree.essais || 0) >= ESSAIS_MAX) { passage.bloquee = true; passage.arrete = true; break; }
     let reponse;
     try {
       reponse = await envoyer(entree.url, {
@@ -181,22 +255,34 @@ export async function rejouer(envoyer) {
       // fetch qui leve ne dit rien du contenu de l'ecriture. Premier jet : on
       // incrementait ici, si bien que cinq reconnexions ratees bloquaient
       // definitivement une ecriture parfaitement valide.
+      passage.arrete = true;
       break;
     }
+    const statut = reponse ? reponse.status : 0;
     if (reponse && reponse.ok) {
       await retirer(entree.id);
-      envoyees++;
-    } else if (reponse && reponse.status >= 400 && reponse.status < 500) {
+      passage.envoyees++;
+    } else if (STATUTS_AUTH.has(statut)) {
+      // Session expiree : l'ecriture RESTE, la file aussi. Voir plus haut.
+      passage.authRequise = true;
+      passage.arrete = true;
+      break;
+    } else if (STATUTS_TRANSPORT.has(statut)) {
+      passage.arrete = true;
+      break;
+    } else if (statut >= 400 && statut < 500) {
       // Le serveur a repondu non. La rejouer ferait une file eternelle.
       await retirer(entree.id);
-      refusees++;
+      passage.refusees++;
+      passage.refus.push({ resume: entree.resume || null, statut });
     } else {
       await incrementerEssais(entree);
+      passage.arrete = true;
       break;
     }
   }
 
-  return { envoyees, refusees, restantes: (await lireFile()).length, bloquee };
+  return passage;
 }
 
 /** Vide la file. Reserve a un geste explicite de l'utilisateur. */

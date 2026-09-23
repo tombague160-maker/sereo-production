@@ -269,3 +269,117 @@ test("file — la methode par defaut est POST, et elle est conservee telle quell
   const file = await lireFile();
   assert.deepEqual(file.map(e => e.methode), ["POST", "DELETE"]);
 });
+
+// --- Lot 1 de l'audit geo (23/09) ----------------------------------------------
+//
+// H2 : une session expiree VIDAIT la file. Mesure de l'audit : deux gestes en
+// file, le serveur repond 401, rejouer() rend {"refusees":2,"restantes":0}. Le
+// livreur qui rouvre l'application le lendemain perd les livraisons de la veille.
+// M9 : deux renvois simultanes envoyaient chaque ecriture deux fois (6 requetes
+// pour 3 ecritures).
+
+for (const statut of [401, 429]) {
+  test(`file — un ${statut} (session) GARDE toutes les ecritures et demande la connexion`, async () => {
+    const { mettreEnAttente, rejouer, lireFile } = await chargerFile();
+    await mettreEnAttente("/api/routes/r/stops/s1", { method: "PATCH", body: '{"status":"livre"}' });
+    await mettreEnAttente("/api/routes/r/stops/s2", { method: "PATCH", body: '{"status":"absent"}' });
+
+    const { envoyer, vues } = envoyeurScripte([statut]);
+    const bilan = await rejouer(envoyer);
+
+    assert.equal(bilan.restantes, 2, `un ${statut} a vide la file : les gestes de la veille sont perdus`);
+    assert.equal(bilan.refusees, 0);
+    assert.equal(bilan.authRequise, true, "l'appelant n'apprend pas qu'il faut se reconnecter");
+    assert.equal(vues.length, 1, "la file a continue sans session");
+    assert.equal((await lireFile()).length, 2);
+
+    // Apres reconnexion, tout part, dans l'ordre.
+    const apres = envoyeurScripte([200]);
+    const fin = await rejouer(apres.envoyer);
+    assert.equal(fin.envoyees, 2);
+    assert.deepEqual(apres.vues.map(v => JSON.parse(v.corps).status), ["livre", "absent"]);
+  });
+}
+
+test("file — temoin : un 403 reste un REFUS (retire), il ne passe pas pour une session expiree", async () => {
+  const { mettreEnAttente, rejouer } = await chargerFile();
+  await mettreEnAttente("/api/comptes", { method: "POST", body: "{}" });
+  const bilan = await rejouer(envoyeurScripte([403]).envoyer);
+  assert.equal(bilan.refusees, 1);
+  assert.equal(bilan.authRequise, false);
+  assert.equal(bilan.restantes, 0);
+});
+
+test("file — 502 / 504 (passerelle) : l'ecriture reste, et le compteur d'essais ne bouge pas", async () => {
+  // SWAG rend 502 quand le serveur redemarre : ce n'est pas l'ecriture qui est
+  // en cause. Compter ces reponses bloquerait une ecriture valide.
+  const { mettreEnAttente, rejouer, ESSAIS_MAX } = await chargerFile();
+  await mettreEnAttente("/api/orders", { method: "POST", body: '{"a":1}' });
+  for (let i = 0; i < ESSAIS_MAX + 2; i++) {
+    const bilan = await rejouer(envoyeurScripte([i % 2 ? 504 : 502]).envoyer);
+    assert.equal(bilan.bloquee, false, `bloquee a la tentative ${i + 1} par une passerelle`);
+    assert.equal(bilan.restantes, 1);
+  }
+  const bilan = await rejouer(envoyeurScripte([200]).envoyer);
+  assert.equal(bilan.envoyees, 1);
+});
+
+/** Un envoyeur lent : chaque reponse 200 arrive apres `ms`. */
+function envoyeurLent(ms) {
+  const vues = [];
+  const envoyer = (url, options) => new Promise(resolve => {
+    vues.push({ url, corps: options.body });
+    setTimeout(() => resolve({ ok: true, status: 200 }), ms);
+  });
+  return { envoyer, vues };
+}
+
+test("file — deux renvois SIMULTANES n'envoient chaque ecriture qu'une fois (M9)", async () => {
+  const { mettreEnAttente, rejouer } = await chargerFile();
+  for (const n of [1, 2, 3]) await mettreEnAttente(`/api/customer-orders?n=${n}`, { method: "POST", body: `{"n":${n}}` });
+
+  const { envoyer, vues } = envoyeurLent(15);
+  // Le reseau clignote : trois « online » pendant le renvoi.
+  const [a, b, c] = await Promise.all([rejouer(envoyer), rejouer(envoyer), rejouer(envoyer)]);
+
+  assert.equal(vues.length, 3, `${vues.length} requetes pour 3 ecritures : des commandes terrain sont creees en double`);
+  assert.equal(a.envoyees, 3);
+  assert.equal(b.restantes, 0);
+  assert.equal(c.restantes, 0);
+});
+
+test("file — une ecriture deposee PENDANT un renvoi part dans la foulee", async () => {
+  // Le verrou ne doit pas la laisser attendre le prochain « online ».
+  const { mettreEnAttente, rejouer } = await chargerFile();
+  await mettreEnAttente("/api/a", { method: "POST", body: '{"n":1}' });
+  const vues = [];
+  let deposee = false;
+  let second = null;
+  const envoyer = async (url, options) => {
+    vues.push(JSON.parse(options.body).n);
+    if (!deposee) {
+      deposee = true;
+      await mettreEnAttente("/api/b", { method: "POST", body: '{"n":2}' });
+      second = rejouer(envoyer);
+    }
+    return { ok: true, status: 200 };
+  };
+  const bilan = await rejouer(envoyer);
+  await second;
+  assert.deepEqual(vues, [1, 2]);
+  assert.equal(bilan.restantes, 0, "l'ecriture deposee pendant le renvoi est restee en file");
+});
+
+test("file — le RESUME d'un geste est garde, pour que l'ecran le nomme", async () => {
+  const { mettreEnAttente, lireFile, rejouer } = await chargerFile();
+  await mettreEnAttente("/api/routes/r/stops/s1", {
+    method: "PATCH", body: '{"status":"livre"}',
+    resume: { nature: "arret", nom: "Cabinet Dupont", statut: "livre", intrus: { a: 1 }, vide: "" }
+  });
+  const [entree] = await lireFile();
+  assert.deepEqual(entree.resume, { nature: "arret", nom: "Cabinet Dupont", statut: "livre" });
+
+  // Un refus rend le resume : le message peut nommer ce qui est perdu.
+  const bilan = await rejouer(envoyeurScripte([409]).envoyer);
+  assert.deepEqual(bilan.refus, [{ resume: { nature: "arret", nom: "Cabinet Dupont", statut: "livre" }, statut: 409 }]);
+});

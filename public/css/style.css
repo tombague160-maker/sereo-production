@@ -13203,3 +13203,13 @@ body:has(#journee.active) .ecran-entete #pageSubtitle { min-height: 2lh; }
   :root:not([data-color-scheme]) #stock .stk-categories-tete h3 { margin: 0; font-size: 14.5px; font-weight: 600; color: var(--v8-principal); }
   #stock .stk-categories-tete p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--v8-texte-secondaire); }
 }
+
+/* --- Lot 1 de l'audit geo (23/09) : un geste en file, a l'ecran ------------ *
+ * L'arret est montre fait (son badge), et cette ligne dit que le serveur ne le
+ * sait pas encore. Couleur de TEXTE (contraste du texte principal, clair comme
+ * sombre), jamais l'accent : la charte l'interdit en texte (2,34:1). */
+:root[data-color-scheme] .route-stop-corps > .route-stop-attente,
+:root:not([data-color-scheme]) .route-stop-corps > .route-stop-attente {
+  color: var(--v8-texte);
+  font-weight: 600;
+}

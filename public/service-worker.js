@@ -128,11 +128,24 @@ function copieEnCache(request) {
 // - Tente fetch (max 3s)
 // - Si reponse 200 OK same-origin : la cache + la retourne
 // - Si timeout / erreur reseau : retourne le cache (marque) si dispo, sinon laisse passer l'erreur
-function networkFirstApi(request) {
+//
+// Lot 1 de l'audit geo (H4), 23/09 :
+// - LA REPONSE TARDIVE (arrivee apres le repli de 3 s) est mise en cache et
+//   annoncee a la page (« sereo-api-tardive »), qui remplace la copie a
+//   l'ecran. Avant, `if (settled) return;` la jetait : la copie ne se
+//   rafraichissait plus tant que le reseau mettait plus de 3 s -- et avec un
+//   an d'historique, il les met a chaque fois.
+// - X-Sereo-Frais : la page vient d'ecrire ; la copie date d'avant le geste.
+//   Pas de repli : on attend le reseau, et son echec reste un echec (la page
+//   garde alors ce qu'elle montre).
+function networkFirstApi(event) {
+  const { request } = event;
+  const frais = request.headers.get("X-Sereo-Frais") === "1";
+  const debut = Date.now();
   return new Promise((resolve, reject) => {
     let settled = false;
 
-    const timeoutId = setTimeout(() => {
+    const timeoutId = frais ? null : setTimeout(() => {
       if (settled) return;
       settled = true;
       copieEnCache(request).then(cached => {
@@ -141,24 +154,42 @@ function networkFirstApi(request) {
       });
     }, API_NETWORK_TIMEOUT_MS);
 
-    fetch(request).then(response => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeoutId);
+    const reseau = fetch(request).then(response => {
+      const tardive = settled;
       if (response.ok && response.type === "basic") {
         const copy = response.clone();
-        caches.open(API_CACHE_NAME).then(cache => cache.put(request, copy));
+        const miseEnCache = caches.open(API_CACHE_NAME).then(cache => cache.put(request, copy));
+        if (tardive) return miseEnCache.then(() => annoncerReponseTardive(event, request.url, debut));
       }
+      if (tardive) return undefined;
+      settled = true;
+      clearTimeout(timeoutId);
       resolve(response);
+      return undefined;
     }).catch(error => {
       if (settled) return;
       settled = true;
       clearTimeout(timeoutId);
+      if (frais) {
+        reject(error);
+        return;
+      }
       copieEnCache(request).then(cached => {
         if (cached) resolve(cached);
         else reject(error);
       });
     });
+    // Le service worker doit vivre jusqu'a la reponse tardive, meme si la page
+    // a deja recu la copie.
+    event.waitUntil(reseau.catch(() => {}));
+  });
+}
+
+function annoncerReponseTardive(event, url, debut) {
+  const id = event.clientId || event.resultingClientId;
+  if (!id) return undefined;
+  return self.clients.get(id).then(client => {
+    if (client) client.postMessage({ type: "sereo-api-tardive", url, debut });
   });
 }
 
@@ -242,7 +273,7 @@ self.addEventListener("fetch", event => {
   // (L'affichage IMMEDIAT des dernieres donnees au demarrage est fait par la
   //  page elle-meme, qui lit ce cache : voir lireDernieresDonnees dans app.js.)
   if (isApiCacheable(url)) {
-    event.respondWith(networkFirstApi(request));
+    event.respondWith(networkFirstApi(event));
     return;
   }
 
