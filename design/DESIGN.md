@@ -2598,3 +2598,107 @@ renvoyé en haut par `resetViewportScroll(false)`. Mesuré par la sonde sur la s
 position qu'elle avait : `scrollY` 138 au `DOMContentLoaded` (le défilement vers
 l'ancre `#livreur`), 0 au `load` — la remise écrase toute position prise avant.
 Le défilement d'un humain n'a pas été rejoué. Hors de ce lot.
+
+## 23/09 — Lot 3 de l audit géo : des adresses justes
+
+Référence : rapport d'audit du 23/09 (`audit-geo-rapport.md`, code audité `019788c`),
+décisions de Thomas du même jour, toutes « oui » aux défauts. Branche
+`fix/adresses-justes`, depuis `main` (v1.41.1).
+
+### Ce qui est fait
+
+- **Un seul géocodeur** (`lib/geocodage.js`) pour l'import, le lot de fond, le calcul
+  de tournée et la recherche d'adresse : la BAN (`api-adresse.data.gouv.fr`,
+  `SEREO_GEOCODER_URL`), un seuil (0,6), une requête (voie + commune, code postal en
+  filtre), un cache (table `geocodages`), un User-Agent `Sereo/<version>
+  (+<dépôt public>)` — un contact générique, jamais une adresse e-mail. Avant, la
+  tournée interrogeait `data.geopf.fr` codé en dur, seuil 0,65, sans cache : une
+  adresse « trouvée » à l'import y était refusée.
+- **H6** : une commande créée dans l'application (terrain, planifiée, abonnement,
+  replanifiée) hérite de la position de son client quand elle se livre à son
+  adresse. Le calcul de tournée prend la position du client avant le géocodeur, et
+  **mémorise** ce qu'il trouve (commande, client s'il n'en avait pas, cache).
+- **H5, H12, décision 8** : un changement d'adresse (Modifier le profil, fiche CRM,
+  commande terrain qui corrige le client) efface la position de l'ancienne adresse
+  et relance le géocodage en fond. Les commandes non livrées qui se livraient à
+  l'ANCIENNE adresse suivent la nouvelle ; celles livrées ailleurs (EHPAD, proche)
+  et celles déjà livrées ou annulées ne sont plus réécrites (adresse, téléphone,
+  consigne). Une consigne propre à une commande n'est plus écrasée par celle du client.
+- **M8** : une position placée par une personne est marquée `geoSource: "manuel"`.
+  Le lot ne l'écrase jamais, même avec `forcer` ; il re-vérifie chaque client sous
+  le verrou (saisie pendant le lot, adresse changée pendant le lot). Deux lots ne
+  tournent plus en parallèle (409), `max` est borné.
+- **M5, décision 6** : (0,0), latitude et longitude inversées, et toute position à
+  plus de **150 km du départ** de la tournée sont refusés avant l'appel à OSRM, en
+  NOMMANT le client ; l'inversion est proposée corrigée. Sans départ (saisie
+  manuelle), la borne est la France métropolitaine. « Réessaie » n'est plus dit que
+  d'une vraie panne de service.
+- **Le calcul liste TOUTES les adresses douteuses d'un coup** (`details.adresses`
+  dans la réponse 400), chacune avec son motif et, s'il y en a une, sa proposition.
+- **H11** : « Résidence…, Bât. B, Apt 12, », « BP 40012 » sont retirés de la requête
+  (l'adresse enregistrée ne change pas : le livreur les lit toujours) ; « CEDEX » et
+  le code CEDEX (qui n'est pas un filtre de la BAN) sont gérés ; un code postal lu
+  comme un nombre par Excel (1100) redevient 01100 ; un rejet est redemandé après
+  30 jours, et n'occupe plus une place du lot en attendant (famine).
+- **La précision est gardée** (`geoPrecision` : numéro, rue, lieu-dit, commune,
+  manuel) sur le client, la commande et l'arrêt, et signalée : « Position
+  approximative : au milieu de la rue ».
+- **M4** : un arrêt encore à faire lit sa commande (consigne, adresse, position,
+  téléphone, articles). Un arrêt soldé, ou une tournée terminée, garde ce qui a été
+  livré. Une commande reportée à une autre date quitte la tournée prête ou en cours
+  et redevient « prête à livrer ».
+- **Client créé ou modifié au CRM : géocodé** en fond. Une demande pendant un lot
+  n'est plus perdue (relance).
+- **H7 — écran « Adresses à vérifier »** (sheet au téléphone, fenêtre au bureau,
+  `public/js/domains/adresses.js`) : clients sans position, approximatifs, ou dont
+  l'adresse a changé après une saisie manuelle ; proposition de la BAN acceptée
+  d'un clic ; recherche d'adresse ou « latitude, longitude » collé ; mini-carte
+  Leaflet au marqueur déplaçable (ou toucher la carte). Alerte « N clients à livrer
+  sans position » dans « Préparer une tournée » (calculée sur les données chargées :
+  aucune requête de plus au rechargement). « Corriger la position » dans les autres
+  actions de l'arrêt remplace les deux champs numériques qui envoyaient
+  l'identifiant de l'ARRÊT au lieu du client. Source citée : « Adresses : BAN ».
+
+### Décisions prises dans le lot
+
+- Accepter une proposition, choisir un résultat de recherche ou déplacer le
+  marqueur, c'est une saisie **manuelle** : elle est protégée, et un point
+  approximatif ainsi validé ne revient pas dans la liste (sa précision reste affichée).
+- Un changement d'adresse garde une position manuelle mais la marque « à vérifier »
+  (« Adresse modifiée ») : elle corrigeait peut-être un lieu-dit que la BAN ignore.
+- La référence des 150 km est le **départ** de la tournée : aucun dépôt n'est encore
+  réglé dans l'application (lot 6).
+- Une commande reportée pendant la tournée en est **retirée** (pas seulement
+  signalée). En route, le tracé est gardé plutôt qu'effacé sous le livreur.
+
+### Écarts nommés
+
+- **`--focus-ring` n'existe pas en mode sombre** (défini sous
+  `:root[data-color-scheme="light"]` seulement) : `box-shadow: var(--focus-ring)`
+  n'y peint rien. Trouvé par le banc de ce lot, contourné ici (anneau écrit en
+  clair), NON corrigé ailleurs (`.cli-retour`, `.cmd-ligne`…) : hors périmètre.
+- L'import Excel, chemin 2 (même bon, contenu modifié), recopie toujours l'adresse
+  du fichier sur la commande ; seule la position y est désormais protégée pour une
+  commande livrée.
+- Le point approximatif n'est pas encore dessiné autrement sur la carte (marqueur
+  creux) : c'est le lot 4.
+- La consigne d'un arrêt à faire suit celle de la commande : une note saisie par le
+  livreur sur un arrêt NON soldé serait remplacée (rare ; les notes d'échec, elles,
+  vont dans `problemReason`).
+- Une adresse de livraison distincte (EHPAD) n'a pas d'écran propre : elle se
+  géocode par son adresse au calcul de tournée (cache), et se corrige dans l'écran
+  seulement via le client.
+- Mesuré une fois : `carte-et-lignes.spec.js` « trace de repli » a dépassé 3 min
+  sous la charge de six fichiers à deux ouvriers ; vert seul (3 s) et au second
+  passage de la même charge (44/44). Non reproduit, cause non affirmée.
+
+### Ce qui reste
+
+- Lot 6 : un dépôt réglé (il remplacera le départ comme référence des 150 km, et
+  la France métropolitaine pour la saisie manuelle).
+- Lot 4 : le marqueur « approximatif » sur la carte, la mention BAN à côté de la
+  licence OSM.
+- Lot 2 : retirer l'ancien panneau « Clients tournée » (décision 7) — sa saisie de
+  coordonnées est déjà remplacée par le bouton de cet écran.
+- Plus tard : l'appel groupé CSV de la BAN pour les gros imports ; une colonne
+  « Complément » reconnue à l'import.
