@@ -2702,3 +2702,51 @@ décisions de Thomas du même jour, toutes « oui » aux défauts. Branche
   coordonnées est déjà remplacée par le bouton de cet écran.
 - Plus tard : l'appel groupé CSV de la BAN pour les gros imports ; une colonne
   « Complément » reconnue à l'import.
+
+### Relecture adverse du 23/09 — sept défauts, sept vrais
+
+Chacun a son banc, rouge sur le code relu (`1daf3d9`) pour la cause nommée, vert
+après. Aucun n'était faux.
+
+- **Bloquant — la virgule après le numéro** (« 12, rue de Dole », « Rue de Dole,
+  12 », « 12 bis, rue X ») : le numéro seul devenait la voie, la rue partait en
+  complément. La BAN ne recevait que « 12 », et deux voies différentes au même
+  numéro avaient la même clé de cache : un déménagement de « 12, rue de Dole » à
+  « 12, avenue Foch » passait inaperçu (position et commandes figées). Le numéro
+  isolé est recollé à sa voie. En plus : quand la clé ne change pas mais le texte si
+  (« Apt 12 » → « Apt 14 »), le texte suit sur les commandes à livrer et la position
+  reste.
+- **« Bat » dans un nom de voie** (« rue du Bateau », « chemin de la Batie », « rue
+  de Batz ») était coupé comme un bâtiment. « Bat » doit maintenant être suivi d'un
+  point ou d'une espace (« Bat B », « Bât. C », « Batiment 2 » restent retirés).
+- **Téléphone d'une commande livrée ailleurs** : « Modifier le profil » renvoie le
+  téléphone à chaque enregistrement et l'écrasait sur la commande EHPAD. Il ne suit
+  plus que si la commande avait le numéro du client (ou aucun), comme la consigne.
+  Le paragraphe « Ce qui est fait » disait « adresse, téléphone, consigne » des
+  commandes LIVRÉES : c'était vrai d'elles seulement.
+- **Import Excel avec Latitude/Longitude** : il écrasait une position placée à la
+  main et ne passait pas `verifierPosition`. Une position manuelle est gardée ; une
+  position du fichier (0,0), inversée ou hors de France est ignorée et comptée
+  (`positionsRefusees` dans la réponse, et dans l'historique).
+- **Lot lancé à la main** : une demande arrivée pendant ce lot était perdue (seul le
+  lot de fond relançait). Il relance aussi.
+- **Stockage JSON** : le calcul de tournée refusait toute commande sans position
+  pour « adresse incomplète ». Il interroge de nouveau la BAN, sans cache ; le lot
+  de fond reste réservé à SQLite.
+- **Focus dans « Adresses à vérifier »** : Annuler, Accepter, Garder et Enregistrer
+  détruisaient le bouton actif et le focus retombait sur `<body>`. Il revient sur
+  « Placer sur la carte » de la même ligne, sinon sur la ligne qui a pris sa place,
+  sinon sur le résumé.
+
+Écarts nommés :
+
+- Le téléphone d'une commande à l'adresse du client, mais qui portait un autre
+  numéro (un proche), ne suit plus un changement du numéro du client : c'est voulu,
+  comme pour la consigne.
+- L'import Excel ne sait toujours pas comparer la position du fichier au départ
+  d'une tournée (aucun dépôt réglé, lot 6) : il la borne à la France métropolitaine.
+- Un client rattaché par la clé secondaire de l'import (nom + code postal, adresse
+  légèrement différente) repart d'une fiche vide côté position, comme avant ce lot :
+  non traité ici.
+- « Bâtiment C, 3 rue de Dole » en tête SANS virgule n'est pas nettoyé (le motif
+  « en ligne » exige une espace avant) : inchangé, la BAN le trouve souvent quand même.
