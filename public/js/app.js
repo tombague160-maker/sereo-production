@@ -1507,6 +1507,10 @@ async function appliquerReponsesTardives() {
   } catch { return; }
   const cles = Object.keys(data);
   if (!cles.length) return;
+  // Integration des lots d'interface (23/09) : des commandes enfin lues ne
+  // sont plus « indisponibles » -- l'echec du repli de 3 s (loadData) avait
+  // pose l'erreur, la reponse tardive l'efface.
+  if (Object.prototype.hasOwnProperty.call(data, "orders")) commandesEnErreur = false;
   appliquerDonnees(data);
   for (const cle of cles) clesEnCopie.delete(cle);
   if (clesEnCopie.size === 0 && /^Données (de|du|en cache)/.test(dernierStatut)) setStatus("À jour");

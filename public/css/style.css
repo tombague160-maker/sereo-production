@@ -14686,3 +14686,19 @@ textarea {
 @media (prefers-color-scheme: dark) {
   :root:not([data-color-scheme="light"]) #statistiques .stat-tile { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 28px rgba(0, 0, 0, 0.3); }
 }
+
+/* ==========================================================================
+   INTEGRATION DES LOTS D'INTERFACE (23/09)
+   --------------------------------------------------------------------------
+   L'anneau clavier pour TOUS les themes. `--focus-ring` n'etait declare que
+   sous :root[data-color-scheme="light"] (deux fois, plus haut) : en sombre,
+   `box-shadow: var(--focus-ring)` devenait une declaration invalide, et les
+   regles qui posent aussi `outline: none` n'avaient plus AUCUN indicateur.
+   Ses deux tons suivent deja le theme (--v8-focus, --v8-focus-halo : 18,46
+   entre eux dans les deux). Les anneaux que les lots ont ecrits en clair
+   (--abo-anneau, Clients au telephone, Ecrans sans planche) ont la meme
+   valeur et restent tels quels. Banc : test/e2e/integration-interface.spec.js.
+   ========================================================================== */
+:root {
+  --focus-ring: 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus);
+}
