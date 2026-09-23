@@ -925,7 +925,7 @@ d'arrêt (`test/e2e/serveur-seme.js`). *Rien n'écrit dans l'application réelle
 | Ligne d'arrêt, mobile | 64–72 px | **184–209 px** | 64 (titre sur une ligne), 75 (sur deux) |
 | Informations par ligne | quatre au plus | 3 à 4, plus deux boutons | quatre, exactement |
 | Marqueur | corps vert, numéro blanc, halo orange | **`circleMarker` rayon 9, quatre couleurs V7, sans numéro** | trois états de la planche + un |
-| Tracé | orange (planche) | `#2b7062` plein / `#2563eb` pointillé | accent 4,5 px / principal pointillé |
+| Tracé | orange (planche) | `#2b7062` plein / `#2563eb` pointillé | accent 4,5 px / principal pointillé — **7 px depuis le 23/09** |
 | Badge d'arrêt « prêt » | **« Prêt »** (§4, statuts d'arrêt) | « Prêt livraison » | « Prêt » |
 
 #### D'où venaient les 120 px de trop
@@ -1022,7 +1022,8 @@ et la planification qui ne se referme pas sous les doigts du livreur.*
 - **Le mot d'état est en principal, pas en orange.** La planche écrit « ARRÊT
   EN COURS » en accent ; la charte l'interdit en texte (2,34:1 sur blanc). Le
   point reste en accent — c'est une forme.
-- **Les boutons gardent 48 / 44.** La planche fait « Livraison validée » à
+- **Les boutons gardent 48 / 44** *(au téléphone, remplacé le 23/09 : « Livré », « Y aller »
+  et leurs deux ronds font 56 — voir « Tournée mobile »)*. La planche fait « Livraison validée » à
   62 px et « Appeler » à 56. La charte dit 48 mobile, 44 desktop, et c'est ce
   que les bancs tiennent depuis le 18/09. Le geste principal se distingue par
   son poids (plein, ombre portée, 17 px), pas par sa hauteur.
@@ -1644,7 +1645,9 @@ planifier la suite, suivant) — ils existent et servent sur la route.
 
 - les flèches de réordonnancement ne s'affichent que sur une tournée **prête**, pas sur
   une tournée qui roule (la planche les montre en livraison) ;
-- les marqueurs de carte gardent 34 / 28 px et le tracé 4,5 px (la planche : 44 et 7) ;
+- ~~les marqueurs de carte gardent 34 / 28 px et le tracé 4,5 px (la planche : 44 et 7)~~ —
+  **remplacé le 23/09** par la décision de Thomas : marqueurs de 44 px, tracé de 7 px (voir
+  « Tournée mobile ») ;
 - pas de distance par arrêt ni de « km restants » : la planche ne dit pas de quoi c'est la
   distance, et rien ne la calcule côté navigateur.
 
@@ -1866,3 +1869,135 @@ l'empreinte ; un dossier absent ne fait pas échouer le démarrage.
    vraie par construction. Le banc mesure maintenant les polices utilisées sur la même page
    dont les `<link rel="preload" as="font">` sont retirés (route Playwright), et exige
    l'égalité des deux ensembles.
+
+### Tournée mobile (planches 4a, 4b, 4c, 4d ; 5c, 11a-11c en sombre), posé le 23/09
+
+**Le cockpit (4b).** Trois gestes sous le pouce, selon la décision de Thomas : une rangée
+Appeler (rond de 56) · **« Y aller »** (56, plein) · Carte (rond de 56) ; **« Livré »** en 56
+pleine largeur ; « Client absent » et « Problème » dessous, à 48, surface basse, sans couleur.
+« Y aller » est l'ancien « Itinéraire » : il ouvrait déjà Google Maps sur
+`https://www.google.com/maps/dir/?api=1&destination=<adresse encodée>` — le libellé change,
+le mécanisme reste. Au bureau, les gestes gardent 44 px (planche 13b).
+
+- **Mesure avant : le geste principal était SOUS la barre basse.** À 390 × 844, « Livraison
+  validée » tombait à y ≈ 740, la barre basse commence à 754. Les gestes collent maintenant
+  au bas de l'écran, au-dessus de la barre (`position: sticky`), tant que la carte de l'arrêt
+  est à l'écran. Il a fallu `overflow-x: clip` au lieu de `hidden` sur `<body>` et `<main>`
+  (sur cet écran seul) : `hidden` en fait des conteneurs de défilement, et le collage se
+  faisait au bas de la page entière, jamais à celui de l'écran.
+- **« Autres actions »** (À reprogrammer, Planifier suite, Suivant) sort du bloc des gestes :
+  gardée, repliée, sous la carte de l'arrêt — elle n'a pas à coller au pouce.
+- **« Prochain : <client> · ville »** sous les articles. **Omis** : « 6,2 km · environ
+  14 min » — aucune distance par arrêt n'est calculée, ni au serveur ni au navigateur.
+
+**Après « Livré » : sans confirmation, avec Annuler.** L'arrêt passe à « Livré » à l'écran,
+la tournée avance d'elle-même à l'arrêt suivant non terminé, et un toast « Livré — <client> »
+porte **Annuler** pendant 4 s (la durée de la charte). **Décision** : le serveur ne sait pas
+défaire une livraison — dans la machine d'état des commandes, `livre` n'a aucune sortie, et la
+livraison consomme la réservation de stock. Plutôt que d'ouvrir une transition
+`livre → en_livraison` (et de défaire une consommation de stock), **l'envoi est différé** :
+le `PATCH` part au terme des 4 s. Annuler n'a donc rien à défaire côté serveur. L'envoi part
+plus tôt si un autre geste d'arrêt suit (jamais deux livraisons en suspens), ou si la page
+passe en arrière-plan (téléphone verrouillé, Google Maps ouvert) — `keepalive` pour
+`pagehide`. Hors ligne, l'écriture rejoint la file existante. Un double appui dans les
+700 ms est ignoré : sans cela il livrait deux arrêts. **Risque nommé** : si le navigateur
+est tué dans les 4 s sans passer par `visibilitychange`/`pagehide`, la livraison n'est pas
+envoyée ; l'arrêt reste « En livraison » au rechargement, visible, à refaire.
+
+**« Problème » : motifs prédéfinis + précision libre — tranché, et c'était déjà là.** La
+question ouverte de la planche (« sheet à motifs prédéfinis ou champ libre ? ») est tranchée
+par ce qui existe depuis le 18/09 : le dialogue `#motifProblemeDialog` propose les motifs du
+serveur (`MOTIFS_PROBLEME` : personne sur place, adresse introuvable, accès impossible
+— portail, code, étage —, établissement fermé, commande refusée, produit manquant ou abîmé,
+autre) **et** un champ « Précision » libre de 120 caractères, stocké avec le motif. Les trois
+motifs de la planche (portail fermé, refus, erreur d'adresse) y sont. Rien n'est ajouté.
+
+**La carte (4c).** Décision de Thomas, qui **remplace** celle du 19/09 : marqueurs de
+**44 px** (la zone de toucher est le disque ; chiffre 17 px, ombre portée de la planche) et
+tracé de **7 px**. **Décision** : un **liseré blanc** de 2 px de chaque côté, sous le tracé,
+non interactif — sur les vraies tuiles OpenStreetMap, dont les routes sont orange et jaunes,
+l'orange seul se perdait ; la planche le craignait elle-même (« le fond de carte ici est une
+esquisse »). Les marqueurs de la **liste** gardent 28 / 34 : la ligne tient 64–72 px.
+**Gardé** : réordonner invalide le tracé (le serveur efface la géométrie ; la carte dessine le
+pointillé en principal). Nouveau : « Recalculer le tracé » est alors **cerclé d'accent** (un
+contour, pas une ombre — l'anneau de focus reste visible avec). **Écarts** : la carte n'est
+pas un mode plein écran à « sheet » en surimpression ; le bouton Carte du cockpit y fait
+défiler. Pas de puce « 18 km restants » : le reste n'est calculé nulle part.
+
+**Préparer (4a).** Au téléphone, la commande prête se lit comme la planche : le client, puis
+« CMD-2026-009 · 2 articles » (articles = lignes, le même mot que « n articles à décharger »).
+L'adresse, le téléphone et le badge quittent la ligne ; l'avertissement d'adresse
+incomplète reste. Le jour et le secteur restent, dessous (corrigé par la revue du 23/09, voir
+plus bas). **Gardés hors planche** : les filtres date / secteur / ville et les trois
+boutons de sélection. **Omis** : « 38 km · 1 h 25 » recalculés à chaque coche (aucun calcul
+avant la création de la tournée), les pilules de secteur de la planche (le filtre « Secteur »
+existe), et le pied collant « n arrêts sélectionnés · Créer la tournée » (le compte et le
+bouton existent dans la planification) — non faits dans ce lot.
+
+**Fin de tournée (4d).** « Tournée terminée », la phrase « Tournée <secteur> du <jour>, de
+13 h 40 à 17 h 05 » (heures depuis `startedAt` / `completedAt`, omises si l'une manque), les
+**trois chiffres** (Livrés, Clients absents, Problèmes — `a_reprogrammer` compté en
+problème), les **problèmes nommés** (client + motif enregistré), l'arrivée et son « Y aller ».
+Pas de fête. **Omis** : « 62 km parcourus » (la distance connue est celle du tracé prévu, pas
+celle roulée) et « 3 h 25 sur la route » en chiffre séparé (l'intervalle est dans la phrase) ;
+**« Clôturer »** — aucune clôture n'existe côté serveur, la tournée passe `terminee` d'elle-même
+au dernier arrêt ; **« Reprogrammer »** sur l'écran de fin (« Planifier suite » existe sur
+l'arrêt). Gardés : « Retour accueil », « Voir à recommander ».
+
+**Écarts nommés.**
+
+- **La barre basse reste** sur le cockpit et la carte. La planche la retire (« la barre
+  basse cède la place aux trois gestes », « retour par la flèche ») ; le cadre commun du lot 1
+  la tient sur tous les écrans, et aucune flèche de retour n'existe. Les gestes collent
+  au-dessus d'elle.
+- **Le bouton de droite est la carte, pas les articles.** L'annotation dit « articles à
+  droite », le dessin montre une carte pliée ; les articles sont déjà sur la carte de l'arrêt.
+- **Les ronds font 56** (48 sur la planche), pour tenir la rangée de « Y aller » à 56.
+- **L'en-tête de tournée** ne garde au téléphone que l'anneau et la barre : le jour et le nom
+  sont déjà le titre de l'en-tête vert (même donnée, deux fois).
+- **Le toast couvre la rangée « Client absent / Problème »** pendant ses 4 s : il se pose
+  au-dessus de la barre basse, et Annuler tombe sous le pouce.
+
+*Bancs : `tournee-mobile.spec.js` (9 cas, ports 3175 et 3181) ; `ecran-livreur.spec.js` et
+`carte-et-lignes.spec.js` mis à jour (libellés et 56 px ; 44 px, 7 px et liseré) ;
+`operations.spec.js` attend l'envoi différé (10 s au lieu de 5).*
+
+### Tournée mobile — revue adverse, corrigée le 23/09
+
+Une relecture adverse du lot a nommé cinq défauts. Les cinq sont vrais ; les cinq sont
+corrigés, chacun avec un banc qui échoue sans le correctif.
+
+- **« Livré » en réseau lent livrait un arrêt jamais vu.** L'envoi d'une livraison en
+  suspens attendait le `PATCH` et le rechargement sans rien bloquer : un appui impatient
+  posait B en suspens, l'appui précédent reprenait, lisait l'arrêt de l'écran (devenu C)
+  et écrasait B ; au terme du toast de B, c'est C qui partait. **Décision** : le geste vise
+  l'arrêt de l'écran **à l'appui** ; après l'attente, il n'agit que si cet arrêt est encore
+  à l'écran et qu'aucune autre livraison n'est en suspens. Pendant l'attente, les gestes
+  d'arrêt sont **désactivés** (le livreur voit que l'appui est pris). Le terme d'un toast
+  n'envoie que **sa** livraison. Le garde de 700 ms du double appui reste.
+- **Hors ligne, le geste qui suivait un « Livré » était perdu sous « enregistré ».** La mise
+  en file de la livraison en suspens arrêtait le geste suivant (Livré, Client absent,
+  Problème). **Décision** : une mise en file n'est pas un échec — elle est annoncée, et le
+  geste continue ; il rejoint la file à son tour. Un refus du serveur, lui, arrête toujours
+  le geste (l'écran vient d'être rechargé).
+- **Préparer (4a) : la ligne ne disait plus le jour.** Le filtre par défaut mélange les dates
+  et les secteurs, et la carte n'a **aucun détail** (une case à cocher) : deux commandes du
+  même EHPAD, aujourd'hui et demain, se lisaient pareil. **Décision** : sous « CMD-… · n
+  articles », une ligne de contexte, 13 px, texte secondaire : le **jour** et le **secteur**
+  toujours, la **priorité** si elle n'est pas la normale, « **À reprogrammer** » (le seul
+  statut qui n'est pas « Prêt »). **Écart nommé** : la planche n'a pas cette ligne — son
+  en-tête dit le jour, et ses pilules de secteur, non posées, disaient le secteur.
+- **« Recalculer le tracé » cerclé sur une tournée partie.** Le serveur refuse le recalcul
+  dès le départ (« Recalcule avant le départ. ») : le cercle invitait à un refus. Il ne se
+  pose plus que sur une tournée **prête** sans tracé — le cas de la planche (réordonner
+  n'est possible qu'avant le départ).
+- **Fin de tournée (4d) : les gestes d'arrêt restaient collés.** Six boutons inertes, ~200 px
+  au-dessus de la barre basse, sur la lecture des chiffres. Au téléphone, ils disparaissent
+  quand l'écran de fin est rendu ; « Retour accueil » et « Voir à recommander » restent.
+  **Gardé** : au bureau (ils n'y collent pas), les gestes désactivés restent visibles, comme
+  avant ce lot.
+
+*Bancs : `tournee-mobile.spec.js`, 12 cas (ports 3175 et 3181, inchangés) — deux neufs
+(réseau lent : `PATCH` retardé de 2,5 s ; hors ligne : la file indexedDB réelle, puis le
+rejeu), trois renforcés (4a : le jour et deux commandes du même client ; 4c : une tournée
+« prête » lue par interception, et la tournée partie ; 4d : les gestes masqués).*

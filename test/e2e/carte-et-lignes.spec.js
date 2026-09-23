@@ -177,9 +177,12 @@ test("charte §4 — les MARQUEURS : coche, numero blanc + halo orange, numero s
       };
     });
     const trace = document.querySelector("#map path.leaflet-interactive");
+    const chemins = [...document.querySelectorAll("#map .leaflet-overlay-pane path")];
+    const lis = chemins.find(c => (c.getAttribute("stroke") || "").toUpperCase() === "#FFFFFF");
     return {
       tokens: { principal: token("--v8-principal"), accent: token("--v8-accent"), surface: token("--v8-surface"), surPrincipal: token("--v8-texte-sur-principal"), pecheClaire: token("--v8-peche-claire") },
       marqueurs,
+      lisere: lis ? { stroke: lis.getAttribute("stroke").toUpperCase(), largeur: lis.getAttribute("stroke-width"), avant: chemins.indexOf(lis) < chemins.indexOf(trace) } : null,
       trace: trace ? { stroke: (trace.getAttribute("stroke") || "").toUpperCase(), largeur: trace.getAttribute("stroke-width"), pointille: trace.getAttribute("stroke-dasharray") } : null
     };
   });
@@ -205,7 +208,9 @@ test("charte §4 — les MARQUEURS : coche, numero blanc + halo orange, numero s
   expect(enCours.texte).toBe("3");
   expect(hex(enCours.fond)).toBe(tokens.principal);
   expect(hex(enCours.couleur)).toBe(tokens.surPrincipal);
-  expect(enCours.diametre).toBe(34);
+  // Decision de Thomas du 23/09 (planche 4c) : 44 px, la zone de toucher.
+  // Elle remplace les 34 / 28 px du 19/09.
+  expect(enCours.diametre).toBe(44);
   // La premiere couche de l'ombre est l'anneau ; hex() lit la premiere couleur.
   expect(hex(enCours.ombre), `l'anneau de l'arret en cours n'est pas en accent : ${enCours.ombre}`).toBe(tokens.accent);
   expect(contraste(rgb(enCours.couleur), rgb(enCours.fond)), "numero sur le disque : contraste").toBeGreaterThanOrEqual(4.5);
@@ -217,7 +222,7 @@ test("charte §4 — les MARQUEURS : coche, numero blanc + halo orange, numero s
     expect(hex(m.fond)).toBe(tokens.surface);
     expect(hex(m.couleur)).toBe(tokens.principal);
     expect(m.ombre.includes("inset") && hex(m.ombre) === tokens.principal, `contour « a venir » : ${m.ombre}`).toBe(true);
-    expect(m.diametre).toBe(28);
+    expect(m.diametre).toBe(44);
     expect(contraste(rgb(m.couleur), rgb(m.fond))).toBeGreaterThanOrEqual(4.5);
   }
   expect(aVenir.map(m => m.texte)).toEqual(["5", "6"]);
@@ -228,11 +233,17 @@ test("charte §4 — les MARQUEURS : coche, numero blanc + halo orange, numero s
   expect(hex(echec.fond)).toBe(tokens.pecheClaire);
   expect(echec.exclamation).toBe('"!"');
 
-  // LE TRACE : accent, 4,5 px, plein.
+  // LE TRACE : accent, 7 px, plein (decision du 23/09 ; 4,5 px avant).
   expect(r.trace, "aucun trace").toBeTruthy();
   expect(r.trace.stroke).toBe(tokens.accent);
-  expect(parseFloat(r.trace.largeur)).toBeCloseTo(4.5, 1);
+  expect(parseFloat(r.trace.largeur)).toBeCloseTo(7, 1);
   expect(r.trace.pointille).toBeNull();
+  // Et son lisere blanc, dessous, plus large : l'orange seul se perd sur les
+  // routes orange des tuiles reelles. Non interactif -- le clic reste au trace.
+  expect(r.lisere, "aucun lisere sous le trace").toBeTruthy();
+  expect(r.lisere.stroke).toBe("#FFFFFF");
+  expect(parseFloat(r.lisere.largeur)).toBeGreaterThan(parseFloat(r.trace.largeur));
+  expect(r.lisere.avant, "le lisere doit etre peint AVANT (sous) le trace").toBe(true);
 
   await ctx.close();
 });
