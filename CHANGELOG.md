@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.40.1](https://github.com/tombague160-maker/sereo-production/compare/v1.40.0...v1.40.1) (2026-09-23)
+
+
+### 🐛 Corrections de bugs
+
+* **deps:** npm audit fix — multer 2.4, express 4.22.3, fflate 0.8.3, xmldom 0.9.12, body-parser, qs (0 vulnérabilité) ([68c198b](https://github.com/tombague160-maker/sereo-production/commit/68c198bec402dfd5260bddd65ac15f2a26a49fca))
+* **deps:** npm audit fix, 0 vulnérabilité ([#161](https://github.com/tombague160-maker/sereo-production/issues/161)) ([fbd9516](https://github.com/tombague160-maker/sereo-production/commit/fbd9516a3262da55a418b9545315360d8d9dd2df))
+
 ## [1.40.0](https://github.com/tombague160-maker/sereo-production/compare/v1.39.0...v1.40.0) (2026-09-23)
 
 
