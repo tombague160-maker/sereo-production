@@ -14985,3 +14985,16 @@ textarea {
 html[data-ouverte-hors-ligne] .content > .page:not(#livreur) { display: none !important; }
 .ecran-demande-reseau { margin: 0 0 16px; }
 .ecran-demande-reseau[hidden] { display: none !important; }
+
+/* ==========================================================================
+   LIVRE EN RETARD SUR UN STOCK A ZERO (decision de Thomas, 23/09)
+   --------------------------------------------------------------------------
+   Un « Livre » arrive en retard est accepte meme quand le rayon n'en a plus
+   assez : le rayon passe en negatif. La ligne du Stock le dit en toutes
+   lettres, dans la couleur d'alerte de la charte (mesure sur la ligne :
+   5,85:1 au clair, 5,23:1 au sombre). Ce n'est pas un bouton : aucune cible.
+   ========================================================================== */
+/* Sur sa propre ligne : le nom du produit est coupe par une ellipse au
+   bureau, et le badge a sa suite disparaissait avec lui. */
+.stk-nom .stk-negatif { display: block; font-size: 12.5px; font-weight: 600; color: var(--v8-alerte); overflow: hidden; text-overflow: ellipsis; }
+.stk-negatif[hidden] { display: none !important; }

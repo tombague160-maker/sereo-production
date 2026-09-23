@@ -4512,7 +4512,9 @@ Relus sur `f063247`, chacun vérifié sur le code avant d'y toucher.
   Si le rayon n'en a plus assez, le geste est **refusé en le disant** (409) : le stock ne
   passe jamais sous zéro en silence, la commande reste à reprogrammer. Rouge sur
   l'ancien code : `actual: { rayon: 24, reserve: 16 }`, attendu `{ rayon: 20, reserve: 16 }` ;
-  le refus : `actual: 200, expected: 409`.
+  le refus : `actual: 200, expected: 409`. **Le refus est remplacé le 23/09** (décision
+  de Thomas, section « Livré en retard sur un stock à zéro », en fin de fichier) : le
+  geste est accepté, le rayon passe en négatif, et c'est signalé.
 - **Important, vrai : rouvert, l'écran ne montrait jamais une tournée finie.**
   `choisirTourneeAffichee` ne prenait que les tournées non soldées : la seule tournée du
   jour, terminée, donnait « Aucune tournée créée. » après un rechargement, et le
@@ -4547,11 +4549,13 @@ Ce qui reste après la relecture :
 
 - Le dialogue du **motif** (« Client absent », « Problème », lot 1) a la même forme :
   Entrée dans la précision ferme sans enregistrer. Hors de cette relecture, non touché.
-- `corrigerArret` refuse toujours « Livré » sur une commande dont le stock a été libéré
+- ~~`corrigerArret` refuse toujours « Livré » sur une commande dont le stock a été libéré
   (choix du lot) ; le geste en retard, lui, reprend le stock. Aligner les deux est une
-  décision.
-- Un « Livré » en retard refusé faute de stock n'a aujourd'hui aucun chemin pour être
-  enregistré (`corrigerArret` le refuse aussi) : la commande reste à reprogrammer. À décider.
+  décision.~~ **Fermé le 23/09** (décision de Thomas) : les deux reprennent le stock.
+- ~~Un « Livré » en retard refusé faute de stock n'a aujourd'hui aucun chemin pour être
+  enregistré (`corrigerArret` le refuse aussi) : la commande reste à reprogrammer. À décider.~~
+  **Fermé le 23/09** (décision de Thomas) : il est accepté, le rayon passe en négatif et
+  c'est signalé. Voir « Livré en retard sur un stock à zéro », en fin de fichier.
 
 ## Lot 6 de l audit géo : pratique au quotidien (23/09)
 
@@ -4879,7 +4883,8 @@ rouvre sans réseau — onglet fermé, téléphone redémarré. Branche
 - **La session ne glisse pas** : elle finit 12 h après la connexion. Un livreur
   connecté la veille au soir ne rouvre pas sa tournée hors ligne le matin — le
   serveur l'aurait refusé de toute façon. Allonger la session est une décision de
-  sécurité, hors de ce lot.
+  sécurité, hors de ce lot. **Tranché le 23/09** : Thomas garde 12 h (« Session de
+  12 h gardée », en fin de fichier).
 - **Une session qui expire pendant que la page rouverte est affichée** : la page ne
   se referme pas d'elle-même ; seule la réouverture suivante est refusée.
 - **Un compte désactivé, ou une session invalidée côté serveur**, pendant que le
@@ -4889,7 +4894,9 @@ rouvre sans réseau — onglet fermé, téléphone redémarré. Branche
   lecture), le refus arrive : page de connexion ou 401, et le cache de données part.
   Fermer cet écart demanderait de ne rien rouvrir hors ligne — contraire à la
   décision 4 ; raccourcir la fenêtre, c'est raccourcir la session (décision de
-  sécurité, hors de ce lot).
+  sécurité, hors de ce lot). **Tranché le 23/09 par Thomas (défaut validé)** : la
+  session de 12 h est gardée, et cet écart est accepté comme le prix de la
+  décision 4. Voir « Session de 12 h gardée », en fin de fichier.
 - **Safari et l'ancre** : non mesuré (aucun banc WebKit). Le bouton « Ouvrir la
   tournée » passe par `?ecran=livreur`, que le service worker reconnaît sans l'ancre ;
   un favori `/#livreur` sur iPhone, lui, reste non vérifié.
@@ -4988,8 +4995,9 @@ interface-finitions, abonnements-mobile, clients-mobile : 45/45.
 
 - Vérifier sur un vrai téléphone (Android Chrome, iPhone Safari) : icône de l'écran
   d'accueil hors ligne, puis « Ouvrir la tournée » ; redémarrage du téléphone.
-- La durée de session (12 h, sans glissement) décide de ce qui se rouvre le matin :
-  à trancher si les tournées commencent loin de la connexion.
+- ~~La durée de session (12 h, sans glissement) décide de ce qui se rouvre le matin :
+  à trancher si les tournées commencent loin de la connexion.~~ **Fermé le 23/09** :
+  Thomas garde la session de 12 h (« Session de 12 h gardée », en fin de fichier).
 - Relecture adverse de ce lot.
 
 ## Calcul routier OSRM intégré à l image Séréo (23/09)
@@ -5381,3 +5389,200 @@ et l'image OSRM, absents avant ; `node:24-alpine`, présente avant, gardée).
 - Les écarts nommés par chaque lot restent les leurs.
 - Le crochet « hawkscan » proposé après chaque commit n'a pas été lancé (aucune clé
   `HAWK_API_KEY`, aucune application exposée pour lui).
+
+## 23/09 — Livré en retard sur un stock à zéro (décision de Thomas)
+
+Décision de Thomas (défaut validé) : un « Livré » qui arrive **en retard** et qui
+serait refusé parce que le stock a été libéré puis repris entre-temps est
+**accepté** : la livraison a physiquement eu lieu. Le stock peut alors passer en
+négatif ; ce négatif est **signalé**, jamais caché ni corrigé en silence. Branche
+`fix/livre-en-retard-stock`, partie de `main` 1.43.0 (`67c382e`).
+
+### Les chemins de refus trouvés, et ce qu'ils deviennent
+
+Le stock en rayon est déduit à la **préparation** (`reserveStockForOrder`) ; la
+livraison ne fait que consommer la réservation (`setOrderStatus`). Un « Livré » ne
+touche donc au rayon que si la réservation a été **libérée à la main** entre-temps
+(`POST /api/orders/:id/release-stock`, admis seulement sur « à reprogrammer » et
+« problème de livraison »). Deux chemins y menaient en refusant (un troisième, et
+deux voisins, n'y menaient qu'en silence : voir « Relecture adverse » plus bas) :
+
+1. **Le geste de la file, arrivé après la clôture** (`updateRouteStop` →
+   `gesteArriveApresCloture` → `reprendreStockLibere`) : refusé (409, « le rayon n'en
+   a plus assez ») si le rayon ne couvrait plus la commande.
+2. **« Corriger le statut » vers « Livré »** (`corrigerArret`) : refusé (409, « le stock
+   a été libéré ») **toujours**, même avec un rayon plein.
+
+Les deux passent désormais par `reprendreStockLibere(db, commande, origine)` :
+
+- rayon suffisant : la réservation est reprise (le rayon est déduit de nouveau) puis
+  consommée ; historique « Stock deduit » (comme avant pour la file ; nouveau pour la
+  correction) ;
+- rayon insuffisant : chaque ligne suivie est déduite quand même, **le rayon passe en
+  négatif** (écriture directe : `setStockQuantity` ramène à zéro), et l'historique
+  reçoit une entrée « Stock » : « Livraison acceptée sur stock insuffisant : commande
+  CMD-… (client) (geste arrivé après la clôture | correction du statut | livrée en
+  tournée | écran Commandes | livraison du client) — Alèses : 2 en rayon pour 4 livrés,
+  stock à -2 ». Un produit absent du stock, ou sans quantité, n'est pas déduit et y est
+  nommé (« absent du stock, rien déduit ») ; si **aucun** rayon ne passe en négatif,
+  l'entrée dit « Livraison acceptée sur un stock non suivi », pas « insuffisant ». Ces
+  lignes non déduites sont gardées sur la commande (`stockNonDeduit`) : la libération
+  ne les rend jamais au rayon.
+
+Ce qui ne change pas :
+
+- **Le « Livré » en temps réel d'une commande réservée** (tournée en cours) ne consulte
+  pas le rayon : la réservation a été prise à la préparation, la livraison la consomme.
+  Il n'a jamais été refusé faute de stock ; c'est volontaire (revue R1 du chantier 1 :
+  le stock est déduit une fois, à la préparation). Banc témoin : rayon à zéro, « Livré »
+  accepté, rayon inchangé, aucune alerte. Celui d'une commande dont le stock a été
+  **libéré** reprend désormais la réservation : voir « Relecture adverse ».
+- **L'idempotence** (lot 1) : le même geste rejoué avec sa clé `X-Sereo-Geste` rend
+  la première réponse sans rien réappliquer ; sans clé, l'arrêt n'est plus « supposé »
+  par la clôture et le geste est refusé (409) — le stock n'est déduit qu'une fois. La
+  même correction renvoyée est refusée (« déjà Livré », 400).
+- **La réservation** : défaire la livraison (correction vers « Absent ») redonne la
+  réservation sans toucher au rayon ; la refaire la consomme. Le rayon négatif ne
+  bouge pas pendant l'aller-retour.
+- `POST /api/livraison` (hérité, plus appelé par aucun écran) ne refuse toujours rien
+  faute de stock ; il reprend seulement une réservation libérée (relecture adverse).
+- Aucune saisie ne produit un négatif : `PATCH /api/stock/:id` refuse une quantité
+  négative, les imports ramènent à zéro. Saisir la quantité comptée **régularise** le
+  négatif (mouvement de stock journalisé comme toute saisie).
+
+### Le négatif se voit
+
+- **Stock** : la ligne du produit porte « Stock négatif · à recompter » (couleur
+  d'alerte, sur sa propre ligne sous le nom : en ligne, l'ellipse du nom la coupait) ;
+  le nom accessible du champ dit « négatif, à recompter ». Contraste mesuré : 5,85:1
+  (clair), 5,23:1 (sombre). Le produit reste « Rupture » pour les filtres, la pastille
+  et « À recommander ».
+- **Les boutons −/+** ne ramènent plus un stock négatif à zéro : `Math.max(0, …)`
+  faisait de « −1 » sur −2 un **ajout** de deux unités. Ils n'écrivent rien et
+  disent : « Stock négatif (-2) : recompte le rayon et saisis la quantité comptée. »
+- **Tableau de bord, « À régler »** : une ligne « N produit(s) en stock négatif »,
+  détail « Livré sur stock insuffisant, à recompter : Alèses (-2) », vers le Stock ;
+  placée avant les ruptures, et ces produits ne sont plus comptés une seconde fois
+  dans « en rupture ».
+- **Historique** : l'entrée ci-dessus, une par livraison acceptée.
+
+### Bancs, et le rouge de chacun
+
+`test/livre-en-retard-stock.test.js` (serveur semé, SQLite), 6 cas ; sur `67c382e`
+(bancs écrits avant le code) :
+
+| Cas | Rouge sur l'ancien code |
+|---|---|
+| file, rayon à 2 pour 4 : accepté, rayon -2, journalisé | `actual: 409, expected: 200` (« le rayon n'en a plus assez ») |
+| file, même geste rejoué avec sa clé, puis sans clé : une seule déduction | `actual: 409, expected: 200` |
+| file, un produit absent du stock : accepté, nommé | `actual: 409, expected: 200` |
+| correction, rayon suffisant : accepté, rayon déduit de nouveau | `actual: 409, expected: 200` (« le stock a été libéré ») |
+| correction, rayon à 0 : -4, journalisé ; renvoi 400 ; aller-retour Absent/Livré | `actual: 409, expected: 200` |
+| témoin : « Livré » en temps réel, rayon à 0 | vert avant et après (comportement gardé) |
+
+Mutant (par copie, restauré par copie) : l'écriture directe remplacée par
+`setStockQuantity` (le négatif ramené à zéro en silence) → 3 rouges,
+`actual: { rayon: 0, reserve: 4 }`, attendu `{ rayon: -2, reserve: 4 }`.
+
+`test/tournees-debloquees.test.js` : le cas « le même Livré en retard, quand le rayon
+n'a plus de quoi : refusé » affirmait l'ancien refus ; il est retiré (un commentaire
+renvoie au nouveau banc).
+
+`test/e2e/stock-negatif.spec.js` (serveur semé, port **3352**), 6 cas ; front de
+`67c382e` copié, chaque cas lancé seul :
+
+| Cas | Rouge |
+|---|---|
+| Stock, clair/sombre, 1440/390 : badge visible, entier, ≥ 4,5:1 ; témoin à 0 sans badge | `expect(locator).toBeVisible()` : `element(s) not found` |
+| « À régler » : sa ligne, avant les ruptures, pas comptée deux fois | `Expected: 1, Received: 0` |
+| −/+ sur un négatif n'écrivent rien ; témoin positif écrit | sans la garde seule : « « − » a ecrit le stock », 1 écriture reçue |
+| règle `display: block` du badge retirée seule | « le badge est coupe », `Expected: false, Received: true` |
+
+Le contrôle « entier » mesurait d'abord `scrollWidth > clientWidth` : sur un badge en
+ligne, les deux valent 0, et le mutant sans `display: block` passait (vert). Il mesure
+désormais les boîtes (le badge dans celle du nom) ; le mutant rougit.
+
+**Exécutions** (arbre final) : `npm run check` ; `npm test` 661/661 ; e2e stock-negatif,
+stock, stock-a-plat, stock-categories, tableau-de-bord, tableau-de-bord-relecture,
+operations, tournees-debloquees : 69/69 ; tabs, livreur-ne-perd-rien : 15/15.
+
+### Écarts nommés
+
+- Le téléphone du livreur n'affiche rien de particulier quand sa livraison en file est
+  acceptée sur un stock insuffisant : le signal est au Stock, dans « À régler » et à
+  l'historique, là où le bureau recompte.
+- Un produit « à renseigner » (quantité inconnue) n'est pas déduit : le rendre négatif
+  inventerait une quantité. Il est nommé dans l'historique, et la libération ne le rend
+  pas (`stockNonDeduit`).
+- Entre « défaire la livraison » et la libération, la ligne non déduite compte encore
+  dans la **réserve** affichée du produit (mesuré : Draps « à renseigner », réservé 3) :
+  `calculateReservedStock` compte toutes les lignes d'une commande réservée. Affichage
+  seul ; le rayon est juste. Non corrigé.
+- Le négatif n'a pas de filtre propre au Stock (il est dans « Rupture ») ; à plat, il
+  vient en tête par l'ordre « du plus bas au plus haut » de l'écran.
+
+### Relecture adverse (23/09) : trois défauts, leur sort
+
+Relecture adverse de `fix/livre-en-retard-stock` à `19dec82`. Les trois sont vrais,
+et corrigés.
+
+1. **Important — un troisième chemin, silencieux.** Une commande « Absent » dont le
+   bureau libère le stock reste « à reprogrammer », donc livrable : remise dans une
+   nouvelle tournée (`createRoute` et `startRoute` ne réservent rien), son « Livré » en
+   temps réel la sortait **sans rien déduire** (rayon 14 au lieu de 10, raison
+   `manual_release`), sans rien journaliser — déjà vrai sur `67c382e`. La section
+   ci-dessus disait « deux chemins » et « volontaire » : c'était faux. Même défaut,
+   même classe, sur deux voisins : `PATCH /api/orders/:id` (« en livraison » puis
+   « livré », hors tournée) et `POST /api/livraison`. Les trois appellent désormais
+   `reprendreStockLibere` (origine « livrée en tournée », « écran Commandes »,
+   « livraison du client ») ; `updateRouteStop` l'appelle pour tout « Livré », plus
+   seulement en retard. Une commande réservée n'est pas concernée (retour immédiat).
+2. **Mineur — la libération inventait une quantité.** Sur le chemin « rayon
+   insuffisant », la commande était marquée réservée pour toutes ses lignes, même
+   celles qu'il n'avait pas déduites ; défaire la livraison puis libérer ajoutait
+   `(null ?? 0) + 3` au produit « à renseigner » (et 3 à un produit réimporté
+   entre-temps). Les lignes non déduites sont gardées (`stockNonDeduit`, préservé par
+   `normalizeOrder`), sautées par `releaseOrderStockReservation`, effacées par la
+   libération et par toute réservation complète (`reserveStockForOrder`).
+3. **Mineur — « stock insuffisant » sans manque.** Une ligne inconnue suffit à rendre
+   `canPrepare` faux : l'entrée disait « insuffisant » alors que le rayon couvrait tout.
+   Elle dit désormais « Livraison acceptée sur un stock non suivi » quand aucun rayon ne
+   passe en négatif. Le banc qui figeait l'ancien texte semait une commande réservée
+   avec un produit absent du stock, état que l'API ne produit pas (`reserveStockForOrder`
+   exige toutes les lignes connues) : il sème désormais la réservation avec le produit
+   présent, puis le retire du stock après la libération.
+
+Bancs (`test/livre-en-retard-stock.test.js`, désormais 13 cas), rouges sur `19dec82` :
+
+| Cas | Rouge sur `19dec82` |
+|---|---|
+| temps réel, nouvelle tournée, rayon suffisant : rayon déduit, « Stock deduit » | `actual: 'manual_release', expected: 'consumed_by_delivery'` |
+| temps réel, rayon à 1 : -3, journalisé | `actual: 1, expected: -3` |
+| écran Commandes, « en livraison » puis « livré » | `actual: { rayon: 14, reserve: 4 }`, attendu `{ rayon: 10, reserve: 4 }` |
+| `POST /api/livraison` « livrée » | `actual: { rayon: 14, reserve: 4 }`, attendu `{ rayon: 10, reserve: 4 }` |
+| aller-retour, Draps « à renseigner » : la libération ne leur rend rien | `actual: 3, expected: null` |
+| aller-retour, Draps retirés puis réimportés à 5 | `actual: 8, expected: 5` |
+| produit retiré après la libération : pas « insuffisant », « non suivi » nommé | `actual: 1, expected: 0` |
+| témoin : une libération ordinaire rend chaque ligne | vert avant et après |
+
+Mutants (par copie, restaurés par copie), chacun tué par son banc et lui seul :
+`retard &&` remis dans `updateRouteStop` → les 2 cas « temps réel » ; l'appel de l'écran
+Commandes retiré → son cas ; celui de `/api/livraison` retiré → son cas ; le saut des
+lignes non déduites retiré → les 2 « aller-retour » ; `stockNonDeduit` perdu par
+`normalizeOrder` → les 2 mêmes ; le titre toujours « insuffisant » → le cas « non suivi ».
+
+**Exécutions** (arbre final) : `npm run check` ; `npm test` 668/668 ; e2e stock-negatif,
+tournees-debloquees, livreur-ne-perd-rien, tournee-hors-ligne, stock, tournee, operations :
+73/73.
+
+## 23/09 — Session de 12 h gardée (décision de Thomas)
+
+Question ouverte par la décision 4 (« L écran Tournée se rouvre sans réseau ») :
+**tranchée par Thomas, défaut validé**. La session reste de **12 h, sans glissement**
+(`AUTH_COOKIE_MAX_AGE_SECONDS = 12 * 60 * 60`, inchangé). Conséquence acceptée : un
+compte désactivé, ou une session invalidée côté serveur, peut rouvrir l'écran Tournée
+**hors ligne** jusqu'à la fin de sa session de 12 h (émission du cookie + 12 h), avec
+les noms, adresses et téléphones de la tournée ; au premier contact avec le serveur, le
+refus arrive et le cache de données part. C'est le prix de la décision 4 : fermer
+l'écart demanderait de ne rien rouvrir hors ligne. Aucun code de session n'a changé ;
+les écarts de la section de la décision 4 renvoient ici.
