@@ -186,6 +186,17 @@ test("12 — la page ne remonte pas toute seule si on a défilé pendant le char
     await new Promise(r => setTimeout(r, 3000));
     route.fallback().catch(() => { /* page fermee */ });
   });
+  // Integration avec la vague geo (23/09) : l'adresse des tuiles vient
+  // desormais du serveur (/api/carte/fond, chargerFondDeCarte). Elle est
+  // demandee APRES les scripts, et `load` tombe avant la premiere tuile
+  // (sonde : `load` a 150 ms, la tuile demandee a 160 ms) : plus aucune tuile
+  // ne le retient, et le prealable ci-dessous tombait (`load` passe a 800 ms).
+  // Une ressource du document le retient a leur place : le logo de la barre,
+  // une image du HTML, servi avec la meme lenteur.
+  await page.route("**/brand/sereo-logo.svg*", async route => {
+    await new Promise(r => setTimeout(r, 3000));
+    route.fallback().catch(() => { /* page fermee */ });
+  });
   await page.goto(srv.base + "/#journee", { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(800);
   const charge = await page.evaluate(() => document.readyState);
