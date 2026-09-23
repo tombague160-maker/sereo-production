@@ -6,8 +6,8 @@
 // l'arret, la commande et le client modifies : l'ecran se met a jour avec.
 //
 // Ce banc compte les requetes de lecture parties APRES la reponse du geste, et
-// verifie que l'ecran dit quand meme la verite (l'arret livre, la commande
-// livree dans l'etat de la page).
+// verifie que l'ecran dit quand meme la verite. Chaque test vise l'arret que
+// l'ecran montre : lance seul (--grep), il tient aussi.
 const { test, expect } = require("./tuiles");
 const { demarrer, jeuDeDonnees, AUJOURDHUI } = require("./serveur-seme");
 
@@ -16,11 +16,18 @@ const MOBILE = { width: 390, height: 844 };
 test.describe.configure({ mode: "serial" });
 
 // Le seme par defaut, plus 20 tournees terminees avec leur trace : l'historique
-// que la liste ne doit plus transporter.
-function semeAvecHistorique() {
+// que la liste ne doit plus transporter. La tournee du jour a son trace.
+function semeAvecHistorique({ presqueFinie = false } = {}) {
   const seme = jeuDeDonnees();
-  // La tournee du jour a son trace : il doit rester a l'ecran quand elle se termine.
-  seme.routes[0].geometry = { type: "LineString", coordinates: seme.routes[0].stops.map(s => [s.lng, s.lat]) };
+  const r1 = seme.routes[0];
+  r1.geometry = { type: "LineString", coordinates: r1.stops.map(s => [s.lng, s.lat]) };
+  if (presqueFinie) {
+    // Il ne reste que le dernier arret (Cabinet Infirmier Dupont-Lefebvre).
+    for (const i of [2, 4]) {
+      r1.stops[i].status = "livre";
+      seme.commandes.find(c => c.id === r1.stops[i].orderId).status = "livre";
+    }
+  }
   const modele = seme.commandes.find(c => c.id === "o-1");
   for (let r = 0; r < 20; r++) {
     const o = { ...structuredClone(modele), id: `o-h${r}`, status: "livre" };
@@ -35,12 +42,16 @@ function semeAvecHistorique() {
   return seme;
 }
 
-let srv;
+let srv, fin;
 test.beforeAll(async () => {
-  srv = await demarrer({ port: 3196, seed: semeAvecHistorique() });
+  [srv, fin] = await Promise.all([
+    demarrer({ port: 3196, seed: semeAvecHistorique() }),
+    demarrer({ port: 3197, seed: semeAvecHistorique({ presqueFinie: true }) })
+  ]);
 });
 test.afterAll(async () => {
   if (srv) await srv.arreter();
+  if (fin) await fin.arreter();
 });
 
 async function ouvrir(browser, base) {
@@ -65,12 +76,24 @@ async function arrets(base) {
   return routes.find(r => r.id === "r-1").stops;
 }
 
+/** L'arret que l'ecran montre : son rang dans la liste et son nom. */
+async function arretCourant(page, base) {
+  const nom = (await page.locator("#currentClient .arret-nom").textContent()).trim();
+  const liste = await arrets(base);
+  const rang = liste.findIndex(s => s.clientName === nom && !["livre", "absent", "probleme"].includes(s.status));
+  expect(rang, `l'arret de l'ecran (${nom}) n'est pas a livrer`).toBeGreaterThanOrEqual(0);
+  return { rang, id: liste[rang].id, nom };
+}
+
+const patchDe = (page, stopId) => page.waitForResponse(
+  r => r.request().method() === "PATCH" && r.url().includes(`/stops/${stopId}`), { timeout: 15000 });
+
 test("lot 5 — « Livré » : l'ecran se met a jour avec la reponse, sans relancer le chargement complet", async ({ browser }) => {
   test.setTimeout(60000);
   const { ctx, page, erreurs, lectures } = await ouvrir(browser, srv.base);
-  await expect(page.locator("#currentClient .arret-nom")).toHaveText("EHPAD Les Tilleuls du Val de Loue");
+  const vise = await arretCourant(page, srv.base);
 
-  const reponse = page.waitForResponse(r => r.request().method() === "PATCH" && r.url().includes("/stops/s-o-3"), { timeout: 15000 });
+  const reponse = patchDe(page, vise.id);
   await page.locator("#markDeliveredButton").click();
   // Le PATCH part au terme du toast (4 s) ; on attend sa reponse.
   const recue = await reponse;
@@ -78,15 +101,14 @@ test("lot 5 — « Livré » : l'ecran se met a jour avec la reponse, sans relan
   const t = Date.now();
   await page.waitForTimeout(1500);
 
-  const apres = lectures.filter(l => l.t >= t - 50).map(l => l.chemin);
   // Temoin : le compteur voit bien les lectures du chargement initial.
   expect(lectures.some(l => l.chemin === "/api/routes"), "le compteur n'a vu aucune lecture").toBe(true);
-  expect(apres, "le geste a relance des lectures").toEqual([]);
+  expect(lectures.filter(l => l.t >= t - 50).map(l => l.chemin), "le geste a relance des lectures").toEqual([]);
 
-  // L'ecran dit la verite : l'arret est livre, la commande aussi dans l'etat de la page.
-  await expect(page.locator("#routeStopsList .route-stop").nth(2).locator(".pill")).toHaveText("Livré");
-  await expect(page.locator("#currentClient .arret-nom")).toHaveText("Pharmacie Centrale de la Gare");
-  expect((await arrets(srv.base))[2].status).toBe("livre");
+  // L'ecran dit la verite : l'arret est livre (serveur et ecran), l'ecran est passe au suivant.
+  expect((await arrets(srv.base))[vise.rang].status).toBe("livre");
+  await expect(page.locator("#routeStopsList .route-stop").nth(vise.rang).locator(".pill")).toHaveText("Livré");
+  await expect(page.locator("#currentClient .arret-nom")).not.toHaveText(vise.nom);
   expect(erreurs).toEqual([]);
   await ctx.close();
 });
@@ -94,13 +116,13 @@ test("lot 5 — « Livré » : l'ecran se met a jour avec la reponse, sans relan
 test("lot 5 — « Client absent » : l'ecran se met a jour avec la reponse, sans relancer le chargement complet", async ({ browser }) => {
   test.setTimeout(60000);
   const { ctx, page, erreurs, lectures } = await ouvrir(browser, srv.base);
-  await expect(page.locator("#currentClient .arret-nom")).toHaveText("Pharmacie Centrale de la Gare");
+  const vise = await arretCourant(page, srv.base);
 
   await page.locator("#markAbsentButton").click();
   const dialogue = page.locator("#motifProblemeDialog");
   await expect(dialogue).toBeVisible();
   await dialogue.locator(".motif-choix").first().click();
-  const reponse = page.waitForResponse(r => r.request().method() === "PATCH" && r.url().includes("/stops/s-o-5"), { timeout: 15000 });
+  const reponse = patchDe(page, vise.id);
   await dialogue.locator("[data-action='motif-valider']").click();
   const recue = await reponse;
   expect(recue.status()).toBe(200);
@@ -109,9 +131,9 @@ test("lot 5 — « Client absent » : l'ecran se met a jour avec la reponse, san
   await page.waitForTimeout(1500);
 
   expect(lectures.filter(l => l.t >= t - 50).map(l => l.chemin), "le geste a relance des lectures").toEqual([]);
-  await expect(page.locator("#routeStopsList .route-stop").nth(4).locator(".pill")).not.toHaveText(/Prêt|En livraison/);
-  expect(corps.order && corps.stop, "la reponse ne porte pas la commande et l'arret").toBeTruthy();
-  expect((await arrets(srv.base))[4].status).toBe(corps.stop.status);
+  expect(corps.order && corps.stop && corps.route, "la reponse ne porte pas la tournee, l'arret et la commande").toBeTruthy();
+  expect((await arrets(srv.base))[vise.rang].status).toBe(corps.stop.status);
+  await expect(page.locator("#routeStopsList .route-stop").nth(vise.rang).locator(".pill")).not.toHaveText(/Prêt|En livraison/);
   expect(erreurs).toEqual([]);
   await ctx.close();
 });
@@ -122,12 +144,12 @@ const traceDessine = page => page.evaluate(() => [...document.querySelectorAll("
 
 test("lot 5 — la derniere livraison termine la tournee : l'ecran recharge une fois, et garde le trace", async ({ browser }) => {
   test.setTimeout(60000);
-  const { ctx, page, erreurs, lectures } = await ouvrir(browser, srv.base);
-  await expect(page.locator("#currentClient .arret-nom")).toHaveText("Cabinet Infirmier Dupont-Lefebvre");
+  const { ctx, page, erreurs, lectures } = await ouvrir(browser, fin.base);
+  const vise = await arretCourant(page, fin.base);
   await page.locator("#map").scrollIntoViewIfNeeded();
   await expect.poll(() => traceDessine(page), { message: "temoin : le trace n'est pas dessine avant le geste" }).toBeGreaterThan(0);
 
-  const reponse = page.waitForResponse(r => r.request().method() === "PATCH" && r.url().includes("/stops/s-o-6"), { timeout: 15000 });
+  const reponse = patchDe(page, vise.id);
   await page.locator("#markDeliveredButton").click();
   const corps = await (await reponse).json();
   expect(corps.route.status).toBe("terminee");
