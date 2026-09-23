@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.39.0](https://github.com/tombague160-maker/sereo-production/compare/v1.38.1...v1.39.0) (2026-09-23)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **mobile:** Clients — la liste, puis la fiche en plein écran avec retour, Itinéraire (planches 9a, 8c) ([3485d98](https://github.com/tombague160-maker/sereo-production/commit/3485d981e2d2cc095e2f98833ddf08dafe5121dd))
+* **mobile:** Commandes — la ligne de 72 px de la planche 8a (date en colonne, client, numéro · secteur) ([627d406](https://github.com/tombague160-maker/sereo-production/commit/627d406f7c2bdce7acfeb25c338917d13e3e97e8))
+* **mobile:** le cadre des planches — en-tête vert, barre basse pleine largeur, menu « Plus » à cinq destinations, marges ([c113c92](https://github.com/tombague160-maker/sereo-production/commit/c113c92dc2ef40d9488d8a08fb539feb6ba656aa))
+* **mobile:** le cadre des planches, Clients, Commandes, tableau de bord, Stock, Paramètres ([#158](https://github.com/tombague160-maker/sereo-production/issues/158)) ([a4f9d1b](https://github.com/tombague160-maker/sereo-production/commit/a4f9d1b9961f59105822d2da5e728bc4663d9db7))
+* **mobile:** tableau de bord, stock et paramètres aux mesures des planches 1b, 8b, 8d ([0cd1ea6](https://github.com/tombague160-maker/sereo-production/commit/0cd1ea620130497f89a418a0aac31be9a6e561cc))
+
+
+### 🐛 Corrections de bugs
+
+* **mobile:** relecture — focus visible (barre basse, recherches, retour), onglet actif marqué, libellés sans chevauchement, retour du téléphone, nouvelle fiche ouverte ([3ed035a](https://github.com/tombague160-maker/sereo-production/commit/3ed035a692426082507d461e723a3bfa5432a7ca))
+
 ## [1.38.1](https://github.com/tombague160-maker/sereo-production/compare/v1.38.0...v1.38.1) (2026-09-23)
 
 
