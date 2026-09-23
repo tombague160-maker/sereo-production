@@ -4222,3 +4222,72 @@ anciennes, pendant que d'autres lots écrivent ce fichier : un nettoyage à part
 Bancs : `test/e2e/ecrans-sans-planche.spec.js` (serveur semé, port 3306 ; clair et
 sombre ; styles calculés et textes rendus) et `test/ecrans-sans-planche.test.js` (plus
 aucune référence aux conteneurs disparus ; contre-témoin : les quatre redirections).
+
+## Intégration des lots d'interface du 23/09 (branche integration/geo-vague1)
+
+Sur la vague géo (lots 1, 3, 4, 5, 7, `0e16b19`), quatre lots d'interface partis de
+v1.41.1 (`ef470c6`), fusionnés dans cet ordre : `fix/interface-finitions` (`8ab6988`),
+`feat/clients-mobile` (`6b10eaa`), `feat/abonnement-creation` (`b5034b6`),
+`feat/ecrans-sans-planche-v8` (`16042d3`) ; puis deux réconciliations (`3b32456`) et
+un banc repris (`2e728e1`).
+
+**Conflits de fin de fichier** (`DESIGN.md`, `style.css`, aux quatre fusions) : notre
+côté avait aussi modifié le milieu (la note du lot 1 ici, la famille `--warning` des
+finitions dans la feuille), `ajouts.py` refusait (code 2). Reconstruits depuis les
+trois versions, jamais en ôtant les marqueurs : l'ajout en fin de chaque côté
+détaché, les têtes fusionnées à trois voies (`git merge-file`, propre), puis les deux
+ajouts bout à bout. Contrôle à chaque fusion : le diff du résultat contre `HEAD` est
+**exactement** le diff du lot contre sa base (lignes ajoutées et retirées, triées).
+
+**Conflits de code, et ce qui a été gardé.**
+- `loadData` (finitions × lot 1) : le mode frais du lot 1 (`clesEnCopie`, écriture
+  croisée) et l'erreur des finitions (`commandesEnErreur`), les deux. En mode frais,
+  des commandes **gardées** faute de réseau gardent aussi l'erreur qu'elles
+  montraient : sinon une liste vide se serait dite « Aucune commande ».
+- Les quatre anciennes listes (écrans sans planche) : la section `#commandes-jour`
+  retirée, ses gestes aussi ; `save-coordinates` n'est repris par aucun côté (le lot 3
+  a retiré sa fonction) ; la case « À livrer en premier » (lot 7) gardée. Aucun code
+  des lots géo ne lisait `todayCustomerOrders` ni ces listes (grep : les fonctions
+  retirées n'ont plus d'appelant, les identifiants retirés ne sont cités que par les
+  redirections de `config/tabs.js`). `/api/customer-orders/today` a quitté
+  `endpointsDeChargement` (lot 1) par la fusion automatique ; la porte `jour` de
+  `lireDernieresDonnees` reste, sans occupant.
+- Le croisement finitions × écrans, résolu **comme le lot écrans l'a écrit et
+  éprouvé** : `activerSelectionDuJour` et son appel retirés (code mort que la fusion
+  automatique laissait) ; « Tout sélectionner attend les commandes » porte sur les
+  boutons qui restent (`data-attend-commandes`) ; le cas « copie du cache sans la
+  liste du jour » retiré (vert sans rien juger).
+
+**Réconciliations**, chacune avec un banc qui rougit sans elle
+(`test/e2e/integration-interface.spec.js`, serveurs semés 3308 et 3309) :
+
+| Défaut de la combinaison | Correctif | Rouge sans lui |
+|---|---|---|
+| Une réponse tardive (lot 1 : repli de 3 s sans copie, puis la réponse arrive) n'effaçait pas « Commandes indisponibles » (finitions) : une liste vraiment vide restait « indisponible » jusqu'au rechargement | `appliquerReponsesTardives` remet `commandesEnErreur` à faux quand elle apporte les commandes | la liste garde « Commandes indisponibles » après la réponse |
+| `--focus-ring` n'existait qu'en clair : en sombre, toute règle `outline: none; box-shadow: var(--focus-ring)` n'avait **aucun** indicateur. Relevé par le lot 3, Clients au téléphone, Création d'abonnement, Écrans sans planche ; chacun l'a contourné dans son bloc | le jeton est déclaré sur `:root` (bloc « INTEGRATION DES LOTS D'INTERFACE » en fin de feuille) : les mêmes deux tons, qui suivent déjà le thème. Les anneaux écrits en clair par les lots (`--abo-anneau`, Clients, Écrans) ont la même valeur et restent | au bureau en sombre : une ligne de Clients, « Modifier » et une commande de la fiche, ombre `none` et contour `none` ; le même relevé en clair, vert |
+
+**Banc repris** : `interface-finitions.spec.js`, « 12 — la page ne remonte pas toute
+seule », tombait sur son préalable (`load` déjà passé), 3 fois sur 3 seul. Cause
+sondée : l'adresse des tuiles vient du serveur (`/api/carte/fond`), demandée après
+les scripts ; `load` tombe à 150 ms, la première tuile part à 160 ms, ralentir les
+tuiles ne retient plus `load`. Le banc ralentit le logo de la barre à leur place.
+Vert 3/3 ; le mutant « `resetViewportScroll` toujours » rouge pour sa cause.
+
+**Ports e2e** : 3300 à 3306 (lots d'interface), 3308 et 3309 (ce banc), 3190 (lots
+1-5) : chacun une seule fois (`test/ports-e2e.test.js`).
+
+**Vérifié** sur `2e728e1` : `node --check` de `server.js`, `app.js`, `operations.js` ;
+`npm run check` ; `npm test` 545/545 ; suite e2e complète deux fois, 469/469 et
+469/469 (dont `connexion.spec.js` et `contraste-login.spec.js` sur le serveur
+authentifié, que le lot écrans n'avait pas rejoués sur l'arbre fusionné).
+
+**Écarts nommés.**
+- `--focus-ring` global : là où une règle garde aussi son contour, le sombre montre
+  désormais contour **et** anneau — mesuré sur le tri de Clients au téléphone : contour
+  plein de 3 px sur le `select`, anneau à deux tons sur son étiquette `.cli-tri`.
+- Les règles CSS des anciennes listes (`.bdc-list`, `.stats-hero`,
+  `.commandes-livrees-card`…) restent sans élément à styler (déjà nommé par le lot
+  écrans).
+- Les écarts nommés par chaque lot restent les leurs (le collant inerte de Commande
+  client, « Se déconnecter » sans authentification, « Nouveau client » tôt dans
+  l'ordre du clavier, « Itinéraire » visible au bureau…).
