@@ -2699,6 +2699,9 @@ function healDatabaseAtBoot() {
         at: lastStorageRecovery.at
       });
     }
+    // Revue du 23/09 (lot 5) : la position « Me localiser » exacte ne dort plus
+    // dans le trace des tournees terminees calculees avant le lot.
+    rognerTracesGpsTerminees(db);
     writeDb(db, { backup: false });
     if (lastStorageRecovery) {
       console.error(`[boot] ATTENTION : recovery storage detectee au demarrage (${lastStorageRecovery.mode}).`);
@@ -4370,7 +4373,11 @@ function syncWorkflow(db) {
     };
   });
 
-  db.routes = db.routes.map(route => normalizeRoute(route, db.commandes));
+  // Lot 5 (audit geo, 23/09) : l'index des commandes se construit UNE fois pour
+  // toutes les tournees. Avant, normalizeRoute le reconstruisait pour chacune :
+  // O(tournees x commandes), 134 ms a 250 tournees, a chaque ecriture.
+  const orderMap = new Map(db.commandes.map(order => [String(order.id), order]));
+  db.routes = db.routes.map(route => normalizeRoute(route, orderMap));
 }
 
 function normalizeClient(client) {
@@ -5725,6 +5732,10 @@ function memoriserPositionDuCalcul(db, order, item) {
   }
 }
 
+// Le plafond du calcul routier (lib/routing.js, roadPlan), applique aussi au
+// calcul « sans depart » (lot 5).
+const MAX_COMMANDES_PAR_TOURNEE = 50;
+
 function createRoute(db, options = {}) {
   const selectedOrderIds = Array.isArray(options.orderIds) ? options.orderIds.map(String) : [];
   const sector = clean(options.sector || "Tous");
@@ -5749,11 +5760,12 @@ function createRoute(db, options = {}) {
   if (!orders.length) {
     throw badRequest("Aucune commande prete selectionnee pour la tournee");
   }
-  // Revue du 23/09 : 50 commandes au plus, dans les deux modes. Sans depart,
-  // rien ne bornait l'optimiseur, synchrone et sous le verrou d'ecriture
-  // (2 s a 400 commandes, 18 s avec des epingles : le serveur fige).
-  if (orders.length > 50) {
-    throw badRequest("Sélectionne entre 1 et 50 commandes par tournée.");
+  // Revue du 23/09 (lot 7) et lot 5 : 50 commandes au plus, dans les deux
+  // modes. Sans depart, rien ne bornait l'optimiseur, synchrone et sous le
+  // verrou d'ecriture (2 s a 400 commandes, 18 s avec des epingles : le
+  // serveur fige ; optimizeOrders est en n² log n).
+  if (orders.length > MAX_COMMANDES_PAR_TOURNEE) {
+    throw badRequest(`Sélectionne entre 1 et ${MAX_COMMANDES_PAR_TOURNEE} commandes par tournée.`);
   }
 
   // Seul un arret ENCORE A FAIRE retient la commande : un absent de ce matin,
@@ -5938,10 +5950,11 @@ function retirerDesTourneesSiReportee(db, order) {
   return true;
 }
 
+/** @param orders tableau des commandes, ou deja leur index (Map id -> commande). */
 function normalizeRoute(route, orders) {
   const routeStatus = ROUTE_STATUSES.has(route.status) ? route.status : "prete";
   const stops = Array.isArray(route.stops) ? route.stops : [];
-  const orderMap = new Map(orders.map(order => [String(order.id), order]));
+  const orderMap = orders instanceof Map ? orders : new Map(orders.map(order => [String(order.id), order]));
 
   const normalizedStops = stops.map((brut, index) => {
     const order = orderMap.get(String(brut.orderId));
@@ -5970,13 +5983,114 @@ function normalizeRoute(route, orders) {
     };
   });
 
+  // Lot 5 (decision 5 de Thomas, 23/09) : la position « Me localiser » est
+  // stockee arrondie a ~100 m. Ici, a chaque ecriture : les tournees deja
+  // enregistrees au centimetre le sont aussi, a la premiere ecriture qui suit.
+  const positions = {};
+  for (const cle of ["departure", "arrival"]) {
+    if (route[cle]) positions[cle] = arrondirPositionGps(route[cle]);
+  }
+
+  // Revue du 23/09 : le trace d'une tournee calculee AVANT le lot part de la
+  // position exacte (recalee sur la route) ; on le rogne autour de la position
+  // arrondie. Seulement s'il est charge : sans propriete `geometry` (tournee
+  // terminee, stockage SQLite), le trace en base ne bouge pas ici -- voir
+  // rognerTracesGpsTerminees, au demarrage.
+  const trace = Object.prototype.hasOwnProperty.call(route, "geometry")
+    ? { geometry: rognerTraceGps(route.geometry, { ...route, ...positions }) }
+    : {};
+
   return {
     ...route,
+    ...positions,
+    ...trace,
     deliveryDate: normalizeDateInput(route.deliveryDate),
     status: routeStatus,
     stops: normalizedStops,
     selectedOrderIds: normalizedStops.map(stop => stop.orderId)
   };
+}
+
+// Le libelle que public/js/operations.js donne a la position du telephone.
+// Une adresse choisie (un depot, une ville) n'est pas une position personnelle :
+// elle n'est pas arrondie.
+const LIBELLE_POSITION_GPS = "Ma position actuelle";
+
+/** 3 decimales : ~110 m en latitude, ~75 m en longitude a 46-47° N. */
+function arrondirPositionGps(point) {
+  if (!point || typeof point !== "object" || point.label !== LIBELLE_POSITION_GPS) return point;
+  const arrondi = valeur => {
+    const n = Number(valeur);
+    return valeur === "" || valeur === null || !Number.isFinite(n) ? valeur : Math.round(n * 1000) / 1000;
+  };
+  return { ...point, lat: arrondi(point.lat), lng: arrondi(point.lng) };
+}
+
+// Le rayon rogne autour de la position arrondie : l'arrondi a 3 decimales
+// deplace le point d'au plus ~67 m, le recalage sur la route en ajoute un peu.
+const RAYON_TRACE_GPS_M = 150;
+
+/** La position « Me localiser » arrondie, en { lat, lng } ; null sinon. */
+function positionGpsArrondie(point) {
+  if (!point || typeof point !== "object" || point.label !== LIBELLE_POSITION_GPS) return null;
+  const arrondie = arrondirPositionGps(point);
+  const lat = Number(arrondie.lat), lng = Number(arrondie.lng);
+  return arrondie.lat === "" || arrondie.lng === "" || !Number.isFinite(lat) || !Number.isFinite(lng) ? null : { lat, lng };
+}
+
+/**
+ * Le trace sans ses sommets a moins de RAYON_TRACE_GPS_M de la position
+ * « Me localiser » (depart et/ou arrivee) : ils sont remplaces par la position
+ * arrondie. Un trace calcule avant le lot partait de la position exacte.
+ * Idempotent (la position arrondie est fixe) : une deuxieme passe ne change
+ * rien, donc rien n'est reecrit en base. Rend le meme objet quand rien ne change.
+ */
+function rognerTraceGps(geometry, route) {
+  const coords = geometry && Array.isArray(geometry.coordinates) ? geometry.coordinates : null;
+  if (!coords || coords.length < 2) return geometry;
+  const depart = positionGpsArrondie(route.departure);
+  const arrivee = positionGpsArrondie(route.arrival);
+  if (!depart && !arrivee) return geometry;
+  const loin = (c, p) => !Array.isArray(c) || distance({ lat: c[1], lng: c[0] }, p) * 1000 > RAYON_TRACE_GPS_M;
+
+  let debut = 0;
+  let fin = coords.length;
+  if (depart) while (debut < fin && !loin(coords[debut], depart)) debut++;
+  if (arrivee) while (fin > debut && !loin(coords[fin - 1], arrivee)) fin--;
+  if (debut === 0 && fin === coords.length) return geometry;
+
+  const tete = depart ? [depart.lng, depart.lat] : coords[0];
+  const queue = arrivee ? [arrivee.lng, arrivee.lat] : coords[coords.length - 1];
+  // Tout le trace tient dans le rayon : il se reduit a ses deux extremites.
+  const net = debut >= fin
+    ? [tete, queue]
+    : [...(debut > 0 ? [tete] : []), ...coords.slice(debut, fin), ...(fin < coords.length ? [queue] : [])];
+  // Deja rogne (seules les extremites ont pu etre remplacees, par elles-memes) :
+  // le meme objet, pour que rien ne change.
+  const meme = (a, b) => Array.isArray(a) && Array.isArray(b) && a[0] === b[0] && a[1] === b[1];
+  if (net.length === coords.length && meme(net[0], coords[0]) && meme(net[net.length - 1], coords[coords.length - 1])) return geometry;
+  return { ...geometry, coordinates: net };
+}
+
+/**
+ * Au demarrage : les traces des tournees terminees ne sont pas charges par
+ * readDb (stockage SQLite), normalizeRoute ne les voit donc jamais. On les lit
+ * pour les tournees parties de « Me localiser », et on pose ceux a rogner sur
+ * la tournee : l'ecriture qui suit les enregistre. Rend le nombre de traces rognes.
+ */
+function rognerTracesGpsTerminees(db) {
+  if (!useSqliteStorage()) return 0;
+  let rognes = 0;
+  for (const route of db.routes) {
+    if (Object.prototype.hasOwnProperty.call(route, "geometry")) continue;
+    if (!positionGpsArrondie(route.departure) && !positionGpsArrondie(route.arrival)) continue;
+    const stocke = getSqliteStore().getRouteTrace(route.id);
+    const rogne = rognerTraceGps(stocke, route);
+    if (rogne === stocke) continue;
+    route.geometry = rogne;
+    rognes += 1;
+  }
+  return rognes;
 }
 
 function startRoute(db, routeId) {
@@ -6128,6 +6242,23 @@ function updateRouteStop(db, routeId, stopId, status, notes = "", motif = null, 
   }
 
   return { route, stop, order };
+}
+
+/**
+ * Lot 5 (audit geo, 23/09) : la reponse d'un geste d'arret porte TOUT ce que le
+ * geste a change -- la tournee, l'arret, la commande, le client -- tels que
+ * les listes (GET /api/routes, /api/orders, /api/clients) les rendraient
+ * apres l'ecriture. Le telephone met son ecran a jour avec, au lieu de relancer
+ * les 17 requetes du chargement complet (5,5 a 8,8 s apres un an).
+ * A appeler APRES writeDb : syncWorkflow a remplace les objets par leur forme
+ * normalisee.
+ */
+function etatApresGesteArret(db, geste) {
+  const route = routeAvecTrace(db, geste.route.id) || geste.route;
+  const stop = route.stops.find(item => String(item.id) === String(geste.stop.id)) || geste.stop;
+  const order = db.commandes.find(item => String(item.id) === String(geste.order.id)) || geste.order;
+  const client = db.clients.find(item => String(item.id) === String(order.clientId)) || null;
+  return { route, stop, order, client };
 }
 
 function formatStopProblem(status) {
@@ -6927,9 +7058,36 @@ app.get("/api/exports/commandes-annexes.xlsx", (req, res) => {
   }
 });
 
+// Lot 5 (audit geo, 23/09) : la liste n'envoie plus le trace des tournees
+// terminees (87 % des 5 Mo relus a chaque chargement apres un an). Le trace
+// reste en base ; `traceOmise` le dit, et GET /api/routes/:id le rend a la
+// demande. En stockage SQLite, readDb ne l'a meme pas charge.
+const STATUTS_TOURNEE_SANS_TRACE_EN_LISTE = new Set(["terminee"]);
+
+function routePourListe(route) {
+  if (!STATUTS_TOURNEE_SANS_TRACE_EN_LISTE.has(route.status)) return route;
+  const { geometry, ...sansTrace } = route;
+  return { ...sansTrace, traceOmise: true };
+}
+
+/** La tournee complete, trace compris, quel que soit son statut. */
+function routeAvecTrace(db, routeId) {
+  const route = db.routes.find(item => String(item.id) === String(routeId));
+  if (!route) return null;
+  if (Object.prototype.hasOwnProperty.call(route, "geometry")) return route;
+  const trace = useSqliteStorage() ? getSqliteStore().getRouteTrace(route.id) : null;
+  return { ...route, geometry: trace ?? null };
+}
+
 app.get("/api/routes", (req, res) => {
   const db = readDb();
-  res.json(db.routes);
+  res.json(db.routes.map(routePourListe));
+});
+
+app.get("/api/routes/:id", (req, res) => {
+  const route = routeAvecTrace(readDb(), req.params.id);
+  if (!route) return res.status(404).json({ error: "Tournée introuvable" });
+  res.json(route);
 });
 
 app.post("/api/import/stock", uploadExcel, async (req, res) => {
@@ -8065,6 +8223,14 @@ app.post("/api/routes", async (req, res) => {
     // Lot 7 : les commandes « a livrer en premier », parmi celles de la tournee.
     const premiers = (Array.isArray(req.body.premiers) ? req.body.premiers : []).map(String);
     let orderIds = req.body.orderIds;
+    // Lot 5 (audit geo, 23/09) : le calcul « sans depart » (vol d'oiseau) avait
+    // ni selection exigee ni plafond : {} prenait TOUTES les commandes pretes,
+    // et 2 000 commandes figeaient le serveur 17 s sous le verrou d'ecriture.
+    // Meme regle que le calcul routier : une selection de 1 a 50 commandes.
+    const ids = Array.isArray(req.body.orderIds) ? req.body.orderIds : [];
+    if (!ids.length || ids.length > MAX_COMMANDES_PAR_TOURNEE) {
+      throw badRequest(`Sélectionne entre 1 et ${MAX_COMMANDES_PAR_TOURNEE} commandes par tournée.`);
+    }
     if (req.body.departure || req.body.arrival) {
       if (!Array.isArray(req.body.orderIds) || !req.body.orderIds.length) throw badRequest("Sélectionne les commandes de la tournée.");
       const snapshot = readDb();
@@ -8156,7 +8322,7 @@ app.patch("/api/routes/:routeId/stops/:stopId", async (req, res) => {
       });
 
       writeDb(db);
-      return r;
+      return etatApresGesteArret(db, r);
     });
     res.json(result);
   } catch (error) {
@@ -8175,7 +8341,8 @@ app.patch("/api/routes/:id/reorder", async (req, res) => {
       });
 
       writeDb(db);
-      return r;
+      // Lot 5 : la forme normalisee, celle de la liste (mise a jour ciblee).
+      return routeAvecTrace(db, r.id) || r;
     });
     res.json(route);
   } catch (error) {
@@ -8346,7 +8513,9 @@ require("./lib/operations-api").registerOperations(app, {
   readDb, writeDb, withWriteLock, badRequest, notFound, handleRouteError, findClient,
   buildCustomerOrderLines, createPlannedOrder, addHistory, getOrderTotal,
   buildImportedSalesIndex, getImportedOrderTotal, normalizeDateInput,
-  geocoderAdresse, positionPourTournee, memoriserPositionDuCalcul
+  geocoderAdresse, positionPourTournee, memoriserPositionDuCalcul,
+  // Lot 5 : la limite de debit du relais de recherche d'adresse, par compte et par IP.
+  cleDeDebit: req => `${getRequestIdentity(req)?.identifiant || "anonyme"}|${getClientIp(req)}`
 });
 
 // --- API des comptes utilisateurs (V8 phase 1) -----------------------------
@@ -8527,10 +8696,128 @@ function addHistoryEntry(categorie, message) {
   }
 }
 
+// ============================================================================
+// Lot 5 (audit geo, decision 5 de Thomas, 23/09) : PURGE DES TOURNEES ANCIENNES
+// ============================================================================
+//
+// Les tournees terminees depuis plus de 12 mois partent, avec leurs arrets et
+// leur trace (la position de depart du livreur y dort). Les COMMANDES restent :
+// le chiffre d'affaires, les statistiques et l'historique des livraisons par
+// client se calculent sur elles, pas sur les tournees.
+//
+// La purge efface pour de bon : elle ne part qu'APRES une sauvegarde forcee
+// (« avant-purge », dans la rotation des sauvegardes), et pas du tout si cette
+// sauvegarde echoue. Elle est journalisee dans l'historique.
+//
+// SEREO_PURGE_TOURNEES_MOIS : 12 par defaut ; 0 coupe la purge.
+const PURGE_TOURNEES_MOIS = (() => {
+  const brut = process.env.SEREO_PURGE_TOURNEES_MOIS;
+  const n = Number(brut === undefined || brut === "" ? 12 : brut);
+  return Number.isFinite(n) && n >= 0 ? n : 12;
+})();
+const PURGE_TOURNEES_INTERVALLE_MS = 24 * 60 * 60 * 1000;
+const STATUTS_TOURNEE_PURGEABLES = new Set(["terminee"]);
+
+/** La date ou la tournee s'est terminee, sinon celle de sa livraison, sinon de sa creation. */
+function dateDeFinTournee(route) {
+  for (const valeur of [route.completedAt, route.deliveryDate, route.createdAt]) {
+    const t = Date.parse(valeur || "");
+    if (Number.isFinite(t)) return t;
+  }
+  return NaN;
+}
+
+function limiteDePurge(maintenant, mois) {
+  const limite = new Date(maintenant);
+  limite.setMonth(limite.getMonth() - mois);
+  return limite;
+}
+
+function tourneesAPurger(db, maintenant = new Date(), mois = PURGE_TOURNEES_MOIS) {
+  if (!(mois > 0)) return [];
+  const limite = limiteDePurge(maintenant, mois).getTime();
+  // Une tournee sans date lisible n'est jamais purgee : dans le doute, on garde.
+  return db.routes.filter(route => STATUTS_TOURNEE_PURGEABLES.has(route.status) && dateDeFinTournee(route) < limite);
+}
+
+/**
+ * @param sauvegarder  la sauvegarde a faire avant (injectable pour les tests) ;
+ *                     doit rendre le chemin du fichier, ou lever.
+ * @returns {{ purgees: number, sauvegarde?: string, raison?: string }}
+ */
+async function purgerTourneesAnciennes({ maintenant = new Date(), mois = PURGE_TOURNEES_MOIS, sauvegarder = writeBackupNowAsync } = {}) {
+  // Revue du 23/09 : la sauvegarde se fait HORS du verrou d'ecriture, comme les
+  // sauvegardes automatiques de writeDb. Sous le verrou, les « Livre » des
+  // livreurs attendaient la compression de toute la base (plusieurs dizaines
+  // de Mo), chaque jour a l'heure du demarrage plus une minute.
+  const candidates = tourneesAPurger(readDb(), maintenant, mois);
+  if (!candidates.length) return { purgees: 0 };
+  // Chaque tournee telle que la sauvegarde va la contenir.
+  const sauvees = new Map(candidates.map(route => [String(route.id), JSON.stringify(route)]));
+
+  // Une sauvegarde automatique deja en vol lirait la base en meme temps : on
+  // la laisse finir, puis la notre tient sa place (writeDb n'en lance pas
+  // d'autre tant qu'elle court). Revue #84 : deux sauvegardes concurrentes.
+  await flushPendingBackup();
+  let sauvegarde = null;
+  try {
+    const enVol = Promise.resolve().then(() => sauvegarder("avant-purge"));
+    const place = enVol.then(() => {}, () => {});
+    pendingBackup = place;
+    place.then(() => { if (pendingBackup === place) pendingBackup = null; });
+    sauvegarde = await enVol;
+  } catch (error) {
+    console.error(`[purge] sauvegarde impossible, purge annulee : ${error.message || error}`);
+    return { purgees: 0, raison: "sauvegarde impossible" };
+  }
+  if (!sauvegarde) {
+    console.error("[purge] aucune sauvegarde ecrite, purge annulee");
+    return { purgees: 0, raison: "sauvegarde impossible" };
+  }
+
+  return withWriteLock(async () => {
+    // Relue sous le verrou : les gestes faits pendant la sauvegarde restent.
+    // Ne part qu'une tournee que la sauvegarde contient sous sa forme actuelle ;
+    // une tournee modifiee entre-temps attend la purge du lendemain.
+    const db = readDb();
+    const cibles = tourneesAPurger(db, maintenant, mois)
+      .filter(route => sauvees.get(String(route.id)) === JSON.stringify(route));
+    if (!cibles.length) return { purgees: 0 };
+
+    const ids = new Set(cibles.map(route => String(route.id)));
+    const arrets = cibles.reduce((n, route) => n + (route.stops || []).length, 0);
+    db.routes = db.routes.filter(route => !ids.has(String(route.id)));
+    const limite = toYmd(limiteDePurge(maintenant, mois));
+    const fichier = path.basename(String(sauvegarde));
+    addHistory(db, "Purge", `${ids.size} tournée(s) terminée(s) avant le ${limite} supprimée(s), ${arrets} arrêt(s) — conservation ${mois} mois. Commandes et chiffre d'affaires intacts. Sauvegarde : ${fichier}`, {
+      tournees: ids.size,
+      arrets,
+      limite,
+      sauvegarde: fichier
+    });
+    writeDb(db, { backup: false });
+    console.log(`[purge] ${ids.size} tournee(s) de plus de ${mois} mois supprimee(s) (sauvegarde ${fichier})`);
+    return { purgees: ids.size, sauvegarde: fichier };
+  });
+}
+
+function planifierPurgeDesTournees() {
+  if (!(PURGE_TOURNEES_MOIS > 0)) return;
+  const lancer = () => purgerTourneesAnciennes().catch(error => {
+    console.error(`[purge] echec : ${error.message || error}`);
+  });
+  // Une minute apres le demarrage (le temps que le serveur reponde), puis chaque jour.
+  const premier = setTimeout(lancer, 60 * 1000);
+  const suivants = setInterval(lancer, PURGE_TOURNEES_INTERVALLE_MS);
+  if (premier.unref) premier.unref();
+  if (suivants.unref) suivants.unref();
+}
+
 function startServer(port = PORT, host = HOST) {
   // P1 v1.14.0 : healing initial pour garantir la coherence apres restart
   // (notamment apres restauration d'un backup ou montee de version)
   healDatabaseAtBoot();
+  planifierPurgeDesTournees();
   return app.listen(port, host, () => {
     console.log(`Sereo lance sur http://${host}:${port}`);
     if (host === "0.0.0.0" || host === "::") {
@@ -8545,6 +8832,11 @@ if (require.main === module) {
 
 module.exports = {
   app,
+  // Lot 5 (audit geo) : purge des tournees anciennes
+  purgerTourneesAnciennes,
+  tourneesAPurger,
+  rognerTraceGps,
+  _healDatabaseAtBoot: healDatabaseAtBoot,
   dimancheDePaques,
   joursFeriesFrance,
   alerteDateNonOuvree,

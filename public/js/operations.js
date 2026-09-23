@@ -885,9 +885,13 @@ async function locate() {
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 },
     ),
   );
+  // Lot 5 (decision 5 de Thomas, 23/09) : ~100 m (3 decimales). La position
+  // exacte ne quitte pas le telephone : ni le serveur ni le calcul routier ne
+  // la recoivent. Le serveur arrondit aussi ce qu'il stocke (normalizeRoute).
+  const arrondi = (v) => Math.round(v * 1000) / 1000;
   departure = {
-    lat: location.coords.latitude,
-    lng: location.coords.longitude,
+    lat: arrondi(location.coords.latitude),
+    lng: arrondi(location.coords.longitude),
     label: "Ma position actuelle",
   };
   document.getElementById("departureQuery").value =

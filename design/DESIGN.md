@@ -3340,3 +3340,189 @@ Deux écarts trouvés, et réglés :
 Toujours ouvert : `withWriteLock` qui expire à 60 s (voir plus haut). Et une lecture
 (GET) dont le corps casse lève « Le serveur a bien reçu la demande… » (lu dans
 `apiFetch`, non mesuré à l'écran) : exact, mais écrit pour une écriture.
+
+## Lot 5 de l'audit géo : rapidité (23/09)
+
+Source : rapport d'audit du 23/09, §4 (performance), §6 (vie privée) et décision 5
+de Thomas (« oui » : position « Me localiser » à ~100 m, purge à 12 mois). Branche
+`perf/tournees-rapides`, partie de `main` 1.41.1 (`ef470c6`).
+
+### Fait
+
+- **§4, « une ligne »** — `syncWorkflow` construit l'index des commandes UNE fois ;
+  `normalizeRoute` le reconstruisait pour chaque tournée (O(tournées × commandes)).
+  Banc : 1 000 commandes, 200 tournées, insertions dans des `Map` comptées pendant
+  `writeDb` — 201 010 avant, sous 60 000 après.
+- **§4, écriture ciblée** — `storage/sqliteStore.js` ne supprime plus 13 tables
+  pour les réinsérer : il calcule les mêmes lignes qu'avant, les compare à
+  l'empreinte (sha1) de ce que la base contient, et n'écrit que ce qui change,
+  dans une transaction. L'état connu est un cache vérifié à chaque écriture par
+  `PRAGMA data_version` (une autre connexion a écrit → relu) : un cache faux peut
+  faire une écriture de trop, jamais en sauter une. Les rangs (`sort_order`) sont
+  gardés tant que l'ordre relatif tient ; un ajout en tête (`addHistory`,
+  `createRoute`) prend un rang plus petit. Un seul chemin d'écriture (la graine
+  JSON d'une base neuve passe par le même).
+- **§4, tracés hors de la liste** — le tracé d'une tournée vit dans
+  `traces_tournees`, hors du payload ; `readDb` ne le charge que pour les
+  tournées non terminées ; migration à CHAQUE ouverture, sur les seuls payloads
+  qui portent encore un tracé (une sauvegarde d'avant, ou un retour à une version
+  d'avant puis une remontée : ce tracé-là est le plus récent, il remplace celui
+  de la table). `GET /api/routes` n'envoie plus le tracé
+  des tournées terminées (`traceOmise: true`) ; `GET /api/routes/:id` le rend.
+- **§4, mise à jour ciblée** — la réponse d'un geste d'arrêt porte la tournée,
+  l'arrêt, la commande et le client tels que les listes les rendent
+  (`etatApresGesteArret`, après `writeDb`). « Livré » (`envoyerLivraisonEnSuspens`),
+  « Absent » / « Problème » (`updateCurrentDeliveryStatus`) et le déplacement d'un
+  arrêt remplacent ces objets et redessinent (`renderAll({ lectures: false })`)
+  au lieu de relancer `loadData()`. Points d'entrée des gestes et file d'attente
+  (lot 1) inchangés : seul le rechargement qui suivait le succès est remplacé ; un
+  échec recharge comme avant. La fin de tournée recharge une fois. Une tournée
+  terminée garde son tracé à l'écran (`garderTrace`), ou le redemande.
+- **Décision 5, position** — « Me localiser » arrondit à 3 décimales sur le
+  téléphone (la position exacte ne part plus, ni au serveur ni au calcul routier) ;
+  `normalizeRoute` arrondit aussi à chaque écriture ce qui porte le libellé
+  « Ma position actuelle », y compris les tournées déjà enregistrées. Leur
+  **tracé** aussi : les sommets à moins de 150 m de la position arrondie sont
+  remplacés par elle (`rognerTraceGps`, dans `normalizeRoute` ; au démarrage pour
+  les tournées terminées, dont `readDb` ne charge pas le tracé).
+- **Décision 5, purge** — chaque jour (une minute après le démarrage, puis toutes
+  les 24 h), les tournées **terminées** depuis plus de 12 mois partent avec leurs
+  arrêts et leur tracé. Avant : `writeBackupNowAsync("avant-purge")`, forcée ; si
+  elle échoue ou n'écrit rien, pas de purge. La sauvegarde se fait HORS du verrou
+  d'écriture (les « Livré » ne l'attendent pas) ; la base est relue sous le
+  verrou, et seule part une tournée que la sauvegarde contient sous sa forme
+  actuelle. Les commandes restent (chiffre
+  d'affaires et statistiques se calculent sur elles : banc « statistiques
+  identiques avant/après »). Journalisée (historique, type « Purge »).
+  `SEREO_PURGE_TOURNEES_MOIS` (0 = coupée), documentée dans `.env.example`.
+  Mécanisme de sauvegarde vérifié : `writeBackupNowAsync` fait un checkpoint WAL,
+  gzip le fichier, renomme atomiquement ; rotation à 30 fichiers.
+- **§4, plafond « sans départ »** — `POST /api/routes` exige 1 à 50 commandes,
+  avec ou sans départ (avant : `{}` prenait toutes les commandes prêtes) ;
+  `createRoute` plafonne aussi.
+- **§4 et §6, relais d'adresse** — `/api/geocode` : cache de 500 recherches (24 h,
+  saisie normalisée) et seau à jetons par compte et par IP (rafale 5, puis 1/s).
+
+### Mesures avant / après
+
+Script de l'audit (`perf-db.js` : 600 clients, 25 arrêts par tournée, tracé réel
+de 3 000 points ≈ 100 km), même PC, `ef470c6` contre ce lot, lancés à la suite.
+Le poste était partagé avec d'autres agents : les deux séries « avant » à 250
+diffèrent du simple au double ; ce sont des ordres de grandeur.
+
+| Historique | Mesure | Avant | Après |
+|---|---|---|---|
+| 0 | « Livré » (PATCH), médiane de 5 | 28 ms | 19 ms |
+| 250 | « Livré » (PATCH), médiane de 5, deux séries | 1 578 / 1 711 ms | 372 / 599 ms |
+| 250 | `readDb` | 413-665 ms | 108-154 ms |
+| 250 | `writeDb` (base inchangée, `syncWorkflow` compris) | 1 178-1 476 ms | 282-476 ms |
+| 250 | `GET /api/routes` (gzip) | 5 118 Ko | 263 Ko |
+| 250 | chargement complet (17 requêtes) | 7,8-14,8 s | 2,2-2,6 s |
+| 250 | après un geste | le chargement complet | 0 requête (réponse du PATCH, 21 Ko) |
+| 500 | « Livré » (PATCH), médiane de 5 | 2 736 ms | 547 ms |
+| 500 | `GET /api/routes` (gzip) | 10 215 Ko | 506 Ko |
+| 500 | chargement complet (17 requêtes) | 15,6 s | 3,3 s |
+
+Un profil (`--cpu-prof`) a montré que l'empreinte coûtait plus en petits
+`update()` qu'en hachage : une chaîne, un `update` — écriture sans changement,
+store seul, 290-470 ms → 150-210 ms.
+
+### Bancs et preuves
+
+`test/lot5-rapidite.test.js` (16 cas depuis la revue) et
+`test/e2e/rapidite-tournee.spec.js` (6 cas, serveurs semés 3196 et 3197). Rouges sur le code d'avant, de la bonne cause :
+index des commandes (201 010 insertions) ; écriture ciblée (journal par
+déclencheurs SQLite : « les tournées terminées ont été réécrites ») ; migration
+(« le tracé d'une tournée terminée est encore relu ») ; liste (« la liste envoie le
+tracé ») ; réponse du geste (« ne porte pas le client ») ; position (« stockée au
+centimètre ») ; purge (« la tournée de 13 mois n'a pas été purgée ») ; plafond
+(60 arrêts sans sélection) ; relais (« la même recherche est repartie 2 fois ») ;
+e2e « Livré » et « Absent » (22 lectures après le geste) ; fin de tournée (« le
+tracé a disparu de la carte ») — CE défaut-là naît du lot lui-même (la liste sans
+tracé), le banc le tient ; « Me localiser » (47.2381234 reçu).
+Gardes neuves prouvées par mutants (le code d'avant n'a pas de purge ni
+d'écriture différentielle) : banc d'équivalence (60 mutations au hasard, base
+différentielle = base réécrite d'un coup) pris par 4 mutants sur 4 (rang en tête,
+tracé absent effacé, suppression oubliée, renumérotation oubliée) ; purge prise
+par 3 sur 3 (échec de sauvegarde ignoré, pas de sauvegarde, tournée active
+purgée) ; relais pris par 2 sur 2 (sans limite, sans cache).
+
+### Écarts nommés
+
+- **503, pas 429**, pour le relais d'adresse saturé : `apiFetch` traite tout 429
+  comme un verrou de connexion et renvoie à `/login`.
+- **Tableau de bord, statistiques, historique** ne sont plus rechargés à chaque
+  geste : à la fin de la tournée, par le sondage de l'accueil (60 s), ou à la
+  prochaine ouverture. Pendant la tournée, ils peuvent retarder de quelques arrêts.
+- **« Sans tracé » = `terminee` seulement** (liste et `readDb`). Un statut de
+  clôture ajouté plus tard (lot 2 : annulée, clôturée) charge son tracé tant qu'il
+  n'est pas ajouté aux deux ensembles : plus lent, jamais faux.
+- **L'arrondi de position se fonde sur le libellé** « Ma position actuelle »
+  (seul `operations.js` le pose). Une adresse choisie (dépôt) n'est pas arrondie.
+- **La sauvegarde « avant-purge » est dans la rotation** (30 fichiers) : elle part
+  avec elle. Voulu : la purge sert la vie privée, une archive éternelle la
+  contredirait. C'est un filet contre une purge fautive, pas une archive.
+- **Une commande garde son `routeId`** vers une tournée purgée (rien ne le suit à
+  l'écran ; `shouldPreserveClientAfterImport` s'en sert encore, dans le bon sens).
+- **Revenir à une version d'avant** : elle ne lit pas `traces_tournees`, les tracés
+  des tournées en cours ne s'y affichent pas (recalculables) ; en remontant, les
+  tracés reviennent, et un tracé écrit entre-temps dans un payload (recalculé, ou
+  effacé : `geometry: null`) gagne sur celui de la table, à l'ouverture.
+- **La copie « dernières données » après un geste** est recopiée par la page
+  (tournées, commandes, clients), pas relue au serveur : elle dit ce que l'écran
+  affiche. Son en-tête `Date` reste celui de la copie d'avant : l'étiquette
+  « Données de 08:00 » peut sous-estimer sa fraîcheur, jamais la surestimer. Les
+  autres données (tableau de bord, statistiques) y gardent leur retard.
+- **Un geste sur un arrêt déjà terminé** (« Absent » tapé sur un arrêt livré)
+  reste accepté par le serveur : c'est aussi le chemin d'une correction légitime
+  (« Livré » tapé par erreur). Pas de garde ajoutée ici (lot 1, gestes du livreur).
+- **Tracé rogné autour de « Me localiser »** : le tracé part d'un segment droit
+  depuis la position arrondie (au plus 150 m de route invisibles), aussi pour les
+  tournées calculées après le lot.
+- **Sauvegarde « avant-purge » hors verrou** : comme les sauvegardes automatiques
+  de `writeDb`, elle lit le fichier pendant que des écritures peuvent passer par le
+  WAL ; un checkpoint automatique (1 000 pages) pendant la compression la rendrait
+  incohérente — risque partagé avec toutes les sauvegardes existantes, non mesuré.
+  Une autre sauvegarde automatique ne court jamais en même temps (`pendingBackup`).
+- **`sort_order` de `lignes_commande` et `livraisons`** devient un rang global
+  (c'était l'indice de ligne) ; aucune lecture ne s'en sert (grep).
+- Sous charge (autres agents sur le poste), trois rouges vus une fois et non
+  reproduits : `C2.stock.a` (seuil de 250 ms, 1 suite complète sur 3),
+  `tournee-mobile` « sous le pouce » (1 sur 3), `carte-et-lignes`
+  `ERR_CONNECTION_REFUSED` sur 3141 (port fixe, partagé entre worktrees). Aucune
+  cause affirmée.
+
+### Revue adverse (23/09)
+
+Quatre défauts relevés sur `73cc8de`, tous vérifiés vrais, tous corrigés :
+
+- **Important — la copie du service worker ne suivait plus les gestes.** Plus
+  aucune lecture après un geste : `/api/routes` et `/api/orders` restaient ceux
+  du matin dans le cache ; un écran rouvert avant le réseau montrait des arrêts
+  livrés « à livrer ». Correctif : `recopierApresGeste` (écritures en série).
+  Banc e2e : geste, réseau retenu, réouverture — « En livraison » au lieu de
+  « Livré » avant, « Livré » après.
+- **Mineur — le tracé d'avant le lot gardait la position exacte.** Correctif :
+  `rognerTraceGps` (idempotent : 20 000 cas au hasard, une deuxième passe ne
+  change rien). Banc : rouge « le tracé stocké d'une tournée terminée part encore
+  de la position exacte » ; chaque site d'appel pris par son mutant.
+- **Mineur — aller-retour de version.** Le drapeau de migration empêchait de
+  relire un tracé écrit entre-temps dans le payload. Banc : rouge « le tracé
+  d'avant le retour a écrasé celui recalculé » ; l'effacement pris par mutant.
+- **Mineur — la purge tenait le verrou pendant la sauvegarde.** Banc : une
+  sauvegarde retenue, un « Livré » pendant — rouge « le geste a attendu », puis
+  vert, et la purge n'efface pas le geste. Garde neuve (une tournée modifiée
+  pendant la sauvegarde attend le lendemain) prise par son mutant.
+
+### Ce qui reste
+
+- Le **chargement complet** reste à 2,2-3,3 s à 250-500 tournées : 17 requêtes,
+  17 `readDb` (≈ 130 ms chacun, surtout les commandes). Il n'a plus lieu après
+  chaque geste, mais à l'ouverture et au sondage. Levier suivant : un seul
+  `readDb` par vague (point d'entrée agrégé, ou lecture mémorisée par
+  `data_version`).
+- `syncWorkflow` renormalise **toutes** les commandes à chaque écriture
+  (≈ 150-250 ms à 6 000 commandes) : c'est le gros du « Livré » restant.
+- L'**historique texte** n'est jamais purgé (§4, réserve †).
+- Hors lot : tracés OSRM compacts (`polyline6` / `overview=simplified`, avec le
+  serveur OSRM hébergé) ; marqueurs recréés à chaque rendu de carte (lot 4).
