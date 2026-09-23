@@ -7685,11 +7685,11 @@ function viderLaFile() {
         bilan = await rejouer((u, o) => fetch(u, { ...o, credentials: "same-origin" }));
         await rafraichirEtatFile();
         annoncerBilanDeRenvoi(bilan);
-        // Un passage arrete sur un echec (reseau, 5xx en pause, session) ne se
-        // relance pas aussitot : il s'arreterait au meme endroit. Premier jet :
-        // chaque lecture reussie pendant le passage en redemandait un, et un
-        // 500 passager epuisait les essais en quelques secondes.
-      } while (viderRedemande && !bilan.arrete && !bilan.authRequise);
+        // Un tour redemande apres un 5xx n'epuise plus les essais : l'entree
+        // est en pause (pauseApresEchecs, file-attente.js), le tour s'arrete
+        // sans rien envoyer. (Une garde `!bilan.arrete` ici a ete retiree le
+        // 23/09 : aucun banc ne la distinguait, la pause la rend redondante.)
+      } while (viderRedemande && !bilan.authRequise);
     } finally {
       viderEnCours = null;
     }
