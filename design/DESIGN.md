@@ -4431,7 +4431,7 @@ preuves rouges sont rejouées contre `c05e6f1`, pas contre `main`.
 `npm run check` ; `npm test` 566/566 ; en une passe sur `9bba7a8` : e2e du lot,
 tournee, tournee-mobile, ecran-livreur, carte-telephone, meilleur-trajet,
 livreur-ne-perd-rien, integration-lots-1-5, operations, hors-ligne 84/84 ; et
-(sur `b77099a`, avant deux retouches de bancs et d'`app.js` rejouées depuis par les
+(sur `754f406`, avant la retouche d'`app.js` de `9bba7a8`, rejouée depuis par les
 84), parce qu'ils visitent la Tournée ou le
 détail d'une commande : adresses-a-verifier, barre-laterale-finitions,
 carte-et-lignes, clients, commandes, ecrans-sans-planche, integration-interface,
