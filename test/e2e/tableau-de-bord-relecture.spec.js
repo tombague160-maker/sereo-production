@@ -61,7 +61,7 @@ test("« Importer les ventes » ENVOIE le fichier choisi", async ({ browser }) =
     .then(() => true).catch(() => false);
   const [selecteur] = await Promise.all([
     page.waitForEvent("filechooser"),
-    page.locator('[data-action="importer-ventes"]').click()
+    page.locator('#enteteActions [data-action="importer-ventes"]').click()
   ]);
   await selecteur.setFiles({ name: "ventes.xlsx", mimeType: "application/octet-stream", buffer: Buffer.from("PK") });
   expect(await envoi, "le fichier choisi doit partir vers le serveur").toBe(true);

@@ -1724,6 +1724,23 @@ Sous **820 px** (le seuil réel de la barre basse — pas 920) :
 - les marges de la charte : 16 px sur les côtés, dans les deux thèmes (les anciennes règles
   mobiles, écrites pour le clair seul, faisaient deux mises en page).
 
+### États limites (planches 10b, 10c), posé le 23/09
+
+- **Hors ligne** : un bandeau vert clair sous l'en-tête, « Hors ligne depuis 14 h 08 »
+  (l'heure de l'événement ; « Hors ligne » seul après un rechargement fait hors ligne), et
+  ce qui attend : « N modifications en attente d'envoi ». La file d'attente existe depuis la
+  v1.31 — la passation, qui la disait inventée, est périmée sur ce point ; seul l'écran
+  manquait. Le bandeau reste tant que des modifications attendent. « Modifications » et
+  non « livraisons » : la file compte des écritures. Hors ligne, les **imports de
+  fichiers** sont désactivés avec leur raison (« Import impossible hors ligne ») : ils ne
+  se mettent jamais en file ; tout le reste continue et part au retour du réseau (la
+  planche désactivait toutes les écritures — contraire à la file qui existe).
+- **Premier lancement** : sans aucune commande, une carte « Commencez par importer vos
+  ventes » remplace « À régler » et « Cette semaine », avec le bouton d'import.
+
+Pas encore faits : le chargement en blocs de la taille d'un chiffre (10b haut — les
+squelettes actuels remplacent des zones entières), et le Stock sans catégorie à plat (10a).
+
 ## 10. Guide pour l'agent
 
 - Toujours produire les deux modes (clair et sombre) avec les mêmes tokens ; lister les contrastes calculés.

@@ -378,6 +378,17 @@
         </div>
       </header>
 
+      <!-- HORS LIGNE (planche 10c) : la file d'attente existe depuis la v1.31 ;
+           elle ne se disait que dans la pastille. Le bandeau dit depuis quand,
+           et ce qui attend. -->
+      <div id="bandeauHorsLigne" class="bandeau-hors-ligne" role="status" aria-live="polite" hidden>
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2 8.8a15 15 0 0 1 4.2-2.6M22 8.8A15 15 0 0 0 10.7 5M5.5 12.5a10 10 0 0 1 3-1.8M18.5 12.5a10 10 0 0 0-3.3-1.9M9 16a5 5 0 0 1 6 0M12 20h.01M3 3l18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+        <span class="bandeau-hors-ligne-texte">
+          <strong id="bandeauHorsLigneTitre">Hors ligne</strong>
+          <span id="bandeauHorsLigneDetail"></span>
+        </span>
+      </div>
+
       <!-- Les onglets qu'une entree de nav absorbe, rendus par app.js pour le
            SEUL groupe actif. La rangee reste masquee quand le groupe n'a qu'un
            ecran. Forme : les pilules de filtre de la charte, que la planche
@@ -449,6 +460,14 @@
             </section>
           </div>
 
+          <!-- PREMIER LANCEMENT (planche 10b) : sans aucune commande, « A regler »
+               et « Cette semaine » n'ont rien a dire ; cette carte dit quoi faire. -->
+          <section class="panel tb-premier" id="tbPremierLancement" hidden>
+            <span class="tb-premier-disque" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></span>
+            <h3>Commencez par importer vos ventes</h3>
+            <p>Le fichier Excel des ventes crée les commandes et les clients. Le tableau de bord se remplit ensuite tout seul.</p>
+            <button class="button primary" type="button" data-action="importer-ventes">Importer les ventes</button>
+          </section>
           <section class="panel tb-regler">
             <div class="panel-heading">
               <h3>À régler</h3>

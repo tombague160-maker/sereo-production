@@ -1554,6 +1554,11 @@ function rendreSiAffiche(idSection, rendu) {
 
 function renderAll() {
   majEnteteTableauDeBord(getInitialTab());
+  // Premier lancement (planche 10b) : aucune commande -> la carte d'accueil
+  // remplace « A regler » et « Cette semaine ».
+  document.getElementById("journee")?.toggleAttribute("data-premier-lancement", !(orders || []).length);
+  const accueil = document.getElementById("tbPremierLancement");
+  if (accueil) accueil.hidden = (orders || []).length > 0;
   renderStats();
   renderDailySummary();
   renderImportSummary();
@@ -6252,9 +6257,13 @@ async function viderLaFile() {
   }
 }
 
+// L'heure de la coupure, captee a l'evenement ; inconnue apres un
+// rechargement fait hors ligne (le bandeau dit alors « Hors ligne », sans heure).
+let horsLigneDepuis = null;
+
 function brancherFileHorsLigne() {
-  window.addEventListener("online", () => { viderLaFile(); });
-  window.addEventListener("offline", () => { setStatus(dernierStatut); });
+  window.addEventListener("online", () => { horsLigneDepuis = null; setStatus(dernierStatut); viderLaFile(); });
+  window.addEventListener("offline", () => { horsLigneDepuis = new Date(); setStatus(dernierStatut); });
   // A l'ouverture : l'onglet a pu etre ferme avec des ecritures en attente.
   // C'est le prix de ne pas utiliser Background Sync, absent d'iOS Safari --
   // une solution qui ne marche pas sur la moitie du parc n'en est pas une.
@@ -6288,6 +6297,33 @@ function setStatus(message) {
     texte = `${message} · hors ligne`;
   }
   element.textContent = texte;
+  majBandeauHorsLigne();
+}
+
+// Planche 10c. Montre hors ligne, OU tant que des modifications attendent.
+// « modifications » et non « livraisons » : la file compte des ecritures.
+function majBandeauHorsLigne() {
+  const bandeau = document.getElementById("bandeauHorsLigne");
+  if (!bandeau) return;
+  const horsLigne = estDefinitivementHorsLigne();
+  // Un import de fichier ne se met pas en file (tenterMiseEnFile) : hors
+  // ligne, ses boutons le disent au lieu d'echouer. AVANT le retour anticipe
+  // du bandeau masque : sinon, le reseau revenu, ils restaient desactives.
+  document.querySelectorAll('[data-action="importer-ventes"], [data-action="importer-stock"], #importVentesButton, #importStockButton')
+    .forEach(bouton => {
+      bouton.disabled = horsLigne;
+      if (horsLigne) bouton.title = "Import impossible hors ligne"; else bouton.removeAttribute("title");
+    });
+  bandeau.hidden = !horsLigne && ecrituresEnAttente === 0;
+  if (bandeau.hidden) return;
+  const heure = horsLigneDepuis
+    ? horsLigneDepuis.toLocaleTimeString("fr-FR", { hour: "numeric", minute: "2-digit" }).replace(":", " h ")
+    : "";
+  setText("bandeauHorsLigneTitre", horsLigne ? (heure ? `Hors ligne depuis ${heure}` : "Hors ligne") : "Envoi en attente");
+  const n = ecrituresEnAttente;
+  setText("bandeauHorsLigneDetail", n
+    ? `${n} modification${n > 1 ? "s" : ""} en attente d'envoi. ${horsLigne ? "Elles partiront au retour du réseau." : "Envoi en cours."}`
+    : "Vos modifications seront gardées et envoyées au retour du réseau. Les imports de fichiers attendront le réseau.");
 }
 
 /** Charte §4 : « Toast : bas d'ecran, 4 s, une action possible (Annuler) ». */
