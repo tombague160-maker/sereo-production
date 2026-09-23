@@ -68,14 +68,18 @@ function corpsLent(contenu) {
     },
   });
 }
-function fauxReseau(extraits, { md5Faux = [], lent = false } = {}) {
+// `sonde` : faux si osrm-routed n'ecoute pas (carte refusee) ; la sonde echoue.
+function fauxReseau(extraits, { md5Faux = [], lent = false, sonde = () => true } = {}) {
   const appels = [];
   const fetch = async (url, init = {}) => {
     url = String(url);
     const entetes = init.headers || {};
     appels.push({ url, entetes });
     // Sonde de osrm-routed : n'importe quelle reponse HTTP.
-    if (url.startsWith("http://127.0.0.1:")) return new Response('{"code":"NoSegment"}', { status: 400 });
+    if (url.startsWith("http://127.0.0.1:")) {
+      if (!sonde()) throw new TypeError("fetch failed (ECONNREFUSED)");
+      return new Response('{"code":"NoSegment"}', { status: 400 });
+    }
     const m = url.match(/^https:\/\/download\.geofabrik\.de\/(.+)-latest\.osm\.pbf(\.md5)?$/);
     if (!m || !(m[1] in extraits)) return new Response("absent", { status: 404 });
     const contenu = Buffer.from(extraits[m[1]]);
@@ -102,7 +106,10 @@ function fauxReseau(extraits, { md5Faux = [], lent = false } = {}) {
  * binaires ecriraient, puis sortent (code 1 pour `echec`). osrm-routed reste
  * vivant jusqu'a kill(). `pendant(prog)` : crochet appele avant la sortie.
  */
-function fauxProcessus({ echec = null, pendant = () => {} } = {}) {
+// `bloque` : cette etape ne se termine jamais d'elle-meme (seul kill() la
+// fait sortir). `refuse(carte)` : osrm-routed refuse ces fichiers (format
+// d'une autre version d'OSRM, fichiers abimes) et sort en code 1.
+function fauxProcessus({ echec = null, pendant = () => {}, bloque = null, refuse = () => false } = {}) {
   const appels = [];
   const lancer = (cmd, args) => {
     const tout = [cmd, ...args].map(String);
@@ -110,11 +117,21 @@ function fauxProcessus({ echec = null, pendant = () => {} } = {}) {
     const enfant = new EventEmitter();
     enfant.stdout = new PassThrough();
     enfant.stderr = new PassThrough();
+    enfant.tue = [];
     enfant.kill = (signal) => {
+      enfant.tue.push(signal || "SIGTERM");
       setImmediate(() => enfant.emit("exit", null, signal || "SIGTERM"));
       return true;
     };
     appels.push({ prog, cmd, args: args.map(String), enfant });
+    if (prog === "osrm-routed" && refuse(String(args.at(-1)))) {
+      enfant.refuse = true;
+      setImmediate(() => {
+        enfant.stderr.write("[error] carte.osrm.fileIndex is incompatible with this version of OSRM\n");
+        enfant.emit("exit", 1, null);
+      });
+    }
+    if (prog === bloque) return enfant;
     if (prog !== "osrm-routed")
       setImmediate(() => {
         pendant(prog);
@@ -148,7 +165,7 @@ function gestionnaire(inst, { env = {}, reseau, processus, maintenant, memoire =
     journal: { log: (m) => lignes.push(m), warn: (m) => lignes.push(m) },
     maintenant: maintenant || (() => new Date("2026-09-24T01:00:00Z")),
     memoire: () => memoire,
-    disqueLibre: async () => libre,
+    disqueLibre: async () => (typeof libre === "function" ? libre() : libre),
     priorite,
     delais: { premierePreparation: 1e9, verification: 1e9, relances: [5, 5], sondage: 5 },
   });
@@ -471,6 +488,173 @@ test("ecriture impossible pendant le telechargement : la preparation echoue, Ser
   assert.deepEqual(chutes, [], "une erreur d'ecriture a fait tomber le processus");
   assert.match(g.etat().derniereErreur?.message || "", /écriture de europe\/a impossible \(EISDIR\)/);
   assert.deepEqual(processus.appels, []);
+});
+
+// --- 12. Relecture adverse du 23/09 ---------------------------------------------
+// Une promesse qui ne se resout jamais rend « jamais fini » au lieu de figer le banc.
+const sousDelai = (promesse, ms = 2000) => Promise.race([promesse, attendre(ms).then(() => "jamais fini")]);
+const routeds = (processus) => processus.appels.filter((a) => a.prog === "osrm-routed");
+const lireSuivi = (inst) => JSON.parse(fs.readFileSync(path.join(inst.dossier, "suivi.json"), "utf8"));
+// La sonde ne repond que si le dernier osrm-routed lance a accepte sa carte.
+const sondeDuDernier = (get) => () => {
+  const r = routeds(get()).at(-1);
+  return Boolean(r) && !r.enfant.refuse;
+};
+
+test("bascule : une nouvelle carte que osrm-routed refuse ne remplace pas l'ancienne, qui reste en service", async () => {
+  const inst = installation();
+  let ancienne = null;
+  const processus = fauxProcessus({ refuse: (base) => ancienne !== null && !base.includes(ancienne.version) });
+  const reseau = fauxReseau({ "europe/a": "extrait A", "europe/b": "extrait B" }, { sonde: sondeDuDernier(() => processus) });
+  let jour = new Date("2026-08-20T01:00:00Z");
+  const g = gestionnaire(inst, { reseau, processus, maintenant: () => jour });
+  g.demarrer();
+  await g.demarrage;
+  assert.equal(await g.preparer(ZONE_TEST), true);
+  ancienne = lirePointeur(inst);
+  assert.ok(await jusqua(() => g.urlSiPret() !== ""));
+
+  // Un mois plus tard : customize reussit, mais osrm-routed refuse les fichiers.
+  jour = new Date("2026-09-24T01:00:00Z");
+  assert.equal(await sousDelai(g.preparer(ZONE_TEST)), false, "une carte que osrm-routed refuse est gardee comme carte en service");
+  assert.deepEqual(lirePointeur(inst), ancienne, "le pointeur designe une carte refusee");
+  assert.deepEqual(fs.readdirSync(path.join(inst.dossier, "versions")), [ancienne.version],
+    "l'ancienne carte supprimee avant que la nouvelle ait demarre, ou la carte refusee gardee");
+  assert.ok(await jusqua(() => g.urlSiPret() === "http://127.0.0.1:5000"), "l'ancienne carte n'a pas ete relancee");
+  assert.ok(routeds(processus).at(-1).args.at(-1).includes(ancienne.version), "osrm-routed relance sur la carte refusee");
+  const etat = g.etat();
+  assert.match(etat.derniereErreur?.message || "", /osrm-routed refuse la nouvelle carte .*incompatible/);
+  assert.match(etat.resume, /L'ancienne carte reste en service\.$/);
+});
+
+test("carte refusee par osrm-routed (montee de version d'OSRM) : erreur visible, carte refaite la nuit suivante sans attendre ses 30 jours", async () => {
+  const inst = installation();
+  let refusee = null;
+  const processus = fauxProcessus({ refuse: (base) => refusee !== null && base.includes(refusee) });
+  const reseau = fauxReseau({ "europe/a": "extrait A", "europe/b": "extrait B" }, { sonde: sondeDuDernier(() => processus) });
+  let jour = new Date("2026-08-20T01:00:00Z");
+  const env = { SEREO_OSRM_ZONE: "europe/a,europe/b" };
+  const g = gestionnaire(inst, { env, reseau, processus, maintenant: () => jour });
+  g.demarrer();
+  await g.demarrage;
+  assert.equal(await g.preparer(ZONE_TEST), true);
+  const ancienne = lirePointeur(inst);
+  assert.ok(await jusqua(() => g.urlSiPret() !== ""));
+  await g.arreter();
+
+  // Nouvelle image : le nouvel osrm-routed refuse le format de la carte en place.
+  refusee = ancienne.version;
+  jour = new Date("2026-08-25T12:00:00Z");
+  const g2 = gestionnaire(inst, { env, reseau, processus, maintenant: () => jour });
+  g2.demarrer();
+  await g2.demarrage;
+  assert.ok(await jusqua(() => /osrm-routed ne démarre pas sur la carte/.test(g2.etat().derniereErreur?.message || "")),
+    `carte refusee relancee en boucle sans erreur visible : ${g2.etat().resume}`);
+  assert.equal(g2.urlSiPret(), "");
+  assert.match(g2.etat().resume, /Dernier essai échoué le 25\/08\/2026 : osrm-routed ne démarre pas sur la carte .*incompatible/);
+  assert.equal(await g2.verifierPlanning(), false, "carte refaite en pleine journee");
+  jour = new Date("2026-08-26T01:00:00Z"); // 3 h a Paris, 6 jours apres le dernier essai
+  assert.equal(await g2.verifierPlanning(), true, "carte refusee de 6 jours : pas refaite avant ses 30 jours");
+  assert.notEqual(lirePointeur(inst).version, ancienne.version);
+  assert.ok(await jusqua(() => g2.urlSiPret() !== ""), "la nouvelle carte ne sert pas");
+  assert.equal(g2.etat().derniereErreur, null);
+});
+
+test("plancher d'espace libre : la preparation s'arrete avant de remplir le volume de la base, et ne demarre pas en dessous", async () => {
+  const inst = installation();
+  const reseau = fauxReseau({ "europe/a": "extrait A", "europe/b": "extrait B" });
+  let libre = 100 * GO;
+  const processus = fauxProcessus({ bloque: "osrm-extract" });
+  const g = gestionnaire(inst, { reseau, processus, libre: () => libre });
+  g.delais.disque = 5;
+  g.demarrer();
+  await g.demarrage;
+  const preparation = g.preparer(ZONE_TEST);
+  assert.ok(await jusqua(() => processus.appels.some((a) => a.prog === "osrm-extract")), "osrm-extract jamais lance");
+  libre = 1 * GO; // osrm-extract remplit le volume
+  assert.equal(await sousDelai(preparation), false, "osrm-extract continue d'ecrire sous le plancher");
+  const extract = processus.appels.find((a) => a.prog === "osrm-extract");
+  assert.ok(extract.enfant.tue.length > 0, "osrm-extract n'a pas ete arrete");
+  assert.match(g.etat().derniereErreur?.message || "", /espace disque sous le plancher .*extract/);
+  assert.equal(fs.existsSync(path.join(inst.dossier, "courante.json")), false);
+
+  // Sous le plancher des le depart : aucune etape n'est lancee.
+  const avant = processus.appels.length;
+  assert.equal(await sousDelai(g.preparer(ZONE_TEST)), false);
+  assert.equal(processus.appels.length, avant, "une etape lancee sous le plancher");
+  assert.match(g.etat().derniereErreur?.message || "", /espace disque sous le plancher/);
+});
+
+test("plancher dans le choix de la zone ; les extraits d'une autre zone sont rendus au disque", async () => {
+  const z = async (libre) => (await gestionnaire(installation(), { libre, memoire: 16 * GO }).zoneVoulue()).zone?.id ?? null;
+  assert.equal(await z(9 * GO), "region", "temoin : 9 Go libres suffisent a la region");
+  assert.equal(await z(7 * GO), null, "7 Go libres : la region (6 Go) prendrait la place de la base");
+
+  const inst = installation();
+  const reseau = fauxReseau({ "europe/a": "extrait A", "europe/b": "extrait B" });
+  const g = gestionnaire(inst, { reseau, processus: fauxProcessus({ echec: "osrm-extract" }) });
+  g.demarrer();
+  await g.demarrage;
+  const tele = path.join(inst.dossier, "telechargements");
+  // Restes d'une zone precedente : comptes comme « disponibles » par le choix.
+  for (const f of ["europe_ailleurs.osm.pbf", "europe_ailleurs.osm.pbf.json", "europe_loin.osm.pbf.part", "europe_loin.osm.pbf.part.json"])
+    fs.writeFileSync(path.join(tele, f), "x");
+  assert.equal(await g.preparer(ZONE_TEST), false);
+  assert.deepEqual(fs.readdirSync(tele).sort(), ["europe_a.osm.pbf", "europe_a.osm.pbf.json", "europe_b.osm.pbf", "europe_b.osm.pbf.json"],
+    "extraits d'une autre zone gardes (ou ceux de la zone perdus apres l'echec)");
+});
+
+test("etape sans fin : arretee au bout du delai maximal, le gestionnaire reste libre pour la suite", async () => {
+  const inst = installation();
+  const reseau = fauxReseau({ "europe/a": "extrait A", "europe/b": "extrait B" });
+  const processus = fauxProcessus({ bloque: "osrm-extract" });
+  const g = gestionnaire(inst, { reseau, processus });
+  g.delais.etapeMax = 50;
+  g.demarrer();
+  await g.demarrage;
+  assert.equal(await sousDelai(g.preparer(ZONE_TEST)), false, "une etape bloquee fige le gestionnaire");
+  assert.equal(g.enCours, null);
+  assert.match(g.etat().derniereErreur?.message || "", /extract : aucune fin au bout de/);
+  assert.ok(processus.appels.find((a) => a.prog === "osrm-extract").enfant.tue.includes("SIGKILL"));
+});
+
+test("dossier des cartes supprime a la main : l'essai est note, un echec n'est pas relance tous les quarts d'heure", async () => {
+  const inst = installation();
+  const reseau = fauxReseau({ "europe/a": "A", "europe/b": "B" });
+  let maintenant = new Date("2026-09-23T12:00:00Z");
+  const g = gestionnaire(inst, {
+    env: { SEREO_OSRM_ZONE: "europe/a,europe/b" }, reseau, processus: fauxProcessus({ echec: "osrm-extract" }), maintenant: () => maintenant,
+  });
+  g.demarrer();
+  await g.demarrage;
+  fs.rmSync(inst.dossier, { recursive: true, force: true });
+  assert.equal(await g.verifierPlanning(), true, "dossier supprime : la carte n'est pas refaite tout de suite");
+  assert.equal(lireSuivi(inst).derniereTentative, "2026-09-23T12:00:00.000Z", "essai non note");
+  maintenant = new Date("2026-09-23T12:15:00Z");
+  assert.equal(await g.verifierPlanning(), false, "echec relance un quart d'heure plus tard");
+});
+
+test("preparation interrompue (conteneur recree par une release) : reprise au demarrage suivant, sauf apres trois interruptions de suite", async () => {
+  const reseau = fauxReseau({ "europe/a": "A", "europe/b": "B" });
+  const env = { SEREO_OSRM_ZONE: "europe/a,europe/b" };
+  const essai = async (suivi) => {
+    const inst = installation();
+    fs.mkdirSync(inst.dossier, { recursive: true });
+    fs.writeFileSync(path.join(inst.dossier, "suivi.json"), JSON.stringify(suivi));
+    const g = gestionnaire(inst, { env, reseau, processus: fauxProcessus(), maintenant: () => new Date("2026-09-23T12:00:00Z") });
+    g.demarrer();
+    await g.demarrage;
+    return { inst, lance: await g.verifierPlanning() };
+  };
+  // Commencee a 10 h, jamais finie : le conteneur a ete recree pendant la preparation.
+  const reprise = await essai({ derniereTentative: "2026-09-23T10:00:00.000Z" });
+  assert.equal(reprise.lance, true, "preparation interrompue par un redemarrage : repoussee au surlendemain comme un echec");
+  assert.equal(lireSuivi(reprise.inst).interruptions, 0, "compteur non remis a zero apres une preparation finie");
+  // Temoins : un essai FINI (echec) garde la regle des 20 h ; trois interruptions de suite aussi.
+  assert.equal((await essai({ derniereTentative: "2026-09-23T10:00:00.000Z", derniereFin: "2026-09-23T10:30:00.000Z" })).lance, false,
+    "un echec termine est relance avant 20 h");
+  assert.equal((await essai({ derniereTentative: "2026-09-23T10:00:00.000Z", interruptions: 2 })).lance, false,
+    "interrompue trois fois de suite (la preparation fait-elle tomber le conteneur ?) : relancee sans fin");
 });
 
 // --- 11. La ligne de l'ecran Parametres ----------------------------------------
