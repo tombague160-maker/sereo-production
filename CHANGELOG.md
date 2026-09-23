@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.40.2](https://github.com/tombague160-maker/sereo-production/compare/v1.40.1...v1.40.2) (2026-09-23)
+
+
+### 🐛 Corrections de bugs
+
+* **tournee:** en sombre, le bandeau de la tournée est vert profond ([#163](https://github.com/tombague160-maker/sereo-production/issues/163)) ([8450465](https://github.com/tombague160-maker/sereo-production/commit/845046542864f0c711876d4b030e9e8b1c09dc25))
+
 ## [1.40.1](https://github.com/tombague160-maker/sereo-production/compare/v1.40.0...v1.40.1) (2026-09-23)
 
 
