@@ -190,6 +190,7 @@ Voir `.env.example` pour la liste complète. Les principales :
 - **iOS ignore les icônes du manifeste** : il ne lit que les `<link rel="apple-touch-icon">` de `index.html`. Une icône ajoutée uniquement au manifeste n'apparaîtra jamais sur un iPhone.
 - **`Math.max(0, ...)` et non `Math.max(1, ...)`** sur les quantités produit (PR antérieure). Une qty 0 est légitime (erreur métier signalée), ne pas la forcer à 1.
 - **`pull_policy: build` + auto-update** : le `docker compose up --force-recreate` doit être lancé avec `--no-build` côté sereo-updater, sinon il tente de re-build le context host depuis le container. Configuration côté OMV (Tom.yml).
+- **Image Debian depuis le 23/09 (OSRM intégré)** : base `node:24-trixie-slim`, plus Alpine — pas d'`apk`, pas de `wget` (le healthcheck passe par `node`). Les binaires OSRM viennent de l'étape `FROM ghcr.io/project-osrm/osrm-backend:<version épinglée> AS osrm` ; la carte, elle, est téléchargée et préparée à l'exécution dans `/app/data/osrm` par `lib/osrm-local.js` (voir `DEPLOYMENT.md`). Garder le builder legacy : multi-étapes oui, `# syntax=` et `--mount` non (`test/dockerfile-osrm.test.js`).
 
 ## Chantier en cours : refonte V8
 
@@ -208,5 +209,5 @@ pièges constatés dans ce code — chacun ayant coûté du temps à découvrir.
 - `CONTRIBUTING.md` : workflow Git détaillé avec exemples Conventional Commits.
 - `DEPLOYMENT.md` : déploiement prod, variables d'env, vérification persistance.
 - `agents/maintenance.md` : notes de maintenance opérationnelle.
-- `Dockerfile` : image de prod (Node 24 alpine + tini + healthcheck `/healthz`).
+- `Dockerfile` : image de prod (Node 24 Debian trixie-slim + tini + binaires OSRM + healthcheck `/healthz` par node).
 - `.release-please-config.json` : config du bumping automatique des versions.

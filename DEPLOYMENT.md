@@ -123,3 +123,81 @@ Verifier la persistance :
   utilisateurs les changent en meme temps, la derniere sauvegarde devient la valeur active.
 - Pour un hebergement sans disque persistant, il faudra brancher une base geree comme
   PostgreSQL/Supabase/Neon/Railway Postgres.
+
+## Calcul routier OSRM local (integre a l'image Docker, 23/09)
+
+Depuis la release qui suit la v1.42.0, l'image Docker de Sereo contient le moteur de
+calcul routier OSRM. **Il n'y a rien a faire sur le serveur** : ni compose a modifier,
+ni conteneur a ajouter, ni carte a telecharger a la main. Hors Docker (poste de
+developpement, CI), les binaires OSRM n'existent pas et rien ne se passe.
+
+### Ce qui se passe apres la release
+
+1. `sereo-updater` reconstruit l'image comme d'habitude. Elle est plus grosse :
+   environ 113 Mo compresses au lieu de 76 Mo (464 Mo sur disque au lieu de 312 Mo).
+   La construction telecharge en plus l'image OSRM depuis `ghcr.io` ; si le serveur ne
+   l'atteint pas, la construction echoue et Sereo reste sur l'ancienne image.
+2. Sereo demarre et repond tout de suite (healthcheck compris). Les tournees se
+   calculent sur le serveur public, comme avant, le temps que la carte locale soit
+   prete.
+3. **2 minutes apres le demarrage**, Sereo choisit une zone selon la memoire et le
+   disque du serveur, telecharge la carte depuis Geofabrik dans `/app/data/osrm/`
+   (le volume de donnees), verifie sa somme MD5 et la prepare **en priorite basse**
+   (`nice`, `ionice`) : le reste du serveur garde la main.
+4. Des que la carte est prete, les tournees sont calculees **dans le conteneur**
+   (`127.0.0.1:5000`) : les coordonnees des clients ne sortent plus. Un point hors de
+   la zone, ou une carte locale en panne, repasse par le serveur public (repli).
+5. Ensuite, **chaque mois**, la nuit (3 h, heure de Paris), la carte est refaite a
+   cote de l'ancienne ; l'ancienne sert jusqu'a la bascule et reste en service si la
+   nouvelle echoue. Les anciennes versions sont supprimees.
+
+### Zone, espace, memoire, duree (estimations)
+
+| Zone choisie | Quand | Telechargement | Disque exige (libre) | Memoire exigee |
+|---|---|---|---|---|
+| France entiere | memoire ≥ 24 Go ET disque ≥ 50 Go | 5,1 Go | 50 Go | 24 Go |
+| Bourgogne-Franche-Comte + Grand Est, Auvergne-Rhone-Alpes, Centre-Val de Loire, Ile-de-France, Suisse | memoire ≥ 12 Go ET disque ≥ 30 Go | 2,5 Go | 30 Go | 12 Go |
+| Bourgogne-Franche-Comte | memoire ≥ 3 Go ET disque ≥ 6 Go | 0,33 Go | 6 Go | 3 Go |
+| Aucune (serveur public) | en dessous | — | — | — |
+
+Ce sont des seuils prudents, **estimes** (seul Monaco a ete prepare pour de vrai : 2 s).
+Ordres de grandeur attendus, a confirmer par la premiere preparation :
+
+- Carte preparee : 2 a 4 fois la taille telechargee (region : 1 Go environ ; voisins :
+  5 a 10 Go ; France : 10 a 20 Go). Pendant une mise a jour, deux cartes coexistent.
+- Duree de la premiere preparation, en priorite basse : de l'ordre de 10 a 30 min pour
+  la region, 1 a 2 h pour les voisins, plusieurs heures pour la France (plus le
+  telechargement).
+- Memoire : pendant la preparation, `osrm-extract` prend de l'ordre de 2,5 fois la
+  taille telechargee ; ensuite, `osrm-routed` lit la carte sur le disque (`--mmap`) et
+  garde peu de memoire propre.
+
+### Verifier que ca marche
+
+- **Parametres → Reglages tournee → Calcul routier** : une ligne dit « Sur carte locale
+  « … », donnees du …, … Go. », ou ce qui se passe (« Serveur public en attendant la
+  carte locale … : telechargement 1/2 : 42 %. », derniere erreur, etc.).
+- `/api/storage/status` → champ `calculRoutier` (zone, date de la carte, pret ou non,
+  derniere erreur, espace utilise).
+- `docker logs sereo 2>&1 | grep osrm-local` : chaque etape (telechargement, somme MD5,
+  extract, partition, customize, bascule, lancement, relance) avec sa duree.
+
+### Couper, forcer une zone
+
+- `SEREO_OSRM_LOCAL=0` dans l'environnement du conteneur coupe tout : pas de
+  telechargement, pas de preparation, pas de processus ; calcul sur le serveur public
+  comme avant. (C'est une modification du compose : a ne faire qu'en cas de probleme.)
+- `SEREO_OSRM_ZONE=region` (ou `voisins`, `france`, `aucune`, ou un chemin Geofabrik
+  comme `europe/monaco`) force la zone.
+- Les cartes vivent dans `/app/data/osrm/` : on peut supprimer ce dossier entier ;
+  Sereo le refait de lui-meme dans le quart d'heure (le suivi des essais part avec
+  lui), puis chaque mois comme d'habitude.
+
+### Risque
+
+La **premiere preparation est lourde** (processeur, disque, memoire), d'autant plus que
+la zone est grande. Elle tourne en priorite basse (`nice -n 19`, `ionice -c 3`, moitie
+des coeurs) et a cote du service : Sereo continue de repondre, et une preparation qui
+echoue (memoire insuffisante, disque plein, reseau) ne casse rien — elle est notee, et
+reessayee la nuit suivante a 3 h. Si le serveur souffre malgre tout, `SEREO_OSRM_ZONE=region`
+reduit la charge, `SEREO_OSRM_LOCAL=0` la supprime.
