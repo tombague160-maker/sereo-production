@@ -2598,3 +2598,112 @@ renvoyé en haut par `resetViewportScroll(false)`. Mesuré par la sonde sur la s
 position qu'elle avait : `scrollY` 138 au `DOMContentLoaded` (le défilement vers
 l'ancre `#livreur`), 0 au `load` — la remise écrase toute position prise avant.
 Le défilement d'un humain n'a pas été rejoué. Hors de ce lot.
+
+## Lot 7 de l audit géo : meilleur trajet et calcul routier (23/09)
+
+Audit de référence : rapport du 23/09 (copie `019788c`), §3a, §3b, §5, §6 et lot 7,
+plus la partie « calcul routier » du lot 8. Décisions de Thomas du 23/09 appliquées :
+n° 2 (serveur OSRM à nous, **révisée en cours de lot** : aucune manipulation sur son
+serveur, OSRM sera intégré plus tard à l'image Séréo par l'intégrateur) et n° 9 (pas de
+créneaux horaires : « À livrer en premier »).
+
+### Fait
+
+- **Or-opt (§3a).** `lib/routing.js` : après le plus proche voisin, une descente 2-opt
+  puis Or-opt (déplacer un arrêt ou un bloc de 2-3, dans son sens ou retourné), jusqu'à
+  stabilité, puis des perturbations « double pont » en nombre FIXE et à graine fixe (le
+  même appel rend le même ordre sur toute machine). Deltas en O(1), sommes cumulées dans
+  les deux sens pour le 2-opt (la matrice est dirigée). Banc
+  `test/meilleur-trajet.test.js` : 750 tournées de 5 à 9 arrêts (cinq scénarios de
+  Franche-Comté, détours, vitesse qui monte avec la distance, côtes, adresses en
+  double), comparées à la force brute : médian 0 %, pire **1,65 %** (avant : pire
+  **8,31 %**). À 50 arrêts : 8 à 12 ms (plafond du banc : 100 ms), gain de 0,7 à 2,8 %
+  sur l'ancien ordre.
+- **« À livrer en premier » (§5, décision 9).** Une case sous chaque commande choisie de
+  l'écran de préparation ; `premiers` dans `POST /api/routes` ; drapeau
+  `livrerEnPremier` sur l'arrêt, respecté par un recalcul. L'optimiseur essaie chaque
+  épinglé comme dernier de la tête (les six plus proches du reste s'il y en a plus),
+  optimise la tête et la queue séparément. Optimiser d'un tenant en interdisant les
+  mouvements mixtes restait à 20 % de l'optimum sous contrainte : abandonné.
+- **Mode « sans départ » (§3a, 16 %).** `optimizeOrders` : plus court chemin OUVERT
+  (départ et arrivée fictifs à coût nul) par le même optimiseur, à vol d'oiseau, au lieu
+  du voisin alphabétique. Banc `test/trajet-serveur.test.js` : 200 instances, avant
+  médian 7,87 % / pire 56,70 %, après ≤ 1 % / ≤ 5 %.
+- **Arrêt injoignable (§2 basse).** `injoignables()` retire le nœud qui porte le plus de
+  `null` jusqu'à une table complète ; le message nomme le client (« Client b :
+  injoignable par la route… ») ou le départ/l'arrivée. Option `retirerInjoignables` :
+  l'arrêt sort de la tournée, sa commande reste prête, la réponse le nomme
+  (`injoignablesRetires`). L'écran l'envoie toujours, et l'annonce par une notification.
+- **Géocodeur (§2 basse).** Au premier échec, les autres workers s'arrêtent (10 appels
+  → 4 au plus) ; une commande sans rue est refusée AVANT tout appel.
+- **Tronçons (§3b).** `route.troncons` : `{ duree (s), distance (m) }` par trajet,
+  départ → … → arrivée, tels qu'OSRM les rend (`legs`). Rien de neuf n'est affiché :
+  c'est la matière des heures d'arrivée du lot 6. Un réordonnancement à la main les
+  efface avec le tracé.
+- **Serveur de calcul routier (§6, décision 2).** `SEREO_ROUTING_URL` désigne notre
+  serveur ; une adresse locale (`http://127.0.0.1:5000`) se branche telle quelle. S'il
+  ne répond pas (réseau, délai, 5xx), repli sur le serveur public, pendant 60 s, avec un
+  avertissement au journal (origine seule, jamais un identifiant glissé dans l'URL).
+  `SEREO_ROUTING_REPLI_URL` change le repli ; vide, aucun. Un refus (4xx) ne bascule
+  pas, et son message dit « refuse une des positions » au lieu de « réessaie ».
+- **Découpage au-delà de 50 (§3b, lot 8).** `POST /api/routes/decoupage` (n'écrit
+  rien) : balayage angulaire autour du départ, coupé à la plus grande trouée, paquets
+  équilibrés de 50 au plus. L'écran le propose (confirmation), crée la première tournée
+  et garde les autres commandes sélectionnées pour la suivante.
+- **Garde-fou.** La descente a un plafond de mouvements : une matrice aux valeurs
+  géantes (un « infini » à 9e15, vu pendant ce lot) faisait voir des gains fantômes à
+  l'arrondi, et la boucle ne finissait pas. Banc : processus fils tué au bout de 20 s.
+
+### Preuves rouges (ancien code, cause lue)
+
+- Qualité : « pire écart trop grand : médian 0,00 %, p90 0,93 %, pire 8,31 % sur 750 ».
+  Mutant sans Or-opt (perturbations gardées) : pire 7,07 %, rouge aussi.
+- Épingles : « épinglés 4,0 mais ordre 3,1,0,2,4 ».
+- Injoignable : reçu « Un trajet est inaccessible par la route. Vérifie les adresses. ».
+- Géocodeur : « 10 appels au géocodeur pour une tournée déjà refusée ».
+- Tronçons : reçu `undefined` (lib), « la tournée n'a pas gardé ses tronçons » (serveur) ;
+  mutant qui ne les efface pas au réordonnancement : rouge.
+- Repli : « …indisponible. Réessaie… » au lieu d'un calcul.
+- Découpage : fonction absente ; route 404.
+- Sans départ : « médian 7,87 %, pire 56,70 % sur 200 ».
+- Plafond retiré : « le calcul a été tué : il ne finissait pas » (SIGTERM).
+- E2E `meilleur-trajet.spec.js` sur l'ancien `app.js` : « element(s) not found » pour la
+  case, « Expected substring: "55 commandes" / Received string: "" ».
+
+### Écarts nommés
+
+- **`deploy/osrm/` non fait**, sur contre-ordre du 23/09 (OSRM viendra dans l'image
+  Séréo, lot de l'intégrateur). Le défaut reste donc le serveur public de
+  démonstration, et le repli y renvoie les coordonnées : tant que notre serveur n'existe
+  pas, la question RGPD du §6 reste entière.
+- « À livrer en premier » vit sur l'ARRÊT, pas sur la commande : la case n'est pas
+  mémorisée d'une préparation à l'autre, ne s'affiche pas dans la liste des arrêts et
+  ne se change plus après la création (sauf réordonner à la main).
+- La qualité est mesurée sur des temps synthétiques et jusqu'à 9 arrêts ; à 50, seul le
+  gain sur l'ancien ordre est mesuré, pas l'écart à l'optimum. Aucune vraie matrice
+  OSRM.
+- Le découpage est un balayage angulaire, pas un regroupement : deux villes dans la même
+  direction peuvent tomber ensemble, une ville à cheval sur deux paquets reste
+  possible. Une seule tournée se voit à la fois (H9, lot 2) : la deuxième se crée après.
+- Le géocodeur s'arrête au premier échec, mais l'écran ne dit toujours qu'UNE adresse
+  douteuse par essai (§5, « toutes d'un coup », M) : non fait.
+- Hors périmètre, au plus petit : dans `server.js`, `createRoute`, `createStop`,
+  `reorderRouteStops` (une ligne), `POST /api/routes` et la nouvelle route de
+  découpage ; dans `app.js`, la liste de préparation et `createDeliveryRoute`.
+  `apiFetch` n'est pas touché (lot 1).
+- Deux modifications de JS (`server.js`, remplacement de la section de l'optimiseur)
+  ont été faites par script au lieu de l'outil Edit, relues par `node --check` et les
+  bancs.
+- Instabilités vues, non imputées : un rouge `toHaveText` dans la première passe des
+  bancs e2e (probablement `operations.spec.js:247`, `#opSubscriptions`, sans rapport
+  avec ce lot) non reproduit en deux passes (40/40, 42/42) ; `C2.stock.a` (250 ms) rouge
+  une fois en `npm test` sous charge (1 988 ms), vert seul (237 ms).
+
+### Ce qui reste
+
+- Mesurer l'ordre sur de vraies matrices OSRM, une fois notre serveur dans l'image ;
+  relever alors la limite de 50 (elle protège le serveur public).
+- Heures d'arrivée par arrêt à partir de `troncons` (lot 6), « Réoptimiser » depuis
+  l'écran (lot 6).
+- Afficher « en premier » dans la liste des arrêts ; vrais créneaux horaires (VROOM)
+  si la décision 9 change.
