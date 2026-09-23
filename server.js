@@ -5565,6 +5565,23 @@ function updateRouteStop(db, routeId, stopId, status, notes = "", motif = null) 
   return { route, stop, order };
 }
 
+/**
+ * Lot 5 (audit geo, 23/09) : la reponse d'un geste d'arret porte TOUT ce que le
+ * geste a change -- la tournee, l'arret, la commande, le client -- tels que
+ * les listes (GET /api/routes, /api/orders, /api/clients) les rendraient
+ * apres l'ecriture. Le telephone met son ecran a jour avec, au lieu de relancer
+ * les 17 requetes du chargement complet (5,5 a 8,8 s apres un an).
+ * A appeler APRES writeDb : syncWorkflow a remplace les objets par leur forme
+ * normalisee.
+ */
+function etatApresGesteArret(db, geste) {
+  const route = routeAvecTrace(db, geste.route.id) || geste.route;
+  const stop = route.stops.find(item => String(item.id) === String(geste.stop.id)) || geste.stop;
+  const order = db.commandes.find(item => String(item.id) === String(geste.order.id)) || geste.order;
+  const client = db.clients.find(item => String(item.id) === String(order.clientId)) || null;
+  return { route, stop, order, client };
+}
+
 function formatStopProblem(status) {
   if (status === "absent") return "Client absent";
   if (status === "a_reprogrammer") return "A reprogrammer";
@@ -6345,9 +6362,36 @@ app.get("/api/exports/commandes-annexes.xlsx", (req, res) => {
   }
 });
 
+// Lot 5 (audit geo, 23/09) : la liste n'envoie plus le trace des tournees
+// terminees (87 % des 5 Mo relus a chaque chargement apres un an). Le trace
+// reste en base ; `traceOmise` le dit, et GET /api/routes/:id le rend a la
+// demande. En stockage SQLite, readDb ne l'a meme pas charge.
+const STATUTS_TOURNEE_SANS_TRACE_EN_LISTE = new Set(["terminee"]);
+
+function routePourListe(route) {
+  if (!STATUTS_TOURNEE_SANS_TRACE_EN_LISTE.has(route.status)) return route;
+  const { geometry, ...sansTrace } = route;
+  return { ...sansTrace, traceOmise: true };
+}
+
+/** La tournee complete, trace compris, quel que soit son statut. */
+function routeAvecTrace(db, routeId) {
+  const route = db.routes.find(item => String(item.id) === String(routeId));
+  if (!route) return null;
+  if (Object.prototype.hasOwnProperty.call(route, "geometry")) return route;
+  const trace = useSqliteStorage() ? getSqliteStore().getRouteTrace(route.id) : null;
+  return { ...route, geometry: trace ?? null };
+}
+
 app.get("/api/routes", (req, res) => {
   const db = readDb();
-  res.json(db.routes);
+  res.json(db.routes.map(routePourListe));
+});
+
+app.get("/api/routes/:id", (req, res) => {
+  const route = routeAvecTrace(readDb(), req.params.id);
+  if (!route) return res.status(404).json({ error: "Tournée introuvable" });
+  res.json(route);
 });
 
 app.post("/api/import/stock", uploadExcel, async (req, res) => {
@@ -7433,7 +7477,7 @@ app.patch("/api/routes/:routeId/stops/:stopId", async (req, res) => {
       });
 
       writeDb(db);
-      return r;
+      return etatApresGesteArret(db, r);
     });
     res.json(result);
   } catch (error) {
@@ -7452,7 +7496,8 @@ app.patch("/api/routes/:id/reorder", async (req, res) => {
       });
 
       writeDb(db);
-      return r;
+      // Lot 5 : la forme normalisee, celle de la liste (mise a jour ciblee).
+      return routeAvecTrace(db, r.id) || r;
     });
     res.json(route);
   } catch (error) {
