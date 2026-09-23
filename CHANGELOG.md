@@ -1,5 +1,118 @@
 # Changelog
 
+## [1.42.0](https://github.com/tombague160-maker/sereo-production/compare/v1.41.1...v1.42.0) (2026-09-23)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **abonnements:** création d'un abonnement des planches 3b / 5b ([e56f703](https://github.com/tombague160-maker/sereo-production/commit/e56f703315aabf9c67f0e0415d1e6aa1de1f272c))
+* **adresses:** écran « Adresses à vérifier » au bureau et au téléphone (H7) ([2e1ec0b](https://github.com/tombague160-maker/sereo-production/commit/2e1ec0b4f0ad5a8931eda4270b135c64d684c104))
+* **carte:** fond de carte reglable en un seul endroit, point approximatif dit ([1fff257](https://github.com/tombague160-maker/sereo-production/commit/1fff2577d20734a4ae20b9e9f154c4e670043059))
+* **clients:** l'écran Clients au téléphone (planches 9a, 8c, 12c) ([cf9e7ba](https://github.com/tombague160-maker/sereo-production/commit/cf9e7ba7896e0b506f08d8603e10158b938988a5))
+* **ecrans:** Analyse, Exports, Rappels, A recommander et Commande client au style V8 ; retrait des quatre anciennes listes ([b0e7a73](https://github.com/tombague160-maker/sereo-production/commit/b0e7a73ce00c850e71872ad2f92d5fa4986cf9da))
+* **tournee:** « À livrer en premier » et découpage au-delà de 50 commandes ([870ba34](https://github.com/tombague160-maker/sereo-production/commit/870ba3404133052edda98c8369f2a5aeb9eb786b))
+* **tournee:** audit géo (livreur, adresses, carte, rapidité, trajet) et fin de l'interface V8 ([#170](https://github.com/tombague160-maker/sereo-production/issues/170)) ([f85d534](https://github.com/tombague160-maker/sereo-production/commit/f85d534e192d66c09fd60e32a2d53b52bc52561a))
+* **tournees:** purge des tournees terminees de plus de 12 mois, position « Me localiser » a ~100 m ([1530f35](https://github.com/tombague160-maker/sereo-production/commit/1530f35a4d20df134247409e037eb9b289574e56))
+* **trajet:** Or-opt, « à livrer en premier », arrêt injoignable nommé, repli OSRM ([ae34766](https://github.com/tombague160-maker/sereo-production/commit/ae347667441e9a393b935a35430e3ad9bf61bce0))
+
+
+### 🐛 Corrections de bugs
+
+* **abonnements:** « Retirer » rend le geste d'un clic sur chaque ligne du panier ([72d5402](https://github.com/tombague160-maker/sereo-production/commit/72d54023b7ba8c68a26a8d69f9ed706297ca10ec))
+* **abonnements:** le nom accessible de la pilule « Mensuel » contient « Mensuel » ([307f7ad](https://github.com/tombague160-maker/sereo-production/commit/307f7ad096ca5db75c7094e94ab35fe3540fbb13))
+* **abonnements:** le premier « + » du catalogue ajoute après une quantité tapée ([6eea9e2](https://github.com/tombague160-maker/sereo-production/commit/6eea9e24ed5a323838f5464d125ec32c99388324))
+* **adresses:** le focus reste dans « Adresses a verifier » apres Annuler et Enregistrer ([0c0f541](https://github.com/tombague160-maker/sereo-production/commit/0c0f54124a6d10b83c44c767f1458172f97ca078))
+* **adresses:** telephone, import Excel, relance et stockage JSON (relecture du lot 3) ([eee9177](https://github.com/tombague160-maker/sereo-production/commit/eee91771d68d6ad43a691efd481c7c7c6ab842ab))
+* **adresses:** un seul géocodeur, positions justes et protégées (lot 3 audit géo) ([73730c0](https://github.com/tombague160-maker/sereo-production/commit/73730c06ed47d9ee0c8aae6c74b6c8a5d92cb4f0))
+* **adresses:** une virgule apres le numero ne coupe plus la voie, « Bateau » n'est plus un batiment ([737a4f6](https://github.com/tombague160-maker/sereo-production/commit/737a4f63db7a795e9f8e4a8ad2695d918f7b6877))
+* **carte:** le point approximatif suit les commandes creees apres le geocodage ([9bd4df3](https://github.com/tombague160-maker/sereo-production/commit/9bd4df3478d18f7b3b4973b0d80ffc56d228bba3))
+* **carte:** legende cachee en preparation, fond redemande, bas de carte empile ([906addc](https://github.com/tombague160-maker/sereo-production/commit/906addce58e245972d29abccd385929a150fc339))
+* **carte:** une carte utilisable au telephone (lot 4 de l'audit geo) ([b153d73](https://github.com/tombague160-maker/sereo-production/commit/b153d73da48d61c6480b3efbec3a67ba546a5e3a))
+* **clients:** l'anneau clavier hors du vert se voit en sombre, au téléphone ([9e18dd3](https://github.com/tombague160-maker/sereo-production/commit/9e18dd3fdbab8185537e91a1c381d0338a29cb55))
+* **clients:** revue adverse — le client d'un rappel survit au seuil, l'anneau des lignes en sombre ([1a6d372](https://github.com/tombague160-maker/sereo-production/commit/1a6d372810989029e24e4789d76a5aee3e007b8f))
+* **docker:** le contexte de build exclut tout le dossier data/ ([9882871](https://github.com/tombague160-maker/sereo-production/commit/988287188a97bcff03ed9c2db6e11d2c2367362d))
+* **ecrans:** plus de squelette pour les listes retirees ; recherche « Statistiques » tenue ; DESIGN.md du lot ([56a96cf](https://github.com/tombague160-maker/sereo-production/commit/56a96cff7553b7f3d711634098933b1d5b3847b8))
+* **ecrans:** suites de la relecture — jour sans vente, requete orpheline, croisement avec les finitions ([b90eb60](https://github.com/tombague160-maker/sereo-production/commit/b90eb603824686ce32502dac010ff16279720e8d))
+* **hors-ligne:** le livreur ne perd plus un geste, et l'écran ne recule plus ([8bd2712](https://github.com/tombague160-maker/sereo-production/commit/8bd27124db9f810317d86c0c6d8004e3830ec887))
+* **hors-ligne:** un 500 passager ne bloque plus la file, un renvoi muet ne la gèle plus ([a986004](https://github.com/tombague160-maker/sereo-production/commit/a986004d46525c85af0540d0f717e15ae9ccf6a1))
+* **integration:** l'anneau clavier en sombre, et l'erreur des commandes effacée par une réponse tardive ([3b32456](https://github.com/tombague160-maker/sereo-production/commit/3b32456ec9937179127cdbe4031f690bca1d5020))
+* **integration:** les gestes d'arrêt gardent les garanties des lots 1 et 5 ([19f399b](https://github.com/tombague160-maker/sereo-production/commit/19f399b0f303442f2a5cf6d56793f327a1e5445f))
+* **interface:** finitions de l'audit du 23/09 ([61d421f](https://github.com/tombague160-maker/sereo-production/commit/61d421f4b5c5dc14f010c19014b74c8e20493837))
+* **interface:** relecture des finitions du 23/09 ([bff9ee7](https://github.com/tombague160-maker/sereo-production/commit/bff9ee747598f41198f4ce966e941ef674944849))
+* **stockage:** un trace ecrit par une version d'avant gagne a la remontee ([e047248](https://github.com/tombague160-maker/sereo-production/commit/e047248d228103c54e7a6a6e18a801951ff2c22b))
+* **tournee:** apres un geste d'arret, la copie du service worker suit l'ecran ([3afb59f](https://github.com/tombague160-maker/sereo-production/commit/3afb59f14fc7b8ebbf9749730d2be96ac9e08b6f))
+* **tournee:** découpage — les « en premier » d'abord, rien en file hors ligne, 50 au plus sans départ ([ab51100](https://github.com/tombague160-maker/sereo-production/commit/ab51100ee00ae31832f421fb90d03ee88d9436e9))
+* **tournee:** la clé d'un geste se libère à la fin du traitement, pas à la fermeture ([0394967](https://github.com/tombague160-maker/sereo-production/commit/03949678b11aae906b649bd5fd192ab1bdac030b))
+* **tournees:** le trace d'une tournee d'avant le lot ne garde plus la position « Me localiser » exacte ([2bcc8b5](https://github.com/tombague160-maker/sereo-production/commit/2bcc8b54a23fa3e824080b41f5538617ac734b38))
+* **tournee:** un absent revient « À reprogrammer », un geste renvoyé ne s'applique qu'une fois ([8c69372](https://github.com/tombague160-maker/sereo-production/commit/8c69372d9fb542c1e26dbc35effe019a5396e601))
+
+
+### ⚡ Optimisations
+
+* **purge:** la sauvegarde d'avant purge se fait hors du verrou d'ecriture ([49f8288](https://github.com/tombague160-maker/sereo-production/commit/49f82880e41e1daefbeda03ad55f5042a6f4b356))
+* **stockage:** ecriture ciblee en base, traces des tournees hors du chemin chaud ([b0ac78d](https://github.com/tombague160-maker/sereo-production/commit/b0ac78d67128a2c050257a69e397156867716d44))
+* **stockage:** l'empreinte d'une ligne se calcule en un seul update ([eb7b4ff](https://github.com/tombague160-maker/sereo-production/commit/eb7b4ff41ef2b452bb2eeccfbc6f0e31a6fa0865))
+* **tournee:** apres un geste d'arret, l'ecran se met a jour avec la reponse ([ecfa25a](https://github.com/tombague160-maker/sereo-production/commit/ecfa25adf435756a7777c8934e2c24b26b1d01a6))
+* **tournees:** l'index des commandes se construit une fois pour toutes les tournees ([f653011](https://github.com/tombague160-maker/sereo-production/commit/f653011686944ca4f623ca38f498f465dee04535))
+* **tournees:** plafond du calcul « sans depart », cache et limite de debit du relais d'adresse ([57b4b2b](https://github.com/tombague160-maker/sereo-production/commit/57b4b2b7c571b6ff083279bf140be3e12cb66f01))
+
+
+### ♻️ Refactorisation
+
+* **carte:** un seul champ de precision, geoPrecision du lot 3 ([d4b8c10](https://github.com/tombague160-maker/sereo-production/commit/d4b8c1067ef05a37c8a2a4d5223a83a8317c3739))
+* **hors-ligne:** retire une garde du renvoi que rien ne distinguait ([e424066](https://github.com/tombague160-maker/sereo-production/commit/e424066ae081f34918139d3eea4c85e99c918816))
+* **trajet:** cède la résolution des adresses au lot 3 et adopte sa convention d'erreur ([1d7db43](https://github.com/tombague160-maker/sereo-production/commit/1d7db432244a955bab0ae7d7ed09b616befbd058))
+* **trajet:** fail() garde son texte de main, le détail d'un refus reste sous details ([f20d1a3](https://github.com/tombague160-maker/sereo-production/commit/f20d1a35a450e8be2e83ce6b5b6e02d85ee674bd))
+
+
+### 📚 Documentation
+
+* **adresses:** exemple juste pour l'ecart « complement en tete sans virgule » ([014dd66](https://github.com/tombague160-maker/sereo-production/commit/014dd66d9aa02d859be792073a363f539f1d69b0))
+* **adresses:** lot 3 de l'audit géo dans DESIGN.md, géocodeur unique documenté ([1daf3d9](https://github.com/tombague160-maker/sereo-production/commit/1daf3d96c899716ef96597f09b24abf462f7ac96))
+* **adresses:** relecture adverse du lot 3 dans DESIGN.md ([0199473](https://github.com/tombague160-maker/sereo-production/commit/01994738728130437a5b9ea31d0aba51d2cc1a28))
+* **design:** Clients au téléphone — le sort des cinq défauts de la revue adverse ([3a333f3](https://github.com/tombague160-maker/sereo-production/commit/3a333f3a7656a5197a4c65f4b2795d9ebb22ff5f))
+* **design:** Clients au téléphone (planches 9a, 8c, 12c) ([6a9a619](https://github.com/tombague160-maker/sereo-production/commit/6a9a6193187bcaf45ba99bc4e5812bf5c53abf50))
+* **design:** création d'abonnement des planches 3b / 5b ([f0cc23a](https://github.com/tombague160-maker/sereo-production/commit/f0cc23a9492f78f24e0b6d9c953a95ce414fd8ec))
+* **design:** croisement avec fix/interface-finitions — resolution eprouvee sur un arbre fusionne ([a815bae](https://github.com/tombague160-maker/sereo-production/commit/a815baee390919ef754d387e39854460e8a1d905))
+* **design:** intégration des lots 1, 3, 4, 5 et 7 — conflits, garanties, bancs ([0e16b19](https://github.com/tombague160-maker/sereo-production/commit/0e16b1907f0aed96ee45b7cb3c96cfe32174d416))
+* **design:** integration des lots 3, 4 et 7, un seul champ geoPrecision ([092f0b8](https://github.com/tombague160-maker/sereo-production/commit/092f0b8380e2ebf768adba3f4c13729397949ff9))
+* **design:** intégration des lots d'interface du 23/09 ([dc78e54](https://github.com/tombague160-maker/sereo-production/commit/dc78e54a9b146528d80e6913a4cd131753f10d82))
+* **design:** l'ancien formulaire faisait « tous les mois » d'un abonnement de 2 mois ([747a855](https://github.com/tombague160-maker/sereo-production/commit/747a855425bac695588342d17b6ef9eb29e4a4aa))
+* **design:** lot 1 de l'audit géo — le livreur ne perd plus rien ([1b33cdc](https://github.com/tombague160-maker/sereo-production/commit/1b33cdcc8aec68af8d49597efe91691a22390220))
+* **design:** lot 4 de l'audit geo, une carte utilisable au telephone ([f7eed6d](https://github.com/tombague160-maker/sereo-production/commit/f7eed6d1a621ec01e73cdeeade495fce5a79b231))
+* **design:** lot 5 de l'audit geo, rapidite — fait, mesures avant/apres, ecarts, ce qui reste ([73cc8de](https://github.com/tombague160-maker/sereo-production/commit/73cc8de03e8584d72ea748b5e2af5ccce3359fc2))
+* **design:** lot 5, rapidite — revue adverse, quatre defauts corriges, ecarts nommes ([1e266c4](https://github.com/tombague160-maker/sereo-production/commit/1e266c407bb4aa84225bfcc6cee24e30dabb56e1))
+* **design:** relecture adverse du lot 1 — le sort de chaque défaut ([f719e60](https://github.com/tombague160-maker/sereo-production/commit/f719e600d1a97d7fa1c2ba6e3b1f32b506d3b0ca))
+* **design:** relecture adverse du lot 4 de l'audit geo, cinq defauts corriges ([2f3f29e](https://github.com/tombague160-maker/sereo-production/commit/2f3f29ee905389a4499d77fb8c809866e9926d33))
+* **design:** reprise de la correction du lot 1 — chaque rouge rejoué ([089105d](https://github.com/tombague160-maker/sereo-production/commit/089105d547e7689137cecf3998b8a687566c8f2f))
+* **design:** section des finitions d'interface du 23/09, et son banc ([46637aa](https://github.com/tombague160-maker/sereo-production/commit/46637aab19957a270d17e82b1dce233bed09f88e))
+* **trajet:** lot 7 de l'audit géo — fait, preuves, écarts, ce qui reste ([547e558](https://github.com/tombague160-maker/sereo-production/commit/547e5582a6dd2713fa0fb0ce4b7c05c8303a3b80))
+* **trajet:** revue adverse du lot 7 — six défauts, leur sort, la recette de fusion avec le lot 3 ([871c6b7](https://github.com/tombague160-maker/sereo-production/commit/871c6b72d70bb71f0be52dba2b9b7ac9e8f0dc26))
+
+
+### 🧪 Tests
+
+* **abonnements:** le banc « Entrée n'envoie pas le formulaire » compte les envois ([96adaad](https://github.com/tombague160-maker/sereo-production/commit/96adaad246b952e056db857248ca935798b3dcf5))
+* **carte:** banc du lot 4 de l'audit geo, rouge sur la carte actuelle ([a7e3cab](https://github.com/tombague160-maker/sereo-production/commit/a7e3cab476c87872c4b18068ce4ea6badc129181))
+* **carte:** sans commande prete, aucun client de la base n'est dessine ([615d498](https://github.com/tombague160-maker/sereo-production/commit/615d498e0531ff2c662136d6cffd4ea518d4d18c))
+* **clients:** la rangée Rappels / synchro et le statut en pleine largeur, au téléphone ([8f88f69](https://github.com/tombague160-maker/sereo-production/commit/8f88f69fefa8a239a8eda859ccf99a40a94eb66d))
+* **design:** la section du lot doit exister, pas être la dernière ([ccd7440](https://github.com/tombague160-maker/sereo-production/commit/ccd744004487689ce109ebcfdc60c2254e65aec1))
+* **e2e:** chaque banc de rapidite vise l'arret de l'ecran et tient seul ([9afeea3](https://github.com/tombague160-maker/sereo-production/commit/9afeea361c366d5dcc3c0956676a998e23480d38))
+* **e2e:** la case « en premier » existe avant d'être jugée cachée ([5d6fe23](https://github.com/tombague160-maker/sereo-production/commit/5d6fe23887a1f71052ad83f23eeeefc53c3e014c))
+* **e2e:** le banc « Me localiser » termine lui-meme la tournee en cours ([a99242c](https://github.com/tombague160-maker/sereo-production/commit/a99242c41dba0c85b62e46808ae4768d300f228f))
+* **e2e:** le semé des bancs ne fuit plus d'un banc à l'autre — cause de meilleur-trajet:45 ([18f299c](https://github.com/tombague160-maker/sereo-production/commit/18f299ca71200011d923c88d2a207707a52cde75))
+* **e2e:** un serveur semé refuse un port déjà pris au lieu de parler à un autre ([f1fd819](https://github.com/tombague160-maker/sereo-production/commit/f1fd819fd5737d9f4b6656bc8eb25ba8c27549b9))
+* **ecrans:** banc des ecrans sans planche au style V8 (rouge attendu) ([52499de](https://github.com/tombague160-maker/sereo-production/commit/52499de316261f3d824593438a0849714bc1f7b9))
+* **hors-ligne:** banc du « Livré » dont la réponse casse, soldé par le geste suivant ([21812dd](https://github.com/tombague160-maker/sereo-production/commit/21812dd0452f18736049ce337aabdb162de3ad4a))
+* **interface:** le banc du defilement rend aux tuiles leur lenteur ([4340643](https://github.com/tombague160-maker/sereo-production/commit/4340643e0048d0befed7fd893968019a916313f3))
+* **interface:** le banc du défilement retient `load` par le logo, plus par les tuiles ([2e728e1](https://github.com/tombague160-maker/sereo-production/commit/2e728e169ed6a78fc6ac3f592e89ef41cd359182))
+* **lot5:** le banc de migration tolere une base sans table des traces ([c013e91](https://github.com/tombague160-maker/sereo-production/commit/c013e91485205a5fe5c759203f4ec0ec4eee57d4))
+* **lot5:** le journal des ecritures ne pose ses declencheurs que sur les tables presentes ([fa8b4f7](https://github.com/tombague160-maker/sereo-production/commit/fa8b4f7ff441952da0758bb38cbe34714fd86aa5))
+* **trajet:** la matrice aberrante reproduit le cas qui figeait la descente ([a6b5b08](https://github.com/tombague160-maker/sereo-production/commit/a6b5b08282814bad635b859001fefeaecad87db6))
+* **trajet:** le banc du géocodeur reproduit le cas de l'audit (seule la première adresse échoue) ([bc5b3a2](https://github.com/tombague160-maker/sereo-production/commit/bc5b3a2b29baa0952ff5972c229b41e848319826))
+* **trajet:** les bancs du découpage jugent le regroupement par direction ([ad63e63](https://github.com/tombague160-maker/sereo-production/commit/ad63e6367e0d3d01f64e0970ab940c1ef9ae6ba3))
+* **trajet:** les rouges du banc serveur disent leur cause (assertion, pas un plantage) ([cafc299](https://github.com/tombague160-maker/sereo-production/commit/cafc2990f26a3746a4eed695e7c77ed494c78acc))
+
 ## [1.41.1](https://github.com/tombague160-maker/sereo-production/compare/v1.41.0...v1.41.1) (2026-09-23)
 
 
