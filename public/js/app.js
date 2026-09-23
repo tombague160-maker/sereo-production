@@ -5731,9 +5731,24 @@ async function enregistrerNumerotation(form) {
   notify("Numérotation enregistrée.", "success");
 }
 
+// Calcul routier OSRM integre (23/09) : une ligne, ecrite par le serveur
+// (`resume`) -- carte locale prete, en preparation, ou serveur public, et
+// pourquoi. Un echec de lecture ne casse pas l'ecran.
+async function afficherCalculRoutier() {
+  const ligne = document.getElementById("calculRoutierEtat");
+  if (!ligne) return;
+  try {
+    const statut = await apiFetch("/api/storage/status");
+    ligne.textContent = statut?.calculRoutier?.resume || "État indisponible.";
+  } catch {
+    ligne.textContent = "État indisponible (serveur injoignable).";
+  }
+}
+
 function renderSettings() {
   updateBrandImageStatus();
   renderTourneeSettings();
+  afficherCalculRoutier();
   renderParSecteursPilules();
   chargerNumerotation();
 

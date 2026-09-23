@@ -12,6 +12,7 @@ const { zipSync, strToU8 } = require("fflate");
 const { createSqliteStore } = require("./storage/sqliteStore");
 const { empreinteDesSources, shellEmpreinte } = require("./lib/empreinte-shell");
 const { fondDeCarte } = require("./lib/fond-de-carte");
+const { GestionnaireOsrm } = require("./lib/osrm-local");
 
 loadEnvFile(path.join(__dirname, ".env"));
 
@@ -132,6 +133,15 @@ const BACKUP_DIR = path.resolve(process.env.SEREO_BACKUP_DIR || path.join(path.d
 // retelechargement et audit. Sous-dossier du data dir, donc persistant sur
 // le volume Docker comme la SQLite.
 const IMPORTS_ARCHIVES_DIR = path.resolve(process.env.SEREO_IMPORTS_ARCHIVES_DIR || path.join(path.dirname(SQLITE_PATH), "imports-archives"));
+// Calcul routier OSRM integre a l'image (23/09) : cartes dans le volume de
+// donnees (/app/data/osrm en production). Le gestionnaire ne fait rien tant
+// que startServer() ne l'a pas demarre, et rien du tout sans les binaires
+// OSRM (poste de developpement, CI). lib/routing.js lui demande a chaque
+// calcul si la carte locale est prete.
+const osrmLocal = new GestionnaireOsrm({
+  dossier: path.resolve(process.env.SEREO_OSRM_DIR || path.join(path.dirname(SQLITE_PATH), "osrm"))
+});
+routing.definirServeurLocal(() => osrmLocal.urlSiPret());
 const LEAFLET_DIST = path.join(__dirname, "node_modules", "leaflet", "dist");
 // Le nom du shell, calcule une fois au demarrage : CACHE_NAME du service
 // worker SUIVI de l'empreinte du contenu de public/ et de Leaflet
@@ -6442,7 +6452,11 @@ app.get("/api/storage/status", (req, res) => {
     // backup async a echoue (disque plein/permissions) : a surveiller.
     backupsSuspended: backupsSuspendedFreshEmpty,
     lastBackupAt,
-    lastBackupError
+    lastBackupError,
+    // Calcul routier (23/09) : carte locale ou serveur public, zone, date de
+    // la carte, derniere erreur, espace utilise ; `resume` est la ligne de
+    // l'ecran Parametres.
+    calculRoutier: osrmLocal.etat()
   });
 });
 
@@ -8829,12 +8843,23 @@ function startServer(port = PORT, host = HOST) {
   // (notamment apres restauration d'un backup ou montee de version)
   healDatabaseAtBoot();
   planifierPurgeDesTournees();
-  return app.listen(port, host, () => {
+  const serveur = app.listen(port, host, () => {
     console.log(`Sereo lance sur http://${host}:${port}`);
     if (host === "0.0.0.0" || host === "::") {
       console.log("Acces reseau local active. A utiliser seulement sur un reseau de confiance.");
     }
   });
+  // Carte OSRM locale : APRES l'ecoute, et sans l'attendre. demarrer() rend
+  // la main tout de suite et ne jette jamais ; le travail lourd
+  // (telechargement, preparation) tourne en arriere-plan et en processus fils.
+  setImmediate(() => {
+    try {
+      osrmLocal.demarrer();
+    } catch (error) {
+      console.warn(`[osrm-local] ${error?.message || error}`);
+    }
+  });
+  return serveur;
 }
 
 if (require.main === module) {
@@ -8855,6 +8880,8 @@ module.exports = {
   nextSectorDeliveryDate,
   decorerSecteurPourAffichage,
   startServer,
+  // Calcul routier OSRM integre (23/09)
+  _osrmLocal: osrmLocal,
   closeStorage,
   defaultDb,
   readDb,
