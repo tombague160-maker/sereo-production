@@ -37,7 +37,7 @@ test("le menu « Plus » : les cinq destinations de la passation", async ({ page
   expect(mots.map(m => m.trim())).toEqual(["Commandes", "Stock", "Clients", "Analyse", "Paramètres"]);
 });
 
-for (const onglet of ["journee", "commandes", "stock", "crm", "abonnements", "parametres"]) {
+for (const onglet of ["journee", "commandes", "stock", "crm", "abonnements", "parametres", "preparation"]) {
   test(`l'en-tête de « ${onglet} » est le bloc vert, et rien n'y déborde`, async ({ page }) => {
     await page.goto("/#" + onglet, { waitUntil: "networkidle" });
     const r = await page.evaluate(() => {

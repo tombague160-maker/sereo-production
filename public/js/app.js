@@ -147,6 +147,9 @@ document.addEventListener("DOMContentLoaded", () => {
   initMap();
   registerServiceWorker();
   brancherFileHorsLigne();
+  // Avant showTab : au telephone, les filtres de la Preparation vivent dans
+  // la fente d'en-tete, que showTab montre ou cache par ecran.
+  placerFiltresPreparation();
   showTab(getInitialTab(), { updateHash: false });
   loadAppearance();
   loadVersionInfo();
@@ -442,7 +445,6 @@ function bindUi() {
     renderStock();
   });
 
-  let preparationSearchTimer = null;
   document.getElementById("preparationSearch")?.addEventListener("input", event => {
     const value = event.target.value;
     clearTimeout(preparationSearchTimer);
@@ -672,6 +674,7 @@ function bindUi() {
       document.getElementById("preparationSectorPills")?.classList.toggle("filtre-pilules--depliee");
       ajusterRepliDesSecteurs();
     }
+    if (action === "basculer-recherche-preparation") basculerRecherchePreparation();
     if (action === "open-commande-detail") openCommandeDetail(actionButton.dataset.orderId);
     if (action === "close-commande-detail") closeCommandeDetail();
     if (action === "start-preparation") runAction(actionButton, "Démarrage...", () => startPreparation(actionButton.dataset.orderId));
@@ -850,6 +853,11 @@ function showTab(tabName, options = {}) {
   if (nextTab === "crm") majSousTitreClients();
   if (nextTab === "abonnements") majSousTitreAbonnements();
   if (nextTab === "livreur") majEnteteTournee();
+  if (nextTab === "preparation") {
+    majSousTitrePreparation();
+    // Le repli des secteurs se MESURE : cache, la rangee n'a pas de hauteur.
+    ajusterRepliDesSecteurs();
+  }
 
   updateCustomerCartBar();
 
@@ -3233,9 +3241,126 @@ function ajusterRepliDesSecteurs() {
   bouton.textContent = ouvert ? "Moins de secteurs" : "Tous les secteurs";
 }
 
+/*
+ * PREPARATION AU TELEPHONE -- planches 7a (la liste) et 7b (une commande).
+ * Sous 820 px, la ou la barre basse remplace la barre laterale. Au bureau,
+ * rien ne change : les groupes et le sheet restent (aucune planche bureau
+ * pour cet ecran).
+ */
+const PREPARATION_MOBILE = window.matchMedia("(max-width: 820px)");
+// Le minuteur de frappe de la recherche (bindUi) : au niveau du module pour
+// que refermer la loupe puisse l'annuler.
+let preparationSearchTimer = null;
+
+function preparationEnListeUnique() {
+  return PREPARATION_MOBILE.matches;
+}
+
+/**
+ * Le mot de STATUT d'une commande a preparer, celui de la planche 7a et de la
+ * charte §4 (En preparation, A verifier, Pret livraison), plus « Bloquee ».
+ * Au bureau, la ligne garde le mot de l'ETAPE (A faire, En cours...) : le
+ * titre de son groupe dit deja le reste.
+ */
+function motDeStatutPreparation(order) {
+  if (["importe", "stock_a_verifier"].includes(order.status) && !order.canPrepare) return { cle: "bloquee", mot: "Bloquée", rang: 0 };
+  if (order.status === "en_preparation") return { cle: "en-preparation", mot: "En préparation", rang: 1 };
+  if (order.status === "stock_a_verifier") return { cle: "a-verifier", mot: "À vérifier", rang: 2 };
+  if (order.status === "pret_livraison") return { cle: "pret", mot: "Prêt livraison", rang: 3 };
+  return { cle: "a-preparer", mot: "À préparer", rang: 2 };
+}
+
+/**
+ * Le tri de la planche 7a : bloquees d'abord, puis en preparation, a
+ * verifier (et a preparer), pret livraison ; a statut egal, par secteur puis
+ * par numero de bon. Recalcule a chaque rendu : une commande qui se debloque
+ * remonte au rendu suivant.
+ */
+function comparerPourLaPreparation(a, b) {
+  return motDeStatutPreparation(a).rang - motDeStatutPreparation(b).rang
+    || String(a.sector || "").localeCompare(String(b.sector || ""), "fr")
+    || String(a.numero || "").localeCompare(String(b.numero || ""), "fr", { numeric: true })
+    || String(a.clientName || "").localeCompare(String(b.clientName || ""), "fr");
+}
+
+/**
+ * Les filtres dans l'en-tete vert au telephone (planche 7a), dans le panneau
+ * au bureau. On DEPLACE le bloc (memes elements, memes identifiants, memes
+ * ecouteurs) : deux copies auraient deux etats a synchroniser.
+ */
+function placerFiltresPreparation() {
+  const filtres = document.getElementById("preparationFiltres");
+  const fente = document.getElementById("enteteActions");
+  const panneau = document.querySelector("#preparation .panel");
+  const liste = document.getElementById("preparationList");
+  if (!filtres || !fente || !panneau || !liste) return;
+  if (preparationEnListeUnique()) {
+    if (filtres.parentElement !== fente) fente.appendChild(filtres);
+    filtres.hidden = !document.getElementById("preparation")?.classList.contains("active");
+    // Une recherche tapee au bureau survit au passage sous 820 px : la loupe
+    // la montre depliee (sans focus : une rotation n'ouvre pas le clavier).
+    // Repliee, elle filtrerait la liste sans rien en dire.
+    if (document.getElementById("preparationSearch")?.value) basculerRecherchePreparation(true, { focus: false });
+  } else {
+    if (filtres.parentElement !== panneau) panneau.insertBefore(filtres, liste);
+    filtres.hidden = false;
+  }
+  ajusterRepliDesSecteurs();
+}
+
+/** La loupe de la planche 7a : la recherche se deplie a la demande. */
+function basculerRecherchePreparation(ouvrir, { focus = true } = {}) {
+  const filtres = document.getElementById("preparationFiltres");
+  const loupe = document.getElementById("preparationLoupe");
+  const champ = document.getElementById("preparationSearch");
+  if (!filtres || !loupe || !champ) return;
+  const ouverte = typeof ouvrir === "boolean" ? ouvrir : !filtres.classList.contains("prep-filtres--recherche");
+  filtres.classList.toggle("prep-filtres--recherche", ouverte);
+  loupe.setAttribute("aria-expanded", String(ouverte));
+  if (ouverte) {
+    if (focus) champ.focus();
+  } else if (champ.value || preparationFilter.query) {
+    // Refermer la loupe efface la recherche : un filtre qu'on ne voit plus
+    // cacherait des commandes sans le dire. La frappe encore en attente
+    // (200 ms) est annulee, sinon elle reappliquerait le filtre efface.
+    clearTimeout(preparationSearchTimer);
+    champ.value = "";
+    preparationFilter.query = "";
+    renderPreparation();
+  }
+}
+
+// Le sous-titre de la planche 7a : « 3 commandes a preparer ». Au telephone
+// seulement : au bureau (aucune planche, aucune decision), le sous-titre reste
+// celui de tabs.js.
+function majSousTitrePreparation() {
+  if (!document.getElementById("preparation")?.classList.contains("active")) return;
+  if (!preparationEnListeUnique()) {
+    setText("pageSubtitle", titles.preparation.subtitle);
+    return;
+  }
+  const restantes = (orders || []).filter(order => ["importe", "stock_a_verifier", "en_preparation"].includes(order.status)).length;
+  setText("pageSubtitle", restantes
+    ? `${restantes} commande${restantes > 1 ? "s" : ""} à préparer`
+    : "Aucune commande à préparer");
+}
+
+// Franchir 820 px (rotation, fenetre redimensionnee) : la liste change de
+// forme et les filtres changent de place. Garde « legacy Safari » (< 14, sans
+// MediaQueryList.addEventListener) comme watchSystemColorScheme : au premier
+// niveau du module, l'appel nu leverait et l'application ne demarrerait pas.
+function surFranchissementPreparation() {
+  closeCommandeDetail();
+  placerFiltresPreparation();
+  renderPreparation();
+}
+if (PREPARATION_MOBILE.addEventListener) PREPARATION_MOBILE.addEventListener("change", surFranchissementPreparation);
+else if (PREPARATION_MOBILE.addListener) PREPARATION_MOBILE.addListener(surFranchissementPreparation);
+
 function renderPreparation() {
   renderPreparationStats();
   renderPreparationFilterOptions();
+  majSousTitrePreparation();
 
   const container = document.getElementById("preparationList");
   if (!container) return;
@@ -3278,6 +3403,18 @@ function renderPreparation() {
     return;
   }
 
+  // Au telephone (planche 7a, decision de Thomas du 23/09) : UNE liste, sans
+  // groupes, et chaque ligne dit son statut en toutes lettres -- le titre de
+  // groupe qui le disait n'est plus la.
+  if (preparationEnListeUnique()) {
+    const toutes = groups.flatMap(group => group.orders).sort(comparerPourLaPreparation);
+    const liste = document.createElement("div");
+    liste.className = "prep-liste";
+    toutes.forEach(order => liste.appendChild(createPreparationRow(order, { unique: true })));
+    container.appendChild(liste);
+    return;
+  }
+
   // Planche Preparation.png : UNE LIGNE PAR COMMANDE. Les quatre colonnes
   // deviennent quatre sections empilees ; une section vide ne s'affiche pas
   // (avant : quatre « Rien ici », un par colonne).
@@ -3313,7 +3450,8 @@ function detailDeBlocage(order) {
   return formatStockStatus(order.stockStatus) || "Stock à vérifier";
 }
 
-function createPreparationRow(order) {
+function createPreparationRow(order, { unique = false } = {}) {
+  if (unique) return createPreparationRowMobile(order);
   const etape = etapeDePreparation(order);
   const lignes = (order.products || []).length;
   const articles = lignes === 1 ? "1 article" : `${lignes} articles`;
@@ -3338,6 +3476,55 @@ function createPreparationRow(order) {
   return row;
 }
 
+/**
+ * La ligne de la planche 7a : un point de couleur, le nom, « ville · n
+ * articles » (ou le manque, en alerte), et le mot de statut. Quatre
+ * informations. « n articles » compte les ARTICLES (les quantites), comme le
+ * resume au-dessus -- pas les lignes de produit.
+ */
+/**
+ * Le manque d'une bloquee en ARTICLES, comme la planche (« Il manque 2
+ * articles » ; 7b : « 2 en stock, 2 manquants ») : la somme des quantites
+ * manquantes, pas le nombre de produits. Un stock non renseigne n'est pas un
+ * manque : il se dit tel quel.
+ */
+function manqueDeLaCommande(order) {
+  const manquants = (order.stockLines || [])
+    .filter(ligne => ligne.status === "missing")
+    .reduce((somme, ligne) => somme + Math.max(0, (Number(ligne.required) || 0) - Math.max(0, Number(ligne.available) || 0)), 0);
+  if (manquants === 1) return "Il manque 1 article";
+  if (manquants > 1) return `Il manque ${manquants} articles`;
+  if ((order.stockLines || []).some(ligne => ligne.status === "unknown")) return "Stock non renseigné";
+  return formatStockStatus(order.stockStatus) === "à vérifier" ? "Stock à vérifier" : `Stock ${formatStockStatus(order.stockStatus)}`;
+}
+
+function createPreparationRowMobile(order) {
+  const statut = motDeStatutPreparation(order);
+  const n = getOrderProductCount(order);
+  const articles = n === 1 ? "1 article" : `${n} articles`;
+  const ville = order.city ? formatSectorLabel(order.city) : (order.sector ? formatSectorLabel(order.sector) : "");
+  const detail = statut.cle === "bloquee"
+    ? `<span class="commande-ligne-alerte">${escapeHtml(manqueDeLaCommande(order))}</span>`
+    : `<span>${escapeHtml([ville, articles].filter(Boolean).join(" · "))}</span>`;
+  // Le « ! » de la planche sur le badge Bloquee : l'alerte voyage avec une forme.
+  const icone = statut.cle === "bloquee"
+    ? `<svg class="prep-badge-icone" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5"></circle><path d="M12 8v4m0 3.5v.5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg>`
+    : "";
+  const row = document.createElement("article");
+  row.className = `commande-ligne prep-ligne prep-ligne--${statut.cle}`;
+  row.innerHTML = `
+    <button class="commande-ligne-main" type="button" data-action="open-commande-detail" data-order-id="${escapeAttribute(order.id)}" aria-label="Ouvrir ${escapeAttribute(order.clientName)}, ${escapeAttribute(statut.mot)}">
+      <span class="prep-point prep-point--${statut.cle}" aria-hidden="true"></span>
+      <span class="commande-ligne-corps">
+        <strong>${escapeHtml(order.clientName)}</strong>
+        ${detail}
+      </span>
+      <span class="pill prep-badge prep-badge--${statut.cle}">${icone}${escapeHtml(statut.mot)}</span>
+    </button>
+  `;
+  return row;
+}
+
 /** Le detail d'une commande, en sheet : l'adresse, la date, le stock, et les actions. */
 function openCommandeDetail(orderId) {
   const dialogue = document.getElementById("commandeDetailDialog");
@@ -3345,10 +3532,123 @@ function openCommandeDetail(orderId) {
   const order = orders.find(item => String(item.id) === String(orderId));
   if (!dialogue || !corps || !order || typeof dialogue.showModal !== "function") return;
   corps.innerHTML = "";
-  corps.appendChild(createPreparationCard(order));
+  const mobile = preparationEnListeUnique();
+  // Au telephone, la page de la planche 7b ; au bureau, le sheet d'avant.
+  dialogue.classList.toggle("commande-page", mobile);
+  corps.appendChild(mobile ? createPreparationDetailMobile(order) : createPreparationCard(order));
   const titre = document.getElementById("commandeDetailTitre");
   if (titre) titre.textContent = order.clientName;
+  remplirEnteteDetailCommande(mobile ? order : null);
   dialogue.showModal();
+}
+
+/**
+ * L'en-tete vert de la planche 7b : « CMD-2026-007 · 16 septembre » au-dessus
+ * du nom, puis deux puces, le secteur et le statut. Vide au bureau.
+ */
+function remplirEnteteDetailCommande(order) {
+  const meta = document.getElementById("commandeDetailMeta");
+  const puces = document.getElementById("commandeDetailPuces");
+  if (!meta || !puces) return;
+  if (!order) {
+    meta.textContent = "";
+    puces.innerHTML = "";
+    return;
+  }
+  const date = order.dateCommande ? new Date(`${String(order.dateCommande).slice(0, 10)}T12:00:00`) : null;
+  const jour = date && !Number.isNaN(date.getTime()) ? date.toLocaleDateString("fr-FR", { day: "numeric", month: "long" }) : "";
+  meta.textContent = [order.numero, jour].filter(Boolean).join(" · ");
+  const secteur = order.sector ? formatSectorLabel(order.sector) : (order.city ? formatSectorLabel(order.city) : "");
+  puces.innerHTML = `
+    ${secteur ? `<span class="commande-page-puce">${escapeHtml(secteur)}</span>` : ""}
+    <span class="commande-page-puce commande-page-puce--statut">${escapeHtml(motDeStatutPreparation(order).mot)}</span>
+  `;
+}
+
+/** Une ligne de produit de la planche 7b : nom, code, quantite ; le manque en clair. */
+function ligneDeProduitPreparation(ligne, reservee) {
+  const requis = Number(ligne.required) || 0;
+  let sous = escapeHtml(ligne.code || "");
+  let alerte = false;
+  // Stock reserve (en preparation, prete) : le manque d'aujourd'hui ne la
+  // concerne plus, ses articles sont deja mis de cote.
+  if (!reservee && ligne.status === "missing") {
+    const dispo = Math.max(0, Number(ligne.available) || 0);
+    const manque = Math.max(0, requis - dispo);
+    sous = `${dispo} en stock, ${manque} manquant${manque > 1 ? "s" : ""}`;
+    alerte = true;
+  } else if (!reservee && ligne.status === "unknown") {
+    sous = [ligne.code, "stock non renseigné"].filter(Boolean).map(escapeHtml).join(" · ");
+    alerte = true;
+  }
+  return `
+    <li class="commande-page-produit${alerte ? " commande-page-produit--manque" : ""}">
+      <span class="commande-page-produit-texte">
+        <strong>${escapeHtml(ligne.nom || ligne.code || "Produit")}</strong>
+        <span>${sous}</span>
+      </span>
+      <span class="commande-page-quantite">${escapeHtml(requis)}</span>
+    </li>
+  `;
+}
+
+/**
+ * Le corps de la planche 7b : les produits, l'adresse, puis le geste du
+ * statut en bas, sous le pouce. Un bouton desactive dit toujours pourquoi
+ * (planche : « jamais un bouton gris sans explication »).
+ */
+function createPreparationDetailMobile(order) {
+  const statut = motDeStatutPreparation(order);
+  const reservee = order.stockStatus === "reserve";
+  const lignes = (order.stockLines && order.stockLines.length)
+    ? order.stockLines
+    : (order.products || []).map(p => ({ nom: p.nom, code: p.code, required: Number(p.quantite || 1), status: "ok" }));
+  const n = getOrderProductCount(order);
+  const deliveryDate = order.deliveryDate || getTodayDateInput();
+  const id = escapeAttribute(order.id);
+
+  let geste = "";
+  if (statut.cle === "bloquee") {
+    const manque = manqueDeLaCommande(order);
+    const raison = /^Il manque/.test(manque) ? `${manque} en stock pour commencer` : `${manque} : impossible de commencer`;
+    geste = `
+      <button class="button primary" type="button" data-action="start-preparation" data-order-id="${id}" disabled aria-describedby="commandeGesteRaison">Passer en préparation</button>
+      <p id="commandeGesteRaison" class="commande-page-raison"><svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"></circle><path d="M12 8v4m0 3.5v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg><span>${escapeHtml(raison)}</span></p>`;
+  } else if (statut.cle === "en-preparation") {
+    geste = `<button class="button primary" type="button" data-action="finish-preparation" data-order-id="${id}">Préparation terminée</button>`;
+  } else if (statut.cle === "pret") {
+    geste = `<p class="commande-page-note">Préparation terminée : la commande attend sa tournée.</p>`;
+  } else {
+    geste = `<button class="button primary" type="button" data-action="start-preparation" data-order-id="${id}">Passer en préparation</button>`;
+  }
+
+  const article = document.createElement("div");
+  article.className = "commande-page-corps";
+  article.innerHTML = `
+    <section class="commande-page-carte" aria-label="Produits">
+      <div class="commande-page-compte">
+        <strong>${lignes.length} produit${lignes.length > 1 ? "s" : ""}</strong>
+        <span>${n} article${n > 1 ? "s" : ""}</span>
+      </div>
+      <ul class="commande-page-produits">
+        ${lignes.map(ligne => ligneDeProduitPreparation(ligne, reservee)).join("")}
+      </ul>
+    </section>
+    <section class="commande-page-carte commande-page-adresse" aria-label="Livraison">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path><circle cx="12" cy="10" r="2.4" stroke="currentColor" stroke-width="2"></circle></svg>
+      <div>
+        <strong>${escapeHtml(formatOrderAddress(order))}</strong>
+        ${order.phone ? `<a href="tel:${escapeAttribute(String(order.phone).replace(/\s+/g, ""))}">${escapeHtml(formatPhone(order.phone))}</a>` : ""}
+      </div>
+      <label class="commande-page-date">
+        Date de livraison
+        <input data-delivery-date-input="${id}" type="date" value="${escapeAttribute(deliveryDate)}">
+      </label>
+      <button class="button secondary" type="button" data-action="open-order-maps" data-order-id="${id}">Itinéraire</button>
+    </section>
+    <div class="commande-page-gestes">${geste}</div>
+  `;
+  return article;
 }
 
 function closeCommandeDetail() {

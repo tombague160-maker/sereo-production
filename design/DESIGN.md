@@ -2001,3 +2001,109 @@ corrigés, chacun avec un banc qui échoue sans le correctif.
 (réseau lent : `PATCH` retardé de 2,5 s ; hors ligne : la file indexedDB réelle, puis le
 rejeu), trois renforcés (4a : le jour et deux commandes du même client ; 4c : une tournée
 « prête » lue par interception, et la tournée partie ; 4d : les gestes masqués).*
+
+### Mobile, Préparation (planches 7a, 7b), posé le 23/09 — une liste, une page
+
+Décision de Thomas (OUI du 23/09) : au téléphone, la Préparation devient **une liste
+unique avec des mots de statut** ; les pilules de filtre passent dans l'**en-tête vert** ;
+le détail d'une commande suit la planche **7b**. Tout vaut **sous 820 px**.
+
+| élément | planche | avant | après |
+|---|---|---|---|
+| La liste | une carte, cinq lignes de 72 px | quatre sections « À préparer / En cours / Prêtes livraison / Bloquées stock » | **une** carte blanche, sans titre de groupe, triée |
+| L'état | point de 10 px + mot de statut | disque de 40 px + mot d'**étape** (À faire, En cours, Prête) | point de 10 px + mot de **statut** : Bloquée · En préparation · À vérifier · À préparer · Prêt livraison |
+| Le tri | bloquées, en préparation, à vérifier, prêt livraison ; puis secteur, puis numéro | l'ordre des groupes | celui de la planche, recalculé à chaque rendu (une commande débloquée remonte) |
+| Filtres | pilules sur le vert, loupe en haut à droite | pilules et recherche dans un panneau blanc sous l'en-tête | le même bloc **déplacé** dans la fente de l'en-tête ; la loupe déplie la recherche |
+| Détail | une page : retour, « CMD-… · date », nom, puces secteur + statut, produits, adresse, un geste en bas | un sheet à trois boutons, deux grisés sans raison | la page 7b (le même `<dialog>`, plein écran) ; **un** geste selon le statut, et sa raison quand il est désactivé |
+
+*Bancs : `preparation-mobile.spec.js`, 11 cas (ports 3176 et 3182) — liste et tri,
+en-tête et loupe, sombre, page 7b, geste depuis la page, franchissement de 820 px, tri à
+statut égal ; et, après relecture adverse : recherche tapée au bureau puis rotation,
+loupe refermée avant les 200 ms, Safari < 14 (sans `MediaQueryList.addEventListener`),
+sous-titre au téléphone seulement. `preparation-lignes.spec.js` : ses cas « mobile » passent à **900 px**
+(entre 821 et 920 px, la liste garde ses groupes et le détail reste un sheet collé en
+bas) — la couverture du sheet n'est pas perdue, elle change de largeur.
+`navigation-mobile.spec.js` : l'en-tête de la Préparation rejoint les six en-têtes
+jugés « vert, rien n'y déborde ».*
+
+**Décisions prises là où la planche ne tranche pas** :
+
+- **« À préparer »** pour une commande importée dont le stock suffit. La planche ne
+  montre que « À vérifier » avant la préparation ; la charte dit « Importée », qui ne
+  dit rien à qui prépare. « À préparer » est le mot de la pilule de Commandes et du
+  tableau de bord. « À vérifier » reste pour le statut `stock_a_verifier`. Même rang de
+  tri que « À vérifier ».
+- **Le manque se compte en articles**, pas en produits : « Il manque 5 articles » (la
+  somme des quantités manquantes), comme la planche (« Il manque 2 articles » / « 2 en
+  stock, 2 manquants »). Un stock non renseigné n'est pas un manque : « Stock non
+  renseigné ». Au bureau, la ligne garde « Il manque 1 article » (un produit) : le
+  banc du bureau le tient, et c'est un écart **nommé** entre les deux vues.
+- **« n articles »** sur la ligne mobile compte les quantités (6 pour deux produits à
+  3), comme le résumé au-dessus (« 29 articles au total »). La ligne du bureau compte
+  encore les **produits** (« 2 articles ») : les deux nombres se contredisaient déjà
+  sur le même écran ; **relevé, non corrigé au bureau** (hors de la décision).
+- **Le sous-titre** : « 3 commandes à préparer » = les commandes **restantes**
+  (importées, bloquées comprises, et en préparation), le même nombre que « 3
+  restantes » du résumé. La planche écrit « 5 commandes à préparer aujourd'hui » en
+  comptant les prêtes, et « aujourd'hui » serait faux : la liste n'est pas bornée au
+  jour. Posé **au téléphone seulement** (sous 820 px) : au bureau, le sous-titre reste
+  celui de `tabs.js` (« Contrôle le stock, prépare les commandes… »), et franchir 820 px
+  le remet. Les autres écrans (Commandes, Stock, Clients, Abonnements) gardent leur
+  sous-titre-compte à toutes les largeurs ; celui-ci vient de la planche 7a, une
+  planche **téléphone**, et la Préparation n'a pas de planche bureau. (Une première
+  version le posait partout et la documentation disait à la fois « rien ne change au
+  bureau » et « seul changement visible au bureau » : relevé en relecture, tranché
+  pour « rien ne change ».)
+- **Le nom passe sur deux lignes** au lieu de l'ellipse de la planche : à 390 px, avec
+  « En préparation » à côté, il restait « Pharmacie Centra… » et « Champagnole · 6
+  artic… ». La ligne fait 72 px et monte à 96 au plus ; le détail n'est jamais coupé.
+- **La loupe** replie la recherche (gardée : la planche ne la dessine pas) ; la
+  refermer **efface** la recherche — un filtre qu'on ne voit plus cacherait des
+  commandes sans le dire. Même règle dans les deux cas limites : une recherche tapée
+  **au bureau** qui passe sous 820 px (rotation d'une tablette) arrive **dépliée**
+  derrière la loupe, sans focus (une rotation n'ouvre pas le clavier) ; refermer la
+  loupe **pendant** les 200 ms d'attente de la frappe annule cette frappe.
+- **Un seul geste** en bas de la page 7b, celui du statut : « Passer en préparation »
+  (à préparer, à vérifier), « Préparation terminée » (en préparation), rien pour une
+  prête (une phrase le dit). Bloquée : le bouton est **désactivé et dit pourquoi**
+  (« Il manque 5 articles en stock pour commencer », relié par `aria-describedby`),
+  dessiné au contour de la planche plutôt qu'en plein grisé.
+- **Au bureau (> 820 px), rien ne change** : il n'existe **aucune planche bureau** de
+  la Préparation dans l'export (7a/7b sont des planches téléphone) ; la décision de
+  Thomas vise le téléphone. Groupes, mots d'étape et sheet restent. Franchir 820 px
+  (rotation, fenêtre) redessine la liste et replace les filtres — mesuré.
+
+**Écarts nommés** :
+
+- pilules de **48 px** et non 44 : la hauteur de pilule mobile de la charte, déjà
+  tenue par `preparation-lignes.spec.js` ;
+- pas de pilules de **statut** : la décision les autorise, la planche 7a n'en dessine
+  aucune (seulement les secteurs) ; ne pas les inventer ;
+- le fond du geste en bas est **opaque** (planche : 82 % flouté), pour la même raison que
+  la barre basse du lot 1 : la raison en alerte ne passe jamais sur un contenu qui défile ;
+- la puce de statut de 7b porte le mot de statut de la ligne (« Bloquée », « À
+  préparer »), pas le statut technique.
+
+**Gardés, hors planche** (ils existent et servent) : la **recherche** (derrière la
+loupe), le **repli des secteurs** (« Tous les secteurs », le secteur choisi passe en
+tête), la **date de livraison** (lue par « Préparation terminée ») et l'**Itinéraire**,
+dans la carte d'adresse de 7b ; la pastille de synchro et « Actualiser » de l'en-tête
+(lot 1).
+
+**Omis faute de données** (règle : ce qu'une planche invente sans données est omis) :
+
+- **cocher les lignes** une à une, « 4 lignes sur 6 préparées », la barre de progression,
+  et « Préparation terminée » désactivé tant que tout n'est pas coché : aucune donnée ne
+  garde une ligne cochée (la planche veut qu'elle survive à la fermeture de
+  l'application), et le serveur ne conditionne pas la fin de préparation à un pointage.
+  La planche elle-même hésite (« Cocher ligne par ligne, ou une seule case ? »). La
+  consigne de départ parlait de « garder le cocher » : **il n'existait pas** dans la
+  Préparation — les seules cases de l'application sont la sélection des Commandes
+  (« À envoyer ») et celle de la planification de Tournée, intactes ;
+- « Commander » / « Livrer partiellement » sur une ligne manquante : aucune route ne
+  commande à un fournisseur ni ne livre une partie (même écart que le Stock du 23/09) ;
+- « livraison le matin » sous le téléphone : aucun champ d'instruction de livraison.
+
+**Relevé, hors lot** : entre 821 et 920 px, les pilules font 44 px mais le plafond de
+repli est calculé sur 48 (`calc(2 * 48px + 8px)`) — un demi-rang de trop visible. Pas
+touché : ni téléphone ni bureau.

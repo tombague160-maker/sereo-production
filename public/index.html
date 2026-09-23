@@ -1014,17 +1014,27 @@
             </div>
           </div>
 
-          <div class="prep-toolbar">
-            <input id="preparationSearch" type="search" placeholder="Rechercher un client ou un numéro" autocomplete="off" aria-label="Rechercher une commande à préparer" />
-          </div>
-          <!-- Charte §4, pilules de filtre (secteurs) : rendues par
-               renderPreparationFilterOptions. « Repliables plutot que
-               debordantes » : la rangee est plafonnee a deux rangs et le
-               bouton n'apparait que si elle depasse VRAIMENT -- mesure dans
-               la page, pas devinette sur le nombre de secteurs. -->
-          <div class="filtre-pilules-enveloppe">
-            <div id="preparationSectorPills" class="filtre-pilules filtre-pilules--repliee" role="group" aria-label="Filtrer par secteur"></div>
-            <button id="preparationSectorPlus" class="button secondary compact filtre-pilules-plus" type="button" data-action="deplier-secteurs" aria-expanded="false" aria-controls="preparationSectorPills" hidden>Tous les secteurs</button>
+          <!-- Les filtres de la preparation. Au telephone (planche 7a), ce bloc
+               entier passe dans l'en-tete vert (placerFiltresPreparation) : la
+               loupe en haut a droite, les pilules de secteur dessous. Au
+               bureau il reste ici, tel quel. data-ecran : une fois dans la
+               fente d'en-tete, showTab ne le montre que sur la Preparation. -->
+          <div id="preparationFiltres" class="prep-filtres" data-ecran="preparation">
+            <button id="preparationLoupe" class="prep-loupe" type="button" data-action="basculer-recherche-preparation" aria-expanded="false" aria-controls="preparationRecherche" aria-label="Rechercher une commande">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"></circle><path d="m20 20-4.35-4.35" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>
+            </button>
+            <div id="preparationRecherche" class="prep-toolbar">
+              <input id="preparationSearch" type="search" placeholder="Rechercher un client ou un numéro" autocomplete="off" aria-label="Rechercher une commande à préparer" />
+            </div>
+            <!-- Charte §4, pilules de filtre (secteurs) : rendues par
+                 renderPreparationFilterOptions. « Repliables plutot que
+                 debordantes » : la rangee est plafonnee a deux rangs et le
+                 bouton n'apparait que si elle depasse VRAIMENT -- mesure dans
+                 la page, pas devinette sur le nombre de secteurs. -->
+            <div class="filtre-pilules-enveloppe">
+              <div id="preparationSectorPills" class="filtre-pilules filtre-pilules--repliee" role="group" aria-label="Filtrer par secteur"></div>
+              <button id="preparationSectorPlus" class="button secondary compact filtre-pilules-plus" type="button" data-action="deplier-secteurs" aria-expanded="false" aria-controls="preparationSectorPills" hidden>Tous les secteurs</button>
+            </div>
           </div>
 
           <div id="preparationList" class="order-board"></div>
@@ -1579,11 +1589,22 @@
   <!-- Le detail d'une commande a preparer (planche Preparation.png : la ligne
        ouvre le detail, qui porte les actions). Charte §4, sheet : coins 28 px,
        poignee, fond surface haute. <dialog> natif comme #motifProblemeDialog. -->
+  <!-- Au telephone (planche 7b), le meme dialogue devient une PAGE : plein
+       ecran, en-tete vert avec le retour, le numero et la date, les puces
+       secteur et statut (classe commande-page, posee par openCommandeDetail).
+       Le retour et le meta ne se montrent qu'au telephone ; le ✕ qu'au bureau. -->
   <dialog id="commandeDetailDialog" class="sheet" aria-labelledby="commandeDetailTitre">
     <div class="sheet-poignee" aria-hidden="true"></div>
     <div class="sheet-entete">
-      <h3 id="commandeDetailTitre">Commande</h3>
+      <button class="commande-page-retour" type="button" data-action="close-commande-detail" aria-label="Retour à la liste">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m14 6-6 6 6 6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+      </button>
+      <div class="sheet-entete-texte">
+        <p id="commandeDetailMeta" class="commande-page-meta"></p>
+        <h3 id="commandeDetailTitre">Commande</h3>
+      </div>
       <button class="button secondary compact sheet-fermer" type="button" data-action="close-commande-detail" aria-label="Fermer">✕</button>
+      <div id="commandeDetailPuces" class="commande-page-puces"></div>
     </div>
     <div id="commandeDetailCorps" class="sheet-corps"></div>
   </dialog>
