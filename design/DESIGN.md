@@ -4431,6 +4431,12 @@ et un volume neuf :
   calcul routier refuse une des positions… ») ; pas de pause après panne ; carte
   jamais consultée ; `server.js` qui ne branche pas son gestionnaire ; état absent de
   `/api/storage/status`.
+- **Défaut trouvé en relisant, corrigé** (`f27206a`) : le flux d'écriture de l'extrait
+  n'avait pas d'écouteur « error ». Banc « ecriture impossible pendant le
+  telechargement » (réseau lent, dossier à la place du fichier partiel) sur le code
+  d'avant : **exception non rattrapée** `EISDIR … open …europe_a.osm.pbf.part` (Séréo
+  serait tombé), puis préparation bloquée jusqu'au délai de silence. Harnais repassé
+  sur le code final : 20 mutants, 0 échappé (témoins : 14 et 4 `ok`).
 - Le premier passage du harnais disait **20 échappés** : il cherchait des lignes TAP
   (`not ok`) dans la sortie du rapporteur par défaut. Instrument muet, pris par son
   propre compte ; corrigé (`--test-reporter=tap`, témoin qui compte les `ok`) avant
@@ -4438,7 +4444,7 @@ et un volume neuf :
 
 ### Bancs
 
-`npm run check` ; `npm test` **564/564** (dont `test/osrm-local.test.js` 13, `test/osrm-routage-local.test.js` 4, `test/dockerfile-osrm.test.js` 2). E2E par `pw-lot.config.js` (port 3326) :
+`npm run check` ; `npm test` **565/565** (dont `test/osrm-local.test.js` 14, `test/osrm-routage-local.test.js` 4, `test/dockerfile-osrm.test.js` 2). E2E par `pw-lot.config.js` (port 3326) :
 `calcul-routier`, `carte-telephone`, `ecran-livreur`, `hors-ligne`,
 `integration-lots-1-5`, `livreur-ne-perd-rien`, `meilleur-trajet`, `operations`,
 `parametres`, `parametres-mobile`, `tournee`, `tournee-mobile`, `tabs`. Premier passage
@@ -4450,6 +4456,8 @@ verts (tournee-mobile, operations, livreur-ne-perd-rien 11/11).
 
 ### Écarts nommés
 
+- La vérification Docker a porté sur l'arbre de `6ad728d` ; le correctif d'écriture
+  (`f27206a`) n'a été éprouvé que par les bancs, pas rejoué dans une image.
 - **Seuils de zone estimés**, pas mesurés : la première préparation chez Thomas sera la
   première mesure réelle d'une région. La ligne de Paramètres et `docker logs` diront
   la zone choisie, la durée de chaque étape et l'espace pris.
