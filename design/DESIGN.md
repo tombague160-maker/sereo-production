@@ -4409,8 +4409,8 @@ premier » est gardé par chaque réoptimisation). Branche `feat/tournee-pratiqu
 - Une modification de `server.js` faite par script (déplacement des constantes du lot
   avant `normalizeSettings`), et une de `package.json` (script `check`), au lieu de l'outil
   Edit ; relues par `node --check`, `npm run check` et les bancs.
-- `ecrans-sans-planche.spec.js` non rejoué : son port 3306 était pris par un autre
-  worktree au moment du passage (le banc refuse, par construction).
+- `ecrans-sans-planche.spec.js` a refusé de partir une fois (port 3306 pris par un autre
+  worktree, refus voulu) ; rejoué ensuite : vert.
 
 ### Preuves rouges
 
@@ -4447,6 +4447,17 @@ nommé désormais par `aria-labelledby`.
 `test/tournee-pratique.test.js` (12, pur), `test/tournee-pratique-serveur.test.js` (15,
 serveur et faux OSRM local), `test/e2e/tournee-pratique.spec.js` (14, ports **3332** et
 **3333**, horloge du navigateur figée, contraste ≥ 4,5:1 en clair et en sombre, 44 px).
+
+Vérifié sur `1a2db4e` (le code de la tête ; seul ce fichier a changé depuis) :
+`npm run check` ; `npm test` 572/572 ; e2e tournee-pratique, tournee, tournee-mobile,
+ecran-livreur, carte-telephone, meilleur-trajet, livreur-ne-perd-rien,
+integration-lots-1-5, operations, hors-ligne, carte-et-lignes, rapidite-tournee,
+ecrans-sans-planche : 116/116. Sur `b268646` (même code) : parametres,
+parametres-mobile, cibles-tactiles 28/28 ; texte-coupe, focus-clavier,
+contraste-application, contraste-champs, integration-interface, typographie,
+charte-composants, etats-limites : verts. Sur `076813c` (avant le correctif du
+`<label>`, une ligne de `index.html`) : themes, tabs, livraison-chargement,
+chargement-instantane verts.
 
 ### Ce qui reste
 
