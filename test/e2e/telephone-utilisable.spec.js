@@ -34,8 +34,10 @@ const THEMES = ["light", "dark"];
 // Un TELEPHONE emule (isMobile : la balise viewport, le toucher), comme les
 // sondes de l'audit. Sans lui, la page ne se reajustait pas pendant le
 // chargement, et le repli mesure en coordonnees d'ecran passait (mutant M2).
-async function ouvrir(browser, ecran, { largeur = 390, hauteur = 844, theme = "light" } = {}) {
-  const ctx = await browser.newContext({ viewport: { width: largeur, height: hauteur }, colorScheme: theme, timezoneId: "Europe/Paris", hasTouch: true, isMobile: true });
+async function ouvrir(browser, ecran, { largeur = 390, hauteur = 844, theme = "light", base = srv.base } = {}) {
+  // Au bureau (1440), un ecran de bureau : ni balise viewport emulee, ni toucher.
+  const telephone = largeur <= 820;
+  const ctx = await browser.newContext({ viewport: { width: largeur, height: hauteur }, colorScheme: theme, timezoneId: "Europe/Paris", hasTouch: telephone, isMobile: telephone });
   await ctx.addInitScript(t => { try { localStorage.setItem("sereo:colorScheme", t); } catch { /* ignore */ } }, theme);
   // Le premier fond opaque sous un element (en remontant ses ancetres), pour
   // les contrastes mesures dans la page.
@@ -52,7 +54,7 @@ async function ouvrir(browser, ecran, { largeur = 390, hauteur = 844, theme = "l
   const page = await ctx.newPage();
   const erreurs = [];
   page.on("pageerror", e => erreurs.push(e.message));
-  await page.goto(`${srv.base}/#${ecran}`, { waitUntil: "networkidle" });
+  await page.goto(`${base}/#${ecran}`, { waitUntil: "networkidle" });
   await page.waitForTimeout(900);
   await page.addStyleTag({ content: "*, *::before, *::after { transition: none !important; animation: none !important; }" });
   return { ctx, page, erreurs };
@@ -136,7 +138,11 @@ for (const theme of THEMES) {
     const r = await page.evaluate(() => {
       const entete = document.querySelector("header.ecran-entete");
       const anneau = document.getElementById("routeProgress");
-      const barre = document.querySelector(".tournee-progression");
+      // La barre de la TOURNEE, par son identifiant (relecture du 24/09) : le
+      // premier `.tournee-progression` du document est celui de la carte
+      // « Tournee du jour » du Tableau de bord -- le deplacer passait ce
+      // controle, avec la mauvaise barre.
+      const barre = document.getElementById("tourneeProgressionBarre").parentElement;
       const titre = document.getElementById("pageTitle");
       const carte = document.querySelector("#livreur .current-driver-card");
       const b = e => e.getBoundingClientRect();
@@ -146,6 +152,8 @@ for (const theme of THEMES) {
       const tb = plage.getBoundingClientRect();
       return {
         anneauDansEntete: entete.contains(anneau), barreDansEntete: entete.contains(barre),
+        barreVisible: barre.checkVisibility() && b(barre).width > 0,
+        tableauGardeSaBarre: document.getElementById("journee").contains(document.getElementById("dashboardTourneeBarre")),
         carteVerteVisible: document.querySelector("#livreur .tournee-entete").checkVisibility(),
         anneau: { texte: anneau.textContent.trim(), gauche: b(anneau).left, haut: b(anneau).top },
         titre: { droite: tb.right, bas: tb.bottom },
@@ -160,6 +168,8 @@ for (const theme of THEMES) {
     console.log(`[4b bloc ${theme}] ${JSON.stringify(r)}`);
     expect(r.anneauDansEntete, "l'anneau n'est pas dans l'en-tete vert").toBe(true);
     expect(r.barreDansEntete, "la barre de progression n'est pas dans l'en-tete vert").toBe(true);
+    expect(r.barreVisible, "la barre de la tournee n'est pas visible dans l'en-tete").toBe(true);
+    expect(r.tableauGardeSaBarre, "la barre du Tableau de bord a quitte sa carte").toBe(true);
     expect(r.carteVerteVisible, "une seconde carte verte reste entre l'en-tete et l'arret").toBe(false);
     expect(r.anneau.texte).toBe("3sur 6");
     // L'anneau a droite du titre, sur sa ligne (planche 4b).
@@ -186,10 +196,15 @@ test("4b — au bureau, l'anneau reste dans l'en-tete de la tournee, et y revien
   const bureau = await page.evaluate(() => ({
     dansTournee: document.querySelector("#livreur .tournee-entete").contains(document.getElementById("routeProgress")),
     visible: document.getElementById("routeProgress").checkVisibility(),
-    absentHauteur: Math.round(document.getElementById("markAbsentButton").getBoundingClientRect().height)
+    absentHauteur: Math.round(document.getElementById("markAbsentButton").getBoundingClientRect().height),
+    // UNE barre dans l'en-tete de la tournee, la sienne ; celle du Tableau de
+    // bord reste dans sa carte (relecture du 24/09 : un iPad tourne franchit
+    // 820 px, et la tournee en affichait deux).
+    barresDeLaTournee: [...document.querySelectorAll("#livreur .tournee-entete .tournee-progression-barre")].map(e => e.id),
+    barreDuTableau: document.getElementById("journee").contains(document.getElementById("dashboardTourneeBarre"))
   }));
   expect(erreurs).toEqual([]);
-  expect(bureau).toEqual({ dansTournee: true, visible: true, absentHauteur: 44 });
+  expect(bureau).toEqual({ dansTournee: true, visible: true, absentHauteur: 44, barresDeLaTournee: ["tourneeProgressionBarre"], barreDuTableau: true });
   await ctx.close();
 });
 
@@ -456,6 +471,50 @@ test("tableau de bord — « 1 echeance » a 13 px, « Detail du jour » reagit 
   await ctx.close();
 });
 
+// Relecture du 24/09 : `display: flex` sur le resume retirait le triangle
+// d'ouverture (le marqueur n'existe que sur un `list-item`) -- au bureau
+// comme au telephone, plus rien ne disait que la carte se deplie. Mesure :
+// le texte du resume est decale par le marqueur (17 px sous Chromium) ;
+// sans marqueur, il commence au bord du rembourrage (0).
+for (const [largeur, hauteur, theme] of [[1440, 900, "light"], [1440, 900, "dark"], [390, 844, "light"], [390, 844, "dark"]]) {
+  test(`tableau de bord — « Detail du jour » garde son triangle d'ouverture (${largeur}, ${theme})`, async ({ browser }) => {
+    test.setTimeout(90000);
+    const { ctx, page, erreurs } = await ouvrir(browser, "journee", { largeur, hauteur, theme });
+    const mesure = () => page.evaluate(() => {
+      const resume = document.querySelector(".tb-detail > summary"), s = getComputedStyle(resume);
+      const plage = document.createRange(); plage.selectNodeContents(resume);
+      const debutTexte = [...plage.getClientRects()].reduce((m, x) => Math.min(m, x.left), Infinity);
+      const bordInterieur = resume.getBoundingClientRect().left + parseFloat(s.borderLeftWidth) + parseFloat(s.paddingLeft);
+      return { decalage: Math.round(debutTexte - bordInterieur), marqueur: s.listStyleType, hauteur: Math.round(resume.getBoundingClientRect().height) };
+    });
+    const ferme = await mesure();
+    expect(erreurs).toEqual([]);
+    console.log(`[detail ${largeur} ${theme}] ${JSON.stringify(ferme)}`);
+    expect(ferme.decalage, "« Detail du jour » n'a plus de triangle d'ouverture").toBeGreaterThanOrEqual(8);
+    expect(ferme.hauteur, "le resume fait moins de 44 px").toBeGreaterThanOrEqual(44);
+    // Ouvert : le triangle reste (il tourne, il ne disparait pas).
+    await page.locator(".tb-detail > summary").click();
+    await expect(page.locator(".tb-detail")).toHaveAttribute("open", "");
+    expect((await mesure()).decalage, "le triangle disparait une fois le volet ouvert").toBeGreaterThanOrEqual(8);
+    await ctx.close();
+  });
+}
+
+test("tableau de bord — au telephone, la carte « Tournee du jour » garde sa barre de progression", async ({ browser }) => {
+  test.setTimeout(90000);
+  const { ctx, page, erreurs } = await ouvrir(browser, "journee", { largeur: 390, hauteur: 844 });
+  const r = await page.evaluate(() => {
+    const barre = document.getElementById("dashboardTourneeBarre");
+    return { dansLaCarte: document.getElementById("journee").contains(barre), visible: barre.parentElement.checkVisibility(),
+      largeur: Math.round(barre.parentElement.getBoundingClientRect().width) };
+  });
+  expect(erreurs).toEqual([]);
+  expect(r.dansLaCarte, "la barre du Tableau de bord a ete deplacee dans l'en-tete").toBe(true);
+  expect(r.visible, "la carte « Tournee du jour » n'a plus de barre").toBe(true);
+  expect(r.largeur).toBeGreaterThan(0);
+  await ctx.close();
+});
+
 test("tournee — « Arret en cours », « n articles a decharger » a 13 px ; « En livraison » a 4,5:1 en clair", async ({ browser }) => {
   test.setTimeout(90000);
   const { ctx, page, erreurs } = await ouvrir(browser, "livreur", { largeur: 390, hauteur: 844 });
@@ -473,4 +532,162 @@ test("tournee — « Arret en cours », « n articles a decharger » a 13 px ; �
     expect(contraste(rgb(p.couleur), rgb(p.fond)), `pastille « ${p.texte} »`).toBeGreaterThanOrEqual(4.5);
   }
   await ctx.close();
+});
+
+// --- 7. Relecture adverse du 24/09 : un arret de TROIS articles -------------
+//
+// Le jeu seme commun a deux articles par arret : le banc 4b ne pouvait pas
+// voir qu'a 375 x 667 un troisieme passait sous la barre collee (2 px de
+// marge). Serveur seme a part (3525), l'arret en cours a trois articles.
+// Les cas qui touchent « Livre » cliquent Annuler avant de juger : rien ne
+// part au serveur, l'etat seme reste le meme d'un cas a l'autre.
+
+function jeuTroisArticles() {
+  const seed = jeuDeDonnees();
+  const commande = seed.commandes.find(c => c.id === "o-3");
+  commande.products = [...commande.products, { code: "GANTS", nom: "Gants nitrile", prixUnitaire: 8, quantite: 5 }];
+  seed.routes[0].stops.find(s => s.orderId === "o-3").products = commande.products;
+  return seed;
+}
+
+test.describe("arret de trois articles", () => {
+  let srv3;
+  test.beforeAll(async () => { srv3 = await demarrer({ port: 3525, seed: jeuTroisArticles() }); });
+  test.afterAll(async () => { if (srv3) await srv3.arreter(); });
+
+  for (const [largeur, hauteur, theme] of [[375, 667, "light"], [375, 667, "dark"], [360, 740, "light"], [390, 844, "light"]]) {
+    test(`4b — ${largeur} x ${hauteur} (${theme}) : les TROIS articles au-dessus des gestes a l'ouverture`, async ({ browser }) => {
+      test.setTimeout(90000);
+      const { ctx, page, erreurs } = await ouvrir(browser, "livreur", { largeur, hauteur, theme, base: srv3.base });
+      const r = await page.evaluate(() => {
+        const b = s => document.querySelector(s).getBoundingClientRect();
+        return {
+          gestes: b("#livreur .current-driver-card .gestes").top,
+          nom: b("#currentClient .arret-nom").bottom, adresse: b("#currentClient .arret-adresse").bottom,
+          articles: [...document.querySelectorAll("#currentClient .arret-article")].map(e => e.getBoundingClientRect().bottom),
+          livre: Math.round(b("#markDeliveredButton").height), aller: Math.round(b("#mapsButton").height),
+          disque: Math.round(document.querySelector("#currentClient .arret-article .marqueur").getBoundingClientRect().height)
+        };
+      });
+      expect(erreurs).toEqual([]);
+      const f = n => Math.round(n);
+      console.log(`[3 articles ${largeur}x${hauteur} ${theme}] gestes ${f(r.gestes)}, nom ${f(r.nom)}, adresse ${f(r.adresse)}, articles ${r.articles.map(f).join("/")}, disque ${r.disque}`);
+      expect(r.articles.length, "prealable : l'arret seme a trois articles").toBe(3);
+      expect(r.nom).toBeLessThanOrEqual(r.gestes + 0.5);
+      expect(r.adresse).toBeLessThanOrEqual(r.gestes + 0.5);
+      for (const [i, bas] of r.articles.entries()) {
+        expect(bas, `l'article ${i + 1} sur 3 passe sous les gestes`).toBeLessThanOrEqual(r.gestes + 0.5);
+      }
+      // Les gestes gardent leurs 56 px (decision du 23/09).
+      expect(r.livre).toBe(56);
+      expect(r.aller).toBe(56);
+      // La ou tout tient, la carte garde les mesures de la planche (disques de 28).
+      if (largeur === 390) expect(r.disque, "la carte est resserree la ou tout tenait deja").toBe(28);
+      await ctx.close();
+    });
+  }
+
+  // Les deux autres chemins de la mesure : l'application ouverte sur le Tableau
+  // de bord (la tournee, cachee au rendu, n'avait rien a mesurer), puis
+  // l'onglet « Tournee » ; et une largeur qui change (rotation).
+  const troisAuDessus = page => page.evaluate(() => {
+    const haut = document.querySelector("#livreur .current-driver-card .gestes").getBoundingClientRect().top;
+    const bas = [...document.querySelectorAll("#currentClient .arret-article")].map(e => Math.round(e.getBoundingClientRect().bottom));
+    const disque = Math.round(document.querySelector("#currentClient .arret-article .marqueur").getBoundingClientRect().height);
+    return { bas, haut: Math.round(haut), dessous: bas.filter(b => b > haut + 0.5).length, disque };
+  });
+  test("4b — 375 x 667 : ouvert sur le Tableau de bord, puis « Tournee » : les trois articles au-dessus des gestes", async ({ browser }) => {
+    test.setTimeout(90000);
+    const { ctx, page, erreurs } = await ouvrir(browser, "journee", { largeur: 375, hauteur: 667, base: srv3.base });
+    await page.locator('nav.mobile-tabbar [data-tab="livreur"]').click();
+    await expect(page.locator("#livreur")).toHaveClass(/active/);
+    await page.waitForTimeout(300);
+    const r = await troisAuDessus(page);
+    expect(erreurs).toEqual([]);
+    expect(r.bas.length).toBe(3);
+    expect(r.dessous, `articles ${r.bas.join("/")} pour une barre a ${r.haut}`).toBe(0);
+    await ctx.close();
+  });
+  test("4b — une largeur qui change (700 -> 375, toujours au telephone) : la carte se re-mesure", async ({ browser }) => {
+    test.setTimeout(90000);
+    // A 700 px, le nom et l'adresse tiennent sur une ligne : rien a resserrer.
+    const { ctx, page, erreurs } = await ouvrir(browser, "livreur", { largeur: 700, hauteur: 667, base: srv3.base });
+    const large = await troisAuDessus(page);
+    expect(large.dessous, "prealable : a 700 px, les trois articles tiennent").toBe(0);
+    expect(large.disque, "prealable : a 700 px, la carte n'est pas resserree").toBe(28);
+    await page.setViewportSize({ width: 375, height: 667 });
+    await page.waitForTimeout(300);
+    const r = await troisAuDessus(page);
+    expect(erreurs).toEqual([]);
+    expect(r.dessous, `articles ${r.bas.join("/")} pour une barre a ${r.haut}`).toBe(0);
+    await ctx.close();
+  });
+
+  // Relecture du 24/09 : la barre visible dans l'en-tete etait celle du Tableau
+  // de bord, que seul renderTourneeDuJour() met a jour. Pendant les 4 s d'une
+  // livraison en suspens (et hors ligne), l'anneau avancait, pas la barre.
+  test("4b — « Livre » : la barre de l'en-tete avance avec l'anneau, et recule avec Annuler", async ({ browser }) => {
+    test.setTimeout(90000);
+    const { ctx, page, erreurs } = await ouvrir(browser, "livreur", { base: srv3.base });
+    const part = () => page.evaluate(() => {
+      const piste = document.querySelector("header.ecran-entete .tournee-progression");
+      const barre = piste?.querySelector(".tournee-progression-barre");
+      return piste && barre ? barre.getBoundingClientRect().width / piste.getBoundingClientRect().width : null;
+    });
+    const avant = await part();
+    await page.locator("#markDeliveredButton").click();
+    const toast = page.locator("#toastRegion .toast", { hasText: "Livré — EHPAD Les Tilleuls du Val de Loue" });
+    await expect(toast).toBeVisible();
+    const pendant = await part();
+    // Annuler AVANT de juger : rien ne part au serveur.
+    await toast.locator(".toast-action").click();
+    await expect(page.locator("#currentClient .arret-nom")).toHaveText("EHPAD Les Tilleuls du Val de Loue");
+    const apres = await part();
+    expect(erreurs).toEqual([]);
+    console.log(`[barre] avant ${avant}, pendant ${pendant}, apres Annuler ${apres}`);
+    // Seme : 3 arrets termines sur 6 (deux livres, un probleme) ; puis 4 sur 6.
+    expect(avant, "la barre de l'en-tete ne dit pas 3 sur 6").toBeCloseTo(3 / 6, 1);
+    expect(pendant, "« Livre » : l'anneau avance, la barre de l'en-tete ne bouge pas").toBeCloseTo(4 / 6, 1);
+    expect(apres, "Annuler : la barre ne revient pas").toBeCloseTo(3 / 6, 1);
+    await ctx.close();
+  });
+
+  // Relecture du 24/09 : le message « Livre -- client · Annuler » recouvrait
+  // « Livre » de l'arret SUIVANT (bouton actif par conception) ; un appui sur
+  // sa droite tombait sur Annuler, qui defaisait l'arret precedent.
+  for (const [largeur, hauteur] of [[390, 844], [375, 667], [360, 740]]) {
+    test(`4b — ${largeur} x ${hauteur} : le message « Livre » ne couvre aucun geste de l'arret suivant`, async ({ browser }) => {
+      test.setTimeout(90000);
+      const { ctx, page, erreurs } = await ouvrir(browser, "livreur", { largeur, hauteur, base: srv3.base });
+      await page.locator("#markDeliveredButton").click();
+      const toast = page.locator("#toastRegion .toast", { hasText: "Livré — EHPAD Les Tilleuls du Val de Loue" });
+      await expect(toast).toBeVisible();
+      await expect(page.locator("#currentClient .arret-nom")).toHaveText("Pharmacie Centrale de la Gare");
+      const r = await page.evaluate(() => {
+        const t = document.querySelector("#toastRegion .toast").getBoundingClientRect();
+        const couverts = ["markDeliveredButton", "mapsButton", "callClientButton", "voirCarteButton"].filter(id => {
+          const e = document.getElementById(id);
+          if (!e || !e.checkVisibility()) return false;
+          const x = e.getBoundingClientRect();
+          return t.left < x.right && x.left < t.right && t.top < x.bottom && x.top < t.bottom;
+        });
+        const livre = document.getElementById("markDeliveredButton"), x = livre.getBoundingClientRect();
+        const appuis = [0.1, 0.5, 0.9].map(f => livre.contains(document.elementFromPoint(x.left + x.width * f, x.top + x.height / 2)));
+        return { couverts, appuis, toast: { haut: Math.round(t.top), bas: Math.round(t.bottom) }, livre: { haut: Math.round(x.top), bas: Math.round(x.bottom) },
+          onglets: Math.round(document.querySelector("nav.mobile-tabbar").getBoundingClientRect().top),
+          annuler: Math.round(document.querySelector("#toastRegion .toast-action").getBoundingClientRect().height) };
+      });
+      // Annuler AVANT de juger : l'arret revient, rien ne part au serveur.
+      await toast.locator(".toast-action").click();
+      await expect(page.locator("#currentClient .arret-nom")).toHaveText("EHPAD Les Tilleuls du Val de Loue");
+      expect(erreurs).toEqual([]);
+      console.log(`[toast ${largeur}x${hauteur}] ${JSON.stringify(r)}`);
+      expect(r.couverts, `le message couvre : ${r.couverts.join(", ")}`).toEqual([]);
+      expect(r.appuis, "un appui sur « Livre » (gauche, milieu, droite) tombe sur le message").toEqual([true, true, true]);
+      expect(r.toast.haut, "le message sort de l'ecran").toBeGreaterThanOrEqual(0);
+      expect(r.toast.bas).toBeLessThanOrEqual(r.onglets);
+      expect(r.annuler).toBeGreaterThanOrEqual(44);
+      await ctx.close();
+    });
+  }
 });

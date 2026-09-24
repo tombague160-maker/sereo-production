@@ -15321,7 +15321,10 @@ html, body, main.content { overflow-x: clip; }
 :root[data-color-scheme] .op-details.tb-detail,
 :root:not([data-color-scheme]) .op-details.tb-detail { padding: 0; }
 .op-details.tb-detail > summary {
-  display: flex; align-items: center; min-height: 44px; padding: 18px; box-sizing: border-box;
+  /* `list-item`, pas `flex` : seul un list-item porte le triangle d'ouverture
+     (relecture du 24/09 -- en flex, il disparaissait au bureau comme au
+     telephone). Le rembourrage suffit a passer 44 px. */
+  display: list-item; min-height: 44px; padding: 18px; box-sizing: border-box;
 }
 .op-details.tb-detail[open] > summary { padding-bottom: 12px; }
 .op-details.tb-detail > .tb-detail-corps { padding: 0 18px 18px; }
@@ -15339,3 +15342,31 @@ html, body, main.content { overflow-x: clip; }
    sur la peche claire ne tient que 4,45:1. Le fond d'avertissement de la
    charte (--v8-avertissement-fond) : 4,89. */
 :root[data-color-scheme="light"] .pill.pill-warning { background: var(--v8-avertissement-fond); }
+
+/* --- 7. Relecture adverse du 24/09 : l'arret sous le pouce ------------------
+   ajusterArretAuPouce (app.js) mesure, apres chaque rendu de la tournee au
+   telephone, ou commence la barre collee des gestes. */
+@media (max-width: 820px) {
+  /* Les messages AU-DESSUS de la barre collee (12 px d'air) : « Livre --
+     client · Annuler » couvrait « Livre » de l'arret suivant, et un appui sur
+     sa droite annulait la livraison precedente. Menu « Plus » ouvert : en
+     haut, comme ailleurs (5). */
+  body:has(#livreur.active):not(:has(#mobile-more-sheet:not([hidden]))) .toast-region {
+    bottom: var(--toast-bas-tournee, calc(92px + env(safe-area-inset-bottom)));
+  }
+
+  /* « arret-serre » : pose seulement quand, page en haut, le dernier article
+     passerait sous la barre collee (a 375 x 667 : un 3e article a 473 pour une
+     barre a 441). Disques de 24, ecarts de 4, rembourrages reduits ; les
+     gestes gardent leurs 56 px (decision du 23/09). */
+  :root[data-color-scheme] body:has(#livreur.active #tourneeActive:not([hidden]) .current-driver-card.arret-serre) main.content > .ecran-entete,
+  :root:not([data-color-scheme]) body:has(#livreur.active #tourneeActive:not([hidden]) .current-driver-card.arret-serre) main.content > .ecran-entete {
+    row-gap: 4px; padding-top: 4px; padding-bottom: 20px;
+  }
+  :root[data-color-scheme] #livreur .tournee .current-driver-card.arret-serre,
+  :root:not([data-color-scheme]) #livreur .tournee .current-driver-card.arret-serre { padding-top: 10px; }
+  #livreur .arret-serre #currentClient .arret { gap: 4px; }
+  #livreur .arret-serre #currentClient .arret-articles { gap: 4px; margin-top: 0; padding-top: 8px; padding-bottom: 10px; }
+  #livreur .arret-serre #currentClient .arret-article .marqueur { width: 24px; height: 24px; font-size: 12px; }
+  #livreur .current-driver-card.arret-serre .gestes { gap: 6px; padding-top: 4px; padding-bottom: 6px; }
+}

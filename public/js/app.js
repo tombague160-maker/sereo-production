@@ -217,6 +217,7 @@ document.addEventListener("DOMContentLoaded", () => {
   placerEnteteTournee();
   ecranTelephone.addEventListener?.("change", placerEnteteTournee);
   ecranTelephone.addEventListener?.("change", replierToutesLesPilules);
+  ecranTelephone.addEventListener?.("change", planifierArretAuPouce);
   showTab(getInitialTab(), { updateHash: false });
   loadAppearance();
   loadVersionInfo();
@@ -998,7 +999,11 @@ function showTab(tabName, options = {}) {
   // Le repli des pilules se MESURE : cache, l'ecran n'avait pas de rangs.
   replierToutesLesPilules();
   if (nextTab === "abonnements") majSousTitreAbonnements();
-  if (nextTab === "livreur") majEnteteTournee();
+  if (nextTab === "livreur") {
+    majEnteteTournee();
+    // Cache, l'ecran n'avait rien a mesurer (ajusterArretAuPouce).
+    planifierArretAuPouce();
+  }
   if (nextTab === "preparation") {
     majSousTitrePreparation();
     // Le repli des secteurs se MESURE : cache, la rangee n'a pas de hauteur.
@@ -2372,11 +2377,72 @@ function placerEnteteTournee() {
   const cible = document.getElementById("enteteTournee");
   const origine = document.querySelector("#livreur .tournee-entete");
   const anneau = document.getElementById("routeProgress");
-  const barre = document.querySelector(".tournee-progression");
+  // La barre de la TOURNEE, par son identifiant : le premier
+  // `.tournee-progression` du document est celui de la carte « Tournee du
+  // jour » du Tableau de bord (relecture du 24/09). Deplace, il laissait sa
+  // carte sans barre et s'affichait ici sans suivre updateRouteProgress.
+  const barre = document.getElementById("tourneeProgressionBarre")?.parentElement;
   if (!cible || !origine || !anneau || !barre) return;
   const place = ecranTelephone.matches ? cible : origine;
   if (anneau.parentElement !== place) place.append(anneau, barre);
 }
+
+/*
+ * L'arret sous le pouce (relecture adverse du 24/09). Deux mesures, apres
+ * chaque rendu de la tournee, quand la barre des gestes colle au bas de
+ * l'ecran (telephone) :
+ *  - « arret-serre » : page en haut, si le dernier article passe sous la
+ *    barre collee, la carte et l'en-tete se resserrent (disques, ecarts,
+ *    rembourrages). Mesure avant : a 375 x 667, un 3e article finissait a
+ *    473 pour une barre a 441. La ou tout tient, les mesures de la planche
+ *    restent. Le resserrement ne fait pas de miracle : au-dela de trois
+ *    articles sur un petit ecran, un defilement reste (DESIGN.md, ecarts) ;
+ *  - le haut de la barre collee, ou se posent les messages : le message
+ *    « Livre -- client · Annuler » couvrait « Livre » de l'arret SUIVANT, et
+ *    un appui sur sa droite annulait la livraison precedente.
+ * Mesure dans une image (requestAnimationFrame) : l'en-tete, l'anneau et la
+ * carte sont alors tous rendus, et rien n'est peint entre-temps.
+ */
+let arretAuPouceEnAttente = 0;
+function planifierArretAuPouce() {
+  cancelAnimationFrame(arretAuPouceEnAttente);
+  arretAuPouceEnAttente = requestAnimationFrame(ajusterArretAuPouce);
+}
+
+function ajusterArretAuPouce() {
+  const carte = document.querySelector("#livreur .current-driver-card");
+  const region = document.getElementById("toastRegion");
+  if (!carte) return;
+  carte.classList.remove("arret-serre");
+  const gestes = carte.querySelector(":scope > .gestes");
+  const collee = ecranTelephone.matches && gestes?.getClientRects().length && getComputedStyle(gestes).position === "sticky";
+  if (!collee) {
+    region?.style.removeProperty("--toast-bas-tournee");
+    return;
+  }
+  // Distance du bas de l'ecran au haut de la barre collee : son decalage
+  // (`bottom`, la barre basse comprise) plus sa hauteur.
+  const dessousGestes = () => parseFloat(getComputedStyle(gestes).bottom) + gestes.getBoundingClientRect().height;
+  const articles = carte.querySelectorAll("#currentClient .arret-article");
+  const dernier = articles[articles.length - 1];
+  // En coordonnees de la PAGE (page en haut, a l'ouverture) : ce qui est
+  // mesure ne depend pas du defilement du moment.
+  if (dernier && dernier.getBoundingClientRect().bottom + window.scrollY > window.innerHeight - dessousGestes()) {
+    carte.classList.add("arret-serre");
+  }
+  region?.style.setProperty("--toast-bas-tournee", `${Math.ceil(dessousGestes() + 12)}px`);
+}
+
+// Une rotation change la largeur (les lignes se replient autrement) ; la
+// hauteur seule change quand les barres du navigateur se replient au
+// defilement : la carte ne se re-mesure pas pour si peu (elle sauterait sous
+// le doigt).
+let largeurArretAuPouce = window.innerWidth;
+window.addEventListener("resize", () => {
+  if (window.innerWidth === largeurArretAuPouce) return;
+  largeurArretAuPouce = window.innerWidth;
+  planifierArretAuPouce();
+});
 
 // Commandes : « Exporter » passe, au telephone, dans le panneau « Filtres »
 // (il exporte la liste filtree : sa place est a cote des filtres). Il prenait
@@ -7051,6 +7117,9 @@ function renderRoute() {
   const metrics = document.getElementById("routeMetrics");
   // Lot 6 : l'historique suit les tournees chargees (s'il est ouvert).
   rendreHistoriqueTournees();
+  // Le telephone utilisable dehors (relecture du 24/09) : l'arret et les
+  // messages se re-mesurent une fois tout rendu.
+  planifierArretAuPouce();
 
   if (!list || !current) return;
 
