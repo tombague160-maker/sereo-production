@@ -2379,8 +2379,12 @@ function dateCourte(iso) {
   // L'annee quand ce n'est pas celle-ci : « 1 janv. » d'une echeance ratee
   // l'an dernier se lisait comme une date a venir.
   const autreAnnee = d.getFullYear() !== new Date().getFullYear();
-  return d.toLocaleDateString("fr-FR", autreAnnee ? { day: "numeric", month: "short", year: "numeric" } : { day: "numeric", month: "short" });
+  // toLocaleDateString construisait un formateur a CHAQUE ligne (80 ms par
+  // frappe dans la recherche des Commandes au telephone, 24/09).
+  return (autreAnnee ? FORMAT_JOUR_MOIS_AN : FORMAT_JOUR_MOIS).format(d);
 }
+const FORMAT_JOUR_MOIS = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short" });
+const FORMAT_JOUR_MOIS_AN = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short", year: "numeric" });
 
 function articlesDe(order) {
   return (order.products || []).reduce((n, p) => n + (Number(p.quantite) || 0), 0);
@@ -3024,8 +3028,13 @@ function crmStatusPill(status) {
   return "pill-blue";
 }
 
+// Les formateurs Intl se construisent UNE fois (24/09) : un par appel coutait
+// 121 a 135 ms a l'ouverture d'un telephone (profil de la production), pour
+// un texte identique.
+const FORMAT_EUROS = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
+
 function formatMoney(value) {
-  return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(value) || 0);
+  return FORMAT_EUROS.format(Number(value) || 0);
 }
 
 const ICONE_CLI = {
@@ -6506,14 +6515,19 @@ function ouvrirFeuilleImports(type) {
   dialogue.showModal();
 }
 
+const FORMAT_DATE_HEURE_COURTE = new Intl.DateTimeFormat("fr-FR", {
+  day: "2-digit", month: "2-digit", year: "numeric",
+  hour: "2-digit", minute: "2-digit"
+});
+
 function formatDateTimeShort(iso) {
   if (!iso) return "—";
   try {
     const d = new Date(iso);
-    return d.toLocaleString("fr-FR", {
-      day: "2-digit", month: "2-digit", year: "numeric",
-      hour: "2-digit", minute: "2-digit"
-    });
+    // Un formateur construit une fois (24/09) ; une date illisible garde le
+    // texte d'avant (« Invalid Date »), la ou format() leverait.
+    if (Number.isNaN(d.getTime())) return String(d);
+    return FORMAT_DATE_HEURE_COURTE.format(d);
   } catch {
     return String(iso).slice(0, 16).replace("T", " ");
   }
@@ -9345,11 +9359,18 @@ function couleurCharte(token, repli) {
   return v || repli;
 }
 
+// Le texte exact de toLocaleString("fr-FR") (jour, mois, annee, heure,
+// minutes, secondes), avec un formateur construit une fois (24/09).
+const FORMAT_DATE_COMPLETE = new Intl.DateTimeFormat("fr-FR", {
+  year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", second: "numeric"
+});
+
 function formatDate(value) {
   if (!value) return "-";
 
   try {
-    return new Date(value).toLocaleString("fr-FR");
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? String(d) : FORMAT_DATE_COMPLETE.format(d);
   } catch {
     return value;
   }

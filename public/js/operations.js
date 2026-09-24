@@ -7,8 +7,10 @@ let context,
   editingId = null;
 let departure = null,
   arrival = null;
+// Un formateur construit une fois, pas un par montant (24/09).
+const FORMAT_EUROS = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
 const money = (value) =>
-  new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(
+  FORMAT_EUROS.format(
     value || 0,
   );
 const day = (value) =>

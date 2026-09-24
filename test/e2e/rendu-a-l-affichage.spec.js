@@ -88,6 +88,40 @@ test("un écran quitté pendant un chargement montre, en y revenant, les donnée
   await page.request.patch(`${srv.base}/api/stock/stk-001`, { data: { quantite: Number(avant || 0), reason: "remise en etat du banc" } });
 });
 
+test("les montants et les dates ne construisent plus un formateur chacun", async ({ page }) => {
+  await page.addInitScript(() => {
+    const n = window.__formateurs = { intl: 0, locale: 0 };
+    for (const nom of ["NumberFormat", "DateTimeFormat"]) {
+      const Vrai = Intl[nom];
+      Intl[nom] = new Proxy(Vrai, {
+        construct(cible, args) { n.intl++; return new cible(...args); },
+        apply(cible, ceci, args) { n.intl++; return cible(...args); }
+      });
+    }
+    for (const nom of ["toLocaleString", "toLocaleDateString", "toLocaleTimeString"]) {
+      const vrai = Date.prototype[nom];
+      Date.prototype[nom] = function (...args) { n.locale++; return vrai.apply(this, args); };
+    }
+  });
+  await ouvrir(page);
+  await page.waitForLoadState("networkidle");
+  await aller(page, "commande-client");
+  await expect(page.locator("#customerCatalog .product-card")).toHaveCount(218);
+  await aller(page, "commandes");
+  await expect(page.locator("#cmdLignes .cmd-ligne")).toHaveCount(20);
+  await page.evaluate(() => { window.__formateurs.intl = 0; window.__formateurs.locale = 0; });
+  // Deux rendus de liste : le catalogue (un prix par carte, 218 -- la recherche
+  // du catalogue le refait) et une page de commandes (une date par ligne, 20).
+  await page.evaluate(() => document.getElementById("customerProductSearch").dispatchEvent(new Event("input", { bubbles: true })));
+  await page.locator("#cmdSuivant").click();
+  await expect(page.locator("#cmdCompte")).toHaveText(/^21–40 sur 224$/);
+  const n = await page.evaluate(() => window.__formateurs);
+  console.log(`[formateurs] pendant les deux rendus : ${n.intl} construits, ${n.locale} toLocale*`);
+  // Avant : 218 NumberFormat (formatMoney) et 20 toLocaleDateString (dateCourte).
+  expect(n.intl).toBeLessThan(5);
+  expect(n.locale).toBeLessThan(5);
+});
+
 test("préparation : la rangée des secteurs n'est mesurée qu'affichée, et une frappe ne la refait pas", async ({ page }) => {
   await page.addInitScript(() => {
     window.__mesures = 0;
