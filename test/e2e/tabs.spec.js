@@ -29,7 +29,8 @@ const TABS = [
   { id: "crm", label: "CRM" },
   { id: "relances", label: "Relances" },
   { id: "statistiques", label: "Statistiques" },
-  { id: "exports", label: "Exports" },
+  // « exports » n'est plus un ecran (decision 9, 24/09) : il redirige vers
+  // Commandes, voir « les anciennes adresses redirigent » plus bas.
   { id: "parametres", label: "Paramètres" }
 ];
 
@@ -162,6 +163,8 @@ test.describe("Parcours complet des onglets", () => {
     // Un favori, un lien partage ou un geste code en dur qui visait l'ancien
     // ecran doit arriver sur la liste unique, filtree comme l'ancien ecran.
     const ATTENDU = {
+      // Decision 9 (24/09) : l'ecran Exports est parti ; on exporte depuis Commandes.
+      exports: "toutes",
       "bons-commande": "toutes",
       "commandes-livrees": "livrees",
       "commandes-planifiees": "planifiees",

@@ -348,11 +348,18 @@ const STOP_STATUSES = new Set(["pret_livraison", "en_livraison", "livre", "absen
 // SSIAD, cliniques -- et non d'une liste generique de messagerie. C'est un
 // choix de vocabulaire metier : il se change en une ligne si Tom en veut
 // d'autres, et rien d'autre dans le code ne depend de ces libelles.
+//
+// DECISION 10 DE THOMAS (24/09) : « Personne sur place » et « Etablissement
+// ferme » decrivent une ABSENCE ; ils ne sont plus PROPOSES pour « Probleme »
+// (`proposes`, ce que le dialogue du livreur montre). Ils restent ADMIS
+// (`statutsAdmis`, ce que le serveur accepte) : un geste « Probleme / Personne
+// sur place » fait hors ligne avant la mise a jour, et rejoue ensuite par la
+// file, ne doit pas etre refuse.
 const MOTIFS_PROBLEME = new Map([
-  ["absent", { libelle: "Personne sur place", statutsAdmis: ["absent", "probleme", "a_reprogrammer"] }],
+  ["absent", { libelle: "Personne sur place", statutsAdmis: ["absent", "probleme", "a_reprogrammer"], proposes: ["absent", "a_reprogrammer"] }],
   ["adresse", { libelle: "Adresse introuvable", statutsAdmis: ["probleme", "a_reprogrammer"] }],
   ["acces", { libelle: "Accès impossible (portail, code, étage)", statutsAdmis: ["probleme", "a_reprogrammer"] }],
-  ["ferme", { libelle: "Établissement fermé", statutsAdmis: ["absent", "probleme", "a_reprogrammer"] }],
+  ["ferme", { libelle: "Établissement fermé", statutsAdmis: ["absent", "probleme", "a_reprogrammer"], proposes: ["absent", "a_reprogrammer"] }],
   ["refus", { libelle: "Commande refusée", statutsAdmis: ["probleme", "a_reprogrammer"] }],
   ["produit", { libelle: "Produit manquant ou abîmé", statutsAdmis: ["probleme", "a_reprogrammer"] }],
   ["autre", { libelle: "Autre", statutsAdmis: ["absent", "probleme", "a_reprogrammer"] }]
@@ -5017,13 +5024,27 @@ function inferCrmStatus(client, orders) {
   return "prospect";
 }
 
-function crmClientView(db, client) {
+// `ventesImportees` : l'index des ventes importees (buildImportedSalesIndex),
+// construit UNE fois par la liste des clients plutot qu'une fois par client.
+function crmClientView(db, client, ventesImportees = null) {
   const orders = getClientOrderHistory(db, client.id);
   const reminders = db.relances
     .filter(reminder => String(reminder.clientId) === String(client.id))
     .sort((a, b) => String(b.datePrevue || "").localeCompare(String(a.datePrevue || "")));
   const latestOrder = orders[0];
   const firstOrder = orders[orders.length - 1];
+  // Le chiffre d'affaires de la fiche (parcours simplifies, 24/09) : les
+  // commandes LIVREES seulement, comme l'Analyse. Il additionnait toutes les
+  // commandes du client, annulees comprises. Meme repli que computeStatistics
+  // pour une commande importee sans montant : ses ventes importees.
+  const livrees = orders.filter(order => order.status === "livre");
+  let index = ventesImportees;
+  const montantLivre = order => {
+    const explicite = getOrderTotal(order);
+    if (explicite) return explicite;
+    index = index || buildImportedSalesIndex(db.ventes);
+    return getImportedOrderTotal(index, order, orderDate(order));
+  };
 
   return {
     ...client,
@@ -5035,7 +5056,8 @@ function crmClientView(db, client) {
     reminderHistory: reminders,
     visitHistory: Array.isArray(client.visitHistory) ? client.visitHistory : [],
     totalOrders: orders.length,
-    totalRevenue: Math.round(orders.reduce((total, order) => total + getOrderTotal(order), 0) * 100) / 100
+    deliveredOrders: livrees.length,
+    totalRevenue: Math.round(livrees.reduce((total, order) => total + montantLivre(order), 0) * 100) / 100
   };
 }
 
@@ -5197,7 +5219,11 @@ function createCustomerOrder(db, payload = {}) {
     ...(payload.client || {})
   });
   const dateCommande = normalizeDateInput(payload.dateCommande) || jourParis();
-  const lines = buildCustomerOrderLines(db, payload.products || payload.produits);
+  // Decision 11 de Thomas (24/09) : un produit en rupture (ou au stock non
+  // renseigne) ne fait plus REFUSER la commande prise chez le client. Elle est
+  // acceptee en « Bloquee », comme une commande importee : rien n'est reserve,
+  // et la Preparation la debloque quand le stock arrive.
+  const lines = buildCustomerOrderLines(db, payload.products || payload.produits, { checkStock: false });
   const total = Math.round(lines.reduce((sum, line) => sum + line.totalLigne, 0) * 100) / 100;
   const numero = generateOrderNumber(db, dateCommande);
   const order = normalizeOrder({
@@ -5227,7 +5253,9 @@ function createCustomerOrder(db, payload = {}) {
   client.nextReminderDate = client.nextReminderDate || "";
   heriterPositionDuClient(order, client);
   db.commandes.push(order);
-  reserveStockForOrder(db, order);
+  // Le stock suffit : reserve comme avant. Sinon (decision 11) : rien n'est
+  // reserve, la commande attend en « Bloquee » (canPrepare faux).
+  if (analyzeOrderStock(order, db.stock).canPrepare) reserveStockForOrder(db, order);
   setOrderStatus(order, "stock_a_verifier");
   order.sentToPreparationAt = new Date().toISOString();
   return order;
@@ -5787,7 +5815,9 @@ function computeStatistics(db, now = new Date()) {
 
   const periodEvolution = (current, previous) => {
     if (previous === 0 && current === 0) return { label: "stable", percent: 0 };
-    if (previous === 0) return { label: "progression", percent: 100 };
+    // Rien la periode d'avant : aucun pourcentage n'a de sens (c'etait « +100 % »,
+    // une croissance qui n'existe pas). Parcours simplifies, 24/09.
+    if (previous === 0) return { label: "nouveau", percent: null };
     const percent = Math.round(((current - previous) / previous) * 1000) / 10;
     return {
       label: Math.abs(percent) < 3 ? "stable" : (percent > 0 ? "progression" : "baisse"),
@@ -5885,35 +5915,73 @@ function buildXlsx(rows) {
   return Buffer.from(zipSync(files, { level: 6 }));
 }
 
+// Les mots des statuts dans l'export : ceux des badges de l'ecran Commandes
+// (public/js/app.js STATUT_COMMANDE), pas les cles techniques.
+const STATUTS_EXPORT = {
+  brouillon: "Brouillon",
+  commande_client_validee: "À envoyer",
+  importe: "À préparer",
+  stock_a_verifier: "À préparer",
+  en_preparation: "En préparation",
+  preparation_terminee: "Prête",
+  pret_livraison: "Prête",
+  en_livraison: "En livraison",
+  livre: "Livrée",
+  planifiee: "Planifiée",
+  a_confirmer: "À confirmer",
+  probleme_livraison: "Problème",
+  a_reprogrammer: "À reprogrammer",
+  annulee: "Annulée"
+};
+
+/** « 23/09/2026 » depuis une date ISO « 2026-09-23 » ; vide sinon. */
+function dateExport(valeur) {
+  const m = String(valeur || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : "";
+}
+
+/** « 23/09/2026 00:30 » : un INSTANT, lu a l'heure de Paris (pas d'UTC). */
+function instantExport(valeur) {
+  const instant = Date.parse(valeur || "");
+  if (!Number.isFinite(instant)) return "";
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("fr-FR", {
+    timeZone: "Europe/Paris", day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+  }).formatToParts(new Date(instant)).map(p => [p.type, p.value]));
+  return `${parts.day}/${parts.month}/${parts.year} ${parts.hour}:${parts.minute}`;
+}
+
+// L'export Excel de l'ecran Commandes (decision 9 de Thomas, 24/09 : un seul
+// export). Il porte ce qu'il faut pour rapprocher livraisons et factures : le
+// numero, la date REELLE de livraison et « remis a » -- aucun des deux anciens
+// exports n'avait les trois.
 function orderExportRows(orders) {
-  const headers = ["Date", "Client", "Adresse", "Telephone", "Produits", "Quantites", "Prix unitaires", "Total", "Statut", "Notes"];
+  const headers = ["Numéro", "Date de commande", "Livraison prévue", "Livrée le", "Remis à", "Client",
+    "Adresse", "Code postal", "Ville", "Secteur", "Téléphone", "Produits", "Quantités", "Prix unitaires",
+    "Total", "Statut", "Notes"];
   const rows = orders.map(order => {
     const lines = normalizeProducts(order.products);
     return [
-      order.deliveryDate || order.dateCommande || "",
+      order.numero || "",
+      dateExport(order.dateCommande),
+      dateExport(order.deliveryDate),
+      order.status === "livre" ? instantExport(order.deliveredAt) : "",
+      order.remisA || "",
       order.clientName || "",
-      [order.address, order.postalCode, order.city].filter(Boolean).join(", "),
+      order.address || "",
+      order.postalCode || "",
+      order.city || "",
+      order.sector || "",
       order.phone || "",
       lines.map(line => line.nom).join(" | "),
       lines.map(line => line.quantite).join(" | "),
       lines.map(line => line.prixUnitaire || 0).join(" | "),
       getOrderTotal(order),
-      order.status || "",
+      STATUTS_EXPORT[order.status] || order.status || "",
       order.notes || ""
     ];
   });
   return [headers, ...rows];
-}
-
-function getOrdersForAnnexExport(db, query = {}) {
-  const type = clean(query.type || "annexe").toLowerCase();
-  let list = db.commandes || [];
-
-  if (type === "all" || type === "toutes") return list;
-  if (type === "planned" || type === "planifiees") return listPlannedOrders(db);
-  if (type === "terrain") return list.filter(order => order.source === "commande_terrain");
-
-  return list.filter(order => order.orderType === "annexe" || order.source === "commande_annexe");
 }
 
 function notFound(message) {
@@ -7661,9 +7729,10 @@ app.get("/api/crm/clients", (req, res) => {
   const statusFilter = normalizeCrmStatus(req.query.status || "", "");
   const today = jourParis();
 
+  const ventesImportees = buildImportedSalesIndex(db.ventes);
   let list = db.clients
     .filter(client => !client.crmArchived)
-    .map(client => crmClientView(db, client));
+    .map(client => crmClientView(db, client, ventesImportees));
 
   if (query) {
     list = list.filter(client => normalizeTextKey([
@@ -7836,13 +7905,15 @@ app.post("/api/customer-orders", async (req, res) => {
     const result = await withWriteLock(async () => {
       const db = readDb();
       const order = createCustomerOrder(db, req.body || {});
-      addHistory(db, "Commande client", `${order.clientName} : commande ${order.numero} validee`, {
+      // Decision 11 : acceptee sans reservation, faute de stock -- l'ecran le dit.
+      const bloquee = order.status === "stock_a_verifier" && !order.stockReservedAt;
+      addHistory(db, "Commande client", `${order.clientName} : commande ${order.numero} validee${bloquee ? ", bloquee faute de stock" : ""}`, {
         orderId: order.id,
         clientId: order.clientId,
         total: order.total
       });
       writeDb(db);
-      return order;
+      return { ...order, bloquee };
     });
     res.status(201).json(result);
   } catch (error) {
@@ -8005,16 +8076,24 @@ app.delete("/api/delivery-sectors/:id", async (req, res) => {
   }
 });
 
-app.get("/api/exports/commandes-annexes.xlsx", (req, res) => {
+// L'export Excel de l'ecran Commandes : les commandes de SON filtre, dans son
+// ordre (`ids`). Il remplace l'ecran Exports (decision 9, 24/09) et son
+// « commandes annexes », une categorie que rien ne cree. POST et non GET :
+// la liste filtree peut compter des centaines d'identifiants.
+app.post("/api/exports/commandes.xlsx", (req, res) => {
   try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
+    if (!ids.length) throw badRequest("Aucune commande à exporter.");
     const db = readDb();
-    const exportOrders = getOrdersForAnnexExport(db, req.query);
-    const buffer = buildXlsx(orderExportRows(exportOrders));
+    const parId = new Map(db.commandes.map(order => [String(order.id), order]));
+    const commandes = ids.map(id => parId.get(id)).filter(Boolean);
+    if (!commandes.length) throw badRequest("Aucune commande à exporter.");
+    const buffer = buildXlsx(orderExportRows(commandes));
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", 'attachment; filename="commandes-annexes.xlsx"');
+    res.setHeader("Content-Disposition", `attachment; filename="sereo-commandes-${jourParis()}.xlsx"`);
     res.send(buffer);
   } catch (error) {
-    handleRouteError(error, res, "Erreur export commandes annexes");
+    handleRouteError(error, res, "Erreur export commandes");
   }
 });
 
@@ -9408,8 +9487,10 @@ app.post("/api/routes/:routeId/stops/:stopId/correction", async (req, res) => {
 // et l'ecart ne se verrait qu'au premier refus, sur le telephone d'un livreur.
 app.get("/api/delivery-problems", (req, res) => {
   res.json({
+    // `proposes` : les statuts pour lesquels le dialogue montre ce motif (par
+    // defaut, tous ceux qu'il admet). Decision 10 : voir MOTIFS_PROBLEME.
     motifs: [...MOTIFS_PROBLEME.entries()].map(([cle, m]) => ({
-      cle, libelle: m.libelle, statutsAdmis: m.statutsAdmis
+      cle, libelle: m.libelle, statutsAdmis: m.statutsAdmis, proposes: m.proposes || m.statutsAdmis
     }))
   });
 });

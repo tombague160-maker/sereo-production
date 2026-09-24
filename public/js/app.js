@@ -1,4 +1,4 @@
-import { initOperations, renderOperations, getRoutePoints, majSousTitreAbonnements, preremplirDepart } from "./operations.js";
+import { initOperations, renderOperations, getRoutePoints, majSousTitreAbonnements, preremplirDepart, rendreRechercheClients, adresseDeCarteClient, commandeAPreparer } from "./operations.js";
 import { initAdresses, majAlerteAdresses, afficherErreursTournee } from "./domains/adresses.js";
 // Lot 6 de l'audit geo : heures d'arrivee, « Y aller », « Prevenir », historique.
 import {
@@ -24,6 +24,8 @@ import {
 // rendu, qui seront decoupes par domaine dans les increments suivants.
 
 import { escapeHtml, escapeAttribute, cssEscape, emptyState, squelette } from "./utils/dom.js";
+// Les dates et les heures de l'ecran : un seul utilitaire (parcours simplifies, 24/09).
+import * as datesFr from "./utils/dates.js";
 import { mettreEnAttente, lireFile, rejouer, ESSAIS_MAX } from "./utils/file-attente.js";
 import {
   normalizeTextKey,
@@ -32,7 +34,8 @@ import {
   splitProductCode,
   productKey,
   inlineMarkdown,
-  renderSimpleMarkdown
+  renderSimpleMarkdown,
+  accorder
 } from "./utils/text.js";
 import {
   getAddressParts,
@@ -396,7 +399,12 @@ function renderBadgesNav(compteurs) {
     badge.toggleAttribute("data-alerte", Boolean(alerte) && nombre > 0);
     badge.setAttribute("aria-label", `${nombre} à traiter`);
   };
-  poser("commandes", compteurs.aTraiter);
+  // Decision 7 de Thomas (24/09) : la pastille « a preparer » est sur
+  // PREPARATION, la ou l'on agit -- plus sur Commandes. Et c'est le compte de
+  // l'ecran (commandeAPreparer : les restantes), le meme que la tuile.
+  poser("preparation", compteurs.aPreparer);
+  const pastillePreparation = document.querySelector('.nav-badge[data-badge="preparation"]');
+  if (pastillePreparation) pastillePreparation.setAttribute("aria-label", `${Number(compteurs.aPreparer) || 0} commande${compteurs.aPreparer > 1 ? "s" : ""} à préparer`);
   poser("tournee", compteurs.livraisonsDuJour);
   poser("stock", compteurs.aRecommander, true);
   // La pastille « Abonnements » (audit du 23/09). Le nombre qui appelle un
@@ -607,6 +615,13 @@ function bindUi() {
     event.preventDefault();
     runAction(event.submitter, "Validation...", () => submitCustomerOrder(event.currentTarget));
   });
+  // Un champ obligatoire dans les coordonnees REPLIEES (le nom d'une nouvelle
+  // fiche) : le navigateur ne peut pas montrer son message sur un champ
+  // cache, et l'envoi echouait sans rien dire. On deplie d'abord.
+  document.getElementById("customerOrderForm")?.addEventListener("invalid", event => {
+    const repli = event.target.closest?.("details");
+    if (repli && !repli.open) repli.open = true;
+  }, true);
 
   document.getElementById("compteForm")?.addEventListener("submit", event => {
     event.preventDefault();
@@ -622,8 +637,16 @@ function bindUi() {
     runAction(null, null, () => changerRoleCompte(select.dataset.compteId, select.value));
   });
 
-  document.getElementById("customerClientSelect")?.addEventListener("change", event => {
-    fillCustomerFormFromClient(event.target.value);
+  // Le client de la nouvelle commande : la recherche de l'abonnement.
+  // Entree n'envoie pas la commande (elle choisirait un panier a moitie fait) :
+  // une seule carte trouvee, Entree la choisit.
+  const rechercheClient = document.getElementById("customerClientSearch");
+  rechercheClient?.addEventListener("input", rendreClientsCommande);
+  rechercheClient?.addEventListener("keydown", event => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    const cartes = document.querySelectorAll('#customerClientResults [data-action="cc-client"]');
+    if (cartes.length === 1) choisirClientCommande(cartes[0].dataset.id, { focus: true });
   });
 
   document.getElementById("customerProductSearch")?.addEventListener("input", event => {
@@ -720,7 +743,14 @@ function bindUi() {
 
     if (action === "refresh") runAction(actionButton, "Actualisation...", loadData);
     if (action === "go-tab") showTab(actionButton.dataset.targetTab || "journee");
-    if (action === "cmd-export") exportBdcCsv(commandesFiltrees(), "sereo-commandes");
+    // Decision 9 : un seul export, en Excel, du filtre de l'ecran Commandes.
+    if (action === "cmd-export") runAction(actionButton, "Export...", () => exporterCommandesExcel(commandesFiltrees()));
+    // Parcours simplifies (24/09) : les gestes de la fiche client, et le
+    // client de la nouvelle commande.
+    if (action === "cli-nouvelle-commande") ouvrirCommandePourClient(actionButton.dataset.clientId);
+    if (action === "cli-rappel") ouvrirRappelPourClient(actionButton.dataset.clientId);
+    if (action === "cc-client") choisirClientCommande(actionButton.dataset.id, { focus: true });
+    if (action === "cc-client-changer") changerClientCommande();
     if (action === "cmd-filtres-basculer") {
       commandesFiltresOuverts = !commandesFiltresOuverts;
       renderCommandes();
@@ -863,9 +893,6 @@ function bindUi() {
     if (action === "par-depot-chercher") runAction(actionButton, "Recherche…", chercherDepot);
     if (action === "par-depot-effacer") runAction(actionButton, "…", () => enregistrerReglagesTournee({ depot: null }, "Dépôt effacé."));
     if (action === "par-navigation") choisirAppliNavigation(actionButton.dataset.appli);
-    if (action === "export-annex-orders") downloadOrdersExport("annexe");
-    if (action === "export-planned-orders") downloadOrdersExport("planned");
-    if (action === "export-all-orders") downloadOrdersExport("all");
     if (action === "delete-delivery-sector") runAction(actionButton, "Suppression...", () => deleteDeliverySector(actionButton.dataset.sectorId));
     if (action === "basculer-compte") {
       runAction(actionButton, "...", () => basculerCompte(actionButton.dataset.compteId, actionButton.dataset.compteActif !== "1"));
@@ -1651,14 +1678,14 @@ function recopierApresGeste() {
   return ecritureDeLaCopie;
 }
 
-/** « Données de 14:32 » (aujourd'hui) ou « Données du 21/09 ». Sans date lisible : « Données en cache ». */
+/** « Données de 14 h 32 » (aujourd'hui) ou « Données du 21 sept. ». Sans date lisible : « Données en cache ». */
 function libelleCopie(date) {
   if (!Number.isFinite(date)) return "Données en cache";
   const d = new Date(date);
   const memeJour = d.toDateString() === new Date().toDateString();
   return memeJour
-    ? `Données de ${d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`
-    : `Données du ${d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })}`;
+    ? `Données de ${datesFr.heure(d)}`
+    : `Données du ${datesFr.jourMois(d)}`;
 }
 
 /** Recopie dans l'etat de la page les cles PRESENTES de `data`. */
@@ -2217,10 +2244,9 @@ function majEnteteTableauDeBord(ongletActif) {
   const nom = String(moi?.identifiant || "").trim();
   titre.textContent = nom ? `Bonjour ${nom}` : titles.journee.title;
 
-  const jour = new Date().toLocaleDateString("fr-FR", {
-    weekday: "long", day: "numeric", month: "long"
-  });
-  // Le MEME nombre que la tuile « En preparation », lu sur elle : deux sources
+  // « jeudi 24 septembre » (utils/dates.js), la majuscule posee plus bas.
+  const jour = datesFr.jourLong(new Date());
+  // Le MEME nombre que la tuile « A preparer », lu sur elle : deux sources
   // donneraient deux verites sur le meme ecran -- c'etait le cas.
   const tuile = document.getElementById("dashboardPreparingCount")?.textContent?.trim();
   const aPreparer = tuile && /^\d+$/.test(tuile) ? Number(tuile) : null;
@@ -2282,8 +2308,10 @@ function renderTourneeDuJour() {
 const FILTRES_COMMANDES = [
   { cle: "toutes", libelle: "Toutes", statuts: null },
   { cle: "a-envoyer", libelle: "À envoyer", statuts: ["commande_client_validee"] },
-  { cle: "a-preparer", libelle: "À préparer", statuts: ["importe", "stock_a_verifier", "en_preparation", "preparation_terminee"] },
-  { cle: "pret", libelle: "Prêt livraison", statuts: ["pret_livraison"] },
+  // « preparation_terminee » se dit « Prete » (son badge) : elle se range sous
+  // « Pretes », plus sous « A preparer » (relecture adverse).
+  { cle: "a-preparer", libelle: "À préparer", statuts: ["importe", "stock_a_verifier", "en_preparation"] },
+  { cle: "pret", libelle: "Prêtes", statuts: ["preparation_terminee", "pret_livraison"] },
   { cle: "en-livraison", libelle: "En livraison", statuts: ["en_livraison"] },
   { cle: "livrees", libelle: "Livrées", statuts: ["livre"] },
   { cle: "planifiees", libelle: "Planifiées", statuts: ["planifiee", "a_confirmer"] }
@@ -2292,14 +2320,19 @@ const FILTRES_COMMANDES = [
 // Les badges de la planche : tiede (peche claire), froid (vert clair), plein
 // (principal) ou contour d'alerte. Chaque statut dit son mot : la couleur
 // n'est jamais seule a porter l'etat.
+// UN SEUL VOCABULAIRE AU BUREAU (parcours simplifies, 24/09) : une commande
+// importee ou a verifier est « A preparer » -- le mot de la pilule, de la
+// tuile, de la pastille et de la Preparation au bureau ; prete ou preparee,
+// « Prete ». « Importee » cotoyait « A preparer », « Pret livraison » cotoyait
+// « Prete ». Le statut technique reste dans le detail, pas sur l'etiquette.
 const STATUT_COMMANDE = {
   brouillon: ["Brouillon", "neutre"],
   commande_client_validee: ["À envoyer", "tiede"],
-  importe: ["Importée", "froid"],
-  stock_a_verifier: ["À vérifier", "tiede"],
+  importe: ["À préparer", "froid"],
+  stock_a_verifier: ["À préparer", "froid"],
   en_preparation: ["En préparation", "tiede"],
-  preparation_terminee: ["Préparée", "tiede"],
-  pret_livraison: ["Prêt livraison", "froid"],
+  preparation_terminee: ["Prête", "froid"],
+  pret_livraison: ["Prête", "froid"],
   en_livraison: ["En livraison", "tiede"],
   livre: ["Livrée", "plein"],
   planifiee: ["Planifiée", "froid"],
@@ -2625,14 +2658,9 @@ function dateEnDeuxMorceaux(texte) {
   return `<span class="cmd-date-jour">${escapeHtml(jour)}</span> <span class="cmd-date-mois">${escapeHtml(reste.join(" "))}</span>`;
 }
 
+// « 24 sept. » (l'annee si ce n'est pas celle-ci) : utils/dates.js, jourMois.
 function dateCourte(iso) {
-  if (!iso) return "—";
-  const d = new Date(`${String(iso).slice(0, 10)}T12:00:00`);
-  if (Number.isNaN(d.getTime())) return "—";
-  // L'annee quand ce n'est pas celle-ci : « 1 janv. » d'une echeance ratee
-  // l'an dernier se lisait comme une date a venir.
-  const autreAnnee = d.getFullYear() !== new Date().getFullYear();
-  return d.toLocaleDateString("fr-FR", autreAnnee ? { day: "numeric", month: "short", year: "numeric" } : { day: "numeric", month: "short" });
+  return iso ? datesFr.jourMois(String(iso).slice(0, 10)) : "—";
 }
 
 function articlesDe(order) {
@@ -2998,7 +3026,6 @@ function renderAll({ lectures = true } = {}) {
   renderRelances();
   renderCustomerOrder();
   renderStatistics();
-  renderExports();
   renderStock();
   renderStockMovements();
   renderPreparation();
@@ -3152,7 +3179,7 @@ function renderStats() {
 
   // Les pastilles de la barre laterale se nourrissent des memes compteurs :
   // deux sources donneraient deux verites.
-  renderBadgesNav({ aTraiter: preparable, livraisonsDuJour: deliveryToday, aRecommander: recommendCount });
+  renderBadgesNav({ aPreparer: orders.filter(commandeAPreparer).length, livraisonsDuJour: deliveryToday, aRecommander: recommendCount });
 
   const badge = document.getElementById("alertBadge");
   if (badge) {
@@ -3182,42 +3209,42 @@ function renderDailySummary() {
   container.innerHTML = `
     <article class="summary-item status-ok">
       <h4>Workflow actif</h4>
-      <p>${orders.length} commande(s), ${stock.length} produit(s), ${ventes.length} ligne(s) importée(s)</p>
+      <p>${accorder(orders.length, "commande")}, ${accorder(stock.length, "produit")}, ${accorder(ventes.length, "ligne importée", "lignes importées")}</p>
     </article>
 
     <article class="summary-item ${lowStock ? "status-warning" : "status-ok"}">
       <h4>Stock à surveiller</h4>
-      <p>${lowStock} stock(s) faible(s), ${outStock} rupture(s)</p>
+      <p>${accorder(lowStock, "stock faible", "stocks faibles")}, ${accorder(outStock, "rupture")}</p>
     </article>
 
     <article class="summary-item ${blockedOrders ? "status-danger" : "status-ok"}">
       <h4>Commandes bloquées</h4>
-      <p>${blockedOrders} commande(s) avec stock insuffisant ou inconnu</p>
+      <p>${accorder(blockedOrders, "commande")} avec stock insuffisant ou inconnu</p>
     </article>
 
     <article class="summary-item ${readyOrders ? "status-neutral" : "status-ok"}">
       <h4>Prêtes livraison</h4>
-      <p>${readyOrders} prête(s), ${inPreparation} en préparation</p>
+      <p>${accorder(readyOrders, "prête")}, ${inPreparation} en préparation</p>
     </article>
 
     <article class="summary-item ${missingInfo ? "status-warning" : "status-ok"}">
       <h4>Données à compléter</h4>
-      <p>${missingInfo} commande(s) avec adresse ou téléphone manquant</p>
+      <p>${accorder(missingInfo, "commande")} avec adresse ou téléphone manquant</p>
     </article>
 
     <article class="summary-item ${planned || toConfirm ? "status-neutral" : "status-ok"}">
       <h4>Commandes planifiées</h4>
-      <p>${planned} planifiée(s), ${toConfirm} à confirmer</p>
+      <p>${accorder(planned, "planifiée")}, ${toConfirm} à confirmer</p>
     </article>
 
     <article class="summary-item ${remindersDue ? "status-warning" : "status-ok"}">
       <h4>Rappels CRM</h4>
-      <p>${remindersDue} rappel(s) à traiter aujourd'hui ou en retard</p>
+      <p>${accorder(remindersDue, "rappel")} à traiter aujourd'hui ou en retard</p>
     </article>
 
     <article class="summary-item status-neutral">
       <h4>Tournées</h4>
-      <p>${deliveryToday} livraison(s) aujourd'hui, ${deliveryUpcoming} à venir</p>
+      <p>${accorder(deliveryToday, "livraison")} aujourd'hui, ${deliveryUpcoming} à venir</p>
     </article>
   `;
 }
@@ -3241,10 +3268,8 @@ const RAISONS_IMPORT_IGNORE = {
 };
 const IMPORT_IGNOREES_MONTREES = 5;
 
-function accorder(n, singulier, pluriel) {
-  // « 0 erreur » : en francais, zero s'accorde au singulier.
-  return `${n} ${n > 1 ? pluriel : singulier}`;
-}
+// `accorder` vient de utils/text.js (lot parcours) : le lot pieges en avait une
+// copie locale, de meme effet pour ses appels (n entier >= 0, pluriel donne).
 
 function iconeAttention() {
   return `<svg class="import-bilan-icone" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 8v5M12 16.5h.01" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"></circle></svg>`;
@@ -3356,7 +3381,7 @@ function crmStatusLabel(status) {
   const labels = {
     prospect: "Prospect",
     client_actif: "Client actif",
-    client_a_relancer: "Client a relancer",
+    client_a_relancer: "Client à rappeler",
     client_inactif: "Client inactif"
   };
   return labels[status] || "Prospect";
@@ -3382,7 +3407,10 @@ const ICONE_CLI = {
   // Planche 8c : la fleche de navigation d'« Itineraire » (celle de « Y aller »)
   // et le crayon de « Modifier », rendus au telephone seulement.
   trajet: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 4 4 11l7 2 2 7z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path></svg>',
-  crayon: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>'
+  crayon: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>',
+  // Parcours simplifies (24/09) : les deux gestes du commercial au telephone.
+  plus: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg>',
+  rappel: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="13" r="8" stroke="currentColor" stroke-width="2"></circle><path d="M12 9v4l2.5 2.5M5 3 2.5 5.5M19 3l2.5 2.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>'
 };
 
 function nomDuClient(client) {
@@ -3596,8 +3624,32 @@ function renderFicheClient() {
         + `<span class="cli-commande-statut">${badgeDeCommande(o)}</span></button>`).join("")
     : `<p class="cli-note">Aucune commande.</p>`;
 
+  // Le chiffre d'affaires et les rappels du client (parcours simplifies,
+  // 24/09) : le serveur les calcule (crmClientView : totalRevenue sur les
+  // commandes LIVREES, reminderHistory), la fiche ne les montrait pas.
+  const livrees = Number(client.deliveredOrders) || 0;
+  const rappelsAFaire = (client.reminderHistory || [])
+    .filter(r => r.status === "a_faire")
+    .sort((a, b) => String(a.datePrevue || "").localeCompare(String(b.datePrevue || "")));
+  const aujourdhui = getTodayDateInput();
+  const lignesRappels = rappelsAFaire.slice(0, 3).map(r => {
+    const retard = String(r.datePrevue || "") < aujourdhui;
+    return `<li class="cli-rappel${retard ? " cli-alerte" : ""}"><span class="cli-rappel-date">${retard ? ICONE_CLI.retard : ""}${escapeHtml(dateCourte(r.datePrevue))}${retard ? " · en retard" : ""}</span>`
+      + `<span class="cli-rappel-motif">${escapeHtml(r.motif || "Rappel client")}</span></li>`;
+  }).join("");
+  const resteRappels = rappelsAFaire.length - 3;
+  const blocCa = `<section class="cli-ca" aria-label="Chiffre d'affaires et rappels">
+      <div class="cli-ca-montant"><p class="cli-libelle">Chiffre d'affaires livré</p><p class="cli-valeur cli-ca-valeur">${escapeHtml(formatMoney(client.totalRevenue || 0))}</p>`
+    + `<p class="cli-note">${livrees ? `${livrees} commande${livrees > 1 ? "s" : ""} livrée${livrees > 1 ? "s" : ""}` : "Aucune commande livrée"}</p></div>
+      <div class="cli-ca-rappels"><p class="cli-libelle">Rappels à faire</p>`
+    + (lignesRappels
+      ? `<ul class="cli-rappels-client">${lignesRappels}</ul>${resteRappels > 0 ? `<p class="cli-note">et ${resteRappels} autre${resteRappels > 1 ? "s" : ""}</p>` : ""}`
+      : `<p class="cli-note">Aucun rappel prévu.</p>`)
+    + `</div></section>`;
+
   const extras = [
-    client.nextReminderDate ? `Prochaine relance : ${dateCourte(client.nextReminderDate)}` : "",
+    // La date posee a la main sur la fiche, quand aucun rappel ne la porte deja.
+    client.nextReminderDate && !rappelsAFaire.length ? `Prochain rappel : ${dateCourte(client.nextReminderDate)}` : "",
     client.needs ? `Besoins : ${client.needs}` : "",
     client.preferences ? `Préférés : ${client.preferences}` : "",
     client.notes || ""
@@ -3615,10 +3667,15 @@ function renderFicheClient() {
       </div>
       <div class="cli-fiche-gestes">${appeler}${itineraire}<button class="cli-bouton-contour cli-modifier" type="button" data-action="cli-modifier" data-client-id="${escapeAttribute(client.id)}">${ICONE_CLI.crayon}<span class="cli-modifier-mot">Modifier</span></button></div>
     </header>
+    <div class="cli-fiche-actions">
+      <button class="cli-bouton-contour cli-nouvelle-commande" type="button" data-action="cli-nouvelle-commande" data-client-id="${escapeAttribute(client.id)}">${ICONE_CLI.plus}<span>Nouvelle commande</span></button>
+      <button class="cli-bouton-contour cli-rappel-bouton" type="button" data-action="cli-rappel" data-client-id="${escapeAttribute(client.id)}">${ICONE_CLI.rappel}<span>Rappel</span></button>
+    </div>
     <div class="cli-champs">
       <div><span class="cli-champ-icone" aria-hidden="true">${ICONE_CLI.lieu}</span><p class="cli-libelle">Adresse</p>${adresse}</div>
       <div><span class="cli-champ-icone" aria-hidden="true">${ICONE_CLI.tel}</span><p class="cli-libelle">Contact</p>${contact}</div>
     </div>
+    ${blocCa}
     ${extras.length ? `<div class="cli-notes">${extras.map(e => `<p class="cli-note">${escapeHtml(e)}</p>`).join("")}</div>` : ""}
     <label class="cli-statut">
       <span class="cli-libelle">Statut commercial</span>
@@ -3728,14 +3785,13 @@ function bindClients() {
 }
 
 function renderClientSelects() {
-  const options = `<option value="">Nouveau client</option>` + crmClients
+  // La nouvelle commande ne passe plus par une liste deroulante : elle a la
+  // recherche de l'abonnement (rendreClientsCommande). Reste celle du rappel.
+  const options = `<option value="">Choisir un client</option>` + crmClients
     .slice()
     .sort((a, b) => String(a.nom).localeCompare(String(b.nom), "fr"))
     .map(client => `<option value="${escapeAttribute(client.id)}">${escapeHtml([client.prenom, client.nom].filter(Boolean).join(" ") || client.nom)}</option>`)
     .join("");
-
-  const customerSelect = document.getElementById("customerClientSelect");
-  if (customerSelect && customerSelect.options.length !== crmClients.length + 1) customerSelect.innerHTML = options;
 
   const relanceSelect = document.getElementById("relanceClientSelect");
   if (relanceSelect) {
@@ -3743,14 +3799,127 @@ function renderClientSelects() {
     // pas le client deja choisi d'un rappel en cours de saisie. Apres l'envoi,
     // le formulaire est remis a zero AVANT le rechargement : rien ne reste.
     const choisi = relanceSelect.value;
-    relanceSelect.innerHTML = options.replace("Nouveau client", "Choisir un client");
+    relanceSelect.innerHTML = options;
     if (choisi && crmClients.some(c => String(c.id) === choisi)) relanceSelect.value = choisi;
   }
+}
+
+// --- Depuis la fiche client : « Nouvelle commande » et « Rappel » ----------
+// (parcours simplifies, 24/09). Appeler puis commander passait par Commandes,
+// « Nouvelle commande », puis le client a rechoisir dans une liste ; un rappel,
+// par l'ecran Rappels et une autre liste. Le client de la fiche est deja choisi.
+
+function ouvrirCommandePourClient(clientId) {
+  showTab("commande-client");
+  choisirClientCommande(clientId);
+  window.scrollTo({ top: 0 });
+}
+
+function ouvrirRappelPourClient(clientId) {
+  showTab("relances");
+  renderClientSelects();
+  const form = document.getElementById("relanceForm");
+  const choix = document.getElementById("relanceClientSelect");
+  if (!form || !choix) return;
+  choix.value = String(clientId);
+  // La date est le seul champ obligatoire qui reste : le curseur y va. Le
+  // formulaire est sous la liste au telephone : il remonte a l'ecran.
+  form.scrollIntoView({ block: "start" });
+  form.elements.datePrevue?.focus({ preventScroll: true });
+}
+
+// --- Le client de la nouvelle commande --------------------------------------
+
+function rendreClientsCommande() {
+  const liste = document.getElementById("customerClientResults");
+  const note = document.getElementById("customerClientReste");
+  if (!liste || !note) return;
+  rendreRechercheClients({
+    saisie: document.getElementById("customerClientSearch")?.value || "",
+    clients: crmClients, liste, note, geste: 'data-action="cc-client"'
+  });
+}
+
+const CHAMPS_COORDONNEES = ["nom", "prenom", "telephone", "codePostal", "adresse", "ville", "email"];
+
+/**
+ * Le client choisi devient le champ, et ses coordonnees se replient derriere
+ * « Modifier les coordonnees ». Sans client, elles s'ouvrent : c'est une
+ * nouvelle fiche, que le serveur cree avec la commande.
+ */
+function majClientCommande() {
+  const form = document.getElementById("customerOrderForm");
+  const id = document.getElementById("customerClientId")?.value || "";
+  const client = id ? crmClients.find(c => String(c.id) === String(id)) : null;
+  const choisi = document.getElementById("customerClientChoisi");
+  const recherche = document.getElementById("customerClientRecherche");
+  const coordonnees = document.getElementById("customerCoordonnees");
+  if (!form || !choisi || !recherche || !coordonnees) return;
+  choisi.hidden = !client;
+  recherche.hidden = Boolean(client);
+  // Replier (ou ouvrir) seulement quand le CLIENT change : un rechargement en
+  // fond (renderAll) ne referme pas des coordonnees qu'on est en train de
+  // corriger.
+  const pour = client ? String(client.id) : "";
+  if (coordonnees.dataset.pour !== pour) {
+    coordonnees.open = !client;
+    coordonnees.dataset.pour = pour;
+  }
+  setText("customerCoordonneesTitre", client ? "Modifier les coordonnées" : "Nouveau client : ses coordonnées");
+  if (client) {
+    setText("customerClientNom", nomDuClient(client));
+    const adresse = document.querySelector("#customerClientAdresse span");
+    if (adresse) adresse.textContent = adresseDeCarteClient(client) || "Adresse à compléter";
+  } else {
+    rendreClientsCommande();
+  }
+}
+
+function choisirClientCommande(clientId, { focus = false } = {}) {
+  const champ = document.getElementById("customerClientId");
+  if (!champ || !crmClients.some(c => String(c.id) === String(clientId))) return;
+  champ.value = String(clientId);
+  fillCustomerFormFromClient(clientId);
+  majClientCommande();
+  if (focus) document.querySelector('[data-action="cc-client-changer"]')?.focus();
+}
+
+function changerClientCommande() {
+  const form = document.getElementById("customerOrderForm");
+  const champ = document.getElementById("customerClientId");
+  if (!form || !champ) return;
+  champ.value = "";
+  for (const nom of CHAMPS_COORDONNEES) if (form.elements[nom]) form.elements[nom].value = "";
+  majClientCommande();
+  document.getElementById("customerClientSearch")?.focus();
 }
 
 // Ce qui, dans une fiche, est recopie sur ses COMMANDES par /api/clients/:id :
 // l'adresse de livraison, le nom, le telephone. La route CRM ne le fait pas.
 const CHAMPS_IDENTITE = { nom: "nom", adresse: "rue", codePostal: "codePostal", ville: "ville", telephone: "telephone" };
+
+/**
+ * Enregistre sur la fiche `id` les champs CHANGES (`change` : { champ du
+ * formulaire: valeur }), par les routes de la fiche : l'identite par
+ * /api/clients/:id (qui la recopie sur ses commandes a livrer), le reste par
+ * /api/crm/clients/:id. `fileAdmise` : une ecriture mise en file hors ligne
+ * n'arrete pas la suite (elle partira dans l'ordre).
+ */
+async function enregistrerChangementsDeFiche(id, change, { fileAdmise = false } = {}) {
+  const identite = {}, crm = {};
+  for (const [cle, valeur] of Object.entries(change)) {
+    if (cle in CHAMPS_IDENTITE) identite[CHAMPS_IDENTITE[cle]] = valeur; else crm[cle] = valeur;
+  }
+  const envoyer = async (chemin, corps) => {
+    try {
+      await apiFetch(chemin, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps) });
+    } catch (error) {
+      if (!(fileAdmise && error?.enFile)) throw error;
+    }
+  };
+  if (Object.keys(identite).length) await envoyer(`/api/clients/${encodeURIComponent(id)}`, identite);
+  if (Object.keys(crm).length) await envoyer(`/api/crm/clients/${encodeURIComponent(id)}`, crm);
+}
 
 async function saveCrmClient(form) {
   const { id, ...data } = Object.fromEntries(new FormData(form).entries());
@@ -3775,20 +3944,7 @@ async function saveCrmClient(form) {
       // (prochaine relance, statut deduit) etaient figees dans la fiche.
       const avant = JSON.parse(form.dataset.initial || "{}");
       const change = Object.fromEntries(Object.entries(data).filter(([cle, valeur]) => String(avant[cle] ?? "") !== String(valeur)));
-      const identite = {}, crm = {};
-      for (const [cle, valeur] of Object.entries(change)) {
-        if (cle in CHAMPS_IDENTITE) identite[CHAMPS_IDENTITE[cle]] = valeur; else crm[cle] = valeur;
-      }
-      if (Object.keys(identite).length) {
-        await apiFetch(`/api/clients/${encodeURIComponent(id)}`, {
-          method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(identite)
-        });
-      }
-      if (Object.keys(crm).length) {
-        await apiFetch(`/api/crm/clients/${encodeURIComponent(id)}`, {
-          method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(crm)
-        });
-      }
+      await enregistrerChangementsDeFiche(id, change);
     }
   } catch (error) {
     // Dans le dialogue : un toast serait sous sa couche, assombri et inerte.
@@ -3818,6 +3974,11 @@ async function updateCrmClientStatus(clientId, status) {
   await loadData();
   notify("Statut CRM mis a jour.", "success");
 }
+
+// Les mots d'un rappel, un seul vocabulaire au bureau (relecture adverse) :
+// l'ecran montrait la cle du statut (« reporte », « annule ») et des gestes
+// sans accent. Les cles envoyees au serveur ne changent pas.
+const STATUT_RAPPEL = { a_faire: "À faire", fait: "Fait", reporte: "Reporté", annule: "Annulé" };
 
 function renderRelances() {
   const container = document.getElementById("relanceList");
@@ -3864,13 +4025,13 @@ function renderRelances() {
             <p>${escapeHtml(item.motif || "Rappel client")} - ${escapeHtml(formatDateDayOnly(item.datePrevue))}</p>
             ${order ? `<p class="muted">${escapeHtml(order.numero || order.id)} - livraison ${escapeHtml(order.deliveryDate ? formatDeliveryDate(order.deliveryDate) : "à dater")}</p>` : ""}
           </div>
-          <span class="pill ${level}">${escapeHtml(item.status === "a_faire" ? "À faire" : item.status)}</span>
+          <span class="pill ${level}">${escapeHtml(STATUT_RAPPEL[item.status] || item.status)}</span>
         </div>
         <p class="muted">${escapeHtml(item.commentaire || "Aucun commentaire")}</p>
         <div class="card-actions">
           <button class="button ok compact" type="button" data-relance-id="${escapeAttribute(item.id)}" data-relance-status="fait">Fait</button>
-          <button class="button warning compact" type="button" data-relance-id="${escapeAttribute(item.id)}" data-relance-status="reporte">Reporte</button>
-          <button class="button danger compact" type="button" data-relance-id="${escapeAttribute(item.id)}" data-relance-status="annule">Annule</button>
+          <button class="button warning compact" type="button" data-relance-id="${escapeAttribute(item.id)}" data-relance-status="reporte">Reporté</button>
+          <button class="button danger compact" type="button" data-relance-id="${escapeAttribute(item.id)}" data-relance-status="annule">Annulé</button>
         </div>
       </article>
     `;
@@ -3901,6 +4062,7 @@ async function updateRelanceStatus(relanceId, status) {
 
 function renderCustomerOrder() {
   renderClientSelects();
+  majClientCommande();
   renderCustomerCategoryFilter();
   renderCustomerCatalog();
   renderCustomerCart();
@@ -3955,6 +4117,21 @@ function getProductPrice(product) {
   return Number(product.prixUnitaire ?? product.tarif ?? product.prix ?? product.price ?? product.cout ?? 0) || 0;
 }
 
+// Decision 11 de Thomas (24/09) : un produit en rupture n'est plus REFUSE au
+// panier (« Stock insuffisant pour ce produit. »), alors que l'import
+// l'acceptait. La commande est enregistree « Bloquee », comme une commande
+// importee ; on le dit ici, une fois par produit, plutot qu'apres coup.
+function prevenirManqueDeStock(product, quantite) {
+  if (document.getElementById("customerOrderType")?.value === "planifiee") return;
+  const disponible = getProductQuantity(product);
+  if (disponible !== null && quantite <= disponible) return;
+  const nom = getProductName(product);
+  notify(disponible === null
+    ? `${nom} : stock non renseigné. La commande sera bloquée jusqu'à ce qu'il le soit.`
+    : `${nom} : ${Math.max(0, disponible)} en stock. La commande sera bloquée jusqu'à l'arrivée du reste.`,
+  "warning", { cle: `manque-${product.id}` });
+}
+
 function changeCustomerCart(productId, delta) {
   const product = stock.find(item => String(item.id) === String(productId));
   if (!product) return;
@@ -3965,13 +4142,8 @@ function changeCustomerCart(productId, delta) {
     quantite: 0,
     prixUnitaire: getProductPrice(product)
   };
-  const available = getProductQuantity(product);
   const nextQuantity = Math.max(0, current.quantite + delta);
-  const isPlannedOrder = document.getElementById("customerOrderType")?.value === "planifiee";
-  if (!isPlannedOrder && available !== null && nextQuantity > available) {
-    notify("Stock insuffisant pour ce produit.", "warning");
-    return;
-  }
+  if (delta > 0) prevenirManqueDeStock(product, nextQuantity);
   if (nextQuantity === 0) customerCart.delete(String(productId));
   else customerCart.set(String(productId), { ...current, quantite: nextQuantity });
   renderCustomerCatalog();
@@ -3998,13 +4170,8 @@ function setCustomerCart(productId, value, inputEl) {
     return;
   }
 
-  const available = getProductQuantity(product);
-  const isPlannedOrder = document.getElementById("customerOrderType")?.value === "planifiee";
-  let nextQuantity = Math.max(0, Math.floor(Number(raw) || 0));
-  if (!isPlannedOrder && available !== null && nextQuantity > available) {
-    notify("Stock insuffisant pour ce produit.", "warning");
-    nextQuantity = available;
-  }
+  const nextQuantity = Math.max(0, Math.floor(Number(raw) || 0));
+  if (nextQuantity > currentQuantity) prevenirManqueDeStock(product, nextQuantity);
 
   const base = current || {
     productId: product.id,
@@ -4071,6 +4238,30 @@ function fillCustomerFormFromClient(clientId) {
   form.elements.adresse.value = client.rue || "";
   form.elements.ville.value = client.ville || "";
   form.elements.email.value = client.email || "";
+  // Ce que la fiche a mis dans les champs : seul ce que l'utilisateur y change
+  // ensuite repart sur la fiche (reporterCoordonneesSurLaFiche). Comparer a
+  // la fiche rechargee en fond ecraserait un changement fait ailleurs.
+  form.dataset.coordonneesInitiales = JSON.stringify(Object.fromEntries(CHAMPS_COORDONNEES.map(nom => [nom, form.elements[nom]?.value ?? ""])));
+}
+
+/**
+ * « Modifier les coordonnees » d'un client existant (relecture adverse du
+ * 24/09) : le serveur reprend le client tel quel des qu'il a son identifiant
+ * (findOrCreateCustomerClient) et jetait ce qui avait ete corrige -- la
+ * commande partait a l'ancienne adresse. Ce que l'utilisateur a change va sur
+ * la FICHE, par les routes de la fiche, AVANT la commande, qui prend alors la
+ * nouvelle adresse. Rend vrai si la fiche a ete modifiee.
+ */
+async function reporterCoordonneesSurLaFiche(form, data) {
+  if (!data.clientId || !form.dataset.coordonneesInitiales) return false;
+  const avant = JSON.parse(form.dataset.coordonneesInitiales);
+  const change = Object.fromEntries(CHAMPS_COORDONNEES
+    .filter(nom => nom in data && String(data[nom]).trim() !== String(avant[nom] ?? "").trim())
+    .map(nom => [nom, data[nom]]));
+  if (!Object.keys(change).length) return false;
+  // Hors ligne : la fiche, puis la commande, attendent dans la file, dans cet ordre.
+  await enregistrerChangementsDeFiche(data.clientId, change, { fileAdmise: true });
+  return true;
 }
 
 async function submitCustomerOrder(form) {
@@ -4085,6 +4276,8 @@ async function submitCustomerOrder(form) {
     return;
   }
   const endpoint = data.orderType === "planifiee" ? "/api/planned-orders" : "/api/customer-orders";
+  const ficheModifiee = await reporterCoordonneesSurLaFiche(form, data);
+  const fiche = ficheModifiee ? " Coordonnées enregistrées sur la fiche du client." : "";
   const reponse = await apiFetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -4099,6 +4292,12 @@ async function submitCustomerOrder(form) {
   });
   customerCart.clear();
   form.reset();
+  // reset() ne vide PAS le client choisi (relecture adverse) : sur un champ
+  // cache, ecrire .value ecrit l'attribut value, et reset() revient a cet
+  // attribut. La commande suivante partait au nom du client d'avant. On le
+  // vide a la main : la recherche revient, les coordonnees se rouvrent.
+  form.elements.clientId.value = "";
+  majClientCommande();
   await loadData();
   // Audit du 24/09 : l'ecran renvoyait vers « À envoyer » (#commandes-jour),
   // un filtre vide par construction -- le serveur passe la commande terrain
@@ -4108,7 +4307,15 @@ async function submitCustomerOrder(form) {
   const planifiee = data.orderType === "planifiee";
   const creee = planifiee ? reponse?.order : reponse;
   const numero = creee?.numero ? ` ${creee.numero}` : "";
-  notify(planifiee ? `Commande planifiée${numero} créée.` : `Commande${numero} validée : elle est à préparer.`, "success");
+  if (!planifiee && reponse?.bloquee) {
+    // Decision 11 : acceptee, mais bloquee faute de stock -- et elle le dit.
+    const chargee = orders.find(o => String(o.id) === String(reponse.id));
+    const manque = chargee ? manqueDeLaCommande(chargee) : "";
+    const pourquoi = /^Il manque/.test(manque) ? `${manque.charAt(0).toLowerCase()}${manque.slice(1)} en stock` : (manque || "stock insuffisant").toLowerCase();
+    notify(`Commande${numero} enregistrée, mais bloquée (${pourquoi}) : elle passera en préparation quand le stock arrivera.${fiche}`, "warning");
+  } else {
+    notify(`${planifiee ? `Commande planifiée${numero} créée.` : `Commande${numero} validée : elle est à préparer.`}${fiche}`, "success");
+  }
   montrerCommandeCreee(creee, planifiee ? "planifiees" : "toutes");
 }
 
@@ -4165,47 +4372,13 @@ async function cancelPlannedOrder(orderId) {
   notify("Commande planifiée annulée.", "success");
 }
 
-function renderExports() {
-  const summary = document.getElementById("exportsSummary");
-  const list = document.getElementById("exportsList");
-  if (summary) summary.textContent = `${orders.length} commande${orders.length > 1 ? "s" : ""}`;
-  if (!list) return;
-  const annex = orders.filter(order => order.orderType === "annexe" || order.source === "commande_annexe").length;
-  list.innerHTML = `
-    <article class="item status-neutral">
-      <div class="item-header">
-        <div>
-          <h4>Commandes annexes</h4>
-          <p>${escapeHtml(annex)} commande${annex > 1 ? "s" : ""} disponible${annex > 1 ? "s" : ""}</p>
-        </div>
-        <span class="pill pill-blue">.xlsx</span>
-      </div>
-    </article>
-    <article class="item status-ok">
-      <div class="item-header">
-        <div>
-          <h4>Commandes planifiées</h4>
-          <p>${escapeHtml(plannedOrders.length)} commande${plannedOrders.length > 1 ? "s" : ""}</p>
-        </div>
-        <span class="pill pill-ok">Excel</span>
-      </div>
-    </article>
-  `;
-}
-
-function downloadOrdersExport(type) {
-  const url = `/api/exports/commandes-annexes.xlsx?type=${encodeURIComponent(type)}`;
-  window.open(url, "_blank", "noopener,noreferrer");
-  notify("Export Excel lancé.", "success");
-}
-
 function renderStatistics() {
   const kpis = document.getElementById("statsKpis");
   if (!kpis || !statistics) return;
   const items = [
-    { label: "CA livré du jour", value: formatMoney(statistics.today?.revenue), hint: `${statistics.today?.orders || 0} commande(s)`, tone: "success" },
+    { label: "CA livré du jour", value: formatMoney(statistics.today?.revenue), hint: accorder(statistics.today?.orders, "commande"), tone: "success" },
     { label: "CA livré de la semaine", value: formatMoney(statistics.week?.revenue), hint: formatEvolution(statistics.week?.evolution), tone: getEvolutionTone(statistics.week?.evolution) },
-    { label: "CA livré du mois", value: formatMoney(statistics.month?.revenue), hint: `${statistics.month?.orders || 0} commande(s) - ${formatEvolution(statistics.month?.evolution)}`, tone: getEvolutionTone(statistics.month?.evolution) },
+    { label: "CA livré du mois", value: formatMoney(statistics.month?.revenue), hint: `${accorder(statistics.month?.orders, "commande")} · ${formatEvolution(statistics.month?.evolution)}`, tone: getEvolutionTone(statistics.month?.evolution) },
     { label: "Panier moyen", value: formatMoney(statistics.averageBasket), hint: "Commandes livrées, toutes périodes", tone: "info" },
     { label: "Nouveaux clients", value: statistics.newClientsMonth || 0, hint: "Ce mois-ci", tone: "warning" },
     { label: "Prospects convertis", value: statistics.convertedProspectsMonth || 0, hint: "Ce mois-ci", tone: "success" }
@@ -4235,8 +4408,12 @@ function getEvolutionTone(evolution = {}) {
 
 function formatEvolution(evolution = {}) {
   if (!evolution.label) return "Stable";
+  // Rien la periode d'avant : « nouveau », jamais « +100 % » -- une
+  // croissance qui n'existait pas (parcours simplifies, 24/09).
+  if (evolution.label === "nouveau" || evolution.percent === null) return "nouveau (rien la période d’avant)";
   const sign = Number(evolution.percent) > 0 ? "+" : "";
-  return `${evolution.label} ${sign}${evolution.percent || 0}%`;
+  // L'espace fine insecable du francais avant « % ».
+  return `${evolution.label} ${sign}${String(evolution.percent || 0).replace(".", ",")} %`;
 }
 
 function renderBarChart(id, rows) {
@@ -4279,7 +4456,7 @@ function renderRankList(id, rows, mode) {
     <div class="rank-row">
       <span>${index + 1}</span>
       <strong>${escapeHtml(row.name || row.clientName || "Client")}</strong>
-      <em>${mode === "total" ? formatMoney(row.total) : `${escapeHtml(row.quantity)} vendu(s)`}</em>
+      <em>${mode === "total" ? formatMoney(row.total) : escapeHtml(accorder(row.quantity, "vendu"))}</em>
       <i style="width:${Math.max(8, (Number(mode === "total" ? row.total : row.quantity) || 0) / max * 100)}%"></i>
     </div>
   `).join("");
@@ -4442,7 +4619,7 @@ function renderStockCategories() {
       // L'import ne distingue pas une colonne ABSENTE d'une colonne VIDE (le
       // serveur lit "" dans les deux cas) : la carte dit ce qui se voit -- aucun
       // produit n'a de categorie --, pas une cause qu'elle ne connait pas.
-      : "Aucun produit de ce fichier n’a de catégorie. Ils sont affichés à plat, sous le seuil en premier. Remplissez la colonne « Catégorie » de votre fichier (ajoutez-la si elle manque) et réimportez-le pour retrouver les tuiles.");
+      : "Aucun produit de ce fichier n’a de catégorie. Ils sont affichés à plat, sous le seuil en premier. Remplis la colonne « Catégorie » de ton fichier (ajoute-la si elle manque) et réimporte-le pour retrouver les tuiles.");
   }
   if (aPlat) {
     bloc.innerHTML = "";
@@ -4827,7 +5004,7 @@ function majSousTitrePreparation() {
     setText("pageSubtitle", "Commandes indisponibles");
     return;
   }
-  const restantes = (orders || []).filter(order => ["importe", "stock_a_verifier", "en_preparation"].includes(order.status)).length;
+  const restantes = (orders || []).filter(commandeAPreparer).length;
   setText("pageSubtitle", restantes
     ? `${restantes} commande${restantes > 1 ? "s" : ""} à préparer`
     : "Aucune commande à préparer");
@@ -4868,18 +5045,21 @@ function renderPreparation() {
       hint: "Stock disponible, prêt à lancer",
       orders: orders.filter(order => ["importe", "stock_a_verifier"].includes(order.status) && order.canPrepare)
     },
+    // Les titres de groupe disent les mots des lignes et des badges (un seul
+    // vocabulaire au bureau, 24/09) : « En cours » et « Pretes livraison »
+    // cotoyaient « En preparation » et « Prete ».
     {
-      title: "En cours",
+      title: "En préparation",
       hint: "Stock réservé, préparation à terminer",
       orders: orders.filter(order => order.status === "en_preparation")
     },
     {
-      title: "Prêtes livraison",
+      title: "Prêtes",
       hint: "Disponibles dans le mode livraison",
       orders: orders.filter(order => order.status === "pret_livraison")
     },
     {
-      title: "Bloquées stock",
+      title: "Bloquées",
       hint: "Stock insuffisant ou non renseigné",
       orders: orders.filter(order => ["importe", "stock_a_verifier"].includes(order.status) && !order.canPrepare)
     }
@@ -4921,15 +5101,18 @@ function renderPreparation() {
 }
 
 /**
- * L'etape de preparation d'une commande, avec le mot de la planche :
- * A faire · En cours · Prete · Bloquee. Ce sont les mots de l'ETAPE, pas
- * ceux du statut (Importee, Pret livraison...) qui restent dans le detail.
+ * L'etape de preparation d'une commande, AU BUREAU : A preparer · En
+ * preparation · Prete · Bloquee. Un seul vocabulaire au bureau (parcours
+ * simplifies, 24/09) : ce sont les mots des badges de Commandes, de la tuile
+ * et de la pastille. « A faire » et « En cours » (19/09) n'etaient dits
+ * nulle part ailleurs. Les classes (a-faire, en-cours) restent : elles portent
+ * les couleurs. Au telephone, motDeStatutPreparation (decision 13).
  */
 function etapeDePreparation(order) {
   if (order.status === "pret_livraison") return { cle: "prete", mot: "Prête" };
-  if (order.status === "en_preparation") return { cle: "en-cours", mot: "En cours" };
+  if (order.status === "en_preparation") return { cle: "en-cours", mot: "En préparation" };
   if (["importe", "stock_a_verifier"].includes(order.status) && !order.canPrepare) return { cle: "bloquee", mot: "Bloquée" };
-  return { cle: "a-faire", mot: "À faire" };
+  return { cle: "a-faire", mot: "À préparer" };
 }
 
 /** Le « ! » du badge « Bloquee » de Preparation, au bureau comme au telephone. */
@@ -5022,18 +5205,27 @@ function createPreparationRowMobile(order) {
 /** Le detail d'une commande, en sheet : l'adresse, la date, le stock, et les actions. */
 function openCommandeDetail(orderId) {
   const dialogue = document.getElementById("commandeDetailDialog");
+  if (!dialogue || typeof dialogue.showModal !== "function") return;
+  if (!remplirDetailCommande(orderId)) return;
+  dialogue.showModal();
+}
+
+/** Le corps du detail pour `orderId` ; faux si la commande n'est pas chargee. */
+function remplirDetailCommande(orderId) {
+  const dialogue = document.getElementById("commandeDetailDialog");
   const corps = document.getElementById("commandeDetailCorps");
   const order = orders.find(item => String(item.id) === String(orderId));
-  if (!dialogue || !corps || !order || typeof dialogue.showModal !== "function") return;
+  if (!dialogue || !corps || !order) return false;
   corps.innerHTML = "";
   const mobile = preparationEnListeUnique();
   // Au telephone, la page de la planche 7b ; au bureau, le sheet d'avant.
   dialogue.classList.toggle("commande-page", mobile);
+  dialogue.dataset.orderId = String(order.id);
   corps.appendChild(mobile ? createPreparationDetailMobile(order) : createPreparationCard(order));
   const titre = document.getElementById("commandeDetailTitre");
   if (titre) titre.textContent = order.clientName;
   remplirEnteteDetailCommande(mobile ? order : null);
-  dialogue.showModal();
+  return true;
 }
 
 /**
@@ -5049,8 +5241,9 @@ function remplirEnteteDetailCommande(order) {
     puces.innerHTML = "";
     return;
   }
-  const date = order.dateCommande ? new Date(`${String(order.dateCommande).slice(0, 10)}T12:00:00`) : null;
-  const jour = date && !Number.isNaN(date.getTime()) ? date.toLocaleDateString("fr-FR", { day: "numeric", month: "long" }) : "";
+  // « 16 septembre » (utils/dates.js).
+  const jour = order.dateCommande && datesFr.lireDate(String(order.dateCommande).slice(0, 10))
+    ? datesFr.jourLong(String(order.dateCommande).slice(0, 10), { semaine: false }) : "";
   meta.textContent = [order.numero, jour].filter(Boolean).join(" · ");
   const secteur = order.sector ? formatSectorLabel(order.sector) : (order.city ? formatSectorLabel(order.city) : "");
   puces.innerHTML = `
@@ -5172,7 +5365,8 @@ function renderPreparationStats() {
 
   // Planche Preparation.png : un seul resume, un anneau a la part des pretes.
   const total = counts.imported + counts.preparing + counts.ready;
-  const restantes = counts.imported + counts.preparing;
+  // Le compte de la pastille et de la tuile (commandeAPreparer), le meme.
+  const restantes = orders.filter(commandeAPreparer).length;
   const articles = orders
     .filter(order => ["importe", "stock_a_verifier", "en_preparation", "pret_livraison"].includes(order.status))
     .reduce((somme, order) => somme + getOrderProductCount(order), 0);
@@ -5202,6 +5396,9 @@ function createPreparationCard(order) {
   const canStart = ["importe", "stock_a_verifier"].includes(order.status) && order.canPrepare;
   const canFinish = order.status === "en_preparation";
   const deliveryDate = order.deliveryDate || getTodayDateInput();
+  // La pastille dit le mot de sa ligne et du badge de Commandes : « Bloquee »
+  // quand le stock manque (relecture adverse ; formatOrderStatus ne lit que
+  // le statut, et disait « A preparer » sur une carte en alerte).
 
   article.innerHTML = `
     <div class="item-header">
@@ -5209,7 +5406,7 @@ function createPreparationCard(order) {
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
         <span>${escapeHtml(formatOrderAddress(order))}</span>
       </p>
-      <span class="pill ${getOrderPill(order.status)}">${escapeHtml(formatOrderStatus(order.status))}</span>
+      <span class="pill ${getOrderPill(order.status)}">${escapeHtml(commandeBloquee(order) ? "Bloquée" : formatOrderStatus(order.status))}</span>
     </div>
     <div class="order-meta">
       <span>Secteur : ${escapeHtml(order.sector ? formatSectorLabel(order.sector) : "-")}</span>
@@ -5232,12 +5429,33 @@ function createPreparationCard(order) {
   return article;
 }
 
+// Parcours simplifies (24/09) : la fenetre ne se ferme plus entre « Passer en
+// preparation » et « Preparation terminee ». Elle se fermait, la ligne
+// changeait de groupe, et il fallait rouvrir la meme commande pour finir --
+// cinq gestes au lieu de quatre, et la liste des produits disparaissait
+// pendant qu'on les prelevait. Elle se redessine en place, le geste suivant
+// sous le doigt.
 async function startPreparation(orderId) {
-  closeCommandeDetail();
-  await apiFetch(`/api/orders/${encodeURIComponent(orderId)}/start-preparation`, {
-    method: "POST"
-  });
+  const dialogue = document.getElementById("commandeDetailDialog");
+  const date = document.querySelector(`#commandeDetailDialog [data-delivery-date-input="${cssEscape(orderId)}"]`)?.value;
+  try {
+    await apiFetch(`/api/orders/${encodeURIComponent(orderId)}/start-preparation`, {
+      method: "POST"
+    });
+  } catch (error) {
+    // Le message d'echec (ou « en attente » hors ligne) ne se lirait pas sous
+    // la couche du dialogue : on le ferme, comme avant.
+    closeCommandeDetail();
+    throw error;
+  }
   await loadData();
+  if (dialogue?.open && dialogue.dataset.orderId === String(orderId) && remplirDetailCommande(orderId)) {
+    // La date deja choisie survit au nouveau rendu : « Preparation terminee » la lit.
+    const champ = dialogue.querySelector(`[data-delivery-date-input="${cssEscape(orderId)}"]`);
+    if (champ && date) champ.value = date;
+    dialogue.querySelector('[data-action="finish-preparation"]:not([disabled])')?.focus();
+    return;
+  }
   notify("Commande passée en préparation. Stock réservé.", "success");
 }
 
@@ -5573,7 +5791,7 @@ function getAlertItems() {
         pill: "pill-warning",
         label: "Stock faible",
         title: getProductName(product),
-        message: `Stock faible : ${quantity} restant(s), seuil minimum ${threshold}.`
+        message: `Stock faible : ${accorder(quantity, "restant")}, seuil minimum ${threshold}.`
       });
     }
   });
@@ -5651,15 +5869,12 @@ function renderHistorique() {
 
 // Format date "seulement jour" : YYYY-MM-DD ou ISO complet -> DD/MM/YYYY (sans heure).
 // Avant on utilisait formatDate qui inclut l'heure 02:00:00 (artefact timezone Excel).
+// « jeu. 24 sept. » (utils/dates.js) : plus « 24/09/2026 ». Une valeur
+// illisible (deja ecrite a la main) passe telle quelle, sans son heure.
 function formatDateDayOnly(value) {
   if (!value) return "—";
-  const s = String(value).slice(0, 10); // garde juste YYYY-MM-DD
-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) {
-    // valeur deja au format FR ou autre : on coupe juste l'heure si presente
-    return String(value).split(/[\sT]/)[0];
-  }
-  return `${m[3]}/${m[2]}/${m[1]}`;
+  const s = String(value).slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? datesFr.jourCourt(s) : String(value).split(/[\sT]/)[0];
 }
 
 
@@ -5688,18 +5903,6 @@ function bdcNeedsCompletion(order) {
   return !hasAddress || !hasPhone || !hasSector;
 }
 
-const BDC_STATUS_LABELS = {
-  importe: "Importée",
-  stock_a_verifier: "À vérifier",
-  en_preparation: "En préparation",
-  preparation_terminee: "Préparation terminée",
-  pret_livraison: "Prêt livraison",
-  en_livraison: "En livraison",
-  livre: "Livrée",
-  probleme_livraison: "Problème livraison",
-  a_reprogrammer: "À reprogrammer"
-};
-
 const BDC_STATUS_TONE = {
   importe: "neutral",
   stock_a_verifier: "warning",
@@ -5713,77 +5916,59 @@ const BDC_STATUS_TONE = {
 };
 
 function bdcStatusBadge(status) {
-  const label = BDC_STATUS_LABELS[status] || status || "Inconnu";
+  // Le mot du badge de la liste (STATUT_COMMANDE) : un seul vocabulaire.
+  const label = STATUT_COMMANDE[status]?.[0] || status || "Inconnu";
   const tone = BDC_STATUS_TONE[status] || "neutral";
   return `<span class="bdc-pill bdc-pill-${tone}">${escapeHtml(label)}</span>`;
 }
 
-// Format date ISO YYYY-MM-DD en FR DD/MM/YYYY (defaut, future option dans settings)
+// « jeu. 24 sept. » (utils/dates.js), comme les listes : plus « 24/09/2026 ».
 function bdcFormatDate(iso) {
   if (!iso) return "—";
-  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!m) return iso;
-  return `${m[3]}/${m[2]}/${m[1]}`;
+  const s = String(iso).slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? datesFr.jourCourt(s) : iso;
 }
 
-// Export CSV des bons filtres. Pas d'endpoint backend : Blob + download client-side.
-// Format : Numero;Date;Client;Adresse;CP;Ville;Secteur;Statut;Telephone;Lignes;Qté
-// Separateur ; (compatibilite Excel FR), encodage UTF-8 BOM pour les accents.
-function exportBdcCsv(liste = [], prefixe = "sereo-commandes") {
-  // L'ecran Commandes (planche 13c) lui passe SA liste filtree. L'ancien ecran
-  // « Bons de commande », qui l'appelait sans argument, a quitte la page.
-  const filtered = liste || [];
-  if (!filtered.length) {
-    notify("Aucun bon à exporter (filtres vides).", "warning");
+// L'export de l'ecran Commandes (decision 9 de Thomas, 24/09 : l'ecran
+// Exports est parti, il reste UN export, en Excel). Le serveur l'ecrit
+// (POST /api/exports/commandes.xlsx) avec les colonnes que le CSV n'avait
+// pas : produits, montant, date REELLE de livraison, « remis a ». On lui
+// envoie la liste FILTREE, dans l'ordre de l'ecran.
+// fetch et non apiFetch : un export n'a rien a faire dans la file hors ligne
+// (il partirait au retour du reseau, sans personne pour le recevoir).
+async function exporterCommandesExcel(liste = [], prefixe = "sereo-commandes") {
+  if (!liste.length) {
+    notify("Aucune commande à exporter : le filtre est vide.", "warning");
     return;
   }
-
-  const headers = [
-    "Numero", "Date commande", "Client", "Adresse", "Code postal", "Ville",
-    "Secteur", "Statut", "Telephone", "Nb lignes", "Total quantite", "Importee livree"
-  ];
-
-  const escapeCsv = v => {
-    const s = v === null || v === undefined ? "" : String(v);
-    if (/[";\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-    return s;
-  };
-
-  const lines = filtered.map(o => {
-    const productsCount = Array.isArray(o.products) ? o.products.length : 0;
-    const totalQty = (o.products || []).reduce((s, p) => s + Number(p.quantite || 0), 0);
-    return [
-      o.numero || "",
-      bdcFormatDate(o.dateCommande),
-      o.clientName || "",
-      o.address || "",
-      o.postalCode || "",
-      o.city || "",
-      o.sector || "",
-      BDC_STATUS_LABELS[o.status] || o.status || "",
-      o.phone || "",
-      productsCount,
-      totalQty,
-      o.importedAsLivre ? "Oui" : "Non"
-    ].map(escapeCsv).join(";");
-  });
-
-  // UTF-8 BOM ﻿ pour qu'Excel detecte l'encodage et n'abime pas les accents
-  const csv = "﻿" + headers.join(";") + "\r\n" + lines.join("\r\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  let reponse;
+  try {
+    reponse = await fetch("/api/exports/commandes.xlsx", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: liste.map(o => o.id) })
+    });
+  } catch {
+    throw new Error("Export impossible sans réseau : réessaie quand la connexion revient.");
+  }
+  if (!reponse.ok) {
+    const corps = await reponse.json().catch(() => null);
+    throw new Error(corps?.error || "Export impossible.");
+  }
+  const blob = await reponse.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   // Le jour a Paris (24/09) : en UTC, un export fait entre minuit et 2 h
   // portait la date de la veille.
   const date = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Paris" });
   a.href = url;
-  a.download = `${prefixe}-${date}.csv`;
+  a.download = `${prefixe}-${date}.xlsx`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 
-  notify(`${filtered.length} bon${filtered.length > 1 ? "s" : ""} exporté${filtered.length > 1 ? "s" : ""} en CSV.`, "success");
+  notify(`${liste.length} commande${liste.length > 1 ? "s" : ""} exportée${liste.length > 1 ? "s" : ""} en Excel.`, "success");
 }
 
 /**
@@ -5792,10 +5977,8 @@ function exportBdcCsv(liste = [], prefixe = "sereo-commandes") {
  */
 function livraisonFaiteHtml(order) {
   if (order.status !== "livre" || (!order.deliveredAt && !order.remisA)) return "";
-  const date = order.deliveredAt ? new Date(order.deliveredAt) : null;
-  const quand = date && !Number.isNaN(date.getTime())
-    ? `${date.toLocaleDateString("fr-FR", { day: "numeric", month: "long" })} à ${heureCourte(order.deliveredAt)}`
-    : "";
+  // « 24 septembre à 9 h 10 » (utils/dates.js).
+  const quand = datesFr.lireDate(order.deliveredAt) ? datesFr.jourEtHeure(order.deliveredAt) : "";
   return `
       <div class="bdc-detail-field">
         <span class="bdc-detail-label">Livrée</span>
@@ -6515,12 +6698,10 @@ async function runDiagnosticSuspiciousDates() {
 // reste humain. Les champs `prochaineDate`, `alerte` et `jourRabattu` sont
 // calcules par le serveur a la lecture (GET /api/delivery-sectors) ; rien
 // n'est enregistre, et la date planifiee n'est pas modifiee.
+// « 24 septembre » : utils/dates.js (jourLong, sans le jour de la semaine).
 function formatDateSeule(ymd) {
   if (!ymd) return "";
-  // Midi plutot que minuit : evite qu'un fuseau negatif recule d'un jour.
-  const date = new Date(`${ymd}T12:00:00`);
-  if (Number.isNaN(date.getTime())) return ymd;
-  return date.toLocaleDateString("fr-FR", { day: "numeric", month: "long" });
+  return datesFr.lireDate(ymd) ? datesFr.jourLong(ymd, { semaine: false }) : ymd;
 }
 
 function avertissementSecteur(sector) {
@@ -7092,13 +7273,9 @@ let archivesImports = [];
 // « 16 septembre à 8 h 42 » (planche 8d) -- l'annee en cours se tait. Une
 // autre annee se dit : les archives ne sont jamais purgees, et un import d'il
 // y a un an, sans son annee, se lirait comme un import de la semaine.
+// « 16 septembre à 9 h 42 » : utils/dates.js (jourEtHeure).
 function formatDateLongue(iso) {
-  const d = new Date(iso);
-  if (!iso || Number.isNaN(d.getTime())) return "—";
-  const options = { day: "numeric", month: "long" };
-  if (d.getFullYear() !== new Date().getFullYear()) options.year = "numeric";
-  const jour = d.toLocaleDateString("fr-FR", options);
-  return `${jour} à ${d.getHours()} h ${String(d.getMinutes()).padStart(2, "0")}`;
+  return iso ? datesFr.jourEtHeure(iso) : "—";
 }
 
 // « 1 ligne », « 38 lignes » ; un nombre inconnu garde « — lignes ».
@@ -7160,17 +7337,9 @@ function ouvrirFeuilleImports(type) {
   dialogue.showModal();
 }
 
+// « 16 septembre à 9 h 42 » (utils/dates.js) : plus « 16/09/2026 09:42 ».
 function formatDateTimeShort(iso) {
-  if (!iso) return "—";
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString("fr-FR", {
-      day: "2-digit", month: "2-digit", year: "numeric",
-      hour: "2-digit", minute: "2-digit"
-    });
-  } catch {
-    return String(iso).slice(0, 16).replace("T", " ");
-  }
+  return iso ? datesFr.jourEtHeure(iso) : "—";
 }
 
 function formatFileSize(bytes) {
@@ -7228,7 +7397,7 @@ async function purgeOrdersHandler(btn) {
   await runAction(btn, "Purge en cours...", async () => {
     const result = await apiFetch("/api/orders/purge", { method: "POST" });
     notify(
-      `Purge OK : ${result.purged.commandes} bon(s), ${result.purged.clients} client(s), ${result.purged.ventes} vente(s), ${result.purged.routes} tournée(s) supprimés. Va dans Imports et archives ci-dessus pour ré-importer tes Excel.`,
+      `Purge faite : ${accorder(result.purged.commandes, "bon")}, ${accorder(result.purged.clients, "client")}, ${accorder(result.purged.ventes, "vente")}, ${accorder(result.purged.routes, "tournée")} supprimés. Va dans Imports et archives ci-dessus pour ré-importer tes Excel.`,
       "success"
     );
     await loadData();
@@ -7425,7 +7594,7 @@ function renderDeliveryCandidates() {
     const dejaPrises = occupees.size ? ` (dont ${occupees.size} déjà en tournée)` : "";
     const saisie = document.getElementById("deliveryCity")?.value || "";
     const attente = villeEnAttente(saisie) ? `. « ${saisie.trim()} » n'est la ville d'aucune commande prête : pas appliquée` : "";
-    summary.textContent = `${filtered.length} commande(s) prête(s)${dejaPrises} - ${sector}${city}${date}${attente}${signalHorsDate()}`;
+    summary.textContent = `${accorder(filtered.length, "commande prête", "commandes prêtes")}${dejaPrises} - ${sector}${city}${date}${attente}${signalHorsDate()}`;
   }
 
   updateSelectedDeliveryCount();
@@ -7461,7 +7630,7 @@ function renderDeliveryCandidates() {
           <span>${escapeHtml(formatSectorLabel(order.sector))}</span>
           <span>${escapeHtml(order.deliveryDate ? formatDeliveryDate(order.deliveryDate) : "Sans date")}</span>
           <span>${escapeHtml(formatPhone(order.phone))}</span>
-          <span>${escapeHtml(getOrderProductCount(order))} produit(s)</span>
+          <span>${escapeHtml(accorder(getOrderProductCount(order), "produit"))}</span>
           <span>${escapeHtml(order.priority || "Priorité normale")}</span>
         </span>
         ${getAddressWarning(order) ? `<span class="address-warning">${escapeHtml(getAddressWarning(order))}</span>` : ""}
@@ -7532,7 +7701,7 @@ function updateSelectedDeliveryCount() {
   const createButton = document.getElementById("createRouteButton");
   if (createButton) {
     createButton.disabled = deliverySelection.size === 0;
-    createButton.title = deliverySelection.size === 0 ? "Sélectionnez au moins un client pour créer une tournée" : "";
+    createButton.title = deliverySelection.size === 0 ? "Sélectionne au moins un client pour créer une tournée" : "";
     // Le compte sur le bouton (audit du 24/09) : on voit ce qui partira.
     createButton.textContent = deliverySelection.size ? `Créer la tournée (${deliverySelection.size})` : "Créer la tournée";
   }
@@ -7573,7 +7742,7 @@ async function createDeliveryRoute() {
   const orderIds = [...deliverySelection];
 
   if (!orderIds.length) {
-    notify("Sélectionnez au moins un client pour créer une tournée.", "warning");
+    notify("Sélectionne au moins un client pour créer une tournée.", "warning");
     return;
   }
 
@@ -7637,7 +7806,7 @@ async function createDeliveryRoute() {
   showTab("livreur");
   const retires = (activeRoute.injoignablesRetires || []).map(o => o.clientName).filter(Boolean);
   // Les deux nouvelles peuvent arriver ensemble : aucune ne masque l'autre.
-  const suite = pourLaSuite.length ? ` ${pourLaSuite.length} commande(s) restent sélectionnées pour la tournée suivante.` : "";
+  const suite = pourLaSuite.length ? ` ${accorder(pourLaSuite.length, "commande reste sélectionnée", "commandes restent sélectionnées")} pour la tournée suivante.` : "";
   if (retires.length) {
     notify(`Tournée créée sans ${retires.join(", ")} : injoignable par la route. Vérifie l’adresse ; la commande reste prête à livrer.${suite}`, "warning");
   } else if (pourLaSuite.length) {
@@ -7675,7 +7844,7 @@ function renderRoute() {
   if (!list || !current) return;
 
   if (!activeRoute || !activeRoute.stops?.length) {
-    list.innerHTML = emptyState("Aucune tournée créée", "Sélectionnez des commandes prêtes, puis créez une tournée optimisée.");
+    list.innerHTML = emptyState("Aucune tournée créée", "Sélectionne des commandes prêtes, puis crée une tournée optimisée.");
     current.textContent = "Aucune tournée créée.";
     if (metrics) metrics.textContent = "Distance estimée indisponible.";
     document.querySelectorAll('[data-op="recalculate-route"]').forEach(bouton =>
@@ -7890,12 +8059,9 @@ function showCurrentStop(stop) {
   updateDriverActionButtons(stop);
 }
 
-/** « 9 h 10 » ; vide si l'instant est illisible. */
+/** « 9 h 10 » (utils/dates.js) ; vide si l'instant est illisible. */
 function heureCourte(valeur) {
-  const date = valeur ? new Date(valeur) : null;
-  return date && !Number.isNaN(date.getTime())
-    ? date.toLocaleTimeString("fr-FR", { hour: "numeric", minute: "2-digit" }).replace(":", " h ")
-    : "";
+  return datesFr.lireDate(valeur) ? datesFr.heure(valeur) : "";
 }
 
 /**
@@ -8083,12 +8249,7 @@ function showRouteCompleted(routeData) {
   // l'arrivee. Pas de fete. Les heures de debut et de fin existent
   // (startedAt, completedAt) ; les kilometres « parcourus » non -- la
   // distance connue est celle du trace prevu, pas celle roulee : omise.
-  const heure = valeur => {
-    const date = valeur ? new Date(valeur) : null;
-    return date && !Number.isNaN(date.getTime())
-      ? date.toLocaleTimeString("fr-FR", { hour: "numeric", minute: "2-digit" }).replace(":", " h ")
-      : "";
-  };
+  const heure = valeur => (datesFr.lireDate(valeur) ? datesFr.heure(valeur) : "");
   const debut = heure(routeData.startedAt);
   const fin = heure(routeData.completedAt);
   // « Tournee Besancon du mercredi 16 septembre » ; sans secteur, « Tournee du
@@ -8168,8 +8329,14 @@ function demanderMotif(status, motifs) {
     return Promise.resolve(null);
   }
 
-  const admis = motifs.filter(m => m.statutsAdmis.includes(status));
-  let choisi = "";
+  // `proposes` : ce que le dialogue montre pour ce statut (decision 10 de
+  // Thomas, 24/09 : « Personne sur place » et « Etablissement ferme » ne sont
+  // plus proposes pour « Probleme », ils passent par « Client absent »). Un
+  // serveur plus ancien ne l'envoie pas : repli sur `statutsAdmis`.
+  const admis = motifs.filter(m => (m.proposes || m.statutsAdmis).includes(status));
+  // « Client absent » presélectionne « Personne sur place » : le motif
+  // evident, « Enregistrer » suffit (deux gestes au lieu de trois).
+  let choisi = status === "absent" && admis.some(m => m.cle === "absent") ? "absent" : "";
   champ.value = "";
   liste.innerHTML = "";
   for (const m of admis) {
@@ -8177,7 +8344,7 @@ function demanderMotif(status, motifs) {
     bouton.type = "button";
     bouton.className = "motif-choix";
     bouton.setAttribute("role", "radio");
-    bouton.setAttribute("aria-checked", "false");
+    bouton.setAttribute("aria-checked", String(m.cle === choisi));
     bouton.dataset.motifCle = m.cle;
     bouton.textContent = m.libelle;
     liste.appendChild(bouton);
@@ -9517,7 +9684,7 @@ function majBandeauHorsLigne() {
   bandeau.hidden = !horsLigne && ecrituresEnAttente === 0;
   if (bandeau.hidden) return;
   const heure = horsLigneDepuis
-    ? horsLigneDepuis.toLocaleTimeString("fr-FR", { hour: "numeric", minute: "2-digit" }).replace(":", " h ")
+    ? datesFr.heure(horsLigneDepuis)
     : "";
   // Des COPIES a l'ecran : le bandeau dit de quand elles datent (« Hors ligne
   // — données de 14:32 »), l'information qui compte pour le livreur. Des
@@ -9532,7 +9699,7 @@ function majBandeauHorsLigne() {
       : "Envoi dès que le serveur répond.";
   setText("bandeauHorsLigneDetail", n
     ? `${decrireAttente()} ${suite}`
-    : "Vos modifications seront gardées et envoyées au retour du réseau. Les imports de fichiers attendront le réseau.");
+    : "Tes modifications seront gardées et envoyées au retour du réseau. Les imports de fichiers attendront le réseau.");
 }
 
 const MOTS_DU_GESTE = { absent: "absent", probleme: "problème", a_reprogrammer: "à reprogrammer" };
@@ -9724,11 +9891,10 @@ function updateRouteProgress() {
 }
 
 /** « Mercredi 2 septembre » -- le jour de la tournee, comme sur la planche. */
+// « Jeudi 24 septembre » : utils/dates.js (jourLong).
 function formatJourDeTournee(value) {
-  const date = value ? new Date(`${value}T12:00:00`) : new Date();
-  if (Number.isNaN(date.getTime())) return "";
-  const texte = date.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
-  return texte.charAt(0).toUpperCase() + texte.slice(1);
+  const date = value ? datesFr.lireDate(String(value).slice(0, 10)) : new Date();
+  return date ? datesFr.jourLong(date, { majuscule: true }) : "";
 }
 
 
@@ -9946,25 +10112,14 @@ function getOrderPill(status) {
   return "pill-blue";
 }
 
+// Les mots d'une commande : CEUX DES BADGES de Commandes (STATUT_COMMANDE),
+// un seul vocabulaire au bureau (parcours simplifies, 24/09). Ce texte disait
+// « Importé », « Stock à vérifier », « Prêt livraison », « Livré » la ou le
+// badge voisin disait « Importée », « À vérifier », « Prêt livraison »,
+// « Livrée ». Les mots de la Preparation au TELEPHONE (motDeStatutPreparation,
+// valides le 23/09) ne passent pas par ici : decision 13, ils restent.
 function formatOrderStatus(status) {
-  const labels = {
-    brouillon: "Brouillon",
-    planifiee: "Planifiée",
-    a_confirmer: "À confirmer",
-    annulee: "Annulée",
-    commande_client_validee: "Commande client validée",
-    importe: "Importé",
-    stock_a_verifier: "Stock à vérifier",
-    en_preparation: "En préparation",
-    preparation_terminee: "Préparation terminée",
-    pret_livraison: "Prêt livraison",
-    en_livraison: "En livraison",
-    livre: "Livré",
-    probleme_livraison: "Problème livraison",
-    a_reprogrammer: "À reprogrammer"
-  };
-
-  return labels[status] || "Importé";
+  return STATUT_COMMANDE[status]?.[0] || STATUT_COMMANDE.importe[0];
 }
 
 function formatStockStatus(status) {
@@ -10057,7 +10212,7 @@ function formatRouteMetrics(routeData) {
     ? "durée inconnue"
     : `${routeData.estimatedDuration} min`;
 
-  return `${stops} arrêt(s) · ${distance} · ${duration} · ${routeData.routingMode === "road" ? "trajet routier, hors trafic" : "tracé à recalculer"}`;
+  return `${accorder(stops, "arrêt")} · ${distance} · ${duration} · ${routeData.routingMode === "road" ? "trajet routier, hors trafic" : "tracé à recalculer"}`;
 }
 
 function formatSectorLabel(value) {
@@ -10072,14 +10227,10 @@ function couleurCharte(token, repli) {
   return v || repli;
 }
 
+// « 24 septembre à 16 h 00 » (utils/dates.js) : plus « 24/09/2026 16:00:00 ».
 function formatDate(value) {
   if (!value) return "-";
-
-  try {
-    return new Date(value).toLocaleString("fr-FR");
-  } catch {
-    return value;
-  }
+  return datesFr.lireDate(value) ? datesFr.jourEtHeure(value) : String(value);
 }
 
 function getTodayDateInput(date = new Date()) {
@@ -10096,18 +10247,11 @@ function addMonthsToInputDate(value, months) {
   return getTodayDateInput(base);
 }
 
+// « jeu. 24 sept. » (utils/dates.js) : plus « jeu. 24/09 ».
 function formatDeliveryDate(value) {
   if (!value) return "sans date";
-
-  try {
-    return new Date(`${value}T12:00:00`).toLocaleDateString("fr-FR", {
-      weekday: "short",
-      day: "2-digit",
-      month: "2-digit"
-    });
-  } catch {
-    return value;
-  }
+  const jour = String(value).slice(0, 10);
+  return datesFr.lireDate(jour) ? datesFr.jourCourt(jour) : String(value);
 }
 
 // ============================================================================
@@ -10237,14 +10381,9 @@ function populateVersionModal() {
   }
 }
 
+// « 24 septembre » (l'annee si ce n'est pas celle-ci) : utils/dates.js.
 function formatDateFR(isoString) {
-  try {
-    const d = new Date(isoString);
-    if (Number.isNaN(d.getTime())) return "";
-    return d.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
-  } catch {
-    return "";
-  }
+  return datesFr.lireDate(isoString) ? datesFr.jourLong(isoString, { semaine: false }) : "";
 }
 
 

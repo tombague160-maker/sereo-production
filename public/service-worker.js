@@ -30,6 +30,8 @@ const APP_SHELL = [
   "/js/utils/text.js",
   "/js/utils/address.js",
   "/js/utils/file-attente.js",
+  // Les dates et les heures (parcours simplifies, 24/09).
+  "/js/utils/dates.js",
   "/js/config/themes.js",
   "/js/config/tabs.js",
   "/js/domains/comptes.js",

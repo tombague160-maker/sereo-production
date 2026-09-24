@@ -100,7 +100,9 @@ for (const vue of ["tablette", "desktop"]) {
     // LES SECTIONS : empilees, jamais cote a cote (avant : quatre colonnes).
     // Juge AVANT les hauteurs : en colonnes etroites les titres s'empilent
     // et les hauteurs rougiraient les premieres, pour la mauvaise ligne.
-    expect(r.sections.map(s => s.titre)).toEqual(["À préparer 1", "En cours 1", "Prêtes livraison 1", "Bloquées stock 1"]);
+    // Un seul vocabulaire au bureau (parcours simplifies, 24/09) : les titres
+    // de groupe disent les mots des lignes et des badges.
+    expect(r.sections.map(s => s.titre)).toEqual(["À préparer 1", "En préparation 1", "Prêtes 1", "Bloquées 1"]);
     for (let i = 1; i < r.sections.length; i++) {
       expect(r.sections[i].haut, `la section ${i + 1} doit venir SOUS la ${i}`).toBeGreaterThanOrEqual(r.sections[i - 1].bas - TOL);
     }
@@ -114,10 +116,11 @@ for (const vue of ["tablette", "desktop"]) {
 
     // L'ETAT : un disque de couleur + le mot de la planche.
     const parMot = Object.fromEntries(r.lignes.map(l => [l.mot, l]));
-    expect(Object.keys(parMot).sort()).toEqual(["Bloquée", "En cours", "Prête", "À faire"].sort());
-    expect(hex(parMot["À faire"].etatFond)).toBe(tokens.vertClair);
+    // Les mots des badges de Commandes (24/09), plus « A faire / En cours ».
+    expect(Object.keys(parMot).sort()).toEqual(["Bloquée", "En préparation", "Prête", "À préparer"].sort());
+    expect(hex(parMot["À préparer"].etatFond)).toBe(tokens.vertClair);
     expect(hex(parMot["Prête"].etatFond)).toBe(tokens.vertClair);
-    expect(hex(parMot["En cours"].etatFond)).toBe(tokens.pecheClaire);
+    expect(hex(parMot["En préparation"].etatFond)).toBe(tokens.pecheClaire);
     expect(hex(parMot["Bloquée"].etatFond)).toBe(tokens.pecheClaire);
     expect(r.lignes.map(l => l.etatTaille)).toEqual([40, 40, 40, 40]);
     // Le manque REMPLACE le detail, en alerte -- « Il manque 2 articles ».
@@ -127,7 +130,7 @@ for (const vue of ["tablette", "desktop"]) {
     // articles » acceptait aussi bien 2 que 6, et ne distinguait rien.
     expect(parMot["Bloquée"].detail).toBe("Il manque 5 articles");
     expect(hex(parMot["Bloquée"].detailCouleur)).toBe(tokens.alerte);
-    expect(parMot["À faire"].detail).toBe("Besançon · 6 articles");
+    expect(parMot["À préparer"].detail).toBe("Besançon · 6 articles");
 
     // LES PILULES : 44/48, rondes, et pas etirees sur la largeur.
     expect(r.pilules.map(p => p.texte)).toEqual(["Tous", "Besançon", "Champagnole", "Dole"]);
@@ -202,20 +205,24 @@ test("en desktop le sheet est centre, sans poignee", async ({ browser }) => {
   await ctx.close();
 });
 
-test("« Passer en preparation » depuis le sheet : le sheet se ferme et la ligne change de mot", async ({ browser }) => {
+// Parcours simplifies (24/09) : le sheet NE SE FERME PLUS -- il offre
+// « Preparation terminee » a la place (parcours-simplifies.spec.js).
+test("« Passer en preparation » depuis le sheet : le sheet reste ouvert et la ligne change de mot", async ({ browser }) => {
   test.setTimeout(180000);
   const { ctx, page, erreurs } = await ouvrir(browser, "tablette");
-  const ligne = page.locator("#preparationList .commande-ligne", { hasText: "À faire" }).first();
+  const ligne = page.locator("#preparationList .commande-ligne", { hasText: "À préparer" }).first();
   const nom = await ligne.locator("strong").textContent();
   await ligne.locator(".commande-ligne-main").click();
   await page.waitForTimeout(300);
   await page.locator("#commandeDetailDialog [data-action=\"start-preparation\"]").click();
   await page.waitForTimeout(1500);
   expect(erreurs).toEqual([]);
-  expect(await page.evaluate(() => document.getElementById("commandeDetailDialog").open), "le sheet doit se fermer apres l'action").toBe(false);
+  expect(await page.evaluate(() => document.getElementById("commandeDetailDialog").open), "le sheet reste ouvert apres l'action").toBe(true);
+  await expect(page.locator('#commandeDetailDialog [data-action="finish-preparation"]')).toBeEnabled();
+  await page.keyboard.press("Escape");
   const mot = await page.locator("#preparationList .commande-ligne", { hasText: nom.trim() }).first().locator(".pill").textContent();
   console.log(`[sheet/action] ${nom.trim()} : ${mot.trim()}`);
-  expect(mot.trim()).toBe("En cours");
+  expect(mot.trim()).toBe("En préparation");
   await ctx.close();
 });
 
