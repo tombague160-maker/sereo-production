@@ -162,3 +162,57 @@ test("le tableau de bord compte les ventes sans lire la table", async () => {
   writeDb(db);
   assert.equal(await compte(), n + 1);
 });
+
+// Revue adverse du lot (24/09). Une table de l'instantane lue APRES un `await`
+// l'est sur le magasin du moment de la lecture -- ferme, si une restauration a
+// chaud a eu lieu pendant le calcul. POST /api/routes/:id/ajouter lisait les
+// clients (position d'un arret qui n'a pas la sienne) apres ses deux appels au
+// calcul routier. Le banc ferme le magasin PENDANT le premier ; la route doit
+// aboutir (son ecriture relit la base sous le verrou, sur un magasin rouvert).
+test("/ajouter lit dans l'instantane avant de suspendre : un magasin ferme pendant le calcul ne la fait pas tomber", async () => {
+  const routing = require("../lib/routing");
+  const db = readDb();
+  const client = db.clients[0];
+  const commande = (id, extra) => ({
+    id, clientId: client.id, clientName: client.nom || client.name || "Client banc", status: "pret_livraison",
+    address: "1 rue du Banc", city: "Besancon", postalCode: "25000", deliveryDate: "2026-09-24", products: [], ...extra
+  });
+  // Un arret restant SANS position (elle vient du client, lu dans l'instantane)
+  // et une commande prete AVEC la sienne (resoudrePositions ne lit rien d'autre).
+  db.commandes = [...db.commandes, commande("o-banc-arret", { routeId: "r-banc-await" }), commande("o-banc-ajout", { lat: 47.24, lng: 6.02 })];
+  db.routes = [...db.routes, {
+    id: "r-banc-await", name: "Banc await", status: "prete", deliveryDate: "2026-09-24",
+    departure: { lat: 47.2, lng: 6.0, label: "Depot" }, arrival: { lat: 47.2, lng: 6.0, label: "Depot" },
+    stops: [{ id: "s-banc-arret", routeId: "r-banc-await", orderId: "o-banc-arret", clientId: client.id, clientName: "Arret sans position", status: "pret_livraison", orderIndex: 1 }]
+  }];
+  writeDb(db);
+  const prealable = readDb().routes.find(r => r.id === "r-banc-await");
+  assert.ok(prealable && !routing.coordinates(prealable.stops[0]), "prealable : l'arret restant n'a pas de position");
+
+  const origine = { resoudrePositions: routing.resoudrePositions, tableDesDurees: routing.tableDesDurees, roadPlan: routing.roadPlan };
+  let fermetures = 0;
+  routing.resoudrePositions = async (...args) => {
+    const resultat = await origine.resoudrePositions(...args);
+    // L'appel reseau rend la main a la boucle ; une restauration ferme le magasin.
+    await new Promise(resolve => setImmediate(resolve));
+    closeStorage();
+    fermetures += 1;
+    return resultat;
+  };
+  // Pas de calcul routier dans ce banc : la route se replie (vol d'oiseau, ordre garde).
+  routing.tableDesDurees = async () => { throw new Error("banc : pas de calcul routier"); };
+  routing.roadPlan = async () => { throw new Error("banc : pas de calcul routier"); };
+  try {
+    const res = await fetch(`${base}/api/routes/r-banc-await/ajouter`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ orderId: "o-banc-ajout" })
+    });
+    const corps = await res.json();
+    assert.equal(fermetures, 1, "prealable : le magasin n'a pas ete ferme pendant le calcul");
+    assert.equal(res.status, 201, `la route tombe quand le magasin se ferme pendant le calcul : ${corps.error || JSON.stringify(corps).slice(0, 200)}`);
+    // Temoin : l'arret est bien ajoute, et ecrit.
+    assert.deepEqual(corps.route.stops.map(s => s.orderId).sort(), ["o-banc-ajout", "o-banc-arret"]);
+    assert.equal(readDb().routes.find(r => r.id === "r-banc-await").stops.length, 2);
+  } finally {
+    Object.assign(routing, origine);
+  }
+});

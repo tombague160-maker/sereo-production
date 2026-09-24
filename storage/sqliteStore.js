@@ -1161,8 +1161,10 @@ const LECTURES_DES_TABLES = [
  *
  * A savoir pour le code asynchrone : une table lue APRES un `await` l'est plus
  * tard que les autres -- et sur un magasin ferme si une restauration a eu lieu
- * entre-temps (erreur). Releve du 24/09 : aucune lecture de ce genre ; lire ce
- * dont on a besoin avant de suspendre.
+ * entre-temps (erreur). Lire ce dont on a besoin avant de suspendre. Releve du
+ * 24/09 (revu apres la relecture adverse) : une seule lecture de ce genre, les
+ * clients dans POST /api/routes/:id/ajouter, desormais lus avant le calcul
+ * routier (test/lecture-paresseuse.test.js ferme le magasin pendant ce calcul).
  */
 function lectureParesseuse(database, db, normaliserTable) {
   for (const [cle, lire] of LECTURES_DES_TABLES) {
