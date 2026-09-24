@@ -1910,6 +1910,25 @@
     </form>
   </dialog>
 
+  <!-- Donnees clients (25/09) : une commande pour un NOUVEAU client dont le
+       telephone, ou le nom et le code postal, est deja celui d'une fiche. Le
+       serveur ne reecrit plus la fiche trouvee : on choisit ici. Memes pieces
+       que « Reoptimiser » (radios dans un fieldset, deux boutons). -->
+  <dialog id="doublonFicheDialog" class="motif-dialog" aria-labelledby="doublonFicheTitre">
+    <form method="dialog" id="doublonFicheForm">
+      <h3 id="doublonFicheTitre">Ce client a peut-être déjà une fiche</h3>
+      <p class="muted" id="doublonFicheTexte"></p>
+      <fieldset class="reopt-choix-liste">
+        <legend>Pour cette commande</legend>
+        <div id="doublonFicheChoix"></div>
+      </fieldset>
+      <div class="motif-actions">
+        <button class="button secondary" type="button" data-action="doublon-annuler">Annuler</button>
+        <button class="button primary" type="button" data-action="doublon-valider">Continuer</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Le detail d'une commande a preparer (planche Preparation.png : la ligne
        ouvre le detail, qui porte les actions). Charte §4, sheet : coins 28 px,
        poignee, fond surface haute. <dialog> natif comme #motifProblemeDialog. -->

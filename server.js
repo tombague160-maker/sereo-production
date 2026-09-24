@@ -5215,18 +5215,37 @@ function findDuplicateClient(db, payload, ignoreId = "") {
   });
 }
 
-function findOrCreateCustomerClient(db, payload = {}) {
+// Une commande pour un NOUVEAU client dont le telephone (ou le nom et le code
+// postal) est deja celui d'une fiche (chasse aux defauts du 24/09, 25/09).
+// Avant : la fiche trouvee prenait tout le formulaire -- « EHPAD Les
+// Tilleuls » devenait « Roux », et sa rue, son email, ses notes partaient
+// (le formulaire envoie ses champs vides). Le serveur ne devine plus : sans
+// choix, il refuse (409) et rend la fiche ; l'ecran propose « rattacher a
+// cette fiche » (clientId : prise telle quelle) ou « creer une nouvelle
+// fiche » (`nouvelleFiche`). Les numeros se comparent normalises
+// (cleTelephone : espaces, points, +33).
+function doublonDeFiche(fiche) {
+  const nom = [fiche.prenom, fiche.nom].filter(Boolean).join(" ") || fiche.nom || "sans nom";
+  const erreur = badRequest(`Une fiche existe déjà avec ce téléphone ou ce nom : ${nom}. Rattache la commande à cette fiche, ou crée une nouvelle fiche.`);
+  erreur.statusCode = 409;
+  erreur.details = {
+    doublon: {
+      id: fiche.id, nom: fiche.nom || "", prenom: fiche.prenom || "", telephone: fiche.telephone || "",
+      rue: fiche.rue || "", codePostal: fiche.codePostal || "", ville: fiche.ville || ""
+    }
+  };
+  return erreur;
+}
+
+function findOrCreateCustomerClient(db, payload = {}, { nouvelleFiche = false } = {}) {
   if (payload.clientId) {
     const existing = findClient(db, payload.clientId);
     if (existing) return existing;
   }
 
-  const duplicate = findDuplicateClient(db, payload);
-  if (duplicate) {
-    const avant = adresseDuClient(duplicate);
-    Object.assign(duplicate, validateCrmClientPayload(payload, duplicate));
-    demenagerClient(db, duplicate, avant);
-    return duplicate;
+  if (!nouvelleFiche) {
+    const duplicate = findDuplicateClient(db, payload);
+    if (duplicate) throw doublonDeFiche(duplicate);
   }
 
   const client = validateCrmClientPayload({
@@ -5293,10 +5312,12 @@ function createCustomerOrder(db, payload = {}) {
     return createPlannedOrder(db, payload).order;
   }
 
+  // L'identifiant choisi (« rattacher a cette fiche ») l'emporte sur celui,
+  // vide, que le formulaire d'un nouveau client porte dans `client`.
   const client = findOrCreateCustomerClient(db, {
-    clientId: payload.clientId,
-    ...(payload.client || {})
-  });
+    ...(payload.client || {}),
+    clientId: payload.clientId || payload.client?.clientId
+  }, { nouvelleFiche: payload.nouvelleFiche === true });
   const dateCommande = normalizeDateInput(payload.dateCommande) || jourParis();
   // Decision 11 de Thomas (24/09) : un produit en rupture (ou au stock non
   // renseigne) ne fait plus REFUSER la commande prise chez le client. Elle est
@@ -5546,10 +5567,12 @@ function createAutomaticOrderReminder(db, order, options = {}) {
 }
 
 function createPlannedOrder(db, payload = {}) {
+  // L'identifiant choisi (« rattacher a cette fiche ») l'emporte sur celui,
+  // vide, que le formulaire d'un nouveau client porte dans `client`.
   const client = findOrCreateCustomerClient(db, {
-    clientId: payload.clientId,
-    ...(payload.client || {})
-  });
+    ...(payload.client || {}),
+    clientId: payload.clientId || payload.client?.clientId
+  }, { nouvelleFiche: payload.nouvelleFiche === true });
   const dateCommande = normalizeDateInput(payload.dateCommande) || jourParis();
   const deliveryDate = resolvePlannedDeliveryDate(db, client, payload);
   if (!deliveryDate) throw badRequest("Date de livraison obligatoire pour une commande planifiee");

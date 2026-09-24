@@ -4760,6 +4760,103 @@ async function reporterCoordonneesSurLaFiche(form, data) {
   return true;
 }
 
+// --- Doublon de fiche (chasse aux defauts du 24/09, lot donnees clients, 25/09) ---
+//
+// Une commande pour un NOUVEAU client dont le telephone -- ou le nom et le code
+// postal -- est deja celui d'une fiche. Mesure du rapport : la fiche trouvee
+// prenait tout le formulaire (« EHPAD Les Tilleuls » devenait « Roux », sa
+// rue, son email et ses notes partaient). Le serveur refuse maintenant (409)
+// sans choix explicite ; l'ecran demande : « rattacher a cette fiche » (prise
+// telle quelle) ou « creer une nouvelle fiche ». Il demande AVANT d'envoyer --
+// la liste des clients est chargee, hors ligne aussi --, et encore si le
+// serveur trouve une fiche que la liste n'avait pas (archivee, ou creee depuis).
+
+/** La cle nom + code postal, comme clientSecondaryKey (server.js). */
+function cleNomCodePostal(nom, codePostal) {
+  const n = normalizeTextKey(nom);
+  const cp = normalizeTextKey(codePostal);
+  return n && cp ? `${n}|${cp}` : "";
+}
+
+/** La fiche chargee qui a le telephone (normalise) ou le nom et le code postal saisis ; null sinon. */
+function ficheEnDoublon(data) {
+  const cleTel = valeur => normaliserTelephone(valeur) || normalizeTextKey(valeur);
+  const telephone = cleTel(data.telephone);
+  const nomCp = cleNomCodePostal([data.prenom, data.nom].filter(Boolean).join(" ") || data.nom, data.codePostal);
+  return crmClients.find(client => {
+    const sien = cleTel(client.telephone);
+    if (telephone && sien && telephone === sien) return true;
+    return Boolean(nomCp) && cleNomCodePostal(client.nom, client.codePostal) === nomCp;
+  }) || null;
+}
+
+/**
+ * `{}` sans doublon connu ; sinon le choix : `{ clientId }` ou
+ * `{ nouvelleFiche: true }` -- ou null si l'on annule. Hors ligne, sans
+ * doublon dans la liste, la commande part en « nouvelle fiche » : rejouee
+ * plus tard, un refus 409 la retirerait de la file (une fiche en double se
+ * fusionne ; une commande perdue ne se retrouve pas).
+ */
+async function choisirFicheSiDoublon(doublon, data) {
+  if (!doublon) return navigator.onLine === false ? { nouvelleFiche: true } : {};
+  return demanderChoixDeFiche(doublon, data);
+}
+
+/** Envoie la commande ; sur un doublon que la liste n'avait pas (409), demande, puis renvoie. */
+async function envoyerCommandeClient(endpoint, corps, data) {
+  const envoyer = contenu => apiFetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(contenu)
+  });
+  try {
+    return await envoyer(corps);
+  } catch (erreur) {
+    const doublon = erreur?.details?.doublon;
+    if (!doublon) throw erreur;
+    const choix = await demanderChoixDeFiche(doublon, data);
+    return choix ? envoyer({ ...corps, ...choix }) : null;
+  }
+}
+
+/** Le dialogue « rattacher ou creer ». Rend `{ clientId }`, `{ nouvelleFiche: true }` ou null. */
+function demanderChoixDeFiche(doublon, data) {
+  const dialogue = document.getElementById("doublonFicheDialog");
+  const texte = document.getElementById("doublonFicheTexte");
+  const liste = document.getElementById("doublonFicheChoix");
+  if (!dialogue || !texte || !liste || typeof dialogue.showModal !== "function") return Promise.resolve(null);
+  const nomFiche = [doublon.prenom, doublon.nom].filter(Boolean).join(" ") || doublon.nom || "sans nom";
+  const reperes = [formaterTelephone(doublon.telephone), villeAffichee(doublon.ville)].filter(Boolean).join(", ");
+  const nomSaisi = [data.prenom, data.nom].filter(Boolean).join(" ").trim() || "ce client";
+  texte.textContent = `Une fiche existe déjà avec ce téléphone ou ce nom : « ${nomFiche} »${reperes ? ` (${reperes})` : ""}.`;
+  liste.innerHTML = `
+    <label class="reopt-choix"><input type="radio" name="doublonFiche" value="rattacher" checked><span>Rattacher la commande à « ${escapeHtml(nomFiche)} » : la fiche reste telle quelle, la commande part à son adresse.</span></label>
+    <label class="reopt-choix"><input type="radio" name="doublonFiche" value="nouvelle"><span>Créer une nouvelle fiche « ${escapeHtml(nomSaisi)} ».</span></label>`;
+
+  return new Promise(resolve => {
+    const surClic = evenement => {
+      const action = evenement.target.closest("[data-action]")?.dataset.action;
+      if (action === "doublon-annuler") terminer(null);
+      if (action === "doublon-valider") {
+        const choix = liste.querySelector('input[name="doublonFiche"]:checked')?.value;
+        terminer(choix === "nouvelle" ? { nouvelleFiche: true } : { clientId: doublon.id });
+      }
+    };
+    // Echap ferme le <dialog> : c'est une annulation (comme le motif d'un arret).
+    const surFermeture = () => terminer(null);
+    function terminer(valeur) {
+      dialogue.removeEventListener("click", surClic);
+      dialogue.removeEventListener("close", surFermeture);
+      if (dialogue.open) dialogue.close();
+      resolve(valeur);
+    }
+    dialogue.addEventListener("click", surClic);
+    dialogue.addEventListener("close", surFermeture);
+    dialogue.showModal();
+    liste.querySelector("input:checked")?.focus();
+  });
+}
+
 async function submitCustomerOrder(form) {
   const lines = Array.from(customerCart.values());
   if (!lines.length) {
@@ -4772,20 +4869,22 @@ async function submitCustomerOrder(form) {
     return;
   }
   const endpoint = data.orderType === "planifiee" ? "/api/planned-orders" : "/api/customer-orders";
+  // Un nouveau client dont le telephone (ou le nom et le code postal) a deja
+  // une fiche : on choisit AVANT d'envoyer (25/09). Annuler : rien ne part.
+  const choixDeFiche = data.clientId ? {} : await choisirFicheSiDoublon(ficheEnDoublon(data), data);
+  if (!choixDeFiche) return;
   const ficheModifiee = await reporterCoordonneesSurLaFiche(form, data);
   const fiche = ficheModifiee ? " Coordonnées enregistrées sur la fiche du client." : "";
-  const reponse = await apiFetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      clientId: data.clientId,
-      client: data,
-      products: lines,
-      notes: data.notes,
-      orderType: data.orderType,
-      deliveryDate: data.deliveryDate
-    })
-  });
+  const reponse = await envoyerCommandeClient(endpoint, {
+    clientId: data.clientId,
+    client: data,
+    products: lines,
+    notes: data.notes,
+    orderType: data.orderType,
+    deliveryDate: data.deliveryDate,
+    ...choixDeFiche
+  }, data);
+  if (!reponse) return;
   customerCart.clear();
   form.reset();
   // reset() ne vide PAS le client choisi (relecture adverse) : sur un champ
