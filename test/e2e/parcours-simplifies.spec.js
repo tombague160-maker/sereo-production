@@ -199,6 +199,13 @@ test("2 — « Modifier les coordonnees » d'un client existant : la commande et
   await page.locator("#customerClientSearch").fill("martin");
   await page.locator('#customerClientResults [data-action="cc-client"]').first().click();
   await expect(page.locator("#customerClientNom")).toHaveText("Cabinet Martin");
+  // Pendant ce temps, un autre poste complete la fiche, et la page se recharge :
+  // seul ce que l'utilisateur change ici doit repartir, pas l'ancien prenom.
+  await fetch(`${srv.base}/api/crm/clients/c-martin`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prenom: "Paul" })
+  });
+  await page.locator("#refreshButton").click();
+  await page.waitForLoadState("networkidle");
   await page.locator("#customerCoordonneesTitre").click();
   await page.locator('#customerCoordonnees input[name="adresse"]').fill("18 avenue de Lahr");
   await page.locator('#customerCoordonnees input[name="telephone"]').fill("0384999999");
@@ -214,7 +221,8 @@ test("2 — « Modifier les coordonnees » d'un client existant : la commande et
   expect(fiche.rue, "la fiche suit").toBe("18 avenue de Lahr");
   expect(fiche.telephone).toBe("0384999999");
   expect(fiche.email).toBe("accueil@cabinet-martin.test");
-  // Temoin : ce qui n'a pas change ne bouge pas.
+  // Temoin : ce qui n'a pas change ne bouge pas -- ni ce qu'un autre poste a change.
+  expect(fiche.prenom, "le changement fait ailleurs n'est pas ecrase").toBe("Paul");
   expect(fiche.nom).toBe("Cabinet Martin");
   expect(fiche.ville).toBe("Dole");
   expect(fiche.codePostal).toBe("39100");
@@ -492,7 +500,10 @@ test("8 — « preparation terminee » se range sous « Pretes », comme son bad
   expect(livraison.map(o => o.id)).toContain("o-pt");
   await expect(page.locator("#dashboardDeliveringCount")).toHaveText(String(livraison.length));
   // Le mot de la ligne du tableau de bord : « Prete », pas la cle technique.
-  await expect(page.locator("#dashboardDelivering .commande-ligne", { hasText: "SSIAD" }).locator(".pill")).toHaveText("Prête");
+  const pastille = page.locator("#dashboardDelivering .commande-ligne", { hasText: "SSIAD" }).locator(".pill");
+  await expect(pastille).toHaveText("Prête");
+  // Et la couleur des pretes (le disque et la pastille), pas celle d'une commande a faire.
+  await expect(pastille).toHaveClass(/pill-ok/);
   expect(erreurs).toEqual([]);
   await ctx.close();
 });

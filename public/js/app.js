@@ -3502,7 +3502,6 @@ function changerClientCommande() {
   const champ = document.getElementById("customerClientId");
   if (!form || !champ) return;
   champ.value = "";
-  delete form.dataset.coordonneesInitiales;
   for (const nom of CHAMPS_COORDONNEES) if (form.elements[nom]) form.elements[nom].value = "";
   majClientCommande();
   document.getElementById("customerClientSearch")?.focus();
@@ -3911,7 +3910,6 @@ async function submitCustomerOrder(form) {
   // attribut. La commande suivante partait au nom du client d'avant. On le
   // vide a la main : la recherche revient, les coordonnees se rouvrent.
   form.elements.clientId.value = "";
-  delete form.dataset.coordonneesInitiales;
   majClientCommande();
   await loadData();
   if (data.orderType !== "planifiee" && reponse?.bloquee) {
