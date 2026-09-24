@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.45.1](https://github.com/tombague160-maker/sereo-production/compare/v1.45.0...v1.45.1) (2026-09-24)
+
+
+### 🐛 Corrections de bugs
+
+* **perf:** l'ouverture ne dessine plus l'historique ([#180](https://github.com/tombague160-maker/sereo-production/issues/180)) ([809551a](https://github.com/tombague160-maker/sereo-production/commit/809551a483f006fd9b2b01e1a628fe9d1082d007))
+* **perf:** l'ouverture ne dessine plus l'historique (2,4 s au bureau, ~16 s au téléphone) ([8473aa1](https://github.com/tombague160-maker/sereo-production/commit/8473aa169b08a7560a70fcc9427dc9d075fd23ba))
+
 ## [1.45.0](https://github.com/tombague160-maker/sereo-production/compare/v1.44.0...v1.45.0) (2026-09-24)
 
 
