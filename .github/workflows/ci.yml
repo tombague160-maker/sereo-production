@@ -12,6 +12,17 @@ on:
   push:
     branches: [main]
 
+# Une PR poussee de nouveau rend son execution en cours inutile : elle est
+# annulee (25/09 ; mesure de la chasse aux defauts : 31 executions devenues
+# inutiles en 7 jours, ~496 min). PAS sur main : chaque commit de main garde
+# son verdict jusqu'au bout -- c'est celui qu'une etiquette de version, puis
+# le deploiement, peuvent viser. D'ou un groupe PAR EXECUTION hors PR : un
+# groupe partage mettrait les executions de main en file, et GitHub annule
+# celle qui attend quand une autre arrive.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: Tests + syntax check
@@ -35,20 +46,32 @@ jobs:
       - name: Run tests (node --test)
         run: npm test
 
-  # Les e2e tournent dans un job SEPARE, et c'est delibere : ils demarrent un
+  # Les e2e tournent dans des jobs SEPARES, et c'est delibere : ils demarrent un
   # vrai serveur et pilotent un navigateur, donc ils echouent pour des raisons
   # que les tests unitaires ne connaissent pas. Melanges, un e2e instable
   # rendrait illisible le signal des 348 unitaires. Separes, on voit lequel
   # des deux parle.
   #
-  # Sans ce job, les tests de non-regression visuels n'auraient jamais tourne
+  # Sans ces jobs, les tests de non-regression visuels n'auraient jamais tourne
   # ailleurs que sur le poste de celui qui les a ecrits -- c'est-a-dire nulle
   # part. Deux d'entre eux gardent des defauts mesures et corriges le 17/09 :
   # l'onglet actif illisible en mode sombre (4,42:1) et l'accordeon de la barre
   # laterale qui ne repliait rien en sombre.
-  e2e:
-    name: Tests e2e (Playwright)
+  #
+  # QUATRE LOTS (25/09). La suite (723 tests, un seul ouvrier) prenait 37 min
+  # sur une machine : le temps de retour d'une PR. Playwright la coupe en
+  # quatre (--shard) : chaque test tourne dans exactement un lot (liste
+  # verifiee : l'union des quatre `--list --shard=i/4` est la liste entiere),
+  # chaque lot sur sa machine, avec UN ouvrier comme avant -- meme charge par
+  # machine, donc meme garantie contre l'instabilite nee de la charge.
+  e2e-lots:
+    name: Tests e2e (lot ${{ matrix.lot }}/4)
     runs-on: ubuntu-latest
+    strategy:
+      # Un lot rouge n'arrete pas les autres : tout le rouge se voit en une fois.
+      fail-fast: false
+      matrix:
+        lot: [1, 2, 3, 4]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -68,10 +91,10 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
-      # Le serveur de test est demarre par playwright.config.js (webServer),
-      # sur le port 3100, avec l'auth desactivee et une base SQLite dediee.
-      - name: Run e2e (playwright)
-        run: npm run test:e2e
+      # Les serveurs de test sont demarres par playwright.config.js (webServer),
+      # ports 3100 et 3101, auth desactivee sur le premier, bases SQLite dediees.
+      - name: Run e2e (playwright, lot ${{ matrix.lot }}/4)
+        run: npm run test:e2e -- --shard=${{ matrix.lot }}/4
 
       # En cas d'echec, la trace du premier reessai et les captures permettent
       # de comprendre sans rejouer localement.
@@ -79,8 +102,23 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
+          name: playwright-report-lot-${{ matrix.lot }}
           path: |
             playwright-report/
             test-results/
           retention-days: 7
+
+  # Le verdict des e2e, sous le NOM d'avant : une protection de branche qui
+  # exige « Tests e2e (Playwright) » exige les quatre lots verts. Il tourne
+  # aussi quand un lot a echoue (pour dire rouge), pas quand l'execution est
+  # annulee (une nouvelle poussee sur la PR rendra son propre verdict).
+  e2e:
+    name: Tests e2e (Playwright)
+    needs: e2e-lots
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Les quatre lots sont verts
+        run: |
+          echo "Lots e2e : ${{ needs.e2e-lots.result }}"
+          test "${{ needs.e2e-lots.result }}" = "success"
