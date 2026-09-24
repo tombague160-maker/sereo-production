@@ -56,6 +56,8 @@ const status = (value) =>
     importe: "À préparer",
     stock_a_verifier: "À préparer",
     en_preparation: "En préparation",
+    // Comptee avec les pretes (relecture adverse) : son mot, pas sa cle.
+    preparation_terminee: "Prête",
     pret_livraison: "Prête",
     en_livraison: "En livraison",
     probleme_livraison: "Problème de livraison",
@@ -68,7 +70,7 @@ const status = (value) =>
  * de preparation, on montre la commande.
  */
 const etatDeLaCommande = (statut) =>
-  statut === "pret_livraison" || statut === "livre"
+  statut === "pret_livraison" || statut === "preparation_terminee" || statut === "livre"
     ? { cle: "prete", pill: "pill-ok" }
     : statut === "en_preparation" || statut === "en_livraison"
       ? { cle: "en-cours", pill: "pill-warning" }

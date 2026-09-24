@@ -2263,8 +2263,10 @@ function renderTourneeDuJour() {
 const FILTRES_COMMANDES = [
   { cle: "toutes", libelle: "Toutes", statuts: null },
   { cle: "a-envoyer", libelle: "À envoyer", statuts: ["commande_client_validee"] },
-  { cle: "a-preparer", libelle: "À préparer", statuts: ["importe", "stock_a_verifier", "en_preparation", "preparation_terminee"] },
-  { cle: "pret", libelle: "Prêtes", statuts: ["pret_livraison"] },
+  // « preparation_terminee » se dit « Prete » (son badge) : elle se range sous
+  // « Pretes », plus sous « A preparer » (relecture adverse).
+  { cle: "a-preparer", libelle: "À préparer", statuts: ["importe", "stock_a_verifier", "en_preparation"] },
+  { cle: "pret", libelle: "Prêtes", statuts: ["preparation_terminee", "pret_livraison"] },
   { cle: "en-livraison", libelle: "En livraison", statuts: ["en_livraison"] },
   { cle: "livrees", libelle: "Livrées", statuts: ["livre"] },
   { cle: "planifiees", libelle: "Planifiées", statuts: ["planifiee", "a_confirmer"] }
@@ -3500,6 +3502,7 @@ function changerClientCommande() {
   const champ = document.getElementById("customerClientId");
   if (!form || !champ) return;
   champ.value = "";
+  delete form.dataset.coordonneesInitiales;
   for (const nom of CHAMPS_COORDONNEES) if (form.elements[nom]) form.elements[nom].value = "";
   majClientCommande();
   document.getElementById("customerClientSearch")?.focus();
@@ -3508,6 +3511,29 @@ function changerClientCommande() {
 // Ce qui, dans une fiche, est recopie sur ses COMMANDES par /api/clients/:id :
 // l'adresse de livraison, le nom, le telephone. La route CRM ne le fait pas.
 const CHAMPS_IDENTITE = { nom: "nom", adresse: "rue", codePostal: "codePostal", ville: "ville", telephone: "telephone" };
+
+/**
+ * Enregistre sur la fiche `id` les champs CHANGES (`change` : { champ du
+ * formulaire: valeur }), par les routes de la fiche : l'identite par
+ * /api/clients/:id (qui la recopie sur ses commandes a livrer), le reste par
+ * /api/crm/clients/:id. `fileAdmise` : une ecriture mise en file hors ligne
+ * n'arrete pas la suite (elle partira dans l'ordre).
+ */
+async function enregistrerChangementsDeFiche(id, change, { fileAdmise = false } = {}) {
+  const identite = {}, crm = {};
+  for (const [cle, valeur] of Object.entries(change)) {
+    if (cle in CHAMPS_IDENTITE) identite[CHAMPS_IDENTITE[cle]] = valeur; else crm[cle] = valeur;
+  }
+  const envoyer = async (chemin, corps) => {
+    try {
+      await apiFetch(chemin, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps) });
+    } catch (error) {
+      if (!(fileAdmise && error?.enFile)) throw error;
+    }
+  };
+  if (Object.keys(identite).length) await envoyer(`/api/clients/${encodeURIComponent(id)}`, identite);
+  if (Object.keys(crm).length) await envoyer(`/api/crm/clients/${encodeURIComponent(id)}`, crm);
+}
 
 async function saveCrmClient(form) {
   const { id, ...data } = Object.fromEntries(new FormData(form).entries());
@@ -3532,20 +3558,7 @@ async function saveCrmClient(form) {
       // (prochaine relance, statut deduit) etaient figees dans la fiche.
       const avant = JSON.parse(form.dataset.initial || "{}");
       const change = Object.fromEntries(Object.entries(data).filter(([cle, valeur]) => String(avant[cle] ?? "") !== String(valeur)));
-      const identite = {}, crm = {};
-      for (const [cle, valeur] of Object.entries(change)) {
-        if (cle in CHAMPS_IDENTITE) identite[CHAMPS_IDENTITE[cle]] = valeur; else crm[cle] = valeur;
-      }
-      if (Object.keys(identite).length) {
-        await apiFetch(`/api/clients/${encodeURIComponent(id)}`, {
-          method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(identite)
-        });
-      }
-      if (Object.keys(crm).length) {
-        await apiFetch(`/api/crm/clients/${encodeURIComponent(id)}`, {
-          method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(crm)
-        });
-      }
+      await enregistrerChangementsDeFiche(id, change);
     }
   } catch (error) {
     // Dans le dialogue : un toast serait sous sa couche, assombri et inerte.
@@ -3575,6 +3588,11 @@ async function updateCrmClientStatus(clientId, status) {
   await loadData();
   notify("Statut CRM mis a jour.", "success");
 }
+
+// Les mots d'un rappel, un seul vocabulaire au bureau (relecture adverse) :
+// l'ecran montrait la cle du statut (« reporte », « annule ») et des gestes
+// sans accent. Les cles envoyees au serveur ne changent pas.
+const STATUT_RAPPEL = { a_faire: "À faire", fait: "Fait", reporte: "Reporté", annule: "Annulé" };
 
 function renderRelances() {
   const container = document.getElementById("relanceList");
@@ -3621,13 +3639,13 @@ function renderRelances() {
             <p>${escapeHtml(item.motif || "Rappel client")} - ${escapeHtml(formatDateDayOnly(item.datePrevue))}</p>
             ${order ? `<p class="muted">${escapeHtml(order.numero || order.id)} - livraison ${escapeHtml(order.deliveryDate ? formatDeliveryDate(order.deliveryDate) : "à dater")}</p>` : ""}
           </div>
-          <span class="pill ${level}">${escapeHtml(item.status === "a_faire" ? "À faire" : item.status)}</span>
+          <span class="pill ${level}">${escapeHtml(STATUT_RAPPEL[item.status] || item.status)}</span>
         </div>
         <p class="muted">${escapeHtml(item.commentaire || "Aucun commentaire")}</p>
         <div class="card-actions">
           <button class="button ok compact" type="button" data-relance-id="${escapeAttribute(item.id)}" data-relance-status="fait">Fait</button>
-          <button class="button warning compact" type="button" data-relance-id="${escapeAttribute(item.id)}" data-relance-status="reporte">Reporte</button>
-          <button class="button danger compact" type="button" data-relance-id="${escapeAttribute(item.id)}" data-relance-status="annule">Annule</button>
+          <button class="button warning compact" type="button" data-relance-id="${escapeAttribute(item.id)}" data-relance-status="reporte">Reporté</button>
+          <button class="button danger compact" type="button" data-relance-id="${escapeAttribute(item.id)}" data-relance-status="annule">Annulé</button>
         </div>
       </article>
     `;
@@ -3834,6 +3852,30 @@ function fillCustomerFormFromClient(clientId) {
   form.elements.adresse.value = client.rue || "";
   form.elements.ville.value = client.ville || "";
   form.elements.email.value = client.email || "";
+  // Ce que la fiche a mis dans les champs : seul ce que l'utilisateur y change
+  // ensuite repart sur la fiche (reporterCoordonneesSurLaFiche). Comparer a
+  // la fiche rechargee en fond ecraserait un changement fait ailleurs.
+  form.dataset.coordonneesInitiales = JSON.stringify(Object.fromEntries(CHAMPS_COORDONNEES.map(nom => [nom, form.elements[nom]?.value ?? ""])));
+}
+
+/**
+ * « Modifier les coordonnees » d'un client existant (relecture adverse du
+ * 24/09) : le serveur reprend le client tel quel des qu'il a son identifiant
+ * (findOrCreateCustomerClient) et jetait ce qui avait ete corrige -- la
+ * commande partait a l'ancienne adresse. Ce que l'utilisateur a change va sur
+ * la FICHE, par les routes de la fiche, AVANT la commande, qui prend alors la
+ * nouvelle adresse. Rend vrai si la fiche a ete modifiee.
+ */
+async function reporterCoordonneesSurLaFiche(form, data) {
+  if (!data.clientId || !form.dataset.coordonneesInitiales) return false;
+  const avant = JSON.parse(form.dataset.coordonneesInitiales);
+  const change = Object.fromEntries(CHAMPS_COORDONNEES
+    .filter(nom => nom in data && String(data[nom]).trim() !== String(avant[nom] ?? "").trim())
+    .map(nom => [nom, data[nom]]));
+  if (!Object.keys(change).length) return false;
+  // Hors ligne : la fiche, puis la commande, attendent dans la file, dans cet ordre.
+  await enregistrerChangementsDeFiche(data.clientId, change, { fileAdmise: true });
+  return true;
 }
 
 async function submitCustomerOrder(form) {
@@ -3848,6 +3890,8 @@ async function submitCustomerOrder(form) {
     return;
   }
   const endpoint = data.orderType === "planifiee" ? "/api/planned-orders" : "/api/customer-orders";
+  const ficheModifiee = await reporterCoordonneesSurLaFiche(form, data);
+  const fiche = ficheModifiee ? " Coordonnées enregistrées sur la fiche du client." : "";
   const reponse = await apiFetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -3862,7 +3906,12 @@ async function submitCustomerOrder(form) {
   });
   customerCart.clear();
   form.reset();
-  // reset() vide le client choisi (champ cache) : la recherche revient.
+  // reset() ne vide PAS le client choisi (relecture adverse) : sur un champ
+  // cache, ecrire .value ecrit l'attribut value, et reset() revient a cet
+  // attribut. La commande suivante partait au nom du client d'avant. On le
+  // vide a la main : la recherche revient, les coordonnees se rouvrent.
+  form.elements.clientId.value = "";
+  delete form.dataset.coordonneesInitiales;
   majClientCommande();
   await loadData();
   if (data.orderType !== "planifiee" && reponse?.bloquee) {
@@ -3870,9 +3919,9 @@ async function submitCustomerOrder(form) {
     const creee = orders.find(o => String(o.id) === String(reponse.id));
     const manque = creee ? manqueDeLaCommande(creee) : "";
     const pourquoi = /^Il manque/.test(manque) ? `${manque.charAt(0).toLowerCase()}${manque.slice(1)} en stock` : (manque || "stock insuffisant").toLowerCase();
-    notify(`Commande ${reponse.numero || ""} enregistrée, mais bloquée (${pourquoi}) : elle passera en préparation quand le stock arrivera.`, "warning");
+    notify(`Commande ${reponse.numero || ""} enregistrée, mais bloquée (${pourquoi}) : elle passera en préparation quand le stock arrivera.${fiche}`, "warning");
   } else {
-    notify(data.orderType === "planifiee" ? "Commande planifiée créée." : "Commande client validée.", "success");
+    notify(`${data.orderType === "planifiee" ? "Commande planifiée créée." : "Commande client validée."}${fiche}`, "success");
   }
   showTab(data.orderType === "planifiee" ? "commandes-planifiees" : "commandes-jour");
 }
@@ -4911,6 +4960,9 @@ function createPreparationCard(order) {
   const canStart = ["importe", "stock_a_verifier"].includes(order.status) && order.canPrepare;
   const canFinish = order.status === "en_preparation";
   const deliveryDate = order.deliveryDate || getTodayDateInput();
+  // La pastille dit le mot de sa ligne et du badge de Commandes : « Bloquee »
+  // quand le stock manque (relecture adverse ; formatOrderStatus ne lit que
+  // le statut, et disait « A preparer » sur une carte en alerte).
 
   article.innerHTML = `
     <div class="item-header">
@@ -4918,7 +4970,7 @@ function createPreparationCard(order) {
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
         <span>${escapeHtml(formatOrderAddress(order))}</span>
       </p>
-      <span class="pill ${getOrderPill(order.status)}">${escapeHtml(formatOrderStatus(order.status))}</span>
+      <span class="pill ${getOrderPill(order.status)}">${escapeHtml(commandeBloquee(order) ? "Bloquée" : formatOrderStatus(order.status))}</span>
     </div>
     <div class="order-meta">
       <span>Secteur : ${escapeHtml(order.sector ? formatSectorLabel(order.sector) : "-")}</span>

@@ -112,6 +112,8 @@ test("tableau de bord : « a preparer » compte les commandes restantes de l'ecr
       commande("v1", "c1", "Cabinet Dupont", "stock_a_verifier"),
       commande("e1", "c1", "Cabinet Dupont", "en_preparation"),
       commande("r1", "c1", "Cabinet Dupont", "pret_livraison"),
+      commande("t1", "c1", "Cabinet Dupont", "preparation_terminee"),
+      commande("l1", "c1", "Cabinet Dupont", "en_livraison"),
       commande("d1", "c1", "Cabinet Dupont", "livre")
     ],
     stock: [{ id: "s1", code: "A1", nom: "Alèses", quantite: 50 }]
@@ -119,6 +121,10 @@ test("tableau de bord : « a preparer » compte les commandes restantes de l'ecr
 
   const { body } = await demander("/api/operations");
   assert.deepEqual(body.preparing.map(o => o.id).sort(), ["e1", "i1", "v1"]);
+  // Relecture adverse : « preparation terminee » (le badge dit « Prete ») ne
+  // se comptait plus nulle part une fois sortie de `preparing`. Elle est
+  // comptee avec les pretes, dans la tuile « En livraison ».
+  assert.deepEqual(body.delivering.map(o => o.id).sort(), ["l1", "r1", "t1"]);
 });
 
 // --- 5. Les motifs proposes ---------------------------------------------------

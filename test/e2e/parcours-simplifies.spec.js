@@ -35,6 +35,16 @@ function seme() {
   s.relances = [{ id: "rel-1", clientId: "c-tilleuls", datePrevue: AUJOURDHUI, motif: "Proposer les alèses", status: "a_faire", type: "crm" }];
   // Deux abonnements actifs dont l'echeance tombe aujourd'hui : « dues ».
   s.subscriptions.push({ ...structuredClone(s.subscriptions[0]), id: "sub-4", clientId: "c-veto", reminderDays: 1 });
+  // Relecture adverse du lot. Une fiche SANS commande, pour « Modifier les
+  // coordonnees » : son demenagement ne deplace aucune commande des autres cas.
+  s.clients.push({ id: "c-martin", nom: "Cabinet Martin", rue: "4 rue Pasteur", ville: "Dole", codePostal: "39100",
+    telephone: "0384000000", lat: 47.094, lng: 5.492, crmStatus: "client_actif" });
+  // Une commande « preparation terminee » (admise par PATCH status ; le badge
+  // dit « Prete »), EN TETE : la liste « A livrer » du tableau de bord montre
+  // les cinq premieres.
+  const terminee = { ...structuredClone(s.commandes.find(o => o.id === "o-2")), id: "o-pt", numero: "CMD-2026-803", status: "preparation_terminee" };
+  delete terminee.deliveredAt;
+  s.commandes.unshift(terminee);
   return s;
 }
 
@@ -143,6 +153,72 @@ test("2 — une nouvelle fiche aux coordonnees repliees : « Valider » les depl
   // Le champ « Nom » manquant ne pouvait pas dire son message, replie.
   await expect.poll(() => coordonnees.evaluate(d => d.open)).toBe(true);
   expect(await page.evaluate(() => document.activeElement?.name)).toBe("nom");
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+// Relecture adverse : reset() ne vidait pas le client choisi. Sur un champ
+// cache, ecrire .value ecrit l'attribut value -- celui auquel reset() revient.
+// La commande suivante partait au nom du client d'avant.
+test("2 — apres « Valider », la commande suivante repart sans le client d'avant", async ({ browser }) => {
+  const { ctx, page, erreurs } = await ouvrir(browser, "commande-client");
+  await page.locator("#customerClientSearch").fill("pharmacie");
+  await page.locator('#customerClientResults [data-action="cc-client"]').first().click();
+  await page.locator('[data-customer-product="st-ALE"][data-customer-delta="1"]').click();
+  const premiere = page.waitForResponse(r => r.url().endsWith("/api/customer-orders") && r.request().method() === "POST");
+  await page.locator("#customerValider").click();
+  expect((await premiere).status()).toBe(201);
+  await expect(page.locator("#commandes")).toHaveClass(/active/);
+
+  // Chez le client suivant : « Nouvelle commande » depuis l'en-tete de Commandes.
+  await page.locator("#enteteActions .cmd-nouvelle").click();
+  await expect(page.locator("#commande-client")).toHaveClass(/active/);
+  expect(await page.locator("#customerClientId").inputValue(), "le client d'avant est parti").toBe("");
+  await expect(page.locator("#customerClientChoisi")).toBeHidden();
+  await expect(page.locator("#customerClientSearch")).toBeVisible();
+  expect(await page.locator("#customerCoordonnees").evaluate(d => d.open), "une nouvelle fiche : coordonnees ouvertes").toBe(true);
+
+  await page.locator('#customerCoordonnees input[name="nom"]').fill("Maison de santé des Rives");
+  await page.locator('[data-customer-product="st-ALE"][data-customer-delta="1"]').click();
+  const seconde = page.waitForResponse(r => r.url().endsWith("/api/customer-orders") && r.request().method() === "POST");
+  await page.locator("#customerValider").click();
+  const reponse = await seconde;
+  expect(JSON.parse(reponse.request().postData()).clientId || "", "aucun client choisi n'est envoye").toBe("");
+  const creee = await reponse.json();
+  expect(creee.clientName).toBe("Maison de santé des Rives");
+  expect(creee.clientId).not.toBe("c-pharma");
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+// Relecture adverse : « Modifier les coordonnees » promettait une modification
+// que le serveur jetait (un client existant est repris tel quel). Elles vont
+// sur la fiche, par les routes de la fiche, avant la commande.
+test("2 — « Modifier les coordonnees » d'un client existant : la commande et la fiche suivent", async ({ browser }) => {
+  const { ctx, page, erreurs } = await ouvrir(browser, "commande-client");
+  await page.locator("#customerClientSearch").fill("martin");
+  await page.locator('#customerClientResults [data-action="cc-client"]').first().click();
+  await expect(page.locator("#customerClientNom")).toHaveText("Cabinet Martin");
+  await page.locator("#customerCoordonneesTitre").click();
+  await page.locator('#customerCoordonnees input[name="adresse"]').fill("18 avenue de Lahr");
+  await page.locator('#customerCoordonnees input[name="telephone"]').fill("0384999999");
+  await page.locator('#customerCoordonnees input[name="email"]').fill("accueil@cabinet-martin.test");
+  await page.locator('[data-customer-product="st-ALE"][data-customer-delta="1"]').click();
+  const envoi = page.waitForResponse(r => r.url().endsWith("/api/customer-orders") && r.request().method() === "POST");
+  await page.locator("#customerValider").click();
+  const creee = await (await envoi).json();
+  expect(creee.clientId).toBe("c-martin");
+  expect(creee.address, "la commande part a la nouvelle adresse").toBe("18 avenue de Lahr");
+  expect(creee.phone).toBe("0384999999");
+  const fiche = (await api("/api/crm/clients")).find(c => c.id === "c-martin");
+  expect(fiche.rue, "la fiche suit").toBe("18 avenue de Lahr");
+  expect(fiche.telephone).toBe("0384999999");
+  expect(fiche.email).toBe("accueil@cabinet-martin.test");
+  // Temoin : ce qui n'a pas change ne bouge pas.
+  expect(fiche.nom).toBe("Cabinet Martin");
+  expect(fiche.ville).toBe("Dole");
+  expect(fiche.codePostal).toBe("39100");
+  await expect(page.locator(".toast", { hasText: "Commande client validée" })).toContainText("fiche du client");
   expect(erreurs).toEqual([]);
   await ctx.close();
 });
@@ -322,6 +398,78 @@ test("8 — au bureau, la Preparation dit « A preparer / En preparation / Prete
   expect(badges.filter(b => interdits.includes(b.trim())), badges.join(", ")).toEqual([]);
   const pilules = await page.locator("#cmdPilules [data-cmd-filtre]").allTextContents();
   expect(pilules).toContain("Prêtes");
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+// Relecture adverse : la fenetre de la Preparation au bureau lisait le mot du
+// STATUT (« A preparer ») sans regarder le stock ; sa ligne disait « Bloquee ».
+test("8 — au bureau, la fenetre d'une commande bloquee dit « Bloquee », comme sa ligne", async ({ browser }) => {
+  // Temoin : une commande qui peut se preparer (creee ici, le cas se lance seul).
+  const temoin = await (await fetch(`${srv.base}/api/customer-orders`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ clientId: "c-bellevue", client: { nom: "EHPAD Résidence Bellevue" }, products: [{ productId: "st-ALE", quantite: 1 }] })
+  })).json();
+  expect(temoin.bloquee).toBe(false);
+  const { ctx, page, erreurs } = await ouvrir(browser, "preparation");
+  const dialogue = page.locator("#commandeDetailDialog");
+
+  const bloquee = page.locator("#preparationList .commande-ligne--bloquee", { hasText: "Clinique Vétérinaire" }).first();
+  await expect(bloquee.locator(".pill")).toHaveText("Bloquée");
+  await bloquee.locator(".commande-ligne-main").click();
+  await expect(dialogue).toBeVisible();
+  await expect(dialogue.locator(".item-header .pill")).toHaveText("Bloquée");
+  await expect(dialogue.locator('[data-action="start-preparation"]')).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await expect(dialogue).toBeHidden();
+
+  await page.locator(`#preparationList [data-order-id="${temoin.id}"]`).click();
+  await expect(dialogue).toBeVisible();
+  await expect(dialogue.locator(".item-header .pill"), "temoin : preparable, elle reste « A preparer »").toHaveText("À préparer");
+  await expect(dialogue.locator('[data-action="start-preparation"]')).toBeEnabled();
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+// Relecture adverse : « preparation terminee » (badge « Prete ») etait rangee
+// sous la pilule « A preparer » et n'etait plus comptee au tableau de bord.
+test("8 — « preparation terminee » se range sous « Pretes », comme son badge, et compte au tableau de bord", async ({ browser }) => {
+  const { ctx, page, erreurs } = await ouvrir(browser, "commandes");
+  const ids = () => page.locator("#cmdLignes .cmd-ligne").evaluateAll(ls => ls.map(l => l.dataset.cmdOuvrir));
+  await page.locator('#cmdPilules [data-cmd-filtre="pret"]').click();
+  expect(await ids()).toContain("o-pt");
+  await expect(page.locator('#cmdLignes .cmd-ligne[data-cmd-ouvrir="o-pt"] .cmd-badge')).toHaveText("Prête");
+  await page.locator('#cmdPilules [data-cmd-filtre="a-preparer"]').click();
+  const aPreparer = await ids();
+  expect(aPreparer.length, "temoin : la pilule « A preparer » a des lignes").toBeGreaterThan(0);
+  expect(aPreparer).not.toContain("o-pt");
+
+  await page.goto(`${srv.base}/#journee`);
+  const livraison = (await api("/api/operations")).delivering;
+  expect(livraison.map(o => o.id)).toContain("o-pt");
+  await expect(page.locator("#dashboardDeliveringCount")).toHaveText(String(livraison.length));
+  // Le mot de la ligne du tableau de bord : « Prete », pas la cle technique.
+  await expect(page.locator("#dashboardDelivering .commande-ligne", { hasText: "SSIAD" }).locator(".pill")).toHaveText("Prête");
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+// Relecture adverse : l'ecran Rappels affichait la cle du statut (« reporte »)
+// et des boutons sans accent (« Reporte », « Annule »).
+test("8 — les Rappels disent « Fait · Reporté · Annulé », jamais la cle technique", async ({ browser }) => {
+  await fetch(`${srv.base}/api/crm/relances`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ clientId: "c-veto", datePrevue: AUJOURDHUI, motif: "Rappeler pour les gants", type: "crm" })
+  });
+  const { ctx, page, erreurs } = await ouvrir(browser, "relances");
+  await page.locator('[data-relance-filter="all"]').click();
+  const carte = page.locator("#relanceList article", { hasText: "Rappeler pour les gants" });
+  await expect(carte.locator(".card-actions .button")).toHaveText(["Fait", "Reporté", "Annulé"]);
+  await expect(carte.locator(".pill")).toHaveText("À faire");
+  await carte.getByRole("button", { name: "Reporté", exact: true }).click();
+  await expect(carte.locator(".pill")).toHaveText("Reporté");
+  const rappel = (await api("/api/crm/relances")).find(r => r.motif === "Rappeler pour les gants");
+  expect(rappel.status, "le geste enregistre la meme cle qu'avant").toBe("reporte");
   expect(erreurs).toEqual([]);
   await ctx.close();
 });
