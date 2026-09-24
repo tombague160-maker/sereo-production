@@ -825,6 +825,7 @@ function bindUi() {
     if (action === "revenir-arret-en-cours") revenirALArretEnCours();
     if (action === "purge-orders") purgeOrdersHandler(actionButton);
     if (action === "diagnostic-suspicious-dates") runAction(actionButton, "Scan...", runDiagnosticSuspiciousDates);
+    if (action === "sauvegarder-maintenant") runAction(actionButton, "Sauvegarde…", sauvegarderMaintenant);
     // « Livre » : pas de texte d'attente (runAction remplacerait l'icone) --
     // l'ecran avance tout de suite et l'envoi part au terme d'Annuler.
     if (action === "mark-delivered") livrerAvecAnnulation().catch(notifyEchec);
@@ -2903,7 +2904,11 @@ function renderStats() {
   const alerts = getAlertItems().length;
   const lowStockCount = stockCounts.low ?? getLowStockProducts().filter(product => getStockLevel(product).label === "Stock faible").length;
   const outStockCount = stockCounts.out ?? stock.filter(product => getProductQuantity(product) === 0).length;
-  const recommendCount = lowStockCount + outStockCount;
+  // Decision de Thomas du 24/09 : le compte de l'ecran « A recommander » --
+  // sous le seuil OU qui manquera d'ici l'horizon --, et non plus « stock
+  // faible + rupture », qui ne voyait pas le produit au-dessus du seuil
+  // attendu par des commandes deja prises.
+  const recommendCount = aRecommander().length;
 
   setText("statTotal", orderCounts.imported ?? orders.length ?? clients.length);
   const preparable = orderCounts.preparable ?? orders.filter(order => ["importe", "stock_a_verifier"].includes(order.status) && order.canPrepare).length;
@@ -4143,30 +4148,31 @@ function majSousTitreStock() {
     : "Aucun produit importé");
 }
 
-// La carte « A recommander » : ce qui est sous le seuil, le plus en retard
-// d'abord. Cinq lignes au plus ; la liste complete, avec les besoins estimes,
-// reste sur l'ecran « A recommander ».
+// La carte « A recommander » : ce qui est sous le seuil OU manquera d'ici
+// l'horizon (decision de Thomas du 24/09) -- le meme compte que la pastille et
+// que le filtre « Urgent et bientot » de l'ecran (aRecommander). L'urgent d'abord,
+// puis le manque le plus proche, puis le plus en retard sur son seuil. Cinq
+// lignes au plus ; la liste complete, avec les besoins estimes, reste sur
+// l'ecran « A recommander ».
 function renderStockRecommande() {
   const liste = document.getElementById("stkRecoListe");
   if (!liste) return;
-  const bas = getLowStockProducts()
-    .map(product => {
-      const quantite = product.quantityAvailable ?? getProductQuantity(product) ?? 0;
-      return { product, quantite, seuil: getProductThreshold(product) };
-    })
-    .sort((a, b) => (a.quantite - a.seuil) - (b.quantite - b.seuil)
+  const bas = aRecommander()
+    .sort((a, b) => (a.level === "urgent" ? 0 : 1) - (b.level === "urgent" ? 0 : 1)
+      || String(a.manqueLe || "9999").localeCompare(String(b.manqueLe || "9999"))
+      || (a.available - a.threshold) - (b.available - b.threshold)
       || String(getProductName(a.product)).localeCompare(getProductName(b.product), "fr"));
   setText("stkRecoCompte", String(bas.length));
   const compte = document.getElementById("stkRecoCompte");
-  if (compte) compte.setAttribute("aria-label", `${bas.length} produit${bas.length > 1 ? "s" : ""} sous le seuil`);
+  if (compte) compte.setAttribute("aria-label", `${bas.length} produit${bas.length > 1 ? "s" : ""} à recommander`);
   if (!bas.length) {
-    liste.innerHTML = `<p class="stk-reco-vide">Rien sous le seuil.</p>`;
+    liste.innerHTML = `<p class="stk-reco-vide">Rien à recommander.</p>`;
     return;
   }
-  liste.innerHTML = bas.slice(0, 5).map(({ product, quantite, seuil }) => `
+  liste.innerHTML = bas.slice(0, 5).map(item => `
     <div class="stk-reco-ligne">
-      <span class="stk-reco-nom">${escapeHtml(getProductName(product))}</span>
-      <span class="stk-reco-detail">${escapeHtml(quantite)} en stock · seuil ${escapeHtml(seuil)}</span>
+      <span class="stk-reco-nom">${escapeHtml(getProductName(item.product))}</span>
+      <span class="stk-reco-detail">${escapeHtml(item.manqueLe ? phraseDuManque(item) : `${item.available} en stock · seuil ${item.threshold}`)}</span>
     </div>`).join("");
 }
 
@@ -5032,6 +5038,7 @@ function renderRecommande() {
 
   container.innerHTML = "";
   updateRecommendFilterButtons();
+  majSousTitreRecommande();
 
   const products = getRecommendationItems().filter(item => {
     if (recommendFilter === "all") return true;
@@ -5047,6 +5054,15 @@ function renderRecommande() {
   products.forEach(item => {
     const article = document.createElement("article");
     article.className = `item ${item.level === "urgent" ? "status-danger" : "status-warning"}`;
+    // Le besoin estime compte aussi la demande a venir (24/09) ; la ligne sous
+    // les chiffres dit d'ou il vient, et jusqu'a quand. Une commande au stock
+    // deja reserve n'y est plus (il est sorti du « Stock actuel ») : la ligne
+    // le dit, sinon « 0 sur commandes en cours » contredirait l'ecran Commandes.
+    const fin = item.horizon ? jourCourt(ajouterJoursCle(getTodayDateInput(), item.horizon)) : "";
+    const detail = item.upcoming > 0
+      ? `Dont ${item.needed} sur commandes en cours sans stock réservé et ${item.upcoming} à venir${fin ? ` d'ici le ${fin}` : ""} (abonnements, commandes planifiées).`
+      : "";
+    const manque = phraseDuManque(item);
     article.innerHTML = `
       <div class="item-header">
         <div>
@@ -5055,15 +5071,33 @@ function renderRecommande() {
         </div>
         <span class="pill ${item.level === "urgent" ? "pill-danger" : "pill-warning"}">${escapeHtml(item.label)}</span>
       </div>
+      ${manque ? `<p class="reco-manque">${escapeHtml(manque)}</p>` : ""}
       <div class="stock-kpis">
         <span><strong>${escapeHtml(item.available)}</strong><small>Stock actuel</small></span>
-        <span><strong>${escapeHtml(item.needed)}</strong><small>Besoin estimé</small></span>
+        <span><strong>${escapeHtml(item.demande)}</strong><small>Besoin estimé</small></span>
         <span><strong>${escapeHtml(item.threshold)}</strong><small>Seuil</small></span>
         <span><strong>${escapeHtml(item.recommended)}</strong><small>À recommander</small></span>
       </div>
+      ${detail ? `<p class="reco-detail">${escapeHtml(detail)}</p>` : ""}
     `;
     container.appendChild(article);
   });
+}
+
+// Une cle YYYY-MM-DD decalee de `jours`, sans fuseau (arithmetique UTC pure).
+function ajouterJoursCle(cle, jours) {
+  const d = new Date(`${cle}T12:00:00Z`);
+  if (Number.isNaN(d.getTime())) return "";
+  d.setUTCDate(d.getUTCDate() + jours);
+  return d.toISOString().slice(0, 10);
+}
+
+// Le sous-titre de l'ecran dit l'horizon regle dans Parametres.
+function majSousTitreRecommande() {
+  const horizon = Number(stock.find(p => p.upcomingHorizonDays)?.upcomingHorizonDays) || 0;
+  setText("recommandeSousTitre", horizon
+    ? `Sous le seuil, ou qui manquera d'ici ${horizon} jours`
+    : "Sous le seuil, ou qui manquera");
 }
 
 function updateRecommendFilterButtons() {
@@ -5075,7 +5109,60 @@ function updateRecommendFilterButtons() {
 }
 
 
+// L'ecran « A recommander », avec le filtre choisi (Urgent, Urgent et bientot,
+// Tout afficher).
 function getRecommendationItems() {
+  return evaluerRecommandations()
+    .filter(item => item.level !== "ok" || recommendFilter === "all")
+    .sort((a, b) => b.recommended - a.recommended || String(getProductName(a.product)).localeCompare(getProductName(b.product), "fr"));
+}
+
+// Ce qui est a recommander : urgent ou bientot. LE compte de la pastille Stock,
+// de la carte du Stock, de la tuile du tableau de bord et du filtre « Urgent
+// et bientot » de l'ecran (decision de Thomas du 24/09 : un produit au-dessus
+// du seuil qui manquera pour des commandes deja prises compte aussi). Une
+// seule fonction : deux nombres ne disent pas deux verites (le 23/09, la
+// pastille disait 1 et l'ecran 2).
+function aRecommander() {
+  return evaluerRecommandations().filter(item => item.level === "urgent" || item.level === "bientot");
+}
+
+// Le besoin des commandes en cours que le stock n'a pas encore sorti du rayon
+// (relecture adverse du 24/09). Une commande confirmee, saisie chez le client
+// ou mise en preparation a son stock RESERVE : ses quantites sont deja
+// deduites de quantityAvailable. La compter encore faisait manquer ce qui ne
+// manque pas (30 en stock, 20 confirmes : « Manque des aujourd'hui : 20
+// demandes, 10 en stock »). Le serveur le donne ; une copie hors ligne d'avant
+// ce champ le recompte sur les commandes de la page (les statuts de
+// NEEDED_ORDER_STATUSES, sans reservation).
+function besoinNonDeduit(product) {
+  if (product.quantityNeededNotDeducted !== undefined) return Number(product.quantityNeededNotDeducted) || 0;
+  const productCode = normalizeTextKey(product.code);
+  const productName = normalizeTextKey(getProductName(product));
+  return orders.reduce((total, order) => {
+    if (order.stockReservedAt || !["commande_client_validee", "importe", "stock_a_verifier", "en_preparation", "pret_livraison"].includes(order.status)) return total;
+    return total + (order.products || []).reduce((sum, line) => {
+      const lineCode = normalizeTextKey(line.code);
+      const lineName = normalizeTextKey(line.nom || line.produit);
+      const matches = (productCode && lineCode === productCode) || (productName && lineName === productName);
+      return matches ? sum + (Number(line.quantite) || 0) : sum;
+    }, 0);
+  }, 0);
+}
+
+// Chaque produit du stock, evalue :
+//   - la demande : les commandes en cours dont le stock n'est pas encore
+//     reserve (besoinNonDeduit) ET la demande connue d'avance sur l'horizon de
+//     Parametres (upcomingDemand, par jour : commandes planifiees et echeances
+//     des abonnements actifs, calculees par le serveur sur le calendrier des
+//     Abonnements), face au stock d'aujourd'hui, deductions faites ;
+//   - `manqueLe` : le premier jour ou la demande cumulee depasse le stock (les
+//     commandes en cours d'abord, aujourd'hui, puis chaque echeance a sa date) ;
+//   - le niveau : « urgent » si le stock est a zero ou manque des aujourd'hui,
+//     « bientot » s'il est sous le seuil ou manquera d'ici l'horizon.
+// A recommander : de quoi couvrir toute la demande de l'horizon, ou repasser
+// au-dessus du seuil -- le plus grand des deux.
+function evaluerRecommandations() {
   // Filet de securite : si la base contient des doublons (ex: imports anterieurs
   // a la dedup), on filtre cote frontend pour eviter d'afficher 2x le meme produit.
   // Garde la premiere occurrence par productKey, les produits sans cle sont conserves.
@@ -5087,33 +5174,64 @@ function getRecommendationItems() {
     seenKeys.add(key);
     return true;
   });
+  const aujourdHui = getTodayDateInput();
 
-  return uniqueStock
-    .map(product => {
-      const inconnu = (product.quantityAvailable ?? getProductQuantity(product)) === null;
-      const available = product.quantityAvailable ?? getProductQuantity(product) ?? 0;
-      const needed = product.quantityNeeded ?? getNeededQuantityForProduct(product);
-      const threshold = getProductThreshold(product);
-      const shortage = Math.max(0, needed - available);
-      // « Sous le seuil » = quantite <= seuil, partout (carte du Stock, pastille,
-      // getStockLevel). Pour en sortir, il faut repasser AU-DESSUS du seuil.
-      const thresholdGap = available <= threshold ? threshold - available + 1 : 0;
-      const recommended = inconnu ? 0 : Math.ceil(Math.max(shortage, thresholdGap));
-      // Une quantite inconnue n'est pas une rupture : elle est « a renseigner ».
-      const level = inconnu ? "ok" : (available <= 0 || shortage > 0 ? "urgent" : (recommended > 0 ? "bientot" : "ok"));
+  return uniqueStock.map(product => {
+    const inconnu = (product.quantityAvailable ?? getProductQuantity(product)) === null;
+    const available = product.quantityAvailable ?? getProductQuantity(product) ?? 0;
+    const needed = besoinNonDeduit(product);
+    const aVenir = Array.isArray(product.upcomingDemand) ? product.upcomingDemand : [];
+    const upcoming = aVenir.reduce((total, d) => total + (Number(d.quantite) || 0), 0);
+    const demande = needed + upcoming;
+    const threshold = getProductThreshold(product);
+    const shortage = Math.max(0, demande - available);
+    // « Sous le seuil » = quantite <= seuil, partout (carte du Stock, pastille,
+    // getStockLevel). Pour en sortir, il faut repasser AU-DESSUS du seuil.
+    const thresholdGap = available <= threshold ? threshold - available + 1 : 0;
+    const recommended = inconnu ? 0 : Math.ceil(Math.max(shortage, thresholdGap));
+    let manqueLe = null;
+    if (!inconnu && shortage > 0) {
+      let cumul = needed;
+      if (cumul > available) manqueLe = aujourdHui;
+      for (const d of aVenir) {
+        if (manqueLe) break;
+        cumul += Number(d.quantite) || 0;
+        if (cumul > available) manqueLe = d.date < aujourdHui ? aujourdHui : d.date;
+      }
+    }
+    // Une quantite inconnue n'est pas une rupture : elle est « a renseigner ».
+    const level = inconnu
+      ? "ok"
+      : (available <= 0 || (manqueLe && manqueLe <= aujourdHui) ? "urgent" : (recommended > 0 ? "bientot" : "ok"));
 
-      return {
-        product,
-        available,
-        needed,
-        threshold,
-        recommended,
-        level,
-        label: inconnu ? "À renseigner" : (level === "urgent" ? "Urgent" : (level === "bientot" ? "Bientôt" : "OK"))
-      };
-    })
-    .filter(item => item.level !== "ok" || recommendFilter === "all")
-    .sort((a, b) => b.recommended - a.recommended || String(getProductName(a.product)).localeCompare(getProductName(b.product), "fr"));
+    return {
+      product,
+      available,
+      needed,
+      upcoming,
+      demande,
+      horizon: Number(product.upcomingHorizonDays) || null,
+      manqueLe,
+      threshold,
+      recommended,
+      level,
+      label: inconnu ? "À renseigner" : (level === "urgent" ? "Urgent" : (level === "bientot" ? "Bientôt" : "OK"))
+    };
+  });
+}
+
+// « 3/10 » : le jour et le mois d'une cle YYYY-MM-DD, sans fuseau.
+function jourCourt(cle) {
+  const [, mois, jour] = String(cle || "").split("-");
+  return mois && jour ? `${Number(jour)}/${Number(mois)}` : "";
+}
+
+// « Manquera le 3/10 : 24 demandés, 14 en stock » -- la demande de tout
+// l'horizon (commandes en cours et a venir), face au stock d'aujourd'hui.
+function phraseDuManque(item) {
+  if (!item.manqueLe) return "";
+  const quand = item.manqueLe <= getTodayDateInput() ? "Manque dès aujourd'hui" : `Manquera le ${jourCourt(item.manqueLe)}`;
+  return `${quand} : ${item.demande} demandé${item.demande > 1 ? "s" : ""}, ${item.available} en stock`;
 }
 
 function renderProduits() {
@@ -6248,14 +6366,163 @@ async function enregistrerNumerotation(form) {
 // Calcul routier OSRM integre (23/09) : une ligne, ecrite par le serveur
 // (`resume`) -- carte locale prete, en preparation, ou serveur public, et
 // pourquoi. Un echec de lecture ne casse pas l'ecran.
+// La meme lecture de /api/storage/status sert la carte « Sauvegardes » (24/09).
 async function afficherCalculRoutier() {
   const ligne = document.getElementById("calculRoutierEtat");
   if (!ligne) return;
   try {
     const statut = await apiFetch("/api/storage/status");
     ligne.textContent = statut?.calculRoutier?.resume || "État indisponible.";
+    renderSauvegardes(statut?.sauvegardes || null);
   } catch {
     ligne.textContent = "État indisponible (serveur injoignable).";
+    renderSauvegardes(null, "Serveur injoignable : l’état des sauvegardes est inconnu.");
+  }
+}
+
+// --- Sauvegardes (decision de Thomas du 24/09) --------------------------------
+//
+// Le serveur sauvegarde la base seul (au plus une fois par heure d'activite) et
+// savait quand ca echouait (lastBackupError, « l'UI doit alerter ») ; l'ecran
+// ne le disait nulle part. La carte montre la derniere (date, taille), une
+// alerte si besoin, et -- pour l'administration -- « Sauvegarder maintenant »
+// et « Telecharger la derniere ». Le serveur donne des faits ; les phrases sont
+// ecrites ici.
+function phraseAlerteSauvegardes(alerte) {
+  if (!alerte) return "";
+  switch (alerte.type) {
+    case "echec":
+      return `La dernière sauvegarde a échoué${alerte.at ? ` (${formatDateLongue(alerte.at)})` : ""} : ${alerte.message || "erreur inconnue"}. Les données sont enregistrées, mais pas sauvegardées.`;
+    case "lecture":
+      return `Le dossier des sauvegardes est illisible : ${alerte.message || "erreur inconnue"}.`;
+    case "suspendues":
+      return "Sauvegardes suspendues : la base a été réinitialisée à vide. Elles reprennent à la première saisie.";
+    case "aucune":
+      return "Aucune sauvegarde pour l’instant.";
+    case "perimee":
+      return `Des saisies du ${formatDateLongue(alerte.depuis)} ne sont dans aucune sauvegarde, et la dernière a plus de 24 h.`;
+    default:
+      return "État des sauvegardes à vérifier.";
+  }
+}
+
+// « 13 septembre » : le jour seul (l'annee si ce n'est pas celle-ci).
+function formatJourLong(iso) {
+  const d = new Date(iso);
+  if (!iso || Number.isNaN(d.getTime())) return "—";
+  const options = { day: "numeric", month: "long" };
+  if (d.getFullYear() !== new Date().getFullYear()) options.year = "numeric";
+  return d.toLocaleDateString("fr-FR", options);
+}
+
+function renderSauvegardes(etat, erreur = "") {
+  const carte = document.getElementById("parSauvegardes");
+  if (!carte) return;
+  const alerte = document.getElementById("parSauvegardesAlerte");
+  const texte = erreur || phraseAlerteSauvegardes(etat?.alerte);
+  if (alerte) {
+    alerte.textContent = texte;
+    alerte.hidden = !texte;
+  }
+  const derniere = etat?.derniere;
+  const taille = derniere ? formatFileSize(derniere.taille).replace(".", ",") : "";
+  setText("parSauvegardeDerniere", derniere
+    ? `${formatDateLongue(derniere.date)} · ${taille}`
+    : (etat ? "Aucune" : "—"));
+  setText("parSauvegardesGardees", etat && etat.nombre
+    ? `${etat.nombre} sauvegarde${etat.nombre > 1 ? "s" : ""} sur ${etat.jours} jour${etat.jours > 1 ? "s" : ""}, depuis le ${formatJourLong(etat.plusAncienne)}`
+    : "—");
+
+  // Les gestes : a l'administration seulement (le serveur les refuse aux
+  // autres, requireAdministration). Un autre compte lit la carte et sait
+  // pourquoi il n'a pas les boutons, comme pour la numerotation des bons.
+  const gestes = document.getElementById("parSauvegardesGestes");
+  const telecharger = document.getElementById("parSauvegardeTelecharger");
+  const note = document.getElementById("parSauvegardesNote");
+  const admin = Boolean(etat?.administration);
+  if (gestes) gestes.hidden = !admin;
+  if (telecharger) telecharger.hidden = !(admin && etat?.telechargement?.permis);
+  let raison = "";
+  if (etat && !admin) raison = "Sauvegarder et télécharger : réservé aux administrateurs.";
+  else if (admin && derniere && etat.telechargement && !etat.telechargement.permis && etat.telechargement.raison) {
+    raison = "Téléchargement fermé : sans connexion, tout visiteur est administrateur (SEREO_ENABLE_DB_EXPORT=1 l’ouvre).";
+  }
+  if (note) {
+    note.textContent = raison;
+    note.hidden = !raison;
+  }
+}
+
+async function sauvegarderMaintenant() {
+  try {
+    const resultat = await apiFetch("/api/backup/now", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tag: "manuelle" })
+    });
+    notify(resultat?.ok === false ? (resultat.error || "Sauvegarde impossible.") : "Sauvegarde faite.", resultat?.ok === false ? "error" : "success");
+  } catch (error) {
+    notify(`Sauvegarde impossible : ${error.message || "erreur"}`, "error");
+  } finally {
+    // La carte se relit : la nouvelle derniere, ou l'echec qui s'y inscrit.
+    await afficherCalculRoutier();
+  }
+}
+
+// --- Horizon de « A recommander » (24/09) --------------------------------------
+// Un curseur de 7 a 30 jours, enregistre 500 ms apres le dernier mouvement
+// (comme ceux de la tournee), puis les donnees sont relues : la pastille Stock
+// et l'ecran comptent aussitot avec le nouvel horizon.
+let horizonSaveTimer = null;
+function libelleHorizon(jours) {
+  return `${jours} jours`;
+}
+async function renderHorizonRecommande() {
+  const curseur = document.getElementById("parHorizonSlider");
+  const valeur = document.getElementById("parHorizonValeur");
+  const statut = document.getElementById("parHorizonStatut");
+  if (!curseur) return;
+  if (!curseur.dataset.listenerAttached) {
+    curseur.dataset.listenerAttached = "1";
+    curseur.addEventListener("input", () => {
+      if (valeur) valeur.textContent = libelleHorizon(curseur.value);
+      if (statut) statut.textContent = "Enregistrement…";
+      clearTimeout(horizonSaveTimer);
+      horizonSaveTimer = setTimeout(async () => {
+        try {
+          const reglage = await apiFetch("/api/settings/stock", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ horizonJours: Number(curseur.value) })
+          });
+          if (statut) statut.textContent = `Enregistré : ${libelleHorizon(reglage?.horizonJours ?? curseur.value)}.`;
+          loadData();
+        } catch (error) {
+          if (statut) statut.textContent = error?.enFile ? error.message : `Erreur : ${error.message || "réseau"}`;
+        } finally {
+          horizonSaveTimer = null;
+        }
+      }, 500);
+    });
+  }
+  // Une saisie en cours n'est pas ecrasee par la lecture (meme regle que la tournee).
+  if (horizonSaveTimer !== null) return;
+  const poser = jours => {
+    curseur.value = String(jours);
+    if (valeur) valeur.textContent = libelleHorizon(jours);
+  };
+  // Chaque produit du stock porte l'horizon avec lequel il a ete compte : pas
+  // de requete de plus a chaque chargement. Sans produit, on le demande.
+  const connu = Number(stock.find(p => p.upcomingHorizonDays)?.upcomingHorizonDays);
+  if (connu) {
+    poser(connu);
+    return;
+  }
+  try {
+    const reglage = await apiFetch("/api/settings/stock");
+    if (horizonSaveTimer === null) poser(reglage.horizonJours);
+  } catch {
+    if (statut) statut.textContent = "Réglage illisible (serveur injoignable).";
   }
 }
 
@@ -6263,6 +6530,7 @@ function renderSettings() {
   updateBrandImageStatus();
   renderTourneeSettings();
   afficherCalculRoutier();
+  renderHorizonRecommande();
   renderParSecteursPilules();
   chargerNumerotation();
   majDroitsNumerotation();
@@ -8675,7 +8943,9 @@ function estDefinitivementHorsLigne() {
 // position de l'instant ; rejoue une heure plus tard, il reordonnerait la
 // tournee d'apres un endroit que le livreur a quitte. L'ecran le refuse hors
 // ligne, avant tout envoi.
-const JAMAIS_EN_FILE = [/^\/api\/comptes(\/|$)/, /^\/api\/orders\/purge$/, /^\/api\/routes\/[^/]+\/(annuler|cloturer|reoptimiser)$/];
+// Une sauvegarde demandee hors ligne ne se differe pas (24/09) : rejouee des
+// heures plus tard, elle ne sauvegarderait pas l'etat qu'on voulait garder.
+const JAMAIS_EN_FILE = [/^\/api\/comptes(\/|$)/, /^\/api\/orders\/purge$/, /^\/api\/routes\/[^/]+\/(annuler|cloturer|reoptimiser)$/, /^\/api\/backup\/now$/];
 
 /** Met l'ecriture en file si elle est recuperable. Rend true si c'est fait. */
 async function tenterMiseEnFile(url, options) {

@@ -69,12 +69,15 @@ const APP_SHELL = [
 // -- une copie perimee montree comme fraiche -- est desormais tenue autrement :
 // toute reponse rendue par le cache porte l'en-tete X-Sereo-Cache, et la page
 // ne dit alors jamais « A jour ».
+// /api/sauvegardes/derniere (24/09) : la base entiere, pour l'administrateur.
+// Jamais une copie dans le cache de l'appareil.
 const API_CACHE_EXCLUDED = [
   "/api/storage/status",
   "/api/version",
   "/api/me",
   "/api/comptes",
-  "/api/geocode"
+  "/api/geocode",
+  "/api/sauvegardes/derniere"
 ];
 
 // Network-first avec timeout puis fallback cache pour les GET /api/*.

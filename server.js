@@ -15,6 +15,9 @@ const { fondDeCarte } = require("./lib/fond-de-carte");
 const { GestionnaireOsrm } = require("./lib/osrm-local");
 // Le jour calendaire est celui de Paris, quel que soit le fuseau du processus (24/09).
 const { jourParis, jourDeLInstant, ajouterJours, debutSemaine, debutMois, moisSuivant, moisPrecedent } = require("./lib/jour-paris");
+// Le calendrier des abonnements, celui de l'ecran Abonnements (« A recommander
+// qui voit venir », 24/09 : les echeances ne se recalculent pas autrement).
+const calendrierAbonnements = require("./lib/subscriptions");
 
 loadEnvFile(path.join(__dirname, ".env"));
 
@@ -2438,6 +2441,16 @@ let backupsSuspendedFreshEmpty = false;
 // pouvait tourner des jours sans nouveau backup en paraissant saine.
 let lastBackupAt = null;
 let lastBackupError = null;
+// Carte « Sauvegardes » (24/09) : l'instant de la derniere ecriture de donnees
+// DE CE PROCESSUS (ms), ou null s'il n'a encore rien ecrit. Une sauvegarde ne
+// part qu'apres une ecriture, au plus une par heure : sans ecriture, une
+// sauvegarde de trois jours reste a jour (un week-end sans activite n'est pas
+// une panne). L'alerte « perimee » veut donc une ecriture PLUS RECENTE que la
+// derniere sauvegarde. Les deux ecritures internes (la mise en coherence du
+// demarrage, la ligne d'historique d'une sauvegarde manuelle) ne comptent pas.
+let derniereModificationA = null;
+// Au-dela, une sauvegarde qui ne couvre pas la derniere ecriture est signalee.
+const SAUVEGARDE_PERIMEE_MS = 24 * 60 * 60 * 1000;
 // Nombre max de fichiers .corrupt-<ts> conserves (forensic) avant purge
 const QUARANTINE_RETENTION = 5;
 
@@ -2766,7 +2779,9 @@ function healDatabaseAtBoot() {
     // Revue du 23/09 (lot 5) : la position « Me localiser » exacte ne dort plus
     // dans le trace des tournees terminees calculees avant le lot.
     rognerTracesGpsTerminees(db);
-    writeDb(db, { backup: false });
+    // La mise en coherence du demarrage n'est pas une saisie : elle ne rend
+    // pas la derniere sauvegarde « perimee » (carte Sauvegardes, 24/09).
+    writeDb(db, { backup: false, modification: false });
     if (lastStorageRecovery) {
       console.error(`[boot] ATTENTION : recovery storage detectee au demarrage (${lastStorageRecovery.mode}).`);
     } else {
@@ -2849,6 +2864,10 @@ function ensureOrderNumbers(db) {
 const DEPOT_LIBELLE_MAX = 200;
 const MESSAGE_PREVENIR_MAX = 300;
 const MESSAGE_PREVENIR_DEFAUT = "Bonjour, je passe vers {heure} pour votre livraison.";
+// L'horizon de « A recommander », en jours (Parametres, 24/09).
+const HORIZON_MIN_JOURS = 7;
+const HORIZON_MAX_JOURS = 30;
+const HORIZON_DEFAUT_JOURS = 14;
 
 function normalizeSettings(settings = {}) {
   const appearance = settings && typeof settings === "object" && settings.appearance && typeof settings.appearance === "object"
@@ -2888,6 +2907,17 @@ function normalizeSettings(settings = {}) {
     ? tourneeRaw.messagePrevenir.trim().slice(0, MESSAGE_PREVENIR_MAX)
     : MESSAGE_PREVENIR_DEFAUT;
 
+  // « A recommander » qui voit venir (decision de Thomas du 24/09) : l'horizon,
+  // en jours, des commandes planifiees et des echeances d'abonnement comptees.
+  // Le delai de reassort fournisseur : 7 a 30 jours, 14 par defaut.
+  const stockRaw = settings && typeof settings === "object" && settings.stock && typeof settings.stock === "object"
+    ? settings.stock
+    : {};
+  const rawHorizon = Number(stockRaw.horizonJours);
+  const horizonJours = Number.isInteger(rawHorizon) && rawHorizon >= HORIZON_MIN_JOURS && rawHorizon <= HORIZON_MAX_JOURS
+    ? rawHorizon
+    : HORIZON_DEFAUT_JOURS;
+
   // Revue R1 NIT-15 + R2 minor : si `settings` est une string corrompue,
   // `...settings` spread les indices de caracteres ("0":"a", "1":"b", ...).
   // Si `settings` est un Array, `typeof === "object"` passe mais on spread
@@ -2910,6 +2940,9 @@ function normalizeSettings(settings = {}) {
       depot,
       retourAuDepot,
       messagePrevenir
+    },
+    stock: {
+      horizonJours
     }
   };
 }
@@ -2959,7 +2992,7 @@ function dbHasData(db) {
 }
 
 function writeDb(db, options = {}) {
-  const { backup = true } = options;
+  const { backup = true, modification = true } = options;
 
   syncWorkflow(db);
 
@@ -2989,6 +3022,7 @@ function writeDb(db, options = {}) {
     fs.writeFileSync(tempPath, JSON.stringify(db, null, 2), "utf8");
     fs.renameSync(tempPath, DB_PATH);
   }
+  if (modification) derniereModificationA = Date.now();
 
   // Chantier 2 : backup async fire-and-forget. Le main thread ne bloque
   // plus 300-800 ms sur gzipSync d'une base 100 MB — la compression part
@@ -3106,6 +3140,9 @@ async function withWriteLock(fn) {
 // (typiquement -65% sur une base SQLite).
 const BACKUP_THROTTLE_MS = 60 * 60 * 1000; // 1h
 const BACKUP_RETENTION = 30;
+// Decision de Thomas du 24/09 : EN PLUS des 30 dernieres, une sauvegarde par
+// jour (de Paris) pendant 30 jours. Voir sauvegardesAGarder().
+const BACKUP_JOURS_JOURNALIERES = 30;
 const BACKUP_FILENAME_PATTERN = /^db-.*\.(sqlite|json)(\.gz)?$/;
 
 function listBackupEntries() {
@@ -3115,7 +3152,8 @@ function listBackupEntries() {
     .map(name => {
       const fullPath = path.join(BACKUP_DIR, name);
       try {
-        return { name, fullPath, mtimeMs: fs.statSync(fullPath).mtimeMs };
+        const stat = fs.statSync(fullPath);
+        return { name, fullPath, mtimeMs: stat.mtimeMs, size: stat.size };
       } catch {
         return null;
       }
@@ -3128,9 +3166,40 @@ function listBackupEntries() {
     .sort((a, b) => (b.mtimeMs - a.mtimeMs) || b.name.localeCompare(a.name));
 }
 
+// Les sauvegardes a garder (decision de Thomas du 24/09).
+//
+// Avant : les 30 plus recentes, point. A une sauvegarde par heure d'activite,
+// elles couvraient environ trois jours ouvres : une erreur remarquee une
+// semaine plus tard n'avait plus de sauvegarde d'avant elle.
+//
+// Maintenant : les 30 plus recentes, COMME AVANT, plus la derniere de chaque
+// jour de Paris sur les 30 derniers jours (aujourd'hui compris). Une
+// journaliere n'est pas un fichier de plus : c'est une sauvegarde deja ecrite
+// que la rotation ne supprime pas. Pour les jours que les 30 dernieres
+// couvrent deja, elle en fait partie.
+//
+// L'ensemble garde CONTIENT toujours celui d'avant (les 30 plus recentes) :
+// la rotation ne supprime jamais plus qu'avant, meme apres un mois sans
+// activite (les 30 plus recentes, toutes vieilles, restent).
+//
+// `entries` : triees de la plus recente a la plus ancienne (listBackupEntries).
+function sauvegardesAGarder(entries, maintenant = new Date()) {
+  const garder = new Set(entries.slice(0, BACKUP_RETENTION).map(entry => entry.name));
+  const premierJour = ajouterJours(jourParis(maintenant), -(BACKUP_JOURS_JOURNALIERES - 1));
+  const joursVus = new Set();
+  for (const entry of entries) {
+    const jour = jourParis(entry.mtimeMs);
+    if (!jour || jour < premierJour || joursVus.has(jour)) continue;
+    joursVus.add(jour);
+    garder.add(entry.name);
+  }
+  return garder;
+}
+
 function pruneOldBackups() {
   const entries = listBackupEntries();
-  entries.slice(BACKUP_RETENTION).forEach(entry => {
+  const garder = sauvegardesAGarder(entries);
+  entries.filter(entry => !garder.has(entry.name)).forEach(entry => {
     try { fs.unlinkSync(entry.fullPath); } catch { /* best-effort */ }
   });
 }
@@ -3926,15 +3995,23 @@ const NEEDED_ORDER_STATUSES = new Set([
 //
 // Correctness : `stockItemMatchesLine` sert de reference (OR sur code/name).
 // L'index reproduit fidelement sa semantique en O(N+M) au lieu de O(N*M).
+//
+// `neededNotDeducted` (relecture adverse du 24/09) : la part de `needed` que
+// le stock n'a pas encore sortie du rayon. Une commande dont le stock est
+// reserve (stockReservedAt : confirmee, saisie chez le client, en
+// preparation) a deja deduit ses quantites de `quantite` ; seules ses lignes
+// gardees non deduites (stockNonDeduit, livraison acceptee sur un stock non
+// suivi) restent a prendre. « A recommander » compare CE besoin au stock
+// d'aujourd'hui : avec `needed`, une commande confirmee manquait deux fois.
 function buildStockMetricsIndex(commandes) {
-  const totals = new Map(); // canonicalKey -> { reserved, needed }
+  const totals = new Map(); // canonicalKey -> { reserved, needed, neededNotDeducted }
   const byCode = new Map(); // codeNorm -> Set<canonicalKey>
   const byName = new Map(); // nameNorm -> Set<canonicalKey>
 
   const ensureCanonical = (canonicalKey) => {
     let slot = totals.get(canonicalKey);
     if (!slot) {
-      slot = { reserved: 0, needed: 0 };
+      slot = { reserved: 0, needed: 0, neededNotDeducted: 0 };
       totals.set(canonicalKey, slot);
     }
     return slot;
@@ -3950,6 +4027,8 @@ function buildStockMetricsIndex(commandes) {
     const isReserved = Boolean(order.stockReservedAt && RESERVED_ORDER_STATUSES.includes(order.status));
     const isNeeded = NEEDED_ORDER_STATUSES.has(order.status);
     if (!isReserved && !isNeeded) continue;
+    // null : rien de deduit, toute la ligne reste a prendre.
+    const nonDeduites = order.stockReservedAt ? new Set(order.stockNonDeduit || []) : null;
 
     for (const line of normalizeProducts(order.products)) {
       const qty = Math.max(0, number(line.quantite, 0));
@@ -3965,6 +4044,7 @@ function buildStockMetricsIndex(commandes) {
       const slot = ensureCanonical(canonicalKey);
       if (isReserved) slot.reserved += qty;
       if (isNeeded) slot.needed += qty;
+      if (isNeeded && (!nonDeduites || nonDeduites.has(productKeyFromLine(line)))) slot.neededNotDeducted += qty;
 
       addReverse(byCode, codeNorm, canonicalKey);
       addReverse(byName, nameNorm, canonicalKey);
@@ -4000,6 +4080,81 @@ function lookupStockMetric(index, product, kind) {
   return total;
 }
 
+// « A recommander » qui voit venir (decisions de Thomas du 24/09, 2 et 3).
+//
+// La demande CONNUE D'AVANCE, sur l'horizon regle dans Parametres (14 jours
+// par defaut, 7 a 30), en plus des commandes en cours (quantityNeeded) :
+//   - les commandes planifiees (planifiee, a_confirmer) livrees d'ici la fin
+//     de l'horizon -- une date passee compte aujourd'hui : elle attend encore ;
+//   - les echeances des abonnements ACTIFS pas encore generees, d'aujourd'hui
+//     a la fin de l'horizon. Elles viennent de schedule() (lib/subscriptions.js),
+//     le calendrier de l'ecran Abonnements : un abonnement en pause ou arrete
+//     n'y figure pas, et une echeance deja generee y porte son orderId -- elle
+//     est comptee par sa commande, une seule fois. Une echeance PASSEE sans
+//     commande n'est pas « a venir » : l'ecran Abonnements la montre en
+//     retard (elle peut dater d'avant la saisie de l'abonnement).
+// Les lignes se rattachent aux produits comme dans buildStockMetricsIndex
+// (code OU nom, cles canoniques) ; chaque produit recoit sa demande par jour.
+const STATUTS_PLANIFIES = new Set(["planifiee", "a_confirmer"]);
+
+function buildUpcomingDemandIndex(db, today = jourParis()) {
+  const horizonJours = normalizeSettings(db.settings || {}).stock.horizonJours;
+  const fin = ajouterJours(today, horizonJours);
+  const parCle = new Map(); // canonicalKey -> Map<jour, quantite>
+  const byCode = new Map();
+  const byName = new Map();
+  const indexer = (map, key, canonicalKey) => {
+    if (!key) return;
+    let set = map.get(key);
+    if (!set) { set = new Set(); map.set(key, set); }
+    set.add(canonicalKey);
+  };
+  const ajouter = (products, jour) => {
+    for (const line of normalizeProducts(products)) {
+      const qty = Math.max(0, number(line.quantite, 0));
+      if (qty <= 0) continue;
+      const codeNorm = normalizeTextKey(line.code || line.sku || line.reference);
+      const nameNorm = normalizeTextKey(line.nom || line.produit || line.productName || line.name);
+      if (!codeNorm && !nameNorm) continue;
+      const canonicalKey = (codeNorm || "_") + "|" + (nameNorm || "_");
+      let parJour = parCle.get(canonicalKey);
+      if (!parJour) { parJour = new Map(); parCle.set(canonicalKey, parJour); }
+      parJour.set(jour, (parJour.get(jour) || 0) + qty);
+      indexer(byCode, codeNorm, canonicalKey);
+      indexer(byName, nameNorm, canonicalKey);
+    }
+  };
+
+  for (const order of db.commandes || []) {
+    if (!STATUTS_PLANIFIES.has(order.status)) continue;
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(order.deliveryDate || "")) ? order.deliveryDate : today;
+    if (date > fin) continue;
+    ajouter(order.products, date < today ? today : date);
+  }
+  for (const occurrence of calendrierAbonnements.schedule(db, today, horizonJours)) {
+    if (occurrence.orderId || occurrence.date < today || occurrence.date > fin) continue;
+    ajouter(occurrence.products, occurrence.date);
+  }
+  return { parCle, byCode, byName, horizonJours };
+}
+
+// La demande a venir d'un produit, par jour croissant : [{ date, quantite }].
+function lookupUpcomingDemand(index, product) {
+  if (!index || !index.parCle) return [];
+  const codeNorm = normalizeTextKey(getProductCode(product));
+  const nameNorm = normalizeTextKey(getProductName(product));
+  const candidates = new Set();
+  if (codeNorm) for (const k of index.byCode.get(codeNorm) || []) candidates.add(k);
+  if (nameNorm) for (const k of index.byName.get(nameNorm) || []) candidates.add(k);
+  const parJour = new Map();
+  for (const k of candidates) {
+    for (const [jour, qty] of index.parCle.get(k) || []) parJour.set(jour, (parJour.get(jour) || 0) + qty);
+  }
+  return [...parJour]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, quantite]) => ({ date, quantite: Math.round(quantite * 100) / 100 }));
+}
+
 // Garde l'API publique (utilisee par les tests). Sans index, recompose
 // l'ancien algorithme N*M. Avec index, lookup O(matches) tres rapide.
 function calculateReservedStock(db, product, index) {
@@ -4031,10 +4186,15 @@ function getStockStatus(product, db, index) {
 // Signature etendue : `index` est optionnel. S'il est passe (typique via
 // getStockView), tout est en O(1). Sans (call-site isole), comportement
 // legacy N*M (correct mais lent).
-function enrichStockItem(db, product, index) {
+function enrichStockItem(db, product, index, upcomingIndex = buildUpcomingDemandIndex(db)) {
   const quantityAvailable = getStockQuantity(product);
   const quantityReserved = calculateReservedStock(db, product, index);
   const quantityNeeded = calculateNeededStock(db, product, index);
+  // Ce qui reste a prendre sur quantityAvailable (buildStockMetricsIndex).
+  const quantityNeededNotDeducted = lookupStockMetric(index && index.totals ? index : buildStockMetricsIndex(db.commandes), product, "neededNotDeducted");
+  // « A recommander » qui voit venir (24/09) : la demande connue d'avance, par
+  // jour, sur l'horizon de Parametres. L'ecran en tire le jour du manque.
+  const upcomingDemand = lookupUpcomingDemand(upcomingIndex, product);
 
   return {
     ...product,
@@ -4043,6 +4203,10 @@ function enrichStockItem(db, product, index) {
     quantityAvailable,
     quantityReserved,
     quantityNeeded,
+    quantityNeededNotDeducted,
+    quantityUpcoming: Math.round(upcomingDemand.reduce((total, d) => total + d.quantite, 0) * 100) / 100,
+    upcomingDemand,
+    upcomingHorizonDays: upcomingIndex.horizonJours,
     quantityTotal: quantityAvailable === null ? null : quantityAvailable + quantityReserved,
     alertThreshold: getStockAlertThreshold(product),
     stockMinimum: getStockAlertThreshold(product),
@@ -4085,7 +4249,8 @@ function defaultDeliverySectors() {
 function getStockView(db) {
   // Construit l'index UNE seule fois, puis lookup O(1) par produit.
   const index = buildStockMetricsIndex(db.commandes);
-  return db.stock.map(product => enrichStockItem(db, product, index));
+  const upcomingIndex = buildUpcomingDemandIndex(db);
+  return db.stock.map(product => enrichStockItem(db, product, index, upcomingIndex));
 }
 
 function getRecommendations(db) {
@@ -7053,8 +7218,108 @@ app.get("/api/storage/status", (req, res) => {
     // Calcul routier (23/09) : carte locale ou serveur public, zone, date de
     // la carte, derniere erreur, espace utilise ; `resume` est la ligne de
     // l'ecran Parametres.
-    calculRoutier: osrmLocal.etat()
+    calculRoutier: osrmLocal.etat(),
+    // Carte « Sauvegardes » de Parametres (24/09) : ce que ces champs disaient
+    // (« l'UI doit alerter »), plus la derniere sauvegarde lue SUR LE DISQUE
+    // (lastBackupAt repart a null a chaque demarrage) et le verdict.
+    sauvegardes: etatDesSauvegardes(getRequestIdentity(req))
   });
+});
+
+// Le telechargement de la base entiere (clients, adresses, telephones, et les
+// empreintes des mots de passe des comptes) : a qui est-il ouvert ?
+//
+// A l'administration seulement (decision de Thomas du 24/09, garde
+// requireAdministration sur la route). Mais sans authentification (dev, ou un
+// deploiement sans SEREO_AUTH_* ni compte), TOUT visiteur est « administrateur »
+// (getRequestIdentity) : le role ne prouve plus rien. C'est le cas que
+// SEREO_ENABLE_DB_EXPORT garde deja pour /api/db (export JSON de la base, ouvert
+// a tout compte connecte, 0 par defaut) : sans authentification, c'est lui qui
+// decide. Avec authentification, la variable ne s'applique pas ici -- l'ouvrir
+// pour la sauvegarde ouvrirait aussi /api/db a tous les comptes.
+// Rend null si le telechargement est permis, sinon la raison du refus.
+function refusDeTelechargement(identite) {
+  if (!identite || !getRole(identite.role).administration) return "Reserve aux administrateurs.";
+  if (!isAccessAuthEnabled() && !ENABLE_DB_EXPORT) {
+    return "Sans connexion, tout visiteur est administrateur : le telechargement de la base reste ferme (SEREO_ENABLE_DB_EXPORT=1 l'ouvre).";
+  }
+  return null;
+}
+
+// L'etat des sauvegardes pour la carte de Parametres. Des donnees, pas des
+// phrases : l'ecran ecrit le texte. `alerte` vaut null quand tout va bien.
+// Une lecture du dossier impossible est elle-meme une alerte, jamais un 500 :
+// la page de Parametres doit rester lisible quand le disque ne l'est pas.
+function etatDesSauvegardes(identite, maintenant = Date.now()) {
+  let entries = [];
+  let erreurLecture = null;
+  try {
+    entries = listBackupEntries();
+  } catch (error) {
+    erreurLecture = String(error.message || error);
+  }
+  const derniere = entries[0] || null;
+  // Les jours de Paris que les sauvegardes sur le disque couvrent.
+  const jours = new Set(entries.map(e => jourParis(e.mtimeMs))).size;
+  const plusAncienne = entries.length ? entries[entries.length - 1] : null;
+  // 2 s de marge : un systeme de fichiers qui date a la seconde (ou a deux,
+  // FAT) arrondit la sauvegarde qui suit une ecriture AVANT cette ecriture.
+  const perimee = Boolean(derniere)
+    && maintenant - derniere.mtimeMs > SAUVEGARDE_PERIMEE_MS
+    && derniereModificationA !== null
+    && derniereModificationA > derniere.mtimeMs + 2000;
+
+  // Une alerte a la fois, la plus grave d'abord.
+  let alerte = null;
+  if (erreurLecture) alerte = { type: "lecture", message: erreurLecture };
+  else if (lastBackupError) alerte = { type: "echec", at: lastBackupError.at, message: lastBackupError.message };
+  else if (backupsSuspendedFreshEmpty) alerte = { type: "suspendues" };
+  else if (!derniere) alerte = { type: "aucune" };
+  else if (perimee) alerte = { type: "perimee", depuis: new Date(derniereModificationA).toISOString() };
+
+  const refus = refusDeTelechargement(identite);
+  return {
+    derniere: derniere
+      ? { nom: derniere.name, date: new Date(derniere.mtimeMs).toISOString(), taille: derniere.size }
+      : null,
+    nombre: entries.length,
+    jours,
+    plusAncienne: plusAncienne ? new Date(plusAncienne.mtimeMs).toISOString() : null,
+    alerte,
+    politique: {
+      heures: BACKUP_THROTTLE_MS / 3600000,
+      dernieres: BACKUP_RETENTION,
+      joursJournalieres: BACKUP_JOURS_JOURNALIERES,
+      perimeeApresHeures: SAUVEGARDE_PERIMEE_MS / 3600000
+    },
+    administration: Boolean(identite && getRole(identite.role).administration),
+    telechargement: { permis: refus === null && Boolean(derniere), raison: refus }
+  };
+}
+
+// Telecharger la derniere sauvegarde (decision de Thomas du 24/09) : le seul
+// moyen d'en avoir une copie HORS de la machine -- les sauvegardes vivent sur
+// le meme disque que la base (DEPLOYMENT.md). Jamais une autre que la
+// derniere : aucun nom de fichier ne vient de la requete.
+app.get("/api/sauvegardes/derniere", requireAdministration, (req, res) => {
+  try {
+    const refus = refusDeTelechargement(req.identite);
+    if (refus) {
+      res.status(403).json({ error: refus });
+      return;
+    }
+    const derniere = listBackupEntries()[0];
+    if (!derniere) {
+      res.status(404).json({ error: "Aucune sauvegarde a telecharger." });
+      return;
+    }
+    res.set("Cache-Control", "no-store");
+    res.download(derniere.fullPath, derniere.name, { headers: { "Content-Type": "application/gzip" } }, error => {
+      if (error && !res.headersSent) handleRouteError(error, res, "Erreur telechargement sauvegarde");
+    });
+  } catch (error) {
+    handleRouteError(error, res, "Erreur telechargement sauvegarde");
+  }
 });
 
 // Chantier 1 (2026-06-04) : force un backup immediat, hors throttle. Utilise
@@ -7064,16 +7329,28 @@ app.get("/api/storage/status", (req, res) => {
 // Revue R1 P0 : addHistory + writeDb dans withWriteLock pour persister
 // l'entree de log (avant, addHistory(readDb(), ...) sans writeDb perdait
 // l'entree silencieusement).
-app.post("/api/backup/now", async (req, res) => {
+// Decision de Thomas du 24/09 : un geste d'administration (la carte
+// « Sauvegardes » de Parametres le porte). Sans authentification (dev), tout le
+// monde est administrateur, comme pour la numerotation des bons.
+app.post("/api/backup/now", requireAdministration, async (req, res) => {
   try {
     const tag = clean(req.body?.tag || "manual").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 32);
     const result = await withWriteLock(async () => {
-      const backupPath = writeBackupNow(tag);
+      let backupPath;
+      try {
+        backupPath = writeBackupNow(tag);
+      } catch (error) {
+        // La carte le dira aussi apres un rechargement, pas seulement le toast.
+        lastBackupError = { at: new Date().toISOString(), message: String(error.message || error) };
+        throw error;
+      }
       if (!backupPath) return { ok: false, error: "Backup impossible (source absente)" };
 
       const db = readDb();
       addHistory(db, "Backup manuel", `Backup forcé créé : ${path.basename(backupPath)}`, { tag, backupPath });
-      writeDb(db, { backup: false }); // pas de double-backup recursif
+      // Pas de double-backup recursif ; et cette ligne d'historique ne rend pas
+      // la sauvegarde qu'elle annonce « perimee ».
+      writeDb(db, { backup: false, modification: false });
       return { ok: true, backupPath: path.basename(backupPath), tag };
     });
     if (!result.ok) {
@@ -7209,6 +7486,35 @@ app.get("/api/settings/order-numbering", (req, res) => {
 app.get("/api/settings/tournee", (req, res) => {
   const db = readDb();
   res.json(normalizeSettings(db.settings || {}).tournee);
+});
+
+// « A recommander » qui voit venir (24/09) : l'horizon en jours. Un reglage du
+// quotidien, comme ceux de la tournee : ouvert a tout compte connecte.
+app.get("/api/settings/stock", (req, res) => {
+  const db = readDb();
+  res.json(normalizeSettings(db.settings || {}).stock);
+});
+
+app.patch("/api/settings/stock", async (req, res) => {
+  try {
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      db.settings = normalizeSettings(db.settings || {});
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "horizonJours")) {
+        const brut = req.body.horizonJours;
+        // Un nombre entier, borne : Number(null) = 0 et « 14 » passeraient sinon.
+        if (typeof brut !== "number" || !Number.isInteger(brut) || brut < HORIZON_MIN_JOURS || brut > HORIZON_MAX_JOURS) {
+          throw badRequest(`Horizon invalide : un nombre entier de jours, de ${HORIZON_MIN_JOURS} a ${HORIZON_MAX_JOURS}.`);
+        }
+        db.settings.stock.horizonJours = brut;
+      }
+      writeDb(db);
+      return normalizeSettings(db.settings).stock;
+    });
+    res.json(result);
+  } catch (error) {
+    handleRouteError(error, res, "Erreur parametres stock");
+  }
 });
 
 // Le fond de carte choisi par l'environnement (lib/fond-de-carte.js). La page
@@ -9707,7 +10013,9 @@ module.exports = {
   // Chantier 2 : permet aux tests d'attendre que le backup async finisse
   // avant d'assertioner sur le filesystem.
   _flushPendingBackup: flushPendingBackup,
-  _resetStorageRecoveryForTest: () => { lastStorageRecovery = null; storageRecoveryFatal = null; backupsSuspendedFreshEmpty = false; lastBackupAt = null; lastBackupError = null; },
+  _resetStorageRecoveryForTest: () => { lastStorageRecovery = null; storageRecoveryFatal = null; backupsSuspendedFreshEmpty = false; lastBackupAt = null; lastBackupError = null; derniereModificationA = null; },
+  // Carte « Sauvegardes » (24/09) : la regle de retention, pure.
+  _sauvegardesAGarder: sauvegardesAGarder,
   _isCorruptionError: isCorruptionError,
   _normalizeDateInput: normalizeDateInput,
   _excelDateToIso: excelDateToIso,
