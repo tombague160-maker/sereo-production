@@ -102,6 +102,14 @@ function createSqliteStore(options) {
       return row ? JSON.parse(row.trace) : null;
     },
 
+    /**
+     * Le nombre de lignes de ventes, sans les lire ni les decoder (24/09) :
+     * le tableau de bord n'en montre que le compte.
+     */
+    compterVentes() {
+      return database.prepare("SELECT COUNT(*) AS n FROM ventes").get().n;
+    },
+
     checkpoint() {
       database.exec("PRAGMA wal_checkpoint(FULL)");
     },

@@ -4132,7 +4132,7 @@ function recordStockMovement(db, product, oldQuantity, newQuantity, reason = "Aj
   });
 }
 
-function getDashboardSummary(db) {
+function getDashboardSummary(db, { nombreDeVentes = db.ventes.length } = {}) {
   const stockView = getStockView(db);
   const today = jourParis();
   const orderCounts = {
@@ -4198,7 +4198,7 @@ function getDashboardSummary(db) {
     stock: stockCounts,
     // Le compte des lignes de ventes importees (« Resume du jour ») : la page
     // ne charge plus /api/ventes a l'ouverture pour ce seul nombre (24/09).
-    ventes: { total: db.ventes.length },
+    ventes: { total: nombreDeVentes },
     alerts: alerts.slice(0, 20),
     routes: {
       draft: db.routes.filter(route => ["brouillon", "prete"].includes(route.status)).length,
@@ -7053,7 +7053,9 @@ app.get("/api/stock-movements", (req, res) => {
 
 app.get("/api/dashboard", (req, res) => {
   const db = readDb();
-  res.json(getDashboardSummary(db));
+  // Le compte des ventes sans lire la table (revue du 24/09) : sur SQLite, un
+  // COUNT ; 429 lignes et 249 ko de JSON decodes pour un nombre, avant.
+  res.json(getDashboardSummary(db, useSqliteStorage() ? { nombreDeVentes: getSqliteStore().compterVentes() } : {}));
 });
 
 app.get("/api/storage/status", (req, res) => {

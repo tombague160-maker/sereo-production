@@ -144,3 +144,21 @@ test("une ecriture apres une lecture partielle garde les tables non lues, et une
   writeDb(db2);
   assert.equal(readDb().importsArchives.length, 0);
 });
+
+// Revue adverse du lot (24/09). /api/dashboard lisait et decodait les 429
+// lignes de ventes (249 ko en production) pour en donner le NOMBRE, a chaque
+// ouverture et apres chaque ecriture.
+test("le tableau de bord compte les ventes sans lire la table", async () => {
+  const lues = await tablesLues("/api/dashboard");
+  assert.ok(lues.includes("commandes"), "prealable : l'instrument voit les lectures du tableau de bord");
+  assert.deepEqual(lues.filter(t => t === "ventes"), [], "/api/dashboard lit la table des ventes pour un compte");
+  // Temoin : le compte est celui de la table, et suit une ecriture.
+  const compte = async () => (await (await fetch(`${base}/api/dashboard`)).json()).ventes.total;
+  const n = readDb().ventes.length;
+  assert.ok(n > 400, "prealable : le jeu de forme production");
+  assert.equal(await compte(), n);
+  const db = readDb();
+  db.ventes = [...db.ventes, { ...db.ventes[0], id: "vente-banc-compte" }];
+  writeDb(db);
+  assert.equal(await compte(), n + 1);
+});
