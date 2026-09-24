@@ -8865,6 +8865,21 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     // cle complete, sinon nom + code postal -- et la complete sans rien effacer.
     const cleClientDeLaVente = vente => clientKey({ nom: vente.client, rue: vente.rue, codePostal: vente.codePostal, ville: vente.ville });
     const indexFiches = indexerClientsExistants(db.clients, new Set(ventes.map(cleClientDeLaVente)));
+    // Les commandes ORPHELINES : leur fiche a disparu (un ancien import la
+    // retirait ; la production en a une, du 03/06). Une fiche recreee par le
+    // fichier reprend leur identifiant -- sinon la commande serait refaite en
+    // double. Par nom normalise, une fiche au plus par identifiant.
+    const idsDesFiches = new Set(db.clients.map(client => String(client.id)));
+    const orphelines = new Map();
+    db.commandes.forEach(order => {
+      const nom = normalizeTextKey(order.clientName);
+      if (order.clientId && !idsDesFiches.has(String(order.clientId)) && nom && !orphelines.has(nom)) orphelines.set(nom, order.clientId);
+    });
+    const idOrphelin = nom => {
+      const id = orphelines.get(normalizeTextKey(nom));
+      if (id !== undefined) orphelines.delete(normalizeTextKey(nom));
+      return id;
+    };
 
     ventes.forEach(vente => {
       const key = cleClientDeLaVente(vente);
@@ -8894,7 +8909,7 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
           ...existingClient,
           _ficheExistante: trouvee.fiche,
           _parSecondaire: trouvee.parSecondaire,
-          id: existingClient.id || crypto.randomUUID(),
+          id: existingClient.id || idOrphelin(vente.client) || crypto.randomUUID(),
           nom: vente.client || existingClient.nom || "Client sans nom",
           rue: valeurFusionnee(vente.rue, existingClient.rue),
           ville: valeurFusionnee(vente.ville, existingClient.ville),

@@ -188,6 +188,26 @@ test("import — deux fiches en double (meme cle) en base : aucune ne disparait"
   assert.equal(fiche(db, "c-dupont-bis").email, "autre@example.test");
 });
 
+test("import — une commande dont la fiche a disparu (ancien import) : la fiche recreee reprend son identifiant, pas de commande en double", async () => {
+  // La production a une commande livree du 03/06 dont la fiche n'existe plus
+  // (retiree par un ancien import, deduit par la chasse du 24/09). Un fichier
+  // qui la cite recreait une fiche NEUVE, donc une commande en double.
+  const perdue = { nom: "Pharmacie Perdue", rue: "9 rue Basse", codePostal: "39100", ville: "Dole" };
+  semer({ commandes: [{
+    id: "cmd-perdue", numero: "CMD-2026-040", clientId: "c-perdu", clientName: perdue.nom, dateCommande: "2026-06-03",
+    status: "livre", importedAsLivre: true, address: perdue.rue, city: perdue.ville, postalCode: perdue.codePostal,
+    products: [{ code: "CH-L", nom: "Changes taille L", quantite: 2 }]
+  }] });
+  const r = await importerVentes(baseUrl, [ENTETE,
+    ["03/06/2026", perdue.nom, "CH-L", "Changes taille L", "2", perdue.rue, perdue.codePostal, perdue.ville, "", "", "24"]]);
+  assert.equal(r.status, 200, r.body?.error);
+  const db = readDb();
+  assert.deepEqual(db.commandes.map(o => o.id), ["cmd-perdue"], "une commande en double a ete creee");
+  const fiche = db.clients.find(c => c.nom === perdue.nom);
+  assert.equal(fiche?.id, "c-perdu", "la fiche recreee ne reprend pas l'identifiant de sa commande");
+  assert.deepEqual(r.body.clientsImport, { created: 1, updated: 0, preserved: 3 });
+});
+
 test("import VIDE (l'en-tete seul) : rien ne disparait -- fiches, commandes, ventes", async () => {
   const vente = { id: "v-1", client: DUPONT.nom, rue: DUPONT.rue, codePostal: DUPONT.codePostal, ville: DUPONT.ville,
     codeProduit: "CH-L", produit: "Changes taille L", quantite: 2, ttc: 24, date: "10/09/2026", dateCommandeIso: "2026-09-10" };
