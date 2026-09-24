@@ -32,7 +32,14 @@ function createSqliteStore(options) {
     // (ce qui, avant, etait interprete a tort comme une corruption -> wipe).
     database.exec("PRAGMA busy_timeout = 5000");
     database.exec("PRAGMA journal_mode = WAL");
-    database.exec("PRAGMA synchronous = NORMAL");
+    // Robustesse (25/09) : FULL, plus NORMAL. En WAL, NORMAL n'attend le
+    // disque (fsync) qu'au checkpoint : une coupure de courant pouvait effacer
+    // les derniers gestes deja confirmes au livreur (reponse 200 recue, la
+    // file hors ligne ne les garde plus). FULL attend le disque a chaque
+    // validation. Cout mesure : 3,1 ms par validation sur le poste de
+    // developpement (0,03 ms en NORMAL), une par ecriture, contre 80 a 100 ms
+    // pour l'ecriture d'un geste sur une base de la forme de la production.
+    database.exec("PRAGMA synchronous = FULL");
     database.exec("PRAGMA foreign_keys = ON");
 
     // quick_check : detecte la corruption STRUCTURELLE du b-tree (chainage de
