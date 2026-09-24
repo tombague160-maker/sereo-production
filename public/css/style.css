@@ -14989,10 +14989,16 @@ html, body, main.content { overflow-x: clip; }
 /* --- 5. Menu « Plus » -------------------------------------------------------
    En clair, une regle ecrite pour une ancienne feuille VERTE peignait les
    icones en blanc a 82 % sur un panneau blanc (1:1). Le trait de la charte :
-   texte secondaire, sur fond transparent (5,13:1 sur blanc). */
+   texte secondaire, sur fond transparent (5,13:1 sur blanc).
+   Integration du 24/09 : la geometrie passe sous 820 px (regle « un seul
+   dessin » du lot theme : une regle du clair ne pose que sa peinture au
+   bureau) ; le menu « Plus » ne s'ouvre que depuis la barre basse du
+   telephone, rien ne change a l'ecran. */
 :root[data-color-scheme="light"] .more-sheet-icon {
-  width: 32px; height: 32px; border-radius: 12px;
   background: transparent; color: var(--v8-texte-secondaire);
+}
+@media (max-width: 820px) {
+  :root[data-color-scheme="light"] .more-sheet-icon { width: 32px; height: 32px; border-radius: 12px; }
 }
 /* Menu ouvert : les messages passent en haut de l'ecran, au lieu de couvrir
    Analyse et Parametres au bas de la feuille. */
