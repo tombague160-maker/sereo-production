@@ -3793,7 +3793,9 @@ function majSousTitreClients() {
   if (aCorriger) morceaux.push(`${aCorriger} adresse${aCorriger > 1 ? "s" : ""} à corriger`);
   // Lot « donnees utiles » (24/09) : les deux signaux qui ont chacun leur filtre.
   const aRelancer = crmClients.filter(c => c.relanceSuggeree).length;
-  if (aRelancer) morceaux.push(`${aRelancer} à relancer`);
+  // « à rappeler » : le mot du filtre (« Clients à rappeler ») depuis le lot
+  // parcours, « un seul vocabulaire » (integration du 24/09).
+  if (aRelancer) morceaux.push(`${aRelancer} à rappeler`);
   const aVerifier = crmClients.filter(c => coordonneesAVerifier(c).length).length;
   if (aVerifier) morceaux.push(`${aVerifier} fiche${aVerifier > 1 ? "s" : ""} à vérifier`);
   setText("pageSubtitle", morceaux.join(" · "));
@@ -3854,7 +3856,7 @@ function renderCrm() {
           : `<span class="cli-meta">${escapeHtml([villeAffichee(client.ville), livraison ? `livrée le ${dateCourte(livraison)}` : ""].filter(Boolean).join(" · ") || "—")}</span>`;
       // Un client signale par son rythme (decision 5) : le mot, pas la couleur seule.
       const badge = client.relanceSuggeree
-        ? `<span class="cli-badge cli-badge--tiede cli-badge--relance">À relancer</span>`
+        ? `<span class="cli-badge cli-badge--tiede cli-badge--relance">À rappeler</span>`
         : abonnement
           ? `<span class="cli-badge cli-badge--${abonnement.status === "active" ? "froid" : "tiede"}">${abonnement.status === "active" ? "Abonné" : "En pause"}</span>`
           : "";
@@ -3990,7 +3992,7 @@ function renderFicheClient() {
     </div>
     ${blocCa}
     ${extras.length ? `<div class="cli-notes">${extras.map(e => `<p class="cli-note">${escapeHtml(e)}</p>`).join("")}</div>` : ""}
-    ${client.relanceSuggeree ? `<p class="cli-relance">${ICONE_CLI.retard}<span><strong>À relancer</strong> · ${escapeHtml(texteRelance(client.relanceSuggeree))}</span></p>` : ""}
+    ${client.relanceSuggeree ? `<p class="cli-relance">${ICONE_CLI.retard}<span><strong>À rappeler</strong> · ${escapeHtml(texteRelance(client.relanceSuggeree))}</span></p>` : ""}
     <label class="cli-statut">
       <span class="cli-libelle">Statut commercial</span>
       <select data-cli-statut="${escapeAttribute(client.id)}" aria-label="Statut commercial de ${escapeAttribute(nomDuClient(client))}">

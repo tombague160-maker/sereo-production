@@ -209,16 +209,22 @@ test("garde-fous — une fiche enregistrée fausse est signalée, sans bloquer n
 
 // --- 2. Clients qui ne commandent plus ---------------------------------------
 
-test("relance — « Clients à relancer » montre le client qui a dépassé son rythme ; son statut ne change pas", async ({ page }) => {
+// Integration du 24/09 : « un seul vocabulaire » (lot parcours) -- « Rappel »
+// partout, le filtre s'appelle « Clients à rappeler ». Le signal de ce lot dit
+// donc « À rappeler », et aucun « relance » ne reste a l'ecran : le banc du lot
+// parcours ne peut pas le voir, son seme n'a aucun client signale.
+test("relance — « Clients à rappeler » montre le client qui a dépassé son rythme ; son statut ne change pas", async ({ page }) => {
   await ouvrir(page, "crm");
-  await expect(page.locator("#pageSubtitle")).toContainText("1 à relancer");
+  await expect(page.locator("#pageSubtitle")).toContainText("1 à rappeler");
   await page.locator("#crmStatusFilter").selectOption("client_a_relancer");
   const ligne = page.locator("#crmList .cli-ligne", { hasText: "Pharmacie du Marché" });
   await expect(ligne).toHaveCount(1);
-  await expect(ligne.locator(".cli-badge")).toHaveText("À relancer");
+  await expect(ligne.locator(".cli-badge")).toHaveText("À rappeler");
   await ligne.click();
   const fiche = page.locator("#cliFiche");
-  await expect(fiche.locator(".cli-relance")).toHaveText("À relancer · pas de livraison depuis 100 jours · d’habitude tous les 30 jours");
+  await expect(fiche.locator(".cli-relance")).toHaveText("À rappeler · pas de livraison depuis 100 jours · d’habitude tous les 30 jours");
+  const textes = await page.locator("#crm").evaluate(e => e.innerText + " " + [...e.querySelectorAll("option")].map(o => o.textContent).join(" "));
+  expect(`${textes} ${await page.locator("#pageSubtitle").innerText()}`, "un « relance » reste a l'ecran").not.toMatch(/relance/i);
   await expect(fiche.locator("[data-cli-statut]")).toHaveValue("client_actif");
   // Les clients livres aujourd'hui n'y sont pas.
   await expect(page.locator("#crmList .cli-ligne", { hasText: "Bellevue" })).toHaveCount(0);
