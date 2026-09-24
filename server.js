@@ -1692,13 +1692,17 @@ async function verifyPassword(password, salt, storedHash) {
 // la separation viendra si l'equipe grandit.
 //
 // Les portees par role restent declarees ci-dessous et restent TESTEES via
-// roleAllowsTabStrict, pour deux raisons : elles documentent l'intention, et
-// les activer se resume a poser SEREO_SEPARATION_ROLES=1. Sans cela, il
-// faudrait re-concevoir la repartition de zero le jour ou le besoin revient.
+// roleAllowsTabStrict : elles documentent l'intention, et SEREO_SEPARATION_ROLES=1
+// masque les onglets hors portee.
 //
-// A noter : `onglets` ne pilote que la NAVIGATION. Le masquage d'un onglet
-// n'est qu'un confort visuel — toute restriction reelle doit etre appliquee
-// cote serveur, sur les endpoints.
+// A noter : `onglets` ne pilote que la NAVIGATION -- poser la variable ne
+// ferme AUCUNE route (la chasse aux defauts du 24/09 : meme banc, meme
+// resultat, variable posee ou non). Les restrictions reelles sont cote
+// serveur, sur les routes, independamment de la variable (garde-fous du
+// 25/09) : requireAdministration (import, purge, reglages, sauvegardes,
+// comptes, numerotation) et refuserAuLivreur (modification du stock). La
+// liste complete : test/garde-fous-routes.test.js. `peutEcrire` n'est lu
+// nulle part.
 const SEPARATION_DES_ROLES = process.env.SEREO_SEPARATION_ROLES === "1";
 
 const ROLES = {
@@ -7874,7 +7878,7 @@ app.get(IMAGE_DE_MARQUE_CHEMIN, (req, res) => {
   res.send(Buffer.from(morceaux[2], "base64"));
 });
 
-app.patch("/api/settings/appearance", async (req, res) => {
+app.patch("/api/settings/appearance", requireAdministration, async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
       const db = readDb();
@@ -7928,7 +7932,7 @@ app.get("/api/settings/stock", (req, res) => {
   res.json(normalizeSettings(db.settings || {}).stock);
 });
 
-app.patch("/api/settings/stock", async (req, res) => {
+app.patch("/api/settings/stock", requireAdministration, async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
       const db = readDb();
@@ -8000,7 +8004,7 @@ app.patch("/api/settings/order-numbering", requireAdministration, async (req, re
 //   un middleware inline. Reduire la limite globale casserait brandImage.
 //   La protection reste : typeof + bornes serveur. Backlog : rate-limit
 //   global /api/settings/*.
-app.patch("/api/settings/tournee", async (req, res) => {
+app.patch("/api/settings/tournee", requireAdministration, async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
       const db = readDb();
@@ -8401,7 +8405,7 @@ app.get("/api/delivery-sectors", (req, res) => {
   res.json((db.deliverySectors || []).map(decorerSecteurPourAffichage));
 });
 
-app.post("/api/delivery-sectors", async (req, res) => {
+app.post("/api/delivery-sectors", requireAdministration, async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
       const db = readDb();
@@ -8417,7 +8421,7 @@ app.post("/api/delivery-sectors", async (req, res) => {
   }
 });
 
-app.patch("/api/delivery-sectors/:id", async (req, res) => {
+app.patch("/api/delivery-sectors/:id", requireAdministration, async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
       const db = readDb();
@@ -8434,7 +8438,7 @@ app.patch("/api/delivery-sectors/:id", async (req, res) => {
   }
 });
 
-app.delete("/api/delivery-sectors/:id", async (req, res) => {
+app.delete("/api/delivery-sectors/:id", requireAdministration, async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
       const db = readDb();
@@ -8506,7 +8510,7 @@ app.get("/api/routes/:id", (req, res) => {
   res.json(route);
 });
 
-app.post("/api/import/stock", uploadExcel, async (req, res) => {
+app.post("/api/import/stock", requireAdministration, uploadExcel, async (req, res) => {
   const uploadedPath = req.file?.path;
 
   try {
@@ -8735,7 +8739,7 @@ function raisonImportIgnore(db, order) {
   return null;
 }
 
-app.post("/api/import/ventes", uploadExcel, async (req, res) => {
+app.post("/api/import/ventes", requireAdministration, uploadExcel, async (req, res) => {
   const uploadedPath = req.file?.path;
 
   // M2 (revue) : compteur des quantites Excel negatives silencieusement
@@ -9223,7 +9227,7 @@ app.get("/api/imports/archives", (req, res) => {
 // v1.12.0 : telechargement d'un fichier Excel archive. Verifie que l'id est
 // connu en DB et que le fichier existe encore sur disque (peut etre purge
 // manuellement par le sysadmin).
-app.get("/api/imports/archives/:id/download", (req, res) => {
+app.get("/api/imports/archives/:id/download", requireAdministration, (req, res) => {
   try {
     const db = readDb();
     const archive = (db.importsArchives || []).find(a => String(a.id) === String(req.params.id));
@@ -9351,7 +9355,7 @@ app.post("/api/orders/purge", requireAdministration, async (req, res) => {
   }
 });
 
-app.patch("/api/stock/:id", async (req, res) => {
+app.patch("/api/stock/:id", refuserAuLivreur, async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
       const db = readDb();
@@ -10046,41 +10050,12 @@ app.post("/api/livraison", async (req, res) => {
   }
 });
 
-app.post("/api/reset-tournee", async (req, res) => {
-  try {
-    await withWriteLock(async () => {
-      const db = readDb();
-
-      db.clients = db.clients.map(client => ({
-        ...client,
-        statut: "restant"
-      }));
-
-      db.commandes = db.commandes.map(order => {
-        if (["en_livraison", "livre", "probleme_livraison", "a_reprogrammer"].includes(order.status)) {
-          setOrderStatus(order, order.preparationStatus === "terminee" ? "pret_livraison" : "stock_a_verifier");
-        }
-
-        return order;
-      });
-
-      db.routes = db.routes.map(route => ({
-        ...route,
-        status: route.status === "en_livraison" ? "prete" : route.status,
-        stops: route.stops.map(stop => ({
-          ...stop,
-          status: stop.status === "en_livraison" ? "pret_livraison" : stop.status
-        }))
-      }));
-
-      addHistory(db, "Tournee", "Tournee reinitialisee");
-      writeDb(db);
-    });
-    res.json({ success: true });
-  } catch (error) {
-    handleRouteError(error, res, "Erreur reset tournee");
-  }
-});
+// Garde-fous (25/09) : l'ancienne route POST /api/reset-tournee est retiree.
+// Aucun ecran ni banc ne l'appelait (grep du 24/09), elle etait ouverte a toute
+// session, remettait tous les clients a « restant » et tentait de repasser des
+// commandes LIVREES en « pretes » -- sur une base sans commande livree, elle
+// defaisait une tournee en cours (200 mesure). Une route d'ecriture qu'aucun
+// ecran n'appelle ne sert qu'a un attaquant.
 
 // Lot 2 de l'audit geo, decision 7 de Thomas (23/09) : l'ancienne route
 // POST /api/optimize-route est retiree. Elle ordonnait les CLIENTS (et non les
@@ -10157,6 +10132,27 @@ function requireAdministration(req, res, next) {
     return;
   }
 
+  req.identite = identite;
+  next();
+}
+
+/**
+ * Refuse une route au role « livreur » (garde-fous du 25/09) : la
+ * modification directe du stock. Comme requireAdministration, independant de
+ * la separation des onglets -- masquer un onglet ne garde rien.
+ * La liste de toutes les routes d'ecriture et de leur garde :
+ * test/garde-fous-routes.test.js (et DESIGN.md, garde-fous du 25/09).
+ */
+function refuserAuLivreur(req, res, next) {
+  const identite = getRequestIdentity(req);
+  if (!identite) {
+    res.status(401).json({ error: "Connexion requise" });
+    return;
+  }
+  if (String(identite.role) === "livreur") {
+    res.status(403).json({ error: "Réservé au bureau et à la préparation." });
+    return;
+  }
   req.identite = identite;
   next();
 }
