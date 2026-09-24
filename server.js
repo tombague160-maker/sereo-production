@@ -860,6 +860,28 @@ function isEnvAuthConfigured() {
   return Boolean(AUTH_USER && AUTH_PASSWORD);
 }
 
+// Garde-fous (25/09) : le mot de passe d'environnement n'avait aucune longueur
+// minimale (celui de production faisait 5 lettres ; les comptes en base en
+// exigent MIN_PASSWORD_LENGTH = 10). En dessous de 12 caracteres : un
+// avertissement au journal du demarrage, et un bandeau pour l'administrateur
+// (/api/me). JAMAIS un refus de demarrer : il verrouillerait Thomas hors de son
+// application apres la mise a jour, sans moyen de corriger depuis l'ecran.
+const MOT_DE_PASSE_ENVIRONNEMENT_MIN = 12;
+
+function motDePasseEnvironnementCourt() {
+  return isEnvAuthConfigured() && AUTH_PASSWORD.length < MOT_DE_PASSE_ENVIRONNEMENT_MIN;
+}
+
+// Le mot de passe et sa longueur ne sont jamais ecrits.
+function avertirMotDePasseCourt() {
+  if (!motDePasseEnvironnementCourt()) return;
+  console.warn(
+    `[auth] SEREO_AUTH_PASSWORD fait moins de ${MOT_DE_PASSE_ENVIRONNEMENT_MIN} caracteres : `
+    + "le changer sur le serveur (20 caracteres aleatoires ou plus ; cela ferme aussi toutes les sessions). "
+    + "Le serveur demarre quand meme."
+  );
+}
+
 /**
  * Existe-t-il au moins un compte actif en base ?
  *
@@ -10284,7 +10306,12 @@ app.get("/api/me", (req, res) => {
     separationDesRoles: SEPARATION_DES_ROLES,
     // `source` distingue un compte en base d'un acces par variables
     // d'environnement : le second ne peut pas etre modifie depuis l'interface.
-    source: identite.source
+    source: identite.source,
+    // Garde-fous (25/09) : a l'administration seulement (un autre compte n'a
+    // pas a apprendre que le mot de passe d'administration est court).
+    ...(getRole(identite.role).administration && motDePasseEnvironnementCourt()
+      ? { motDePasseEnvironnementCourt: true }
+      : {})
   });
 });
 
@@ -10618,6 +10645,7 @@ function startServer(port = PORT, host = HOST) {
   // P1 v1.14.0 : healing initial pour garantir la coherence apres restart
   // (notamment apres restauration d'un backup ou montee de version)
   healDatabaseAtBoot();
+  avertirMotDePasseCourt();
   nettoyerSauvegardesInterrompues();
   if (BACKUP_COPY_DIR) nettoyerSauvegardesInterrompues(BACKUP_COPY_DIR);
   planifierPurgeDesTournees();

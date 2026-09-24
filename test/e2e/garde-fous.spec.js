@@ -194,3 +194,90 @@ test.describe("compte non administrateur", () => {
     await expect(page.locator("#tourneeSpeedSlider")).toBeEnabled();
   });
 });
+
+// --- 3. Mot de passe d'environnement court : un bandeau pour l'administrateur
+//
+// Serveur seme AVEC connexion (port 3601, un seul endroit), l'un apres l'autre :
+// un mot de passe de 11 caracteres, puis un de 26 (temoin). Le journal du
+// demarrage et /api/me sont tenus par test/garde-fous-mot-de-passe.test.js.
+
+const lancerAvecConnexion = motDePasse => demarrer({ port: 3601, env: { SEREO_AUTH_USER: "admin-e2e", SEREO_AUTH_PASSWORD: motDePasse, SEREO_AUTH_MAX_ATTEMPTS: "50" } });
+
+async function seConnecter(page, base, identifiant, motDePasse, { largeur = 1440, schema = "light" } = {}) {
+  await page.addInitScript(s => { try { localStorage.setItem("sereo:colorScheme", s); } catch { /* sans stockage */ } }, schema);
+  await page.setViewportSize({ width: largeur, height: largeur < 800 ? 844 : 900 });
+  await page.goto(base + "/login", { waitUntil: "networkidle" });
+  await page.fill("#username", identifiant);
+  await page.fill("#password", motDePasse);
+  await Promise.all([page.waitForURL(u => !String(u).includes("/login")), page.getByRole("button", { name: "Se connecter" }).click()]);
+  await page.waitForLoadState("networkidle");
+}
+
+test.describe("mot de passe d'environnement court", () => {
+  const COURT = "motdepasse1";
+  let srv;
+  test.beforeAll(async () => { srv = await lancerAvecConnexion(COURT); });
+  test.afterAll(async () => { if (srv) await srv.arreter(); });
+
+  for (const schema of ["light", "dark"]) {
+    test(`en ${schema === "light" ? "clair" : "sombre"}, l'administrateur lit le bandeau (4,5:1), sa croix fait 44 px et montre son focus`, async ({ page }) => {
+      await seConnecter(page, srv.base, "admin-e2e", COURT, { schema });
+      const bandeau = page.locator("#bandeauMotDePasseCourt");
+      await expect(bandeau).toBeVisible();
+      await expect(bandeau).toHaveAttribute("role", "alert");
+      await expect(bandeau).toContainText("moins de 12 caractères");
+      await expect(bandeau).not.toContainText(COURT);
+      expect(await contraste(page, "#bandeauMotDePasseCourt strong")).toBeGreaterThanOrEqual(4.5);
+      expect(await contraste(page, "#bandeauMotDePasseCourt p")).toBeGreaterThanOrEqual(4.5);
+      const croix = bandeau.getByRole("button", { name: "Fermer l’avertissement" });
+      const boite = await croix.boundingBox();
+      expect(Math.min(boite.width, boite.height)).toBeGreaterThanOrEqual(44);
+      await croix.focus();
+      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press("Tab");
+      await expect(croix).toBeFocused();
+      expect(await croix.evaluate(e => getComputedStyle(e).outlineStyle)).not.toBe("none");
+      await croix.click();
+      await expect(bandeau).toHaveCount(0);
+    });
+  }
+
+  test("au téléphone, le bandeau tient dans l'écran", async ({ page }) => {
+    await seConnecter(page, srv.base, "admin-e2e", COURT, { largeur: 390 });
+    await expect(page.locator("#bandeauMotDePasseCourt")).toBeVisible();
+    const deborde = await page.evaluate(() => [...document.querySelectorAll("#bandeauMotDePasseCourt, #bandeauMotDePasseCourt *")]
+      .filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.right > window.innerWidth + 0.5; })
+      .map(e => e.tagName));
+    expect(deborde).toEqual([]);
+  });
+
+  test("témoin : un compte livreur ne le voit pas", async ({ browser }) => {
+    const admin = await browser.newContext();
+    const pageAdmin = await admin.newPage();
+    await seConnecter(pageAdmin, srv.base, "admin-e2e", COURT);
+    const creation = await pageAdmin.evaluate(async () => (await fetch("/api/comptes", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ identifiant: "livreur-e2e-mdp", motDePasse: "livreur-e2e-sans-valeur-2026", role: "livreur" })
+    })).status);
+    expect(creation).toBe(201);
+    const livreur = await browser.newContext();
+    const page = await livreur.newPage();
+    await seConnecter(page, srv.base, "livreur-e2e-mdp", "livreur-e2e-sans-valeur-2026");
+    await expect(page.locator("#tabNav, .sidebar").first()).toBeVisible();
+    await expect(page.locator("#bandeauMotDePasseCourt")).toHaveCount(0);
+    await admin.close();
+    await livreur.close();
+  });
+});
+
+test.describe("mot de passe d'environnement long (témoin)", () => {
+  let srv;
+  test.beforeAll(async () => { srv = await lancerAvecConnexion("mot-de-passe-long-sans-valeur-e2e"); });
+  test.afterAll(async () => { if (srv) await srv.arreter(); });
+
+  test("l'administrateur n'a pas de bandeau", async ({ page }) => {
+    await seConnecter(page, srv.base, "admin-e2e", "mot-de-passe-long-sans-valeur-e2e");
+    await expect(page.locator("#parSauvegardes, .sidebar").first()).toBeAttached();
+    await expect(page.locator("#bandeauMotDePasseCourt")).toHaveCount(0);
+  });
+});

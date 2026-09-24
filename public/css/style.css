@@ -15739,3 +15739,10 @@ button.button.danger .button-icon { width: 18px; height: 18px; flex: none; }
   :root[data-color-scheme] #commandes .cmd-filtres > .cmd-tri:not(.cmd-filtre-second) select,
   :root:not([data-color-scheme]) #commandes .cmd-filtres > .cmd-tri:not(.cmd-filtre-second) select { width: 100%; min-width: 0; text-overflow: ellipsis; }
 }
+
+/* --- Garde-fous (25/09) : bandeau « mot de passe d'administration trop court »
+   Meme forme que le bandeau de restauration (couleur d'alerte, texte clair) ;
+   sa croix fait 44 px (celle du bandeau de restauration en fait 32) et montre
+   son focus au clavier. */
+#bandeauMotDePasseCourt .storage-recovery-dismiss { width: 44px; height: 44px; }
+#bandeauMotDePasseCourt .storage-recovery-dismiss:focus-visible { outline: 3px solid var(--v8-surface); outline-offset: 2px; }

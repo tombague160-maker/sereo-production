@@ -7802,6 +7802,35 @@ async function loadMoi() {
   majDroitsNumerotation();
   majDroitsAdministration();
   majCarteJournal();
+  if (moi?.motDePasseEnvironnementCourt) montrerBandeauMotDePasseCourt();
+}
+
+// Garde-fous (25/09) : le mot de passe d'environnement fait moins de 12
+// caracteres. Le serveur demarre quand meme (un refus verrouillerait Thomas
+// dehors) ; /api/me le dit a l'administration seulement, et ce bandeau le
+// redit a chaque ouverture : il ne se corrige que sur le serveur. Meme forme
+// que le bandeau de restauration ; construit sans innerHTML.
+function montrerBandeauMotDePasseCourt() {
+  if (document.getElementById("bandeauMotDePasseCourt")) return;
+  const bandeau = document.createElement("div");
+  bandeau.id = "bandeauMotDePasseCourt";
+  bandeau.className = "storage-recovery-banner";
+  bandeau.setAttribute("role", "alert");
+  const contenu = document.createElement("div");
+  contenu.className = "storage-recovery-content";
+  const titre = document.createElement("strong");
+  titre.textContent = "Mot de passe d’administration trop court";
+  const texte = document.createElement("p");
+  texte.textContent = "Le mot de passe du compte d’environnement (SEREO_AUTH_PASSWORD) fait moins de 12 caractères. Change-le sur le serveur : 20 caractères aléatoires ou plus. Cela ferme aussi toutes les sessions ouvertes.";
+  contenu.append(titre, texte);
+  const fermer = document.createElement("button");
+  fermer.type = "button";
+  fermer.className = "storage-recovery-dismiss";
+  fermer.setAttribute("aria-label", "Fermer l’avertissement");
+  fermer.textContent = "×";
+  fermer.addEventListener("click", () => bandeau.remove());
+  bandeau.append(contenu, fermer);
+  document.body.prepend(bandeau);
 }
 
 // La numerotation des bons est reservee a l'administration (decision du

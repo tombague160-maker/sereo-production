@@ -207,3 +207,13 @@ test("les sessions fermées le restent après un redémarrage (lues dans la base
   S._oublierRevocationsPourTest();
   assert.equal(await moi(cookie), 401, "apres un redemarrage, la session fermee se rouvre");
 });
+
+// --- 3. Temoin du mot de passe court (test/garde-fous-mot-de-passe.test.js) ---
+
+test("mot de passe d'environnement de 26 caractères : rien à signaler à l'administrateur", async () => {
+  _resetAuthRateLimitForTest();
+  const { cookie } = await connexion("admin-env", "mot-de-passe-environnement");
+  const corps = await (await fetch(`${baseUrl}/api/me`, { headers: { cookie } })).json();
+  assert.equal(corps.administration, true);
+  assert.notEqual(corps.motDePasseEnvironnementCourt, true);
+});
