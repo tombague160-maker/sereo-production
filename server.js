@@ -7957,11 +7957,21 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
 //
 // « Partie en tournee » : Probleme et A reprogrammer n'existent qu'apres une
 // tournee ; le carton est prepare et le stock deduit, comme pour une prete.
+//
+// Stock deja RESERVE (relecture adverse du 24/09) : la preparation lancee, la
+// commande terrain (reservee des sa creation), la planifiee confirmee. La
+// reservation a ete deduite sur CES produits : les reecrire, c'est la meme
+// derive (annulee, une commande terrain rendait 8 Changes et jamais ses 3
+// Aleses). Meme regle que la modification a la main : « Impossible de
+// modifier les produits apres reservation du stock ».
 function raisonImportIgnore(db, order) {
   if (order.status === "livre") return "livree";
   if (order.status === "en_livraison" || tourneeActiveDeLaCommande(db, order.id)) return "en_tournee";
   if (order.status === "pret_livraison") return "prete";
   if (STATUTS_A_RELIVRER.includes(order.status)) return "partie_en_tournee";
+  if (order.stockReservedAt) {
+    return ["en_preparation", "preparation_terminee"].includes(order.status) ? "en_preparation" : "stock_reserve";
+  }
   return null;
 }
 
@@ -8313,7 +8323,7 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       ? `, ${positionsImportRefusees} position(s) du fichier ignoree(s) (0,0, inversee ou hors zone)`
       : "";
     const ignoreesMessage = ignorees.length > 0
-      ? `, ${ignorees.length} commande(s) deja prete(s), en tournee ou livree(s) laissee(s) telle(s) quelle(s) (${ignorees.map(i => i.numero || i.id).join(", ")})`
+      ? `, ${ignorees.length} commande(s) laissee(s) telle(s) quelle(s) (${ignorees.map(i => `${i.numero || i.id} : ${i.raison}`).join(", ")})`
       : "";
     const illisiblesMessage = lignesIllisibles > 0
       ? `, ${lignesIllisibles} ligne(s) sans client ni produit ecartee(s)`

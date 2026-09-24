@@ -65,9 +65,9 @@ async function importer(lignes) {
   return { status: res.status, body: await res.json() };
 }
 
-async function poster(chemin, corps = {}) {
+async function poster(chemin, corps = {}, method = "POST") {
   const res = await fetch(`${baseUrl}${chemin}`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps)
+    method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps)
   });
   return { status: res.status, body: await res.json() };
 }
@@ -142,6 +142,35 @@ test("import — stock juste : une commande a reprogrammer ignoree rend EXACTEME
   assert.deepEqual((r.body.ignorees || []).map(i => i.raison), ["partie_en_tournee"]);
 });
 
+test("import — stock deja RESERVE (commande terrain, encore a preparer) : ignoree ; annulee, elle rend EXACTEMENT ce qu'elle avait pris", async () => {
+  // Relecture adverse (24/09) : la commande terrain est reservee des sa
+  // creation (createCustomerOrder), et reste « a preparer ». L'import la
+  // reecrivait (8 Changes L) ; annulee, elle rendait 8 Changes et jamais les
+  // 3 Aleses : { CH-L: 28, ALE: 20 } au lieu de { 23, 23 }.
+  semer({ status: "stock_a_verifier", source: "commande_terrain", stockReservedAt: "2026-09-24T07:00:00.000Z" });
+  const r = await importer([ENTETE, LIGNE_8_CHANGES]);
+  assert.equal(r.status, 200, r.body?.error);
+  assert.deepEqual(lignes(commandeLue()), [["CH-L", 3], ["ALE", 3]], "la commande au stock reserve a ete reecrite par l'import");
+  assert.equal(r.body.updated, 0);
+  assert.deepEqual((r.body.ignorees || []).map(i => [i.id, i.raison]), [["o-t", "stock_reserve"]]);
+
+  const annulation = await poster("/api/orders/o-t", { status: "annulee" }, "PATCH");
+  assert.equal(annulation.status, 200, annulation.body?.error);
+  assert.deepEqual(stockDe(readDb()), { "CH-L": 23, ALE: 23 }, "le stock rendu n'est pas celui qui avait ete pris");
+});
+
+test("import — une commande EN PREPARATION (stock reserve) n'est pas reecrite : le carton se fait sur ce qui a ete deduit", async () => {
+  for (const status of ["en_preparation", "preparation_terminee"]) {
+    semer({ status, stockReservedAt: "2026-09-24T07:00:00.000Z" });
+    const r = await importer([ENTETE, LIGNE_8_CHANGES]);
+    assert.equal(r.status, 200, r.body?.error);
+    assert.deepEqual(lignes(commandeLue()), [["CH-L", 3], ["ALE", 3]], `commande ${status} reecrite`);
+    assert.equal(commandeLue().status, status);
+    assert.deepEqual((r.body.ignorees || []).map(i => i.raison), ["en_preparation"], status);
+    assert.equal(r.body.updated, 0, status);
+  }
+});
+
 test("import — une commande PRETE hors tournee, une commande LIVREE : ignorees, chacune avec sa raison", async () => {
   for (const [status, raison] of [["pret_livraison", "prete"], ["livre", "livree"]]) {
     semer({ status });
@@ -201,5 +230,7 @@ test("import — l'historique dit les commandes laissees telles quelles", async 
   await importer([ENTETE, LIGNE_8_CHANGES]);
   const entree = readDb().historique.find(h => h.type === "Import ventes");
   assert.ok(entree, "aucune entree d'historique pour l'import");
-  assert.match(entree.message, /1 commande\(s\) deja prete\(s\), en tournee ou livree\(s\) laissee\(s\) telle\(s\) quelle\(s\)/);
+  // Chaque commande avec sa raison : elles ne sont plus seulement « pretes,
+  // en tournee ou livrees » (le stock reserve aussi, relecture du 24/09).
+  assert.match(entree.message, /1 commande\(s\) laissee\(s\) telle\(s\) quelle\(s\) \(CMD-2026-003 : en_tournee\)/);
 });
