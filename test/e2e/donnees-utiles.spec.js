@@ -274,7 +274,9 @@ test("journal — rien au chargement de l'app ; Paramètres lit une page, avec l
   // est parti hors de la page : on la recharge -- un goto qui ne change que
   // l'ancre ne recharge rien.)
   await page.goto(`${srv.base}/#stock`);
-  const reponse = page.waitForResponse(r => r.url().endsWith("/api/stock-movements") && r.status() === 200);
+  // Integration du 24/09 : la page demande les 12 qu'elle montre
+  // (/api/stock-movements?limite=12, lot reseau).
+  const reponse = page.waitForResponse(r => new URL(r.url()).pathname === "/api/stock-movements" && r.status() === 200);
   await page.reload({ waitUntil: "networkidle" });
   const recus = await (await reponse).json();
   expect(recus.map(m => m.productName)).toEqual(["Alèses", "Changes taille L"]); // temoin : le geste y est

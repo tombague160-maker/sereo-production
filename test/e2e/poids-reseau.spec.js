@@ -70,7 +70,8 @@ test("à l'ouverture, la page ne demande que ce que l'écran montre", async ({ p
   expect.soft(demandes.filter(c => /^\/(brand\/sereo-logo|api\/settings\/appearance\/image)/.test(c)), "le logo des Parametres part a l'ouverture").toEqual([]);
 
   // Ce que l'ecran montre reste montre : le compte des ventes importees.
-  await expect(page.locator("#dailySummary")).toContainText("429 ligne(s) importée(s)");
+  // « 429 lignes importées » : accorde (lot parcours, integration du 24/09).
+  await expect(page.locator("#dailySummary")).toContainText("429 lignes importées");
 });
 
 test("les Paramètres lisent leurs données en s'affichant, et les montrent", async ({ page }) => {
