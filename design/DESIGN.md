@@ -6007,11 +6007,13 @@ téléphone 390 × 844 CPU x4.
 
 **Ce qui a changé** (quatre commits `perf`, chacun tenu par un banc qui rougit sans lui) :
 
-1. **Un écran caché ne se dessine plus à chaque chargement** (`rendreSiAffiche`
-   généralisé). `renderAll` dessinait les treize écrans à l'ouverture, à chaque
+1. **Un écran caché ne se dessine plus à chaque chargement** (`rendreOuDifferer`).
+   `renderAll` dessinait les treize écrans à l'ouverture, à chaque
    actualisation et après chaque geste qui recharge. Un écran caché garde son rendu **en
-   attente** ; `showTab` le dessine en y arrivant, avec les données du moment. Le tableau
-   de bord et les pastilles de la barre latérale restent à jour partout. La rangée des
+   attente** ; `showTab` le dessine en y arrivant, **une fois**, avec les données du
+   moment. `rendreSiAffiche` garde le contrat de main (caché : rien) — voir la relecture
+   ci-dessous. Le tableau de bord, les pastilles de la barre latérale et les 12 derniers
+   mouvements du Stock restent à jour partout. La rangée des
    secteurs de la Préparation n'est plus mesurée cachée (lire `scrollHeight` forçait une
    mise en page de toute la page), ni refaite à chaque frappe.
 2. **Les formateurs `Intl` se construisent une fois** (`formatMoney`, `formatDate`,
@@ -6034,9 +6036,11 @@ téléphone 390 × 844 CPU x4.
 | Bureau, pire tâche | 52–79 ms | aucune tâche ≥ 50 ms |
 | Téléphone x4, pire tâche | 486–955 ms | 121–164 ms |
 | Téléphone x4, total des tâches longues | 950–1 503 ms | 214–365 ms |
-| Éléments dans la page | 12 939 | 2 758 (dont ~1 140 d'archives, que le lot réseau diffère) |
+| Éléments dans la page | 12 939 (12 967 au téléphone) | 2 830 (dont ~1 140 d'archives, que le lot réseau diffère ; 1 677 fusionné avec lui) |
 
 Objectif : aucune tâche > 200 ms au bureau (**tenu**), > 800 ms au téléphone (**tenu**).
+Le temps au téléphone dépend du moment : l'ancien code, remesuré le même soir, donnait
+269–454 ms (huit ouvertures) ; c'est un **journal**, pas un banc (voir la relecture).
 
 **Avant → après, arrivée sur un écran** (depuis le tableau de bord, pire tâche longue,
 médiane de trois passages ; « 0 » = aucune tâche de 50 ms) :
@@ -6078,9 +6082,10 @@ construits pendant deux rendus de liste (218 et 20 avant ; 0 après), lignes du 
 cartes hors mise en page au téléphone (0 avant ; 210 et 216 après), écritures dans la
 liste du Stock (219 avant ; 2 après), carte du catalogue remplacée par « + », rangée des
 secteurs mesurée cachée (2 fois avant ; 0 après), sélecteurs `body:has` sans chemin (52
-avant ; 0 après). Un seul chronomètre, à large marge : ouverture au téléphone x4 sous
-800 ms (892 avant, ~120 après). Témoins positifs : chaque écran se dessine en entier en
-y arrivant ; un écran quitté pendant un rechargement montre la donnée neuve en y
+avant ; 0 après), éléments de l'ouverture au téléphone (12 967 avant ; 2 830 après),
+rendus d'une arrivée sur Commandes ou À recommander (2 avant ; 1 après). Aucun
+chronomètre jugé : le temps de l'ouverture au téléphone est journalisé. Témoins
+positifs : chaque écran se dessine en entier en y arrivant ; un écran quitté pendant un rechargement montre la donnée neuve en y
 revenant ; `<body>` répond pareil aux neuf conditions avec et sans chemin ; trois règles
 de la feuille changent ce qu'elles doivent dans leur état. Harnais de mutation : chaque
 correctif retiré seul fait rougir son banc, pour sa cause (14 mutations ; deux restaient
@@ -6106,7 +6111,59 @@ rempli — et ont fait resserrer les bancs).
   listes, non touchés (quelques ms par rendu).
 - `CACHE_NAME` n'est **pas** incrémenté (consigne du lot) alors que `app.js`,
   `operations.js` et `style.css` changent : à faire à l'intégration.
-- **Intégration avec le lot réseau** (`perf/reseau-donnees`) : il appelle
-  `rendreSiAffiche("parametres", lectureDesParametres)` dans `renderAll` **et**
-  `lectureDesParametres()` dans `showTab`. Avec `rendreSiAffiche` généralisé (point 1),
-  l'arrivée sur Paramètres lirait deux fois : garder un seul des deux chemins.
+- **Intégration avec le lot réseau** (`perf/reseau-donnees`) : `app.js` fusionne **sans
+  conflit** ; seul `DESIGN.md` en a un (deux sections ajoutées au même endroit : garder
+  les deux). Les deux conflits de sens trouvés à la relecture sont réglés dans ce lot
+  (ci-dessous) et mesurés sur l'arbre fusionné.
+- **Préparation** : à la première arrivée, la rangée des secteurs se mesure deux fois (le
+  rendu en attente, puis `showTab`) ; une fois aux suivantes (mesuré). Aucune tâche de
+  50 ms au téléphone : non traité.
+
+### Relecture adverse du 24/09 — le sort de chaque point
+
+Mesures sur le jeu « production », même machine ; « fusion » = ce lot + `perf/reseau-donnees`
+(`git merge --no-commit`, arbre jetable, jamais poussé).
+
+1. **Rapport faux, et Paramètres lus deux à trois fois après fusion — vrai (important).**
+   Le rapport annonçait des conflits dans `renderAll` et `showTab` : `app.js` fusionne
+   sans conflit. En cause, ce lot : il avait changé le sens de `rendreSiAffiche` (caché :
+   rendu gardé pour l'arrivée), que le lot réseau appelle avec celui de main (caché :
+   rien) avant de lire lui-même les Paramètres en y arrivant. `rendreSiAffiche` revient
+   au texte de main, le rendu différé s'appelle `rendreOuDifferer`. Arrivée sur
+   Paramètres, fusion : `/api/storage/status`, `/api/imports/archives`, `/api/comptes`
+   2 / 2 / 3 → 1 / 1 / 1 ; tableau des 123 archives écrit 2 → 1 fois ; banc du lot
+   réseau « les Paramètres lisent leurs données en s'affichant » rouge → vert. Temps
+   (téléphone x4, trois passages) : 206–263 → 184–300 ms, dans le bruit ; au bureau,
+   aucune tâche de 50 ms ni avant ni après. Banc : `test/rendu-differe.test.js` (les
+   vraies fonctions de `app.js`) ; rouge sur l'ancien code : 1 rendu gardé au lieu de 0,
+   `{ lecture: 2, comptes: 3 }` au lieu de `{ 1, 1 }`.
+   **Trouvé en le vérifiant, même classe** : le banc du lot réseau « la copie d'avant
+   sert encore » lit les 12 derniers mouvements du Stock dès l'ouverture, depuis le
+   tableau de bord ; différés avec le Stock, ils n'y étaient pas (rouge sur la fusion :
+   12 noms attendus, liste vide). `renderStockMovements` redevient appelé à chaque
+   chargement, comme sur main (+72 éléments). Banc : les 12 mouvements sont dans la page
+   à l'ouverture, Stock caché (rouge avant). Fusion : banc réseau 5 / 5, celui-ci 15 / 15,
+   `chargement-instantane` 10 / 10, `npm test` vert.
+2. **Le seul chronomètre ne sépare pas l'ancien code — vrai (mineur).** Rejoué le même
+   soir sur l'ancien code : huit ouvertures de 269 à 454 ms, **toutes sous le seuil de
+   800 ms** (l'ancien banc, rejoué cinq fois : cinq verts). Le temps
+   est journalisé ; le banc juge les éléments de l'ouverture au téléphone (ancien code :
+   12 967 à chaque essai, rouge trois fois sur trois ; nouveau : 2 830, seuil 4 000).
+3. **Deux bancs attendaient un délai fixe — vrai (mineur).** Mutant « rendu à 1 s au lieu
+   de 200 ms » + écriture ligne à ligne : l'ancien banc du Stock est **vert** (« 0
+   écriture ») ; le nouveau, qui attend la première écriture, est rouge (≤ 2 attendu,
+   219 reçu). Même chose pour la Préparation (rendu à 1 s + rangée refaite à chaque
+   frappe) : ancien vert, nouveau rouge (pilule marquée : 1 attendu, 0 reçu) ; il attend
+   que le résumé, refait par chaque rendu, perde sa marque. Rendu à 1 s seul : les deux
+   nouveaux bancs sont verts.
+4. **Commandes dessinée deux fois par « Les N autres » et par une ancienne adresse — vrai
+   (mineur).** Le filtre se pose avant l'arrivée, le rendu passe par `rendreOuDifferer` :
+   écritures de la liste 2 → 1 dans les deux chemins ; script du geste au téléphone x4
+   (médiane de cinq) 33 → 17 ms et 24 → 18 ms. **Même classe, trouvé en cherchant** :
+   « Tout voir » du Stock vers À recommander, 334 → 167 articles créés pour 167
+   affichés, script 93 → 50 ms. Pire tâche du geste, elle, dans le bruit (76 → 64 et
+   222 → 200 ms) : la mise en page de l'écran d'arrivée domine, et elle reste une.
+5. **La jonction `node_modules` du worktree `perf-rendu-avant` — vrai (mineur).** Windows
+   PowerShell 5.1 descend dans une jonction avec `Remove-Item -Recurse`. La jonction est
+   retirée par `rmdir` (le lien seul, sa cible intacte), puis le worktree par
+   `git worktree remove` ; même geste pour l'arbre de fusion jetable.

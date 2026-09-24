@@ -354,8 +354,9 @@ test("téléphone : les règles d'écran de la feuille s'appliquent toujours (ch
 
 // Le temps de l'ouverture au telephone est JOURNALISE, pas juge : sur l'ancien
 // code, la pire tache allait de 486 a 987 ms (sept ouvertures), puis de 269 a
-// 454 ms le meme soir (huit) -- l'ancien seuil de 800 ms y etait VERT huit fois
-// sur huit (relecture du 24/09). Le banc juge ce qui la faisait : les elements
+// 454 ms le meme soir (huit, toutes sous l'ancien seuil de 800 ms ; l'ancien
+// banc, rejoue cinq fois, cinq verts -- relecture du 24/09). Le banc juge ce qui
+// la faisait : les elements
 // dessines par l'ouverture, un compte qui ne depend pas de la machine.
 test("téléphone (CPU x4) : l'ouverture ne dessine que l'écran affiché (temps journalisé)", async ({ page }) => {
   test.setTimeout(120000);
