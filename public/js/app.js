@@ -3097,8 +3097,9 @@ function renderImportSummary() {
 // y entre (tabindex -1) : un lecteur d'ecran le lit, Tab repart de la.
 function montrerBilanImport() {
   const bilan = document.getElementById("importSummary");
+  // (Un import du stock lance depuis l'ecran Stock : le tableau de bord est
+  // cache, sa boite est vide -- rien ne defile, le focus ne part pas.)
   if (!bilan || bilan.hidden) return;
-  if (ongletAffiche !== "journee") return;
   const boite = bilan.getBoundingClientRect();
   // La barre basse du telephone est fixe : ce qui passe dessous est cache.
   const barre = document.querySelector(".mobile-tabbar")?.getBoundingClientRect();

@@ -36,9 +36,10 @@ function seme() {
 }
 
 let srv;
-async function semer() {
+// Le port n'est ecrit qu'ICI (test/ports-e2e.test.js) : chaque banc resème.
+async function semer(seed = seme()) {
   if (srv) await srv.arreter();
-  srv = await demarrer({ port: 3520, seed: seme() });
+  srv = await demarrer({ port: 3520, seed });
 }
 test.afterAll(async () => { if (srv) await srv.arreter(); });
 
@@ -174,6 +175,8 @@ test("import, bureau : le resume est JUSTE et EN HAUT, sans defiler ; la command
   expect(Math.round(f.height)).toBeGreaterThanOrEqual(44);
   await fermer.click();
   await expect(bilan).toBeHidden();
+  // Le focus ne reste pas sur un bouton disparu : il revient a l'import.
+  expect(await page.evaluate(() => document.activeElement?.dataset?.action)).toBe("importer-ventes");
   expect(erreurs).toEqual([]);
   await ctx.close();
 });
@@ -365,6 +368,33 @@ for (const [nom, viewport] of [["bureau", BUREAU], ["telephone", TELEPHONE]]) {
     await ctx.close();
   });
 }
+
+test("« À envoyer » revient quand une commande l'attend (donnee ancienne), et reste choisie apres l'envoi de la derniere", async ({ browser }) => {
+  // Le temoin positif du retrait : la pilule n'est pas supprimee, elle ne se
+  // montre que si une commande l'attend -- c'est le seul chemin vers « Envoyer
+  // en préparation » pour elle.
+  test.setTimeout(120000);
+  const s = seme();
+  s.commandes.push({ ...structuredClone(s.commandes.find(o => o.id === "o-parc")), id: "o-ancienne", status: "commande_client_validee", clientName: "Commande ancienne" });
+  await semer(s);
+  const { ctx, page, erreurs } = await ouvrir(browser, "commandes");
+  const pilule = page.locator('#cmdPilules [data-cmd-filtre="a-envoyer"]');
+  await expect(pilule, "une commande attend l'envoi, et la pilule n'est pas la").toHaveCount(1);
+  await pilule.click();
+  await page.locator('[data-cmd-choix="o-ancienne"]').check();
+  const envoi = page.waitForResponse(r => r.url().includes("/api/customer-orders/send-preparation"));
+  await page.locator("#cmdEnvoyer").click();
+  expect((await envoi).status()).toBe(200);
+  // La derniere est partie : la liste est vide, mais la pilule choisie reste
+  // la et pressee -- l'ecran dit ou l'on est.
+  await expect(page.locator("#commandes .empty-state")).toBeVisible();
+  await expect(pilule).toHaveAttribute("aria-pressed", "true");
+  // Quitter le filtre : la pilule, vide, s'en va.
+  await page.locator('#cmdPilules [data-cmd-filtre="toutes"]').click();
+  await expect(pilule).toHaveCount(0);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
 
 test("valider une commande : contrastes de la ligne mise en avant, clair et sombre", async ({ browser }) => {
   test.setTimeout(120000);
