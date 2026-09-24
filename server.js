@@ -416,6 +416,26 @@ app.disable("x-powered-by");
 // est indispensable pour que le rate limit s'applique par utilisateur et pas
 // sur l'IP unique du reverse proxy.
 app.set("trust proxy", 1);
+// Arret propre (robustesse, 25/09) : les requetes en cours sont comptees, pour
+// que l'arret (SIGTERM au redeploiement) les laisse finir ; une requete qui
+// arrive pendant l'arret recoit 503 (la file hors ligne garde le geste et le
+// renvoie, X-Sereo-Geste le rend idempotent) au lieu d'etre coupee.
+app.use((req, res, next) => {
+  if (arretEnCours) {
+    res.set("Connection", "close");
+    return res.status(503).json({ error: "Serveur en cours de redemarrage, reessaie dans un instant." });
+  }
+  requetesEnCours += 1;
+  let finie = false;
+  const finir = () => {
+    if (finie) return;
+    finie = true;
+    requetesEnCours -= 1;
+  };
+  res.once("finish", finir);
+  res.once("close", finir);
+  next();
+});
 app.use(securityHeaders);
 // Compression des reponses texte (HTML, CSS, JS, JSON de l'API). Mesure du
 // 23/09 : Node envoyait tout brut -- 750 Ko a chaque chargement (175 Ko une fois
@@ -10269,7 +10289,118 @@ function planifierPurgeDesTournees() {
   if (suivants.unref) suivants.unref();
 }
 
+// ============================================================================
+// ARRET PROPRE (robustesse, 25/09, chasse aux defauts section 4)
+// ============================================================================
+//
+// Avant : aucun gestionnaire de SIGTERM. A chaque redeploiement (sereo-updater,
+// `docker stop` : SIGTERM, puis SIGKILL 10 s plus tard), Node mourait sur le
+// coup : la requete en cours etait coupee (mesure du rapport : un PATCH en
+// attente du verrou recoit une reponse vide), la base n'etait ni validee au
+// fichier principal ni fermee, et une sauvegarde en cours laissait son
+// fichier temporaire (db-...gz.tmp) pour toujours.
+//
+// Maintenant, au premier SIGTERM ou SIGINT : plus de nouvelle connexion (et
+// 503 pour une requete qui arriverait sur une connexion deja ouverte : la
+// file hors ligne la renvoie), les requetes en cours finissent, puis la file
+// des ecritures et la sauvegarde en vol, la carte OSRM locale s'arrete, la
+// base est validee (checkpoint) et fermee, et le processus sort avec 0. Le
+// tout plafonne a ARRET_DELAI_MS, sous les 10 s de `docker stop`. Un second
+// signal garde son effet par defaut (arret immediat).
+
+const ARRET_DELAI_MS = 8000;
+let requetesEnCours = 0;
+let arretEnCours = null;
+let quitterLeProcessus = code => process.exit(code);
+
+function attendre(ms) {
+  return new Promise(resolve => {
+    const minuterie = setTimeout(resolve, ms);
+    if (minuterie.unref) minuterie.unref();
+  });
+}
+
+// La promesse, ou rien de plus que `ms` millisecondes.
+function auPlus(promesse, ms) {
+  return Promise.race([Promise.resolve(promesse).catch(() => {}), attendre(Math.max(0, ms))]);
+}
+
+async function arreterProprement(serveur, { signal = "SIGTERM", delaiMs = ARRET_DELAI_MS } = {}) {
+  if (arretEnCours) return arretEnCours;
+  arretEnCours = (async () => {
+    const debut = Date.now();
+    const reste = () => delaiMs - (Date.now() - debut);
+    console.log(`[arret] ${signal} recu : plus de nouvelle requete ; ${requetesEnCours} en cours.`);
+    if (serveur) {
+      serveur.close();
+      if (serveur.closeIdleConnections) serveur.closeIdleConnections();
+    }
+    while (requetesEnCours > 0 && reste() > 0) await attendre(20);
+    // Les ecritures deja en file (y compris hors requete : geocodage, purge).
+    let file;
+    do {
+      file = writeQueue;
+      await auPlus(file, reste());
+    } while (file !== writeQueue && reste() > 0);
+    await auPlus(flushPendingBackup(), reste());
+    if (serveur && serveur.closeAllConnections) serveur.closeAllConnections();
+    await auPlus(osrmLocal.arreter(), Math.min(1000, Math.max(0, reste())));
+    const restantes = requetesEnCours;
+    try {
+      if (useSqliteStorage() && sqliteStore) sqliteStore.checkpoint();
+    } catch (error) {
+      console.error(`[arret] validation de la base impossible : ${error.message || error}`);
+    }
+    closeStorage();
+    console.log(`[arret] termine en ${Date.now() - debut} ms${restantes ? ` (${restantes} requete(s) coupee(s) au bout du delai)` : ""}.`);
+    quitterLeProcessus(0);
+  })();
+  return arretEnCours;
+}
+
+let signauxInstalles = false;
+let serveurCourant = null;
+
+function installerArretPropre(serveur) {
+  serveurCourant = serveur;
+  if (signauxInstalles) return;
+  signauxInstalles = true;
+  for (const signal of ["SIGTERM", "SIGINT"]) {
+    process.once(signal, function arretPropreDeSereo() {
+      arreterProprement(serveurCourant, { signal }).catch(error => {
+        console.error(`[arret] ${error.message || error}`);
+        quitterLeProcessus(1);
+      });
+    });
+  }
+}
+
+// Les fichiers temporaires d'une sauvegarde interrompue (processus tue pendant
+// la compression) : ni la rotation ni la restauration ne les voient
+// (BACKUP_FILENAME_PATTERN), ils restaient pour toujours. Supprimes au
+// demarrage : aucune sauvegarde de CE processus n'a encore commence.
+function nettoyerSauvegardesInachevees() {
+  let noms = [];
+  try {
+    noms = fs.readdirSync(BACKUP_DIR);
+  } catch {
+    return [];
+  }
+  const supprimes = [];
+  for (const nom of noms.filter(n => /^db-.*\.tmp$/.test(n))) {
+    try {
+      fs.unlinkSync(path.join(BACKUP_DIR, nom));
+      supprimes.push(nom);
+    } catch (error) {
+      console.error(`[sauvegarde] fichier temporaire ${nom} non supprime : ${error.message || error}`);
+    }
+  }
+  if (supprimes.length) console.log(`[sauvegarde] ${supprimes.length} fichier(s) temporaire(s) d'une sauvegarde interrompue supprime(s) : ${supprimes.join(", ")}`);
+  return supprimes;
+}
+
 function startServer(port = PORT, host = HOST) {
+  nettoyerSauvegardesInachevees();
   // P1 v1.14.0 : healing initial pour garantir la coherence apres restart
   // (notamment apres restauration d'un backup ou montee de version)
   healDatabaseAtBoot();
@@ -10290,6 +10421,7 @@ function startServer(port = PORT, host = HOST) {
       console.warn(`[osrm-local] ${error?.message || error}`);
     }
   });
+  installerArretPropre(serveur);
   return serveur;
 }
 
@@ -10387,6 +10519,9 @@ module.exports = {
   _resetStorageRecoveryForTest: () => { lastStorageRecovery = null; storageRecoveryFatal = null; backupsSuspendedFreshEmpty = false; lastBackupAt = null; lastBackupError = null; derniereModificationA = null; },
   // Carte « Sauvegardes » (24/09) : la regle de retention, pure.
   _sauvegardesAGarder: sauvegardesAGarder,
+  // Arret propre (25/09) : les bancs remplacent la sortie du processus.
+  _quitterPourTest: fn => { quitterLeProcessus = fn; },
+  _arreterProprement: arreterProprement,
   _isCorruptionError: isCorruptionError,
   _normalizeDateInput: normalizeDateInput,
   _excelDateToIso: excelDateToIso,
