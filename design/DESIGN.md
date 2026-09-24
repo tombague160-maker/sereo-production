@@ -6067,7 +6067,8 @@ revient »).
   pas la suite. `/api/historique` garde sa forme (tout le tableau, pour les outils) mais passe
   lui aussi réservé à l'administration. Le service worker ne met pas `/api/journal` en cache
   (comme `/api/comptes`).
-- Les « Mouvements récents » du Stock disent aussi « par <compte> ».
+- ~~Les « Mouvements récents » du Stock disent aussi « par <compte> ».~~ Retiré à la relecture
+  adverse (plus bas) : `/api/stock-movements` part à tous les comptes ; il ne sert plus l'auteur.
 
 **4. Bon de livraison imprimable, sans les prix (décision 8).** Depuis le détail d'une commande
 (« Bon de livraison », sous l'en-tête) et depuis l'arrêt de tournée (« Autres actions »). Logo
@@ -6103,8 +6104,9 @@ correspond à « … ». » (au lieu d'un menu vide). Deux caractères au moins 
   son complément du zéro perdu (`normaliserCodePostal`, inchangé).
 - **Journal en deux vues, pas un fil unique** : un ajustement de stock écrit une action ET un
   mouvement ; mêlés, chaque geste apparaîtrait deux fois.
-- **Consignes du bon = notes de la commande** (ou de l'arrêt) ; les notes de la fiche client
-  (besoins, préférés…) restent internes.
+- **Consignes du bon = notes de la commande** (ou de l'arrêt, qui les recopie) ; les besoins
+  particuliers et produits préférés de la fiche restent internes. Les *notes* de la fiche, elles,
+  sont la consigne de livraison du client (précision de la relecture adverse, plus bas).
 
 ### Écarts nommés
 
@@ -6188,3 +6190,92 @@ correspond à « … ». » (au lieu d'un menu vide). Deux caractères au moins 
 - Les numéros étrangers, si Thomas en a besoin.
 - Un « Imprimer les bons de la tournée » (tous les arrêts d'un coup) : non demandé.
 - La recherche au téléphone, si les planches mobiles en dessinent une.
+
+### Relecture adverse (24/09) : six défauts, leur sort
+
+Relecture de `ca8f8d4`. Quatre vrais (dont un en partie), corrigés chacun avec un banc qui
+rougit sans lui ; deux faux, prouvés, sans changement de code.
+
+1. **Important, vrai. Les mouvements de stock et leurs auteurs, lisibles par tous.**
+   `/api/stock-movements` part au chargement de l'app pour TOUS les comptes (et reste dans le
+   cache du service worker) ; il servait toute la table avec `createdBy`, qui porte depuis ce lot
+   l'identifiant du compte : le verrou de `/api/journal?genre=stock` ne gardait rien, et la
+   moitié « stock » du journal repartait en entier à chaque ouverture. **Corrigé** : la route ne
+   sert plus que les **50 derniers** mouvements (l'écran en montre 12), **sans auteur**
+   (`createdBy`, et les anciens `utilisateur` / `auteur`) ; les « Mouvements récents » du Stock ne
+   disent plus « par … ». « Qui » se lit au journal, réservé à l'administration. *Pourquoi pas
+   l'auteur pour l'administrateur seul* : le service worker garde la réponse par adresse, pas par
+   compte ; la copie de l'administrateur serait rendue hors ligne à un autre compte du même
+   appareil — la raison même qui tient `/api/journal` hors du cache.
+2. **Mineur, vrai. Le géocodage de fond signé d'un compte.** Lancé par la route après sa
+   réponse, il héritait du contexte de la requête : « N client(s) géolocalisé(s)
+   automatiquement » était signé du compte qui avait touché une fiche, relance comprise (même
+   provoquée par un autre compte). **Corrigé** : `declencherGeocodageEnFond` lance le lot hors
+   contexte (`contexteRequete.exit`) : « automatique ». Le lot lancé à la main
+   (`POST /api/geocodage/lancer`) garde l'auteur de la requête qui l'a lancé ; sa relance, elle,
+   passe par le fond : « automatique ».
+3. **Mineur, vrai. « Modifier le profil » refusait ce qu'il signalait.** Le formulaire du détail
+   de commande montre le téléphone et le code postal DE LA COMMANDE ; le serveur compare à ceux DU
+   CLIENT. Un numéro faux resté sur une commande ouverte, alors que la fiche avait été corrigée
+   dans Clients (qui ne le fait pas suivre), était signalé « à vérifier » sans bloquer — puis
+   refusé (400) à l'envoi, quand on ne changeait que les notes. **Corrigé côté page** : un champ
+   gardé signalé « à vérifier » et **non touché ne part pas** ; la fiche garde le sien. Touché, il
+   part et se juge comme avant. (Avant le lot, le même envoi réécrivait en silence le bon numéro
+   de la fiche avec le faux de la commande.)
+4. **Mineur, vrai en partie. Les consignes du bon.**
+   - *« Replanification depuis CMD-… »* (la note que « Planifier la suite » écrit d'office) partait
+     sur le papier comme consigne : **vrai, corrigé** — une commande qui a une commande d'origine
+     (`parentOrderId`) et dont la note est exactement ce renvoi n'imprime pas de « Consignes ».
+   - *« Les notes de la fiche client, dites internes »* : **faux**. Les notes de la fiche SONT la
+     consigne de livraison du client : `PATCH /api/clients` les fait suivre sur ses commandes
+     (« une consigne propre à une commande n'est pas écrasée par celle du client »), le détail de
+     commande les propose avec « Sonner 2 fois, code 1234 ». Ce que le gabarit disait interne,
+     ce sont les besoins particuliers et produits préférés ; le commentaire le dit maintenant.
+   - *« Les notes de l'arrêt, écrites par le livreur »* : **faux**. `stop.notes` n'est écrit qu'à
+     la création de l'arrêt (copie de `order.notes`) et par le paramètre `notes` du geste
+     (`updateRouteStop`), qu'aucun écran n'envoie : les trois envois d'un geste portent
+     `{ status, motif, faitLe }` ou `{ status: "livre", motif: null, faitLe, remisA }`.
+5. **Mineur, faux. « Un code postal à 4 chiffres est désormais refusé. »** Le fait est exact, et
+   c'est une décision nommée du lot (« Décisions prises dans le lot »). Sa raison, précisée : à la
+   saisie, un code à 4 chiffres est plus souvent une faute de frappe qu'un zéro perdu — compléter
+   « 3910 » (Dole, 39100) donne « 03910 », un code bien formé et faux, géocodé ailleurs sans que
+   personne le voie. Le zéro perdu a une cause mécanique dans l'import seul (Excel lit 01100 comme
+   le nombre 1100) : lui seul complète. Avant le lot, la règle était déjà double (la fiche Clients
+   gardait « 1000 » tel quel, le détail de commande le complétait).
+6. **Mineur, vrai. La recherche à un caractère disait n'avoir rien trouvé.** Sous 2 caractères,
+   elle ne cherche pas les données ; elle disait pourtant « Aucun écran, client, commande ni
+   produit ne correspond à « 7 » ». **Corrigé** : « Aucun écran ne correspond à « 7 ». Tape au
+   moins 2 caractères pour chercher un client, une commande ou un produit. »
+
+**Bancs, et leur rouge** (chaque mutant = le retour d'UN correctif, posé seul, restauré par copie
+depuis le commit) :
+
+- `test/journal-auteur.test.js`, cas « mouvements récents » (4 cas désormais) : l'ancienne route
+  rend `['julie', 'marc', …]` au livreur au lieu de `[]` ; sans le plafond, `61 !== 50`.
+- `test/journal-geocodage.test.js` (nouveau, authentification allumée, géocodage de fond actif,
+  BAN simulée lente) : sans `exit`, `['marc', 'marc']` au lieu de `['automatique',
+  'automatique']` — la relance provoquée par julie signée marc. Témoins : les deux fiches placées,
+  les lignes « CRM » signées julie et marc.
+- `test/e2e/donnees-utiles.spec.js` (14 cas ; serveur semé sur 3530) : le cas du journal lit la
+  réponse de `/api/stock-movements` (sans auteur ; l'ancienne route y met `"createdBy": "dev"`) ;
+  « modifier le profil » : `Received: 400` au lieu de 200 sans le correctif ; son témoin (un
+  numéro TOUCHÉ part) rougit quand le téléphone ne part jamais (`"0698765432"` au lieu de
+  `"0711223344"`) ; bon : « Replanification depuis » imprimé, avec son témoin (« Code portail
+  1234 », consigne de o-8, imprimée) ; recherche : l'ancien message reçu mot pour mot.
+- **Oracle changé par la décision** : le cas du journal attendait « par dev » dans les
+  « Mouvements récents » ; il attend désormais qu'ils ne nomment personne.
+- Voisins relancés, verts : barre latérale, commandes, écrans sans planche, navigation plate,
+  tournée, stock, paramètres, chargement instantané, hors ligne (page et tournée), le livreur ne
+  perd rien, rapidité tournée, fumée, charte des composants, clients ; numérotation réservée à
+  l'administrateur (sur un serveur authentifié à moi, 3511 : `pw-lot.config.js` ne lance pas le
+  3101) ; `npm test` (701).
+
+**Écarts nommés.**
+- La fiche Clients nomme son champ « Notes », à côté de « Besoins particuliers » et « Produits
+  préférés » : rien n'y dit qu'il part sur les commandes, l'arrêt et le bon. Renommer le libellé
+  (« Consignes de livraison ») change un écran d'un autre lot : non fait, à trancher.
+- Le filtre du renvoi « Replanification depuis … » lit le texte que le serveur écrit : si ce texte
+  change, le renvoi repart sur le papier (l'échec est visible, jamais une consigne perdue).
+- Le formulaire du détail de commande prérempli avec les coordonnées de la commande, qui
+  réécrivent celles de la fiche, reste tel quel (antérieur au lot) : seul le cas signalé et
+  intact est corrigé.
