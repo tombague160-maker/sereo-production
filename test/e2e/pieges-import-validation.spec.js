@@ -165,6 +165,8 @@ test("import, bureau : le resume est JUSTE et EN HAUT, sans defiler ; la command
     console.log(`[contraste/clair] ${p.quoi} ${p.ratio.toFixed(2)}`);
     expect(p.ratio, `${p.quoi} : ${p.texte} sur ${p.fond}`).toBeGreaterThanOrEqual(4.5);
   }
+  // Des commandes nouvelles ou mises a jour : la suite du travail est a un geste.
+  await expect(bilan.locator('[data-target-tab="preparation"]')).toHaveText("Voir la préparation");
   // Fermer : une cible de 44 px, et le resume part.
   const fermer = bilan.locator('[data-action="fermer-bilan-import"]');
   const f = await fermer.boundingBox();
@@ -227,6 +229,38 @@ test("import, telephone et sombre : depuis l'en-tete puis depuis le formulaire d
     console.log(`[contraste/sombre] ${p.quoi} ${p.ratio.toFixed(2)}`);
     expect(p.ratio, `${p.quoi} : ${p.texte} sur ${p.fond}`).toBeGreaterThanOrEqual(4.5);
   }
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+test("import : les autres avertissements du serveur se lisent aussi (livree a l'import, position refusee, client en double)", async ({ browser }) => {
+  // Ils ne vivaient que dans l'historique, que personne ne peut ouvrir.
+  test.setTimeout(120000);
+  await semer();
+  const { ctx, page, erreurs } = await ouvrir(browser, "journee");
+  const [selecteur] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    page.locator('#enteteActions [data-action="importer-ventes"]').click()
+  ]);
+  const reponse = page.waitForResponse(r => r.url().includes("/api/import/ventes"));
+  await selecteur.setFiles({
+    name: "ventes.xlsx",
+    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    buffer: classeur([
+      ["Date", "Client", "Code", "Produit", "Quantite", "Rue", "Code Postal", "Ville", "Statut", "Latitude", "Longitude"],
+      // Facture « Envoyée » : importee comme deja livree ; position (0,0) refusee.
+      [JOUR_FR, "Cabinet Neuf", "ALE", "Alèses", "1", "4 rue Neuve", "39100", "Dole", "Envoyée", "0", "0"],
+      // Le Foyer du Parc, rue ecrite avec une virgule : le meme client (nom + code postal).
+      [JOUR_FR, "Foyer du Parc", "CH-L", "Changes taille L", "2", "2 rue du Parc,", "39100", "Dole", "", "", ""]
+    ])
+  });
+  const r = await (await reponse).json();
+  console.log(`[avertissements] importedAsLivre ${r.importedAsLivre} positionsRefusees ${r.positionsRefusees} mergedBySecondary ${r.mergedBySecondary}`);
+  const bilan = page.locator("#importSummary");
+  await expect(bilan).toBeVisible();
+  await expect(bilan).toContainText("1 commande importée comme déjà livrée (facture « Envoyée »)");
+  await expect(bilan).toContainText("1 position du fichier ignorée (0,0, inversée ou hors zone)");
+  await expect(bilan).toContainText("1 client en double fusionné avec sa fiche existante");
   expect(erreurs).toEqual([]);
   await ctx.close();
 });
