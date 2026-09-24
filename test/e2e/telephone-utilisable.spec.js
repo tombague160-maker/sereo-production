@@ -31,8 +31,11 @@ test.afterAll(async () => { if (srv) await srv.arreter(); });
 const TAILLES = [[375, 667], [360, 740], [390, 844]];
 const THEMES = ["light", "dark"];
 
+// Un TELEPHONE emule (isMobile : la balise viewport, le toucher), comme les
+// sondes de l'audit. Sans lui, la page ne se reajustait pas pendant le
+// chargement, et le repli mesure en coordonnees d'ecran passait (mutant M2).
 async function ouvrir(browser, ecran, { largeur = 390, hauteur = 844, theme = "light" } = {}) {
-  const ctx = await browser.newContext({ viewport: { width: largeur, height: hauteur }, colorScheme: theme, timezoneId: "Europe/Paris", hasTouch: true });
+  const ctx = await browser.newContext({ viewport: { width: largeur, height: hauteur }, colorScheme: theme, timezoneId: "Europe/Paris", hasTouch: true, isMobile: true });
   await ctx.addInitScript(t => { try { localStorage.setItem("sereo:colorScheme", t); } catch { /* ignore */ } }, theme);
   // Le premier fond opaque sous un element (en remontant ses ancetres), pour
   // les contrastes mesures dans la page.
@@ -283,7 +286,13 @@ test("pilules — Clients : secteurs, Abonnes et statut repliés a deux rangs ; 
 
 test("Commandes — « Exporter » dans « Filtres », « Nouvelle commande » fixe en bas et apres la liste au clavier", async ({ browser }) => {
   test.setTimeout(90000);
-  const { ctx, page, erreurs } = await ouvrir(browser, "commandes", { largeur: 390, hauteur: 844 });
+  // Ouvert sur un AUTRE ecran, puis Commandes par le menu « Plus » : le chemin
+  // du doigt. Deplace hors de la fente, « Exporter » n'est plus range par
+  // showTab ; parti cache, il le restait (mutant M14).
+  const { ctx, page, erreurs } = await ouvrir(browser, "journee", { largeur: 390, hauteur: 844 });
+  await page.locator("#mobile-tab-more").click();
+  await page.locator('#mobile-more-sheet [data-tab="commandes"]').click();
+  await expect(page.locator("#commandes")).toHaveClass(/active/);
   const exporter = page.locator('[data-action="cmd-export"]');
   expect(await exporter.evaluate(e => Boolean(e.closest(".ecran-entete"))), "« Exporter » est encore dans l'en-tete").toBe(false);
   await expect(exporter).toBeHidden();
