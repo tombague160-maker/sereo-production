@@ -153,6 +153,26 @@ test("une ancienne adresse (#commandes-jour) : Commandes s'écrit une fois, sur 
   expect(n).toBe(1);
 });
 
+test("« Tout voir » du Stock : À recommander s'écrit une fois, sur « Stock faible »", async ({ page }) => {
+  // Meme chemin que « Les N autres » : le bouton dessinait la liste (filtre
+  // « Stock faible »), puis l'arrivee redessinait celle qui attendait.
+  await ouvrir(page, "stock");
+  await page.evaluate(() => {
+    const e = window.__articlesRecommande = { n: 0 };
+    new MutationObserver(recs => { for (const r of recs) for (const x of r.addedNodes) if (x.nodeName === "ARTICLE") e.n++; })
+      .observe(document.getElementById("recommandeList"), { childList: true });
+  });
+  await page.locator("#stock .stk-tout-voir").click();
+  await expect(page.locator("#recommande")).toHaveClass(/active/);
+  await expect(page.locator('#recommande [data-recommend-filter="low"]')).toHaveAttribute("aria-pressed", "true");
+  const r = await page.evaluate(() => new Promise(fin => requestAnimationFrame(() => setTimeout(() => fin({
+    crees: window.__articlesRecommande.n, affiches: document.querySelectorAll("#recommandeList article").length
+  }), 0))));
+  console.log(`[recommande] « Tout voir » : ${r.crees} articles crees pour ${r.affiches} affiches`);
+  expect(r.affiches, "prealable : des produits sous le seuil").toBeGreaterThan(0);
+  expect(r.crees).toBe(r.affiches);
+});
+
 test("les montants et les dates ne construisent plus un formateur chacun", async ({ page }) => {
   await page.addInitScript(() => {
     const n = window.__formateurs = { intl: 0, locale: 0 };

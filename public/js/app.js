@@ -509,7 +509,9 @@ function bindUi() {
   // carte y manquaient.
   document.querySelector("#stock .stk-tout-voir")?.addEventListener("click", () => {
     recommendFilter = "low";
-    renderRecommande();
+    // Dessinee une fois, en arrivant (go-tab suit) : pas ici puis a nouveau
+    // par le rendu en attente (24/09).
+    rendreOuDifferer("recommande", renderRecommande);
   });
 
   bindCommandes();
