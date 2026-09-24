@@ -5985,3 +5985,228 @@ Sur un écran bas, la barre **défile dans sa propre hauteur** (règle existante
 *Bancs (`collant-et-clavier.spec.js`)* : « la barre latérale reste fixe » (921 et 1440 px, trois
 écrans ; rouge avant : −400 au lieu de 0) ; « écran bas, tout le menu reste atteignable »
 (rouge si la barre fixe perd son défilement : « Version » à 768 px pour un écran de 560).
+
+## 24/09 — Parcours simplifiés (audit du 24/09, décisions de Thomas)
+
+Branche `feat/parcours-simplifies`, partie de `12da3d4` (v1.45.0). Les huit points du lot
+« parcours » de l'audit d'améliorations ; les décisions de Thomas du 24/09 qui le
+concernent : 6, 7, 9, 10, 11, 13.
+
+### Ce qui est fait
+
+1. **La fiche client** (bureau et téléphone) porte deux gestes sous son en-tête :
+   « Nouvelle commande » ouvre la commande client **avec ce client déjà choisi**
+   (coordonnées repliées) ; « Rappel » ouvre l'écran Rappels avec ce client choisi et le
+   curseur dans la date, le seul champ obligatoire qui reste. Appeler puis commander
+   passe de ~9 gestes à ~5. La fiche montre aussi ce que le serveur calculait sans que
+   rien ne l'affiche (`crmClientView`) : **le chiffre d'affaires livré** (« 51,00 € ·
+   1 commande livrée ») et **les rappels à faire** (les trois plus proches, le retard en
+   alerte avec l'icône et le mot, « et N autres »). Le chiffre d'affaires ne compte plus
+   que les commandes **livrées** : il additionnait toutes les commandes du client,
+   annulées comprises (mesuré : 1 050 € pour 100 € livrés et 900 € annulés). Même repli
+   que l'Analyse pour une commande importée sans montant (ses ventes importées) ; l'index
+   des ventes est construit une fois par liste de clients.
+2. **La nouvelle commande.** « Valider la commande » est **sous le total du panier**
+   (relié au formulaire par `form=`) : il était au-dessus du catalogue, et au téléphone à
+   1 388 px pour un catalogue qui finissait à 2 302 px (mesuré par le banc, comme l'audit).
+   Le client se choisit par **la recherche de la création d'abonnement** : le même rendu,
+   extrait en `rendreRechercheClients` (`operations.js`) et appelé par les deux écrans
+   (nom, ville, rue, code postal, trois chiffres du téléphone, six cartes, la note dit le
+   reste, Entrée choisit une carte seule). Le client choisi devient le champ (« × » pour
+   changer) ; ses coordonnées se **replient** derrière « Modifier les coordonnées ». Sans
+   client choisi, elles restent ouvertes : c'est une nouvelle fiche, créée avec la
+   commande, comme avant. Un champ obligatoire manquant dans les coordonnées repliées les
+   déplie (le navigateur ne peut pas montrer son message sur un champ caché : l'envoi
+   échouait sans rien dire).
+3. **Abonnements (décision 6).** La commande d'une échéance reste « Planifiée » jusqu'à
+   l'accord du client et se **confirme sur l'échéance** : « Confirmer » remplace le badge
+   « À confirmer », qui ne confirmait rien et ouvrait Commandes, filtre Planifiées.
+   Confirmer passe la commande « À préparer » sans quitter l'écran (5 gestes → 3 au
+   bureau). « **Créer les N commandes dues** » crée d'un geste les commandes des échéances
+   dont le rappel est arrivé (le compte de la pastille Abonnements) ; il n'apparaît qu'à
+   partir de deux (une seule : son bouton suffit).
+4. **Préparation (décision 7).** La fenêtre **ne se ferme plus** entre « Passer en
+   préparation » et « Préparation terminée » : elle se redessine en place, le geste suivant
+   reçoit le focus, la date de livraison déjà choisie survit (5 gestes → 4, bureau et page
+   7b du téléphone). Un échec, ou une écriture mise en file hors ligne, la ferme comme
+   avant, pour que le message se lise. **Un seul compte « à préparer »**, les commandes
+   RESTANTES de l'écran (importées, à vérifier, en préparation, bloquées comprises) :
+   `commandeAPreparer` (`operations.js`), lu par la **pastille, désormais sur
+   Préparation** (plus sur Commandes), la tuile du tableau de bord (renommée « À
+   préparer ») et le sous-titre qui la lit, le résumé et le sous-titre de la Préparation ;
+   `/api/operations` (`preparing`) a la même définition. Mesuré avant sur les données
+   semées : pastille 1, tuile 1, écran 3 ; après : 3 partout.
+5. **Tournée (décision 10).** « Client absent » **présélectionne** « Personne sur place » :
+   « Enregistrer » suffit (3 gestes → 2). « Personne sur place » et « Établissement
+   fermé » **sortent de la liste « Problème »**. Seul le dialogue des motifs change, pas
+   le cockpit.
+6. **Exports (décision 9).** L'écran Exports est **supprimé** (navigation, `index.html`,
+   JS, bancs) ; `#exports` redirige vers Commandes, filtre « Toutes » (un favori arrive là
+   où l'on exporte), et la recherche du menu le trouve encore. Commandes exporte **son
+   filtre, en Excel** (`POST /api/exports/commandes.xlsx`, les identifiants dans l'ordre
+   de l'écran) : numéro, date de commande, livraison prévue, **livrée le** (l'instant lu
+   à Paris), **remis à**, client, adresse, code postal, ville, secteur, téléphone,
+   produits, quantités, prix, total, statut en mots. Le CSV et l'export des « commandes
+   annexes » (une catégorie que rien ne crée) sont retirés. Aucun autre écran ne dépendait
+   d'Exports (grep : seules ses propres règles CSS le nomment encore).
+7. **Rupture (décision 11).** Une commande prise chez le client sur un produit en rupture
+   (ou au stock non renseigné) est **acceptée en « Bloquée »**, comme une commande
+   importée : rien n'est réservé, rien ne passe en négatif, et la Préparation la débloque
+   quand le stock arrive. Le panier ne refuse plus (« Stock insuffisant pour ce
+   produit. ») : il **prévient** une fois par produit (« Gants nitrile : 0 en stock. La
+   commande sera bloquée jusqu'à l'arrivée du reste. ») ; la validation le **dit** :
+   « Commande CMD-… enregistrée, mais bloquée (il manque 1 article en stock) : elle
+   passera en préparation quand le stock arrivera. »
+8. **Un seul vocabulaire au bureau.**
+   - « **Rappel** » partout : « Clients à rappeler », « Rappels du jour / en retard »,
+     « Prochain rappel », « Créer le rappel ». Plus aucun « relance » à l'écran ; les clés
+     techniques (`client_a_relancer`, `relance_today`) restent.
+   - « **À préparer · En préparation · Prête · Bloquée** » : les lignes et les groupes de
+     la Préparation au bureau (« À faire », « En cours », « Prêtes livraison », « Bloquées
+     stock » n'étaient dits nulle part ailleurs), les badges de Commandes, de la fiche, du
+     détail et de la Tournée (`formatOrderStatus` et le badge du détail lisent
+     `STATUT_COMMANDE`), la pilule « Prêtes ». **Au téléphone, la Préparation garde les
+     mots validés le 23/09** (décision 13 : `motDeStatutPreparation` inchangé).
+   - **Pluriels justes** : plus aucun « commande(s) » (`accorder(n, mot, pluriel)`,
+     `utils/text.js`), vingt-trois textes.
+   - « **nouveau (rien la période d'avant)** » au lieu de « +100 % » quand la période
+     précédente vaut 0 (serveur : `{ label: "nouveau", percent: null }`) ; « +12,5 % »
+     avec la virgule et l'espace fine.
+   - **Tutoiement** : c'est la voix de l'application (environ 35 textes contre 5, relevé
+     de l'audit). Passés au tu : « Commence par importer tes ventes », « Ton départ / Ton
+     arrivée », « Choisis le départ… », « Sélectionne… », « Remplis la colonne… de ton
+     fichier… », « Tes modifications seront gardées… », « Les produits de tes clients ».
+   - **Les dates, un seul utilitaire** : `public/js/utils/dates.js` (inscrit dans
+     `APP_SHELL` et le `check`), quatre formes — `jourMois` « 24 sept. » (colonnes),
+     `jourCourt` « jeu. 24 sept. » (une échéance, une livraison, un rappel), `jourLong`
+     « jeudi 24 septembre » (en-têtes, phrases), `heure` « 16 h 00 » ; l'année quand ce
+     n'est pas celle-ci ; une date sans heure lue à midi. Les fonctions de date
+     d'`app.js` et d'`operations.js` y délèguent. Disparaissent de l'écran « 24/09/2026 »
+     (Rappels, détail de commande), « jeu. 24/09 » (Tournée), « 16:00 » (« Mis à jour à »,
+     « Données de ») et « 24/09/2026 16:00:00 » (historique, mouvements, imports).
+
+### Décisions prises dans le lot
+
+- Le **chiffre d'affaires** de la fiche = commandes livrées, avec le repli de l'Analyse ;
+  les **rappels** = `reminderHistory` du serveur, à faire, du plus proche au plus loin. La
+  date posée à la main sur la fiche (« Prochain rappel ») ne s'affiche plus que si aucun
+  rappel ne la porte.
+- « **Rappel** » réutilise l'écran Rappels existant (client choisi, curseur sur la date)
+  plutôt qu'un nouveau formulaire dans la fiche : les rappels se créent à un seul endroit,
+  comme décidé le 23/09.
+- « Notes livraison » **reste hors** du repli des coordonnées : ce sont les notes de la
+  commande, pas du client. Le repli ne se refait qu'au **changement** de client : un
+  rechargement en fond ne referme pas des coordonnées qu'on corrige.
+- « Confirmer » une commande d'abonnement **reste refusé si le stock manque** (le serveur
+  réserve à la confirmation, comme avant) : la décision 11 vise la commande prise chez le
+  client, pas l'abonnement.
+- La pastille de Préparation n'est **pas en alerte** quand des commandes sont bloquées :
+  « Bloquée » se lit dans la liste, avec son icône ; une pastille rouge dirait l'urgence
+  par la seule couleur.
+- Motifs : le serveur distingue ce qu'il **propose** (`proposes`, lu par le dialogue) de
+  ce qu'il **admet** (`statutsAdmis`, inchangé). Un « Problème / Personne sur place » fait
+  hors ligne avant la mise à jour, puis rejoué par la file, est **encore accepté**. Un
+  serveur sans `proposes` : le dialogue retombe sur `statutsAdmis`.
+- L'export part par `fetch`, **pas par la file hors ligne** : sans réseau il échoue et le
+  dit (« Export impossible sans réseau… ») au lieu de partir plus tard sans personne pour
+  le recevoir. Le fichier garde le nom du jour **de Paris**, calculé par le navigateur.
+- Tutoiement retenu : DESIGN.md n'en décide pas pour toute l'application (voir l'écart
+  ci-dessous), c'est le plus fréquent.
+
+### Écarts nommés
+
+- **Le tutoiement contredit une décision locale du 23/09** : la carte « à plat » du Stock
+  et la carte de premier lancement avaient été mises au **vous** (« Commandes + Stock
+  mobile… », plus haut). La consigne de ce lot est une voix unique ; les deux cartes
+  passent au tu. Le SMS « Prévenir » garde « votre livraison » : il parle au client de
+  Thomas, pas à Thomas.
+- « **À vérifier** » disparaît des étiquettes du bureau (`stock_a_verifier` se lit « À
+  préparer », comme la pilule qui le range) ; au téléphone, la Préparation le garde
+  (décision 13). La Tournée dit « Prête » à toutes les largeurs : elle lit
+  `formatOrderStatus`, ce n'est pas la Préparation.
+- Le titre de la planche « À préparer **aujourd'hui** » reste, bien que la liste ne soit
+  pas bornée au jour (déjà relevé le 23/09).
+- La barre basse du téléphone n'a **aucune pastille** (Préparer compris) : non ajoutée
+  (lot téléphone).
+- Les règles CSS de l'écran Exports (`#exports`, `.export-actions`, `#exportsList`)
+  restent dans `style.css`, mortes, hors du bloc de ce lot. `comptes.test.js` cite encore
+  « exports » comme nom d'onglet (portées de rôles) : sans effet.
+- La recherche de client de la commande **reprend** les règles de celle de l'abonnement
+  (`#commande-client .abo-cr-…`, bloc de ce lot) : celles du dialogue sont préfixées
+  `#subscriptionDialog`. Même dessin, deux déclarations.
+- Les **tuiles de jour** (« JEU 24 ») et les libellés de mois (« septembre 2026 ») restent
+  hors de l'utilitaire : ce sont des formes de planche, pas des dates de phrase.
+- **Hors périmètre, touchés au plus petit** : trois lignes du résumé d'import (pluriels,
+  « traités le … ») — le lot « pièges » réécrit ce résumé, conflit attendu et trivial ;
+  la ligne « N commandes prêtes » de la planification de Tournée (pluriel).
+- **Hors périmètre, non faits** : « après Valider la commande, une liste vide » (lot
+  pièges) ; la barre du panier sous la barre d'onglets au téléphone (lot téléphone).
+
+### Preuves rouges (le banc sur le code d'avant, cause lue)
+
+*Serveur* (`test/parcours-simplifies.test.js`, sur `12da3d4`) : 8 rouges sur 9, chacun de
+la bonne cause — chiffre d'affaires `1050` au lieu de `100` ; `preparing` `[e1, v1]` au
+lieu de `[e1, i1, v1]` ; « probleme propose : absent,adresse,acces,ferme,… » ; export
+`404` au lieu de `200`, puis de `400` ; commande en rupture `400 « Stock insuffisant pour
+Alèses (2 disponible) »` au lieu de `201` ; `bloquee` absent (le témoin du stock
+suffisant) ; évolution `{ progression, 100 }` au lieu de `{ nouveau, null }`. Vert, et
+c'est attendu : « encore accepté » (un témoin de non-régression, voir les mutants).
+
+*E2E, bureau* (`parcours-simplifies.spec.js`, chaque cas lancé seul sur le front d'avant) :
+16 rouges sur 16 — « 51,00 € » introuvable ; `cli-nouvelle-commande`, `cli-rappel`,
+`#customerClientSearch`, `generate-dues`, `confirm-sub-order` introuvables ; « la pastille
+est sur Preparation : Expected false, Received true » ; « Préparation terminée »
+`disabled` (la fenêtre s'était refermée) ; « Personne sur place » `aria-checked="false"` ;
+la liste « Problème » contenait `absent` et `ferme` ; `#exports` ne menait pas à Commandes
+(« Received string: page ») ; « Exporter en CSV » au lieu de « Exporter (Excel) » ; les
+mots « À faire, En cours » ; « relance » à l'écran ; une date `dd/mm/yyyy` dans les
+Rappels. *Téléphone* (`parcours-simplifies-telephone.spec.js`) : 4 rouges sur 4 — gestes
+absents de la fiche ; « Valider » à 1 388 px, le catalogue finissant à 2 302 px ; la page
+7b refermée ; « Personne sur place » non choisi.
+
+*Mutants* (un morceau de l'ancien code remis dans le nouveau, commité avant, restauré par
+copie) : tous tués, de la bonne cause. M1 le panier refuse la rupture → « Gants nitrile »
+absent du panier ; M2 l'ancien format d'évolution → « nouveau (rien la période d'avant) »
+absent (« nouveau 0% ») ; M3 le serveur n'admet plus « Problème / Personne sur place » →
+`400` au lieu de `200` ; M4 la pastille revient sur Commandes → rouge ; M5 l'ancienne
+définition de `preparing` → `[e1, v1]` ; M6 la fenêtre se referme → « Préparation
+terminée » `disabled` ; M7 plus de dépli sur le nom manquant → `open` faux. Le cas « une
+nouvelle fiche aux coordonnées repliées » n'a pas de rouge « ancien code » (les
+coordonnées ne se repliaient pas) : M7 en tient lieu.
+
+### Bancs et résultats
+
+- `npm test` : **696/696** (dont `parcours-simplifies.test.js`, 9 cas, et
+  `dates-uniques.test.js`, 5 cas, neufs).
+- `parcours-simplifies.spec.js` (port 3528, 17 cas) et
+  `parcours-simplifies-telephone.spec.js` (port 3529, 4 cas) : 21/21.
+- Écrans voisins, sur l'arbre final ou juste avant ses dernières retouches : commandes,
+  clients, clients-mobile, abonnements, abonnements-lignes, abonnements-mobile,
+  abonnement-creation, preparation-lignes, preparation-mobile, tableau-de-bord,
+  tableau-de-bord-relecture, motif-dialogue, tabs, nav-plate, barre-laterale-finitions,
+  ecrans-sans-planche, meilleur-trajet, collant-et-clavier, stock-a-plat, squelette,
+  badges, parametres, parametres-mobile, etats-limites, tournee-mobile, tournee-pratique,
+  ecran-livreur, livreur-ne-perd-rien, rapidite-tournee, integration-lots-1-5,
+  hors-ligne, chargement-instantane, interface-finitions, navigation-mobile, smoke,
+  operations, integration-interface, calcul-routier, et les balayages cibles-tactiles,
+  contraste-application, focus-clavier, themes, texte-coupe, typographie,
+  charte-composants, contraste-champs, stock, tournee, tournees-debloquees, rayons :
+  verts. Plusieurs passages ont rougi sur « port … déjà pris » (un autre worktree lançait
+  les mêmes bancs au même moment) : chaque fichier concerné a été relancé seul, vert.
+- Bancs **mis à jour** parce qu'ils tenaient ce que Thomas a décidé de changer :
+  `preparation-lignes` (les mots du bureau ; le sheet reste ouvert), `preparation-mobile`
+  (la page 7b reste ouverte), `commandes` (pilule « Prêtes » ; export `.xlsx`, lu dans
+  l'archive), `abonnements` (« Confirmer » après la création), `abonnements-mobile`
+  (l'oracle de la forme longue), `tableau-de-bord` (« À préparer aujourd'hui 3 »),
+  `tabs`, `nav-plate`, `barre-laterale-finitions`, `ecrans-sans-planche` (plus d'écran
+  Exports ; `#exports` redirige ; « nouveau »), `meilleur-trajet` (« 28 commandes
+  restent… »), `tournee-mobile` (« jeu. 24 sept. · Dole ») ; `api.test.js` (l'export
+  passe par la route unique).
+
+### Ce qui reste
+
+- La confirmation d'une échéance d'abonnement en rupture : à trancher, si Thomas veut la
+  même règle que la décision 11.
+- Les pastilles de la barre basse du téléphone.
+- Fusionner les deux déclarations CSS de la recherche de client ; retirer les règles
+  mortes d'Exports.
