@@ -3720,6 +3720,10 @@ function bilanImportVentes(result) {
   // Les fiches clients (fusion du 25/09) : l'import ne supprime plus une fiche
   // absente du fichier et n'efface plus ce que le fichier ne porte pas. Le
   // resume le dit, fiches gardees comprises.
+  // Decision 7 : un bon deja importe dont le montant TTC change dans le fichier
+  // (un avoir, une correction) prend ce montant ; le resume le dit.
+  const repris = nombre(result.montantsRepris);
+  if (repris) details.push({ html: `${escapeHtml(accorder(repris, "commande déjà importée : montant TTC repris du fichier", "commandes déjà importées : montant TTC repris du fichier"))} (avoir ou correction dans Ximi).` });
   const fiches = result.clientsImport;
   if (fiches) {
     details.push({ html: `Fiches clients : ${escapeHtml([
@@ -4117,7 +4121,7 @@ function renderFicheClient() {
   }).join("");
   const resteRappels = rappelsAFaire.length - 3;
   const blocCa = `<section class="cli-ca" aria-label="Chiffre d'affaires et rappels">
-      <div class="cli-ca-montant"><p class="cli-libelle">Chiffre d'affaires livré</p><p class="cli-valeur cli-ca-valeur">${escapeHtml(formatMoney(client.totalRevenue || 0))}</p>`
+      <div class="cli-ca-montant"><p class="cli-libelle">Chiffre d'affaires livré TTC</p><p class="cli-valeur cli-ca-valeur">${escapeHtml(formatMoney(client.totalRevenue || 0))}</p>`
     + `<p class="cli-note">${livrees ? `${livrees} commande${livrees > 1 ? "s" : ""} livrée${livrees > 1 ? "s" : ""}` : "Aucune commande livrée"}</p></div>
       <div class="cli-ca-rappels"><p class="cli-libelle">Rappels à faire</p>`
     + (lignesRappels
@@ -4972,11 +4976,13 @@ async function cancelPlannedOrder(orderId) {
 function renderStatistics() {
   const kpis = document.getElementById("statsKpis");
   if (!kpis || !statistics) return;
+  // Decision 7 de Thomas (24/09) : le chiffre d'affaires est TTC, avoirs
+  // soustraits, et l'ecran le dit (le serveur n'additionne plus HT et TTC).
   const items = [
-    { label: "CA livré du jour", value: formatMoney(statistics.today?.revenue), hint: accorder(statistics.today?.orders, "commande"), tone: "success" },
-    { label: "CA livré de la semaine", value: formatMoney(statistics.week?.revenue), hint: formatEvolution(statistics.week?.evolution), tone: getEvolutionTone(statistics.week?.evolution) },
-    { label: "CA livré du mois", value: formatMoney(statistics.month?.revenue), hint: `${accorder(statistics.month?.orders, "commande")} · ${formatEvolution(statistics.month?.evolution)}`, tone: getEvolutionTone(statistics.month?.evolution) },
-    { label: "Panier moyen", value: formatMoney(statistics.averageBasket), hint: "Commandes livrées, toutes périodes", tone: "info" },
+    { label: "CA livré TTC du jour", value: formatMoney(statistics.today?.revenue), hint: accorder(statistics.today?.orders, "commande"), tone: "success" },
+    { label: "CA livré TTC de la semaine", value: formatMoney(statistics.week?.revenue), hint: formatEvolution(statistics.week?.evolution), tone: getEvolutionTone(statistics.week?.evolution) },
+    { label: "CA livré TTC du mois", value: formatMoney(statistics.month?.revenue), hint: `${accorder(statistics.month?.orders, "commande")} · ${formatEvolution(statistics.month?.evolution)}`, tone: getEvolutionTone(statistics.month?.evolution) },
+    { label: "Panier moyen", value: formatMoney(statistics.averageBasket), hint: "TTC, commandes livrées, toutes périodes", tone: "info" },
     { label: "Nouveaux clients", value: statistics.newClientsMonth || 0, hint: "Ce mois-ci", tone: "warning" },
     { label: "Prospects convertis", value: statistics.convertedProspectsMonth || 0, hint: "Ce mois-ci", tone: "success" }
   ];

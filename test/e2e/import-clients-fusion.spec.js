@@ -192,3 +192,40 @@ test("commande terrain : Annuler au dialogue n'envoie rien ; une fiche que la li
   expect(erreurs).toEqual([]);
   await ctx.close();
 });
+
+// 4. Decision 7 de Thomas (24/09) : le chiffre d'affaires est TTC, et l'ecran
+//    le dit -- tableau de bord, Analyse, fiche client. Un avoir ajoute a un bon
+//    deja importe se soustrait ; le resume le dit.
+test("chiffre d'affaires : « TTC » ecrit sur le tableau de bord, l'Analyse et la fiche ; un avoir se soustrait", async ({ browser }) => {
+  test.setTimeout(120000);
+  await semer();
+  // Un client NOUVEAU : ceux du seme ont tous une commande du jour en cours (l'import la laisserait).
+  const pharma = { nom: "Maison de Santé Arbois", rue: "10 rue de Faramand", codePostal: "39600", ville: "Arbois" };
+  const entete = ["Date", "Statut", "Client", "Code", "Produit", "Quantite", "Rue", "Code Postal", "Ville", "HT", "TTC"];
+  const vente = [JOUR_FR, "Envoyée", pharma.nom, "CH-L", "Changes taille L", "4", pharma.rue, pharma.codePostal, pharma.ville, "40", "48"];
+  const avoir = [JOUR_FR, "Envoyée", pharma.nom, "CH-L", "Changes taille L", "-1", pharma.rue, pharma.codePostal, pharma.ville, "-10", "-12"];
+
+  const { ctx, page, erreurs } = await ouvrir(browser, "journee");
+  await expect(page.locator("#journee .tb-ca .tb-libelle").first()).toHaveText("Chiffre d’affaires livré TTC");
+  await importerParLEcran(page, xlsx([entete, vente]));
+  const second = await importerParLEcran(page, xlsx([entete, vente, avoir]));
+  expect(second.montantsRepris).toBe(1);
+  await expect(page.locator("#importSummary")).toContainText("1 commande déjà importée : montant TTC repris du fichier (avoir ou correction dans Ximi).");
+
+  await page.goto(srv.base + "/#statistiques", { waitUntil: "networkidle" });
+  await page.waitForTimeout(600);
+  const tuiles = page.locator("#statsKpis");
+  await expect(tuiles).toContainText("CA livré TTC du jour");
+  await expect(tuiles).toContainText("CA livré TTC du mois");
+
+  await page.goto(srv.base + "/#crm", { waitUntil: "networkidle" });
+  await page.waitForTimeout(600);
+  await page.locator("#crmList .cli-ligne", { hasText: "Arbois" }).click();
+  const ca = page.locator("#cliFiche .cli-ca");
+  await expect(ca).toContainText("Chiffre d'affaires livré TTC");
+  const vue = (await (await fetch(srv.base + "/api/crm/clients")).json()).find(c => c.nom === pharma.nom);
+  // 48 - 12 : l'avoir est soustrait.
+  expect(vue.totalRevenue).toBe(36);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});

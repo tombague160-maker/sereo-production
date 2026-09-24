@@ -2785,6 +2785,9 @@ function normalizeDb(db) {
 function healDatabaseAtBoot() {
   try {
     const db = readDb();
+    // Migration unique et idempotente (25/09) : le montant TTC des commandes
+    // dont le CA venait des ventes est fige sur elles (figerMontantsImportes).
+    figerMontantsImportes(db, "demarrage");
     syncWorkflow(db);
     // B3 v1.16.0 : si une recovery de corruption a eu lieu pendant le readDb
     // ci-dessus, on la journalise dans l'historique pour que l'operateur la voie
@@ -4843,6 +4846,9 @@ function normalizeOrder(order) {
     plannedReminderId: clean(order.plannedReminderId || order.reminderId),
     reminderLeadDays: Math.max(0, Math.round(number(order.reminderLeadDays, 7))),
     total: Math.max(0, number(order.total, 0)),
+    // Le montant TTC fige d'une commande importee (25/09, voir montantTtcFige) :
+    // absent ailleurs. Sans cette ligne, syncWorkflow l'effacerait a l'ecriture.
+    ...(montantTtcFige(order) !== null ? { montantTtc: montantTtcFige(order) } : {}),
     sentToPreparationAt: order.sentToPreparationAt || ""
   };
 }
@@ -5296,7 +5302,24 @@ function buildCustomerOrderLines(db, products, options = {}) {
   });
 }
 
+// LE MONTANT TTC FIGE d'une commande importee (25/09). Chasse aux defauts du
+// 24/09 : 197 commandes sur 224 n'avaient de montant ni sur elles ni sur leurs
+// lignes ; leur chiffre d'affaires se relisait dans `db.ventes`, que chaque
+// import remplacait -- un fichier du seul mois courant mettait les mois passes
+// a 0. L'import fige desormais le montant de chaque bon sur la commande, et
+// une migration unique (figerMontantsImportes) l'a fait pour les commandes
+// d'avant. Decision 7 de Thomas (24/09) : c'est un montant TTC, avoirs
+// soustraits (il peut etre negatif) ; une ligne sans TTC n'y compte pas.
+// null : pas de montant fige (commande saisie dans Sereo, ou ancienne).
+function montantTtcFige(order) {
+  if (!order || order.montantTtc === undefined || order.montantTtc === null || order.montantTtc === "") return null;
+  const montant = Number(order.montantTtc);
+  return Number.isFinite(montant) ? Math.round(montant * 100) / 100 : null;
+}
+
 function getOrderTotal(order) {
+  const fige = montantTtcFige(order);
+  if (fige !== null) return fige;
   const explicit = firstPositiveNumber(order.total, order.totalTtc, order.ttc, order.montantTotal, order.montant);
   if (explicit > 0) return Math.round(explicit * 100) / 100;
   return normalizeProducts(order.products).reduce((total, line) => {
@@ -5794,18 +5817,27 @@ function importedSaleDate(vente) {
   return normalizeDateInput(vente.dateCommandeIso || vente.dateCommande || vente.date) || "";
 }
 
-function importedSaleLineTotal(vente) {
-  const quantity = Math.max(0, number(vente.quantite ?? vente.quantity, 0));
-  return firstPositiveNumber(
-    vente.totalLigne,
-    vente.total,
-    vente.ttc,
-    vente.TTC,
-    vente.ht,
-    vente.HT,
-    vente.montant,
-    number(vente.prixUnitaire, 0) * quantity
-  );
+// Le montant TTC d'une ligne de vente, ou null si elle n'en a pas (decision 7
+// de Thomas, 24/09 : CA en TTC, avoirs soustraits, HT et TTC plus jamais
+// additionnes). Avant : le premier montant positif, TTC sinon HT -- deux ventes
+// identiques comptaient 120 et 100, et un avoir (negatif) ne comptait pas.
+//   - une vente importee depuis le 25/09 porte son montant (`montantTtc`) ;
+//   - plus ancienne : son TTC, SIGNE (un avoir est negatif) ; un total sans
+//     base declaree ; un HT seul ne vaut pas un TTC (null : « sans montant ») ;
+//     sans aucun des deux, le prix unitaire par la quantite.
+function montantTtcDeLaVente(vente) {
+  if (Object.prototype.hasOwnProperty.call(vente, "montantTtc")) {
+    if (vente.montantTtc === null || vente.montantTtc === "") return null;
+    const montant = Number(vente.montantTtc);
+    return Number.isFinite(montant) ? montant : null;
+  }
+  const ttc = number(vente.ttc ?? vente.TTC ?? vente.totalTtc, 0);
+  if (ttc !== 0) return ttc;
+  const total = firstPositiveNumber(vente.totalLigne, vente.total, vente.montant);
+  if (total) return total;
+  if (number(vente.ht ?? vente.HT, 0) !== 0) return null;
+  const parPrix = number(vente.prixUnitaire, 0) * Math.max(0, number(vente.quantite ?? vente.quantity, 0));
+  return parPrix > 0 ? parPrix : null;
 }
 
 function importedOrderKey(clientName, date) {
@@ -5820,8 +5852,8 @@ function buildImportedSalesIndex(ventes = []) {
     const client = clean(vente.client || vente.clientName || vente.nomClient);
     if (!client) return;
     const date = importedSaleDate(vente);
-    const total = importedSaleLineTotal(vente);
-    if (!total) return;
+    const total = montantTtcDeLaVente(vente);
+    if (total === null) return;
 
     const orderKey = importedOrderKey(client, date);
     byOrder.set(orderKey, Math.round(((byOrder.get(orderKey) || 0) + total) * 100) / 100);
@@ -5839,12 +5871,44 @@ function buildImportedSalesIndex(ventes = []) {
   return { byOrder, byOrderProduct };
 }
 
-function getImportedOrderTotal(importedIndex, order, date) {
-  if (!importedIndex || !order) return 0;
+// Le montant des ventes d'une commande, ou null si aucune vente (avec un
+// montant TTC) ne la couvre -- la migration ne fige que ce qui existe.
+function montantDesVentesDeLaCommande(importedIndex, order, date) {
+  if (!importedIndex || !order) return null;
   const clientName = clean(order.clientName || order.nom || order.client);
-  const exact = importedIndex.byOrder.get(importedOrderKey(clientName, date));
-  if (exact) return exact;
-  return importedIndex.byOrder.get(importedOrderKey(clientName, "")) || 0;
+  for (const cle of [importedOrderKey(clientName, date), importedOrderKey(clientName, "")]) {
+    if (importedIndex.byOrder.has(cle)) return importedIndex.byOrder.get(cle);
+  }
+  return null;
+}
+
+function getImportedOrderTotal(importedIndex, order, date) {
+  return montantDesVentesDeLaCommande(importedIndex, order, date) || 0;
+}
+
+/**
+ * MIGRATION UNIQUE (25/09) : fige le montant TTC de chaque commande dont le
+ * chiffre d'affaires venait des ventes -- aucun montant sur elle ni sur ses
+ * lignes, et des ventes qui la couvrent (197 commandes sur 224 en
+ * production). Le CA de chaque mois ne change pas ; il ne depend plus des
+ * ventes. IDEMPOTENTE : une commande figee (ou qui porte son montant) n'est
+ * plus visee, une commande sans vente reste sans montant. Rend le compte.
+ */
+function figerMontantsImportes(db, origine = "demarrage") {
+  let index = null;
+  let figees = 0;
+  (db.commandes || []).forEach(order => {
+    if (montantTtcFige(order) !== null || getOrderTotal(order) !== 0) return;
+    index = index || buildImportedSalesIndex(db.ventes);
+    const montant = montantDesVentesDeLaCommande(index, order, orderDate(order));
+    if (montant === null) return;
+    order.montantTtc = Math.round(montant * 100) / 100;
+    figees += 1;
+  });
+  if (figees > 0) {
+    addHistory(db, "Migration", `${figees} commande(s) : montant TTC fige depuis les ventes importees (${origine}) ; leur chiffre d'affaires ne depend plus du dernier fichier importe.`, { commandes: figees });
+  }
+  return figees;
 }
 
 function getImportedProductTotal(importedIndex, order, date, line) {
@@ -8682,9 +8746,21 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
         const rawQty = number(getCellByNames(row, headers, ["Quantite", "Quantité", "Qte", "Qté"]), 1);
         const quantite = Math.max(0, rawQty);
         if (rawQty < 0) clampedNegativeQtyCount += 1;
-        const prixUnitaire = number(getCell(row, headers, "Prix unitaire", 1), 0);
-        const ht = number(getCell(row, headers, "HT", 1), 0);
-        const ttc = number(getCell(row, headers, "TTC", 1), 0);
+        const cellulePrix = getCell(row, headers, "Prix unitaire", 1);
+        const celluleHt = getCell(row, headers, "HT", 1);
+        const celluleTtc = getCell(row, headers, "TTC", 1);
+        const prixUnitaire = number(cellulePrix, 0);
+        const ht = number(celluleHt, 0);
+        const ttc = number(celluleTtc, 0);
+        // Decision 7 (24/09) : le montant TTC de la ligne, SIGNE -- un avoir
+        // (quantite et TTC negatifs) se soustrait. Un HT seul n'est pas un
+        // TTC (null : la ligne ne compte pas). Sans HT ni TTC, le prix unitaire
+        // par la quantite, comme avant.
+        const lisible = cellule => clean(cellule) !== "" && Number.isFinite(number(cellule, NaN));
+        const montantTtc = lisible(celluleTtc) ? number(celluleTtc, 0)
+          : clean(celluleHt) !== "" ? null
+            : lisible(cellulePrix) ? Math.round(number(cellulePrix, 0) * rawQty * 100) / 100
+              : null;
         const produitComplet = clean(getCell(row, headers, "Produit", 1));
         const telephone = clean(getCellByNames(row, headers, ["Telephone favori", "Téléphone favori", "Telephone", "Téléphone", "Mobile", "Phone"]));
         const reference = clean(getCell(row, headers, "Reference", 1));
@@ -8713,6 +8789,7 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
           prixUnitaire,
           ht,
           ttc,
+          montantTtc,
           telephone,
           reference,
           codePostal,
@@ -8737,8 +8814,15 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     // celles de tout bon absent du fichier -- et le chiffre d'affaires qui en
     // venait. Un bon du fichier (client + date) remplace ses lignes ; les
     // autres restent.
+    // D'abord, figer le montant des commandes dont le CA vient encore des
+    // ventes (migration du 25/09, idempotente) : la table va changer.
+    figerMontantsImportes(db, "import des ventes");
     const fusionVentes = fusionnerVentes(db.ventes, ventes);
     db.ventes = fusionVentes.ventes;
+    // Le montant TTC de chaque bon du fichier : { montant, lignes } (lignes : celles qui ont un TTC).
+    const montantsDesBons = new WeakMap();
+    const arrondi = n => Math.round(n * 100) / 100;
+    let montantsRepris = 0;
 
     // ERP v1.9.0 : bucket par (client, dateCommande) au lieu de juste par client.
     // Chaque (client, date) = 1 bon de commande distinct. Multiples imports
@@ -8827,6 +8911,13 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
         order.factureLivree = order.factureLivree && venteFactureLivree;
         if (!order.deliveryDate && vente.deliveryDate) order.deliveryDate = vente.deliveryDate;
       }
+      // Le montant TTC du bon (decision 7), hors du releve garde sur la fiche.
+      const montantDuBon = montantsDesBons.get(clientsMap[key].ordersByDate[dateCommande]) || { montant: 0, lignes: 0 };
+      if (vente.montantTtc !== null) {
+        montantDuBon.montant += vente.montantTtc;
+        montantDuBon.lignes += 1;
+      }
+      montantsDesBons.set(clientsMap[key].ordersByDate[dateCommande], montantDuBon);
 
       // Agregation/dedup produit dans la commande (meme produit 2 lignes Excel = somme)
       const lineTotal = firstPositiveNumber(vente.ttc, vente.ht, vente.prixUnitaire * vente.quantite);
@@ -8897,9 +8988,18 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
 
         // Chemin 1 : hash strict = meme contenu, re-import identique idempotent
         const sameHashOrder = db.commandes.find(o => o.excelRowHash && o.excelRowHash === hash);
+        const bon = montantsDesBons.get(orderData) || { montant: 0, lignes: 0 };
         if (sameHashOrder) {
           sameHashOrder.updatedAt = new Date().toISOString();
           skippedIdenticalCount += 1;
+          // Memes produits, memes quantites (l'empreinte ignore les montants) :
+          // le montant TTC du fichier fait foi -- un avoir ajoute au bon dans
+          // Ximi se soustrait. Le resume compte les montants qui changent.
+          if (bon.lignes > 0) {
+            const avant = getOrderTotal(sameHashOrder);
+            sameHashOrder.montantTtc = arrondi(bon.montant);
+            if (avant !== 0 && avant !== sameHashOrder.montantTtc) montantsRepris += 1;
+          }
           return;
         }
 
@@ -8924,6 +9024,8 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
           }
           sameKeyOrder.products = normalizeProducts(orderData.produits);
           sameKeyOrder.excelRowHash = hash;
+          // Le montant TTC du bon, fige (0 : aucune ligne n'a de TTC).
+          sameKeyOrder.montantTtc = arrondi(bon.montant);
           sameKeyOrder.updatedAt = new Date().toISOString();
           // Sync coordonnees client (peuvent avoir change). lat/lng client manuel
           // (PATCH /api/clients/:id/coordinates) deja merge dans client.lat/lng.
@@ -8964,6 +9066,8 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
           deliveryDate: orderData.deliveryDate || "",
           dateImport: new Date().toISOString(),
           excelRowHash: hash,
+          // Le montant TTC du bon, fige (0 : aucune ligne n'a de TTC).
+          montantTtc: arrondi(bon.montant),
           numero: generateOrderNumber(db, orderData.dateCommande),
           status: orderData.factureLivree ? "livre" : "stock_a_verifier",
           deliveryStatus: orderData.factureLivree ? "livre" : "restant",
@@ -8985,6 +9089,9 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     const fichesMessage = `, fiches clients : ${clientsImport.created} creee(s), ${clientsImport.updated} mise(s) a jour, ${clientsImport.preserved} absente(s) du fichier conservee(s)`;
     const ventesGardeesMessage = fusionVentes.gardees > 0
       ? `, ${fusionVentes.gardees} vente(s) d'autres bons conservee(s)`
+      : "";
+    const montantsMessage = montantsRepris > 0
+      ? `, ${montantsRepris} montant(s) TTC repris du fichier (bon identique, avoir ou correction)`
       : "";
     const mergedMessage = mergedImport.mergedBySecondary > 0
       ? `, ${mergedImport.mergedBySecondary} doublon(s) client(s) fusionne(s) par cle secondaire`
@@ -9008,7 +9115,7 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     addHistory(
       db,
       "Import ventes",
-      `${ventes.length} vente(s) importee(s), ${importedClients.length} client(s) detecte(s), ${commandeStats}${ignoreesMessage}${illisiblesMessage}${fichesMessage}${ventesGardeesMessage}${mergedMessage}${livreMessage}${clampedMessage}${positionsMessage}`,
+      `${ventes.length} vente(s) importee(s), ${importedClients.length} client(s) detecte(s), ${commandeStats}${ignoreesMessage}${illisiblesMessage}${fichesMessage}${ventesGardeesMessage}${montantsMessage}${mergedMessage}${livreMessage}${clampedMessage}${positionsMessage}`,
       {
         fichier: req.file.originalname
       }
@@ -9026,7 +9133,8 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       lignesIllisibles,
       importedAsLivre: importedAsLivreCount,
       mergedBySecondary: mergedImport.mergedBySecondary,
-      clientsImport
+      clientsImport,
+      montantsRepris
     });
 
     writeDb(db);
@@ -9041,6 +9149,8 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       // Fusion des fiches (25/09) : aucune n'est retiree ; `preserved` compte
       // celles que le fichier ne cite pas, laissees telles quelles.
       clientsImport,
+      // Decision 7 : bons identiques dont le montant TTC du fichier a change (un avoir).
+      montantsRepris,
       importedAsLivre: importedAsLivreCount,
       created: createdCount,
       updated: updatedCount,
