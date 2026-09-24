@@ -294,7 +294,10 @@ window.addEventListener("load", () => {
 // `navigator.onLine === false` est sur ; `true` ne prouve rien (reseau qui
 // ment) : ce cas-la reste celui d'avant, hors de portee de cette garde.
 document.addEventListener("submit", event => {
-  if (event.target?.id !== "formDeconnexion" || navigator.onLine !== false) return;
+  if (event.target?.id !== "formDeconnexion") return;
+  // Le brouillon de commande (25/09) part avec la session : le compte suivant,
+  // sur le meme onglet, n'en herite pas.
+  if (navigator.onLine !== false) { oublierBrouillonCommande(); return; }
   event.preventDefault();
   notify("Hors ligne : la déconnexion attend le retour du réseau. Rien n'a été effacé.", "error", { cle: "deconnexion-hors-ligne" });
 });
@@ -752,7 +755,7 @@ function bindUi() {
     const champ = event.target;
     if (champ.dataset.depuisEntete !== "1") return;
     delete champ.dataset.depuisEntete;
-    if (champ.files?.length) document.getElementById("ventesForm")?.requestSubmit();
+    if (champ.files?.length) demanderEnvoi(document.getElementById("ventesForm"));
   });
 
   // Un selecteur ANNULE ne doit pas laisser l'envoi arme : le prochain fichier
@@ -765,7 +768,7 @@ function bindUi() {
     const champ = event.target;
     if (champ.dataset.depuisEntete !== "1") return;
     delete champ.dataset.depuisEntete;
-    if (champ.files?.length) document.getElementById("stockForm")?.requestSubmit();
+    if (champ.files?.length) demanderEnvoi(document.getElementById("stockForm"));
   });
 
   // Une tuile de categorie filtre le tableau ; la meme tuile, rappuyee, rend tout.
@@ -873,8 +876,13 @@ function bindUi() {
 
   document.getElementById("customerOrderForm")?.addEventListener("submit", event => {
     event.preventDefault();
-    runAction(event.submitter, "Validation...", () => submitCustomerOrder(event.currentTarget));
+    const form = event.currentTarget;
+    envoyerUneFois(form, event.submitter, "Validation...", () => submitCustomerOrder(form));
   });
+  // Le brouillon de la commande (25/09) : chaque saisie le garde.
+  for (const quoi of ["input", "change"]) {
+    document.getElementById("customerOrderForm")?.addEventListener(quoi, () => garderBrouillonCommande());
+  }
   // Un champ obligatoire dans les coordonnees REPLIEES (le nom d'une nouvelle
   // fiche) : le navigateur ne peut pas montrer son message sur un champ
   // cache, et l'envoi echouait sans rien dire. On deplie d'abord.
@@ -1309,6 +1317,10 @@ function showTab(tabName, options = {}) {
   // (rendreOuDifferer). Son rendu refait aussi l'ordre a plat du Stock.
   const stockEnAttente = nextTab === "stock" && Boolean(rendusEnAttente.get("stock")?.has(renderStock));
   if (stockEnAttente) ordreAPlat = null;
+  // La commande en cours, gardee avant un « retour » ou un rechargement (25/09).
+  if (nextTab === "commande-client") reprendreBrouillonCommande();
+  // Apres un geste d'arret, les chiffres du tableau de bord se relisent (25/09).
+  if (nextTab === "journee" && tableauDeBordPerime) relireTableauDeBord();
   rendreEnAttente(nextTab);
 
   setText("pageTitle", titles[nextTab].title);
@@ -1820,6 +1832,10 @@ let derniereEcritureA = 0;
 // Les cles dont l'ecran montre une COPIE (reseau trop lent), depuis le dernier
 // chargement : une reponse tardive les rafraichit (ecouterReponsesTardives).
 const clesEnCopie = new Set();
+// Les cles INDISPONIBLES au dernier chargement (« Partiel (N indispo) ») : une
+// reponse tardive les remplit, et le statut suit (chasse aux defauts, 25/09 :
+// il restait « Partiel » avec les commandes a l'ecran).
+const clesEnEchec = new Set();
 
 /**
  * Une ecriture part (ou vient d'etre renvoyee par la file). Integration des
@@ -1837,6 +1853,9 @@ function noterEcriture() {
 }
 
 async function viderCacheDeDonnees() {
+  // Le brouillon de commande (25/09) n'est PAS un cache : comme la file, il
+  // reste a la fin de session (reconnexion dans le meme onglet, la saisie
+  // revient). Il part a la deconnexion volontaire (formDeconnexion).
   try {
     if (typeof caches === "undefined") return;
     const noms = (await caches.keys()).filter(nom => nom.startsWith(PREFIXE_CACHE_DONNEES));
@@ -1941,11 +1960,18 @@ async function appliquerReponsesTardives() {
   // pose l'erreur, la reponse tardive l'efface.
   if (Object.prototype.hasOwnProperty.call(data, "orders")) commandesEnErreur = false;
   appliquerDonnees(data);
-  for (const cle of cles) clesEnCopie.delete(cle);
-  if (clesEnCopie.size === 0 && /^Données (de|du|en cache)/.test(dernierStatut)) {
+  const partiel = /^Partiel/.test(dernierStatut);
+  for (const cle of cles) {
+    clesEnCopie.delete(cle);
+    clesEnEchec.delete(cle);
+  }
+  if (clesEnCopie.size === 0 && clesEnEchec.size === 0 && (partiel || /^Données (de|du|en cache)/.test(dernierStatut))) {
     copieAffichee = null;
     setStatus("À jour");
     quitterOuvertureHorsLigne();
+  } else if (partiel) {
+    // Ce qui manque encore, ou, s'il ne manque plus rien, l'age des copies.
+    setStatus(clesEnEchec.size ? `Partiel (${clesEnEchec.size} indispo)` : libelleCopie(copieAffichee));
   }
 }
 
@@ -2166,6 +2192,8 @@ async function loadData() {
 
   clesEnCopie.clear();
   for (const cle of copiees) clesEnCopie.add(cle);
+  clesEnEchec.clear();
+  for (const cle of failed) clesEnEchec.add(cle);
   const ecritureCroisee = derniereEcritureA !== ecritureAuDepart;
   if (frais && gardees.length === 0 && failed.length === 0 && !ecritureCroisee) ecritureNonRelue = false;
 
@@ -2567,8 +2595,33 @@ async function appliquerGesteArret(resultat) {
     await loadData();
     return;
   }
+  // Le chiffre d'affaires et les comptes du tableau de bord viennent de
+  // /api/operations, que la mise a jour ciblee ne relit pas (lot 5 : aucune
+  // lecture ne suit un geste). Ils se relisent a l'arrivee sur le tableau de
+  // bord (chasse aux defauts, 25/09) : ils y montraient l'etat d'avant le geste.
+  tableauDeBordPerime = true;
   renderAll({ lectures: false });
   recopierApresGeste();
+}
+
+// Le tableau de bord montre des chiffres d'avant un geste d'arret.
+let tableauDeBordPerime = false;
+
+/**
+ * Relit ce que le tableau de bord tient du serveur (chiffre d'affaires,
+ * commandes livrees, « En livraison ») : deux lectures, a l'arrivee sur
+ * l'ecran, jamais sur le chemin du geste. Frais (X-Sereo-Frais) : la copie
+ * du service worker date d'avant le geste. Un echec (hors ligne) laisse
+ * l'ecran tel quel ; la prochaine arrivee reessaie.
+ */
+async function relireTableauDeBord() {
+  tableauDeBordPerime = false;
+  const endpoints = endpointsDeChargement().filter(e => e.key === "operations" || e.key === "dashboard");
+  const resultats = await Promise.allSettled(endpoints.map(e => apiFetch(e.path, { headers: { "X-Sereo-Frais": "1" } })));
+  const data = {};
+  resultats.forEach((r, i) => { if (r.status === "fulfilled" && r.value) data[endpoints[i].key] = r.value; });
+  if (Object.keys(data).length < endpoints.length) tableauDeBordPerime = true;
+  if (Object.keys(data).length) appliquerDonnees(data);
 }
 
 /**
@@ -4436,6 +4489,7 @@ function choisirClientCommande(clientId, { focus = false } = {}) {
   champ.value = String(clientId);
   fillCustomerFormFromClient(clientId);
   majClientCommande();
+  garderBrouillonCommande();
   if (focus) document.querySelector('[data-action="cc-client-changer"]')?.focus();
 }
 
@@ -4446,6 +4500,7 @@ function changerClientCommande() {
   champ.value = "";
   for (const nom of CHAMPS_COORDONNEES) if (form.elements[nom]) form.elements[nom].value = "";
   majClientCommande();
+  garderBrouillonCommande();
   document.getElementById("customerClientSearch")?.focus();
 }
 
@@ -4458,35 +4513,49 @@ const CHAMPS_IDENTITE = { nom: "nom", adresse: "rue", codePostal: "codePostal", 
  * formulaire: valeur }), par les routes de la fiche : l'identite par
  * /api/clients/:id (qui la recopie sur ses commandes a livrer), le reste par
  * /api/crm/clients/:id. `fileAdmise` : une ecriture mise en file hors ligne
- * n'arrete pas la suite (elle partira dans l'ordre).
+ * n'arrete pas la suite (elle partira dans l'ordre). Rend vrai si une partie
+ * attend dans la file.
  */
 async function enregistrerChangementsDeFiche(id, change, { fileAdmise = false } = {}) {
   const identite = {}, crm = {};
   for (const [cle, valeur] of Object.entries(change)) {
     if (cle in CHAMPS_IDENTITE) identite[CHAMPS_IDENTITE[cle]] = valeur; else crm[cle] = valeur;
   }
+  let enFile = false;
   const envoyer = async (chemin, corps) => {
     try {
       await apiFetch(chemin, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps) });
     } catch (error) {
       if (!(fileAdmise && error?.enFile)) throw error;
+      enFile = true;
     }
   };
   if (Object.keys(identite).length) await envoyer(`/api/clients/${encodeURIComponent(id)}`, identite);
   if (Object.keys(crm).length) await envoyer(`/api/crm/clients/${encodeURIComponent(id)}`, crm);
+  return enFile;
 }
 
 async function saveCrmClient(form) {
   const { id, ...data } = Object.fromEntries(new FormData(form).entries());
   const erreur = document.getElementById("cliErreur");
   if (erreur) { erreur.hidden = true; erreur.textContent = ""; }
+  // Hors ligne (chasse aux defauts, 25/09) : ce qui attend dans la file est
+  // FAIT pour l'ecran -- la fenetre se ferme et le dit. Elle restait ouverte
+  // sur « enregistre » : un second appui mettait une seconde fiche en file.
+  let enFile = false;
   try {
     if (!id) {
-      const cree = await apiFetch("/api/crm/clients", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data)
-      });
+      let cree = null;
+      try {
+        cree = await apiFetch("/api/crm/clients", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data)
+        });
+      } catch (error) {
+        if (!error?.enFile) throw error;
+        enFile = true;
+      }
       // La fiche creee s'ouvre -- y compris si un filtre l'aurait cachee.
       if (cree?.id) clientChoisi = String(cree.id);
       Object.assign(crmFilter, { query: "", status: "all", secteur: "" });
@@ -4499,7 +4568,12 @@ async function saveCrmClient(form) {
       // (prochaine relance, statut deduit) etaient figees dans la fiche.
       const avant = JSON.parse(form.dataset.initial || "{}");
       const change = Object.fromEntries(Object.entries(data).filter(([cle, valeur]) => String(avant[cle] ?? "") !== String(valeur)));
-      await enregistrerChangementsDeFiche(id, change);
+      // TOUT part, ou rien (25/09) : l'identite (/api/clients) et la fiche CRM
+      // (statut, rappel, notes : /api/crm/clients) sont deux ecritures. Hors
+      // ligne, la premiere partait en file et levait : la seconde n'etait ni
+      // envoyee ni gardee -- statut, rappel et notes perdus sous « enregistre ».
+      // Les deux attendent maintenant dans la file, dans cet ordre.
+      enFile = await enregistrerChangementsDeFiche(id, change, { fileAdmise: true });
     }
   } catch (error) {
     // Dans le dialogue : un toast serait sous sa couche, assombri et inerte.
@@ -4512,6 +4586,10 @@ async function saveCrmClient(form) {
   }
   form.reset();
   document.getElementById("cliDialogue")?.close();
+  if (enFile) {
+    notify(id ? "Fiche enregistrée sur ce téléphone : elle partira à la reconnexion." : "Client enregistré sur ce téléphone : il partira à la reconnexion.", "warning");
+    return;
+  }
   await loadData();
   notify(id ? "Fiche client mise à jour." : "Client enregistré.", "success");
   // Au telephone, la fiche creee s'ouvre (et pas seulement sa ligne).
@@ -4708,6 +4786,7 @@ function changeCustomerCart(productId, delta) {
   if (champ) champ.value = nextQuantity;
   else renderCustomerCatalog();
   renderCustomerCart();
+  garderBrouillonCommande();
 }
 
 // Audit UI 2026-07 : saisie directe de la quantite (valeur absolue) en plus
@@ -4746,6 +4825,7 @@ function setCustomerCart(productId, value, inputEl) {
   // Reflete la valeur retenue (utile si clampee) sans re-rendre le catalogue.
   if (inputEl) inputEl.value = nextQuantity;
   renderCustomerCart();
+  garderBrouillonCommande();
 }
 
 function renderCustomerCart() {
@@ -4832,6 +4912,122 @@ async function reporterCoordonneesSurLaFiche(form, data) {
   return true;
 }
 
+/**
+ * UNE cle de geste par SAISIE de commande (chasse aux defauts, 25/09).
+ * Chaque envoi tirait une cle neuve. Or une issue peut rester inconnue : la
+ * reponse coupee en route, un delai depasse sans file possible (indexedDB
+ * absent). Le serveur a pu creer la commande ; revalider -- le geste naturel
+ * -- en creait une seconde, meme EN LIGNE. Tant que la saisie ne change pas
+ * (memes champs, meme panier), la cle reste : le serveur rend « deja fait »
+ * (gesteIdempotent) au lieu de refaire. Elle part quand l'issue est connue :
+ * la commande est creee ou mise en file (viderCommandeClient), ou le serveur
+ * a repondu un refus (oublierCleDEnvoi). Le brouillon la garde avec la saisie.
+ */
+function cleDEnvoiDeLaSaisie(form, saisie) {
+  const empreinte = JSON.stringify(saisie);
+  if (form.dataset.saisieEnvoyee !== empreinte || !form.dataset.cleEnvoi) {
+    form.dataset.saisieEnvoyee = empreinte;
+    form.dataset.cleEnvoi = nouvelleCleDeGeste();
+    garderBrouillonCommande();
+  }
+  return form.dataset.cleEnvoi;
+}
+
+function oublierCleDEnvoi(form) {
+  delete form.dataset.saisieEnvoyee;
+  delete form.dataset.cleEnvoi;
+  garderBrouillonCommande();
+}
+
+/** La commande est partie (ou attend dans la file) : l'ecran repart a vide. */
+function viderCommandeClient(form) {
+  customerCart.clear();
+  form.reset();
+  // reset() ne vide PAS le client choisi (relecture adverse) : sur un champ
+  // cache, ecrire .value ecrit l'attribut value, et reset() revient a cet
+  // attribut. La commande suivante partait au nom du client d'avant. On le
+  // vide a la main : la recherche revient, les coordonnees se rouvrent.
+  form.elements.clientId.value = "";
+  delete form.dataset.saisieEnvoyee;
+  delete form.dataset.cleEnvoi;
+  oublierBrouillonCommande();
+  majClientCommande();
+  // Sans rechargement (mise en file) : le panier et les quantites du catalogue.
+  renderCustomerCart();
+  for (const champ of document.querySelectorAll("#customerCatalog [data-customer-qty-input]")) {
+    if (champ.value !== "0") champ.value = "0";
+  }
+}
+
+// --- LE BROUILLON DE LA COMMANDE (chasse aux defauts, 25/09) -----------------
+//
+// Le panier vivait dans une Map en memoire. Le geste « retour » du telephone
+// (qui quitte l'application : les onglets passent par replaceState), un
+// rechargement, « Recharger » apres une mise a jour, la reconnexion apres une
+// fin de session : au retour, le navigateur remettait le nom tape, mais le
+// panier etait VIDE -- une saisie a moitie rendue, qui ne correspondait plus a
+// rien. Le brouillon (champs, client choisi, panier, cle d'envoi) est garde
+// dans sessionStorage a chaque saisie, et rendu a l'ouverture de la commande
+// client si l'ecran est vide. Il part avec la commande (creee ou mise en
+// file), a la deconnexion et a la fin de session. sessionStorage : l'onglet
+// seulement, jamais un autre appareil ni une autre session de navigation ;
+// sans stockage (navigation privee stricte), rien n'est garde, comme avant.
+const CLE_BROUILLON_COMMANDE = "sereo-brouillon-commande";
+const CHAMPS_BROUILLON = ["clientId", "orderType", "deliveryDate", ...CHAMPS_COORDONNEES, "notes"];
+
+function garderBrouillonCommande() {
+  const form = document.getElementById("customerOrderForm");
+  if (!form) return;
+  const lignes = [...customerCart.values()];
+  const champs = Object.fromEntries(CHAMPS_BROUILLON.map(nom => [nom, form.elements[nom]?.value ?? ""]));
+  const vide = !lignes.length && !CHAMPS_COORDONNEES.some(nom => String(champs[nom] || "").trim()) && !champs.clientId && !String(champs.notes || "").trim();
+  try {
+    if (vide) sessionStorage.removeItem(CLE_BROUILLON_COMMANDE);
+    else sessionStorage.setItem(CLE_BROUILLON_COMMANDE, JSON.stringify({
+      champs, lignes, cleEnvoi: form.dataset.cleEnvoi || "", saisieEnvoyee: form.dataset.saisieEnvoyee || "",
+      // Ce que la fiche du client choisi avait mis dans les champs : seul ce que
+      // la saisie y a change repartira sur la fiche (reporterCoordonneesSurLaFiche).
+      coordonneesInitiales: form.dataset.coordonneesInitiales || ""
+    }));
+  } catch { /* stockage indisponible : rien n'est garde, comme avant */ }
+}
+
+function oublierBrouillonCommande() {
+  try { sessionStorage.removeItem(CLE_BROUILLON_COMMANDE); } catch { /* rien a oublier */ }
+}
+
+/**
+ * A l'ouverture de la commande client : l'ecran vide reprend le brouillon.
+ * Un panier deja rempli (la meme page) n'est jamais remplace.
+ */
+function reprendreBrouillonCommande() {
+  const form = document.getElementById("customerOrderForm");
+  if (!form || customerCart.size || form.elements.clientId?.value) return;
+  let brouillon = null;
+  try { brouillon = JSON.parse(sessionStorage.getItem(CLE_BROUILLON_COMMANDE) || "null"); } catch { brouillon = null; }
+  if (!brouillon || typeof brouillon !== "object") return;
+  const lignes = Array.isArray(brouillon.lignes) ? brouillon.lignes.filter(l => l && l.productId !== undefined && Number(l.quantite) > 0) : [];
+  const champs = brouillon.champs && typeof brouillon.champs === "object" ? brouillon.champs : {};
+  for (const nom of CHAMPS_BROUILLON) {
+    if (form.elements[nom] && typeof champs[nom] === "string") form.elements[nom].value = champs[nom];
+  }
+  for (const ligne of lignes) customerCart.set(String(ligne.productId), { ...ligne, quantite: Number(ligne.quantite) });
+  if (typeof brouillon.cleEnvoi === "string" && brouillon.cleEnvoi && typeof brouillon.saisieEnvoyee === "string") {
+    form.dataset.cleEnvoi = brouillon.cleEnvoi;
+    form.dataset.saisieEnvoyee = brouillon.saisieEnvoyee;
+  }
+  if (typeof brouillon.coordonneesInitiales === "string" && brouillon.coordonneesInitiales) {
+    form.dataset.coordonneesInitiales = brouillon.coordonneesInitiales;
+  }
+  majClientCommande();
+  renderCustomerCart();
+  for (const champ of document.querySelectorAll("#customerCatalog [data-customer-qty-input]")) {
+    const ligne = customerCart.get(String(champ.dataset.productId));
+    champ.value = String(ligne ? ligne.quantite : 0);
+  }
+  if (lignes.length) notify("La commande en cours a été reprise.", "info");
+}
+
 async function submitCustomerOrder(form) {
   const lines = Array.from(customerCart.values());
   if (!lines.length) {
@@ -4844,28 +5040,40 @@ async function submitCustomerOrder(form) {
     return;
   }
   const endpoint = data.orderType === "planifiee" ? "/api/planned-orders" : "/api/customer-orders";
+  const cle = cleDEnvoiDeLaSaisie(form, [data, lines]);
   const ficheModifiee = await reporterCoordonneesSurLaFiche(form, data);
   const fiche = ficheModifiee ? " Coordonnées enregistrées sur la fiche du client." : "";
-  const reponse = await apiFetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      clientId: data.clientId,
-      client: data,
-      products: lines,
-      notes: data.notes,
-      orderType: data.orderType,
-      deliveryDate: data.deliveryDate
-    })
-  });
-  customerCart.clear();
-  form.reset();
-  // reset() ne vide PAS le client choisi (relecture adverse) : sur un champ
-  // cache, ecrire .value ecrit l'attribut value, et reset() revient a cet
-  // attribut. La commande suivante partait au nom du client d'avant. On le
-  // vide a la main : la recherche revient, les coordonnees se rouvrent.
-  form.elements.clientId.value = "";
-  majClientCommande();
+  let reponse;
+  try {
+    reponse = await apiFetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Sereo-Geste": cle },
+      body: JSON.stringify({
+        clientId: data.clientId,
+        client: data,
+        products: lines,
+        notes: data.notes,
+        orderType: data.orderType,
+        deliveryDate: data.deliveryDate
+      })
+    });
+  } catch (error) {
+    if (error?.enFile) {
+      // Hors ligne (chasse aux defauts, 25/09) : la commande attend dans la
+      // file, avec sa cle -- c'est un envoi DIFFERE, pas un echec. Le
+      // formulaire restait rempli et le bouton se rallumait : on revalidait,
+      // et une seconde commande, sous une autre cle, partait au retour du
+      // reseau. La commande est faite : l'ecran repart a vide.
+      viderCommandeClient(form);
+      notify(`${data.orderType === "planifiee" ? "Commande planifiée" : "Commande"} enregistrée sur ce téléphone : elle partira à la reconnexion.${fiche}`, "warning");
+      return;
+    }
+    // Le serveur a repondu (un refus) : l'issue est connue, le prochain appui
+    // est un nouveau geste. Sans reponse, la cle reste (cleDEnvoiDeLaSaisie).
+    if (Number.isInteger(error?.statut)) oublierCleDEnvoi(form);
+    throw error;
+  }
+  viderCommandeClient(form);
   await loadData();
   // Audit du 24/09 : l'ecran renvoyait vers « À envoyer » (#commandes-jour),
   // un filtre vide par construction -- le serveur passe la commande terrain
@@ -10024,7 +10232,13 @@ async function apiFetch(url, options = {}) {
     noterEcriture();
     // La cle d'idempotence : gardee dans la file avec l'ecriture, elle fait
     // qu'un renvoi n'est applique qu'une fois (gesteIdempotent, server.js).
-    if (!isUpload) options = { ...options, headers: { ...entetesEnObjet(options.headers), "X-Sereo-Geste": nouvelleCleDeGeste() } };
+    // L'appelant peut porter la sienne (25/09) : la commande client garde UNE
+    // cle tant que sa saisie ne change pas (cleDEnvoiDeLaSaisie), pour qu'un
+    // second appui apres une issue inconnue soit le MEME geste.
+    if (!isUpload) {
+      const entetes = entetesEnObjet(options.headers);
+      options = { ...options, headers: { ...entetes, "X-Sereo-Geste": entetes["X-Sereo-Geste"] || nouvelleCleDeGeste() } };
+    }
   }
   const timeoutMs = options.timeoutMs || (isUpload ? APIFETCH_UPLOAD_TIMEOUT_MS : APIFETCH_DEFAULT_TIMEOUT_MS);
   const ac = new AbortController();
@@ -10051,18 +10265,22 @@ async function apiFetch(url, options = {}) {
     // Si c'est l'appelant qui a abort (pas le timeout), on re-throw l'erreur
     // originale pour preserver la semantique : il ne voulait plus rien envoyer.
     if (options.signal && options.signal.aborted) throw err;
-    // L'ecriture est-elle recuperable ? Voir tenterMiseEnFile().
-    if (await tenterMiseEnFile(url, options)) throw erreurMiseEnFile();
+    // L'ecriture est-elle recuperable ? Voir tenterMiseEnFile(). `sansFile` :
+    // une ecriture dont la suite depend de la reponse (la fiche d'un nouveau
+    // client, puis son abonnement) ne se met pas en file morceau par morceau.
+    if (!options.sansFile && await tenterMiseEnFile(url, options)) throw erreurMiseEnFile();
+    // `injoignable` : le serveur n'a rien repondu (l'appelant peut dire
+    // pourquoi rien n'est parti, plutot qu'un message de reseau generique).
     if (err && (err.name === "AbortError" || err.code === "ABORT_ERR")) {
-      throw new Error(`Réseau trop lent (plus de ${Math.round(timeoutMs / 1000)} s). Vérifie ta connexion.`);
+      throw Object.assign(new Error(`Réseau trop lent (plus de ${Math.round(timeoutMs / 1000)} s). Vérifie ta connexion.`), { injoignable: true });
     }
     // Jamais le message brut du navigateur (« Failed to fetch », « Load
     // failed », « NetworkError... ») : il est anglais et ne dit rien d'utile.
-    throw new Error("Impossible de joindre le serveur. Vérifie ta connexion.");
+    throw Object.assign(new Error("Impossible de joindre le serveur. Vérifie ta connexion."), { injoignable: true });
   }
   clearTimeout(timer);
 
-  if (ecriture && STATUTS_PASSERELLE.has(res.status) && await tenterMiseEnFile(url, options)) {
+  if (ecriture && STATUTS_PASSERELLE.has(res.status) && !options.sansFile && await tenterMiseEnFile(url, options)) {
     throw erreurMiseEnFile();
   }
   // Le serveur vient de repondre : c'est le moment de vider la file, meme si
@@ -10084,7 +10302,7 @@ async function apiFetch(url, options = {}) {
     const next = window.location.pathname + window.location.search + window.location.hash;
     // Le geste qui a rencontre la session expiree n'est pas perdu : il attend
     // dans la file, qui repartira apres la reconnexion (H2, lot 1 de l'audit).
-    if (ecriture) await tenterMiseEnFile(url, options);
+    if (ecriture && !options.sansFile) await tenterMiseEnFile(url, options);
     // La session est finie : ses donnees ne doivent pas s'afficher a la
     // prochaine ouverture, avant que le serveur ait reconnu quelqu'un.
     // (Un 429 n'est pas une fin de session : on ne vide que sur 401.)
@@ -10126,12 +10344,52 @@ async function apiFetch(url, options = {}) {
       ? body.error
       : `Erreur HTTP ${res.status}`;
     const erreur = new Error(message);
+    // Le serveur a REPONDU (25/09) : l'issue est connue, un nouvel envoi est
+    // un nouveau geste (voir cleDEnvoiDeLaSaisie).
+    erreur.statut = res.status;
     // Un refus peut porter sa liste (ex. les adresses a verifier d'une tournee).
     if (body && typeof body === "object" && body.details) erreur.details = body.details;
     throw erreur;
   }
 
   return body;
+}
+
+/**
+ * Un formulaire, UN envoi a la fois (chasse aux defauts, 25/09). La commande
+ * client a deux boutons « Valider la commande » HORS du formulaire, relies par
+ * `form=` : sous le total, et dans la barre du panier au telephone. runAction
+ * ne grisait que le declencheur : Entree (qui envoie par le premier) puis un
+ * toucher sur la barre, pendant un envoi lent, creaient DEUX commandes (chaque
+ * envoi tirait sa cle de geste). Le verrou est pose sur le FORMULAIRE : tous
+ * ses boutons d'envoi se grisent (`form.elements` compte ceux qui le visent
+ * par `form=`), et un envoi qui arrive pendant le premier est ignore.
+ */
+/**
+ * Envoie un formulaire comme un clic sur son bouton : ses ecouteurs « submit »
+ * s'executent. `requestSubmit()` n'existe que depuis Safari 16 : sous iOS 15.4
+ * a 15.x, l'import lance depuis l'en-tete levait une TypeError et le fichier
+ * choisi ne partait pas (chasse aux defauts, 25/09). Sans elle, l'evenement
+ * « submit » est emis a la main ; `form.submit()` contournerait les ecouteurs
+ * et naviguerait.
+ */
+function demanderEnvoi(form) {
+  if (!form) return;
+  if (typeof form.requestSubmit === "function") form.requestSubmit();
+  else form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+}
+
+async function envoyerUneFois(form, declencheur, busyText, action) {
+  if (form.dataset.envoiEnCours === "1") return;
+  form.dataset.envoiEnCours = "1";
+  const autres = [...form.elements].filter(el => el.type === "submit" && el !== declencheur && !el.disabled);
+  for (const bouton of autres) bouton.disabled = true;
+  try {
+    await runAction(declencheur, busyText, action);
+  } finally {
+    for (const bouton of autres) bouton.disabled = false;
+    delete form.dataset.envoiEnCours;
+  }
 }
 
 async function runAction(control, busyText, action) {

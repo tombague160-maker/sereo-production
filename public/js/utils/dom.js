@@ -114,3 +114,17 @@ export function emptyState(title, message, action) {
     </div>
   `;
 }
+
+/**
+ * L'element est-il rendu (une boite a l'ecran) ? `checkVisibility()` n'existe
+ * que depuis Safari 17.4 (mars 2024) : sur un iPhone en iOS 15.4 a 17.3,
+ * l'appeler levait « checkVisibility is not a function » -- une fausse erreur
+ * rouge apres une commande d'abonnement bien creee, et une promesse rejetee a
+ * l'ouverture de l'agenda (chasse aux defauts, 25/09). Sans elle : une boite
+ * de rendu (display: none n'en a aucune), le critere de toujours.
+ */
+export function estVisible(element) {
+  if (!element) return false;
+  if (typeof element.checkVisibility === "function") return element.checkVisibility();
+  return element.getClientRects().length > 0;
+}

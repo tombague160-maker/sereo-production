@@ -1,4 +1,4 @@
-import { escapeHtml as h } from "./utils/dom.js";
+import { escapeHtml as h, estVisible } from "./utils/dom.js";
 import { normalizeTextKey, villeAffichee } from "./utils/text.js";
 import { getAddressParts } from "./utils/address.js";
 // Les dates et les heures de l'ecran : un seul utilitaire (parcours simplifies, 24/09).
@@ -209,7 +209,7 @@ export function initOperations(api) {
         // echeance (decision 6 : le geste suivant, au meme endroit), sinon a
         // l'echeance suivante du meme abonnement -- jamais sur <body>.
         const suivant = [...document.querySelectorAll(`[data-op="confirm-sub-order"][data-id="${CSS.escape(el.dataset.id)}"], [data-op="generate-sub"][data-id="${CSS.escape(el.dataset.id)}"]`)]
-          .find((b) => b.checkVisibility());
+          .find((b) => estVisible(b));
         suivant?.focus();
       }
       // Decision 6 : confirmer SUR l'echeance, sans changer d'ecran. La
@@ -222,7 +222,7 @@ export function initOperations(api) {
         await context.loadData();
         context.notify("Commande confirmée : elle est à préparer.", "success");
         const badge = [...document.querySelectorAll(`[data-op="confirm-sub-order"][data-id="${CSS.escape(el.dataset.id)}"], [data-op="generate-sub"][data-id="${CSS.escape(el.dataset.id)}"]`)]
-          .find((b) => b.checkVisibility());
+          .find((b) => estVisible(b));
         (badge || document.getElementById("subscriptionAgenda"))?.focus?.();
       }
       // « Creer les N commandes dues » : une commande par echeance due, l'une
@@ -707,7 +707,7 @@ function ouvrirVueAbonnements(vue, { depuisHistorique = false } = {}) {
   majSousTitreAbonnements();
   window.scrollTo(0, 0);
   const cible = vue === "agenda" ? document.getElementById("aboAgendaRetour") : document.querySelector(".abo-agenda-ouvrir");
-  if (cible?.checkVisibility()) cible.focus();
+  if (estVisible(cible)) cible.focus();
 }
 // La prochaine echeance d'un abonnement ; en retard si elle n'a pas de
 // commande et que sa date est passee.
@@ -1242,6 +1242,8 @@ function openEditor(id) {
   majFrequence();
   $("subscriptionDialog").showModal();
 }
+const ABONNEMENT_NOUVEAU_CLIENT_HORS_LIGNE =
+  "Pas de réseau : la fiche d’un nouveau client et son abonnement se créent ensemble, en ligne. Réessaie quand le réseau revient, ou choisis un client existant.";
 async function saveSubscription(event) {
   event.preventDefault();
   const save = document.getElementById("subSave");
@@ -1258,19 +1260,32 @@ async function saveSubscription(event) {
     if (!ficheNouvelle && !clientId)
       throw new Error("Choisis un client, ou crée sa fiche.");
     if (ficheNouvelle) {
-      const client = await context.apiFetch("/api/crm/clients", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          nom: document.getElementById("subLastName").value,
-          prenom: document.getElementById("subFirstName").value,
-          rue: document.getElementById("subAddress").value,
-          codePostal: document.getElementById("subPostal").value,
-          ville: document.getElementById("subCity").value,
-          telephone: document.getElementById("subPhone").value,
-          crmStatus: "client_actif",
-        }),
-      });
+      // Chasse aux defauts (25/09) : la fiche PUIS l'abonnement, qui a besoin
+      // de l'identifiant de la fiche. Hors ligne, la fiche partait seule en
+      // file (« enregistre »), l'abonnement jamais ; un second appui mettait
+      // une seconde fiche en file -- deux clients, aucun abonnement. Ce geste
+      // ne se coupe pas en morceaux : sans reseau, il est refuse, et le dit.
+      if (navigator.onLine === false) throw new Error(ABONNEMENT_NOUVEAU_CLIENT_HORS_LIGNE);
+      let client;
+      try {
+        client = await context.apiFetch("/api/crm/clients", {
+          method: "POST",
+          sansFile: true,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            nom: document.getElementById("subLastName").value,
+            prenom: document.getElementById("subFirstName").value,
+            rue: document.getElementById("subAddress").value,
+            codePostal: document.getElementById("subPostal").value,
+            ville: document.getElementById("subCity").value,
+            telephone: document.getElementById("subPhone").value,
+            crmStatus: "client_actif",
+          }),
+        });
+      } catch (e) {
+        if (e?.injoignable) throw new Error(ABONNEMENT_NOUVEAU_CLIENT_HORS_LIGNE);
+        throw e;
+      }
       clientId = client.id;
       data.crmClients.push(client);
       // La fiche existe : un second envoi (apres une erreur) ne la recree pas.
@@ -1287,17 +1302,31 @@ async function saveSubscription(event) {
       notes: document.getElementById("subNotes").value,
       status: document.getElementById("subStatus").value,
     };
-    await context.apiFetch(
-      editingId
-        ? `/api/subscriptions/${encodeURIComponent(editingId)}`
-        : "/api/subscriptions",
-      {
-        method: editingId ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      },
-    );
+    // L'abonnement d'un client qui EXISTE (au serveur) se garde hors ligne :
+    // il part a la reconnexion, avec sa cle. La fenetre se ferme et le dit
+    // (25/09) : ouverte sur « enregistre », un second appui mettait un second
+    // abonnement en file.
+    let enFile = false;
+    try {
+      await context.apiFetch(
+        editingId
+          ? `/api/subscriptions/${encodeURIComponent(editingId)}`
+          : "/api/subscriptions",
+        {
+          method: editingId ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
+    } catch (e) {
+      if (!e?.enFile) throw e;
+      enFile = true;
+    }
     document.getElementById("subscriptionDialog").close();
+    if (enFile) {
+      context.notify("Abonnement enregistré sur ce téléphone : il partira à la reconnexion.", "warning");
+      return;
+    }
     await context.loadData();
     context.notify("Abonnement enregistré.", "success");
   } catch (e) {
