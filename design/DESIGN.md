@@ -6048,13 +6048,14 @@ Le serveur sauvegardait seul (au plus une fois par heure d'activité, à la prem
   « À recommander » dans Paramètres avec un curseur (44 px de haut), enregistré 500 ms
   après le dernier mouvement, puis les données sont relues.
 - **L'écran** (`evaluerRecommandations`, une seule évaluation) : besoin estimé = commandes
-  en cours + à venir ; à recommander = de quoi couvrir tout l'horizon, ou repasser
+  en cours **dont le stock n'est pas encore réservé** (relecture adverse, plus bas) + à
+  venir ; à recommander = de quoi couvrir tout l'horizon, ou repasser
   au-dessus du seuil — le plus grand des deux ; **le jour du manque** = le premier jour où
   la demande cumulée dépasse le stock (les commandes en cours d'abord, aujourd'hui, puis
   chaque échéance à sa date). Chaque produit qui manque le dit : « Manquera le 27/9 : 24
   demandés, 14 en stock » (ou « Manque dès aujourd'hui : … »), et d'où vient le besoin
-  (« Dont 12 sur commandes en cours et 12 à venir d'ici le 8/10 (abonnements, commandes
-  planifiées). »). Le sous-titre dit l'horizon.
+  (« Dont 12 sur commandes en cours sans stock réservé et 12 à venir d'ici le 8/10
+  (abonnements, commandes planifiées). »). Le sous-titre dit l'horizon.
 - **Un seul compte** (`aRecommander()` : urgent ou bientôt) pour la pastille Stock, la carte
   « À recommander » du Stock (badge et liste), la tuile du tableau de bord et le filtre de
   l'écran. Mesuré sur le semé de l'audit adapté : 3 partout (l'ancien code : pastille 1).
@@ -6081,8 +6082,8 @@ Le serveur sauvegardait seul (au plus une fois par heure d'activité, à la prem
 - **Urgent / bientôt.** Urgent : stock à zéro ou qui manque **dès aujourd'hui** (une
   échéance du jour non générée compte comme une commande en cours). Bientôt : sous le
   seuil, ou qui manquera avant la fin de l'horizon.
-- **« N demandés »** : toute la demande de l'horizon (en cours et à venir), face au stock
-  d'aujourd'hui.
+- **« N demandés »** : toute la demande de l'horizon (en cours et à venir) que le stock n'a
+  pas encore réservée, face au stock d'aujourd'hui, réservations déduites.
 - **La fin de l'horizon** : aujourd'hui + N jours, inclus — la convention de `schedule()` et
   celle de la mesure de l'audit (24 sous 14 jours, 60 sous 30).
 - **Une échéance passée sans commande n'est pas « à venir »** (réserve du vérificateur de
@@ -6151,14 +6152,74 @@ envoyé »).
 ### Bancs
 
 `test/sauvegardes.test.js` (10 cas, serveur authentifié), `test/a-recommander-a-venir.test.js`
-(5 cas), `test/e2e/sauvegardes.spec.js` (port 3522, trois serveurs semés l'un après l'autre :
-téléchargement ouvert, sauvegardes en échec, téléchargement fermé ; clair et sombre, 1440
-et 390 px ; 10 cas), `test/e2e/a-recommander.spec.js` (port 3523 ; 6 cas).
+(7 cas, dont 2 de la relecture adverse), `test/e2e/sauvegardes.spec.js` (port 3522, trois
+serveurs semés l'un après l'autre : téléchargement ouvert, sauvegardes en échec,
+téléchargement fermé ; clair et sombre, 1440 et 390 px ; 10 cas),
+`test/e2e/a-recommander.spec.js` (port 3523 ; 7 cas, dont 1 de la relecture adverse).
 
 ### Ce qui reste
 
-- Aligner ou retirer `/api/recommendations`.
+- Aligner ou retirer `/api/recommendations` (il compte encore deux fois une commande au
+  stock réservé : `quantityNeeded`, voir la relecture adverse).
+- **« Réservé » ne compte pas une commande confirmée** (constat de la relecture, antérieur
+  au lot, non touché) : `RESERVED_ORDER_STATUSES` n'a pas `stock_a_verifier`, où la
+  confirmation et la saisie chez le client laissent une commande au stock déjà déduit. La
+  carte produit dit alors « Réservé 0 », « Total » = le disponible, et le statut
+  « disponible » au lieu de « réservé ».
 - Une sauvegarde « de fin d'activité » (une heure après la dernière écriture non
   sauvegardée) fermerait l'écart du rythme horaire ; une copie **hors de la machine**
   automatique reste hors de l'application (aujourd'hui : « Télécharger »).
 - « Manquera » dans les alertes du tableau de bord, si Thomas le veut.
+
+### Relecture adverse (24/09) : un défaut, vrai
+
+**Le besoin comptait deux fois une commande au stock réservé.** Confirmer une commande
+planifiée (`confirmPlannedOrder`), saisir une commande chez le client
+(`createCustomerOrder`) ou lancer une préparation (`start-preparation`) **réserve** le
+stock : `reserveStockForOrder` déduit les quantités de `quantite` et pose
+`stockReservedAt`. La commande restait pourtant dans `quantityNeeded`
+(`NEEDED_ORDER_STATUSES`, sans condition sur la réservation), et l'écran comparait ce besoin
+au stock **déjà déduit**. Rejoué sur `5fac3f2` (la sonde du relecteur) : Changes L, 30 en
+stock, seuil 5, 20 confirmés → `quantite` 10, `quantityNeeded` 20, « Urgent »,
+« Manque dès aujourd'hui : 20 demandés, 10 en stock », 10 à recommander — alors que rien ne
+manque (30 physiques, 20 promis et déduits, 10 libres). Le calcul existait avant le lot sur
+l'écran « À recommander » ; la décision 3 le portait sur la pastille, la carte du Stock et
+la tuile du tableau de bord.
+
+- **Le serveur** donne `quantityNeededNotDeducted` : dans `buildStockMetricsIndex`, les
+  lignes des commandes en cours **sans** `stockReservedAt`, plus, sur une commande
+  réservée, ses lignes gardées non déduites (`stockNonDeduit`, livraison acceptée sur un
+  stock non suivi, puis revenue « prête »). `quantityNeeded` (« Nécessaire » de la carte
+  produit, `/api/recommendations`, tableau de bord) **ne change pas de sens**.
+- **L'écran** (`besoinNonDeduit`) prend ce besoin-là. Une copie hors ligne d'avant le champ
+  le recompte sur les commandes de la page (les statuts de `NEEDED_ORDER_STATUSES`, sans
+  réservation).
+- **La ligne du détail** dit « sur commandes en cours **sans stock réservé** » : sinon
+  « Dont 0 sur commandes en cours » contredirait l'écran Commandes pour un produit dont la
+  commande est confirmée.
+- Même sonde, nouveau code : après confirmation, besoin 0, « OK », 0 à recommander.
+
+**Ce qu'il disait des bancs, mesuré à moitié.** Les semés sans `stockReservedAt` ne sont
+pas tous impossibles : l'import des ventes crée ses commandes en `stock_a_verifier`, sans
+réservation (`status: orderData.factureLivree ? "livre" : "stock_a_verifier"`, lu dans le
+code, pas rejoué) — le cas que le besoin doit compter, et que les bancs gardent comme
+témoin positif. En préparation sans réservation,
+en revanche, aucun chemin ordinaire ne le produit. Les nouveaux cas passent donc par les
+**vraies routes** (création, confirmation, saisie, mise en préparation), pas par un semé.
+
+**Écarts nommés.** Le repli de l'écran ignore `stockNonDeduit` (une copie hors ligne d'avant
+le champ, sur une commande livrée puis revenue « prête » : deux raretés à la fois) ; il
+compte `pret_livraison` comme le serveur, là où l'ancien repli de « Nécessaire »
+(`getNeededQuantityForProduct`) ne le compte pas.
+
+**Preuves rouges** (ancien code `5fac3f2`, restauré par copie ; cause lue) :
+`a-recommander.spec.js`, « une commande confirmée… » : pastille **« 4 »** au lieu de « 3 »
+(le gel, 20 en stock, 12 confirmés, 8 restants, compté manquant) ;
+`a-recommander-a-venir.test.js` : `quantityNeededNotDeducted` **undefined** (le champ
+n'existait pas — rouge sans valeur propre, d'où les mutants). **Mutants** (nouveau code, un
+à la fois, restauré par copie) : besoin non déduit = besoin (réservation ignorée) → rouge
+en `node --test` (**14** au lieu de 2, « la commande confirmée, déjà déduite, est comptée
+deux fois ») et en e2e (pastille 4, première vérification) ; `stockNonDeduit` ignoré →
+rouge (**0** au lieu de 4) ; repli de l'écran sans le filtre de réservation → rouge (pastille
+4, seconde vérification, `/api/stock` réécrit sans le champ) ; écran revenu à
+`quantityNeeded` → rouge (pastille 4).
