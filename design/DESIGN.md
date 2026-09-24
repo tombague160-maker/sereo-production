@@ -8194,3 +8194,187 @@ liste ciblée — les bancs des deux lots, `chargement-instantane`, `hors-ligne`
 `stock*`, `tabs`, `smoke` — **312/312** ; suite complète, deux passages : **723/723** et
 **723/723**. Un passage complet préalable (avant `4d8f513` et le banc de la carte) : 721 verts,
 le rouge de `carte-telephone` réglé ci-dessus.
+
+## 25/09 — Stock et abonnements (chasse aux défauts du 24/09, décision 8)
+
+Branche `fix/stock-et-abonnements`, partie de `5b52268` (v1.46.0 + la performance, PR #184).
+Constats de la chasse aux défauts du 24/09, angle « métier » (identifiants du journal de la
+chasse : `7.n`) ; décision 8 de Thomas (24/09, recommandation acceptée). Chaque constat a été
+**rejoué sur `5b52268` avant d'y toucher** (scripts de la chasse, `chasse/metier/b*.js`, pointés
+sur ce code) : tous encore présents, sauf 7.14, corrigé à moitié par v1.46.0 (l'écran « À
+recommander » compte déjà le besoin non déduit ; `/api/recommendations` non).
+
+### Fait
+
+- **7.1 — La commande terrain ne se bloque plus elle-même.** Saisie chez le client ou planifiée
+  confirmée, une commande sort son stock du rayon et reste « à vérifier » (à préparer). Absente
+  de `RESERVED_ORDER_STATUSES`, elle était réévaluée contre le rayon qu'elle venait de réduire :
+  6 pris sur 10, « 6 demandés pour 4 », rangée « Bloquées », « Passer en préparation » grisé,
+  « Réservé 0 » au Stock, « Commande bloquée » au tableau de bord. La réservation se lit
+  désormais **sur la commande** : `stockReserveActif(order)` = `stockReservedAt`, ni livrée ni
+  annulée (`enrichOrder`, `buildStockMetricsIndex`, `calculateReservedStock`) ; la liste de
+  statuts est retirée. Ferme aussi l'écart « Réservé ne compte pas une commande confirmée » du
+  24/09 (section « Le filet de sécurité », « Ce qui reste »).
+- **7.3 — Deux lignes du même produit se partagent le rayon.** `analyzeOrderStock` fait prendre
+  chaque ligne dans ce que les précédentes du même produit ont laissé (`available` d'une ligne =
+  ce qui reste pour elle ; une ligne seule : le rayon, comme avant) : 3 + 3 sur 5 est « Bloquée —
+  Il manque 1 article », la préparation est refusée. La réservation et la libération sortent et
+  rendent **la somme par produit** (`quantitesParProduit`), écrite sans remise à zéro : avant, le
+  rayon tombait à 0 (une unité perdue) et la libération en rendait 6 ; un rayon négatif
+  (livraison acceptée sur stock insuffisant) remonte de ce qui est rendu au lieu de sauter à 0.
+- **7.12 — `PATCH /api/orders/:id` sort le stock.** Une commande importée, à vérifier ou validée
+  qu'une transition fait entrer en préparation (ou au-delà) réserve comme « Passer en
+  préparation » ; 400 « Stock insuffisant » si le rayon ne couvre pas. Avant : en préparation puis
+  livrée, rayon inchangé. Une commande « à reprogrammer » libérée à la main n'est pas concernée
+  (sa livraison reprend le stock, `reprendreStockLibere`).
+- **7.14 — `/api/recommendations`** compte le besoin non encore sorti du rayon
+  (`quantityNeededNotDeducted`, celui de l'écran depuis le 24/09) : 7 sortis, rayon 3, seuil 5 →
+  **2** (avant : 4). Sa règle « sous le seuil seulement » ne change pas (écart du 24/09).
+- **7.13 — Le journal des mouvements reçoit tout ce qui change le rayon.** Sortie d'une commande
+  (« Sortie pour la commande CMD-2026-012 (EHPAD …) »), retour au rayon (« Rendue au rayon :
+  commande … (commande annulée | commande planifiée annulée | purge des bons de commande |
+  libération manuelle | abonnement mis en pause | abonnement arrêté | le motif saisi) »), livraison
+  reprise après libération, livraison acceptée sur stock insuffisant (« Livrée sur stock
+  insuffisant : commande … (origine) », négatif compris), import du stock dont la colonne
+  Quantité **change** le rayon (« Import du stock (fichier.xlsx) », « … : produit créé ») ; un
+  import qui ne change rien n'écrit rien. Chaque mouvement porte `orderId` (colonne
+  `reference_commande`) et `numero` ; l'auteur est celui de la requête (`createdBy`, posé par le
+  lot « données utiles »). Le journal de Paramètres écrit « — » pour une quantité qui n'existait
+  pas. L'état vide des « Mouvements récents » dit « Les entrées et sorties du stock apparaîtront
+  ici. » (plus « Les ajustements manuels »).
+- **7.10 — Une commande annulée annule ses rappels.** Planifiée annulée (`PATCH
+  /api/planned-orders/:id`) ou annulée depuis l'écran Commandes (`PATCH /api/orders/:id`) : ses
+  rappels encore à faire passent « annulé » (« Commande annulée »), le prochain rappel du client
+  est recalculé ; ses autres rappels ne bougent pas (`annulerRappelsDeLaCommande`).
+- **7.11 — Un numéro attribué ne revient jamais.** La purge des bons retient, avant de vider,
+  le plus grand numéro de chaque série (`settings.numerosAttribues` : « CMD-2026 » en remise
+  annuelle, « CMD » en compteur continu) ; `generateOrderNumber` et la numérotation des anciennes
+  commandes sans numéro partent du plus grand des deux. Avant : CMD-2026-001 et l'identifiant
+  `cmd-cmd-2026-001` d'une commande purgée, qu'un rappel survivant visait alors.
+- **7.15 — « Prospects convertis ce mois »** ne compte qu'un client qui était **prospect** : aucune
+  commande livrée ni en cours avant celle-ci (une planifiée non confirmée, une annulée, un
+  brouillon ne font pas un client) — commande terrain et confirmation d'une planifiée.
+- **7.6 / décision 8 — Abonnements.**
+  - *Pause ou arrêt* (`PATCH /api/subscriptions/:id`, statut qui quitte « actif ») : les
+    commandes déjà générées et pas livrées sont **annulées** avec leurs rappels ; le stock
+    réservé par une échéance confirmée revient au rayon (journal). Une commande déjà en
+    préparation, prête ou en livraison suit son cours (la machine d'état ne l'annule pas). La
+    réponse porte `suspension: { annulees, gardees }` (jamais écrit sur l'abonnement) ;
+    l'historique le dit ; l'écran aussi : « Abonnement mis en pause : 1 commande déjà créée
+    annulée (CMD-2026-011). » (bouton du sheet et éditeur).
+  - *Changement de fréquence ou reprise* : l'abonnement reçoit une **date d'effet**
+    (`effectiveFrom`, le jour de Paris ; jamais lue dans la requête). `schedule()` ignore les
+    échéances d'avant qui n'ont pas de commande ; `POST /api/subscriptions/:id/orders` refuse de
+    les créer (400). Avant : 14 → 7 jours faisait ressortir 6 échéances « en retard » déjà
+    couvertes par l'ancienne cadence, proposées à la génération (double livraison) ; une reprise
+    après deux mois de pause, 2 (3 au 25/09, la troisième échue le 22).
+  - Une commande annulée **par la pause** porte `annuleeAvecAbonnement` (gardé par
+    `normalizeOrder`) : elle ne retient plus son échéance ; l'abonnement repris, l'échéance à venir
+    se génère de nouveau. Une commande annulée à la main retient toujours la sienne (échéance
+    sautée, comme avant).
+  - Une commande déjà générée que la nouvelle cadence ne porte plus **reste au calendrier**
+    (avant : invisible à côté des nouvelles échéances, une double livraison que rien ne montrait).
+    Elle n'est pas annulée : c'est au bureau de choisir.
+
+### Décisions prises dans le lot
+
+- **Ce que « non livrée » annule** : les commandes que la machine d'état laisse annuler
+  (brouillon, planifiée, à confirmer, validée, à vérifier). Annuler une commande en préparation ou
+  dans une tournée casserait la tournée et mentirait sur le carton préparé : elle est nommée.
+- **Une pause est réversible pour l'avenir** : sans le marqueur, pause puis reprise la veille
+  d'une échéance l'aurait perdue pour toujours (la commande annulée la retenait).
+- **La date d'effet n'est posée que par la fréquence ou la reprise** (la décision). Changer la
+  première date d'un abonnement, ou en créer un avec une date passée, garde l'ancien comportement
+  (échéances passées « en retard ») : ni l'un ni l'autre n'est dans la décision.
+- **Le plancher des numéros vit dans les réglages**, retenu par la purge, seul chemin qui retire
+  des commandes. Les identifiants restent dérivés du numéro (`cmd-<numéro>`) : un numéro qui ne
+  revient pas suffit.
+
+### Écarts nommés
+
+- Les rappels d'une commande **purgée** restent en base (la purge ne touche pas `relances`) ; ils
+  ne visent plus jamais une autre commande, mais le client est introuvable. Lot « purge » (la
+  décision 5 y est traitée par un autre lot).
+- Un `PATCH` d'abonnement mis **en file hors ligne** annule les commandes au moment où il
+  repart, pas au moment du geste.
+- `CACHE_NAME` non changé (consigne) : `app.js` et `operations.js` ont bougé, l'intégration le
+  monte.
+- Le jeu « forme de la production » a 4 commandes **livrées** avec deux lignes du même produit :
+  au premier démarrage, leurs lignes calculées (`stockLines`, table `lignes_commande`) prennent
+  la nouvelle répartition (affichage d'une commande livrée, sans effet).
+- Le journal des mouvements n'a pas de rétention (une réservation et sa libération font deux
+  lignes) : lot rapidité / conservation.
+- `test/e2e/numerotation-admin.spec.js` vise le serveur authentifié commun (3101) : non lancé
+  ici ; sa moitié serveur (`comptes-connexion.test.js`, 403) est verte dans `npm test`.
+
+### Preuves rouges (ancien code `5b52268`, fichiers posés puis restaurés par copie ; cause lue)
+
+| Banc | Rouge sur `5b52268` |
+|---|---|
+| `stock-reservation-juste` — terrain 6 sur 10 | `{ canPrepare: false, stockStatus: 'insuffisant' }` au lieu de `{ true, 'reserve' }` |
+| — planifiée confirmée 6 sur 10 | idem |
+| — 3 + 3 sur 5 (API) | « 6 demandes pour 5 en rayon » : `bloquee` `false` au lieu de `true` |
+| — 3 + 3 sur 5 (import, avec et sans code) | `canPrepare` `true` au lieu de `false` |
+| — PATCH jusqu'à « livré » | `[['en_preparation',10,0],…,['livre',10,0]]` au lieu de `[…6,4…,['livre',6,0]]` |
+| — PATCH « prête » directe / rayon insuffisant | rayon 10 au lieu de 6 ; 200 au lieu de 400 |
+| — `/api/recommendations` | 4 au lieu de 2 |
+| `stock-journal-mouvements` (5 cas) | `actual: []` : aucun mouvement |
+| `commandes-rappels-et-numeros` — rappels | `[['a_faire','']]` au lieu de `[['annule','Commande annulée']]` (×3) |
+| — numéros | `CMD-2026-001` au lieu de `CMD-2026-003` ; `CMD-00001` au lieu de `CMD-00002` |
+| — conversions | 1 au lieu de 0 (×2) |
+| `abonnements-suspendus` (7 cas) | `['planifiee','stock_a_verifier']` au lieu de `['annulee','annulee']` (×2) ; `suspension` indéfini ; l'échéance garde `orderId` ; 6 puis 3 échéances « en retard » ; la commande du 15 absente du calendrier |
+| `stock-invariant` | ruptures « journal » dès la première préparation, « écran : Réservé 0 != 30 », « pD physique : rayon 0 + réservé 6 != 5 » puis « rayon 6 != 5 », « CMD-2026-006 pret_livraison sans stock sorti » |
+| e2e `stock-et-abonnements` | état vide : l'ancien texte ; terrain : groupe « Bloquées 2 » au lieu de « À préparer » ; pause (front neuf, serveur ancien) : « Abonnement mis en pause. » sans la commande |
+
+Témoins verts avant et après : commande importée non réservée qui dépasse le rayon (bloquée),
+2 + 2 sur 5, commande importée comptée dans le besoin, saisie à la main journalisée, numérotation
+sans purge, prospect converti, commande livrée de l'abonnement intouchée, modification sans date
+d'effet (la date de la requête ignorée), abonnement créé avec une date passée.
+
+**Mutants** (code commité, un à la fois, restauré par copie, empreinte vérifiée) : **23 sur 23
+tués** — la règle de réservation par liste, le partage du rayon retiré, le PATCH sans
+réservation, la recommandation sur `quantityNeeded`, chacun des quatre journaux (réservation,
+libération, import, livraison sur stock insuffisant), chacun des deux rappels, la purge sans
+plancher, le plancher ignoré, chacune des deux conversions, la pause sans annulation, sans
+rappels, la date d'effet jamais posée, le calendrier sans elle, sans les commandes hors cadence,
+le marqueur ignoré, perdu par `normalizeOrder`, la date d'effet lue dans la requête, la
+génération d'une échéance passée acceptée.
+
+### Aucune donnée perdue
+
+Deux bases, instantané de toutes les tables SQLite à chaque étape (script hors dépôt,
+contre-témoin de l'instrument : une ligne retirée et une ligne modifiée sont vues) :
+**A.** le jeu « forme de la production » (`jeu-production.js`) chargé et écrit par v1.45.1 ;
+**B.** le semé ordinaire où v1.45.1 a écrit par son API deux échéances d'abonnement (l'une
+confirmée), une commande terrain de 6 sur 10 (bloquée par v1.45.1) et une planifiée avec rappel.
+
+- Premier démarrage du nouveau code : **aucune ligne disparue** ; seuls des champs calculés
+  changent (A : 4 commandes livrées, voir les écarts ; B : la commande terrain devient
+  `canPrepare: true`, « réservé »). Second démarrage : **identique** (horodatages d'`app_meta`
+  seuls) — idempotent.
+- Gestes du lot (pause, annulation d'une planifiée) : aucune ligne disparue ; ne changent que les
+  commandes de l'abonnement (annulées, marquées), leurs rappels (annulés), le produit dont la
+  réservation revient (A : sorti puis rendu, inchangé ; B : 96 → 100), le prochain rappel des
+  clients, et les lignes ajoutées au journal et à l'historique.
+
+### Bancs
+
+`test/stock-reservation-juste.test.js` (11), `test/stock-journal-mouvements.test.js` (6,
+authentification allumée : l'auteur), `test/commandes-rappels-et-numeros.test.js` (9),
+`test/abonnements-suspendus.test.js` (10), `test/stock-invariant.test.js` (1 parcours, 20 étapes,
+4 produits, 3 égalités, plus les commandes préparées), `test/e2e/stock-et-abonnements.spec.js`
+(port 3604, 3 cas).
+
+**Exécutions** (arbre final) : `npm run check` ; `npm test` 805/806 — le rouge est
+`donnees-utiles.test.js` « journal — 50 par page », qui dépend de l'heure : sa ligne « écrite
+entre deux pages » est datée de maintenant, ses lignes semées d'aujourd'hui 08:00 UTC ; entre
+minuit à Paris et 08:00 UTC, maintenant est plus ancien qu'elles (rouge identique sur `5b52268`
+à 22:02 UTC, hors lot). e2e : stock, stock-a-plat, stock-negatif, stock-categories,
+preparation-lignes, preparation-mobile, operations, abonnements, abonnements-lignes,
+abonnements-mobile, abonnement-creation, a-recommander, tableau-de-bord,
+tableau-de-bord-relecture, commandes, donnees-utiles : **182/182** (dans le même lancement,
+`numerotation-admin` : rouge d'environnement, `ERR_CONNECTION_REFUSED` sur 3101, voir les écarts) ;
+le nouveau banc : **3/3** ; tabs,
+livreur-ne-perd-rien, hors-ligne, chargement-instantane, poids-reseau, rendu-a-l-affichage,
+un-seul-dessin, tournee, tournees-debloquees, tournee-hors-ligne, barre-laterale-finitions,
+parcours-simplifies, integration-lots-1-5, pieges-tournee, etats-limites, smoke : **142/142**.
