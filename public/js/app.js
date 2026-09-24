@@ -8140,6 +8140,7 @@ async function purgeOrdersHandler(btn) {
     "",
     "Le stock et l'historique sont préservés.",
     "Les archives Excel restent téléchargeables.",
+    "Une sauvegarde est faite juste avant, et gardée à part : si elle échoue, rien n'est supprimé.",
     "",
     "Continuer ?"
   ].join("\n");
@@ -8152,7 +8153,7 @@ async function purgeOrdersHandler(btn) {
   await runAction(btn, "Purge en cours...", async () => {
     const result = await apiFetch("/api/orders/purge", { method: "POST" });
     notify(
-      `Purge faite : ${accorder(result.purged.commandes, "bon")}, ${accorder(result.purged.clients, "client")}, ${accorder(result.purged.ventes, "vente")}, ${accorder(result.purged.routes, "tournée")} supprimés. Va dans Imports et archives ci-dessus pour ré-importer tes Excel.`,
+      `Purge faite : ${accorder(result.purged.commandes, "bon")}, ${accorder(result.purged.clients, "client")}, ${accorder(result.purged.ventes, "vente")}, ${accorder(result.purged.routes, "tournée")} supprimés. Sauvegarde d’avant la purge : ${result.sauvegarde || "—"}. Va dans Imports et archives ci-dessus pour ré-importer tes Excel.`,
       "success"
     );
     await loadData();

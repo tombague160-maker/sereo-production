@@ -9150,11 +9150,47 @@ app.get("/api/imports/archives/:id/download", (req, res) => {
 //
 // La purge laisse l'utilisateur pouvoir reimporter ses Excel originaux
 // depuis Parametres -> Historique imports -> Telecharger.
-app.post("/api/orders/purge", async (req, res) => {
+//
+// Garde-fous (25/09, decisions 5 et 6) :
+// - reservee a l'administration (requireAdministration) ;
+// - precedee, SOUS le verrou d'ecriture (rien ne change entre la copie et
+//   l'effacement), d'une sauvegarde « avant-purge-commandes » HORS rotation,
+//   coherente et relue (ecrireSauvegardeVerifiee) ;
+// - la sauvegarde relue doit contenir EXACTEMENT les lignes que la purge
+//   efface (commandes, clients, ventes, tournees : memes comptes, memes
+//   identifiants) ; sinon, ou si elle echoue, la purge est refusee (503) et
+//   rien n'est efface.
+// La base est lue APRES l'attente de la sauvegarde : une ligne d'historique
+// ecrite pendant la copie (addHistoryEntry, hors verrou) n'est pas perdue.
+const TABLES_PURGEES = ["commandes", "clients", "ventes", "routes"];
+
+function refusDePurge(message) {
+  const error = new Error(`Purge refusée : ${message} Rien n'a été effacé.`);
+  error.refusDePurge = true;
+  return error;
+}
+
+app.post("/api/orders/purge", requireAdministration, async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
+      if (readDb().subscriptions.length) throw badRequest("La purge est désactivée en présence d’abonnements pour préserver les fiches clients et leurs échéances.");
+
+      let sauvegarde;
+      try {
+        sauvegarde = await sauvegardeSeule(() => ecrireSauvegardeVerifiee(GENRE_AVANT_PURGE_COMMANDES, { tables: TABLES_PURGEES }));
+      } catch (error) {
+        lastBackupError = { at: new Date().toISOString(), message: String(error.message || error) };
+        throw refusDePurge(`la sauvegarde d'avant purge a échoué (${error.message || error}).`);
+      }
+      if (!sauvegarde) throw refusDePurge("aucune sauvegarde n'a pu être écrite.");
+      if (useSqliteStorage()) {
+        const actuel = getSqliteStore().releverTables(TABLES_PURGEES);
+        const ecarts = TABLES_PURGEES.filter(table => sauvegarde.comptes[table] !== actuel.comptes[table]
+          || sauvegarde.empreintes[table] !== actuel.empreintes[table]);
+        if (ecarts.length) throw refusDePurge(`la sauvegarde ${sauvegarde.nom} ne contient pas exactement ce qui serait effacé (${ecarts.join(", ")}).`);
+      }
+
       const db = readDb();
-      if (db.subscriptions.length) throw badRequest("La purge est désactivée en présence d’abonnements pour préserver les fiches clients et leurs échéances.");
       const purgedCounts = {
         commandes: db.commandes.length,
         clients: db.clients.length,
@@ -9189,19 +9225,25 @@ app.post("/api/orders/purge", async (req, res) => {
       addHistory(
         db,
         "Purge",
-        `Reset bons de commande : ${purgedCounts.commandes} commande(s), ${purgedCounts.clients} client(s), ${purgedCounts.ventes} vente(s), ${purgedCounts.routes} tournee(s) supprimees. ${stockReservationsReleased} reservation(s) de stock restituee(s). Catalogue stock et historique preserves.`,
-        { ...purgedCounts, stockReservationsReleased }
+        `Reset bons de commande : ${purgedCounts.commandes} commande(s), ${purgedCounts.clients} client(s), ${purgedCounts.ventes} vente(s), ${purgedCounts.routes} tournee(s) supprimees. ${stockReservationsReleased} reservation(s) de stock restituee(s). Catalogue stock et historique preserves. Sauvegarde d'avant purge (hors rotation) : ${sauvegarde.nom}`,
+        { ...purgedCounts, stockReservationsReleased, sauvegarde: sauvegarde.nom }
       );
 
       writeDb(db);
-      return purgedCounts;
+      return { purgedCounts, sauvegarde: sauvegarde.nom };
     });
     res.json({
       success: true,
-      purged: result,
+      purged: result.purgedCounts,
+      sauvegarde: result.sauvegarde,
       message: "Bons de commande purges. Re-importez vos Excel depuis Parametres > Historique imports."
     });
   } catch (error) {
+    if (error && error.refusDePurge) {
+      console.error(`[purge] ${error.message}`);
+      res.status(503).json({ error: error.message });
+      return;
+    }
     handleRouteError(error, res, "Erreur purge bons");
   }
 });
