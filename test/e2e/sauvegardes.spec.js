@@ -69,7 +69,7 @@ test.describe("téléchargement ouvert", () => {
     expect((await reponse).status()).toBe(200);
     await expect(alerte).toBeHidden();
     await expect(page.locator("#parSauvegardeDerniere")).toHaveText(/^\d{1,2} \S+ à \d{1,2} h \d{2} · [\d,]+ (o|ko|Mo)$/);
-    await expect(page.locator("#parSauvegardesGardees")).toHaveText(/^1 sauvegarde sur 1 jour, depuis le \d{1,2} \S+$/);
+    await expect(page.locator("#parSauvegardesGardees")).toHaveText(/^1 sauvegarde sur 1 jour, depuis le \d{1,2}(er)? \S+$/);
 
     // Le lien rend bien la base, compressee.
     const lien = page.locator("#parSauvegardeTelecharger");

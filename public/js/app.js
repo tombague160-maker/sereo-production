@@ -3584,7 +3584,8 @@ function renderImportSummary() {
   }
 
   const { type, result, importedAt } = lastImportSummary;
-  const heure = new Date(importedAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  // « a 16 h 00 » (utils/dates.js, lot parcours) : jamais « 16:00 ».
+  const heure = datesFr.heure(importedAt);
   let comptes;
   let details = [];
   let aPreparer = false;
@@ -5999,13 +6000,13 @@ function evaluerRecommandations() {
   });
 }
 
-// « 3/10 » : le jour et le mois d'une cle YYYY-MM-DD, sans fuseau.
+// « ven. 3 oct. » : une echeance se dit par l'utilitaire des dates (lot
+// parcours, « un seul utilitaire ») ; la cle YYYY-MM-DD y est lue a midi.
 function jourCourt(cle) {
-  const [, mois, jour] = String(cle || "").split("-");
-  return mois && jour ? `${Number(jour)}/${Number(mois)}` : "";
+  return cle ? datesFr.jourCourt(cle) : "";
 }
 
-// « Manquera le 3/10 : 24 demandés, 14 en stock » -- la demande de tout
+// « Manquera le ven. 3 oct. : 24 demandés, 14 en stock » -- la demande de tout
 // l'horizon (commandes en cours et a venir), face au stock d'aujourd'hui.
 function phraseDuManque(item) {
   if (!item.manqueLe) return "";
@@ -6192,7 +6193,7 @@ function majCarteJournal({ rafraichir = false } = {}) {
 function ligneDuJournal(entree) {
   const quand = entree.date ? new Date(entree.date) : null;
   const date = quand && !Number.isNaN(quand.getTime())
-    ? `${quand.toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })} · ${heureCourte(entree.date)}`
+    ? `${datesFr.jourMois(entree.date)} · ${heureCourte(entree.date)}`
     : (entree.date || "—");
   // Les lignes d'avant le 24/09 n'ont pas d'auteur : « — », jamais un nom devine.
   const auteur = entree.auteur || "—";
@@ -6413,7 +6414,7 @@ function gabaritBonDeLivraison({ order, stop = null, remisA = "" }) {
   const livraison = order?.deliveryDate || stop?.deliveryDate || "";
   const livree = order?.status === "livre" && order.deliveredAt ? new Date(order.deliveredAt) : null;
   const livreeLe = livree && !Number.isNaN(livree.getTime())
-    ? `${livree.toLocaleDateString("fr-FR")} à ${heureCourte(order.deliveredAt)}`
+    ? datesFr.jourEtHeure(order.deliveredAt)
     : "";
   // Les consignes de livraison : les notes de la commande (ou de l'arret, qui
   // les recopie a sa creation ; aucun ecran n'y ecrit). Une commande importee
@@ -7367,13 +7368,10 @@ function phraseAlerteSauvegardes(alerte) {
   }
 }
 
-// « 13 septembre » : le jour seul (l'annee si ce n'est pas celle-ci).
+// « 13 septembre » : le jour seul (l'annee si ce n'est pas celle-ci), par
+// l'utilitaire des dates (lot parcours) -- « 1er octobre » le premier du mois.
 function formatJourLong(iso) {
-  const d = new Date(iso);
-  if (!iso || Number.isNaN(d.getTime())) return "—";
-  const options = { day: "numeric", month: "long" };
-  if (d.getFullYear() !== new Date().getFullYear()) options.year = "numeric";
-  return d.toLocaleDateString("fr-FR", options);
+  return datesFr.lireDate(iso) ? datesFr.jourLong(iso, { semaine: false }) : "—";
 }
 
 function renderSauvegardes(etat, erreur = "") {

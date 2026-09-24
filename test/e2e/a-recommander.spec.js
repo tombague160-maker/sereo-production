@@ -23,8 +23,16 @@ function jour(decalage) {
   d.setUTCDate(d.getUTCDate() + decalage);
   return d.toISOString().slice(0, 10);
 }
-// « 27/9 » : ce que l'ecran ecrit d'une date.
-const court = cle => { const [, m, j] = cle.split("-"); return `${Number(j)}/${Number(m)}`; };
+// « dim. 27 sept. » : ce que l'ecran ecrit d'une date (integration du 24/09 :
+// utils/dates.js, jourCourt, du lot parcours -- le lot ecrivait « 27/9 »).
+// Recalcule ici par la regle, pas par l'utilitaire : jour de la semaine
+// court, jour, mois court, l'annee quand ce n'est pas celle-ci.
+const court = cle => {
+  const d = new Date(`${cle}T12:00:00`);
+  const options = { weekday: "short", day: "numeric", month: "short" };
+  if (d.getFullYear() !== new Date().getFullYear()) options.year = "numeric";
+  return d.toLocaleDateString("fr-FR", options);
+};
 
 function abonnement(id, clientId, status, debut, code, nom, quantite, interval = 14) {
   return {

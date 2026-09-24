@@ -243,6 +243,8 @@ test("journal — rien au chargement de l'app ; Paramètres lit une page, avec l
   const lignes = page.locator("#parJournal .par-journal-ligne");
   await expect(lignes).toHaveCount(50);
   await expect(lignes.first().locator(".par-journal-qui")).toHaveText(/dev/);
+  // Integration du 24/09 : « 24 sept. · 16 h 00 » (utils/dates.js, lot parcours).
+  await expect(lignes.first().locator(".par-journal-quand")).toHaveText(/^\d{1,2}(er)? [a-zéû]+\.? · \d{1,2} h \d{2}$/);
   await expect(lignes.first().locator(".par-journal-quoi")).toContainText("Alèses : stock 100 -> 90");
   await expect(lignes.filter({ hasText: "ancienne action 0" }).locator(".par-journal-qui")).toHaveText(/—/);
 

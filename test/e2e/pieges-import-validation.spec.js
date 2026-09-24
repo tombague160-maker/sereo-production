@@ -155,6 +155,8 @@ test("import, bureau : le resume est JUSTE et EN HAUT, sans defiler ; la command
   await expect(bilan).toContainText("1 ligne sans client ni produit");
   await expect(bilan, "l'avertissement du serveur (quantite negative) n'est pas montre").toContainText("1 quantité négative ramenée à 0");
   await expect(page.locator("#journee")).not.toContainText("élément(s) traités");
+  // Integration du 24/09 : l'heure par l'utilitaire des dates (lot parcours).
+  await expect(bilan.locator(".import-bilan-heure")).toHaveText(/^à \d{1,2} h \d{2}$/);
 
   // La commande en tournee n'a pas bouge (serveur), ni chez le livreur.
   const liste = await (await fetch(srv.base + "/api/orders")).json();
