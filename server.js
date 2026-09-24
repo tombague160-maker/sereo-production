@@ -5099,13 +5099,40 @@ function inferCrmStatus(client, orders) {
   return "prospect";
 }
 
+// Les commandes, les rappels et les abonnes actifs, par client, construits
+// UNE fois pour la liste des clients (25/09). crmClientView parcourait toutes
+// les commandes et tous les rappels pour chaque client : O(clients x
+// commandes), 170 ms a dix fois la base, plusieurs secondes a cinquante. Memes
+// listes, dans le meme ordre (meme tri, stable, sur les commandes prises dans
+// l'ordre de la table).
+function indexCrmParClient(db) {
+  const parClient = (liste, champ) => {
+    const index = new Map();
+    for (const item of liste) {
+      const cle = String(item.clientId);
+      if (!index.has(cle)) index.set(cle, []);
+      index.get(cle).push(item);
+    }
+    for (const items of index.values()) items.sort((a, b) => String(b[champ] || "").localeCompare(String(a[champ] || "")));
+    return index;
+  };
+  return {
+    commandes: parClient(db.commandes, "dateCommande"),
+    relances: parClient(db.relances, "datePrevue"),
+    abonnes: new Set((db.subscriptions || []).filter(sub => sub.status === "active").map(sub => String(sub.clientId)))
+  };
+}
+
 // `ventesImportees` : l'index des ventes importees (buildImportedSalesIndex),
 // construit UNE fois par la liste des clients plutot qu'une fois par client.
-function crmClientView(db, client, ventesImportees = null) {
-  const orders = getClientOrderHistory(db, client.id);
-  const reminders = db.relances
-    .filter(reminder => String(reminder.clientId) === String(client.id))
-    .sort((a, b) => String(b.datePrevue || "").localeCompare(String(a.datePrevue || "")));
+// `parClient` : indexCrmParClient, de meme (la fiche seule s'en passe).
+function crmClientView(db, client, ventesImportees = null, parClient = null) {
+  const orders = parClient ? parClient.commandes.get(String(client.id)) || [] : getClientOrderHistory(db, client.id);
+  const reminders = parClient
+    ? parClient.relances.get(String(client.id)) || []
+    : db.relances
+      .filter(reminder => String(reminder.clientId) === String(client.id))
+      .sort((a, b) => String(b.datePrevue || "").localeCompare(String(a.datePrevue || "")));
   const latestOrder = orders[0];
   const firstOrder = orders[orders.length - 1];
   // Le chiffre d'affaires de la fiche (parcours simplifies, 24/09) : les
@@ -5133,7 +5160,9 @@ function crmClientView(db, client, ventesImportees = null) {
     // le signal ne s'y fie donc pas.
     relanceSuggeree: relanceSuggeree({
       commandes: orders,
-      abonne: (db.subscriptions || []).some(sub => String(sub.clientId) === String(client.id) && sub.status === "active"),
+      abonne: parClient
+        ? parClient.abonnes.has(String(client.id))
+        : (db.subscriptions || []).some(sub => String(sub.clientId) === String(client.id) && sub.status === "active"),
       statutCrm: crmStatus,
       archive: Boolean(client.crmArchived),
       aujourdhui: jourParis()
@@ -5153,10 +5182,19 @@ function crmClientView(db, client, ventesImportees = null) {
 function getReminderViews(db, query = {}) {
   const today = jourParis();
   const range = clean(query.range || "");
+  // Le client et la commande de chaque rappel, par index (25/09) : un find sur
+  // toute la table pour chaque rappel. Le premier trouve, comme find.
+  const premierParId = liste => {
+    const index = new Map();
+    for (const item of liste) if (!index.has(String(item.id))) index.set(String(item.id), item);
+    return index;
+  };
+  const clients = db.relances.length ? premierParId(db.clients) : new Map();
+  const commandes = db.relances.length ? premierParId(db.commandes) : new Map();
   let list = db.relances.map(reminder => ({
     ...reminder,
-    client: db.clients.find(client => String(client.id) === String(reminder.clientId)) || null,
-    order: db.commandes.find(order => String(order.id) === String(reminder.commandeId)) || null
+    client: clients.get(String(reminder.clientId)) || null,
+    order: commandes.get(String(reminder.commandeId)) || null
   }));
 
   if (query.clientId) {
@@ -7975,6 +8013,7 @@ app.get("/api/crm/clients", (req, res) => {
   const today = jourParis();
 
   const ventesImportees = buildImportedSalesIndex(db.ventes);
+  const parClient = indexCrmParClient(db);
   // La LISTE ne porte plus l'historique des commandes de chaque client (24/09) :
   // `orderHistory` recopiait /api/orders, client par client (66 % des 552 ko
   // mesures en production), et la page ne le lit pas -- elle a deja toutes les
@@ -7983,7 +8022,7 @@ app.get("/api/crm/clients", (req, res) => {
   let list = db.clients
     .filter(client => !client.crmArchived)
     .map(client => {
-      const { orderHistory, ...vue } = crmClientView(db, client, ventesImportees);
+      const { orderHistory, ...vue } = crmClientView(db, client, ventesImportees, parClient);
       return sansReleveDImport(vue);
     });
 

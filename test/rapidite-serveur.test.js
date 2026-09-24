@@ -277,7 +277,79 @@ test("la premiere ecriture apres l'ouverture recrit tout, comme avant (base d'un
   assert.equal(JSON.parse(payload).message, "café");
 });
 
-// --- 4. Resultat identique : la table partagee rend ce que rend l'appel isole --
+// --- 4. La vague de chargement : la liste des clients, les rappels ----------
+//
+// GET /api/crm/clients retrouvait les commandes et les rappels de chaque client
+// en parcourant toute la table, client par client ; GET /api/reminders, le
+// client et la commande de chaque rappel. On compte les elements parcourus par
+// Array.prototype.filter / les appels a Array.prototype.find pendant la route.
+
+async function pendantRoute(chemin, methode) {
+  const origine = Array.prototype[methode];
+  let compte = 0;
+  // eslint-disable-next-line no-extend-native
+  Array.prototype[methode] = function (...args) {
+    compte += methode === "filter" ? this.length : 1;
+    return origine.apply(this, args);
+  };
+  let r;
+  try {
+    r = await api(chemin);
+  } finally {
+    Array.prototype[methode] = origine;
+  }
+  return { r, compte };
+}
+
+test("la liste des clients ne parcourt pas toutes les commandes pour chaque client", async () => {
+  const db = readDb();
+  const C = db.clients.length, N = db.commandes.length;
+  const { r, compte } = await pendantRoute("/api/crm/clients", "filter");
+  assert.equal(r.status, 200);
+  assert.ok(r.body.length > 90, "prealable : le jeu de forme production");
+  // Avant : >= clients x commandes = 97 x 225 elements parcourus.
+  assert.ok(compte < 10 * (C + N), `${compte} elements parcourus par filter pour ${C} clients et ${N} commandes`);
+});
+
+test("temoin : chaque client de la liste est sa fiche, sans l'historique des commandes", async () => {
+  const liste = (await api("/api/crm/clients")).body;
+  // Des rappels et un abonnement : les index par client ne sont pas vides.
+  const avecRappel = liste[3].id;
+  await api("/api/crm/relances", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: avecRappel, datePrevue: "2026-10-02", note: "banc" }) });
+  await api("/api/crm/relances", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: avecRappel, datePrevue: "2026-10-09", note: "banc 2" }) });
+  const apres = (await api("/api/crm/clients")).body;
+  assert.equal(apres.find(c => c.id === avecRappel).reminderHistory.length, 2, "le temoin ne peut pas varier : pas de rappel");
+  for (const client of apres) {
+    const fiche = (await api(`/api/crm/clients/${encodeURIComponent(client.id)}`)).body;
+    const { orderHistory, ordersByDate, ...attendu } = fiche;
+    assert.deepEqual(client, attendu, `${client.id} : la liste differe de la fiche`);
+  }
+});
+
+test("la liste des rappels ne cherche pas le client et la commande de chaque rappel dans toute la table", async () => {
+  const db = readDb();
+  const clients = db.clients.slice(0, 20);
+  for (const [i, client] of clients.entries()) {
+    const r = await api("/api/crm/relances", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clientId: client.id, commandeId: db.commandes[i].id, datePrevue: `2026-11-${String(1 + i).padStart(2, "0")}` }) });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+  }
+  const R = readDb().relances.length;
+  const { r, compte } = await pendantRoute("/api/reminders", "find");
+  assert.equal(r.status, 200);
+  assert.equal(r.body.length, R);
+  // Temoin : chaque rappel porte son client et sa commande.
+  const vus = r.body.filter(x => x.commandeId);
+  assert.ok(vus.length >= 20);
+  for (const rappel of vus) {
+    assert.equal(rappel.client && rappel.client.id, rappel.clientId);
+    assert.equal(rappel.order && rappel.order.id, rappel.commandeId);
+  }
+  // Avant : deux find par rappel, chacun sur toute une table.
+  assert.ok(compte < R, `${compte} appels a find pour ${R} rappels`);
+});
+
+// --- 5. Resultat identique : la table partagee rend ce que rend l'appel isole --
 //
 // Un appel isole (un geste sur une commande) construit encore sa propre table.
 // Le catalogue ci-dessous a des doublons : deux produits au meme code, deux au
@@ -318,7 +390,7 @@ test("temoin : l'analyse de stock ecrite est celle de l'appel isole, doublons et
   assert.equal(db.commandes[4].stockLines[0].status, "unknown");
 });
 
-// --- 5. Aucune donnee perdue : l'ecriture sans relire = une reecriture complete
+// --- 6. Aucune donnee perdue : l'ecriture sans relire = une reecriture complete
 //
 // Le risque de ne pas relire : oublier une table modifiee, perdre une ligne
 // ajoutee en tete, la ranger ailleurs. Ce banc joue 120 pas tires au hasard
