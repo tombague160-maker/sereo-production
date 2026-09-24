@@ -2451,6 +2451,7 @@ function openSqliteStore(options = {}) {
     seedJsonPath: options.skipJsonSeed ? null : DB_PATH,
     defaultDb,
     normalizeDb,
+    normaliserTable,
     ensureDir
   });
 }
@@ -2717,25 +2718,30 @@ function readDb() {
   return normalizeDb(db);
 }
 
-function normalizeDb(db) {
-  db.clients = Array.isArray(db.clients) ? db.clients : [];
-  db.ventes = Array.isArray(db.ventes) ? db.ventes : [];
-  db.stock = Array.isArray(db.stock) ? db.stock : [];
-  db.historique = Array.isArray(db.historique) ? db.historique : [];
-  db.commandes = Array.isArray(db.commandes) ? db.commandes : [];
-  db.routes = Array.isArray(db.routes) ? db.routes : [];
-  db.subscriptions = Array.isArray(db.subscriptions) ? db.subscriptions : [];
-  db.relances = Array.isArray(db.relances) ? db.relances.map(normalizeCrmReminder) : [];
-  db.deliverySectors = Array.isArray(db.deliverySectors) ? db.deliverySectors.map(normalizeDeliverySector) : defaultDeliverySectors();
-  if (!db.deliverySectors.length) db.deliverySectors = defaultDeliverySectors().map(normalizeDeliverySector);
-  db.stockMovements = Array.isArray(db.stockMovements) ? db.stockMovements : [];
-  db.importsArchives = Array.isArray(db.importsArchives) ? db.importsArchives : [];
-  db.settings = normalizeSettings(db.settings);
+// Chaque table se normalise SEULE (24/09) : la lecture paresseuse de la base
+// (storage/sqliteStore.js, readDb) ne normalise que les tables qu'une requete
+// lit. normalizeDb les normalise toutes, comme avant.
+const TABLES_DE_LA_BASE = ["clients", "ventes", "stock", "historique", "commandes", "routes", "subscriptions",
+  "relances", "deliverySectors", "stockMovements", "importsArchives", "settings"];
 
+function normaliserTable(cle, valeur, db) {
+  if (cle === "relances") return Array.isArray(valeur) ? valeur.map(normalizeCrmReminder) : [];
+  if (cle === "deliverySectors") {
+    const secteurs = Array.isArray(valeur) ? valeur.map(normalizeDeliverySector) : defaultDeliverySectors();
+    return secteurs.length ? secteurs : defaultDeliverySectors().map(normalizeDeliverySector);
+  }
+  if (cle === "settings") return normalizeSettings(valeur);
+  const liste = Array.isArray(valeur) ? valeur : [];
   // Migration retroactive v1.9.0 : attribuer un numero aux commandes qui n'en
   // ont pas (legacy avant cette release). Numerotation chronologique par
-  // dateImport pour preserver l'ordre historique reel.
-  ensureOrderNumbers(db);
+  // dateImport pour preserver l'ordre historique reel. (ensureOrderNumbers ne
+  // lit que les commandes et les reglages, qu'il normalise lui-meme.)
+  if (cle === "commandes") ensureOrderNumbers({ commandes: liste, settings: db.settings });
+  return liste;
+}
+
+function normalizeDb(db) {
+  for (const cle of TABLES_DE_LA_BASE) db[cle] = normaliserTable(cle, db[cle], db);
 
   // P1 v1.14.0 : syncWorkflow N'EST PLUS appele ici (avant : a chaque readDb,
   // ce qui ajoutait 50-100ms a chaque requete GET). Il est maintenant appele
@@ -9645,6 +9651,7 @@ module.exports = {
   _osrmLocal: osrmLocal,
   closeStorage,
   defaultDb,
+  normalizeDb,
   readDb,
   writeDb,
   getRecommendations,
