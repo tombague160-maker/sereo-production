@@ -14,7 +14,7 @@
 //    sa ligne mise en avant.
 const { test, expect } = require("./tuiles");
 const { zipSync, strToU8 } = require("fflate");
-const { demarrer, jeuDeDonnees, AUJOURDHUI } = require("./serveur-seme");
+const { demarrer, jeuDeDonnees, CLIENTS, AUJOURDHUI } = require("./serveur-seme");
 
 const BUREAU = { width: 1440, height: 900 };
 const TELEPHONE = { width: 390, height: 844 };
@@ -261,6 +261,33 @@ test("import : les autres avertissements du serveur se lisent aussi (livree a l'
   await expect(bilan).toContainText("1 commande importée comme déjà livrée (facture « Envoyée »)");
   await expect(bilan).toContainText("1 position du fichier ignorée (0,0, inversée ou hors zone)");
   await expect(bilan).toContainText("1 client en double fusionné avec sa fiche existante");
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+test("import : au-dela de cinq commandes ignorees, le resume en nomme cinq et compte les autres", async ({ browser }) => {
+  // Un fichier qui reprend un mois de ventes vise surtout des commandes deja
+  // livrees : une ligne par commande ferait defiler le resume sans fin.
+  test.setTimeout(120000);
+  await semer();
+  const { ctx, page, erreurs } = await ouvrir(browser, "journee");
+  // Les six clients du seme ont chacun une commande du jour deja livree ou en tournee.
+  const lignes = CLIENTS.map(c => [JOUR_FR, c.nom, "CH-L", "Changes taille L", "9", c.rue, c.codePostal, c.ville]);
+  const [selecteur] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    page.locator('#enteteActions [data-action="importer-ventes"]').click()
+  ]);
+  await selecteur.setFiles({
+    name: "ventes.xlsx",
+    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    buffer: classeur([["Date", "Client", "Code", "Produit", "Quantite", "Rue", "Code Postal", "Ville"], ...lignes])
+  });
+  const bilan = page.locator("#importSummary");
+  await expect(bilan).toBeVisible();
+  const comptes = (await bilan.locator(".import-bilan-compte").allInnerTexts()).map(t => t.replace(/\s+/g, " ").trim());
+  expect(comptes).toEqual(["0 nouvelle", "0 mise à jour", "6 ignorées", "0 erreur"]);
+  await expect(bilan.locator(".import-bilan-detail", { hasText: /^Ignorée/ })).toHaveCount(5);
+  await expect(bilan).toContainText("Et 1 autre commande ignorée (déjà prêtes, en tournée ou livrées), laissées telles quelles.");
   expect(erreurs).toEqual([]);
   await ctx.close();
 });

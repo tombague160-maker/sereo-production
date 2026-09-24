@@ -3027,7 +3027,7 @@ function bilanImportVentes(result) {
     details.push({ attention: true, html: `<strong>Ignorée : ${escapeHtml(RAISONS_IMPORT_IGNORE[item.raison] || "commande déjà en cours")}</strong>${qui ? ` — ${escapeHtml(qui)}` : ""}. Elle est laissée telle quelle.` });
   });
   if (ignorees.length > IMPORT_IGNOREES_MONTREES) {
-    details.push({ attention: true, html: `Et ${escapeHtml(accorder(ignorees.length - IMPORT_IGNOREES_MONTREES, "autre commande ignorée", "autres commandes ignorées"))}, pour la même raison.` });
+    details.push({ attention: true, html: `Et ${escapeHtml(accorder(ignorees.length - IMPORT_IGNOREES_MONTREES, "autre commande ignorée", "autres commandes ignorées"))} (déjà prêtes, en tournée ou livrées), laissées telles quelles.` });
   }
   if (identiques) details.push({ html: `${escapeHtml(accorder(identiques, "commande identique, déjà importée", "commandes identiques, déjà importées"))} : rien à changer.` });
   if (erreurs) details.push({ attention: true, html: `<strong>${escapeHtml(accorder(erreurs, "ligne sans client ni produit", "lignes sans client ni produit"))}</strong> : écartée${erreurs > 1 ? "s" : ""}, vérifie le fichier.` });
