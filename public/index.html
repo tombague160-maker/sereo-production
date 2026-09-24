@@ -1365,20 +1365,24 @@
               <button class="button secondary compact" type="button" data-adr="ouvrir">Vérifier les adresses</button>
             </div>
             <div id="adressesTourneeErreurs" class="adr-erreurs" role="alert" hidden></div>
+            <!-- TOURNEE PAR SECTEUR (audit du 24/09). Le secteur etait un menu
+                 qui n'agissait qu'apres « Filtrer » : « Sélectionner ce
+                 secteur » cochait entre-temps les commandes de TOUS les
+                 secteurs (5 au lieu de 3). Ce sont des pilules qui filtrent
+                 tout de suite, comme dans Préparation ; la date et la ville
+                 aussi, sans bouton a retenir. -->
+            <div id="deliverySectorPills" class="filtre-pilules trn-secteurs" role="group" aria-label="Secteur de la tournée">
+              <button class="button secondary compact filtre-pilule active-filter" type="button" data-delivery-sector="Tous" aria-pressed="true">Tous</button>
+            </div>
             <div class="delivery-filters">
               <label>
                 Date
                 <input id="deliveryDate" type="date" />
               </label>
               <label>
-                Secteur
-                <select id="deliverySector"></select>
-              </label>
-              <label>
                 Ville
                 <input id="deliveryCity" placeholder="Ville exacte, optionnel" autocomplete="off" />
               </label>
-              <button id="applyDeliveryFilterButton" class="button secondary" type="button" data-action="apply-delivery-filter">Filtrer</button>
             </div>
 
             <div class="delivery-actions">
@@ -1388,7 +1392,6 @@
               <button class="button secondary" type="button" data-action="select-all-delivery" data-attend-commandes disabled>Tout sélectionner</button>
               <button class="button secondary" type="button" data-action="clear-delivery-selection" data-attend-commandes disabled>Tout désélectionner</button>
               <button class="button secondary" type="button" data-action="select-current-sector" data-attend-commandes disabled>Sélectionner ce secteur</button>
-              <button id="createRouteButton" class="button primary" type="button" data-action="create-route">Créer une tournée optimisée</button>
             </div>
           </details>
 
@@ -1402,6 +1405,13 @@
             </div>
 
             <div id="deliveryCandidates" class="delivery-candidates"></div>
+            <!-- « Créer la tournée (N) » SOUS la liste (audit du 24/09) : on
+                 coche en bas, on cree en bas -- au-dessus, il fallait remonter.
+                 Collant en bas au telephone. Visible quand la planification
+                 est ouverte, comme avant (app.js, majCreationTournee). -->
+            <div id="trnCreer" class="trn-creer">
+              <button id="createRouteButton" class="button primary" type="button" data-action="create-route">Créer la tournée</button>
+            </div>
           </div>
 
           <!-- Lot 2 de l'audit geo, decision 7 (23/09) : l'ancien panneau

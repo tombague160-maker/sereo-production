@@ -634,6 +634,27 @@ function bindUi() {
     applyDeliveryFilter();
   });
 
+  // Tournee par secteur (audit du 24/09) : la pilule filtre TOUT DE SUITE ; la
+  // ville aussi, sans « Filtrer » (une pause de frappe suffit).
+  document.getElementById("deliverySectorPills")?.addEventListener("click", event => {
+    const pilule = event.target.closest("[data-delivery-sector]");
+    if (!pilule) return;
+    const valeur = pilule.dataset.deliverySector;
+    applyDeliveryFilter(valeur);
+    // Le rendu refait les pilules : le focus clavier reste sur celle choisie.
+    document.querySelector(`#deliverySectorPills [data-delivery-sector="${cssEscape(valeur)}"]`)?.focus();
+  });
+  let villeMinuteur = null;
+  document.getElementById("deliveryCity")?.addEventListener("input", () => {
+    clearTimeout(villeMinuteur);
+    villeMinuteur = setTimeout(() => applyDeliveryFilter(), 300);
+  });
+  document.getElementById("deliveryCity")?.addEventListener("change", () => {
+    clearTimeout(villeMinuteur);
+    applyDeliveryFilter();
+  });
+  document.getElementById("routePlanning")?.addEventListener("toggle", majCreationTournee);
+
   // Lot 2 (H9) : « Tournées du jour ».
   document.getElementById("tourneeChoix")?.addEventListener("change", event => {
     choisirTournee(event.target.value);
@@ -791,7 +812,7 @@ function bindUi() {
     if (action === "start-preparation") runAction(actionButton, "Démarrage...", () => startPreparation(actionButton.dataset.orderId));
     if (action === "finish-preparation") runAction(actionButton, "Validation...", () => finishPreparation(actionButton.dataset.orderId));
     if (action === "open-order-maps") openOrderMaps(actionButton.dataset.orderId);
-    if (action === "apply-delivery-filter") applyDeliveryFilter();
+    // (« Filtrer » est retire le 24/09 : les pilules et les champs filtrent seuls.)
     if (action === "select-all-delivery") selectAllDelivery(true);
     if (action === "clear-delivery-selection") selectAllDelivery(false);
     if (action === "select-current-sector") selectCurrentSector();
@@ -6694,21 +6715,49 @@ async function purgeOrdersHandler(btn) {
   });
 }
 
+/*
+ * TOURNEE PAR SECTEUR (audit du 24/09). Le secteur etait un <select> qui
+ * n'agissait qu'apres « Filtrer » ; entre les deux, « Sélectionner ce
+ * secteur » prenait le filtre APPLIQUE -- « tous secteurs » -- et cochait les
+ * 5 commandes pretes au lieu des 3 de Besancon (mesure : verif-parcours/v2.js).
+ * Ce sont des pilules qui filtrent tout de suite, comme dans Preparation. Leur
+ * compte est celui de la liste qu'elles montrent (memes filtres de date et de
+ * ville), et non plus `sectors[].ready` du serveur, qui ignorait la date :
+ * « Besançon (3) » au-dessus d'une liste de 5.
+ */
 function renderDeliveryFilters() {
-  const select = document.getElementById("deliverySector");
-  if (!select) return;
-
-  const current = deliveryFilter.sector || select.value || "Tous";
-  const options = [{ name: "Tous", total: orders.length, ready: getDeliverableOrders().length }, ...sectors];
-
-  select.innerHTML = options.map(sector => `
-    <option value="${escapeAttribute(sector.name)}" ${sector.name === current ? "selected" : ""}>
-      ${escapeHtml(formatSectorLabel(sector.name))} (${sector.ready || 0})
-    </option>
-  `).join("");
+  const conteneur = document.getElementById("deliverySectorPills");
+  if (conteneur) {
+    const choisi = deliveryFilter.sector && deliveryFilter.sector !== "Tous" ? deliveryFilter.sector : "Tous";
+    const cleChoisie = normalizeTextKey(choisi);
+    const pilule = (valeur, libelle, n) => {
+      const actif = normalizeTextKey(valeur) === cleChoisie;
+      // Avant l'arrivee des commandes, un compte serait un faux zero.
+      const compte = commandesChargees ? ` (${n})` : "";
+      return `<button class="button secondary compact filtre-pilule${actif ? " active-filter" : ""}" type="button"`
+        + ` data-delivery-sector="${escapeAttribute(valeur)}" aria-pressed="${actif}">${escapeHtml(libelle)}${compte}</button>`;
+    };
+    // Les secteurs de la liste sous la date et la ville choisies ; le secteur
+    // CHOISI reste toujours, meme vide : on ne cache jamais ce qu'on a choisi.
+    const base = getFilteredDeliveryOrders({ ...deliveryFilter, sector: "Tous" });
+    const parSecteur = new Map();
+    for (const order of base) {
+      const nom = String(order.sector || "").trim();
+      if (!nom) continue;
+      const cle = normalizeTextKey(nom);
+      const entree = parSecteur.get(cle) || { nom, n: 0 };
+      entree.n += 1;
+      parSecteur.set(cle, entree);
+    }
+    if (choisi !== "Tous" && !parSecteur.has(cleChoisie)) parSecteur.set(cleChoisie, { nom: choisi, n: 0 });
+    const secteurs = [...parSecteur.values()]
+      .sort((a, b) => formatSectorLabel(a.nom).localeCompare(formatSectorLabel(b.nom), "fr"));
+    conteneur.innerHTML = pilule("Tous", "Tous", base.length)
+      + secteurs.map(s => pilule(s.nom, formatSectorLabel(s.nom), s.n)).join("");
+  }
 
   const cityInput = document.getElementById("deliveryCity");
-  if (cityInput && cityInput.value !== deliveryFilter.city) {
+  if (cityInput && cityInput.value !== deliveryFilter.city && document.activeElement !== cityInput) {
     cityInput.value = deliveryFilter.city;
   }
 
@@ -6718,15 +6767,33 @@ function renderDeliveryFilters() {
   }
 }
 
-function applyDeliveryFilter() {
+/**
+ * Applique la date et la ville des champs, et le secteur de la pilule
+ * choisie (`secteur`, sinon celui deja choisi). La selection ne garde que ce
+ * qui est a l'ecran : une commande d'un autre secteur ne part jamais sans
+ * avoir ete vue (le serveur la refuserait, « n'est pas du secteur »).
+ */
+function applyDeliveryFilter(secteur) {
   deliveryFilter = {
     date: document.getElementById("deliveryDate")?.value || "",
-    sector: document.getElementById("deliverySector")?.value || "Tous",
+    sector: secteur || deliveryFilter.sector || "Tous",
     city: document.getElementById("deliveryCity")?.value || ""
   };
   deliverySelection = new Set([...deliverySelection].filter(orderId => getFilteredDeliveryOrders().some(order => String(order.id) === String(orderId))));
+  deliveryFirst = new Set([...deliveryFirst].filter(id => deliverySelection.has(id)));
+  renderDeliveryFilters();
   renderDeliveryCandidates();
   renderMap();
+}
+
+// « Créer la tournée (N) » vit sous la liste, hors du depliant de la
+// planification : il se montre quand elle est ouverte, comme avant (repliee
+// pendant la livraison, le livreur ne voit pas un bouton de creation colle en
+// bas de son ecran).
+function majCreationTournee() {
+  const bloc = document.getElementById("trnCreer");
+  const planification = document.getElementById("routePlanning");
+  if (bloc && planification) bloc.hidden = !planification.open;
 }
 
 // C1 (lot 1 de l'audit geo) : un absent ou un probleme REVIENT ici, marque
@@ -6739,16 +6806,16 @@ function getDeliverableOrders() {
   return orders.filter(order => order.status === "pret_livraison" || STATUTS_A_RELIVRER.includes(order.status));
 }
 
-function getFilteredDeliveryOrders() {
-  const cityKey = normalizeTextKey(deliveryFilter.city);
-  const sectorKey = normalizeTextKey(deliveryFilter.sector);
+function getFilteredDeliveryOrders(filtre = deliveryFilter) {
+  const cityKey = normalizeTextKey(filtre.city);
+  const sectorKey = normalizeTextKey(filtre.sector);
 
   return getDeliverableOrders().filter(order => {
     // Une commande a relivrer a deja manque son jour : le filtre de date ne la
     // cache pas (sinon choisir « demain » la ferait disparaitre).
     const aRelivrer = STATUTS_A_RELIVRER.includes(order.status);
-    if (!aRelivrer && deliveryFilter.date && order.deliveryDate && order.deliveryDate !== deliveryFilter.date) return false;
-    if (!aRelivrer && deliveryFilter.date && !order.deliveryDate) return false;
+    if (!aRelivrer && filtre.date && order.deliveryDate && order.deliveryDate !== filtre.date) return false;
+    if (!aRelivrer && filtre.date && !order.deliveryDate) return false;
     if (sectorKey && sectorKey !== "tous" && normalizeTextKey(order.sector) !== sectorKey) return false;
     if (cityKey && normalizeTextKey(order.city) !== cityKey) return false;
     return true;
@@ -6928,6 +6995,8 @@ function updateSelectedDeliveryCount() {
   if (createButton) {
     createButton.disabled = deliverySelection.size === 0;
     createButton.title = deliverySelection.size === 0 ? "Sélectionnez au moins un client pour créer une tournée" : "";
+    // Le compte sur le bouton (audit du 24/09) : on voit ce qui partira.
+    createButton.textContent = deliverySelection.size ? `Créer la tournée (${deliverySelection.size})` : "Créer la tournée";
   }
 }
 

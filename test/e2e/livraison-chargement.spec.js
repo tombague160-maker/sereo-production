@@ -56,10 +56,12 @@ test.describe("Tournée — sélection pendant le chargement", () => {
     // viewport » -- 1 rouge sur 30 sous charge, le 23/09, qui n'accusait rien.
     // Pas `dispatchEvent("click")` non plus : il passe outre `disabled`.
     await tout.evaluate(bouton => bouton.click());
-    // « Filtrer » reste actif pendant le chargement (le filtre choisi est garde
-    // pour le rendu final) ; il redessine la liste. C'est lui qui juge le rendu
-    // lui-meme : sans garde, il afficherait aussi le faux etat vide.
-    await page.locator("#applyDeliveryFilterButton").click();
+    // La pilule de secteur reste active pendant le chargement (le filtre choisi
+    // est garde pour le rendu final) ; elle redessine la liste. C'est elle qui
+    // juge le rendu lui-meme : sans garde, elle afficherait aussi le faux etat
+    // vide. (Avant le 24/09, c'etait « Filtrer », retire : les pilules filtrent
+    // tout de suite -- pieges-tournee.spec.js.)
+    await page.locator('#deliverySectorPills [data-delivery-sector="Tous"]').click();
     await page.waitForTimeout(300);
 
     const candidates = page.locator("#deliveryCandidates");
