@@ -1,5 +1,66 @@
 # Changelog
 
+## [1.46.0](https://github.com/tombague160-maker/sereo-production/compare/v1.45.1...v1.46.0) (2026-09-24)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* audit des améliorations — pièges, sauvegardes, téléphone, thème clair, parcours, données, carte du chiffre d'affaires ([#182](https://github.com/tombague160-maker/sereo-production/issues/182)) ([af7ef94](https://github.com/tombague160-maker/sereo-production/commit/af7ef9483679aa137c3bf649a5e951eb877f1bed))
+
+
+### 🐛 Corrections de bugs
+
+* **donnees-utiles:** relecture adverse — mouvements sans auteur, géocodage de fond automatique, profil, bon, recherche ([bc8d8bb](https://github.com/tombague160-maker/sereo-production/commit/bc8d8bb9e9aef8ef2da0f36d5a860a276452722b))
+* **import:** une commande au stock deja reserve n'est plus reecrite par l'import ([7453d3a](https://github.com/tombague160-maker/sereo-production/commit/7453d3a0fbca9e8aac0270e45d2d42ff02b7d6a8))
+* **interface:** la ligne mise en avant perd sa marque quand on quitte Commandes ([d22a347](https://github.com/tombague160-maker/sereo-production/commit/d22a347658ce490f8f039ae1d928f99e9acbe125))
+* **interface:** la ville en cours de frappe ne vide plus la selection ; le resume de l'import dit ses unites ([0868d22](https://github.com/tombague160-maker/sereo-production/commit/0868d22a41b9dbb76c296488ca499f20b4d5d217))
+* **interface:** les clients signalés disent « À rappeler », le mot de leur filtre ([f3ee1e0](https://github.com/tombague160-maker/sereo-production/commit/f3ee1e0520af120a72fd1166f87babba59c0cffd))
+* **interface:** les dates des lots pièges, sauvegardes et données passent par l'utilitaire ([1587a57](https://github.com/tombague160-maker/sereo-production/commit/1587a57207eb93301878c1b2fd946b54f867d023))
+* **interface:** relecture a l'ecran des finitions du bureau ([fb0fad4](https://github.com/tombague160-maker/sereo-production/commit/fb0fad4150344303a868f017d2116c961e91a5f8))
+* **interface:** relecture adverse des finitions du theme clair ([1ceaf76](https://github.com/tombague160-maker/sereo-production/commit/1ceaf761a98d49785966a7366bdc64fa95a86898))
+* **mobile:** Commandes garde compte, Filtres et tri sur une rangée à 360 px ([4da1515](https://github.com/tombague160-maker/sereo-production/commit/4da1515ff1e34a7ecfde049f8d93fd35bfb6a006))
+* **parcours:** relecture adverse -- client vide apres Valider, coordonnees sur la fiche, mots du bureau ([794c8a1](https://github.com/tombague160-maker/sereo-production/commit/794c8a118caf453aa3217c6cecad4ba22a77c6f8))
+* **stock:** « À recommander » ne compte plus deux fois une commande au stock réservé ([c87aed9](https://github.com/tombague160-maker/sereo-production/commit/c87aed99e6ea15d55ffd594c44a4b63e29376397))
+* **tableau-de-bord:** l'histogramme remplit la carte du chiffre d'affaires au bureau ([7f93069](https://github.com/tombague160-maker/sereo-production/commit/7f93069dfcf8472d41b088c806cb4d0598d7f323))
+* **telephone:** 8 px d'air entre le dernier article et la barre collee ([ca2cd49](https://github.com/tombague160-maker/sereo-production/commit/ca2cd497c5e95eaa0926b8a9201bb13c7eadfe10))
+* **telephone:** les textes de « Detail du jour » a 13 px ([e826625](https://github.com/tombague160-maker/sereo-production/commit/e82662578848a8aa330e27aee36405d5c12832b5))
+* **telephone:** relecture adverse -- la barre de la tournee, le message au-dessus des gestes, trois articles, le triangle ([6010336](https://github.com/tombague160-maker/sereo-production/commit/6010336fb18cc90cba7ba36aa183b152d3242d0e))
+* **tournee:** le message « Livré » se pose au-dessus du haut réel de la barre de gestes ([4d8f513](https://github.com/tombague160-maker/sereo-production/commit/4d8f513d7740234e68f865805131d74ecdf7e9e1))
+
+
+### ♻️ Refactorisation
+
+* **interface:** l'icône du menu « Plus » en clair suit « un seul dessin » ([e6510d0](https://github.com/tombague160-maker/sereo-production/commit/e6510d01805887bd3a9051372921e26e941ae5e5))
+
+
+### 📚 Documentation
+
+* **design:** ce que l'app sait déjà, enfin montré (24/09) ([ca8f8d4](https://github.com/tombague160-maker/sereo-production/commit/ca8f8d426b7aa5e33d22fe213e98f76ac7b12fec))
+* **design:** intégration des améliorations du 24/09 ([12e0c90](https://github.com/tombague160-maker/sereo-production/commit/12e0c906b1a495d60a92cfd0569edb76f98a7ba9))
+* **design:** le telephone utilisable dehors (24/09) ([af3289c](https://github.com/tombague160-maker/sereo-production/commit/af3289c66e4296614f32d4ed71baa55e1a1ba6f3))
+* **design:** les pièges — import, tournée par secteur, retour après validation (24/09) ([45936e9](https://github.com/tombague160-maker/sereo-production/commit/45936e9422742792c77680c839a72745020cece5))
+* **design:** parcours simplifies du 24/09 -- fait, decisions, ecarts, preuves ([6b73c82](https://github.com/tombague160-maker/sereo-production/commit/6b73c820c886dc5811bcbf4fa073ac10364c18dd))
+* **design:** relecture adverse des parcours simplifies -- sort des six defauts ([44a748a](https://github.com/tombague160-maker/sereo-production/commit/44a748a5f4f622d698214daa3123e993cb6d3c00))
+* **design:** relecture adverse des pieges -- stock reserve, ville en attente, unites du resume (24/09) ([4f23e90](https://github.com/tombague160-maker/sereo-production/commit/4f23e90ff36289b174e4cd2d20742534b20802b8))
+* **design:** relecture adverse du filet de sécurité, le besoin au stock réservé ([d4fef9c](https://github.com/tombague160-maker/sereo-production/commit/d4fef9c8ce91ad3f81a3cbeaddc27a505ba37abb))
+* **design:** relecture adverse du lot « données utiles » — six défauts, leur sort ([9eb4a3b](https://github.com/tombague160-maker/sereo-production/commit/9eb4a3be2eb74c9a3632783249b9bc0a1470c137))
+* **design:** relecture adverse du telephone utilisable -- quatre defauts, quatre vrais ([e1d8466](https://github.com/tombague160-maker/sereo-production/commit/e1d8466486e719d3e26901cb66686bcc1c82fc10))
+* **design:** theme clair, finitions et un seul dessin (24/09) ([be2b6bb](https://github.com/tombague160-maker/sereo-production/commit/be2b6bb4fac79df162a1e80e32c3ddd289dea639))
+
+
+### 🧪 Tests
+
+* **e2e:** « Valider la commande » — chaque banc suit la décision de l'autre lot ([f74915a](https://github.com/tombague160-maker/sereo-production/commit/f74915af4da144975b890ab87a1d27d5bf7acb29))
+* **e2e:** Analyse n'a plus de sous-onglets à juger en clair ([a7a39ac](https://github.com/tombague160-maker/sereo-production/commit/a7a39ac9802cb82ec551b6d9e2589a50e1fe02ae))
+* **e2e:** historique-lent juge ce que la v1.45.1 et le Journal promettent ensemble ([461dd09](https://github.com/tombague160-maker/sereo-production/commit/461dd09b806bd368f7b357b8119720042a584c40))
+* **e2e:** le bandeau hors ligne dit « données de 20 h 20 » ([3ed61ac](https://github.com/tombague160-maker/sereo-production/commit/3ed61ac274eb1d254d38a73aeedec8692858ab9f))
+* **e2e:** le repli des pilules de Commandes se juge en sombre à 360 px ([3c65f90](https://github.com/tombague160-maker/sereo-production/commit/3c65f90cb49649e55d37cc195dbe924fec48aa8a))
+* **interface:** « À envoyer » revient quand une commande l'attend ; « Fermer » rend le focus à l'import ([4bd5aec](https://github.com/tombague160-maker/sereo-production/commit/4bd5aec3b2f664e1a8816ac8e35bc9956a7c4a33))
+* **interface:** après validation, la commande planifiée et la commande d'une page 2 se voient aussi ([b1b906a](https://github.com/tombague160-maker/sereo-production/commit/b1b906ae4d67917c4300e8cbd9655e21599a25fe))
+* **parcours:** hors ligne, la fiche corrigee puis la commande attendent dans la file ([4e7ced7](https://github.com/tombague160-maker/sereo-production/commit/4e7ced7c3f0e74e6f34b6ad430c83417c35b611e))
+* **parcours:** la fiche ne recoit que ce que l'utilisateur change ; couleur des pretes au tableau de bord ([f45bd33](https://github.com/tombague160-maker/sereo-production/commit/f45bd3315ac4eb8daf21faa2613e5800350e125f))
+* **squelette:** l'histogramme qui remplit sa carte peut grandir avec elle, pas bouger ([578a4dc](https://github.com/tombague160-maker/sereo-production/commit/578a4dc93ff07955568411e3f963e2096340d185))
+
 ## [1.45.1](https://github.com/tombague160-maker/sereo-production/compare/v1.45.0...v1.45.1) (2026-09-24)
 
 
