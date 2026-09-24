@@ -3035,7 +3035,10 @@ function writeDb(db, options = {}) {
   // l'application echoue sur l'ecriture des donnees (visible) plutot que sur
   // un backup invisible. Cf revue R1 chantier 1 P1 #2.
   if (useSqliteStorage()) {
-    getSqliteStore().writeDb(db);
+    const store = getSqliteStore();
+    const misesDeCote = journaliserLignesMisesDeCote(db, store);
+    store.writeDb(db);
+    if (misesDeCote.length) store.marquerJournalisees(misesDeCote);
   } else {
     ensureDir(path.dirname(DB_PATH));
     const tempPath = `${DB_PATH}.${process.pid}.${Date.now()}.tmp`;
@@ -3066,6 +3069,25 @@ function writeDb(db, options = {}) {
       })
       .finally(() => { pendingBackup = null; });
   }
+}
+
+// Robustesse (25/09) : une ligne illisible (un caractere abime sur le disque)
+// est mise de cote a la lecture au lieu de faire tomber toutes les pages
+// (storage/sqliteStore.js, mettreDeCote). Elle va au journal dans l'ecriture
+// qui suit. Toutes les tables sont lues d'abord : ce que cette ecriture va
+// normaliser de toute facon, elle le decouvre ici, pas apres. Rend les numeros
+// a marquer « journalisees » une fois l'ecriture faite (un echec d'ecriture
+// les laisse pour la suivante).
+function journaliserLignesMisesDeCote(db, store) {
+  for (const cle of Object.keys(db)) void db[cle];
+  const lignes = store.misesDeCoteAJournaliser();
+  if (!lignes.length) return [];
+  const noms = lignes.slice(0, 5).map(ligne => `${ligne.table} ${ligne.ligne}`).join(", ");
+  addHistory(db, "Stockage",
+    `${lignes.length} ligne(s) illisible(s) mise(s) de côté (${noms}${lignes.length > 5 ? ", …" : ""}) : `
+    + "leur texte est gardé tel quel dans la base (table lignes_en_quarantaine), le reste des données se lit normalement.",
+    { lignes: lignes.map(({ numero, ...ligne }) => ligne) });
+  return lignes.map(ligne => ligne.numero);
 }
 
 // Promise du dernier backup async en vol. Utilise par les tests pour
@@ -7429,6 +7451,15 @@ app.get("/api/dashboard", (req, res) => {
   res.json(getDashboardSummary(db, useSqliteStorage() ? { nombreDeVentes: getSqliteStore().compterVentes() } : {}));
 });
 
+function lignesMisesDeCotePourEtat() {
+  if (!useSqliteStorage()) return { nombre: 0, dernieres: [] };
+  try {
+    return getSqliteStore().lignesMisesDeCote();
+  } catch {
+    return null;
+  }
+}
+
 app.get("/api/storage/status", (req, res) => {
   res.json({
     engine: useSqliteStorage() ? "sqlite" : "json",
@@ -7449,6 +7480,9 @@ app.get("/api/storage/status", (req, res) => {
     backupsSuspended: backupsSuspendedFreshEmpty,
     lastBackupAt,
     lastBackupError,
+    // Robustesse (25/09) : les lignes illisibles mises de cote (sans leur
+    // contenu) ; null si l'etat ne se lit pas.
+    lignesMisesDeCote: lignesMisesDeCotePourEtat(),
     // Calcul routier (23/09) : carte locale ou serveur public, zone, date de
     // la carte, derniere erreur, espace utilise ; `resume` est la ligne de
     // l'ecran Parametres.
