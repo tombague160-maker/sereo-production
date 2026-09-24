@@ -112,6 +112,26 @@ test.describe("téléchargement ouvert", () => {
     expect(await lien.evaluate(e => getComputedStyle(e).boxShadow)).not.toBe("none");
   });
 
+  test("hors ligne, « Sauvegarder maintenant » refuse tout de suite, sans se mettre en file", async ({ page, context }) => {
+    // Une sauvegarde rejouee des heures plus tard ne garderait pas l'etat voulu :
+    // elle n'entre pas dans la file des ecritures (JAMAIS_EN_FILE).
+    await ouvrir(page, { base: srv.base });
+    const avant = await page.locator("#parSauvegardeDerniere").textContent();
+    const envois = [];
+    page.on("request", r => { if (r.method() === "POST" && r.url().endsWith("/api/backup/now")) envois.push(r.url()); });
+    await context.setOffline(true);
+    await page.locator('[data-action="sauvegarder-maintenant"]').click();
+    const toast = page.getByText(/^Sauvegarde impossible : /);
+    await expect(toast).toBeVisible();
+    await expect(toast).not.toContainText("sera envoyé");
+    await context.setOffline(false);
+    // Le reseau revenu, rien ne part (la file n'avait rien) : la derniere n'a pas bouge.
+    await page.waitForTimeout(1500);
+    await page.reload({ waitUntil: "networkidle" });
+    await expect(page.locator("#parSauvegardeDerniere")).toHaveText(avant);
+    expect(envois.length).toBeLessThanOrEqual(1);
+  });
+
   test("un compte non administrateur lit la carte, sans ses gestes, et sait pourquoi", async ({ page }) => {
     // Ce serveur tourne sans connexion (tout le monde est administrateur) : la
     // reponse est rendue telle que le serveur la donne a un livreur -- le
