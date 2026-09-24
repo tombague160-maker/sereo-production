@@ -122,3 +122,27 @@ test("une copie qui échoue ne fait pas échouer la sauvegarde, et se dit", asyn
   await S._sauvegarderPourTest("");
   assert.equal((await etat()).alerte, null);
 });
+
+test("une copie abîmée en route n'est pas gardée : la relecture la refuse, et le dit", async () => {
+  vider(PREMIER);
+  vider(SECOND);
+  // La copie arrive avec un octet change (disque, cable, partage reseau).
+  const copyFile = fs.promises.copyFile;
+  fs.promises.copyFile = async (source, cible, ...reste) => {
+    await copyFile.call(fs.promises, source, cible, ...reste);
+    const octets = fs.readFileSync(cible);
+    octets[octets.length >> 1] ^= 0xff;
+    fs.writeFileSync(cible, octets);
+  };
+  try {
+    saisie();
+    const chemin = await S._sauvegarderPourTest("");
+    assert.ok(chemin && fs.existsSync(chemin), "la sauvegarde elle-meme a echoue");
+    assert.deepEqual(liste(SECOND), [], "une copie abimee est gardee dans le second dossier");
+    const s = await etat();
+    assert.equal(s.alerte?.type, "copie");
+    assert.match(s.alerte.message, /empreinte/);
+  } finally {
+    fs.promises.copyFile = copyFile;
+  }
+});
