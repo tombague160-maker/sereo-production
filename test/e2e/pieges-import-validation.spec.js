@@ -378,11 +378,20 @@ test("import du stock : le resume compte les produits NOUVEAUX et MIS A JOUR, pa
 
 // --- 3. Apres « Valider la commande » ------------------------------------------
 
+// Integration du 24/09 : le client se choisit par la recherche (lot parcours,
+// plus de liste deroulante) et « Valider » vit sous le total du panier, relie
+// au formulaire par form= (#customerValider).
+async function choisirLaClinique(page) {
+  await page.locator("#customerClientSearch").fill("Clinique");
+  await page.locator('#customerClientResults [data-action="cc-client"][data-id="c-veto"]').click();
+  await expect(page.locator("#customerOrderForm [name=clientId]")).toHaveValue("c-veto");
+}
+
 async function validerUneCommande(page) {
-  await page.locator("#customerClientSelect").selectOption("c-veto");
+  await choisirLaClinique(page);
   await page.locator('#customerCatalog [data-customer-product="st-CH-L"][data-customer-delta="1"]').click();
   const reponse = page.waitForResponse(r => r.url().endsWith("/api/customer-orders") && r.request().method() === "POST");
-  await page.locator("#customerOrderForm button[type=submit]").click();
+  await page.locator("#customerValider").click();
   const r = await reponse;
   expect(r.status()).toBe(201);
   return r.json();
@@ -422,12 +431,12 @@ test("valider une commande PLANIFIEE : la liste « Planifiées » la montre, mis
   test.setTimeout(120000);
   await semer();
   const { ctx, page, erreurs } = await ouvrir(browser, "commande-client");
-  await page.locator("#customerClientSelect").selectOption("c-veto");
+  await choisirLaClinique(page);
   await page.locator("#customerOrderType").selectOption("planifiee");
   await page.locator("#customerDeliveryDate").fill("2026-12-15");
   await page.locator('#customerCatalog [data-customer-product="st-ALE"][data-customer-delta="1"]').click();
   const reponse = page.waitForResponse(r => r.url().endsWith("/api/planned-orders") && r.request().method() === "POST");
-  await page.locator("#customerOrderForm button[type=submit]").click();
+  await page.locator("#customerValider").click();
   const { order } = await (await reponse).json();
   await expect(page.locator('#cmdPilules [data-cmd-filtre="planifiees"]')).toHaveAttribute("aria-pressed", "true");
   const ligne = page.locator(`#cmdLignes [data-cmd-ouvrir="${order.id}"]`);

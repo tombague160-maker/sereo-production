@@ -226,7 +226,8 @@ test("2 — « Modifier les coordonnees » d'un client existant : la commande et
   expect(fiche.nom).toBe("Cabinet Martin");
   expect(fiche.ville).toBe("Dole");
   expect(fiche.codePostal).toBe("39100");
-  await expect(page.locator(".toast", { hasText: "Commande client validée" })).toContainText("fiche du client");
+  // Integration du 24/09 : le message dit le numero (lot pieges), puis la fiche.
+  await expect(page.locator(".toast", { hasText: `${creee.numero} validée` })).toContainText("fiche du client");
   expect(erreurs).toEqual([]);
   await ctx.close();
 });
