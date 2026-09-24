@@ -385,6 +385,13 @@ test("valider une commande PLANIFIEE : la liste « Planifiées » la montre, mis
   await expect(ligne).toBeVisible();
   await expect(ligne).toHaveClass(/cmd-ligne--nouvelle/);
   await expect(page.locator(".toast").last()).toContainText(`Commande planifiée ${order.numero} créée.`);
+  // Quitter Commandes retire la mise en avant : au retour, la liste est ordinaire.
+  await page.evaluate(() => { location.hash = "#journee"; });
+  await expect(page.locator("#journee")).toHaveClass(/active/);
+  await page.evaluate(() => { location.hash = "#commandes"; });
+  await expect(page.locator("#commandes")).toHaveClass(/active/);
+  await expect(ligne).toBeVisible();
+  await expect(page.locator(".cmd-ligne--nouvelle")).toHaveCount(0);
   expect(erreurs).toEqual([]);
   await ctx.close();
 });

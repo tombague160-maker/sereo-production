@@ -965,7 +965,12 @@ function showTab(tabName, options = {}) {
   }
   const nextTab = titles[tabName] && mainTabs.has(tabName) ? tabName : "journee";
   // La commande mise en avant ne l'est que jusqu'a ce qu'on quitte Commandes.
-  if (nextTab !== "commandes") commandeMiseEnAvant = "";
+  // La liste est redessinee : sinon la ligne gardait sa marque au retour
+  // (showTab ne redessine pas les Commandes).
+  if (nextTab !== "commandes" && commandeMiseEnAvant) {
+    commandeMiseEnAvant = "";
+    renderCommandes();
+  }
   // Decision 4 : ouverte sans reseau, seul l'ecran Tournee se montre.
   ongletAffiche = nextTab;
   majEcranDemandeReseau();
