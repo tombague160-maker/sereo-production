@@ -8040,3 +8040,157 @@ Mesures sur le jeu « production », même machine ; « fusion » = ce lot + `pe
    PowerShell 5.1 descend dans une jonction avec `Remove-Item -Recurse`. La jonction est
    retirée par `rmdir` (le lien seul, sa cible intacte), puis le worktree par
    `git worktree remove` ; même geste pour l'arbre de fusion jetable.
+
+## 24/09 — Intégration de la performance du 24/09
+
+Branche `integration/perf`, partie d'`integration/ameliorations` (`4da1515`, PR #182 : `main`
+v1.45.1 et les six lots d'améliorations). Fusionnés `--no-ff`, dans cet ordre, les deux lots de
+performance partis de `ef78be1` (v1.45.1) : `perf/reseau-donnees` (`d8a385c`), puis
+`perf/rendu-front` (`7004de2`) ; enfin `4d8f513` (le message « Livré » d'`integration/ameliorations`,
+venu après la base ; sans conflit, aucun lot de performance ne touche `ajusterArretAuPouce`).
+Chaque fusion est contrôlée : les lignes ajoutées et retirées de la fusion contre son premier
+parent égalent celles du lot contre `ef78be1`, hors les conflits nommés ci-dessous (et, pour le lot
+rendu, `jeu-production.js` et `serveur-seme.js`, déjà apportés identiques par le lot réseau).
+
+### Conflits et résolutions
+
+- **`DESIGN.md`** (deux fois) : ajouts en fin de fichier, reconstruits depuis les trois versions,
+  jamais en ôtant les marqueurs.
+- **Le chargement et l'historique.** Le lot « données utiles » avait déjà retiré l'écran
+  Historique, `renderHistorique` et `/api/historique` du chargement (le Journal se lit par pages
+  dans Paramètres) : cette intention est gardée. Les ajustements du lot réseau sur l'historique
+  **n'ont plus d'objet** : son entrée de `demanderDonneesDeLEcran` (l'écran le demandait s'il
+  s'affichait) et la ligne de `renderHistorique` partent avec la fonction. Restent du lot réseau :
+  `/api/ventes` hors du chargement (l'écran Ventes, inatteignable, le demande s'il s'affiche) et
+  l'oubli des copies d'avant (`/api/historique` compris : les caches de la v1.45.1 l'ont encore,
+  et rien ne l'en retirait).
+- **Résumé du jour** : le compte des ventes vient de `/api/dashboard` (lot réseau), accordé
+  (« 429 lignes importées », lot parcours).
+- **`renderSettings`** : `renderHorizonRecommande` (sauvegardes) reste ; `afficherCalculRoutier`
+  passe aux lectures des Paramètres (lot réseau). Elle sert aussi la carte « Sauvegardes » (même
+  `/api/storage/status`), qui n'existe que dans Paramètres : elle se lit en y arrivant.
+- **`/api/stock-movements`** : `limite` (lot réseau), plafonnée aux 50 derniers et sans auteur
+  (lot données : « qui » se lit au Journal, réservé à l'administration). Sans `limite`, les 50
+  derniers, plus la table entière.
+- **`/api/crm/clients`** : sans `orderHistory` ni `ordersByDate` (lot réseau), avec l'index des
+  ventes importées construit une fois pour la liste (lot parcours).
+- **`dateCourte`, `formatDateTimeShort`, `formatDate`** : le texte de l'utilitaire
+  (`utils/dates.js`, lot parcours) ; les formateurs locaux du lot rendu partent avec leurs
+  fonctions, **le cache passe dans l'utilitaire** (réconciliation ci-dessous).
+- **`renderAll`** : `rendreOuDifferer` pour chaque écran de liste, sans l'écran Exports (supprimé
+  par le lot thème).
+
+**Vérifié, rien de retiré dont la page a besoin.** La fiche client (lot parcours) lit son chiffre
+d'affaires, ses commandes livrées et ses rappels dans la LISTE `/api/crm/clients`
+(`totalRevenue`, `deliveredOrders`, `reminderHistory`) : comparée à celle d'`integration/ameliorations`
+sur le jeu « production », la liste est identique client par client, aux deux champs retirés près ;
+aucun fichier du front ne lit `orderHistory` ni `ordersByDate`. La recherche de la barre latérale
+(lot données) cherche dans `crmClients`, `orders` et `stock`, tous chargés à l'ouverture. Relevé
+« lecture après un `await` » (lecture paresseuse de la base) refait sur le code des six lots : aucune
+lecture nouvelle de l'instantané après une suspension. `CACHE_NAME` (« à faire à l'intégration »,
+lot rendu) : rien à faire, le nom du shell porte l'empreinte du contenu depuis le 23/09.
+
+### Réconciliations (commits à part, chacune avec son banc rouge avant)
+
+- **Les dates par des formateurs gardés** (rendu × parcours) : l'utilitaire garde un
+  `Intl.DateTimeFormat` par forme. Rouge avant : 252 `toLocale*` pour 224 dates
+  (`dates-uniques.test.js`), 20 par page de Commandes (banc du lot rendu). Témoin : même texte
+  que `toLocaleDateString`, forme par forme.
+- **Les `body:has(...)` des améliorations par leur chemin** (rendu × téléphone, commandes) :
+  50 règles ajoutées sans chemin (`#livreur.active #tourneeActive…`, `:is(#statistiques, …).active`,
+  `#commandes.active`, `#crm.active`, le menu « Plus », `:not(:has(#bandeauHorsLigne,
+  #tourneesNonSoldees))`). `has-borne.test.js` juge désormais chaque élément d'une liste
+  `:has(A, B)` et chaque identifiant d'un `:is(...)`, et accepte un enfant direct de `.app` (le menu
+  « Plus ») ; trois mutants rougissent pour leur cause. Témoin e2e : chaque condition, sans puis
+  avec chemin, répond pareil dans treize états. `#exports` quitte ces listes (absent de la page).
+- **Une arrivée, un rendu** (rendu × données, parcours, pièges) : la recherche de la barre
+  latérale (un client, un produit), « Rappel » d'une fiche et le retour après « Valider la
+  commande » dessinaient l'écran PUIS y arrivaient — la classe que le lot rendu avait réglée pour
+  « Les N autres ». Rouges avant : 2, 3, 2 et 2 rendus ; chaque correctif retiré seul fait rougir
+  son banc.
+- **Retirer les squelettes ne vide plus la page** (rendu × pièges) : `retirerSquelettes` vidait
+  tout élément `aria-busy="true"` contenant un squelette — `<body>` aussi, que le voile d'une
+  action longue marque (`showLoader`, l'import d'un fichier Excel). Dès qu'une liste CACHÉE
+  garde son squelette (ce que le rendu différé rend ordinaire), l'import des ventes depuis le
+  tableau de bord laissait une **page blanche** (banc du lot pièges « import, bureau »). Rouge
+  aussi sur `perf/rendu-front` seul, et **sur `main` v1.45.1**, par `#historiqueList` (plus
+  dessinée à l'ouverture depuis la v1.45.1 ; le lot données avait retiré cette zone, ce qui le
+  masquait sur `integration/ameliorations`). Les zones sont désormais marquées par
+  `poserSquelettes`, et seules elles sont retirées.
+- **Bancs qui suivent la décision d'un autre lot** : `/api/stock-movements` plafonné
+  (`poids-reseau`, unitaire et e2e) ; `?limite=12` (`donnees-utiles`, journal) ; « 429 lignes
+  importées » (`poids-reseau`) ; `#commandes-jour` ouvre « Toutes » depuis le lot pièges, le banc de
+  la redirection se juge sur `#commandes-livrees` (un filtre à lui). Et deux bancs d'avant les
+  lots, que le lot réseau privait de leur instrument (rouges sur `perf/reseau-donnees` seul) :
+  « la page ne remonte pas toute seule » retenait `load` par l'aperçu du logo, désormais
+  `loading="lazy"` (le banc pose sa propre image) ; « `/api/carte/fond` échoue une fois » faisait
+  échouer une demande qui, partie au `resize` de la carte, passe maintenant par le service worker
+  (le banc le bloque ; il juge la relance de la page, deux appels par la route). Les deux gardent
+  leur rouge sur mutant.
+
+### Mesures avant / après
+
+Même machine, jeu « production » (`jeu-production.js`, 97 clients, 224 commandes, 218 produits,
+633 mouvements, image de 116 Ko), servi par le serveur semé de chaque arbre. Six passages par case
+(deux séries de trois, ordre des arbres inversé) : médiane, étendue entre parenthèses ; « 0 » :
+aucune tâche de 50 ms. Ouverture : rechargement, service worker actif, jusqu'à 1,5 s après « À
+jour ». Changement d'écran : depuis le tableau de bord rouvert, jusqu'à 1,5 s après l'arrivée
+(première arrivée : l'écran se dessine). JSON : premier chargement, contexte neuf, corps décodés
+des réponses `/api/*`. Tuiles servies localement.
+
+| Bureau 1440 × 900 | `main` v1.45.1 (`ef78be1`) | améliorations (`4da1515`) | `integration/perf` |
+|---|---|---|---|
+| JSON à l'ouverture | 1 986 049 o (27 réponses) | 1 619 849 o (26) | **733 460 o (20)** |
+| Ouverture, pire tâche longue | 76 ms (73–79) | 83 ms (78–91) | **0** |
+| Ouverture, total des tâches longues | 140 ms (73–153) | 160 ms (78–168) | **0** |
+| Éléments dans la page après l'ouverture | 12 939 | 12 972 | 1 712 |
+| → Stock, pire tâche | 83 ms (0–93) | 80 ms (52–111) | **0** |
+| → Clients, Commandes, Tournée | 0 | 0 | 0 |
+
+| Téléphone 390 × 844, CPU × 4 | `main` v1.45.1 | améliorations | `integration/perf` |
+|---|---|---|---|
+| Ouverture, pire tâche longue | 521 ms (352–776) | 904 ms (605–981) | **150 ms (130–180)** |
+| Ouverture, total | 1 259 ms (610–2 027) | 1 691 ms (1 054–1 920) | **448 ms (392–635)** |
+| Éléments après l'ouverture | 12 967 | 12 994 | 1 712 |
+| → Stock, pire / total | 674 (574–970) / 1 142 ms | 792 (543–919) / 1 364 ms | **263 (137–306) / 358 ms** |
+| → Clients, pire / total | 206 (165–231) / 206 ms | 3 446 (2 363–3 625) / 3 586 ms | **766 (534–838) / 799 ms** |
+| → Commandes, pire / total | 155 (110–192) / 155 ms | 222 (162–289) / 326 ms | **142 (71–154) / 142 ms** |
+| → Tournée, pire / total | 237 (216–371) / 407 ms | 354 (212–472) / 996 ms | **156 (81–260) / 174 ms** |
+
+Le JSON de l'ouverture est le même aux deux tailles. Sur `integration/perf`, il pèse 30 575 o de
+plus que sur le lot réseau seul (702 885 o, même mesure) : `/api/stock` +20 928 o (« À recommander »
+qui voit venir : la demande estimée de chaque produit), `/api/crm/clients` +9 508 o (le signal
+« À rappeler », les commandes livrées de la fiche), les mouvements −240 o (sans auteur). Côté serveur, les 18 routes de l'ouverture lisent 30
+tables au lieu de 26 pour le lot réseau seul : `/api/crm/clients` lit `ventes` (le chiffre
+d'affaires de la fiche, lot parcours, prend les ventes importées d'une commande livrée sans montant
+— 182 des 224 du jeu) et `abonnements` (le signal « À rappeler »), `/api/stock` et `/api/dashboard`
+lisent `abonnements` (« À recommander » qui voit venir). Aucune ne lit l'historique ni les archives.
+
+### Ce qui reste
+
+- **Clients au téléphone : 766 ms à l'arrivée** (206 sur `main`, 3 446 sur
+  `integration/ameliorations`). Profil (CPU × 4) : `replierPilules` (lot téléphone) cache les
+  pilules une à une et remesure après chacune — une mise en page et un recalcul du style forcés par
+  pilule cachée, pour 26 secteurs. Les `body:has` bornés (lot rendu) ont divisé par cinq le coût de
+  chaque recalcul (profil : 3 000 → 650 ms de style cumulés) ; le nombre de mesures, lui, reste. Changer l'algorithme touche au
+  repli des pilules (bancs `telephone-utilisable`, `clients-mobile`) : non fait ici, à trancher.
+- `main` v1.45.1 a le défaut de la page blanche après l'import d'un fichier depuis le tableau de
+  bord (voir « Retirer les squelettes »). Corrigé ici ; en production tant que `main` n'a pas cette
+  branche ou `integration/ameliorations`.
+- Le chargement pose, puis retire, un squelette dans chaque liste jamais affichée (deux écritures
+  de quelques lignes par chargement) : le squelette sert si l'on y arrive pendant le chargement.
+  Gardé.
+- Les écarts nommés par chaque lot restent (Paramètres au bureau à la première arrivée, Leaflet
+  au démarrage, `/api/operations` en 200, `/api/orders` entier…).
+
+### Bancs
+
+Code vérifié : `6b371b5` (arbre `3361e69`), dont ce commit ne diffère que par `DESIGN.md`.
+`npm run check`, et chaque module du front par `node --input-type=module --check` (13) ;
+`npm test` **769/769**. e2e (3100/3101 et les ports des bancs semés, aucun autre lancement local) :
+liste ciblée — les bancs des deux lots, `chargement-instantane`, `hors-ligne`,
+`livreur-ne-perd-rien`, `integration-lots-1-5`, `historique-lent`, `parcours-simplifies*`,
+`donnees-utiles`, `sauvegardes`, `pieges-*`, `telephone-utilisable`, `clients*`, `commandes`,
+`stock*`, `tabs`, `smoke` — **312/312** ; suite complète, deux passages : **723/723** et
+**723/723**. Un passage complet préalable (avant `4d8f513` et le banc de la carte) : 721 verts,
+le rouge de `carte-telephone` réglé ci-dessus.
