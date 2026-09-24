@@ -41,9 +41,10 @@ function seme() {
 }
 
 let srv;
-async function semer() {
+// Le port n'est ecrit qu'ICI (test/ports-e2e.test.js) : chaque banc resème.
+async function semer(seed = seme()) {
   if (srv) await srv.arreter();
-  srv = await demarrer({ port: 3521, seed: seme(), routageAdaptatif: true });
+  srv = await demarrer({ port: 3521, seed, routageAdaptatif: true });
 }
 test.afterAll(async () => { if (srv) await srv.arreter(); });
 
@@ -188,8 +189,8 @@ test("pendant la livraison, « Créer la tournée » se replie avec la planifica
   // pendant la livraison. Sous la liste, il en est sorti : sans cette regle,
   // il collerait en bas de l'ecran du livreur, sous le pouce, en pleine tournee.
   test.setTimeout(120000);
-  if (srv) await srv.arreter();
-  srv = await demarrer({ port: 3521, seed: jeuDeDonnees(), routageAdaptatif: true });
+  // Le seme commun : la tournee r-1 roule.
+  await semer(jeuDeDonnees());
   const { ctx, page, erreurs } = await ouvrir(browser, { viewport: TELEPHONE });
   const planification = page.locator("#routePlanning");
   await expect(planification, "prealable : la tournee roule, la planification est repliee").not.toHaveAttribute("open", "");
