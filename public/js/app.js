@@ -2913,6 +2913,44 @@ function declarerRepliDePilules(nom, { conteneur, pilules, choisie }) {
   REPLIS_DE_PILULES.set(nom, { conteneur, pilules, choisie });
 }
 
+/*
+ * UNE mise en page par repli (performance, 25/09). Le premier jet cachait les
+ * pilules une par une et remesurait apres chacune : une mise en page forcee
+ * par pilule cachee -- Clients au telephone, 26 secteurs, 766 ms a l'arrivee
+ * (CPU x 4, jeu « production »). Meme resultat, calcule : on ECRIT tout
+ * (pilules depliees, sondes de « + N »), on LIT tout d'un coup, on CALCULE le
+ * repli, puis on ECRIT les classes.
+ *
+ * Le calcul tient parce que la rangee est un flot `flex-wrap` sans
+ * etirement : une pilule ne bouge pas quand on cache celles d'APRES elle. Ne
+ * se deplacent que ce qui suit la premiere pilule cachee -- les choisies,
+ * jamais cachees, et « + N » -- et on les place a la suite, comme le
+ * navigateur (retour a la ligne des qu'une largeur, ecart compris, deborde).
+ * La largeur de « + N » depend de N (« + 9 » tient dans les 56 px minimum,
+ * « + 12 » non) : une sonde par N, hors du flot, mesuree dans la meme mise en
+ * page. Les largeurs sont des multiples de 1/64 px (celles du moteur) : les
+ * sommes sont exactes. telephone-utilisable.spec.js et hors-ligne-et-saisie
+ * comparent le resultat a celui de la mesure pilule par pilule.
+ */
+function mesurerRangeeDePilules(conteneur, pilules, sondes) {
+  if (!conteneur.getClientRects().length) return null;
+  const boite = conteneur.getBoundingClientRect();
+  const style = getComputedStyle(conteneur);
+  const px = valeur => parseFloat(valeur) || 0;
+  const dispo = boite.width - px(style.paddingLeft) - px(style.paddingRight) - px(style.borderLeftWidth) - px(style.borderRightWidth);
+  const ecart = px(style.columnGap);
+  const mesures = new Map();
+  for (const p of pilules) {
+    if (!p.getClientRects().length) continue;
+    const r = p.getBoundingClientRect();
+    const s = getComputedStyle(p);
+    // Relatif au conteneur : un defilement qui s'ajuste ne deplace rien.
+    mesures.set(p, { haut: Math.round(r.top - boite.top), largeur: r.width + px(s.marginLeft) + px(s.marginRight) });
+  }
+  const largeursPlus = sondes.map(s => s.getBoundingClientRect().width);
+  return { dispo, ecart, mesures, largeursPlus };
+}
+
 function replierPilules(nom) {
   const repli = REPLIS_DE_PILULES.get(nom);
   const conteneur = repli?.conteneur();
@@ -2921,15 +2959,38 @@ function replierPilules(nom) {
   const pilules = repli.pilules(conteneur);
   pilules.forEach(p => p.classList.remove("pilule-repliee"));
   if (bouton) bouton.hidden = true;
-  // Au bureau, ou ecran cache (rien ne se mesure) : tout reste deplie.
-  if (!ecranTelephone.matches || !conteneur.getClientRects().length) return;
+  // Au bureau : tout reste deplie.
+  if (!ecranTelephone.matches) return;
+  // Les sondes de « + 1 » a « + N » : hors du flot, invisibles, retirees
+  // avant de rendre la main (rien d'autre ne les voit).
+  const modele = bouton || Object.assign(document.createElement("button"), { type: "button", className: "pilules-plus" });
+  const sondes = pilules.map((_, i) => {
+    const sonde = modele.cloneNode(false);
+    sonde.removeAttribute("data-pilules-plus");
+    sonde.removeAttribute("id");
+    sonde.hidden = false;
+    sonde.tabIndex = -1;
+    sonde.setAttribute("aria-hidden", "true");
+    sonde.style.cssText = "position:absolute;visibility:hidden;left:0;top:0;";
+    sonde.textContent = `+ ${i + 1}`;
+    return sonde;
+  });
+  conteneur.append(...sondes);
+  let mesure;
+  try {
+    mesure = mesurerRangeeDePilules(conteneur, pilules, sondes);
+  } finally {
+    for (const sonde of sondes) sonde.remove();
+  }
+  // Ecran cache (rien ne se mesure) : tout reste deplie.
+  if (!mesure) return;
+  const { dispo, ecart, mesures, largeursPlus } = mesure;
+  const visibles = pilules.filter(p => mesures.has(p));
   const rangs = [];
-  // Relatif au conteneur : cacher une pilule change la hauteur de la page, et
-  // le defilement qui s'ajuste deplacait tout -- en coordonnees d'ecran, le
-  // deuxieme rang « glissait » et le repli cachait six pilules sur sept.
-  const haut = e => Math.round(e.getBoundingClientRect().top - conteneur.getBoundingClientRect().top);
-  const visibles = pilules.filter(p => p.getClientRects().length);
-  for (const p of visibles) if (!rangs.some(r => Math.abs(r - haut(p)) < 4)) rangs.push(haut(p));
+  for (const p of visibles) {
+    const haut = mesures.get(p).haut;
+    if (!rangs.some(r => Math.abs(r - haut) < 4)) rangs.push(haut);
+  }
   if (rangs.length <= 2) return;
   if (!bouton) {
     bouton = document.createElement("button");
@@ -2949,16 +3010,42 @@ function replierPilules(nom) {
   // On cache depuis le bout, jamais la pilule choisie, jusqu'a ce que tout --
   // « + N » compris -- tienne dans les deux premiers rangs.
   rangs.sort((a, b) => a - b);
-  const limite = rangs[1] + 4;
+  const rangDe = p => rangs.findIndex(r => Math.abs(r - mesures.get(p).haut) < 4);
   const cachables = visibles.filter(p => !repli.choisie(p)).reverse();
-  let caches = 0;
-  for (;;) {
-    bouton.textContent = `+ ${Math.max(caches, 1)}`;
-    const deborde = [...visibles, bouton].some(e => !e.classList.contains("pilule-repliee") && haut(e) > limite);
-    if (!deborde || caches >= cachables.length) break;
-    cachables[caches].classList.add("pilule-repliee");
-    caches++;
-  }
+  const rangVisible = new Map(visibles.map((p, i) => [p, i]));
+  const deborde = caches => {
+    const cachees = new Set(cachables.slice(0, caches));
+    const premiere = caches ? rangVisible.get(cachables[caches - 1]) : visibles.length;
+    // Avant la premiere pilule cachee, rien ne bouge : les rangs mesures.
+    const avant = visibles.slice(0, premiere);
+    if (avant.some(p => rangDe(p) > 1)) return true;
+    let rang = 0, occupe = 0, nombre = 0;
+    if (avant.length) {
+      rang = rangDe(avant[avant.length - 1]);
+      const memeRang = avant.filter(p => rangDe(p) === rang);
+      occupe = memeRang.reduce((somme, p) => somme + mesures.get(p).largeur, 0) + ecart * (memeRang.length - 1);
+      nombre = memeRang.length;
+    }
+    // Apres : les choisies qui restent, puis « + N », a la suite.
+    const suite = visibles.slice(premiere + 1).filter(p => !cachees.has(p)).map(p => mesures.get(p).largeur);
+    suite.push(largeursPlus[Math.max(caches, 1) - 1]);
+    for (const largeur of suite) {
+      if (nombre && occupe + ecart + largeur > dispo) {
+        rang += 1;
+        occupe = largeur;
+        nombre = 1;
+      } else {
+        occupe = nombre ? occupe + ecart + largeur : largeur;
+        nombre += 1;
+      }
+      if (rang > 1) return true;
+    }
+    return false;
+  };
+  let caches = 1;
+  while (caches < cachables.length && deborde(caches)) caches++;
+  caches = Math.min(caches, cachables.length);
+  for (const p of cachables.slice(0, caches)) p.classList.add("pilule-repliee");
   bouton.textContent = `+ ${caches}`;
   bouton.setAttribute("aria-label", `Afficher ${caches} filtre${caches > 1 ? "s" : ""} de plus`);
 }
