@@ -36,11 +36,10 @@ test.describe("Navigation laterale plate", () => {
 
   test("une entree reste allumee pour tous les ecrans qu'elle absorbe", async ({ page }) => {
     await page.goto("/");
-    // Une entree absorbe plusieurs ecrans (Analyse : statistiques et
-    // exports). Passer de l'un a l'autre ne doit pas l'eteindre.
+    // Analyse n'absorbe plus qu'un ecran : Exports est parti (decision 9,
+    // 24/09). Ce sont les ecrans SECONDAIRES qui gardent leur entree allumee.
     await page.locator("#nav-analyse").click();
-    await page.locator("#tab-exports").click();
-    await expect(page.locator("#exports")).toHaveClass(/active/);
+    await expect(page.locator("#statistiques")).toHaveClass(/active/);
     await expect(page.locator("#nav-analyse")).toHaveClass(/active/);
     // Les rappels sont devenus un ecran SECONDAIRE de Clients (planche 13e).
     await page.locator("#nav-clients").click();

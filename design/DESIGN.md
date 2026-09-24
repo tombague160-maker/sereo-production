@@ -5985,3 +5985,1639 @@ Sur un écran bas, la barre **défile dans sa propre hauteur** (règle existante
 *Bancs (`collant-et-clavier.spec.js`)* : « la barre latérale reste fixe » (921 et 1440 px, trois
 écrans ; rouge avant : −400 au lieu de 0) ; « écran bas, tout le menu reste atteignable »
 (rouge si la barre fixe perd son défilement : « Version » à 768 px pour un écran de 560).
+
+## 24/09 — Les pièges : import, tournée par secteur, retour après validation
+
+Branche `fix/pieges-import-tournee`, partie de `12da3d4` (release 1.45.0). Source : l'audit
+« améliorations » du 24/09 (angle parcours, revérifié par un second contrôleur) et la
+**décision 1 de Thomas** (24/09) : un import de ventes ne modifie pas une commande déjà
+prête, en tournée ou livrée ; elle est laissée telle quelle et le résumé le dit.
+
+### Fait
+
+**1. Import des ventes.**
+
+- *Serveur* (`POST /api/import/ventes`, chemin 2 « même client, même date »). Mesure de
+  l'audit : une ligne visant une commande **en tournée** remplaçait ses produits (3 Changes L +
+  3 Alèses → 8 Changes L, chez le livreur aussi), sans un mot ; et le stock devenait faux (la
+  réservation déduite sur les **anciens** produits, `releaseOrderStockReservation` rendant les
+  **nouveaux**). `raisonImportIgnore` rend la raison de ne pas y toucher : `livree` (livrée),
+  `en_tournee` (« en livraison », ou un arrêt encore à faire dans une tournée active,
+  `tourneeActiveDeLaCommande` — une tournée prête pas encore partie compte), `prete`
+  (`pret_livraison` hors tournée), `partie_en_tournee` (Problème, À reprogrammer). La commande
+  n'est **pas touchée du tout** : produits, quantités, adresse, position, empreinte
+  (`excelRowHash`) ; jamais le chemin 3 (ce serait un doublon). La réponse porte `ignored`,
+  `ignorees` (`id`, `numero`, `clientName`, `status`, `raison`) et `lignesIllisibles` ;
+  l'historique et l'archive de l'import les comptent aussi.
+- *Lignes illisibles* : une ligne où quelque chose est écrit mais ni client ni produit était
+  écartée en silence ; elle est comptée en **erreur**. Une ligne entièrement vide (la fin d'une
+  feuille) n'en est pas une.
+- *Écran*. Le résumé disait « 12 élément(s) traités » (`commandes.length` : toute la base,
+  pour un fichier de 4 lignes), à y = 1376 px au bureau et 2332 au téléphone. `#importSummary`
+  monte **en tête du tableau de bord** (caché sans import) ; quatre comptes :
+  **nouvelles · mises à jour · ignorées** (des commandes, bon par bon) **· lignes en erreur**
+  (des lignes du fichier ; « 0 ligne en erreur » au singulier — voir la relecture). Dessous :
+  chaque commande ignorée, « **Ignorée : commande déjà en tournée** — CMD-2026-004 · EHPAD Les
+  Tilleuls… Elle est laissée telle quelle. » (cinq au plus, puis « Et N autres commandes
+  ignorées… ») ; les identiques ; les lignes sans client ni produit ; et les **avertissements
+  du serveur**, qui ne vivaient que dans l'historique : quantités négatives ramenées à 0
+  (« vérifie les retours ou avoirs dans Ximi »), positions du fichier refusées, commandes
+  importées comme déjà livrées, clients en double fusionnés. « Voir la préparation » quand des
+  commandes sont nouvelles ou mises à jour ; « Fermer » (44 px) rend le focus à « Importer les
+  ventes ». L'import fini, le résumé **vient à l'écran** (défilement si besoin, au-dessus de la
+  barre basse du téléphone) et prend le focus (`tabindex -1`, `role="status"`).
+- Le résumé de l'**import du stock** avait le même défaut (`stock.length`) : il compte
+  « N nouveaux produits · N produits mis à jour » (+ doublons ignorés).
+
+**2. Tournée par secteur.** Mesure de l'audit (et du contrôleur) : le secteur était un menu qui
+n'agissait qu'après « Filtrer » ; entre les deux, « Sélectionner ce secteur » prenait le filtre
+**appliqué** (« tous secteurs ») et cochait 5 commandes au lieu des 3 de Besançon — Dole et
+Champagnole partaient dans la tournée de Besançon. « Créer une tournée optimisée » était
+**au-dessus** de la liste (575 contre 782 au bureau).
+
+- Le secteur devient une rangée de **pilules qui filtrent tout de suite** (`#deliverySectorPills`,
+  forme des pilules d'À recommander : surface basse, 44 px ; la choisie **pleine**, au
+  principal). Leur compte est **celui de la liste** qu'elles montrent (mêmes date et ville,
+  commandes grisées comprises) : l'ancien menu affichait `sectors[].ready` du serveur, qui
+  ignorait la date (« Besançon (3) » au-dessus de 5 cartes). Le secteur choisi reste toujours,
+  même vide. La **ville** filtre après une pause de frappe (300 ms), quand elle nomme la ville
+  d'une commande à livrer (sinon elle attend : voir la relecture). **« Filtrer » est retiré.**
+- Changer de pilule ne garde de la sélection que ce qui est à l'écran : une commande d'un autre
+  secteur ne part jamais sans avoir été vue (le serveur la refuserait, « n'est pas du secteur »).
+- **« Créer la tournée (N) »** passe **sous la liste**, avec le compte de la sélection ;
+  **collé en bas au téléphone**, au-dessus de la barre basse, tant que la liste est à l'écran.
+  Il se montre quand « Préparer une tournée » est ouvert (`toggle` du dépliant), comme
+  avant : sorti du dépliant, il aurait collé sous le pouce du livreur en pleine tournée.
+- Gardes du lot 2 inchangées : une commande déjà dans une tournée active est grisée et
+  « Sélectionner ce secteur » ne la prend pas ; « à livrer en premier » suit la sélection.
+
+**3. Après « Valider la commande ».** Mesure : l'écran renvoyait vers `#commandes-jour`, redirigé
+sur « À envoyer » — « Aucune commande ne correspond à ce filtre » juste après la validation.
+On arrive sur **« Toutes »** (« Planifiées » pour une planifiée), liste propre (comme une
+redirection), **à la page qui contient la commande** (les planifiées se classent à leur date
+de livraison et peuvent la repousser en page 2), la ligne **mise en avant** — un trait, un
+fond (surface basse en clair, surface haute en sombre) et le mot « Nouvelle » —, amenée à
+l'écran et focalisée. La marque part quand on change de filtre ou qu'on quitte Commandes. Le
+message dit le numéro : « Commande CMD-2026-011 validée : elle est à préparer. »
+
+**« À envoyer » : vide par construction, vérifié.** Les deux seules créations qui posent
+`commande_client_validee` — la commande terrain (`createCustomerOrder`) et la planifiée
+confirmée (`confirmPlannedOrder`) — la passent en `stock_a_verifier` **dans la même écriture**,
+depuis l'introduction du statut (`897b2ba`, 22/07, même commit) ; aucun écran ne l'envoie
+(`grep` des `apiFetch` du front). Seul un appel direct `PATCH /api/orders/:id` (depuis
+`brouillon` ou `a_confirmer`) ou une donnée ancienne peut en produire une. La pilule est donc
+**retirée de la rangée** ; elle ne revient que si une commande l'attend (et reste pressée
+après l'envoi de la dernière) : c'est le seul chemin vers « Envoyer en préparation » pour
+elle. `#commandes-jour` ouvre « Toutes ».
+
+### Décisions prises dans le lot
+
+- **« En tournée » comprend « partie en tournée »** : Problème et À reprogrammer n'existent
+  qu'après une tournée ; le carton est préparé, le stock déduit — le même défaut de stock s'y
+  produisait (banc « stock juste » : rendu 28 + 20 au lieu de 23 + 23). C'est une lecture de la
+  décision 1, pas une décision de Thomas.
+- **« Ignorées » réunit les identiques et les verrouillées** : chaque bon du fichier tombe dans
+  exactement un des **trois premiers** comptes ; le détail sépare les raisons.
+- **« Erreurs » = lignes sans client ni produit** (rien d'autre n'était rejeté ligne à ligne).
+  Ce compte-là est en **lignes** : une ligne sans client ni produit n'appartient à aucun bon.
+  (La première version disait « chaque bon tombe dans un des quatre comptes » et affichait
+  « 1 erreur » à côté de « 1 nouvelle » : corrigé par la relecture, plus bas.)
+- **La pilule « À envoyer » est cachée, pas supprimée** (voir plus haut).
+- **Pas de présélection au choix d'un secteur** : l'audit visait 3 gestes (pilule, Créer,
+  Démarrer) ; le lot demandait des pilules immédiates. Aujourd'hui : pilule, « Sélectionner ce
+  secteur », Créer, Démarrer — 4 gestes (5 et plus avant), sans rien cocher que l'on n'a pas vu.
+- **Hors périmètre, au plus petit** : la pilule choisie en clair ne se distinguait pas des
+  autres (défaut relevé par l'audit sur Préparation, lot « thème et finitions ») ; la règle
+  pleine est posée **pour les seules pilules de secteur de la tournée** (`#deliverySectorPills`),
+  puisque c'est elle qui dit de quel secteur partira la tournée.
+- **Bancs existants adaptés à une décision** : `api.test.js` « re-import qui modifie commande
+  déjà livrée » attendait « Contenu mis à jour » (8) — la décision 1 l'inverse (5, ignorée) ;
+  les quatre bancs de redirection (`tabs.spec.js`, `ecrans-sans-planche.spec.js` et `.test.js`,
+  `commandes.spec.js`) attendent « Toutes » pour `#commandes-jour` (le banc e2e passe d'abord
+  par « Livrées » pour que le filtre change) ; `livraison-chargement.spec.js` touche la pilule
+  « Tous » au lieu de « Filtrer » pendant le chargement (même jugement : pas de faux état vide).
+
+### Écarts nommés
+
+- Les pilules de secteur **passent à la ligne** (deux rangs à 390 px avec trois secteurs) ; elles
+  ne se replient pas comme celles de Préparation (charte : « repliables plutôt que
+  débordantes »). Avec beaucoup de secteurs prêts le même jour, la rangée grandit.
+- `sectors` (`/api/sectors`) est toujours chargé par `loadData` mais n'est plus lu par le front
+  (les pilules comptent la liste) : une requête morte, laissée (elle touche la liste des données
+  du chargement instantané et de la copie hors ligne).
+- La règle `.import-summary` de la feuille ne sert plus.
+- Un import du stock lancé depuis l'écran **Stock** met son résumé en tête du tableau de bord,
+  qu'on ne voit pas depuis Stock (le message « Stock importé. » reste).
+
+### Preuves rouges (ancien code `12da3d4`, restauré par copie, cause lue)
+
+- `test/pieges-import.test.js` (7 cas) : 7 rouges — « la commande en tournée a été réécrite »
+  (`[['CH-L', 8]]` au lieu de `[['CH-L', 3], ['ALE', 3]]`), stock rendu `{ CH-L: 28, ALE: 20 }`
+  au lieu de `{ 23, 23 }`, prête et livrée réécrites, tournée prête réécrite, témoin (`ignored`
+  absent ; la mise à jour d'une commande à préparer, elle, passe), comptes (`updated` 1 au lieu
+  de 0), historique muet.
+- `test/e2e/pieges-import-validation.spec.js` (11 cas, port 3520) : 7 rejoués **seuls** sur
+  l'ancien code, 7 rouges — résumé à y = 1512 au bureau et 2280 au téléphone (« il faut
+  défiler ») ; après validation, « la liste est vide » (bureau et téléphone) ; ligne
+  introuvable (contrastes) ; stock : aucun compte (`[]`) ; avertissements absents du résumé.
+  Les 4 autres (plafond de cinq, planifiée, page 2, « À envoyer » revient) sont prouvés par
+  mutant.
+- `test/e2e/pieges-tournee.spec.js` (6 cas, port 3521) : 4 rouges sur l'ancien code —
+  « Sélectionner ce secteur » coche `["Besançon", "Besançon", "Champagnole", "Besançon", "Dole"]` ;
+  « Filtrer » encore là ; « Créer » à y = 427 pour une liste finissant à 1603 ; au téléphone,
+  « Créer » à −251 (hors de l'écran) pendant qu'on parcourt la liste. Les 2 autres (repli avec
+  la planification, contrastes des pilules) visent des éléments que l'ancien écran n'avait pas
+  (ils y tombent sur « introuvable », la mauvaise cause) : prouvés par mutant.
+- **Mutants** sur le nouveau code (copie restaurée, empreinte comparée octet à octet) : **24 sur
+  24 rouges**, chacun de sa cause — côté serveur la garde, la tournée active, « partie en
+  tournée » (le stock 28/20), les lignes vides comptées ; côté écran le défilement et l'appel
+  du résumé, le plafond de cinq, les avertissements, « Fermer » et le focus, la pilule
+  immédiate, la ville, le compte du bouton, le repli avec la planification, la pilule choisie
+  pleine, le collé au téléphone, la pilule « À envoyer » (cachée / restée pressée), le filtre
+  « Toutes », la page, la mise en avant, la planifiée, la marque retirée en quittant Commandes,
+  le fond de la ligne. Deux défauts pris en route par ces bancs : la marque « Nouvelle » restait
+  au retour sur Commandes (corrigé) ; le banc de contraste lisait un fond transparent comme du
+  noir (3,49 au lieu d'« a le fond de la carte » : corrigé, il remonte au premier fond opaque).
+
+### Bancs et résultats
+
+`npm run check` ; `npm test` **689/689** (deux passes ; une passe antérieure a montré 10 rouges
+dans `tournees-debloquees.test.js`, non reproduits — 23/23 seul, puis deux suites vertes ;
+cause non lue). e2e (config de lot, serveur commun sur 3500) : les deux bancs du lot (17/17) ;
+écrans voisins — commandes, écrans sans planche, onglets, tableau de bord (et relecture),
+smoke, états limites, collant et clavier, chargement de la livraison, tournées débloquées,
+meilleur trajet, opérations, adresses à vérifier, rapidité, tournée pratique, tournée,
+tournée mobile, écran livreur, hors ligne, tournée hors ligne, chargement instantané,
+intégration des lots 1-5, livreur ne perd rien, cibles tactiles, focus clavier, contraste
+application, finitions, navigation mobile, texte coupé, thèmes, badges, navigation plate :
+verts. Rouges vus en route, non imputables : `collant-et-clavier` « port 3350 déjà pris par un
+autre processus » (un autre worktree), vert relancé seul (14/14) ; `numerotation-admin` demande
+le serveur authentifié du port 3101, que la configuration de lot ne lance pas (non touché).
+Contrastes mesurés par les bancs : comptes du résumé 7,04 (clair) / 8,55 (sombre), compte
+« ignorée » 4,89 / 4,56, avertissements 5,46 / 11,59 ; pilule de secteur libre 4,56 / 9,28,
+choisie 6,01 / 10,22 ; ligne mise en avant, secondaire 4,56 / 7,67.
+
+### Ce qui reste
+
+- ~~Une commande en préparation ou une commande terrain réservée reste réécrite par l'import~~ :
+  **fait** par la relecture (plus bas).
+- La présélection au choix d'un secteur (3 gestes) ; « Créer la tournée » actif sans départ
+  réglé (l'erreur « Choisis ton départ » n'arrive qu'après le clic).
+- L'écran Historique, seul lecteur des comptes de l'import dans le détail, reste inatteignable.
+
+### Relecture adverse (24/09) : trois défauts, trois vrais
+
+Relecture de `45936e9`. Chaque défaut remesuré sur ce commit avant d'y toucher.
+
+**1. Important — le stock réservé restait réécrit. Vrai, corrigé.** La décision 1 ne visait que
+prête, en tournée et livrée ; la première version l'avait laissé dans « ce qui reste ». Mesure
+(sonde sur `45936e9`) : une commande terrain de 3 Changes L + 3 Alèses, réservée à sa création
+(`createCustomerOrder` → `reserveStockForOrder`), encore « à préparer » : l'import renvoie
+`updated 1`, la commande devient `[['CH-L', 8]]` ; annulée, elle rend `{ CH-L: 28, ALE: 20 }` au
+lieu de `{ 23, 23 }`. Même réécriture en `en_preparation`.
+
+- *Décision (la mienne, dans le périmètre)* : **verrouiller**, pas « rendre puis refaire la
+  réservation ». Le serveur a déjà la règle : le seul autre chemin qui change des produits,
+  `PATCH /api/planned-orders/:id` (`updatePlannedOrder`), refuse après réservation
+  (« Impossible de modifier les produits apres reservation du stock ») ; l'import était le seul
+  chemin qui la contournait. Rendre puis refaire échouerait sur un stock devenu
+  insuffisant (une commande en préparation sans réservation) et changerait le carton sous les
+  mains du préparateur. `raisonImportIgnore` rend `en_preparation` (préparation lancée ou
+  terminée) ou `stock_reserve` (commande terrain, planifiée confirmée, envoyée en préparation)
+  dès que `stockReservedAt` est posé. L'écran : « Ignorée : commande déjà en préparation » /
+  « Ignorée : stock déjà réservé pour cette commande » (le repli « commande déjà en cours »
+  n'est plus atteint). L'historique nomme chaque commande avec sa raison
+  (« 1 commande(s) laissee(s) telle(s) quelle(s) (CMD-2026-003 : en_tournee) »).
+- *Ce qui change pour l'utilisateur* : une correction Ximi d'une commande au stock réservé n'est
+  plus reprise ; le résumé la nomme. Aucun écran ne change les produits d'une telle commande
+  (c'était déjà vrai) : une commande terrain encore à préparer peut être annulée (la transition
+  existe, et rend exactement sa réservation) puis refaite ; une commande **en préparation** ne
+  s'annule pas (`en_preparation` → `annulee` n'est pas une transition) — voir *ce qui reste*
+  ci-dessous. Le témoin tient : une commande importée, pas encore réservée, est toujours mise à
+  jour.
+
+**2. Mineur — une pause au milieu de la ville vidait la sélection. Vrai, corrigé.** Mesure
+(téléphone, `45936e9`) : Besançon choisi, 3 cochées, « Besan » et 700 ms → 0 cochée ; la ville
+finie, la liste revient sans coche. La correction ne peut pas être une recherche par début de nom
+côté écran : le serveur compare la ville **exactement** (« n'est pas à Besan » refuserait la
+tournée). Une saisie qui n'est la ville d'**aucune** commande à livrer — un début de nom, une
+faute — reste **en attente** (`villeEnAttente`) : la ville déjà appliquée tient, ni la liste ni la
+sélection ne bougent, le champ n'est pas réécrit tant qu'il a le focus, et le résumé le dit
+(« « Besan » n'est la ville d'aucune commande prête : pas appliquée »). Une ville de la liste
+s'applique après la pause, et la règle du lot tient (ce qu'elle cache quitte la sélection).
+
+**3. Mineur — les comptes du résumé ne comptaient pas la même chose. Vrai, corrigé.** « Nouvelles »,
+« mises à jour » et « ignorées » comptent des bons (client + date), « erreurs » des lignes ; la
+phrase « chaque bon tombe dans un des quatre comptes » laissait croire à une partition du
+fichier. Le quatrième compte dit son unité : **« 1 ligne en erreur »** (« 0 ligne en erreur »,
+« 2 lignes en erreur ») ; la phrase est corrigée plus haut.
+
+*Écarts nommés.*
+- « Ignorées » reste compté **par commande** : un bon de trois lignes visant une commande en
+  tournée fait « 1 ignorée », nommée par son numéro. La phrase de la décision (« 1 ligne ignorée :
+  commande déjà en tournée ») est lue comme un exemple : ce qu'on laisse tel quel, c'est la
+  commande. Si Thomas veut des lignes, c'est un compte de plus côté serveur.
+- Une ville en attente laissée dans le champ : un geste qui refait le rendu hors du champ (une
+  pilule, la date) le ramène à la ville appliquée ; la saisie inconnue est perdue, sans effet sur
+  la liste.
+- Une commande `en_preparation` **sans** réservation (possible par `PATCH` de statut, que l'écran
+  n'emploie pas) reste mise à jour par l'import : rien n'est déduit, pas de dérive de stock, mais
+  le carton peut changer en cours de préparation.
+
+*Preuves rouges* (ancien code `45936e9` restauré par copie ; cause lue) :
+- `test/pieges-import.test.js`, 2 cas nouveaux : « la commande au stock reserve a ete reecrite
+  par l'import » (`[['CH-L', 8]]`) ; « commande en_preparation reecrite ». Le stock rendu
+  (`{ CH-L: 28, ALE: 20 }`) est mesuré par une sonde, l'assertion des produits tombant avant.
+- `test/e2e/pieges-tournee.spec.js`, « une pause au milieu de la ville » : Expected 3, Received 0.
+- `test/e2e/pieges-import-validation.spec.js`, chaque cas seul : les trois comptes (`"1 erreur"`
+  reçu pour `"1 ligne en erreur"`, `"0 erreur"` au plafond de cinq) ; le cas nouveau « stock déjà
+  réservé » : `"2 mises à jour", "0 ignorée"` reçus pour `"0 mise à jour", "2 ignorées"`.
+- *Mutants* sur le nouveau code (copie restaurée, `git diff` vide vérifié) : **7 sur 7 rouges**,
+  chacun de sa cause — la clause `stockReservedAt` retirée (2 cas unitaires), `en_preparation`
+  confondu avec `stock_reserve`, les deux libellés retirés (« commande déjà en cours » reçu),
+  l'unité du compte, `villeEnAttente` toujours faux (3 → 0), la garde du focus (champ vidé : `""`
+  reçu pour `"Besan"`), la phrase du résumé.
+
+*Bancs* : `npm run check` ; `npm test` **691/691** ; e2e (config de lot) : les deux bancs du
+lot **19/19** ; écrans voisins, avec eux (138 cas) — tournées débloquées, chargement de la
+livraison, tournée, tournée au téléphone, meilleur trajet, tournée pratique, écran livreur,
+rapidité, collant et clavier, tableau de bord (et relecture), smoke, états limites, cibles
+tactiles, focus clavier, hors ligne, tournée hors ligne : 128 verts, 1 rouge de la mauvaise cause
+(`tournee.spec.js` : « port 3166 déjà pris par un autre processus », un autre worktree) et ses
+9 suivants non lancés ; `tournee.spec.js` relancé seul, port libéré : **10/10**.
+
+*Ce qui reste.* Une correction Ximi d'une commande **déjà en préparation** n'a aucun chemin :
+l'import la laisse (et le dit), aucun écran ne change ses produits, et elle ne s'annule pas. À
+trancher si le cas arrive : un geste « reprendre la correction » qui rend la réservation et
+refait la nouvelle (refusé si le stock ne suffit pas), ou une préparation qu'on peut défaire.
+
+## 24/09 — Le filet de sécurité : sauvegardes visibles, À recommander qui voit venir
+
+Branche `feat/sauvegardes-et-previsions`, partie de v1.45.0 (`12da3d4`). Décisions de
+Thomas du 24/09 (recommandations de l'audit acceptées) : **2** (« À recommander » compte
+les abonnements actifs et les commandes planifiées des 14 prochains jours, réglable de 7
+à 30), **3** (la pastille Stock compte aussi un produit au-dessus du seuil qui manquera),
+**4** (télécharger une sauvegarde : l'administrateur seul ; une sauvegarde par jour gardée
+30 jours, en plus, sans jamais supprimer plus qu'avant).
+
+### Fait — les sauvegardes
+
+Le serveur sauvegardait seul (au plus une fois par heure d'activité, à la première
+écriture qui suit) et savait quand ça échouait (`lastBackupError`, `backupsSuspended` dans
+`/api/storage/status`, commentés « l'UI doit alerter ») ; l'écran ne lisait que
+`lastRecovery`. `POST /api/backup/now` n'avait aucun appelant et était ouvert à tout compte.
+
+- **Une carte « Sauvegardes »** dans Paramètres, après « Imports et archives » (demi-largeur
+  au bureau, pleine largeur sous 920 px), la forme des autres cartes : **Dernière** (date et
+  taille, lues **sur le disque** — `lastBackupAt` repart à `null` à chaque démarrage),
+  **Conservées** (« 31 sauvegardes sur 12 jours, depuis le 13 septembre »), une **alerte**
+  (`role="alert"`, texte et contour dans la couleur d'alerte, jamais la couleur seule), et
+  deux gestes : « Sauvegarder maintenant », « Télécharger la dernière ».
+- **L'état vient de `/api/storage/status`** (champ `sauvegardes`, là où le serveur le disait
+  déjà) : des faits, pas des phrases — l'écran les écrit. Une alerte à la fois, la plus
+  grave d'abord : dossier illisible (jamais un 500), **échec** (automatique, ou manuel —
+  désormais noté lui aussi), sauvegardes suspendues (base repartie vide), **aucune**
+  sauvegarde, **périmée** (voir les décisions).
+- **« Sauvegarder maintenant »** : `requireAdministration` sur la route ; jamais mise en
+  file hors ligne (`JAMAIS_EN_FILE`) — rejouée des heures plus tard, elle ne garderait pas
+  l'état voulu. La carte se relit ensuite (la nouvelle dernière, ou l'échec qui s'y
+  inscrit). Sa ligne d'historique ne compte pas comme une saisie.
+- **« Télécharger la dernière »** : `GET /api/sauvegardes/derniere`, derrière
+  `requireAdministration` ; la dernière seulement (aucun nom de fichier ne vient de la
+  requête) ; `Cache-Control: no-store`, et la route est **exclue du cache du service
+  worker** (`API_CACHE_EXCLUDED`) : la base entière ne dort jamais dans l'appareil.
+- **La rétention** (`sauvegardesAGarder`) : les 30 plus récentes, comme avant, **plus la
+  dernière de chaque jour de Paris** sur les 30 derniers jours (aujourd'hui compris). Une
+  journalière n'est pas un fichier de plus : c'est une sauvegarde déjà écrite que la
+  rotation épargne ; pour les jours que les 30 dernières couvrent, elle en fait partie.
+  L'ensemble gardé contient toujours les 30 plus récentes : après un mois sans activité, les
+  30 dernières (toutes vieilles) restent, comme avant.
+- Un compte non administrateur **lit** la carte ; ses gestes ne sont pas rendus, et la
+  carte dit « Sauvegarder et télécharger : réservé aux administrateurs. » (comme la
+  numérotation des bons).
+
+### Fait — « À recommander » qui voit venir
+
+- **Le serveur** donne à chaque produit de `/api/stock` sa demande **connue d'avance**, par
+  jour (`upcomingDemand`, `quantityUpcoming`, `upcomingHorizonDays`) : les commandes
+  **planifiées** (`planifiee`, `a_confirmer`) livrées d'ici la fin de l'horizon (une date
+  passée compte aujourd'hui : elle attend encore), et les échéances des abonnements
+  **actifs** pas encore générées, d'aujourd'hui à la fin de l'horizon. Les échéances
+  viennent de `schedule()` (`lib/subscriptions.js`), le calendrier de l'écran Abonnements,
+  **appelé avec l'horizon** : rien n'est recalculé autrement ; un abonnement en pause ou
+  arrêté n'y figure pas ; une échéance déjà générée y porte son `orderId` et n'est comptée
+  que par sa commande. Les lignes se rattachent aux produits comme les réservations (code
+  ou nom, clés canoniques de `buildStockMetricsIndex`).
+- **L'horizon** : `settings.stock.horizonJours` (7 à 30, 14 par défaut),
+  `GET / PATCH /api/settings/stock` (un entier dans les bornes, sinon 400) ; une carte
+  « À recommander » dans Paramètres avec un curseur (44 px de haut), enregistré 500 ms
+  après le dernier mouvement, puis les données sont relues.
+- **L'écran** (`evaluerRecommandations`, une seule évaluation) : besoin estimé = commandes
+  en cours **dont le stock n'est pas encore réservé** (relecture adverse, plus bas) + à
+  venir ; à recommander = de quoi couvrir tout l'horizon, ou repasser
+  au-dessus du seuil — le plus grand des deux ; **le jour du manque** = le premier jour où
+  la demande cumulée dépasse le stock (les commandes en cours d'abord, aujourd'hui, puis
+  chaque échéance à sa date). Chaque produit qui manque le dit : « Manquera le 27/9 : 24
+  demandés, 14 en stock » (ou « Manque dès aujourd'hui : … »), et d'où vient le besoin
+  (« Dont 12 sur commandes en cours sans stock réservé et 12 à venir d'ici le 8/10
+  (abonnements, commandes planifiées). »). Le sous-titre dit l'horizon.
+- **Un seul compte** (`aRecommander()` : urgent ou bientôt) pour la pastille Stock, la carte
+  « À recommander » du Stock (badge et liste), la tuile du tableau de bord et le filtre de
+  l'écran. Mesuré sur le semé de l'audit adapté : 3 partout (l'ancien code : pastille 1).
+
+### Décisions prises dans le lot
+
+- **« Périmée » veut une saisie plus récente que la sauvegarde.** Une sauvegarde ne part
+  qu'après une écriture : sans écriture, une sauvegarde de trois jours est à jour (un
+  week-end sans activité n'est pas une panne, et une alerte qui crie tous les lundis
+  apprend à ne plus la lire). L'alerte veut donc la dernière de plus de 24 h **et** une
+  écriture de ce processus plus récente qu'elle (deux secondes de marge : un système de
+  fichiers daté à la seconde arrondit la sauvegarde avant l'écriture qu'elle suit). Ne
+  comptent pas : la mise en cohérence du démarrage, la ligne d'historique d'une sauvegarde
+  manuelle.
+- **`SEREO_ENABLE_DB_EXPORT`, lu et respecté là où il a un sens.** Il garde `GET /api/db`
+  (export JSON de la base entière, ouvert à **tout** compte connecté, fermé par défaut,
+  « pour diagnostic local »). Le téléchargement d'une sauvegarde est une autre porte vers
+  le même contenu (et les empreintes des mots de passe) : elle est réservée à
+  l'administration. Mais **sans authentification**, tout visiteur est « administrateur »
+  (`getRequestIdentity`) et le rôle ne prouve plus rien : c'est alors la variable qui
+  décide (fermé par défaut ; la carte le dit). Avec authentification, elle ne s'applique
+  pas ici — l'exiger obligerait à l'ouvrir en production, ce qui ouvrirait aussi `/api/db`
+  à tous les comptes.
+- **Urgent / bientôt.** Urgent : stock à zéro ou qui manque **dès aujourd'hui** (une
+  échéance du jour non générée compte comme une commande en cours). Bientôt : sous le
+  seuil, ou qui manquera avant la fin de l'horizon.
+- **« N demandés »** : toute la demande de l'horizon (en cours et à venir) que le stock n'a
+  pas encore réservée, face au stock d'aujourd'hui, réservations déduites.
+- **La fin de l'horizon** : aujourd'hui + N jours, inclus — la convention de `schedule()` et
+  celle de la mesure de l'audit (24 sous 14 jours, 60 sous 30).
+- **Une échéance passée sans commande n'est pas « à venir »** (réserve du vérificateur de
+  l'audit) : l'écran Abonnements la montre en retard ; elle peut dater d'avant la saisie
+  de l'abonnement. Une commande planifiée en retard, elle, compte aujourd'hui.
+- **Le filtre « Stock faible » devient « Urgent et bientôt »** : il montre ce que la
+  pastille compte, et un produit au-dessus du seuil qui manquera n'est pas un « stock
+  faible ».
+- **La règle du 23/09 est remplacée** (section « Stock des planches 13d/14d ») : « le badge
+  de la carte est le même compte que la pastille (stock faible + rupture) » devient « le
+  même compte que la pastille : à recommander » (décision 3). « Sous le seuil » garde son
+  sens (quantité ≤ seuil) là où il est écrit : le sous-titre du Stock (« 3 sous le seuil »),
+  les tuiles de catégorie, les filtres de statut.
+- **L'horizon se règle par tout compte connecté**, comme les réglages de tournée : c'est un
+  réglage du quotidien, pas un geste d'administration.
+
+### Écarts nommés
+
+- **`/api/recommendations`** garde sa troisième règle (sous le seuil seulement) : aucun
+  appelant dans `public/`, tenue par `test/api.test.js`. Ni alignée ni retirée ici.
+- **Les alertes du tableau de bord** (`getAlertItems`, tuile « Alertes ») ne disent pas
+  « manquera » : elles restent « rupture / stock faible ».
+- **Après un redémarrage, rien n'est « modifié » tant que rien n'est écrit** : une saisie
+  faite dans l'heure avant un redémarrage, puis plus aucune écriture, n'est pas signalée
+  (la première écriture suivante déclenche de toute façon une sauvegarde).
+- **« Aucune sauvegarde » alerte aussi sur une base neuve et vide.**
+- **Le rythme d'une sauvegarde par heure est inchangé** : les écritures de la dernière heure
+  d'activité ne sont sauvegardées qu'à l'écriture suivante. C'est ce que l'alerte
+  « périmée » rattrape au bout de 24 h, et ce que « Sauvegarder maintenant » couvre.
+- **Disque** : jusqu'à 59 fichiers (30 + 29 journalières) au lieu de 30, sur le même volume
+  que la base et la carte OSRM (`DEPLOYMENT.md`). La taille réelle en production n'est pas
+  mesurée.
+- **L'écran d'un non-administrateur** est jugé en e2e sur la réponse du serveur réécrite
+  (les serveurs semés tournent sans connexion) ; le refus 403 lui-même est jugé en
+  `node --test`, sur un serveur authentifié avec un livreur et un compte bureau.
+- **Hors lot, non touchés** : les chiffres « neutres » en rouge et les listes rognées
+  d'À recommander (lot thème et finitions) ; « commander 6 » sur la carte du Stock et le
+  retrait des anciens écrans (audit, « Simplifier »).
+
+### Preuves rouges (ancien code `12da3d4`, restauré par copie ; cause lue)
+
+- `test/sauvegardes.test.js` : 403 attendu, **200** reçu pour un livreur sur
+  `POST /api/backup/now` ; 200 attendu, **404** pour le téléchargement ; rétention :
+  **jours 11 à 29** sans aucune sauvegarde (attendu : aucun) ; état : « /api/storage/status
+  ne dit rien des sauvegardes » (`'undefined'` au lieu de `'object'`). « Jamais plus
+  agressive » ne se juge pas sur l'ancien code (la fonction est neuve) : par mutant.
+- `test/a-recommander-a-venir.test.js` : `quantityUpcoming` **undefined** au lieu de 24
+  (l'exemple de l'audit), 0, et les demandes par jour ; horizon : `upcomingHorizonDays`
+  undefined au lieu de 14.
+- `test/e2e/a-recommander.spec.js` : pastille Stock **« 1 »** au lieu de « 3 » (le défaut
+  mesuré par l'audit) ; Changes L absent du filtre (« element(s) not found »).
+- `test/e2e/sauvegardes.spec.js` : la carte n'existe pas (« element(s) not found »), pour
+  l'état vide comme pour l'échec.
+
+**Mutants** (nouveau code, un à la fois, restauré par copie) : rétention sans les 30
+dernières → rouge (`[]` gardé au lieu des 30) ; « périmée » à l'âge seul → rouge (alerte
+sur la sauvegarde de deux jours sans saisie) ; sans la marge de 2 s → rouge ; état sans
+contrôle du rôle → rouge (un livreur « peut » télécharger) ; routes sans
+`requireAdministration` → rouge (200 au lieu de 403, sur chacune) ; abonnement en pause
+compté (`lib/subscriptions.js`) → rouge (20 au lieu de 0) ; horizon ignoré (calendrier à
+90 jours) → rouge (140 au lieu de 60) ; commandes planifiées hors horizon → rouge ;
+échéance générée comptée deux fois → rouge (10 au lieu de 6) ; échéances passées comptées
+→ rouge ; `/api/backup/now` retiré de `JAMAIS_EN_FILE` → rouge (« enregistré, sera
+envoyé »).
+
+### Bancs
+
+`test/sauvegardes.test.js` (10 cas, serveur authentifié), `test/a-recommander-a-venir.test.js`
+(7 cas, dont 2 de la relecture adverse), `test/e2e/sauvegardes.spec.js` (port 3522, trois
+serveurs semés l'un après l'autre : téléchargement ouvert, sauvegardes en échec,
+téléchargement fermé ; clair et sombre, 1440 et 390 px ; 10 cas),
+`test/e2e/a-recommander.spec.js` (port 3523 ; 7 cas, dont 1 de la relecture adverse).
+
+### Ce qui reste
+
+- Aligner ou retirer `/api/recommendations` (il compte encore deux fois une commande au
+  stock réservé : `quantityNeeded`, voir la relecture adverse).
+- **« Réservé » ne compte pas une commande confirmée** (constat de la relecture, antérieur
+  au lot, non touché) : `RESERVED_ORDER_STATUSES` n'a pas `stock_a_verifier`, où la
+  confirmation et la saisie chez le client laissent une commande au stock déjà déduit. La
+  carte produit dit alors « Réservé 0 », « Total » = le disponible, et le statut
+  « disponible » au lieu de « réservé ».
+- Une sauvegarde « de fin d'activité » (une heure après la dernière écriture non
+  sauvegardée) fermerait l'écart du rythme horaire ; une copie **hors de la machine**
+  automatique reste hors de l'application (aujourd'hui : « Télécharger »).
+- « Manquera » dans les alertes du tableau de bord, si Thomas le veut.
+
+### Relecture adverse (24/09) : un défaut, vrai
+
+**Le besoin comptait deux fois une commande au stock réservé.** Confirmer une commande
+planifiée (`confirmPlannedOrder`), saisir une commande chez le client
+(`createCustomerOrder`) ou lancer une préparation (`start-preparation`) **réserve** le
+stock : `reserveStockForOrder` déduit les quantités de `quantite` et pose
+`stockReservedAt`. La commande restait pourtant dans `quantityNeeded`
+(`NEEDED_ORDER_STATUSES`, sans condition sur la réservation), et l'écran comparait ce besoin
+au stock **déjà déduit**. Rejoué sur `5fac3f2` (la sonde du relecteur) : Changes L, 30 en
+stock, seuil 5, 20 confirmés → `quantite` 10, `quantityNeeded` 20, « Urgent »,
+« Manque dès aujourd'hui : 20 demandés, 10 en stock », 10 à recommander — alors que rien ne
+manque (30 physiques, 20 promis et déduits, 10 libres). Le calcul existait avant le lot sur
+l'écran « À recommander » ; la décision 3 le portait sur la pastille, la carte du Stock et
+la tuile du tableau de bord.
+
+- **Le serveur** donne `quantityNeededNotDeducted` : dans `buildStockMetricsIndex`, les
+  lignes des commandes en cours **sans** `stockReservedAt`, plus, sur une commande
+  réservée, ses lignes gardées non déduites (`stockNonDeduit`, livraison acceptée sur un
+  stock non suivi, puis revenue « prête »). `quantityNeeded` (« Nécessaire » de la carte
+  produit, `/api/recommendations`, tableau de bord) **ne change pas de sens**.
+- **L'écran** (`besoinNonDeduit`) prend ce besoin-là. Une copie hors ligne d'avant le champ
+  le recompte sur les commandes de la page (les statuts de `NEEDED_ORDER_STATUSES`, sans
+  réservation).
+- **La ligne du détail** dit « sur commandes en cours **sans stock réservé** » : sinon
+  « Dont 0 sur commandes en cours » contredirait l'écran Commandes pour un produit dont la
+  commande est confirmée.
+- Même sonde, nouveau code : après confirmation, besoin 0, « OK », 0 à recommander.
+
+**Ce qu'il disait des bancs, mesuré à moitié.** Les semés sans `stockReservedAt` ne sont
+pas tous impossibles : l'import des ventes crée ses commandes en `stock_a_verifier`, sans
+réservation (`status: orderData.factureLivree ? "livre" : "stock_a_verifier"`, lu dans le
+code, pas rejoué) — le cas que le besoin doit compter, et que les bancs gardent comme
+témoin positif. En préparation sans réservation,
+en revanche, aucun chemin ordinaire ne le produit. Les nouveaux cas passent donc par les
+**vraies routes** (création, confirmation, saisie, mise en préparation), pas par un semé.
+
+**Écarts nommés.** Le repli de l'écran ignore `stockNonDeduit` (une copie hors ligne d'avant
+le champ, sur une commande livrée puis revenue « prête » : deux raretés à la fois) ; il
+compte `pret_livraison` comme le serveur, là où l'ancien repli de « Nécessaire »
+(`getNeededQuantityForProduct`) ne le compte pas.
+
+**Preuves rouges** (ancien code `5fac3f2`, restauré par copie ; cause lue) :
+`a-recommander.spec.js`, « une commande confirmée… » : pastille **« 4 »** au lieu de « 3 »
+(le gel, 20 en stock, 12 confirmés, 8 restants, compté manquant) ;
+`a-recommander-a-venir.test.js` : `quantityNeededNotDeducted` **undefined** (le champ
+n'existait pas — rouge sans valeur propre, d'où les mutants). **Mutants** (nouveau code, un
+à la fois, restauré par copie) : besoin non déduit = besoin (réservation ignorée) → rouge
+en `node --test` (**14** au lieu de 2, « la commande confirmée, déjà déduite, est comptée
+deux fois ») et en e2e (pastille 4, première vérification) ; `stockNonDeduit` ignoré →
+rouge (**0** au lieu de 4) ; repli de l'écran sans le filtre de réservation → rouge (pastille
+4, seconde vérification, `/api/stock` réécrit sans le champ) ; écran revenu à
+`quantityNeeded` → rouge (pastille 4).
+
+## 24/09 — Le téléphone utilisable dehors
+
+Branche `fix/telephone-utilisable`, partie de `12da3d4` (release 1.45.0). Sous 820 px, mesuré
+à **375 × 667** (iPhone SE), 360 × 740 et 390 × 844, clair et sombre (captures et sondes de
+l'audit du 24/09 rejouées). CSS : le bloc « LE TELEPHONE UTILISABLE DEHORS » en fin de
+`style.css`. Banc : `test/e2e/telephone-utilisable.spec.js` (34 cas au premier jet, 49 après
+la relecture ; serveurs semés sur 3524 et 3525, téléphone émulé : `isMobile` et toucher).
+
+### Fait
+
+**1. Tournée (planche 4b) : le client, l'adresse et les articles au-dessus des gestes.**
+
+- **Un seul bloc vert.** L'anneau « 3 sur 6 » et la barre de progression rejoignent
+  l'en-tête vert de l'écran (`placerEnteteTournee`, app.js : les MÊMES éléments, déplacés au
+  seuil de 820 px, comme `placerGestesBas` ; au bureau, ils restent dans l'en-tête de la
+  tournée, planche 13b). Deux rangs : « titre et date | anneau », puis « barre | À jour +
+  Actualiser ». La seconde carte verte disparaît au téléphone ; la carte de l'arrêt chevauche
+  le vert comme la planche (sauf si un bandeau s'intercale : hors ligne, tournée d'un jour
+  passé — le vert garde alors sa marge).
+- **Client absent et Problème quittent la barre collée** : une rangée `.gestes-secondaires`
+  juste après elle, à 48 px, sans couleur — à un défilement. La barre ne porte plus
+  qu'Appeler, « Y aller » et Carte (56), et « Livré » (56). L'ordre du clavier ne change pas.
+  Au bureau, la rangée garde sa place et ses 44 px. Fin de tournée : masquée comme les gestes.
+- **La carte aux mesures de la planche** : le nom à 22 px (une ancienne règle mobile,
+  `.current-client-main strong`, le passait à 28), « ARRÊT EN COURS » et « n ARTICLES À
+  DÉCHARGER » à 13 px (12 avant), « sur 6 » à 13 px (11), les écarts resserrés.
+
+| 375 × 667 (clair = sombre) | avant | après |
+|---|---|---|
+| haut de la barre des gestes | 398 | 441 |
+| bas du nom du client | 467 | 289 |
+| bas de l'adresse | 519 | 340 |
+| bas des deux articles | 594 / 631 | 405 / 439 |
+
+À 360 × 740 : barre à 444 → 514, articles 594/631 → 405/439. À 390 × 844 : le titre des
+articles (557) passait sous la barre (548) ; tout tient maintenant.
+
+**2. « À jour + Actualiser » sur la ligne du titre**, là où la rangée était seule (56 px) :
+Analyse, Exports, Rappels, À recommander, Commande client, Paramètres, Commandes, Clients
+(liste), Tournée sans tournée ; sur une tournée en cours, à droite de la barre (point 1).
+Mesure (Analyse, 390) : en-tête 76–254 → 76–182.
+
+**3. Commandes et Clients : des lignes à l'ouverture.**
+
+- **Les pilules se replient au-delà de deux rangs** (`replierPilules`, app.js) : celles du
+  bout se cachent et une pilule « + N » les rend ; « Moins » replie. Mesuré dans la page,
+  jamais déduit du compte ; **ce qui est choisi ne se cache jamais** (la pilule active, le
+  statut commercial quand il n'est pas « Tous »). Remesuré au franchissement de 820 px, à
+  la rotation (`resize`) et à l'arrivée de la police. Clients : secteurs, « Abonnés » et le
+  statut dans UN flot, replié ensemble.
+- **« Exporter en CSV » passe dans « Filtres »** (`placerExportCommandes`) : il exporte la
+  liste filtrée, il vit à côté des filtres. Au bureau, il revient dans l'en-tête.
+- **« Nouvelle commande » devient un bouton fixe en bas**, comme « Nouveau client »
+  (`GESTES_BAS`) : après la liste dans l'ordre du clavier, 14 px au-dessus de la barre basse.
+- **Clients** : « Rappels » (gardé) partage la ligne de la recherche ; la synchro, celle du
+  titre.
+
+| lignes entières à l'ouverture | 390 × 844 | 360 × 740 |
+|---|---|---|
+| Commandes | 1 → **3** (1ʳᵉ ligne 630 → 430) | 0 → **2** (682 → 430) |
+| Clients | 2 → **3** (518 → 410) | 0 → **2** (570 → 410) |
+
+Aucun défilement horizontal (mesuré, 0 px).
+
+**4. Commande client** : la barre « Total · Valider » à `bottom: 104px` (la place des
+boutons fixes de Clients et d'Abonnements) au lieu de 78 : à 390, 699–766 sous une barre
+basse commençant à 754 → 669–740. « TOTAL PANIER » à 13 px (11).
+
+**5. Menu « Plus »** : en clair, une règle écrite pour une ancienne feuille verte peignait
+les icônes en blanc à 82 % sur blanc (1:1) ; elles prennent le texte secondaire (5,13:1 ;
+4,18 sur la ligne active). Clients a une icône de personnes (la maison était celle du
+Tableau de bord). Menu ouvert, les messages passent en haut de l'écran : ils couvraient
+Analyse et Paramètres.
+
+**6. Lisible dehors, facile à toucher** : « 1 échéance » à 13 px (11), et dans « Détail du
+jour », « Voir mes abonnements », « Rappels arrivés à échéance » (11) et le libellé des
+cartes (12) ; « Détail du jour » répond sur toute la carte (le résumé passe de 19 à 55 px :
+le rembourrage passe du volet à son résumé ; le premier jet y perdait le triangle
+d'ouverture, rendu par la relecture, voir plus bas) ; les puces d'un titre de
+carte passé en colonne restent à leur largeur (« En livraison » : 322 → 103 px) ;
+`.pill-warning` en clair (« En préparation », « En livraison », « En pause ») prend le fond
+d'avertissement de la charte : 4,45 → 4,89:1.
+
+### Décisions prises dans le lot
+
+- **Déplacer, pas dupliquer** : l'anneau, la barre, « Exporter » et « Nouvelle commande »
+  sont les mêmes éléments à deux places (une seule région `aria-live` pour l'anneau, un seul
+  nom accessible par geste).
+- **Sur Tournée, la synchro suit la barre**, pas le titre : l'anneau occupe la droite du
+  titre (planche). Trois colonnes : partager celle de l'anneau faisait passer « Tournée du
+  jour » sur deux lignes à 375 px.
+- **La carte de l'arrêt plus serrée que la planche** (rembourrage 14/16 au lieu de 18,
+  écarts 6 au lieu de 10, nom en interligne 1,15, « Actualiser » à 44 dans cet en-tête) :
+  c'est ce qui fait tenir les deux articles semés à 375 × 667.
+- **« + N » dans le rang**, pas un bouton sous les pilules (le motif de la Préparation,
+  « Tous les secteurs ») : un bouton dessous coûte un rang, et Clients à 360 × 740 n'aurait
+  montré qu'une ligne.
+- **Le repli mesure relativement à son conteneur.** Premier jet en coordonnées d'écran :
+  cacher une pilule raccourcit la page, le défilement se recale, le deuxième rang « glisse »
+  — il ne restait que « Toutes » et « + 6 » (vu au chargement en sombre, reproduit à coup
+  sûr en remesurant en bas de liste).
+- **`[hidden]` gagne sur « Exporter » déplacé** : `.button` (`inline-flex`) l'emportait sur
+  la feuille du navigateur.
+- **Le fond d'avertissement pour `.pill-warning`** (la charte), et non la pastille tiède de
+  la planche : le badge reste un avertissement, pêche → crème.
+- **Messages en haut, menu ouvert**, plutôt que sous le menu : un « Annuler » doit rester
+  atteignable.
+
+### Écarts nommés
+
+- **375 × 667 : trois articles, pas quatre** (écrit « deux articles, 2 px de marge » au premier
+  jet ; la relecture l'a porté à trois, voir plus bas). Au-delà, le reste demande un
+  défilement. Le bandeau de marque (76 px) et la barre basse (90 px) restent : la planche
+  retire la barre basse pendant un arrêt (−90 px) — une décision de navigation pour Thomas
+  (aucune flèche de retour n'existe).
+- ~~Le message « Livré — client · Annuler » couvre « Livré »~~ : faux écart, c'était un défaut
+  (un appui sur la droite de « Livré » annulait l'arrêt précédent). Corrigé par la relecture.
+- **Clients à 360 px** : la recherche, à côté de « Rappels », coupe son indication
+  (« Nom, ville, télép… »).
+- **À 360 px, « Commande client » et « À recommander »** passent sur deux lignes (la synchro
+  prend ~115 px) ; le gain net reste positif.
+- **Journée, Stock, Préparation, Abonnements** gardent leur rangée de synchro : leur ligne
+  de titre porte déjà un geste (loupe, calendrier) ou leur fente des boutons. L'audit ne
+  relevait la rangée seule que sur six écrans.
+- **Quatre bancs voisins suivent** la décision qu'ils codaient : `tournee-mobile` (« Client
+  absent » jugé après un défilement), `clients-mobile` (les filtres repliés se comptent ;
+  « Rappels » avec la recherche), `commandes` (« Livrées » derrière « + N » : on déplie),
+  `navigation-mobile` (le bouton plein sur le vert est « Importer les ventes »).
+- **Restent sous 13 px**, hors de la liste de l'audit : les libellés de la barre basse
+  (12,5, lot 1), les badges des listes (12,5, valeurs des planches), les chiffres des
+  marqueurs de la liste d'arrêts (11-12), les jours de l'histogramme d'Analyse (11 : trente
+  barres ne tiennent pas 13 px), « SEPT. » des Commandes (11,5).
+
+### Ce qui reste
+
+- Masquer la barre basse pendant un arrêt (planche 4b), avec un retour : à trancher.
+- Un essai sur un vrai téléphone (barres de Safari, encoche) : aucun banc ne les émule.
+- La synchro de Journée, Stock, Préparation et Abonnements ; les feuilles basses qui se
+  ferment différemment ; la barre système beige (audit, hors de ce lot).
+
+### Preuves rouges, bancs
+
+**Ancien code** (`12da3d4`, le banc en mode non sériel) : **33 cas rouges sur 34**, chacun
+sur sa cause — « le nom du client passe sous les gestes » (Expected ≤ 398,9, Received 466,5
+à 375 × 667 ; ≤ 444,5 à 360) ; « n articles a decharger passe sous les gestes » (≤ 548,5,
+556,7 à 390) ; « l'anneau n'est pas dans l'en-tete vert » ; lignes entières Commandes 1 et 0
+(attendu 3 et 2), Clients 2 et 0 ; « les pilules prennent plus de deux rangs » (4 et 3) ;
+« Exporter est encore dans l'en-tete » ; « Actualiser a sa propre rangee sous le titre »
+(sept écrans, 164 à 532 contre < 117) ; « la barre du panier passe sous la barre
+d'onglets » (766 pour 754, 662 pour 652) ; « icone de Commandes » (1 pour ≥ 3) ; « Clients
+porte encore l'icone de la maison » ; 11 px et 12 px pour ≥ 13. Le vert : « au bureau,
+l'anneau reste dans l'en-tête de la tournée » (un garde du déplacement, éprouvé ci-dessous).
+
+**Harnais** (15 mutants, chacun sur le code du lot, restauré par copie) : tous rouges, pour
+la bonne cause — sans l'écoute du seuil (l'anneau ne revient pas au bureau) ; le repli en
+coordonnées d'écran (« remesure en bas de page », 1 rang pour 2) ; la pilule choisie
+cachable (Received hidden) ; le statut choisi cachable ; « Nouvelle commande » hors de
+`GESTES_BAS` (`static` au lieu de `fixed`) ; sans `justify-self` (puce de 322 px) ; sans le
+résumé agrandi (18,8 px) ; sans les messages en haut (« couvre Analyse, Paramètres ») ;
+sans le fond d'avertissement (4,45) ; « TOTAL PANIER » à 11 ; la marge verte rendue (2 px
+de vide) ; « sur 6 » à 11 ; Client absent remis dans la barre ; « Exporter » sans
+`hidden = false` (caché, ouvert par le menu « Plus ») ; les textes du détail à 11/12. Deux
+mutants survivaient au premier tour (le repli en coordonnées d'écran, « Exporter » sans
+`hidden = false`) : le banc émule maintenant un téléphone, remesure en bas de liste et
+ouvre Commandes par le menu.
+
+*Bancs verts sur le code final* : `telephone-utilisable` 34/34 ; `tournee-mobile` 12,
+`ecran-livreur`, `livreur-ne-perd-rien`, `integration-lots-1-5`, `tournee` ; `commandes`,
+`clients-mobile`, `navigation-mobile` ; `collant-et-clavier`, `abonnements-mobile`,
+`texte-coupe`, `tableau-de-bord`, `interface-finitions`, `preparation-mobile`,
+`squelette`, `cibles-tactiles`, `etats-limites`, `parametres-mobile`,
+`ecrans-sans-planche`, `focus-clavier`, `contraste-navigation`, `hors-ligne`,
+`tournee-hors-ligne`, `stock`, `themes` (312 cas) ; `npm test` (682). Une fois,
+`interface-finitions` n'a pas démarré (« port 3301 déjà pris » : un autre worktree lançait le
+même banc) ; relancé seul, 15/15.
+
+### Relecture adverse (24/09) : quatre défauts, quatre vrais
+
+Une relecture adverse de `af3289c` a nommé quatre défauts (un bloquant, trois importants).
+Les quatre sont **vrais**, mesurés avant toute correction ; les quatre sont corrigés, chacun
+avec un banc qui échoue sans le correctif.
+
+- **Bloquant — la barre déplacée dans l'en-tête était celle du Tableau de bord.**
+  `placerEnteteTournee` la cherchait par `document.querySelector(".tournee-progression")` :
+  la première du document est celle de la carte « Tournée du jour » (`#dashboardTourneeBarre`,
+  dans `#journee`), pas celle de la tournée. Mesuré : au téléphone, dès le chargement, la carte
+  du Tableau de bord n'avait plus de barre ; sur Tournée, la barre visible n'était mise à jour
+  que par `renderTourneeDuJour()` — pendant les 4 s d'une livraison en suspens (et hors ligne),
+  l'anneau passait à « 4 sur 6 », la barre restait à 50 % ; en franchissant 820 px (un iPad
+  qu'on tourne), l'en-tête de la tournée portait **deux** barres. Le banc ne pouvait pas le
+  voir : il cherchait la barre avec le même sélecteur. **Corrigé** : la barre se prend par son
+  identifiant (`#tourneeProgressionBarre`). Le banc aussi ; il exige en plus que le Tableau de
+  bord garde la sienne, que la barre de l'en-tête avance avec « Livré » et recule avec
+  Annuler, et qu'au bureau la tournée n'en ait qu'une.
+- **Le message « Livré — client · Annuler » couvrait « Livré » de l'arrêt suivant.** Ce n'était
+  pas un écart (le premier jet le nommait ainsi) : mesuré à 390, 375 et 360, le message
+  (684–752 à 390) recouvrait « Livré » (675–731) ; les appuis à gauche, au milieu et à droite
+  tombaient tous sur le message, celui de droite sur « Annuler », qui défait l'arrêt
+  **précédent**. **Décision** : sur Tournée au téléphone, les messages se posent **au-dessus
+  de la barre collée**, 12 px d'air, mesurée après chaque rendu (`ajusterArretAuPouce` pose
+  `--toast-bas-tournee` ; sans barre collée — fin de tournée, bureau — la place habituelle).
+  « Annuler » reste près du pouce. Menu « Plus » ouvert : en haut, comme avant.
+- **375 × 667 : un troisième article passait sous la barre collée** (473 pour une barre à 441 ;
+  le jeu semé n'avait que deux articles, avec 2 px d'air). 667 px, c'est l'iPhone SE, mais
+  aussi un iPhone récent dans Safari, barres dépliées. **Décision** : la carte se **resserre**
+  (`arret-serre`) quand, page en haut, le dernier article n'a pas **8 px d'air** au-dessus de
+  la barre collée — disques de 24 (28), écarts de 4 (6), rembourrages de la carte, des
+  articles, de la barre et de l'en-tête réduits. Les gestes gardent leurs 56 px (décision du
+  23/09) ; là où tout tient (360 × 740 et 390 × 844 à trois articles), la carte garde les
+  mesures de la planche. Mesuré par l'écran au rendu, pas par une requête `max-height` :
+  Safari ne fait pas varier celle-ci avec ses barres. Les 8 px : les polices d'un vrai
+  téléphone ne tombent pas au pixel près sur celles de Chromium (le harnais a montré qu'à 2 px
+  près, trois articles « tenaient » sans les disques de 24). Après : trois articles
+  377/405/433 pour une barre à 447 (14 px d'air) ; deux articles, 42 px d'air.
+- **« Détail du jour » avait perdu son triangle d'ouverture**, au bureau comme au téléphone :
+  `display: flex` sur le résumé retire le marqueur, qui n'existe que sur un `list-item`.
+  Mesuré : le texte du résumé commençait au bord du rembourrage (décalage 0) ; rien ne disait
+  plus que la carte se déplie. **Corrigé** : le résumé redevient un `list-item`, même
+  rembourrage (55 px de haut : toute la carte répond toujours) ; décalage 14 px, le triangle
+  est là, fermé et ouvert, clair et sombre.
+
+**Écarts nommés (relecture).**
+
+- **375 × 667 : quatre articles ne tiennent pas**, même resserrés : le quatrième finit à 461
+  pour une barre à 447 ; un défilement le montre. À 360 × 740, quatre tiennent. La réponse de
+  la planche (retirer la barre basse pendant un arrêt, −90 px) reste une décision de
+  navigation pour Thomas.
+- **Sur Tournée, le message couvre le contenu de l'arrêt suivant** (ses articles) pendant ses
+  4 s, au lieu de ses gestes ; la croix le ferme.
+- **Le resserrement se décide au rendu et quand la largeur change**, pas quand seule la
+  hauteur change (les barres de Safari qui se replient au défilement) : la carte ne saute pas
+  sous le doigt. Un arrêt rendu barres repliées peut donc rester desserré.
+- **Deux articles à 375 × 667 sont désormais resserrés** eux aussi (2 px d'air avant).
+
+**Preuves rouges.** Sur `af3289c`, les cas nouveaux ou corrigés (banc en mode non sériel) :
+**14 rouges sur 16**, chacun sur sa cause — « la barre de progression n'est pas dans
+l'en-tête vert » (clair et sombre : la barre de la tournée était restée cachée dans
+`.tournee-entete`) ; au bureau après 820 px, reçu `["tourneeProgressionBarre",
+"dashboardTourneeBarre"]` et `barreDuTableau: false` ; « la barre du Tableau de bord a été
+déplacée dans l'en-tête » ; « Livré : l'anneau avance, la barre ne bouge pas » (attendu 0,67,
+reçu 0,5) ; « le message couvre : markDeliveredButton » à 390, 375 et 360 ; « l'article 3 sur
+3 passe sous les gestes » à 375 × 667, clair et sombre (≤ 441,5, reçu 473,06) ; « Détail du
+jour n'a plus de triangle d'ouverture » à 1440 et 390, clair et sombre (≥ 8, reçu 0). Les deux
+verts attendus : trois articles à 360 × 740 et 390 × 844 tenaient déjà. Puis, sur le premier
+correctif, les 8 px d'air : « moins de 8 px d'air » à 375 × 667, deux articles (reçu 1,94).
+
+**Harnais** (13 mutants, restaurés par copie) : la barre reprise par sa classe (trois bancs
+rouges, chacun lancé seul), la règle du message retirée, la mesure du message retirée,
+jamais resserré, toujours resserré (disque de 24 à 390), sans la mesure de `showTab` (ouvert
+sur le Tableau de bord), sans la mesure au changement de largeur, sans celle de
+`renderRoute`, sans l'air (0 px), le résumé repassé en `flex` : tous rouges, pour la bonne
+cause. « Sans les disques de 24 » **survivait** au premier tour (trois articles tenaient à
+2 px) : c'est lui qui a amené la règle des 8 px ; il rougit depuis (reçu 1,94).
+
+*Bancs* : `telephone-utilisable` 49/49 (serveur semé 3524, et 3525 pour un arrêt de trois
+articles). Vingt-trois voisins (`tournee-mobile`, `ecran-livreur`, `livreur-ne-perd-rien`,
+`tournee`, `integration-lots-1-5`, `tableau-de-bord`, `tableau-de-bord-relecture`,
+`charte-composants`, `operations`, `hors-ligne`, `tournee-hors-ligne`, `cibles-tactiles`,
+`collant-et-clavier`, `texte-coupe`, `interface-finitions`, `navigation-mobile`,
+`focus-clavier`, `etats-limites`, `themes`, `contraste-navigation`, `carte-et-lignes`,
+`squelette`, `meilleur-trajet`) : 165 verts, 1 rouge — `ecran-livreur` au téléphone, la
+tournée jamais chargée (« null null », sous la charge de la suite) — et ses 3 suivants non
+lancés ; relancé seul, 4/4, puis `ecran-livreur` et `tournee-mobile` deux fois de suite,
+32/32. `npm test` : 682/682 (lancé pendant les bancs e2e, deux rouges de charge — 286 ms
+pour 250 dans `chantier2-perf`, un `ECONNRESET` dans `lot5-rapidite` — verts relancés).
+
+## 24/09 — Thème clair : finitions et un seul dessin
+
+Branche `fix/theme-clair-finitions`, sur `main` (v1.45.0). Audit « améliorations » du
+24/09, angle bureau (lots 4 et 5 de sa synthèse). CSS : bloc « THEME CLAIR : FINITIONS ET
+UN SEUL DESSIN » en fin de `style.css`, plus le déplacement décrit ci-dessous.
+
+### Un seul dessin
+
+**Le défaut.** Le thème ne changeait pas que les couleurs. Les couches anciennes écrites
+`:root[data-color-scheme="light"] X` posaient AUSSI la géométrie, et le sombre ne les voyait
+pas : corps à 15 px contre 16, boutons à 13,44 px contre 16, pilules à coins de 8 px, titres de
+carte en trois rendus (19/600, 19/700 et 18,4/950). Mesure sur `main`, douze écrans à 1440 px :
+**890** écarts de forme entre clair et sombre, 90 dans trois fenêtres. Depuis le 17/09 le thème
+suit le système : un poste Windows en clair voyait la version la moins finie.
+
+**Ce qui est fait.**
+
+- **Au bureau (≥ 821 px), une règle scopée au clair ne garde que sa peinture** (couleurs,
+  fonds, ombres, contours de focus, opacité). Sa géométrie — taille, graisse, interlignage,
+  rayons, marges, dimensions, grille, affichage, position — est **déplacée**, à la même place
+  dans la cascade, dans un `@media (max-width: 820px)` qui suit la règle ; un raccourci de
+  bordure garde sa couleur au bureau. 335 règles claires : 177 avaient de la géométrie au
+  bureau (410 déclarations déplacées), 35 étaient déjà bornées au téléphone (intactes). Le
+  clair prend donc, au bureau, la géométrie du sombre — celle des lots V8.
+- **Graisses** : Poppins n'est chargée qu'en 400/500/600/700. Les 50 déclarations à 650, 750,
+  760, 800, 850, 880, 900, 920, 930 et 950 valent 700 — le rendu ne change pas (le navigateur
+  prenait déjà la face 700), le code dit enfin ce que l'écran montre.
+- **Titres de carte** (charte §3) : 18 px, 600, −0,01 em, au bureau, dans les deux thèmes (les
+  `h3` des treize écrans ; pas le nom de la tournée dans l'en-tête du cockpit, ni l'encart « à
+  plat » du Stock). Titre d'écran : 30 px / 700, il l'était déjà dans les deux thèmes.
+- **Ce que les règles claires tenaient sans le dire**, et que le sombre ratait (les bancs de
+  forme ne tournent qu'en clair) — révélé par les bancs, corrigé pour les deux thèmes : la case
+  « Retour au point de départ » (22 px de haut) a 44 px ; les pilules de filtre de la tablette
+  (821–920 px) ont 44 px, pas 48 ; les grilles des anciens écrans passent en une colonne sous
+  920 px (Commande client débordait de l'écran en sombre) ; les tuiles d'Analyse passent à la
+  ligne de 921 à 1100 px (six fois 120 px ne tenaient pas) ; les champs de Commande client ne
+  vont par deux que s'ils logent « Commande immédiate » (15 rem et non 13,5 : à 821 px le texte
+  était coupé).
+
+### Finitions du bureau
+
+| Défaut (audit) | Ce qui change |
+|---|---|
+| « Purger », « Annuler la commande », « Supprimer » un secteur (et, après relecture, « Supprimer » un compte dans le tableau du bureau) : habillés comme « Enregistrer » ou comme les gestes courants en clair, dégradé corail ou rose pâle en sombre | Contour d'alerte 1,5 px sur la surface, texte d'alerte, sans dégradé ; au survol, surface basse et contour épaissi (l'alerte n'est jamais un fond, charte §2) ; la corbeille et les listes ✗ / ✓ deviennent des icônes linéaires |
+| La seconde confirmation de la purge dit « Tape OK » | « Dernière vérification : les commandes, clients, ventes et tournées seront supprimés pour de bon. Purger maintenant ? » |
+| « Tous les abonnements ↗ », « Tout voir ↗ » dans le bleu du navigateur | Principal, 600, sans soulignement (souligné au survol) : la règle existait, bornée au téléphone |
+| Filtre choisi invisible en clair (Préparation « Tous », Analyse / Exports) | La pilule choisie est pleine au principal, comme en sombre et comme dans Commandes |
+| Clients : la fiche affichée et le survol ne se voyaient dans aucun thème (spécificité (1,2,0) contre (1,3,0)) | Au bureau : survol au fond ; la ligne choisie au fond avec un anneau de 2 px au principal (le téléphone n'est pas touché) |
+| Indications des champs en gras, comme la valeur | Au bureau : indication 400, saisie 500 |
+| Préparation au bureau : « Bloquée » au badge vert de « À faire » | Le badge du téléphone : contour d'alerte et « ! » (mots du 19/09 gardés) |
+| « Besancon » sans cédille (liste et fiche client, « Modifier », Nouvel abonnement, détail de commande, Adresses à vérifier, secteurs par défaut) | `villeAffichee` (`utils/text.js`) rend l'orthographe **à l'affichage** ; la valeur stockée ne change pas. « Itinéraire » (fiche client) vise l'adresse affichée, cédille comprise (`clients-mobile.spec.js` l'exige) |
+| « Modifier le client » : Notes, un carré de 189 px, libellé en bas | Pleine largeur, 96 px, libellé au-dessus |
+| Commandes et Stock à 1280 px : des cartes, 3 commandes à l'écran ; à 1281, le client coupé à 133 px | Le tableau reste un tableau dès 1280 px ; colonnes resserrées (numéro 120, date 84 « 24 sept. », secteur 110, articles 64, statut 132 ; Stock : code 104) ; le nom d'un produit passe à la ligne. De 1280 à 1439 px : en-tête des Commandes sur une ligne (recherche 200 px, « Actualiser » réduit à son icône), espaces de 12 px, lignes de 48 px — **8 commandes entières à 1280 × 720** |
+| Abonnements : « EHPAD Les Till… », « EHPAD Résid… » coupés à 1440 | Fréquence 168 px (« Toutes les 2 semaines » entier), Prochaine 112, État 96 ; « Les 90 jours » sous le tableau jusqu'à 1599 px. Aucun nom coupé à 1280, 1440 ni 1600 |
+| Détail de commande : « Technique » déplié, ✏️ 📞 ⚠ 📝 💾 | `<details>` fermé ; icônes linéaires ; « (idem date commande) » devient « le jour de la commande » ; le secteur avec sa cédille |
+| Nouvel abonnement : le client choisi, « Créer une fiche client » restait | Il disparaît ; la croix du champ rend la recherche et le bouton |
+| À recommander : les quatre chiffres en rouge d'alerte en clair | Texte courant ; seul un stock à zéro reste en alerte, avec son mot |
+| Exports, Rappels, À recommander : première et dernière carte rognées | 4 px de marge intérieure dans la liste qui défile |
+| Deux « À jour » : données (en-tête) et version (barre latérale) | Au bureau, la version dit « Installée » (dans la barre, sous le numéro) ; « À jour » reste aux données, et au pied de Paramètres du téléphone (planche 6a) |
+| L'icône d'« Actualiser » collée à son mot (en sombre, et en clair une fois sa géométrie partie) | Au bureau, 8 px entre l'icône et le mot de tout bouton, dans les deux thèmes |
+
+### Décisions prises dans le lot
+
+- **La référence est la charte, valeur par valeur, et à défaut la géométrie V8** (celle du
+  sombre) : c'est elle que les lots du 18 au 23/09 ont posée et mesurée, en règles
+  `:root[data-color-scheme]` qui valent pour les deux thèmes. Le clair y perdait ses restes.
+- **Le texte des données ne change pas** : les bancs de la file hors ligne attendent « À jour »
+  (`tournee-hors-ligne`, `livreur-ne-perd-rien`, `chargement-instantane`). C'est la version qui
+  change de mot.
+- **Ne jamais réécrire la fiche d'un client** : la ville s'affiche « Besançon », le formulaire
+  « Modifier » n'envoie toujours que ce qui diffère de ce qu'il a montré (banc : un téléphone
+  modifié part seul, la ville reste « Besancon » en base).
+- **8 lignes à 1280 × 720 par la densité, pas en retirant** : aucun filtre ni geste n'est
+  retiré ; l'en-tête se resserre et la ligne passe à 48 px, au-dessus de la cible de 44.
+
+### Écarts nommés
+
+- **Le téléphone (≤ 820 px) garde, en clair, la géométrie de ses couches** : le lot téléphone
+  y mesure en clair, en parallèle de celui-ci. Clair et sombre y diffèrent encore (corps 15 /
+  16 px, boutons pleine largeur sous 560 px en clair…). `test/un-seul-dessin.test.js` ne juge
+  que ce qui s'applique au bureau, et le dit.
+- **Le clair change à l'œil au bureau** : corps 16 px (15 avant), boutons 16 px (13,44), pilules
+  rondes, titres de carte à 18 px. C'est le but ; c'est aussi un changement que Thomas verra.
+- **La tablette (821–920 px)** prend elle aussi la géométrie du sombre, hors les trois
+  corrections ci-dessus.
+- **Abonnements** : de 1440 à 1599 px, « Les 90 jours » passe sous le tableau, alors que la
+  planche 13a les met côte à côte à 1440 — côte à côte, même resserré, le tableau n'avait pas la
+  place d'un nom d'EHPAD.
+- **Commandes, 1280–1439 px** : lignes de 48 px (la planche 13c : 56) et « Actualiser » en icône
+  (son nom accessible reste « Actualiser »).
+- **La version dit « Installée » au bureau**, la planche 6a écrit « À jour » (le téléphone le
+  garde, `parametres-mobile.spec.js` inchangé depuis `main`).
+- **`normalizeCity` (serveur) range toujours « Besancon »** : c'est aussi la clé de secteur
+  (`CORE_SECTORS`, `deriveSector`). La commande client pré-remplie garde la valeur stockée (seul
+  son texte indicatif a sa cédille). Le champ Ville du détail d'une commande montre « Besançon »
+  (relecture) : ce formulaire renvoie tous ses champs, et le serveur range la ville comme avant.
+- **La page de connexion** (CSS dans `server.js`) garde ses graisses : hors de ce lot.
+- **« Exports »** n'est pas dans le banc de comparaison : l'écran est retiré par un autre lot
+  (décision 9).
+
+### Bancs, et le rouge de chacun
+
+Chaque banc a été lancé sur le code de `main` (fichiers produit remis par `git checkout
+12da3d4 --`, bancs du lot gardés, puis restauration et `git diff --quiet HEAD`) :
+
+- `test/e2e/un-seul-dessin.spec.js` (serveur semé, port **3526**) : douze écrans à 1440 et
+  trois fenêtres, chaque élément visible repéré par son chemin dans le DOM, forme comparée
+  (taille et graisse, rayons, marges, hauteur ; un état `aria-pressed` différent n'est pas un
+  écart). Rouges sur `main` : **890** écarts (1 361 éléments), **90** dans les fenêtres, **197**
+  graisses hors Poppins, **66** titres de carte hors charte.
+- `test/un-seul-dessin.test.js` : aucune règle claire ne pose de géométrie au bureau, aucune
+  graisse hors 400/500/600/700 ; témoins (le sombre `:not([…="light"])` n'est pas pris pour le
+  clair, une règle de 821–920 px est jugée, une règle du téléphone ne l'est pas). Rouge sur
+  `main` : 410 déclarations de géométrie au bureau (la première : `body { font-size: 15px }`),
+  50 graisses hors Poppins (la première : `.eyebrow { font-weight: 800 }`).
+- `test/e2e/theme-clair-finitions.spec.js` (serveur semé, port **3527**, 31 cas) : chacun rouge
+  sur `main`, de la bonne cause — Purger au fond d'« Enregistrer » `rgb(42, 82, 84)` (clair) et
+  `linear-gradient(135deg, …)` (sombre) ; « Annuler la commande » en blanc sur principal ;
+  « Tape OK » ; lien `rgb(0, 0, 238)` / `rgb(158, 158, 255)` ; « Tous » en `rgb(255, 255,
+  255)` ; ligne client transparente ; indications et saisies en 800 ; badge « Bloquée » sans
+  icône ; « Besancon » ; notes de 189 / 210 px pour 584 ; à 1280 × 720 pas d'en-tête de tableau
+  (cartes) ; Abonnements « EHPAD Les Tilleuls du Val de Loue (116/251) » à 1440 et « Toutes les
+  2 semaines (150/161) » à 1280 ; « Technique » en `DIV` ; « Créer une fiche client » visible ;
+  « Besoin estimé 5 » en `rgb(192, 43, 10)` (clair), « Stock actuel 0 » en texte (sombre) ;
+  « À jour » dans la barre ; le champ Ville à « Besancon ».
+
+Non-régression, sur le code final : `npm test` (686/686) ; 38 fichiers e2e du bureau
+(conception, contraste, cibles, focus, typographie, thèmes, texte coupé, et chaque écran) et
+20 fichiers du téléphone et des garanties (file hors ligne, tournée, rapidité, chargement) ;
+`numerotation-admin.spec.js` sur un serveur authentifié à part (copie locale non suivie visant
+3507). Deux rouges de charge pendant la suite (port 3304 pris par un autre arbre de travail ;
+« la page défile » mesuré avant le rendu) : relancés seuls, verts, sans rien changer. Après la
+relecture à l'écran (icônes, barre latérale, Itinéraire), les 18 fichiers qu'elle touche ont été
+relancés : 231 cas verts.
+
+### Relecture adverse (24/09)
+
+Quatre défauts relevés sur `be2b6bb` ; tous vérifiés à l'écran, tous vrais, tous corrigés. Chaque
+banc a d'abord été lancé sur le code de `be2b6bb` (rouge, de la bonne cause), puis sur le
+correctif (vert). Bancs dans `theme-clair-finitions.spec.js`, section 10.
+
+| Défaut | Mesure sur `be2b6bb` | Correctif |
+|---|---|---|
+| Clients au téléphone : la première ligne, choisie d'office par `renderCrm`, portait fond et anneau alors que la fiche est cachée (la règle du lot n'avait pas de media query) | 390 px : fond `rgb(251, 247, 245)` (clair), `rgb(13, 21, 24)` (sombre) | Les règles du survol et de la ligne choisie passent sous `@media (min-width: 821px)`. Banc : à 390 px, fond transparent, aucune ombre, survol transparent ; témoin, la même ligne à 1440 px porte l'anneau |
+| « Supprimer » un compte (tableau du bureau) en `ghost` : en clair, fond, texte et contour identiques à « Désactiver » et « Mot de passe » ; en sombre, rose pâle. La note « les gestes Désactiver gardent leur style ghost » se trompait de bouton | clair : texte `rgb(42, 82, 84)` pour les trois ; sombre : `rgb(236, 148, 130)` sur `rgba(229, 139, 124, 0.1)` | `button danger compact`, comme « Supprimer » un secteur : texte et contour d'alerte (`rgb(192, 43, 10)` / `rgb(242, 99, 90)`), 44 px. Banc : comptes servis par le banc (un vrai compte activerait l'authentification) ; témoin, « Mot de passe » n'est pas en alerte |
+| « Dernière version » affirmait ce que `/api/version` ne sait pas (elle ne rend que la version du serveur), et changeait aussi le mot du téléphone (planche 6a) | barre et pied de Paramètres : « Dernière version » | Barre latérale : « Installée » ; téléphone : « À jour », `parametres-mobile.spec.js` rendu à `main`. « Mise à jour » (nouvelle version en attente) ne change pas |
+| Détail d'une commande, « Modifier le profil » : le champ Ville montrait « Besancon », la fenêtre « Modifier le client » « Besançon » | valeur du champ : « Besancon » | `villeAffichee(order.city)`. Banc : le champ montre « Besançon » ; enregistré (téléphone changé), la fiche garde « Besancon » et son secteur |
+
+Le fichier passe de 31 à 36 cas. Non-régression sur le correctif : `npm test` (686/686) ;
+`theme-clair-finitions`, `parametres-mobile`, `barre-laterale-finitions` (59 cas) ; Clients
+(bureau et téléphone), Paramètres, Commandes, Adresses à vérifier, `un-seul-dessin`, contraste,
+cibles, focus, charte, thèmes, typographie, texte coupé, finitions, intégration, onglets,
+navigation du téléphone (179 cas ; Commandes relancé seul après un port 3160 pris par un autre
+arbre de travail) ; file hors ligne, tournée hors ligne, livreur, chargement instantané, tableau
+de bord, navigation (43 cas).
+
+### Ce qui reste
+
+- Le téléphone en un seul dessin (après le lot téléphone).
+- « Annuler la tournée » reste un bouton secondaire (écran Tournée, hors de ce lot).
+- La feuille d'un compte au téléphone : « Supprimer le compte » reste `ghost` avec le texte
+  d'alerte (`par-geste-danger`) ; c'est au lot téléphone.
+- Migrer la valeur stockée « Besancon » avec un banc, dans un lot à part.
+- Les graisses de la page de connexion.
+
+## 24/09 — Parcours simplifiés (audit du 24/09, décisions de Thomas)
+
+Branche `feat/parcours-simplifies`, partie de `12da3d4` (v1.45.0). Les huit points du lot
+« parcours » de l'audit d'améliorations ; les décisions de Thomas du 24/09 qui le
+concernent : 6, 7, 9, 10, 11, 13.
+
+### Ce qui est fait
+
+1. **La fiche client** (bureau et téléphone) porte deux gestes sous son en-tête :
+   « Nouvelle commande » ouvre la commande client **avec ce client déjà choisi**
+   (coordonnées repliées) ; « Rappel » ouvre l'écran Rappels avec ce client choisi et le
+   curseur dans la date, le seul champ obligatoire qui reste. Appeler puis commander
+   passe de ~9 gestes à ~5. La fiche montre aussi ce que le serveur calculait sans que
+   rien ne l'affiche (`crmClientView`) : **le chiffre d'affaires livré** (« 51,00 € ·
+   1 commande livrée ») et **les rappels à faire** (les trois plus proches, le retard en
+   alerte avec l'icône et le mot, « et N autres »). Le chiffre d'affaires ne compte plus
+   que les commandes **livrées** : il additionnait toutes les commandes du client,
+   annulées comprises (mesuré : 1 050 € pour 100 € livrés et 900 € annulés). Même repli
+   que l'Analyse pour une commande importée sans montant (ses ventes importées) ; l'index
+   des ventes est construit une fois par liste de clients.
+2. **La nouvelle commande.** « Valider la commande » est **sous le total du panier**
+   (relié au formulaire par `form=`) : il était au-dessus du catalogue, et au téléphone à
+   1 388 px pour un catalogue qui finissait à 2 302 px (mesuré par le banc, comme l'audit).
+   Le client se choisit par **la recherche de la création d'abonnement** : le même rendu,
+   extrait en `rendreRechercheClients` (`operations.js`) et appelé par les deux écrans
+   (nom, ville, rue, code postal, trois chiffres du téléphone, six cartes, la note dit le
+   reste, Entrée choisit une carte seule). Le client choisi devient le champ (« × » pour
+   changer) ; ses coordonnées se **replient** derrière « Modifier les coordonnées ». Sans
+   client choisi, elles restent ouvertes : c'est une nouvelle fiche, créée avec la
+   commande, comme avant. Un champ obligatoire manquant dans les coordonnées repliées les
+   déplie (le navigateur ne peut pas montrer son message sur un champ caché : l'envoi
+   échouait sans rien dire).
+3. **Abonnements (décision 6).** La commande d'une échéance reste « Planifiée » jusqu'à
+   l'accord du client et se **confirme sur l'échéance** : « Confirmer » remplace le badge
+   « À confirmer », qui ne confirmait rien et ouvrait Commandes, filtre Planifiées.
+   Confirmer passe la commande « À préparer » sans quitter l'écran (5 gestes → 3 au
+   bureau). « **Créer les N commandes dues** » crée d'un geste les commandes des échéances
+   dont le rappel est arrivé (le compte de la pastille Abonnements) ; il n'apparaît qu'à
+   partir de deux (une seule : son bouton suffit).
+4. **Préparation (décision 7).** La fenêtre **ne se ferme plus** entre « Passer en
+   préparation » et « Préparation terminée » : elle se redessine en place, le geste suivant
+   reçoit le focus, la date de livraison déjà choisie survit (5 gestes → 4, bureau et page
+   7b du téléphone). Un échec, ou une écriture mise en file hors ligne, la ferme comme
+   avant, pour que le message se lise. **Un seul compte « à préparer »**, les commandes
+   RESTANTES de l'écran (importées, à vérifier, en préparation, bloquées comprises) :
+   `commandeAPreparer` (`operations.js`), lu par la **pastille, désormais sur
+   Préparation** (plus sur Commandes), la tuile du tableau de bord (renommée « À
+   préparer ») et le sous-titre qui la lit, le résumé et le sous-titre de la Préparation ;
+   `/api/operations` (`preparing`) a la même définition. Mesuré avant sur les données
+   semées : pastille 1, tuile 1, écran 3 ; après : 3 partout.
+5. **Tournée (décision 10).** « Client absent » **présélectionne** « Personne sur place » :
+   « Enregistrer » suffit (3 gestes → 2). « Personne sur place » et « Établissement
+   fermé » **sortent de la liste « Problème »**. Seul le dialogue des motifs change, pas
+   le cockpit.
+6. **Exports (décision 9).** L'écran Exports est **supprimé** (navigation, `index.html`,
+   JS, bancs) ; `#exports` redirige vers Commandes, filtre « Toutes » (un favori arrive là
+   où l'on exporte), et la recherche du menu le trouve encore. Commandes exporte **son
+   filtre, en Excel** (`POST /api/exports/commandes.xlsx`, les identifiants dans l'ordre
+   de l'écran) : numéro, date de commande, livraison prévue, **livrée le** (l'instant lu
+   à Paris), **remis à**, client, adresse, code postal, ville, secteur, téléphone,
+   produits, quantités, prix, total, statut en mots. Le CSV et l'export des « commandes
+   annexes » (une catégorie que rien ne crée) sont retirés. Aucun autre écran ne dépendait
+   d'Exports (grep : seules ses propres règles CSS le nomment encore).
+7. **Rupture (décision 11).** Une commande prise chez le client sur un produit en rupture
+   (ou au stock non renseigné) est **acceptée en « Bloquée »**, comme une commande
+   importée : rien n'est réservé, rien ne passe en négatif, et la Préparation la débloque
+   quand le stock arrive. Le panier ne refuse plus (« Stock insuffisant pour ce
+   produit. ») : il **prévient** une fois par produit (« Gants nitrile : 0 en stock. La
+   commande sera bloquée jusqu'à l'arrivée du reste. ») ; la validation le **dit** :
+   « Commande CMD-… enregistrée, mais bloquée (il manque 1 article en stock) : elle
+   passera en préparation quand le stock arrivera. »
+8. **Un seul vocabulaire au bureau.**
+   - « **Rappel** » partout : « Clients à rappeler », « Rappels du jour / en retard »,
+     « Prochain rappel », « Créer le rappel ». Plus aucun « relance » à l'écran ; les clés
+     techniques (`client_a_relancer`, `relance_today`) restent.
+   - « **À préparer · En préparation · Prête · Bloquée** » : les lignes et les groupes de
+     la Préparation au bureau (« À faire », « En cours », « Prêtes livraison », « Bloquées
+     stock » n'étaient dits nulle part ailleurs), les badges de Commandes, de la fiche, du
+     détail et de la Tournée (`formatOrderStatus` et le badge du détail lisent
+     `STATUT_COMMANDE`), la pilule « Prêtes ». **Au téléphone, la Préparation garde les
+     mots validés le 23/09** (décision 13 : `motDeStatutPreparation` inchangé).
+   - **Pluriels justes** : plus aucun « commande(s) » (`accorder(n, mot, pluriel)`,
+     `utils/text.js`), vingt-trois textes.
+   - « **nouveau (rien la période d'avant)** » au lieu de « +100 % » quand la période
+     précédente vaut 0 (serveur : `{ label: "nouveau", percent: null }`) ; « +12,5 % »
+     avec la virgule et l'espace fine.
+   - **Tutoiement** : c'est la voix de l'application (environ 35 textes contre 5, relevé
+     de l'audit). Passés au tu : « Commence par importer tes ventes », « Ton départ / Ton
+     arrivée », « Choisis le départ… », « Sélectionne… », « Remplis la colonne… de ton
+     fichier… », « Tes modifications seront gardées… », « Les produits de tes clients ».
+   - **Les dates, un seul utilitaire** : `public/js/utils/dates.js` (inscrit dans
+     `APP_SHELL` et le `check`), quatre formes — `jourMois` « 24 sept. » (colonnes),
+     `jourCourt` « jeu. 24 sept. » (une échéance, une livraison, un rappel), `jourLong`
+     « jeudi 24 septembre » (en-têtes, phrases), `heure` « 16 h 00 » ; l'année quand ce
+     n'est pas celle-ci ; une date sans heure lue à midi. Les fonctions de date
+     d'`app.js` et d'`operations.js` y délèguent. Disparaissent de l'écran « 24/09/2026 »
+     (Rappels, détail de commande), « jeu. 24/09 » (Tournée), « 16:00 » (« Mis à jour à »,
+     « Données de ») et « 24/09/2026 16:00:00 » (historique, mouvements, imports).
+
+### Décisions prises dans le lot
+
+- Le **chiffre d'affaires** de la fiche = commandes livrées, avec le repli de l'Analyse ;
+  les **rappels** = `reminderHistory` du serveur, à faire, du plus proche au plus loin. La
+  date posée à la main sur la fiche (« Prochain rappel ») ne s'affiche plus que si aucun
+  rappel ne la porte.
+- « **Rappel** » réutilise l'écran Rappels existant (client choisi, curseur sur la date)
+  plutôt qu'un nouveau formulaire dans la fiche : les rappels se créent à un seul endroit,
+  comme décidé le 23/09.
+- « Notes livraison » **reste hors** du repli des coordonnées : ce sont les notes de la
+  commande, pas du client. Le repli ne se refait qu'au **changement** de client : un
+  rechargement en fond ne referme pas des coordonnées qu'on corrige.
+- « Confirmer » une commande d'abonnement **reste refusé si le stock manque** (le serveur
+  réserve à la confirmation, comme avant) : la décision 11 vise la commande prise chez le
+  client, pas l'abonnement.
+- La pastille de Préparation n'est **pas en alerte** quand des commandes sont bloquées :
+  « Bloquée » se lit dans la liste, avec son icône ; une pastille rouge dirait l'urgence
+  par la seule couleur.
+- Motifs : le serveur distingue ce qu'il **propose** (`proposes`, lu par le dialogue) de
+  ce qu'il **admet** (`statutsAdmis`, inchangé). Un « Problème / Personne sur place » fait
+  hors ligne avant la mise à jour, puis rejoué par la file, est **encore accepté**. Un
+  serveur sans `proposes` : le dialogue retombe sur `statutsAdmis`.
+- L'export part par `fetch`, **pas par la file hors ligne** : sans réseau il échoue et le
+  dit (« Export impossible sans réseau… ») au lieu de partir plus tard sans personne pour
+  le recevoir. Le fichier garde le nom du jour **de Paris**, calculé par le navigateur.
+- Tutoiement retenu : DESIGN.md n'en décide pas pour toute l'application (voir l'écart
+  ci-dessous), c'est le plus fréquent.
+
+### Écarts nommés
+
+- **Le tutoiement contredit une décision locale du 23/09** : la carte « à plat » du Stock
+  et la carte de premier lancement avaient été mises au **vous** (« Commandes + Stock
+  mobile… », plus haut). La consigne de ce lot est une voix unique ; les deux cartes
+  passent au tu. Le SMS « Prévenir » garde « votre livraison » : il parle au client de
+  Thomas, pas à Thomas.
+- « **À vérifier** » disparaît des étiquettes du bureau (`stock_a_verifier` se lit « À
+  préparer », comme la pilule qui le range) ; au téléphone, la Préparation le garde
+  (décision 13). La Tournée dit « Prête » à toutes les largeurs : elle lit
+  `formatOrderStatus`, ce n'est pas la Préparation.
+- Le titre de la planche « À préparer **aujourd'hui** » reste, bien que la liste ne soit
+  pas bornée au jour (déjà relevé le 23/09).
+- La barre basse du téléphone n'a **aucune pastille** (Préparer compris) : non ajoutée
+  (lot téléphone).
+- Les règles CSS de l'écran Exports (`#exports`, `.export-actions`, `#exportsList`)
+  restent dans `style.css`, mortes, hors du bloc de ce lot. `comptes.test.js` cite encore
+  « exports » comme nom d'onglet (portées de rôles) : sans effet.
+- La recherche de client de la commande **reprend** les règles de celle de l'abonnement
+  (`#commande-client .abo-cr-…`, bloc de ce lot) : celles du dialogue sont préfixées
+  `#subscriptionDialog`. Même dessin, deux déclarations.
+- Les **tuiles de jour** (« JEU 24 ») et les libellés de mois (« septembre 2026 ») restent
+  hors de l'utilitaire : ce sont des formes de planche, pas des dates de phrase.
+- **Hors périmètre, touchés au plus petit** : trois lignes du résumé d'import (pluriels,
+  « traités le … ») — le lot « pièges » réécrit ce résumé, conflit attendu et trivial ;
+  la ligne « N commandes prêtes » de la planification de Tournée (pluriel).
+- **Hors périmètre, non faits** : « après Valider la commande, une liste vide » (lot
+  pièges) ; la barre du panier sous la barre d'onglets au téléphone (lot téléphone).
+
+### Preuves rouges (le banc sur le code d'avant, cause lue)
+
+*Serveur* (`test/parcours-simplifies.test.js`, sur `12da3d4`) : 8 rouges sur 9, chacun de
+la bonne cause — chiffre d'affaires `1050` au lieu de `100` ; `preparing` `[e1, v1]` au
+lieu de `[e1, i1, v1]` ; « probleme propose : absent,adresse,acces,ferme,… » ; export
+`404` au lieu de `200`, puis de `400` ; commande en rupture `400 « Stock insuffisant pour
+Alèses (2 disponible) »` au lieu de `201` ; `bloquee` absent (le témoin du stock
+suffisant) ; évolution `{ progression, 100 }` au lieu de `{ nouveau, null }`. Vert, et
+c'est attendu : « encore accepté » (un témoin de non-régression, voir les mutants).
+
+*E2E, bureau* (`parcours-simplifies.spec.js`, chaque cas lancé seul sur le front d'avant) :
+16 rouges sur 16 — « 51,00 € » introuvable ; `cli-nouvelle-commande`, `cli-rappel`,
+`#customerClientSearch`, `generate-dues`, `confirm-sub-order` introuvables ; « la pastille
+est sur Preparation : Expected false, Received true » ; « Préparation terminée »
+`disabled` (la fenêtre s'était refermée) ; « Personne sur place » `aria-checked="false"` ;
+la liste « Problème » contenait `absent` et `ferme` ; `#exports` ne menait pas à Commandes
+(« Received string: page ») ; « Exporter en CSV » au lieu de « Exporter (Excel) » ; les
+mots « À faire, En cours » ; « relance » à l'écran ; une date `dd/mm/yyyy` dans les
+Rappels. *Téléphone* (`parcours-simplifies-telephone.spec.js`) : 4 rouges sur 4 — gestes
+absents de la fiche ; « Valider » à 1 388 px, le catalogue finissant à 2 302 px ; la page
+7b refermée ; « Personne sur place » non choisi.
+
+*Mutants* (un morceau de l'ancien code remis dans le nouveau, commité avant, restauré par
+copie) : tous tués, de la bonne cause. M1 le panier refuse la rupture → « Gants nitrile »
+absent du panier ; M2 l'ancien format d'évolution → « nouveau (rien la période d'avant) »
+absent (« nouveau 0% ») ; M3 le serveur n'admet plus « Problème / Personne sur place » →
+`400` au lieu de `200` ; M4 la pastille revient sur Commandes → rouge ; M5 l'ancienne
+définition de `preparing` → `[e1, v1]` ; M6 la fenêtre se referme → « Préparation
+terminée » `disabled` ; M7 plus de dépli sur le nom manquant → `open` faux. Le cas « une
+nouvelle fiche aux coordonnées repliées » n'a pas de rouge « ancien code » (les
+coordonnées ne se repliaient pas) : M7 en tient lieu.
+
+### Bancs et résultats
+
+- `npm test` : **696/696** (dont `parcours-simplifies.test.js`, 9 cas, et
+  `dates-uniques.test.js`, 5 cas, neufs).
+- `parcours-simplifies.spec.js` (port 3528, 17 cas) et
+  `parcours-simplifies-telephone.spec.js` (port 3529, 4 cas) : 21/21.
+- Écrans voisins, sur l'arbre final ou juste avant ses dernières retouches : commandes,
+  clients, clients-mobile, abonnements, abonnements-lignes, abonnements-mobile,
+  abonnement-creation, preparation-lignes, preparation-mobile, tableau-de-bord,
+  tableau-de-bord-relecture, motif-dialogue, tabs, nav-plate, barre-laterale-finitions,
+  ecrans-sans-planche, meilleur-trajet, collant-et-clavier, stock-a-plat, squelette,
+  badges, parametres, parametres-mobile, etats-limites, tournee-mobile, tournee-pratique,
+  ecran-livreur, livreur-ne-perd-rien, rapidite-tournee, integration-lots-1-5,
+  hors-ligne, chargement-instantane, interface-finitions, navigation-mobile, smoke,
+  operations, integration-interface, calcul-routier, et les balayages cibles-tactiles,
+  contraste-application, focus-clavier, themes, texte-coupe, typographie,
+  charte-composants, contraste-champs, stock, tournee, tournees-debloquees, rayons :
+  verts. Plusieurs passages ont rougi sur « port … déjà pris » (un autre worktree lançait
+  les mêmes bancs au même moment) : chaque fichier concerné a été relancé seul, vert.
+- Bancs **mis à jour** parce qu'ils tenaient ce que Thomas a décidé de changer :
+  `preparation-lignes` (les mots du bureau ; le sheet reste ouvert), `preparation-mobile`
+  (la page 7b reste ouverte), `commandes` (pilule « Prêtes » ; export `.xlsx`, lu dans
+  l'archive), `abonnements` (« Confirmer » après la création), `abonnements-mobile`
+  (l'oracle de la forme longue), `tableau-de-bord` (« À préparer aujourd'hui 3 »),
+  `tabs`, `nav-plate`, `barre-laterale-finitions`, `ecrans-sans-planche` (plus d'écran
+  Exports ; `#exports` redirige ; « nouveau »), `meilleur-trajet` (« 28 commandes
+  restent… »), `tournee-mobile` (« jeu. 24 sept. · Dole ») ; `api.test.js` (l'export
+  passe par la route unique).
+
+### Ce qui reste
+
+- La confirmation d'une échéance d'abonnement en rupture : à trancher, si Thomas veut la
+  même règle que la décision 11.
+- Les pastilles de la barre basse du téléphone.
+- Fusionner les deux déclarations CSS de la recherche de client ; retirer les règles
+  mortes d'Exports.
+
+### Relecture adverse (24/09) : six défauts, cinq vrais, un faux
+
+Relecture de `6b73c82`. Chaque défaut vérifié sur le code, les vrais corrigés avec un banc
+rouge sur le code d'avant (cause lue), puis vert.
+
+1. **Vrai (important) — après « Valider », la commande suivante gardait le client
+   d'avant.** `form.reset()` ne vide pas `#customerClientId` : sur un `input type=hidden`,
+   écrire `.value` écrit l'attribut `value`, et `reset()` revient à cet attribut. La
+   commande suivante montrait l'ancienne carte, coordonnées vides et repliées, et partait
+   avec son `clientId` (le serveur reprend alors ce client et ignore le nom tapé). Le
+   champ est vidé à la main après l'envoi : la recherche revient, les coordonnées se
+   rouvrent. Banc : « apres « Valider », la commande suivante repart sans le client
+   d'avant » (rouge d'avant : `Expected "" · Received "c-pharma"`).
+2. **Vrai (important) — « Modifier les coordonnées » promettait ce que le serveur
+   jetait.** `findOrCreateCustomerClient` rend le client existant tel quel dès qu'il a
+   son identifiant ; la commande partait à l'ancienne adresse, la fiche ne bougeait pas.
+   **Décision : ce que l'utilisateur change va sur la FICHE**, par les routes de la fiche
+   (`/api/clients/:id` pour l'identité, recopiée sur les commandes à livrer ;
+   `/api/crm/clients/:id` pour le prénom et l'e-mail — l'aiguillage de `saveCrmClient`,
+   extrait en `enregistrerChangementsDeFiche` et partagé), **avant** la commande, qui
+   prend alors la nouvelle adresse. Le message le dit (« Coordonnées enregistrées sur la
+   fiche du client. »). Seul ce que l'utilisateur a changé part : on compare aux valeurs
+   mises dans les champs au choix du client, pas à la fiche rechargée en fond — sinon un
+   changement fait sur un autre poste serait écrasé. **Hors ligne**, la fiche puis la
+   commande attendent dans la file, dans cet ordre (sans cela, la fiche mise en file
+   arrêtait l'envoi et la commande n'entrait jamais dans la file). Le serveur n'est pas
+   touché : son chemin « doublon » (`Object.assign(duplicate, validateCrmClientPayload(…))`)
+   écrase les notes CRM par les notes de livraison, on ne l'a pas étendu au client choisi.
+   Bancs : « Modifier les coordonnees d'un client existant : la commande et la fiche
+   suivent » (rouge d'avant : `Expected "18 avenue de Lahr" · Received "4 rue Pasteur"`),
+   « hors ligne, la fiche corrigee PUIS la commande attendent dans la file ».
+3. **Vrai (mineur) — la fenêtre de Préparation au bureau disait « À préparer » sur une
+   commande bloquée.** Sa pastille lit « Bloquée » quand le stock manque (`commandeBloquee`,
+   comme le badge de Commandes), sinon `formatOrderStatus`. Banc : « la fenetre d'une
+   commande bloquee dit « Bloquee », comme sa ligne », avec un témoin préparable qui garde
+   « À préparer » (rouge d'avant : `Received "À préparer"`).
+4. **Vrai (mineur) — `preparation_terminee` n'était comptée nulle part et rangée sous « À
+   préparer ».** Son badge dit « Prête » (l'export aussi, et le serveur la livre comme
+   `pret_livraison`) : elle se range sous la pilule « Prêtes » et compte avec les prêtes
+   (`/api/operations`, `delivering` : tuile « En livraison » et liste « À livrer »), avec
+   son mot et sa couleur (`operations.js`). Bancs : `parcours-simplifies.test.js`
+   (`delivering` rendait `[l1, r1]` sans `t1`) et « preparation terminee se range sous
+   Pretes… » (rouge d'avant : `Received array: ["o-8"]`).
+5. **Faux (mineur) — « l'export Excel ouvre les prix aux préparateurs et livreurs ».**
+   Rien ne change pour eux : la séparation des rôles est **désactivée** (décision du
+   26/08, `SEREO_SEPARATION_ROLES` absent) ; activée, elle ne pilote rien non plus —
+   **aucun code du navigateur ne lit `onglets`** de `/api/me` (`git grep "\.onglets"
+   12da3d4 -- public/` : rien), donc l'onglet Exports n'était fermé à personne ; la route
+   d'avant (`GET /api/exports/commandes-annexes.xlsx`) n'avait **aucune garde**, comme
+   `GET /api/orders`, qui rend déjà prix et totaux à tout compte connecté. Aucun
+   changement.
+6. **Vrai (mineur) — l'écran Rappels affichait la clé du statut.** La pastille dit « À
+   faire · Fait · Reporté · Annulé » (`STATUT_RAPPEL`), les gestes « Fait · Reporté ·
+   Annulé » ; les clés envoyées au serveur ne changent pas. Banc : « les Rappels disent
+   « Fait · Reporté · Annulé » » (rouge d'avant : `Reporte`, `Annule`).
+
+*Écarts nommés.* Les gestes des rappels restent des **états** (« Reporté », comme
+« Fait »), pas des verbes. Si l'envoi de la commande échoue après l'enregistrement de la
+fiche, la fiche reste corrigée (c'était voulu) et la commande n'est pas créée : le
+message d'erreur le dit, le panier reste. `preparation_terminee` ne s'affiche toujours
+ni dans la Préparation ni dans la Tournée (statut qu'aucun geste ne crée, seulement
+`PATCH status`) : non traité.
+
+*Mutants* (commités avant, restaurés par copie) : la fiche mise en file arrête l'envoi →
+`["PATCH /api/clients/c-martin"]` sans la commande ; comparer à la fiche rechargée → le
+prénom posé ailleurs écrasé (`Received ""`) ; le mot « Prête » retiré d'`operations.js`
+→ `Received "preparation_terminee"` ; sa couleur → `pill-blue` ; le mot du rappel →
+`Received "reporte"`. Tous tués, de la bonne cause.
+
+*Bancs.* `npm test` 696/696 ; `parcours-simplifies.spec.js` 23/23 ; voisins verts :
+parcours-simplifies-telephone, clients, clients-mobile, commandes, preparation-lignes,
+preparation-mobile, tableau-de-bord, tableau-de-bord-relecture, ecrans-sans-planche,
+collant-et-clavier, operations (180) ; hors-ligne, abonnements, abonnement-creation,
+interface-finitions, badges, tabs, texte-coupe, livreur-ne-perd-rien (68).
+
+*Ce qui reste.* Si Thomas veut un jour « livrer ailleurs, pour cette commande
+seulement » : un champ qui n'existe pas, distinct de la correction de la fiche.
+
+## 24/09 — Ce que l'app sait déjà, enfin montré (lot « données utiles »)
+
+Branche `feat/donnees-utiles`, sur `main` (v1.45.0). Cinq points de l'audit « améliorations »
+du 24/09 : des données que le serveur tenait déjà, et que l'écran ne montrait pas ou montrait
+faux. Décisions de Thomas appliquées : 5 (clients qui ne commandent plus) et 8 (bon de
+livraison sans les prix).
+
+### Fait
+
+**1. Garde-fous de saisie.** Mesure de l'audit : une commande prise avec le téléphone « abc » et
+le code postal « ABCDE » était acceptée ; « Appeler » devenait un lien `tel:` vide.
+
+- *Serveur* (`lib/saisie.js`) : téléphone à **10 chiffres** (espaces, points, tirets, `+33` et
+  `0033` acceptés, « (0) » toléré), code postal à **5 chiffres**. Une saisie juste est
+  **normalisée** (on garde `0612345678`, l'écran l'affiche par deux) ; une saisie fausse est
+  **refusée, 400, nommée** (« Téléphone invalide : 10 chiffres attendus, par exemple 06 12 34 56
+  78 (le +33 est accepté). »). Routes : `POST/PATCH /api/crm/clients` (donc aussi le client créé
+  par une commande client, une commande planifiée, un abonnement), `PATCH /api/clients/:id`, le
+  code postal propre à une commande client.
+- *Une valeur déjà en base n'est jamais réécrite en silence* : renvoyée **telle quelle** (le
+  formulaire du détail de commande renvoie tous ses champs), elle est gardée, même fausse ; elle
+  n'est ni refusée ni corrigée. Elle est **signalée** : filtre « Coordonnées à vérifier » dans
+  Clients, ligne « Téléphone et code postal à vérifier », sous-titre « N fiches à vérifier »,
+  fiche (« Numéro à vérifier : il ne compte pas 10 chiffres. »), et dans le dialogue
+  « Modifier », un avertissement (orange, pas l'erreur rouge) qui ne bloque pas l'envoi.
+- *Page* : un champ `data-garde` dit son erreur **sous lui, à la frappe** (charte §4), icône et
+  mot : tout de suite si la saisie ne pourra plus devenir juste (« 06 12 a »), à la sortie du
+  champ si elle est seulement incomplète (« 06 12 »). `setCustomValidity` bloque l'envoi ; le
+  message est relié au champ (`aria-describedby`), le nom du champ reste son libellé. Champs :
+  « Nouveau / Modifier le client », « Commande client », la fiche neuve de « Nouvel
+  abonnement », « Modifier le profil » du détail de commande (dont l'envoi passe par un clic :
+  `reportValidity()` y est demandé). Le même calcul des deux côtés, vérifié par un banc de parité.
+- *Affichage* : le numéro par deux (« 06 12 34 56 78 ») dans la fiche client, le détail de
+  commande et partout où passe `formatPhone` (arrêt de tournée compris) ; la recherche de Clients
+  le trouve aussi tapé ainsi. « Appeler » compose le numéro normalisé, et disparaît quand la fiche
+  n'a aucun chiffre.
+- *Doublons* : normaliser rendait atteignable un doublon que plus rien ne voyait
+  (« 0612345678 » en base, « 06 12 34 56 78 » tapé : deux clés de texte différentes). La clé du
+  téléphone est désormais le numéro normalisé quand il est valide.
+
+**2. Clients qui ne commandent plus (décision 5).** `lib/relance-client.js` : un client **non
+abonné** qui dépasse **1,5 fois son rythme** — l'intervalle médian entre ses jours de livraison
+(`deliveredAt` lu à Paris, sinon la date prévue) — ou **90 jours** s'il n'a été livré qu'un jour,
+est signalé (`relanceSuggeree` dans `/api/crm/clients` : dernière livraison, jours depuis, rythme,
+seuil). **Dérivé à chaque lecture, jamais écrit : le statut ne change pas.** Le filtre
+« Clients à relancer » (qui existait) les compte, côté page et côté serveur
+(`?status=client_a_relancer`) ; la ligne porte « À relancer », la fiche la phrase « À relancer ·
+pas de livraison depuis 100 jours · d'habitude tous les 30 jours », le sous-titre « N à
+relancer ».
+
+*« Confirmer une commande planifiée fige le client en actif » — vérifié, vrai.*
+`confirmPlannedOrder` (et `createCustomerOrder`) écrivent `crmStatus = "client_actif"` en dur,
+et `inferCrmStatus` rend le statut écrit avant toute déduction : un filtre fondé sur le statut
+ne pouvait plus jamais y voir un client arrêté. **Corrigé à la cause du signal, pas du statut** :
+le signal ne lit pas le statut (sauf « Client inactif », posé à la main) ; « Confirmer » garde
+son geste (un client qui commande à nouveau est actif), et un client ainsi figé est signalé dès
+que plus rien n'est en cours et que son rythme est dépassé (banc « Confirmer … le signal
+revient »).
+
+**3. Le journal « qui a fait quoi ».**
+- *Qui le chargeait* : `loadData`, à **chaque ouverture** (`endpointsDeChargement`,
+  `/api/historique` en entier — 549 ko pour 3 000 lignes, mesure de l'audit), pour le rendre dans
+  la section `#historique`, que la navigation n'ouvrait pas. **Retiré** : l'endpoint ne part plus,
+  la section et `renderHistorique` sont supprimés.
+- *L'auteur* : chaque requête `/api` s'exécute dans un contexte (`AsyncLocalStorage`) ;
+  `addHistory` y lit l'identifiant du compte (`auteur`), `recordStockMovement` aussi
+  (`createdBy`, qui valait « local » pour tous). Il suit les `await` et la file d'écriture, y
+  compris dans `lib/operations-api.js` et `lib/tournee-pratique.js` (aucun appelant à modifier).
+  Hors requête (purge planifiée, géocodage de fond) : « automatique ».
+- *La carte « Journal »* de Paramètres (pleine largeur, avant la zone dangereuse), **réservée à
+  l'administration** : cachée tant que `/api/me` ne l'a pas dit, et jamais demandée pour un
+  autre compte (un 403 ferait une erreur console). Deux vues, « Actions » et « Mouvements de
+  stock » ; date · qui · quoi ; **50 lignes par page**, « Afficher les 50 suivantes ». Lue à
+  l'ouverture de Paramètres (première page relue à chaque ouverture), jamais au chargement.
+  Les lignes d'avant le 24/09 disent « — ».
+- *Serveur* : `GET /api/journal?genre=actions|stock&limite=&avant=` (défaut 50, plafond 200),
+  réservé à l'administration ; le curseur `date|id` de la dernière ligne ne saute rien quand
+  deux lignes partagent la même milliseconde, et une ligne écrite entre deux pages ne décale
+  pas la suite. `/api/historique` garde sa forme (tout le tableau, pour les outils) mais passe
+  lui aussi réservé à l'administration. Le service worker ne met pas `/api/journal` en cache
+  (comme `/api/comptes`).
+- ~~Les « Mouvements récents » du Stock disent aussi « par <compte> ».~~ Retiré à la relecture
+  adverse (plus bas) : `/api/stock-movements` part à tous les comptes ; il ne sert plus l'auteur.
+
+**4. Bon de livraison imprimable, sans les prix (décision 8).** Depuis le détail d'une commande
+(« Bon de livraison », sous l'en-tête) et depuis l'arrêt de tournée (« Autres actions »). Logo
+de l'application, numéro, date de commande, livraison prévue (et « Livrée le … à … » si c'est
+fait), client et adresse, téléphone, lignes produit / quantité (le code en petit), consignes de
+la commande, « Remis à » s'il existe (celui de l'arrêt, ou celui tapé dans le champ de l'arrêt
+à l'écran), zones « Reçu par (nom) » et « Date et signature ». Une feuille posée en fin de
+`<body>`, que `@media print` montre **seule**, `@page { size: A4 }`, dans les couleurs claires de
+la charte quel que soit le thème ; l'impression du navigateur (au téléphone : sa feuille de
+partage, « Imprimer » ou « Enregistrer en PDF »). Aucune dépendance. Le logo est **attendu**
+avant d'imprimer (au plus 1,5 s) : le premier PDF de contrôle était parti sans lui.
+
+**5. Recherche de la barre latérale.** Elle trouve toujours les écrans (le menu se filtre comme
+avant), et désormais, sous le champ, les **clients** (nom, ville, téléphone), les **commandes**
+(numéro, client) et les **produits** (code, nom) : cinq par groupe, « et N autres ». **Aucune
+requête** : les données déjà chargées. Choisir un client ouvre sa fiche (filtres de Clients
+remis à zéro), une commande son détail, un produit le Stock filtré dessus ; Entrée ouvre l'écran
+trouvé, sinon le premier résultat. Rien du tout : « Aucun écran, client, commande ni produit ne
+correspond à « … ». » (au lieu d'un menu vide). Deux caractères au moins pour les données.
+
+### Décisions prises dans le lot
+
+- **« Non abonné » = sans abonnement ACTIF** : un abonnement en pause ne protège pas du signal
+  — même règle que la pilule « Abonnés » de Clients. Un client « Client inactif » (posé à la
+  main) n'est pas signalé une seconde fois ; un client qui a une commande en cours (tout statut
+  sauf livrée et annulée, planifiée comprise) non plus.
+- **Le rythme compte les JOURS de livraison** : deux commandes livrées le même jour font une
+  livraison ; « une seule commande » (90 jours) se lit « un seul jour de livraison ».
+- **Stocker les chiffres, afficher par deux** : `0612345678` en base ; l'écran regroupe.
+- **Numéros français seulement**, comme la consigne (`+33` / `0033`) : un numéro suisse (`+41`)
+  est refusé à la saisie. Voir « Écarts ».
+- **Un code postal à 4 chiffres est refusé à la saisie** (5 exigés) ; l'import Excel, lui, garde
+  son complément du zéro perdu (`normaliserCodePostal`, inchangé).
+- **Journal en deux vues, pas un fil unique** : un ajustement de stock écrit une action ET un
+  mouvement ; mêlés, chaque geste apparaîtrait deux fois.
+- **Consignes du bon = notes de la commande** (ou de l'arrêt, qui les recopie) ; les besoins
+  particuliers et produits préférés de la fiche restent internes. Les *notes* de la fiche, elles,
+  sont la consigne de livraison du client (précision de la relecture adverse, plus bas).
+
+### Écarts nommés
+
+- **Import Ximi non gardé** : un téléphone ou un code postal faux venu d'un classeur est importé
+  tel quel, puis signalé « à vérifier » à l'écran. Refuser une ligne d'import pour un numéro
+  aurait bloqué la commande qu'elle porte.
+- **Frontaliers** : un client suisse ne peut plus recevoir un numéro `+41` par la saisie. À
+  trancher par Thomas s'il en a (élargir aux indicatifs étrangers, ou accepter tel quel).
+- **« Planifier la suite » sur une commande dont la fiche client a disparu** repasse par la
+  création de fiche : un numéro faux sur la commande d'origine y serait refusé (400). Cas limite,
+  non rencontré dans les données de test.
+- **Pas de recherche globale au téléphone** : la barre latérale n'y est pas rendue, et l'en-tête
+  vert n'a pas de champ ; les planches mobiles n'en dessinent pas. Hors lot.
+- **Le bon depuis la tournée est dans « Autres actions »** (un geste de plus) : la barre collée
+  des gestes appartient au lot téléphone, et le bon n'est pas un geste de chaque arrêt.
+- **Le bouton « Bon de livraison » d'« Autres actions » a le rayon de ses voisins** (8 px en
+  clair, comme « À reprogrammer ») : ces boutons compacts relèvent du lot « thème et finitions ».
+  Celui du détail de commande, visible au banc de la charte, est une pilule.
+- **L'impression attend le logo** (≤ 1,5 s) : `window.print()` part donc après une attente, hors
+  du geste de l'utilisateur. Non vérifié dans une vraie fenêtre d'impression, ni sur un vrai
+  téléphone : le banc remplace `window.print` (il juge la feuille en media `print` émulé, et le
+  PDF de contrôle de Chromium).
+- **Le journal n'est pas plafonné** en durée (l'audit proposait 12 mois, plage 3 à 36) : pas
+  décidé. Le serveur ne sert plus que des pages, mais la table grandit.
+- **L'affichage par deux passe par `formatPhone`**, donc aussi par la carte de l'arrêt de tournée
+  (affichage seul, aucun geste changé).
+
+### Bancs, et le rouge de chacun
+
+- `test/donnees-utiles.test.js` (10 cas, serveur semé, sans authentification) : saisie (refus,
+  normalisation, valeur ancienne gardée, commande refusée sans rien créer, doublon), relance
+  (signalés / non signalés, rien d'écrit, filtre serveur ; « Confirmer » fige puis le signal
+  revient), journal (auteur ; pages de 50, paires coupées, ligne écrite entre deux pages).
+  **Sur le `server.js` de `main` : 10 rouges sur 10**, chacun de sa cause (201 au lieu de 400,
+  `'06.12.34.56.78'` au lieu de `'0612345678'`, 200 au lieu de 400, 201 au lieu de 409,
+  `relanceSuggeree` `undefined`, auteur `undefined`, `/api/journal` 404).
+- `test/journal-auteur.test.js` (3 cas, authentification allumée, comptes « julie » et
+  « marc ») : l'auteur est le compte connecté ; une tournée dont le calcul routier (simulé, lent)
+  laisse passer l'écriture d'un autre compte garde son auteur ; `/api/journal` et
+  `/api/historique` refusés (403) au livreur. **Sur `main` : 3 rouges** (`undefined` au lieu de
+  `'julie'` / `'marc'`, 404 au lieu de 403).
+- `test/garde-saisie.test.js` (4 cas) : parité page / serveur sur 19 téléphones et 8 codes
+  postaux, affichage par deux, verdicts de frappe.
+- `test/e2e/donnees-utiles.spec.js` (11 cas, serveur semé sur **3530**) : les cinq points, dont
+  l'impression (media `print` émulé : la feuille seule, sans « € », quantités à droite, A4,
+  couleurs du papier en clair et en sombre, logo chargé à l'instant de l'impression), le bureau
+  et le téléphone pour l'arrêt, et le contraste ≥ 4,5:1 de chaque texte neuf en clair et en
+  sombre. **Avec le front de `main` (serveur du lot) : 10 rouges sur 11**, chacun sur l'élément
+  absent ou la requête de trop (`/api/historique` au chargement) ; le onzième (« un compte qui
+  n'administre pas ») est une garde : il a reçu un témoin de présence, et son mutant le fait
+  rougir.
+- **Mutants** (un fichier muté à la fois, restauré par copie depuis le commit) : 20 posés, 20
+  rouges. Serveur : le signal lit le statut ; l'ancienne valeur réécrite ; le curseur par la
+  seule date ; `/api/journal` sans garde ; la page accepte « / » ; le doublon par texte. Page :
+  la carte montrée à tous ; le bon sans attendre le logo (`naturalWidth` 0 à l'impression) ;
+  l'en-tête du tableau par la règle générique (blanc en sombre) ; les quantités à gauche ;
+  l'avertissement pâle (contraste) ; la valeur enregistrée bloquée ; l'incomplet dit à la
+  frappe ; le filtre « à relancer » sur le seul statut ; la recherche sans message vide ; la
+  recherche par le serveur (une requête par frappe) ; le numéro brut dans la fiche ;
+  `/api/historique` rechargé ; le mouvement sans auteur ; le bouton du bon carré.
+- **Deux instruments corrigés en route.** ① Le premier cas « deux comptes en même temps »
+  n'utilisait que des écritures synchrones : un auteur GLOBAL (le mutant) y donnait le bon nom
+  — vert sans rien distinguer. Remplacé par une écriture qui attend le calcul routier. ② Le cas
+  de pagination avait des paires alignées sur les pages : le curseur par la seule date y
+  survivait. Les paires sont décalées d'un rang, la page coupe l'une d'elles.
+- **Oracles changés par la décision** : `api.test.js` et `adresses-justes.test.js` attendaient
+  le numéro tel que tapé (« 06 11 22 33 44 ») ; il est désormais normalisé (`0611223344`).
+- Bancs voisins relancés, verts : clients, clients-mobile, commandes, paramètres (bureau et
+  téléphone), tabs, barre latérale, nav, écran livreur, tournée (bureau et téléphone), cibles
+  tactiles, focus clavier, squelette, chargement instantané, création d'abonnement, fumée,
+  contraste (application, champs), thèmes, collant et clavier, texte coupé, hors ligne (page et
+  tournée), le livreur ne perd rien, tournées débloquées, états limites, typographie, écrans
+  sans planche, performance, opérations, stock, rapidité tournée, intégration, finitions,
+  charte des composants (rouge d'abord : le bouton du bon, 8 px — corrigé) ; `npm test` vert.
+
+### Ce qui reste
+
+- Plafonner le journal (durée à décider) ; filtrer le journal par compte ou par type.
+- Le tableau de bord (« À régler ») ne compte pas encore les clients à relancer ; la ligne
+  signalée n'a pas de geste « Poser un rappel » (`POST /api/crm/relances` existe).
+- Les numéros étrangers, si Thomas en a besoin.
+- Un « Imprimer les bons de la tournée » (tous les arrêts d'un coup) : non demandé.
+- La recherche au téléphone, si les planches mobiles en dessinent une.
+
+### Relecture adverse (24/09) : six défauts, leur sort
+
+Relecture de `ca8f8d4`. Quatre vrais (dont un en partie), corrigés chacun avec un banc qui
+rougit sans lui ; deux faux, prouvés, sans changement de code.
+
+1. **Important, vrai. Les mouvements de stock et leurs auteurs, lisibles par tous.**
+   `/api/stock-movements` part au chargement de l'app pour TOUS les comptes (et reste dans le
+   cache du service worker) ; il servait toute la table avec `createdBy`, qui porte depuis ce lot
+   l'identifiant du compte : le verrou de `/api/journal?genre=stock` ne gardait rien, et la
+   moitié « stock » du journal repartait en entier à chaque ouverture. **Corrigé** : la route ne
+   sert plus que les **50 derniers** mouvements (l'écran en montre 12), **sans auteur**
+   (`createdBy`, et les anciens `utilisateur` / `auteur`) ; les « Mouvements récents » du Stock ne
+   disent plus « par … ». « Qui » se lit au journal, réservé à l'administration. *Pourquoi pas
+   l'auteur pour l'administrateur seul* : le service worker garde la réponse par adresse, pas par
+   compte ; la copie de l'administrateur serait rendue hors ligne à un autre compte du même
+   appareil — la raison même qui tient `/api/journal` hors du cache.
+2. **Mineur, vrai. Le géocodage de fond signé d'un compte.** Lancé par la route après sa
+   réponse, il héritait du contexte de la requête : « N client(s) géolocalisé(s)
+   automatiquement » était signé du compte qui avait touché une fiche, relance comprise (même
+   provoquée par un autre compte). **Corrigé** : `declencherGeocodageEnFond` lance le lot hors
+   contexte (`contexteRequete.exit`) : « automatique ». Le lot lancé à la main
+   (`POST /api/geocodage/lancer`) garde l'auteur de la requête qui l'a lancé ; sa relance, elle,
+   passe par le fond : « automatique ».
+3. **Mineur, vrai. « Modifier le profil » refusait ce qu'il signalait.** Le formulaire du détail
+   de commande montre le téléphone et le code postal DE LA COMMANDE ; le serveur compare à ceux DU
+   CLIENT. Un numéro faux resté sur une commande ouverte, alors que la fiche avait été corrigée
+   dans Clients (qui ne le fait pas suivre), était signalé « à vérifier » sans bloquer — puis
+   refusé (400) à l'envoi, quand on ne changeait que les notes. **Corrigé côté page** : un champ
+   gardé signalé « à vérifier » et **non touché ne part pas** ; la fiche garde le sien. Touché, il
+   part et se juge comme avant. (Avant le lot, le même envoi réécrivait en silence le bon numéro
+   de la fiche avec le faux de la commande.)
+4. **Mineur, vrai en partie. Les consignes du bon.**
+   - *« Replanification depuis CMD-… »* (la note que « Planifier la suite » écrit d'office) partait
+     sur le papier comme consigne : **vrai, corrigé** — une commande qui a une commande d'origine
+     (`parentOrderId`) et dont la note est exactement ce renvoi n'imprime pas de « Consignes ».
+   - *« Les notes de la fiche client, dites internes »* : **faux**. Les notes de la fiche SONT la
+     consigne de livraison du client : `PATCH /api/clients` les fait suivre sur ses commandes
+     (« une consigne propre à une commande n'est pas écrasée par celle du client »), le détail de
+     commande les propose avec « Sonner 2 fois, code 1234 ». Ce que le gabarit disait interne,
+     ce sont les besoins particuliers et produits préférés ; le commentaire le dit maintenant.
+   - *« Les notes de l'arrêt, écrites par le livreur »* : **faux**. `stop.notes` n'est écrit qu'à
+     la création de l'arrêt (copie de `order.notes`) et par le paramètre `notes` du geste
+     (`updateRouteStop`), qu'aucun écran n'envoie : les trois envois d'un geste portent
+     `{ status, motif, faitLe }` ou `{ status: "livre", motif: null, faitLe, remisA }`.
+5. **Mineur, faux. « Un code postal à 4 chiffres est désormais refusé. »** Le fait est exact, et
+   c'est une décision nommée du lot (« Décisions prises dans le lot »). Sa raison, précisée : à la
+   saisie, un code à 4 chiffres est plus souvent une faute de frappe qu'un zéro perdu — compléter
+   « 3910 » (Dole, 39100) donne « 03910 », un code bien formé et faux, géocodé ailleurs sans que
+   personne le voie. Le zéro perdu a une cause mécanique dans l'import seul (Excel lit 01100 comme
+   le nombre 1100) : lui seul complète. Avant le lot, la règle était déjà double (la fiche Clients
+   gardait « 1000 » tel quel, le détail de commande le complétait).
+6. **Mineur, vrai. La recherche à un caractère disait n'avoir rien trouvé.** Sous 2 caractères,
+   elle ne cherche pas les données ; elle disait pourtant « Aucun écran, client, commande ni
+   produit ne correspond à « 7 » ». **Corrigé** : « Aucun écran ne correspond à « 7 ». Tape au
+   moins 2 caractères pour chercher un client, une commande ou un produit. »
+
+**Bancs, et leur rouge** (chaque mutant = le retour d'UN correctif, posé seul, restauré par copie
+depuis le commit) :
+
+- `test/journal-auteur.test.js`, cas « mouvements récents » (4 cas désormais) : l'ancienne route
+  rend `['julie', 'marc', …]` au livreur au lieu de `[]` ; sans le plafond, `61 !== 50`.
+- `test/journal-geocodage.test.js` (nouveau, authentification allumée, géocodage de fond actif,
+  BAN simulée lente) : sans `exit`, `['marc', 'marc']` au lieu de `['automatique',
+  'automatique']` — la relance provoquée par julie signée marc. Témoins : les deux fiches placées,
+  les lignes « CRM » signées julie et marc.
+- `test/e2e/donnees-utiles.spec.js` (14 cas ; serveur semé sur 3530) : le cas du journal lit la
+  réponse de `/api/stock-movements` (sans auteur ; l'ancienne route y met `"createdBy": "dev"`) ;
+  « modifier le profil » : `Received: 400` au lieu de 200 sans le correctif ; son témoin (un
+  numéro TOUCHÉ part) rougit quand le téléphone ne part jamais (`"0698765432"` au lieu de
+  `"0711223344"`) ; bon : « Replanification depuis » imprimé, avec son témoin (« Code portail
+  1234 », consigne de o-8, imprimée) ; recherche : l'ancien message reçu mot pour mot.
+- **Oracle changé par la décision** : le cas du journal attendait « par dev » dans les
+  « Mouvements récents » ; il attend désormais qu'ils ne nomment personne.
+- Voisins relancés, verts : barre latérale, commandes, écrans sans planche, navigation plate,
+  tournée, stock, paramètres, chargement instantané, hors ligne (page et tournée), le livreur ne
+  perd rien, rapidité tournée, fumée, charte des composants, clients ; numérotation réservée à
+  l'administrateur (sur un serveur authentifié à moi, 3511 : `pw-lot.config.js` ne lance pas le
+  3101) ; `npm test` (701).
+
+**Écarts nommés.**
+- La fiche Clients nomme son champ « Notes », à côté de « Besoins particuliers » et « Produits
+  préférés » : rien n'y dit qu'il part sur les commandes, l'arrêt et le bon. Renommer le libellé
+  (« Consignes de livraison ») change un écran d'un autre lot : non fait, à trancher.
+- Le filtre du renvoi « Replanification depuis … » lit le texte que le serveur écrit : si ce texte
+  change, le renvoi repart sur le papier (l'échec est visible, jamais une consigne perdue).
+- Le formulaire du détail de commande prérempli avec les coordonnées de la commande, qui
+  réécrivent celles de la fiche, reste tel quel (antérieur au lot) : seul le cas signalé et
+  intact est corrigé.
+
+## 24/09 — Intégration des améliorations du 24/09
+
+Branche `integration/ameliorations`, partie de `main` (`ef78be1`, v1.45.1). Les six lots de
+l'audit « améliorations », tous partis de `12da3d4` (v1.45.0), fusionnés `--no-ff` dans cet
+ordre : pièges (import, tournée, retour après validation), sauvegardes et prévisions,
+téléphone, thème clair, parcours simplifiés, données utiles. Chaque fusion est contrôlée :
+le diff de la fusion contre son premier parent égale le diff du lot contre `12da3d4`,
+ligne à ligne, hors les conflits nommés ci-dessous.
+
+### Conflits
+
+- **Ajouts en fin de fichier** (`DESIGN.md` à chaque fusion, `style.css`) : reconstruits
+  depuis les trois versions (base + ajout de chaque côté), jamais en ôtant les marqueurs.
+  À partir du lot thème, qui déplace aussi des règles au milieu de `style.css`, les têtes
+  sont fusionnées à trois voies (propre) et les ajouts remis bout à bout, dans l'ordre des
+  lots.
+- **Les deux intentions gardées** : « Besoin estimé » (`item.demande`, sauvegardes) et
+  `reco-rupture` (thème) ; `villeAffichee` (thème) avec le pluriel (parcours) et avec la
+  fiche client du lot données ; après « Valider la commande », le retour du lot pièges
+  (Commandes, la ligne mise en avant, le numéro dans le message) avec les messages du lot
+  parcours (commande bloquée, « Coordonnées enregistrées sur la fiche du client ») ; la
+  ville en attente (pièges) avec le pluriel (parcours) ; « Créer la tournée (N) » (pièges)
+  tutoyé (parcours) ; la commande client repliable (parcours) avec les gardes de saisie
+  (données) ; les deux routes hors du cache du service worker ; le `check` des deux lots.
+- **Le résumé de l'import** : la réécriture du lot pièges (le lot parcours n'y posait que
+  des pluriels, qu'elle a déjà).
+- **v1.45.1 et le lot données** : la v1.45.1 ne dessinait plus l'historique à l'ouverture ;
+  le lot données retire l'écran, `renderHistorique` et `/api/historique` du chargement.
+  Rien n'est chargé ni dessiné à l'ouverture, le Journal se lit par pages dans Paramètres ;
+  le corps réécrit par la v1.45.1 part avec sa fonction.
+- **Conflit que git ne signale pas** : `accorder` importé de `utils/text.js` (parcours) et
+  déclaré dans `app.js` (pièges), un `SyntaxError` au chargement du module. La copie locale
+  part (même effet pour ses appels).
+
+### Réconciliations (commits à part, chacun avec son banc rouge avant)
+
+- **Un seul dessin** (téléphone × thème) : l'icône du menu « Plus » en clair posait sa
+  géométrie à toutes les largeurs ; elle passe sous 820 px (rien ne change à l'écran).
+- **Les dates par l'utilitaire** (pièges, sauvegardes, données × parcours) : « à 16 h 00 »
+  dans le résumé de l'import, « Manquera le dim. 27 sept. » (une fonction locale `jourCourt`
+  rendait « 27/9 »), « 24 sept. · 16 h 00 » au Journal, « Livrée le 24 septembre à 16 h 00 »
+  sur le bon.
+- **Un seul vocabulaire** (données × parcours) : les clients signalés disent « À
+  rappeler », le mot du filtre « Clients à rappeler » ; plus aucun « relance » dans Clients.
+- **Bancs qui suivent la décision d'un autre lot** : la recherche de client et
+  `#customerValider` (pièges) ; le message « Commande CMD-… validée » (parcours) ;
+  « données de 20 h 20 » (`tournee-hors-ligne`, que le lot parcours n'avait pas relancé) ;
+  Analyse sans sous-onglets depuis la suppression d'Exports (thème) ; le repli des pilules
+  de Commandes jugé à 360 px, les six pilules tenant désormais en deux rangs à 390 px
+  (téléphone) ; `historique-lent` juge qu'à l'ouverture ni `/api/historique` ni
+  `/api/journal` ne partent, et que le Journal lit une page de 50 sur 4 000 lignes.
+
+### Exports
+
+Aucun autre lot n'ajoute rien à l'écran supprimé : les lots téléphone et thème ne le
+nomment que dans des listes `:is(…)` de leur CSS (sans effet), comme les règles d'avant
+le 24/09 et l'entrée `exportsList` du squelette de chargement (ignorée : l'élément
+n'existe plus). Le bouton d'export de Commandes que le lot téléphone déplace est celui que
+le lot parcours garde (« Exporter (Excel) »).
+
+### Écarts nommés
+
+- `npm run check` (`node --check` sans type module) ne voit pas une déclaration en double
+  dans un module ES ; `node --input-type=module --check < fichier` la voit. Non changé.
+- « Livrée le … » du bon de livraison n'a pas de banc (aucun bon semé n'est livré).
+- Le bon imprimé perd l'année de « Livrée le » l'année en cours, comme ses autres dates.
+- Restent `#exports` et `exportsList`, morts, dans la feuille et le squelette.
+
+### Bancs
+
+Code final vérifié : `461dd09` (arbre `9bdf567`). `npm run check`, et chaque module du front
+par `node --input-type=module --check` ; `npm test` 745/745 (dont `feuille-equilibree`,
+`ports-e2e`, `un-seul-dessin`). e2e (3100/3101 et les ports des bancs semés) :
+
+- **Liste ciblée** (42 fichiers, 491 cas : les bancs des six lots, `historique-lent`,
+  onglets, fumée, Commandes, Clients, Abonnements, Tournée, Préparation, Paramètres,
+  Stock, connexion, contrastes, cibles, focus, thèmes, texte coupé, navigation au
+  téléphone). Premier passage, sur la dernière fusion : 5 rouges, chacun une décision
+  d'un autre lot, réconciliés ci-dessus. Second passage : 490 verts, 1 rouge —
+  `smoke.spec.js` « sliders tournee », « Enregistré » jamais lu ; vert seul 3 fois sur 3 et
+  dans les deux suites complètes. Instable, cause antérieure aux lots (`bc70081`) : une
+  lecture de `/api/settings/tournee` qui revient après l'enregistrement remet le statut à
+  vide (`tourneeSaveTimer` déjà repassé à `null`), ce qu'une suite chargée rend possible.
+- **Suite complète, passage 1** : 668 verts, 3 rouges, 24 non lancés. Deux rouges « port
+  3334 / 3330 déjà pris » : les agents « perf » lançaient au même moment les mêmes bancs
+  dans leurs arbres. Le troisième (`preparation-lignes`, tablette) a reçu « En cours ·
+  Prêtes livraison · Bloquées stock », les mots d'avant le lot parcours, que ce code ne
+  peut plus écrire (présents dans `main` et les deux branches perf) : le banc a parlé au
+  serveur d'un autre arbre (la course que `serveur-seme.js` nomme). Les trois fichiers,
+  relancés trois fois de suite sans autre suite en cours : 27/27, trois fois.
+- **Suite complète, passage 2** : **695/695** (une suite perf relevée en parallèle
+  pendant ce passage, sans effet).
+
+### Carte « Chiffre d'affaires livré » : l'histogramme remplit la carte (24/09)
+
+**Demande de Thomas** (capture à 2 560 px) : la carte était trop grande pour son contenu.
+**Mesure en production** : de 1 440 à 2 560 px, la carte s'étire à la hauteur de la colonne de
+droite (deux tuiles + « Tournée du jour ») et l'histogramme, fixé à 150 px, laissait **265 à
+293 px vides** dessous. Ce n'était pas une décision : la planche 6a fixe 150 px parce que sa
+carte de tournée est plus courte ; dans l'app, celle-ci porte « Prochain », les arrêts et
+« Ouvrir la carte ». **Posé** : au-dessus de 920 px, l'histogramme prend la hauteur disponible
+de la carte, jamais moins de 150 px (environ 400 px au bureau) ; en une colonne et au téléphone,
+rien ne change. *Banc* : `carte-ca-remplie.spec.js` (1 440 et 1 920 px ; rouge avant : 265 px
+vides ; préalable : la colonne de droite étire bien la carte).

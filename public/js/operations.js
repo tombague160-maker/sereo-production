@@ -1,6 +1,8 @@
 import { escapeHtml as h } from "./utils/dom.js";
-import { normalizeTextKey } from "./utils/text.js";
+import { normalizeTextKey, villeAffichee } from "./utils/text.js";
 import { getAddressParts } from "./utils/address.js";
+// Les dates et les heures de l'ecran : un seul utilitaire (parcours simplifies, 24/09).
+import * as datesFr from "./utils/dates.js";
 let context,
   data = {},
   selectedMonth = "",
@@ -11,14 +13,9 @@ const money = (value) =>
   new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(
     value || 0,
   );
+// « jeudi 24 septembre » (utils/dates.js) : la forme longue des phrases.
 const day = (value) =>
-  value
-    ? new Date(`${value}T12:00:00`).toLocaleDateString("fr-FR", {
-        weekday: "long",
-        day: "numeric",
-        month: "short",
-      })
-    : "Date non précisée";
+  value ? datesFr.jourLong(value) : "Date non précisée";
 const iso = (date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 const plus = (value, days) => {
@@ -42,12 +39,25 @@ const products = (lines) =>
 const empty = (text) => `<div class="op-empty">${h(text)}</div>`;
 const button = (action, label, extra = "", style = "secondary") =>
   `<button type="button" class="button ${style}" data-op="${action}" ${extra}>${label}</button>`;
+/**
+ * Une commande « a preparer » : ce que l'ecran Preparation compte comme
+ * RESTANTE -- importee, a verifier, en preparation, bloquees comprises. UN
+ * seul compte partout (parcours simplifies, 24/09) : la pastille de l'entree
+ * Preparation, la tuile du tableau de bord, le resume de la Preparation, et
+ * /api/operations (lib/operations-api.js, `preparing`) cote serveur. Il y en
+ * avait trois (1 / 1 / 3 sur les memes donnees).
+ */
+export const STATUTS_A_PREPARER = ["importe", "stock_a_verifier", "en_preparation"];
+export const commandeAPreparer = (o) => STATUTS_A_PREPARER.includes(o?.status);
 const status = (value) =>
   ({
     planifiee: "À confirmer",
     a_confirmer: "À confirmer",
+    importe: "À préparer",
     stock_a_verifier: "À préparer",
     en_preparation: "En préparation",
+    // Comptee avec les pretes (relecture adverse) : son mot, pas sa cle.
+    preparation_terminee: "Prête",
     pret_livraison: "Prête",
     en_livraison: "En livraison",
     probleme_livraison: "Problème de livraison",
@@ -60,7 +70,7 @@ const status = (value) =>
  * de preparation, on montre la commande.
  */
 const etatDeLaCommande = (statut) =>
-  statut === "pret_livraison" || statut === "livre"
+  statut === "pret_livraison" || statut === "preparation_terminee" || statut === "livre"
     ? { cle: "prete", pill: "pill-ok" }
     : statut === "en_preparation" || statut === "en_livraison"
       ? { cle: "en-cours", pill: "pill-warning" }
@@ -90,7 +100,7 @@ function openSubDetail(id) {
   const etat = etatAbonnement(s);
   document.getElementById("abonnementDetailTitre").textContent = name(client || {}) || "Client introuvable";
   // .subscription-card : le dispatcher y desactive les boutons freres pendant une action.
-  corps.innerHTML = `<div class="subscription-card"><p class="arret-adresse"><span>${h(client?.ville || "Adresse à compléter")}</span><span class="pill ${etat.pill}">${h(etat.mot)}</span></p><p class="sub-basket">${h(products(s.products))}</p><div class="sub-facts"><div><small>Fréquence</small><strong>${h(frequency(s))}</strong></div><div><small>Prochaine échéance</small><strong${retard ? ' class="abo-alerte"' : ""}>${h(next ? day(next.date) + (retard ? " · en retard" : "") : "—")}</strong></div><div><small>Rappel</small><strong>${s.reminderDays} jour(s) avant</strong></div><div><small>Panier prévu</small><strong>${h(money(s.products.reduce((sum, p) => sum + p.totalLigne, 0)))}</strong></div></div><div class="card-actions">${button("edit-sub", "Modifier", `data-id="${h(s.id)}"`, "primary")}${button("toggle-sub", s.status === "active" ? "Mettre en pause" : "Réactiver", `data-id="${h(s.id)}"`)}</div></div>`;
+  corps.innerHTML = `<div class="subscription-card"><p class="arret-adresse"><span>${h(villeAffichee(client?.ville) || "Adresse à compléter")}</span><span class="pill ${etat.pill}">${h(etat.mot)}</span></p><p class="sub-basket">${h(products(s.products))}</p><div class="sub-facts"><div><small>Fréquence</small><strong>${h(frequency(s))}</strong></div><div><small>Prochaine échéance</small><strong${retard ? ' class="abo-alerte"' : ""}>${h(next ? day(next.date) + (retard ? " · en retard" : "") : "—")}</strong></div><div><small>Rappel</small><strong>${s.reminderDays} jour${s.reminderDays > 1 ? "s" : ""} avant</strong></div><div><small>Panier prévu</small><strong>${h(money(s.products.reduce((sum, p) => sum + p.totalLigne, 0)))}</strong></div></div><div class="card-actions">${button("edit-sub", "Modifier", `data-id="${h(s.id)}"`, "primary")}${button("toggle-sub", s.status === "active" ? "Mettre en pause" : "Réactiver", `data-id="${h(s.id)}"`)}</div></div>`;
   dialogue.showModal();
 }
 
@@ -190,14 +200,55 @@ export function initOperations(api) {
         );
         await context.loadData();
         context.notify(
-          "Commande créée. Confirme-la dans Commandes, filtre « Planifiées », pour la préparer.",
+          "Commande créée, planifiée : « Confirmer » sur l’échéance quand le client a donné son accord.",
           "success",
         );
-        // Le rendu a detruit le bouton : le focus revient a l'echeance suivante
-        // du meme abonnement, visible, au lieu de tomber sur <body>.
-        const suivant = [...document.querySelectorAll(`[data-op="generate-sub"][data-id="${CSS.escape(el.dataset.id)}"]`)]
+        // Le rendu a detruit le bouton : le focus va a « Confirmer » de cette
+        // echeance (decision 6 : le geste suivant, au meme endroit), sinon a
+        // l'echeance suivante du meme abonnement -- jamais sur <body>.
+        const suivant = [...document.querySelectorAll(`[data-op="confirm-sub-order"][data-id="${CSS.escape(el.dataset.id)}"], [data-op="generate-sub"][data-id="${CSS.escape(el.dataset.id)}"]`)]
           .find((b) => b.checkVisibility());
         suivant?.focus();
+      }
+      // Decision 6 : confirmer SUR l'echeance, sans changer d'ecran. La
+      // commande passe « A preparer » (le serveur reserve le stock).
+      if (action === "confirm-sub-order") {
+        await context.apiFetch(
+          `/api/planned-orders/${encodeURIComponent(el.dataset.orderId)}/confirm`,
+          { method: "POST" },
+        );
+        await context.loadData();
+        context.notify("Commande confirmée : elle est à préparer.", "success");
+        const badge = [...document.querySelectorAll(`[data-op="confirm-sub-order"][data-id="${CSS.escape(el.dataset.id)}"], [data-op="generate-sub"][data-id="${CSS.escape(el.dataset.id)}"]`)]
+          .find((b) => b.checkVisibility());
+        (badge || document.getElementById("subscriptionAgenda"))?.focus?.();
+      }
+      // « Creer les N commandes dues » : une commande par echeance due, l'une
+      // apres l'autre (le serveur refuse un doublon : un second appui ne cree
+      // rien de plus). Chacune se confirme ensuite sur son echeance.
+      if (action === "generate-dues") {
+        const dues = echeancesDues();
+        let creees = 0;
+        try {
+          for (const o of dues) {
+            await context.apiFetch(
+              `/api/subscriptions/${encodeURIComponent(o.subscriptionId)}/orders`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ date: o.date }),
+              },
+            );
+            creees += 1;
+          }
+        } finally {
+          await context.loadData();
+        }
+        context.notify(
+          `${creees} commande${creees > 1 ? "s" : ""} créée${creees > 1 ? "s" : ""}, planifiée${creees > 1 ? "s" : ""} : « Confirmer » sur chaque échéance quand le client a donné son accord.`,
+          "success",
+        );
+        document.getElementById("subscriptionAgenda")?.querySelector('[data-op="confirm-sub-order"]')?.focus();
       }
       if (action === "locate") await locate();
       if (action === "search-departure" || action === "search-arrival")
@@ -431,13 +482,13 @@ function renderDashboard() {
     (s) => s.due && !s.orderId,
   ).length;
   document.getElementById("opUpdated").textContent =
-    `Mis à jour à ${new Date(op.updatedAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`;
+    `Mis à jour à ${datesFr.heure(op.updatedAt)}`;
   document.getElementById("revenueCaveat").textContent = [
     month.missingPrices
-      ? `${month.missingPrices} commande(s) sans montant à compléter.`
+      ? `${month.missingPrices} commande${month.missingPrices > 1 ? "s" : ""} sans montant à compléter.`
       : "",
     month.estimatedDates
-      ? `${month.estimatedDates} ancienne(s) commande(s) : date prévue ou date de commande utilisée faute de date de livraison réelle.`
+      ? `${month.estimatedDates} ancienne${month.estimatedDates > 1 ? "s commandes" : " commande"} : date prévue ou date de commande utilisée faute de date de livraison réelle.`
       : "",
   ]
     .filter(Boolean)
@@ -467,8 +518,15 @@ function renderDashboard() {
     );
   document.getElementById("opWeekCount").textContent =
     `${upcoming.length} échéance${upcoming.length > 1 ? "s" : ""}`;
+  // « A preparer » : les commandes chargees par la page, filtrees par LE
+  // predicat partage (commandeAPreparer) -- la pastille de Preparation et le
+  // resume de l'ecran lisent les memes. Repli sur le serveur (meme
+  // definition) si la liste des commandes n'est pas arrivee.
+  const aPreparer = Array.isArray(data.orders) && data.orders.length
+    ? data.orders.filter(commandeAPreparer)
+    : op.preparing;
   for (const [id, list] of [
-    ["dashboardPreparing", op.preparing],
+    ["dashboardPreparing", aPreparer],
     ["dashboardDelivering", op.delivering],
   ]) {
     document.getElementById(id + "Count").textContent = list.length;
@@ -618,24 +676,13 @@ let aboFiltre = "tous",
   agendaDeplie = false;
 const panier = (lines) =>
   (lines || []).map((p) => `${p.quantite} ${p.nom}`).join(", ");
-// « Mer. 23 sept. » (planche 13a) ; l'annee si ce n'est pas celle-ci.
-const jourCourt = (value) => {
-  if (!value) return "—";
-  const d = new Date(`${value}T12:00:00`);
-  const autre = d.getFullYear() !== new Date().getFullYear();
-  const t = d.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short", ...(autre ? { year: "numeric" } : {}) });
-  return t.charAt(0).toUpperCase() + t.slice(1);
-};
+// « Mer. 23 sept. » (planche 13a) ; l'annee si ce n'est pas celle-ci --
+// utils/dates.js, jourCourt en debut de ligne.
+const jourCourt = (value) => (value ? datesFr.jourCourt(value, { majuscule: true }) : "—");
 // « Mercredi 23 septembre », ou « 12 septembre » sans le jour (planche 3a) ;
 // « 1er » pour le premier du mois, l'annee si ce n'est pas celle-ci.
-const dateLongue = (value, avecJour = true) => {
-  const d = new Date(`${value}T12:00:00`);
-  const mois = d.toLocaleDateString("fr-FR", { month: "long" });
-  const annee = d.getFullYear() !== new Date().getFullYear() ? ` ${d.getFullYear()}` : "";
-  const jour = d.toLocaleDateString("fr-FR", { weekday: "long" });
-  const t = `${avecJour ? jour + " " : ""}${d.getDate() === 1 ? "1er" : d.getDate()} ${mois}${annee}`;
-  return t.charAt(0).toUpperCase() + t.slice(1);
-};
+const dateLongue = (value, avecJour = true) =>
+  datesFr.jourLong(value, { majuscule: true, semaine: avecJour });
 // « Mar » : le jour de la semaine d'une echeance de l'agenda (planche 3c).
 const jourSemaine = (value) => {
   const t = new Date(`${value}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "short" }).replace(".", "");
@@ -672,6 +719,10 @@ const enRetard = (o) => Boolean(o && o.overdue && !o.orderId);
 // Les livraisons que l'agenda compte : a venir, ou deja commandees.
 const aVenirAgenda = () =>
   data.subscriptions.occurrences.filter((o) => o.date >= data.subscriptions.today || o.orderId);
+// Les echeances DUES : leur rappel est arrive, aucune commande encore. Le meme
+// compte que la pastille Abonnements (app.js renderBadgesNav).
+const echeancesDues = () =>
+  (data.subscriptions?.occurrences || []).filter((o) => o.due && !o.orderId);
 
 /** Le sous-titre de l'ecran : « 6 actifs · 1 en pause · 2 echeances en retard ». */
 export function majSousTitreAbonnements() {
@@ -803,9 +854,16 @@ function renderAgenda() {
     // Le RAPPEL : l'abonnement promet « rappel N jours avant ». L'echeance
     // dont le rappel est arrive le dit, sans le panneau d'avant.
     const rappel = !retard && o.due && !o.orderId;
-    const geste = o.orderId
-      ? `<button class="pill abo-badge abo-badge--commande" type="button" data-action="go-tab" data-target-tab="commandes-planifiees" aria-label="${h(status(o.orderStatus))} : voir dans Commandes">${h(status(o.orderStatus))}</button>`
-      : `<button class="abo-creer" type="button" data-op="generate-sub" data-id="${h(o.subscriptionId)}" data-date="${h(o.date)}" aria-label="Créer la commande du ${h(jourCourt(o.date))} pour ${h(o.clientName)}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg><span class="abo-creer-mot">Créer la commande</span></button>`;
+    // Decision 6 de Thomas (24/09) : la commande d'abonnement reste
+    // « Planifiee » jusqu'a l'accord du client, et se CONFIRME ici, sur
+    // l'echeance. Le badge « A confirmer » ne confirmait rien : il ouvrait
+    // Commandes, filtre Planifiees, ou il fallait retrouver la ligne.
+    const aConfirmer = o.orderId && ["planifiee", "a_confirmer"].includes(o.orderStatus);
+    const geste = aConfirmer
+      ? `<button class="abo-creer abo-confirmer" type="button" data-op="confirm-sub-order" data-order-id="${h(o.orderId)}" data-id="${h(o.subscriptionId)}" aria-label="Confirmer la commande du ${h(jourCourt(o.date))} pour ${h(o.clientName)}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg><span class="abo-creer-mot">Confirmer</span></button>`
+      : o.orderId
+        ? `<button class="pill abo-badge abo-badge--commande" type="button" data-action="go-tab" data-target-tab="bons-commande" aria-label="${h(status(o.orderStatus))} : voir dans Commandes">${h(status(o.orderStatus))}</button>`
+        : `<button class="abo-creer" type="button" data-op="generate-sub" data-id="${h(o.subscriptionId)}" data-date="${h(o.date)}" aria-label="Créer la commande du ${h(jourCourt(o.date))} pour ${h(o.clientName)}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg><span class="abo-creer-mot">Créer la commande</span></button>`;
     return `<div class="abo-echeance subscription-card${retard ? " abo-echeance--retard" : ""}"><span class="abo-jour" title="${h(jourCourt(o.date))}"><span class="abo-jour-semaine">${h(jourSemaine(o.date))}</span>${numero(o.date)}</span><span class="abo-echeance-texte"><strong>${h(o.clientName)}</strong><span>${h(panier(o.products))}${retard ? ` · échue le ${h(jourCourt(o.date).replace(/^\S+ /, ""))}` : rappel ? " · rappel arrivé" : ""}</span></span>${geste}</div>`;
   };
   const blocs = [];
@@ -819,6 +877,15 @@ function renderAgenda() {
   corps.innerHTML = blocs.length
     ? blocs.join('<div class="abo-separateur" aria-hidden="true"></div>')
     : empty("Aucune livraison prévue dans les 90 jours.");
+  // « Creer les N commandes dues » : les echeances dont le rappel est arrive
+  // et qui n'ont pas encore de commande -- le compte de la pastille
+  // Abonnements. Chacune se confirme ensuite sur son echeance.
+  const dues = echeancesDues();
+  const toutes = document.getElementById("aboCreerDues");
+  if (toutes) {
+    toutes.hidden = dues.length < 2;
+    toutes.textContent = `Créer les ${dues.length} commandes dues`;
+  }
   const plus = document.getElementById("aboAgendaPlus");
   if (plus) {
     const reste = groupes.length - 2;
@@ -859,7 +926,7 @@ const texteStock = (p) => {
 };
 const adresseClient = (c) => {
   const a = getAddressParts(c);
-  const ville = [a.postalCode, a.city].filter(Boolean).join(" ");
+  const ville = [a.postalCode, villeAffichee(a.city)].filter(Boolean).join(" ");
   const secteur = c.ville ? context.formatSectorLabel(c.ville) : "";
   // La planche ecrit « ..., 25000 Besancon · Besancon » : le secteur n'est
   // ajoute que s'il dit autre chose que la ville.
@@ -907,28 +974,49 @@ function cocher(nom, valeur) {
 
 /* Le client : une recherche, des cartes ; la carte choisie devient le champ. */
 function rendreClients() {
-  const saisie = $("subClientSearch").value;
+  rendreRechercheClients({
+    saisie: $("subClientSearch").value,
+    clients: data.crmClients,
+    liste: $("subClientResults"),
+    note: $("subClientReste"),
+    geste: 'data-op="sub-client"',
+  });
+}
+
+/**
+ * La recherche d'un client en cartes (planches 3b / 5b). PARTAGEE par la
+ * creation d'abonnement et par la nouvelle commande (parcours simplifies,
+ * 24/09) : un seul composant, un seul comportement -- nom, ville, rue ou
+ * code postal ; trois chiffres ou plus cherchent le telephone ; six cartes au
+ * plus, la note dit le reste. `geste` : l'attribut que porte chaque carte
+ * (data-op="sub-client" ici, data-action="cc-client" dans app.js).
+ */
+export function rendreRechercheClients({ saisie, clients, liste, note, geste }) {
   const q = normalizeTextKey(saisie);
-  const chiffres = saisie.replace(/\D/g, "");
-  const trouves = data.crmClients
-    .filter((c) => !c.crmArchived)
+  const chiffres = String(saisie || "").replace(/\D/g, "");
+  const actifs = (clients || []).filter((c) => !c.crmArchived);
+  const trouves = actifs
     .filter((c) =>
       !q
       || normalizeTextKey([name(c), c.ville, c.rue, c.address, c.codePostal].join(" ")).includes(q)
       || (chiffres.length >= 3 && String(c.telephone || c.phone || "").replace(/\D/g, "").includes(chiffres)))
     .sort((a, b) => name(a).localeCompare(name(b), "fr"));
   const MAX = 6;
-  $("subClientResults").innerHTML = trouves
+  liste.innerHTML = trouves
     .slice(0, MAX)
-    .map((c) => `<div role="listitem"><button type="button" class="abo-cr-client-carte" data-op="sub-client" data-id="${h(c.id)}"><strong>${h(name(c) || "Client sans nom")}</strong><span>${h(adresseClient(c) || "Adresse à compléter")}</span></button></div>`)
+    .map((c) => `<div role="listitem"><button type="button" class="abo-cr-client-carte" ${geste} data-id="${h(c.id)}"><strong>${h(name(c) || "Client sans nom")}</strong><span>${h(adresseClient(c) || "Adresse à compléter")}</span></button></div>`)
     .join("");
-  const reste = $("subClientReste");
-  reste.hidden = trouves.length > 0 && trouves.length <= MAX;
-  reste.textContent = !trouves.length
-    ? data.crmClients.some((c) => !c.crmArchived)
+  note.hidden = trouves.length > 0 && trouves.length <= MAX;
+  note.textContent = !trouves.length
+    ? actifs.length
       ? "Aucun client ne correspond : crée sa fiche."
       : "Aucun client pour l’instant : crée sa fiche."
     : `${trouves.length - MAX} autre${trouves.length - MAX > 1 ? "s" : ""} : précise la recherche.`;
+}
+
+/** « 12 avenue ..., 25000 Besançon » : l'adresse d'une carte de client. */
+export function adresseDeCarteClient(c) {
+  return adresseClient(c);
 }
 function majClient() {
   const id = $("subClient").value;
@@ -941,6 +1029,9 @@ function majClient() {
   const bouton = $("subNouveauClient");
   bouton.textContent = ficheNouvelle ? "Choisir un client existant" : "Créer une fiche client";
   bouton.setAttribute("aria-expanded", String(ficheNouvelle));
+  // Le client choisi, la carte se replie sur lui : « Creer une fiche client »
+  // n'a plus lieu d'etre (la croix du champ rend la recherche).
+  bouton.hidden = Boolean(c) && !ficheNouvelle;
   if (c) {
     $("subClientNom").textContent = name(c) || "Client sans nom";
     $("subClientAdresse").querySelector("span").textContent = adresseClient(c) || "Adresse à compléter";

@@ -114,8 +114,10 @@ test("une échéance en retard se crée depuis l'agenda", async ({ page }) => {
   await retard.getByRole("button", { name: /^Créer la commande/ }).click();
   await envoi;
   await expect(page.locator("#pageSubtitle")).toHaveText("2 actifs · 1 en pause · 1 échéance en retard");
-  // La commande creee se lit dans l'agenda, et mene a Commandes.
-  await expect(page.locator("#subscriptionAgenda .abo-badge--commande").first()).toBeVisible();
+  // La commande creee (planifiee) se CONFIRME sur son echeance : decision 6
+  // de Thomas (24/09), a la place du badge « A confirmer » qui menait a
+  // Commandes (parcours-simplifies.spec.js tient le geste).
+  await expect(page.locator('#subscriptionAgenda [data-op="confirm-sub-order"][data-id="sub-retard"]').first()).toBeVisible();
 });
 
 test("le tableau de bord compte le même retard que l'écran Abonnements", async ({ page }) => {

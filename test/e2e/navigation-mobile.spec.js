@@ -60,10 +60,13 @@ for (const onglet of ["journee", "commandes", "stock", "crm", "abonnements", "pa
 }
 
 test("sur le vert, un bouton plein est blanc à texte vert (il ne disparaît pas)", async ({ page }) => {
-  await page.goto("/#commandes", { waitUntil: "networkidle" });
+  // « Importer les ventes » du tableau de bord : « Nouvelle commande », le
+  // bouton plein que ce banc lisait, a quitte l'en-tete vert le 24/09 (fixe
+  // en bas, comme « Nouveau client »).
+  await page.goto("/#journee", { waitUntil: "networkidle" });
   // En clair (le theme par defaut du banc) : le fond du bouton est la SURFACE
   // (blanc), pas le principal -- vert sur vert, il disparaissait.
-  const r = await page.locator('#enteteActions [data-target-tab="commande-client"]').evaluate(b => {
+  const r = await page.locator('#enteteActions .tb-importer').evaluate(b => {
     const sonde = document.createElement("span");
     sonde.style.color = "var(--v8-surface)";
     document.body.append(sonde);

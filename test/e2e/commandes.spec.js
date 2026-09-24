@@ -60,7 +60,7 @@ test("un seul tableau, sept pilules de statut, six colonnes", async ({ page }) =
   await ouvrir(page);
   const pilules = await page.locator("#cmdPilules [data-cmd-filtre]").allTextContents();
   expect(pilules.map(p => p.trim())).toEqual(
-    ["Toutes", "À envoyer", "À préparer", "Prêt livraison", "En livraison", "Livrées", "Planifiées"]);
+    ["Toutes", "À envoyer", "À préparer", "Prêtes", "En livraison", "Livrées", "Planifiées"]);
   const entete = await page.locator("#commandes .cmd-entete span:not(.cmd-col-choix)").allTextContents();
   expect(entete).toEqual(["Numéro", "Date", "Client", "Secteur", "Articles", "Statut"]);
   expect(await lignes(page).count()).toBeGreaterThan(5);
@@ -166,14 +166,15 @@ test("« Nouvelle commande » mène à la saisie, et Commandes reste allumé", a
   await expect(page.locator("#nav-commandes")).toHaveClass(/active/);
 });
 
-test("« Exporter en CSV » télécharge le filtre courant", async ({ page }) => {
+// Decision 9 (24/09) : un seul export, en Excel (plus de CSV).
+test("« Exporter (Excel) » télécharge le filtre courant", async ({ page }) => {
   await ouvrir(page);
   await page.locator('[data-cmd-filtre="livrees"]').click();
   const [telechargement] = await Promise.all([
     page.waitForEvent("download"),
     page.locator('#enteteActions [data-action="cmd-export"]').click()
   ]);
-  expect(telechargement.suggestedFilename()).toMatch(/^sereo-commandes-\d{4}-\d{2}-\d{2}\.csv$/);
+  expect(telechargement.suggestedFilename()).toMatch(/^sereo-commandes-\d{4}-\d{2}-\d{2}\.xlsx$/);
 });
 
 test("l'export fait à 0 h 30 à Paris porte la date du jour, pas celle de la veille (24/09)", async ({ page }) => {
@@ -186,7 +187,7 @@ test("l'export fait à 0 h 30 à Paris porte la date du jour, pas celle de la ve
     page.waitForEvent("download"),
     page.locator('#enteteActions [data-action="cmd-export"]').click()
   ]);
-  expect(telechargement.suggestedFilename()).toBe("sereo-commandes-2026-10-01.csv");
+  expect(telechargement.suggestedFilename()).toBe("sereo-commandes-2026-10-01.xlsx");
 });
 
 test("le sous-titre compte les bons, comme la planche", async ({ page }) => {
@@ -250,10 +251,12 @@ test("la période Du / Au borne la liste ET l'export", async ({ page }) => {
     page.waitForEvent("download"),
     page.locator('#enteteActions [data-action="cmd-export"]').click()
   ]);
-  const csv = require("fs").readFileSync(await telechargement.path(), "utf8");
-  expect(csv).toContain("CMD-2026-903");
-  expect(csv).not.toContain("CMD-2026-904");
-  expect(csv).not.toContain("CMD-2025-907");
+  // Le classeur Excel : on lit sa feuille (XML) dans l'archive.
+  const { unzipSync, strFromU8 } = require("fflate");
+  const feuille = strFromU8(unzipSync(new Uint8Array(require("fs").readFileSync(await telechargement.path())))["xl/worksheets/sheet1.xml"]);
+  expect(feuille).toContain("CMD-2026-903");
+  expect(feuille).not.toContain("CMD-2026-904");
+  expect(feuille).not.toContain("CMD-2025-907");
 });
 
 test("la ligne dit son statut dans son nom accessible", async ({ page }) => {
@@ -317,13 +320,15 @@ test("« Modifier le profil » puis « Annuler » : le détail reste sur la mêm
 });
 
 test("une redirection arrive sur une liste propre", async ({ page }) => {
-  // « Bloquees seulement » coche, puis la saisie d'une commande renvoie vers
-  // « A envoyer » : la commande saisie etait cachee.
+  // « Bloquees seulement » coche, puis un ancien lien : la liste etait cachee.
+  // (24/09 : #commandes-jour ouvre « Toutes » -- « À envoyer » est vide par
+  // construction ; la saisie ne passe plus par la, pieges-import-validation.)
   await ouvrir(page);
+  await page.locator('[data-cmd-filtre="livrees"]').click();
   await page.locator(".cmd-case", { hasText: "Bloqu" }).click();
   await page.fill("#cmdRecherche", "introuvable-xyz");
   await page.evaluate(() => { location.hash = "#commandes-jour"; });
-  await expect(page.locator('[data-cmd-filtre="a-envoyer"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator('[data-cmd-filtre="toutes"]')).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("#cmdBloquees")).not.toBeChecked();
   await expect(page.locator("#cmdRecherche")).toHaveValue("");
   // Et le jour revient a aujourd'hui : la commande saisie est du jour.
@@ -459,6 +464,10 @@ test("téléphone : les pilules de statut sont DANS l'en-tête vert, sous la rec
 
 test("téléphone : une pilule de l'en-tête filtre la liste", async ({ page }) => {
   await ouvrirTelephone(page);
+  // Au-dela de deux rangs, « Livrees » est derriere « + N » (24/09) : on
+  // deplie d'abord, comme au doigt.
+  const plus = page.locator("#cmdPilules > .pilules-plus:visible");
+  if (await plus.count()) await plus.click();
   await page.locator('#cmdPilules [data-cmd-filtre="livrees"]').click();
   await expect(page.locator('#cmdPilules [data-cmd-filtre="livrees"]')).toHaveAttribute("aria-pressed", "true");
   const statuts = await page.locator("#cmdLignes .cmd-badge").allTextContents();

@@ -141,7 +141,17 @@ test("4b — les gestes sont SOUS LE POUCE : au-dessus de la barre basse, a l'ou
   // Visible sans defiler : entre le haut de l'ecran et la barre basse.
   expect(r.livre.haut).toBeGreaterThan(0);
   expect(r.livre.bas, "« Livre » passe sous la barre basse").toBeLessThanOrEqual(r.barre + 1);
-  expect(r.absent, "« Client absent » passe sous la barre basse").toBeLessThanOrEqual(r.barre + 1);
+  // « Client absent » : hors de la barre collee depuis le 24/09 (elle cachait
+  // les articles a decharger ; telephone-utilisable.spec.js) -- a un
+  // defilement, et alors au-dessus de la barre basse.
+  // (scrollIntoViewIfNeeded ne defile pas : sous la barre basse, le bouton
+  // est encore « dans » la fenetre.)
+  const absent = await page.evaluate(() => {
+    const b = document.getElementById("markAbsentButton");
+    b.scrollIntoView({ block: "center" });
+    return b.getBoundingClientRect().bottom;
+  });
+  expect(absent, "« Client absent » passe sous la barre basse").toBeLessThanOrEqual(r.barre + 1);
   // Appeler : un rond de 56.
   expect(r.appeler.map(Math.round)).toEqual([56, 56]);
   await ctx.close();
@@ -242,7 +252,9 @@ test("4a — la commande prete se lit « CMD-... · n articles », puis son jour
     // mais le jour et le secteur y restent -- sans filtre de date, la liste
     // melange les dates et les secteurs.
     expect(c.adresse, "l'adresse quitte la ligne au telephone").toBe(false);
-    expect(c.contexte, "le jour et le secteur de la commande ont disparu de la ligne").toMatch(/^[a-zé]+\.? \d{2}\/\d{2} · .+/);
+    // « jeu. 24 sept. · Dole » : la date d'une livraison s'ecrit comme
+    // partout (utils/dates.js, parcours simplifies du 24/09), plus « jeu. 24/09 ».
+    expect(c.contexte, "le jour et le secteur de la commande ont disparu de la ligne").toMatch(/^[a-zé]+\.? \d{1,2} [a-zéû]+\.? · .+/);
   }
   // Deux commandes pretes du meme client, aujourd'hui et demain : la ligne
   // doit dire laquelle est laquelle.

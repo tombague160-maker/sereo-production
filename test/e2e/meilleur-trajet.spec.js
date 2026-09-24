@@ -157,7 +157,8 @@ test.describe("Tournée — plus de 50 commandes", () => {
     expect(envoye.orderIds.every(id => Number(id.slice(2)) % 2 === 1)).toBe(true);
     const toast = page.locator("#toastRegion .toast-message").last();
     await expect(toast).toContainText("sans Client 00");
-    await expect(toast).toContainText("28 commande(s) restent sélectionnées pour la tournée suivante");
+    // Le pluriel juste (parcours simplifies, 24/09) : plus de « commande(s) ».
+    await expect(toast).toContainText("28 commandes restent sélectionnées pour la tournée suivante");
   });
 
   // Revue du 23/09 : hors ligne, la proposition de decoupage (qui n'ecrit rien)

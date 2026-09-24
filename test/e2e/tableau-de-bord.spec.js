@@ -133,7 +133,10 @@ test("les listes du tableau de bord sont les MÊMES lignes qu'ailleurs, avec leu
   expect(r.lignes.every(l => l.disque), "chaque ligne porte son disque d'état").toBe(true);
   expect(r.lignes.map(l => l.infos), "quatre informations par ligne").toEqual(r.lignes.map(() => 4));
   expect(r.anciennesRangees, "plus aucune ancienne rangée .op-order-row").toBe(0);
-  expect(r.titre, "le titre de la planche").toBe("À préparer aujourd’hui 1");
+  // Trois : le compte « a preparer » de l'ecran Preparation, un seul partout
+  // (parcours simplifies, 24/09) -- o-7 en preparation, o-9 et o-10 importees.
+  // Il comptait 1 : les importees manquaient.
+  expect(r.titre, "le titre de la planche").toBe("À préparer aujourd’hui 3");
   await ctx.close();
 });
 

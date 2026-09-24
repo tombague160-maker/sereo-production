@@ -106,10 +106,12 @@ for (const schema of ["light", "dark"]) {
     // L'evolution de la semaine et celle du mois : UNE fois chacune, dans leur
     // tuile (l'ancien ecran les montrait quatre fois, deux sans dire laquelle).
     const texte = await page.locator("#statistiques").innerText();
-    const evolutions = texte.match(/(progression|baisse) [+-]?\d+%|Stable/g) || [];
+    // Parcours simplifies (24/09) : « nouveau » quand la periode d'avant vaut 0
+    // (plus de « +100 % »), et l'espace fine insecable avant « % ».
+    const evolutions = texte.match(/(progression|baisse|stable) [+-]?\d+(,\d+)? %|Stable|nouveau/g) || [];
     expect(evolutions, texte).toHaveLength(2);
-    await expect(page.locator("#statsKpis .stat-tile", { hasText: "semaine" })).toContainText(/progression|baisse|Stable/);
-    await expect(page.locator("#statsKpis .stat-tile", { hasText: "du mois" })).toContainText(/progression|baisse|Stable/);
+    await expect(page.locator("#statsKpis .stat-tile", { hasText: "semaine" })).toContainText(/progression|baisse|stable|Stable|nouveau/);
+    await expect(page.locator("#statsKpis .stat-tile", { hasText: "du mois" })).toContainText(/progression|baisse|stable|Stable|nouveau/);
   });
 
   test(`Analyse (${schema}) : des cartes blanches, des chiffres de la charte`, async ({ page }) => {
@@ -219,10 +221,10 @@ for (const schema of ["light", "dark"]) {
     expect.soft(contraste(principal, vide), `${principal} / ${vide}`).toBeGreaterThanOrEqual(3);
   });
 
-  test(`Exports, Rappels, À recommander, Commande client (${schema}) : aucune carte à trait coloré`, async ({ page }) => {
+  // L'ecran Exports est parti (decision 9, 24/09) : on exporte depuis Commandes.
+  test(`Rappels, À recommander, Commande client (${schema}) : aucune carte à trait coloré`, async ({ page }) => {
     const surface = async () => jeton(page, "--v8-surface");
     const cas = [
-      ["exports", "#exportsList > article"],
       ["relances", "#relanceList > article"],
       ["recommande", "#recommandeList > article"],
       ["commande-client", "#customerCatalog .product-card"],
@@ -267,8 +269,8 @@ for (const schema of ["light", "dark"]) {
     // tiennent pas cote a cote sur 328.
     const cas = [
       ["relances", "#relances .recommend-toolbar .button", 5, "filtre"],
-      ["recommande", "#recommande .recommend-toolbar .button", 3, "filtre"],
-      ["exports", "#exports .export-actions .button", 3, "geste"]
+      ["recommande", "#recommande .recommend-toolbar .button", 3, "filtre"]
+      // (« exports » : l'ecran est parti, decision 9 du 24/09.)
     ];
     let premier = true;
     for (const [ecran, selecteur, n, nature] of cas) {
@@ -388,7 +390,9 @@ test("dette 7 : les quatre anciennes listes ont quitté la page, leurs adresses 
   await expect(page.locator("#bdc-detail-modal")).toHaveAttribute("aria-hidden", "false");
   await page.keyboard.press("Escape");
   // Les anciennes adresses arrivent sur l'ecran unique, filtre.
-  for (const [ancien, filtre] of [["commandes-jour", "a-envoyer"], ["commandes-livrees", "livrees"]]) {
+  // (24/09 : #commandes-jour ouvre « Toutes » ; en second, pour que le filtre
+  // CHANGE -- la liste s'ouvre deja sur « Toutes ».)
+  for (const [ancien, filtre] of [["commandes-livrees", "livrees"], ["commandes-jour", "toutes"]]) {
     await page.evaluate(h => { location.hash = `#${h}`; }, ancien);
     await expect(page.locator("#commandes")).toHaveClass(/active/);
     await expect(page.locator(`[data-cmd-filtre="${filtre}"]`)).toHaveClass(/active-filter/);

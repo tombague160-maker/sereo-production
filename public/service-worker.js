@@ -30,6 +30,8 @@ const APP_SHELL = [
   "/js/utils/text.js",
   "/js/utils/address.js",
   "/js/utils/file-attente.js",
+  // Les dates et les heures (parcours simplifies, 24/09).
+  "/js/utils/dates.js",
   "/js/config/themes.js",
   "/js/config/tabs.js",
   "/js/domains/comptes.js",
@@ -69,12 +71,18 @@ const APP_SHELL = [
 // -- une copie perimee montree comme fraiche -- est desormais tenue autrement :
 // toute reponse rendue par le cache porte l'en-tete X-Sereo-Cache, et la page
 // ne dit alors jamais « A jour ».
+// /api/sauvegardes/derniere (24/09) : la base entiere, pour l'administrateur.
+// Jamais une copie dans le cache de l'appareil.
+// /api/journal (24/09) : reserve a l'administration, comme /api/comptes ; une
+// copie en cache le rendrait hors ligne a un autre compte du meme appareil.
 const API_CACHE_EXCLUDED = [
   "/api/storage/status",
   "/api/version",
   "/api/me",
   "/api/comptes",
-  "/api/geocode"
+  "/api/geocode",
+  "/api/sauvegardes/derniere",
+  "/api/journal"
 ];
 
 // Network-first avec timeout puis fallback cache pour les GET /api/*.

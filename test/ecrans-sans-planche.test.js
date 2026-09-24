@@ -62,7 +62,8 @@ test("dette 7 — les quatre sections ont quitte la page", () => {
 test("dette 7 — contre-temoin : les anciennes adresses redirigent toujours", () => {
   // Sans ce contre-temoin, « retirer les listes » pourrait emporter les
   // redirections, et un ancien lien tomberait sur un ecran vide.
-  for (const [ancien, filtre] of [["commandes-jour", "a-envoyer"], ["commandes-planifiees", "planifiees"],
+  // 24/09 : « À envoyer » est vide par construction, #commandes-jour ouvre « Toutes ».
+  for (const [ancien, filtre] of [["commandes-jour", "toutes"], ["commandes-planifiees", "planifiees"],
     ["bons-commande", "toutes"], ["commandes-livrees", "livrees"]]) {
     const ligne = new RegExp(`"${ancien}":\\s*\\{\\s*onglet:\\s*"commandes",\\s*filtre:\\s*"${filtre}"\\s*\\}`);
     assert.ok(ligne.test(onglets), `redirection perdue : #${ancien} -> commandes (${filtre})`);

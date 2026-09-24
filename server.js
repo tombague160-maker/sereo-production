@@ -15,6 +15,14 @@ const { fondDeCarte } = require("./lib/fond-de-carte");
 const { GestionnaireOsrm } = require("./lib/osrm-local");
 // Le jour calendaire est celui de Paris, quel que soit le fuseau du processus (24/09).
 const { jourParis, jourDeLInstant, ajouterJours, debutSemaine, debutMois, moisSuivant, moisPrecedent } = require("./lib/jour-paris");
+// Le calendrier des abonnements, celui de l'ecran Abonnements (« A recommander
+// qui voit venir », 24/09 : les echeances ne se recalculent pas autrement).
+const calendrierAbonnements = require("./lib/subscriptions");
+// Lot « donnees utiles » (24/09) : garde-fous de saisie, clients qui ne
+// commandent plus, auteur de chaque ecriture.
+const saisie = require("./lib/saisie");
+const { relanceSuggeree } = require("./lib/relance-client");
+const { AsyncLocalStorage } = require("node:async_hooks");
 
 loadEnvFile(path.join(__dirname, ".env"));
 
@@ -345,11 +353,18 @@ const STOP_STATUSES = new Set(["pret_livraison", "en_livraison", "livre", "absen
 // SSIAD, cliniques -- et non d'une liste generique de messagerie. C'est un
 // choix de vocabulaire metier : il se change en une ligne si Tom en veut
 // d'autres, et rien d'autre dans le code ne depend de ces libelles.
+//
+// DECISION 10 DE THOMAS (24/09) : « Personne sur place » et « Etablissement
+// ferme » decrivent une ABSENCE ; ils ne sont plus PROPOSES pour « Probleme »
+// (`proposes`, ce que le dialogue du livreur montre). Ils restent ADMIS
+// (`statutsAdmis`, ce que le serveur accepte) : un geste « Probleme / Personne
+// sur place » fait hors ligne avant la mise a jour, et rejoue ensuite par la
+// file, ne doit pas etre refuse.
 const MOTIFS_PROBLEME = new Map([
-  ["absent", { libelle: "Personne sur place", statutsAdmis: ["absent", "probleme", "a_reprogrammer"] }],
+  ["absent", { libelle: "Personne sur place", statutsAdmis: ["absent", "probleme", "a_reprogrammer"], proposes: ["absent", "a_reprogrammer"] }],
   ["adresse", { libelle: "Adresse introuvable", statutsAdmis: ["probleme", "a_reprogrammer"] }],
   ["acces", { libelle: "Accès impossible (portail, code, étage)", statutsAdmis: ["probleme", "a_reprogrammer"] }],
-  ["ferme", { libelle: "Établissement fermé", statutsAdmis: ["absent", "probleme", "a_reprogrammer"] }],
+  ["ferme", { libelle: "Établissement fermé", statutsAdmis: ["absent", "probleme", "a_reprogrammer"], proposes: ["absent", "a_reprogrammer"] }],
   ["refus", { libelle: "Commande refusée", statutsAdmis: ["probleme", "a_reprogrammer"] }],
   ["produit", { libelle: "Produit manquant ou abîmé", statutsAdmis: ["probleme", "a_reprogrammer"] }],
   ["autre", { libelle: "Autre", statutsAdmis: ["absent", "probleme", "a_reprogrammer"] }]
@@ -518,6 +533,8 @@ function finDeSessionConnue(req, now = Date.now()) {
   return session ? session.issuedAt + duree : null;
 }
 app.use("/api", requireTrustedApiRequest);
+// L'auteur des ecritures : voir auteurCourant (lot « donnees utiles », 24/09).
+app.use("/api", (req, res, next) => contexteRequete.run(req, next));
 app.use("/api", gesteIdempotent);
 
 // --- UN GESTE RENVOYE N'EST APPLIQUE QU'UNE FOIS (lot 1 de l'audit geo) ------
@@ -2438,6 +2455,16 @@ let backupsSuspendedFreshEmpty = false;
 // pouvait tourner des jours sans nouveau backup en paraissant saine.
 let lastBackupAt = null;
 let lastBackupError = null;
+// Carte « Sauvegardes » (24/09) : l'instant de la derniere ecriture de donnees
+// DE CE PROCESSUS (ms), ou null s'il n'a encore rien ecrit. Une sauvegarde ne
+// part qu'apres une ecriture, au plus une par heure : sans ecriture, une
+// sauvegarde de trois jours reste a jour (un week-end sans activite n'est pas
+// une panne). L'alerte « perimee » veut donc une ecriture PLUS RECENTE que la
+// derniere sauvegarde. Les deux ecritures internes (la mise en coherence du
+// demarrage, la ligne d'historique d'une sauvegarde manuelle) ne comptent pas.
+let derniereModificationA = null;
+// Au-dela, une sauvegarde qui ne couvre pas la derniere ecriture est signalee.
+const SAUVEGARDE_PERIMEE_MS = 24 * 60 * 60 * 1000;
 // Nombre max de fichiers .corrupt-<ts> conserves (forensic) avant purge
 const QUARANTINE_RETENTION = 5;
 
@@ -2766,7 +2793,9 @@ function healDatabaseAtBoot() {
     // Revue du 23/09 (lot 5) : la position « Me localiser » exacte ne dort plus
     // dans le trace des tournees terminees calculees avant le lot.
     rognerTracesGpsTerminees(db);
-    writeDb(db, { backup: false });
+    // La mise en coherence du demarrage n'est pas une saisie : elle ne rend
+    // pas la derniere sauvegarde « perimee » (carte Sauvegardes, 24/09).
+    writeDb(db, { backup: false, modification: false });
     if (lastStorageRecovery) {
       console.error(`[boot] ATTENTION : recovery storage detectee au demarrage (${lastStorageRecovery.mode}).`);
     } else {
@@ -2849,6 +2878,10 @@ function ensureOrderNumbers(db) {
 const DEPOT_LIBELLE_MAX = 200;
 const MESSAGE_PREVENIR_MAX = 300;
 const MESSAGE_PREVENIR_DEFAUT = "Bonjour, je passe vers {heure} pour votre livraison.";
+// L'horizon de « A recommander », en jours (Parametres, 24/09).
+const HORIZON_MIN_JOURS = 7;
+const HORIZON_MAX_JOURS = 30;
+const HORIZON_DEFAUT_JOURS = 14;
 
 function normalizeSettings(settings = {}) {
   const appearance = settings && typeof settings === "object" && settings.appearance && typeof settings.appearance === "object"
@@ -2888,6 +2921,17 @@ function normalizeSettings(settings = {}) {
     ? tourneeRaw.messagePrevenir.trim().slice(0, MESSAGE_PREVENIR_MAX)
     : MESSAGE_PREVENIR_DEFAUT;
 
+  // « A recommander » qui voit venir (decision de Thomas du 24/09) : l'horizon,
+  // en jours, des commandes planifiees et des echeances d'abonnement comptees.
+  // Le delai de reassort fournisseur : 7 a 30 jours, 14 par defaut.
+  const stockRaw = settings && typeof settings === "object" && settings.stock && typeof settings.stock === "object"
+    ? settings.stock
+    : {};
+  const rawHorizon = Number(stockRaw.horizonJours);
+  const horizonJours = Number.isInteger(rawHorizon) && rawHorizon >= HORIZON_MIN_JOURS && rawHorizon <= HORIZON_MAX_JOURS
+    ? rawHorizon
+    : HORIZON_DEFAUT_JOURS;
+
   // Revue R1 NIT-15 + R2 minor : si `settings` est une string corrompue,
   // `...settings` spread les indices de caracteres ("0":"a", "1":"b", ...).
   // Si `settings` est un Array, `typeof === "object"` passe mais on spread
@@ -2910,6 +2954,9 @@ function normalizeSettings(settings = {}) {
       depot,
       retourAuDepot,
       messagePrevenir
+    },
+    stock: {
+      horizonJours
     }
   };
 }
@@ -2959,7 +3006,7 @@ function dbHasData(db) {
 }
 
 function writeDb(db, options = {}) {
-  const { backup = true } = options;
+  const { backup = true, modification = true } = options;
 
   syncWorkflow(db);
 
@@ -2989,6 +3036,7 @@ function writeDb(db, options = {}) {
     fs.writeFileSync(tempPath, JSON.stringify(db, null, 2), "utf8");
     fs.renameSync(tempPath, DB_PATH);
   }
+  if (modification) derniereModificationA = Date.now();
 
   // Chantier 2 : backup async fire-and-forget. Le main thread ne bloque
   // plus 300-800 ms sur gzipSync d'une base 100 MB — la compression part
@@ -3106,6 +3154,9 @@ async function withWriteLock(fn) {
 // (typiquement -65% sur une base SQLite).
 const BACKUP_THROTTLE_MS = 60 * 60 * 1000; // 1h
 const BACKUP_RETENTION = 30;
+// Decision de Thomas du 24/09 : EN PLUS des 30 dernieres, une sauvegarde par
+// jour (de Paris) pendant 30 jours. Voir sauvegardesAGarder().
+const BACKUP_JOURS_JOURNALIERES = 30;
 const BACKUP_FILENAME_PATTERN = /^db-.*\.(sqlite|json)(\.gz)?$/;
 
 function listBackupEntries() {
@@ -3115,7 +3166,8 @@ function listBackupEntries() {
     .map(name => {
       const fullPath = path.join(BACKUP_DIR, name);
       try {
-        return { name, fullPath, mtimeMs: fs.statSync(fullPath).mtimeMs };
+        const stat = fs.statSync(fullPath);
+        return { name, fullPath, mtimeMs: stat.mtimeMs, size: stat.size };
       } catch {
         return null;
       }
@@ -3128,9 +3180,40 @@ function listBackupEntries() {
     .sort((a, b) => (b.mtimeMs - a.mtimeMs) || b.name.localeCompare(a.name));
 }
 
+// Les sauvegardes a garder (decision de Thomas du 24/09).
+//
+// Avant : les 30 plus recentes, point. A une sauvegarde par heure d'activite,
+// elles couvraient environ trois jours ouvres : une erreur remarquee une
+// semaine plus tard n'avait plus de sauvegarde d'avant elle.
+//
+// Maintenant : les 30 plus recentes, COMME AVANT, plus la derniere de chaque
+// jour de Paris sur les 30 derniers jours (aujourd'hui compris). Une
+// journaliere n'est pas un fichier de plus : c'est une sauvegarde deja ecrite
+// que la rotation ne supprime pas. Pour les jours que les 30 dernieres
+// couvrent deja, elle en fait partie.
+//
+// L'ensemble garde CONTIENT toujours celui d'avant (les 30 plus recentes) :
+// la rotation ne supprime jamais plus qu'avant, meme apres un mois sans
+// activite (les 30 plus recentes, toutes vieilles, restent).
+//
+// `entries` : triees de la plus recente a la plus ancienne (listBackupEntries).
+function sauvegardesAGarder(entries, maintenant = new Date()) {
+  const garder = new Set(entries.slice(0, BACKUP_RETENTION).map(entry => entry.name));
+  const premierJour = ajouterJours(jourParis(maintenant), -(BACKUP_JOURS_JOURNALIERES - 1));
+  const joursVus = new Set();
+  for (const entry of entries) {
+    const jour = jourParis(entry.mtimeMs);
+    if (!jour || jour < premierJour || joursVus.has(jour)) continue;
+    joursVus.add(jour);
+    garder.add(entry.name);
+  }
+  return garder;
+}
+
 function pruneOldBackups() {
   const entries = listBackupEntries();
-  entries.slice(BACKUP_RETENTION).forEach(entry => {
+  const garder = sauvegardesAGarder(entries);
+  entries.filter(entry => !garder.has(entry.name)).forEach(entry => {
     try { fs.unlinkSync(entry.fullPath); } catch { /* best-effort */ }
   });
 }
@@ -3282,13 +3365,32 @@ function safeTimestamp(date = new Date()) {
   return date.toISOString().replace(/[:.]/g, "-");
 }
 
+// --- L'AUTEUR D'UNE ECRITURE (lot « donnees utiles », 24/09) -----------------
+//
+// Le journal ne disait pas QUI avait fait quoi : un ecart de stock ne pouvait
+// pas etre attribue (audit du 24/09). addHistory est appele d'une cinquantaine
+// d'endroits, dont deux modules (lib/operations-api.js, lib/tournee-pratique.js) :
+// plutot que de passer la requete a chacun, chaque requete /api s'execute dans
+// un contexte (AsyncLocalStorage) que l'ecriture relit. Il suit les `await` et
+// la file d'ecriture (withWriteLock est appele depuis la requete).
+//
+// Hors requete (purge planifiee, geocodage de fond) : « automatique ».
+const contexteRequete = new AsyncLocalStorage();
+
+function auteurCourant() {
+  const req = contexteRequete.getStore();
+  if (!req) return "automatique";
+  return getRequestIdentity(req)?.identifiant || "";
+}
+
 function addHistory(db, type, message, details = {}) {
   db.historique.unshift({
     id: crypto.randomUUID(),
     date: new Date().toISOString(),
     type,
     message,
-    details
+    details,
+    auteur: auteurCourant()
   });
 }
 
@@ -3926,15 +4028,23 @@ const NEEDED_ORDER_STATUSES = new Set([
 //
 // Correctness : `stockItemMatchesLine` sert de reference (OR sur code/name).
 // L'index reproduit fidelement sa semantique en O(N+M) au lieu de O(N*M).
+//
+// `neededNotDeducted` (relecture adverse du 24/09) : la part de `needed` que
+// le stock n'a pas encore sortie du rayon. Une commande dont le stock est
+// reserve (stockReservedAt : confirmee, saisie chez le client, en
+// preparation) a deja deduit ses quantites de `quantite` ; seules ses lignes
+// gardees non deduites (stockNonDeduit, livraison acceptee sur un stock non
+// suivi) restent a prendre. « A recommander » compare CE besoin au stock
+// d'aujourd'hui : avec `needed`, une commande confirmee manquait deux fois.
 function buildStockMetricsIndex(commandes) {
-  const totals = new Map(); // canonicalKey -> { reserved, needed }
+  const totals = new Map(); // canonicalKey -> { reserved, needed, neededNotDeducted }
   const byCode = new Map(); // codeNorm -> Set<canonicalKey>
   const byName = new Map(); // nameNorm -> Set<canonicalKey>
 
   const ensureCanonical = (canonicalKey) => {
     let slot = totals.get(canonicalKey);
     if (!slot) {
-      slot = { reserved: 0, needed: 0 };
+      slot = { reserved: 0, needed: 0, neededNotDeducted: 0 };
       totals.set(canonicalKey, slot);
     }
     return slot;
@@ -3950,6 +4060,8 @@ function buildStockMetricsIndex(commandes) {
     const isReserved = Boolean(order.stockReservedAt && RESERVED_ORDER_STATUSES.includes(order.status));
     const isNeeded = NEEDED_ORDER_STATUSES.has(order.status);
     if (!isReserved && !isNeeded) continue;
+    // null : rien de deduit, toute la ligne reste a prendre.
+    const nonDeduites = order.stockReservedAt ? new Set(order.stockNonDeduit || []) : null;
 
     for (const line of normalizeProducts(order.products)) {
       const qty = Math.max(0, number(line.quantite, 0));
@@ -3965,6 +4077,7 @@ function buildStockMetricsIndex(commandes) {
       const slot = ensureCanonical(canonicalKey);
       if (isReserved) slot.reserved += qty;
       if (isNeeded) slot.needed += qty;
+      if (isNeeded && (!nonDeduites || nonDeduites.has(productKeyFromLine(line)))) slot.neededNotDeducted += qty;
 
       addReverse(byCode, codeNorm, canonicalKey);
       addReverse(byName, nameNorm, canonicalKey);
@@ -4000,6 +4113,81 @@ function lookupStockMetric(index, product, kind) {
   return total;
 }
 
+// « A recommander » qui voit venir (decisions de Thomas du 24/09, 2 et 3).
+//
+// La demande CONNUE D'AVANCE, sur l'horizon regle dans Parametres (14 jours
+// par defaut, 7 a 30), en plus des commandes en cours (quantityNeeded) :
+//   - les commandes planifiees (planifiee, a_confirmer) livrees d'ici la fin
+//     de l'horizon -- une date passee compte aujourd'hui : elle attend encore ;
+//   - les echeances des abonnements ACTIFS pas encore generees, d'aujourd'hui
+//     a la fin de l'horizon. Elles viennent de schedule() (lib/subscriptions.js),
+//     le calendrier de l'ecran Abonnements : un abonnement en pause ou arrete
+//     n'y figure pas, et une echeance deja generee y porte son orderId -- elle
+//     est comptee par sa commande, une seule fois. Une echeance PASSEE sans
+//     commande n'est pas « a venir » : l'ecran Abonnements la montre en
+//     retard (elle peut dater d'avant la saisie de l'abonnement).
+// Les lignes se rattachent aux produits comme dans buildStockMetricsIndex
+// (code OU nom, cles canoniques) ; chaque produit recoit sa demande par jour.
+const STATUTS_PLANIFIES = new Set(["planifiee", "a_confirmer"]);
+
+function buildUpcomingDemandIndex(db, today = jourParis()) {
+  const horizonJours = normalizeSettings(db.settings || {}).stock.horizonJours;
+  const fin = ajouterJours(today, horizonJours);
+  const parCle = new Map(); // canonicalKey -> Map<jour, quantite>
+  const byCode = new Map();
+  const byName = new Map();
+  const indexer = (map, key, canonicalKey) => {
+    if (!key) return;
+    let set = map.get(key);
+    if (!set) { set = new Set(); map.set(key, set); }
+    set.add(canonicalKey);
+  };
+  const ajouter = (products, jour) => {
+    for (const line of normalizeProducts(products)) {
+      const qty = Math.max(0, number(line.quantite, 0));
+      if (qty <= 0) continue;
+      const codeNorm = normalizeTextKey(line.code || line.sku || line.reference);
+      const nameNorm = normalizeTextKey(line.nom || line.produit || line.productName || line.name);
+      if (!codeNorm && !nameNorm) continue;
+      const canonicalKey = (codeNorm || "_") + "|" + (nameNorm || "_");
+      let parJour = parCle.get(canonicalKey);
+      if (!parJour) { parJour = new Map(); parCle.set(canonicalKey, parJour); }
+      parJour.set(jour, (parJour.get(jour) || 0) + qty);
+      indexer(byCode, codeNorm, canonicalKey);
+      indexer(byName, nameNorm, canonicalKey);
+    }
+  };
+
+  for (const order of db.commandes || []) {
+    if (!STATUTS_PLANIFIES.has(order.status)) continue;
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(order.deliveryDate || "")) ? order.deliveryDate : today;
+    if (date > fin) continue;
+    ajouter(order.products, date < today ? today : date);
+  }
+  for (const occurrence of calendrierAbonnements.schedule(db, today, horizonJours)) {
+    if (occurrence.orderId || occurrence.date < today || occurrence.date > fin) continue;
+    ajouter(occurrence.products, occurrence.date);
+  }
+  return { parCle, byCode, byName, horizonJours };
+}
+
+// La demande a venir d'un produit, par jour croissant : [{ date, quantite }].
+function lookupUpcomingDemand(index, product) {
+  if (!index || !index.parCle) return [];
+  const codeNorm = normalizeTextKey(getProductCode(product));
+  const nameNorm = normalizeTextKey(getProductName(product));
+  const candidates = new Set();
+  if (codeNorm) for (const k of index.byCode.get(codeNorm) || []) candidates.add(k);
+  if (nameNorm) for (const k of index.byName.get(nameNorm) || []) candidates.add(k);
+  const parJour = new Map();
+  for (const k of candidates) {
+    for (const [jour, qty] of index.parCle.get(k) || []) parJour.set(jour, (parJour.get(jour) || 0) + qty);
+  }
+  return [...parJour]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, quantite]) => ({ date, quantite: Math.round(quantite * 100) / 100 }));
+}
+
 // Garde l'API publique (utilisee par les tests). Sans index, recompose
 // l'ancien algorithme N*M. Avec index, lookup O(matches) tres rapide.
 function calculateReservedStock(db, product, index) {
@@ -4031,10 +4219,15 @@ function getStockStatus(product, db, index) {
 // Signature etendue : `index` est optionnel. S'il est passe (typique via
 // getStockView), tout est en O(1). Sans (call-site isole), comportement
 // legacy N*M (correct mais lent).
-function enrichStockItem(db, product, index) {
+function enrichStockItem(db, product, index, upcomingIndex = buildUpcomingDemandIndex(db)) {
   const quantityAvailable = getStockQuantity(product);
   const quantityReserved = calculateReservedStock(db, product, index);
   const quantityNeeded = calculateNeededStock(db, product, index);
+  // Ce qui reste a prendre sur quantityAvailable (buildStockMetricsIndex).
+  const quantityNeededNotDeducted = lookupStockMetric(index && index.totals ? index : buildStockMetricsIndex(db.commandes), product, "neededNotDeducted");
+  // « A recommander » qui voit venir (24/09) : la demande connue d'avance, par
+  // jour, sur l'horizon de Parametres. L'ecran en tire le jour du manque.
+  const upcomingDemand = lookupUpcomingDemand(upcomingIndex, product);
 
   return {
     ...product,
@@ -4043,6 +4236,10 @@ function enrichStockItem(db, product, index) {
     quantityAvailable,
     quantityReserved,
     quantityNeeded,
+    quantityNeededNotDeducted,
+    quantityUpcoming: Math.round(upcomingDemand.reduce((total, d) => total + d.quantite, 0) * 100) / 100,
+    upcomingDemand,
+    upcomingHorizonDays: upcomingIndex.horizonJours,
     quantityTotal: quantityAvailable === null ? null : quantityAvailable + quantityReserved,
     alertThreshold: getStockAlertThreshold(product),
     stockMinimum: getStockAlertThreshold(product),
@@ -4085,7 +4282,8 @@ function defaultDeliverySectors() {
 function getStockView(db) {
   // Construit l'index UNE seule fois, puis lookup O(1) par produit.
   const index = buildStockMetricsIndex(db.commandes);
-  return db.stock.map(product => enrichStockItem(db, product, index));
+  const upcomingIndex = buildUpcomingDemandIndex(db);
+  return db.stock.map(product => enrichStockItem(db, product, index, upcomingIndex));
 }
 
 function getRecommendations(db) {
@@ -4122,7 +4320,8 @@ function recordStockMovement(db, product, oldQuantity, newQuantity, reason = "Aj
     newQuantity,
     reason: clean(reason) || "Ajustement manuel",
     createdAt: new Date().toISOString(),
-    createdBy: "local"
+    // Avant le 24/09 : « local », toujours. L'auteur est celui de la requete.
+    createdBy: auteurCourant()
   });
 }
 
@@ -4852,17 +5051,45 @@ function inferCrmStatus(client, orders) {
   return "prospect";
 }
 
-function crmClientView(db, client) {
+// `ventesImportees` : l'index des ventes importees (buildImportedSalesIndex),
+// construit UNE fois par la liste des clients plutot qu'une fois par client.
+function crmClientView(db, client, ventesImportees = null) {
   const orders = getClientOrderHistory(db, client.id);
   const reminders = db.relances
     .filter(reminder => String(reminder.clientId) === String(client.id))
     .sort((a, b) => String(b.datePrevue || "").localeCompare(String(a.datePrevue || "")));
   const latestOrder = orders[0];
   const firstOrder = orders[orders.length - 1];
+  // Le chiffre d'affaires de la fiche (parcours simplifies, 24/09) : les
+  // commandes LIVREES seulement, comme l'Analyse. Il additionnait toutes les
+  // commandes du client, annulees comprises. Meme repli que computeStatistics
+  // pour une commande importee sans montant : ses ventes importees.
+  const livrees = orders.filter(order => order.status === "livre");
+  let index = ventesImportees;
+  const montantLivre = order => {
+    const explicite = getOrderTotal(order);
+    if (explicite) return explicite;
+    index = index || buildImportedSalesIndex(db.ventes);
+    return getImportedOrderTotal(index, order, orderDate(order));
+  };
+
+  const crmStatus = inferCrmStatus(client, orders);
 
   return {
     ...client,
-    crmStatus: inferCrmStatus(client, orders),
+    crmStatus,
+    // Decision 5 (24/09) : un client non abonne qui depasse 1,5 fois son rythme
+    // est SIGNALE, sans que son statut change (lib/relance-client.js). Derive a
+    // chaque lecture, jamais ecrit ; du statut, il ne lit que « client_inactif »
+    // (deja classe a la main) : « Confirmer » fige le statut en « client_actif »,
+    // le signal ne s'y fie donc pas.
+    relanceSuggeree: relanceSuggeree({
+      commandes: orders,
+      abonne: (db.subscriptions || []).some(sub => String(sub.clientId) === String(client.id) && sub.status === "active"),
+      statutCrm: crmStatus,
+      archive: Boolean(client.crmArchived),
+      aujourdhui: jourParis()
+    }),
     firstContactDate: client.firstContactDate || firstOrder?.dateCommande || "",
     lastVisitDate: client.lastVisitDate || latestOrder?.dateCommande || "",
     nextReminderDate: client.nextReminderDate || reminders.find(item => item.status === "a_faire")?.datePrevue || "",
@@ -4870,7 +5097,8 @@ function crmClientView(db, client) {
     reminderHistory: reminders,
     visitHistory: Array.isArray(client.visitHistory) ? client.visitHistory : [],
     totalOrders: orders.length,
-    totalRevenue: Math.round(orders.reduce((total, order) => total + getOrderTotal(order), 0) * 100) / 100
+    deliveredOrders: livrees.length,
+    totalRevenue: Math.round(livrees.reduce((total, order) => total + montantLivre(order), 0) * 100) / 100
   };
 }
 
@@ -4911,11 +5139,13 @@ function validateCrmClientPayload(payload = {}, existing = {}) {
     ...existing,
     nom: clean(payload.nom ?? existing.nom ?? "Client sans nom"),
     prenom: clean(payload.prenom ?? existing.prenom),
-    telephone: clean(payload.telephone ?? existing.telephone),
+    // Garde-fous de saisie (24/09) : 10 chiffres, 5 chiffres ; refus nomme,
+    // et une valeur deja en base qui revient telle quelle n'est pas touchee.
+    telephone: saisie.telephoneSaisi(payload.telephone, existing.telephone, badRequest),
     email: clean(payload.email ?? existing.email),
     rue: clean(payload.rue ?? payload.adresse ?? existing.rue),
     ville: city,
-    codePostal: clean(payload.codePostal ?? payload.postalCode ?? existing.codePostal),
+    codePostal: saisie.codePostalSaisi(payload.codePostal ?? payload.postalCode, existing.codePostal, badRequest),
     secteur: deriveSector(city, payload.secteur ?? existing.secteur),
     notes: clean(payload.notes ?? existing.notes),
     crmStatus: normalizeCrmStatus(payload.crmStatus ?? payload.statutCrm ?? existing.crmStatus),
@@ -4933,8 +5163,15 @@ function validateCrmClientPayload(payload = {}, existing = {}) {
   return normalizeClient(next);
 }
 
+// La cle d'un telephone pour reconnaitre un doublon : le numero normalise
+// quand il est valide (« 06 12 34 56 78 » tape = « 0612345678 » en base, depuis
+// que la saisie est normalisee, 24/09), sinon le texte comme avant.
+function cleTelephone(valeur) {
+  return saisie.normaliserTelephone(valeur) || normalizeTextKey(valeur || "");
+}
+
 function findDuplicateClient(db, payload, ignoreId = "") {
-  const phone = normalizeTextKey(payload.telephone || payload.phone || "");
+  const phone = cleTelephone(payload.telephone || payload.phone || "");
   const secondary = clientSecondaryKey({
     nom: [payload.prenom, payload.nom].filter(Boolean).join(" ") || payload.nom,
     codePostal: payload.codePostal || payload.postalCode
@@ -4942,7 +5179,7 @@ function findDuplicateClient(db, payload, ignoreId = "") {
 
   return db.clients.find(client => {
     if (ignoreId && String(client.id) === String(ignoreId)) return false;
-    const clientPhone = normalizeTextKey(client.telephone || "");
+    const clientPhone = cleTelephone(client.telephone || "");
     if (phone && clientPhone && phone === clientPhone) return true;
     if (secondary && clientSecondaryKey(client) === secondary) return true;
     return false;
@@ -5032,9 +5269,17 @@ function createCustomerOrder(db, payload = {}) {
     ...(payload.client || {})
   });
   const dateCommande = normalizeDateInput(payload.dateCommande) || jourParis();
-  const lines = buildCustomerOrderLines(db, payload.products || payload.produits);
+  // Decision 11 de Thomas (24/09) : un produit en rupture (ou au stock non
+  // renseigne) ne fait plus REFUSER la commande prise chez le client. Elle est
+  // acceptee en « Bloquee », comme une commande importee : rien n'est reserve,
+  // et la Preparation la debloque quand le stock arrive.
+  const lines = buildCustomerOrderLines(db, payload.products || payload.produits, { checkStock: false });
   const total = Math.round(lines.reduce((sum, line) => sum + line.totalLigne, 0) * 100) / 100;
   const numero = generateOrderNumber(db, dateCommande);
+  // Un code postal de livraison propre a la commande : les memes 5 chiffres (24/09).
+  const postalCode = payload.postalCode
+    ? saisie.codePostalSaisi(payload.postalCode, client.codePostal, badRequest)
+    : client.codePostal;
   const order = normalizeOrder({
     id: `cmd-${numero.toLowerCase()}`,
     numero,
@@ -5042,7 +5287,7 @@ function createCustomerOrder(db, payload = {}) {
     clientName: [client.prenom, client.nom].filter(Boolean).join(" ") || client.nom,
     address: payload.deliveryAddress || client.rue,
     city: payload.city || client.ville,
-    postalCode: payload.postalCode || client.codePostal,
+    postalCode,
     sector: client.secteur,
     phone: client.telephone,
     products: lines,
@@ -5062,7 +5307,9 @@ function createCustomerOrder(db, payload = {}) {
   client.nextReminderDate = client.nextReminderDate || "";
   heriterPositionDuClient(order, client);
   db.commandes.push(order);
-  reserveStockForOrder(db, order);
+  // Le stock suffit : reserve comme avant. Sinon (decision 11) : rien n'est
+  // reserve, la commande attend en « Bloquee » (canPrepare faux).
+  if (analyzeOrderStock(order, db.stock).canPrepare) reserveStockForOrder(db, order);
   setOrderStatus(order, "stock_a_verifier");
   order.sentToPreparationAt = new Date().toISOString();
   return order;
@@ -5622,7 +5869,9 @@ function computeStatistics(db, now = new Date()) {
 
   const periodEvolution = (current, previous) => {
     if (previous === 0 && current === 0) return { label: "stable", percent: 0 };
-    if (previous === 0) return { label: "progression", percent: 100 };
+    // Rien la periode d'avant : aucun pourcentage n'a de sens (c'etait « +100 % »,
+    // une croissance qui n'existe pas). Parcours simplifies, 24/09.
+    if (previous === 0) return { label: "nouveau", percent: null };
     const percent = Math.round(((current - previous) / previous) * 1000) / 10;
     return {
       label: Math.abs(percent) < 3 ? "stable" : (percent > 0 ? "progression" : "baisse"),
@@ -5720,35 +5969,73 @@ function buildXlsx(rows) {
   return Buffer.from(zipSync(files, { level: 6 }));
 }
 
+// Les mots des statuts dans l'export : ceux des badges de l'ecran Commandes
+// (public/js/app.js STATUT_COMMANDE), pas les cles techniques.
+const STATUTS_EXPORT = {
+  brouillon: "Brouillon",
+  commande_client_validee: "À envoyer",
+  importe: "À préparer",
+  stock_a_verifier: "À préparer",
+  en_preparation: "En préparation",
+  preparation_terminee: "Prête",
+  pret_livraison: "Prête",
+  en_livraison: "En livraison",
+  livre: "Livrée",
+  planifiee: "Planifiée",
+  a_confirmer: "À confirmer",
+  probleme_livraison: "Problème",
+  a_reprogrammer: "À reprogrammer",
+  annulee: "Annulée"
+};
+
+/** « 23/09/2026 » depuis une date ISO « 2026-09-23 » ; vide sinon. */
+function dateExport(valeur) {
+  const m = String(valeur || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : "";
+}
+
+/** « 23/09/2026 00:30 » : un INSTANT, lu a l'heure de Paris (pas d'UTC). */
+function instantExport(valeur) {
+  const instant = Date.parse(valeur || "");
+  if (!Number.isFinite(instant)) return "";
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("fr-FR", {
+    timeZone: "Europe/Paris", day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+  }).formatToParts(new Date(instant)).map(p => [p.type, p.value]));
+  return `${parts.day}/${parts.month}/${parts.year} ${parts.hour}:${parts.minute}`;
+}
+
+// L'export Excel de l'ecran Commandes (decision 9 de Thomas, 24/09 : un seul
+// export). Il porte ce qu'il faut pour rapprocher livraisons et factures : le
+// numero, la date REELLE de livraison et « remis a » -- aucun des deux anciens
+// exports n'avait les trois.
 function orderExportRows(orders) {
-  const headers = ["Date", "Client", "Adresse", "Telephone", "Produits", "Quantites", "Prix unitaires", "Total", "Statut", "Notes"];
+  const headers = ["Numéro", "Date de commande", "Livraison prévue", "Livrée le", "Remis à", "Client",
+    "Adresse", "Code postal", "Ville", "Secteur", "Téléphone", "Produits", "Quantités", "Prix unitaires",
+    "Total", "Statut", "Notes"];
   const rows = orders.map(order => {
     const lines = normalizeProducts(order.products);
     return [
-      order.deliveryDate || order.dateCommande || "",
+      order.numero || "",
+      dateExport(order.dateCommande),
+      dateExport(order.deliveryDate),
+      order.status === "livre" ? instantExport(order.deliveredAt) : "",
+      order.remisA || "",
       order.clientName || "",
-      [order.address, order.postalCode, order.city].filter(Boolean).join(", "),
+      order.address || "",
+      order.postalCode || "",
+      order.city || "",
+      order.sector || "",
       order.phone || "",
       lines.map(line => line.nom).join(" | "),
       lines.map(line => line.quantite).join(" | "),
       lines.map(line => line.prixUnitaire || 0).join(" | "),
       getOrderTotal(order),
-      order.status || "",
+      STATUTS_EXPORT[order.status] || order.status || "",
       order.notes || ""
     ];
   });
   return [headers, ...rows];
-}
-
-function getOrdersForAnnexExport(db, query = {}) {
-  const type = clean(query.type || "annexe").toLowerCase();
-  let list = db.commandes || [];
-
-  if (type === "all" || type === "toutes") return list;
-  if (type === "planned" || type === "planifiees") return listPlannedOrders(db);
-  if (type === "terrain") return list.filter(order => order.source === "commande_terrain");
-
-  return list.filter(order => order.orderType === "annexe" || order.source === "commande_annexe");
 }
 
 function notFound(message) {
@@ -7017,12 +7304,94 @@ app.get("/api/stock", (req, res) => {
   res.json(getStockView(db));
 });
 
-app.get("/api/historique", (req, res) => {
+// Le journal « qui a fait quoi » (lot « donnees utiles », 24/09). Avant, la
+// page chargeait /api/historique EN ENTIER a chaque ouverture (loadData), pour
+// le rendre dans un ecran que la navigation n'ouvrait pas ; sans auteur. La
+// page ne le charge plus ; la carte « Journal » de Parametres (administration)
+// le lit par pages. /api/historique reste pour les outils, reserve comme lui.
+app.get("/api/historique", requireAdministration, (req, res) => {
   res.json(readDb().historique);
 });
 
+const JOURNAL_PAGE_DEFAUT = 50;
+const JOURNAL_PAGE_MAX = 200;
+
+/** « Alèses : −2 · 10 → 8 · Inventaire » : un mouvement de stock en une ligne. */
+function messageMouvementStock(mouvement) {
+  const signe = mouvement.type === "entree" ? "+" : "−";
+  const quantite = Number(mouvement.quantity ?? mouvement.quantite);
+  return [
+    `${mouvement.productName || mouvement.sku || "Produit"} : ${signe}${Number.isFinite(quantite) ? quantite : "?"}`,
+    mouvement.oldQuantity !== undefined && mouvement.newQuantity !== undefined ? `${mouvement.oldQuantity} → ${mouvement.newQuantity}` : "",
+    clean(mouvement.reason || mouvement.raison)
+  ].filter(Boolean).join(" · ");
+}
+
+// L'auteur d'une ligne : null quand il n'etait pas connu (lignes d'avant le
+// 24/09, et « local », que les mouvements portaient tous).
+function auteurDuJournal(valeur) {
+  const auteur = clean(valeur);
+  return auteur && auteur !== "local" ? auteur : null;
+}
+
+/**
+ * Une page du journal. `genre` : « actions » (l'historique) ou « stock » (les
+ * mouvements). Du plus recent au plus ancien ; a date egale, l'ordre d'ecriture.
+ * Le curseur `avant` est « date|id » de la derniere ligne de la page precedente :
+ * une ligne ecrite entre deux pages arrive en tete, elle ne decale pas la suite.
+ */
+function pageDuJournal(db, { genre = "actions", limite, avant } = {}) {
+  const taille = Math.min(JOURNAL_PAGE_MAX, Math.max(1, Math.floor(Number(limite)) || JOURNAL_PAGE_DEFAUT));
+  const lignes = genre === "stock"
+    ? (db.stockMovements || []).map(m => ({
+      genre: "stock", id: String(m.id), date: String(m.createdAt || m.date || ""), type: "Stock",
+      message: messageMouvementStock(m), auteur: auteurDuJournal(m.createdBy || m.utilisateur)
+    }))
+    : (db.historique || []).map(h => ({
+      genre: "action", id: String(h.id), date: String(h.date || ""), type: clean(h.type) || "—",
+      message: clean(h.message || h.texte), auteur: auteurDuJournal(h.auteur)
+    }));
+  // Tri stable : a date egale, l'ordre du tableau (le plus recent en tete, unshift).
+  lignes.sort((a, b) => (a.date === b.date ? 0 : a.date < b.date ? 1 : -1));
+
+  let debut = 0;
+  if (avant) {
+    const [dateCurseur, ...reste] = String(avant).split("|");
+    const idCurseur = reste.join("|");
+    const rang = lignes.findIndex(l => l.id === idCurseur);
+    debut = rang >= 0 ? rang + 1 : lignes.findIndex(l => l.date < dateCurseur);
+    if (debut < 0) debut = lignes.length;
+  }
+  const entrees = lignes.slice(debut, debut + taille);
+  const derniere = entrees[entrees.length - 1];
+  const suivant = debut + taille < lignes.length && derniere ? `${derniere.date}|${derniere.id}` : null;
+  return { genre: genre === "stock" ? "stock" : "actions", entrees, suivant, total: lignes.length };
+}
+
+app.get("/api/journal", requireAdministration, (req, res) => {
+  try {
+    res.json(pageDuJournal(readDb(), {
+      genre: req.query.genre === "stock" ? "stock" : "actions",
+      limite: req.query.limite,
+      avant: req.query.avant
+    }));
+  } catch (error) {
+    handleRouteError(error, res, "Erreur lecture du journal");
+  }
+});
+
+// Les « Mouvements recents » de l'ecran Stock (relecture adverse du 24/09).
+// Cette route part au chargement de l'app, pour TOUS les comptes, et le
+// service worker la garde en cache. Elle servait toute la table, avec
+// `createdBy` -- qui porte depuis le 24/09 l'identifiant du compte : le verrou
+// de /api/journal?genre=stock (administration) ne gardait donc rien. Elle ne
+// sert plus que les derniers mouvements (l'ecran en montre 12), sans auteur ;
+// « qui » se lit dans le journal de Parametres.
+const MOUVEMENTS_STOCK_RECENTS = 50;
+
 app.get("/api/stock-movements", (req, res) => {
-  res.json(readDb().stockMovements);
+  res.json((readDb().stockMovements || []).slice(0, MOUVEMENTS_STOCK_RECENTS)
+    .map(({ createdBy, utilisateur, auteur, ...mouvement }) => mouvement));
 });
 
 app.get("/api/dashboard", (req, res) => {
@@ -7053,8 +7422,108 @@ app.get("/api/storage/status", (req, res) => {
     // Calcul routier (23/09) : carte locale ou serveur public, zone, date de
     // la carte, derniere erreur, espace utilise ; `resume` est la ligne de
     // l'ecran Parametres.
-    calculRoutier: osrmLocal.etat()
+    calculRoutier: osrmLocal.etat(),
+    // Carte « Sauvegardes » de Parametres (24/09) : ce que ces champs disaient
+    // (« l'UI doit alerter »), plus la derniere sauvegarde lue SUR LE DISQUE
+    // (lastBackupAt repart a null a chaque demarrage) et le verdict.
+    sauvegardes: etatDesSauvegardes(getRequestIdentity(req))
   });
+});
+
+// Le telechargement de la base entiere (clients, adresses, telephones, et les
+// empreintes des mots de passe des comptes) : a qui est-il ouvert ?
+//
+// A l'administration seulement (decision de Thomas du 24/09, garde
+// requireAdministration sur la route). Mais sans authentification (dev, ou un
+// deploiement sans SEREO_AUTH_* ni compte), TOUT visiteur est « administrateur »
+// (getRequestIdentity) : le role ne prouve plus rien. C'est le cas que
+// SEREO_ENABLE_DB_EXPORT garde deja pour /api/db (export JSON de la base, ouvert
+// a tout compte connecte, 0 par defaut) : sans authentification, c'est lui qui
+// decide. Avec authentification, la variable ne s'applique pas ici -- l'ouvrir
+// pour la sauvegarde ouvrirait aussi /api/db a tous les comptes.
+// Rend null si le telechargement est permis, sinon la raison du refus.
+function refusDeTelechargement(identite) {
+  if (!identite || !getRole(identite.role).administration) return "Reserve aux administrateurs.";
+  if (!isAccessAuthEnabled() && !ENABLE_DB_EXPORT) {
+    return "Sans connexion, tout visiteur est administrateur : le telechargement de la base reste ferme (SEREO_ENABLE_DB_EXPORT=1 l'ouvre).";
+  }
+  return null;
+}
+
+// L'etat des sauvegardes pour la carte de Parametres. Des donnees, pas des
+// phrases : l'ecran ecrit le texte. `alerte` vaut null quand tout va bien.
+// Une lecture du dossier impossible est elle-meme une alerte, jamais un 500 :
+// la page de Parametres doit rester lisible quand le disque ne l'est pas.
+function etatDesSauvegardes(identite, maintenant = Date.now()) {
+  let entries = [];
+  let erreurLecture = null;
+  try {
+    entries = listBackupEntries();
+  } catch (error) {
+    erreurLecture = String(error.message || error);
+  }
+  const derniere = entries[0] || null;
+  // Les jours de Paris que les sauvegardes sur le disque couvrent.
+  const jours = new Set(entries.map(e => jourParis(e.mtimeMs))).size;
+  const plusAncienne = entries.length ? entries[entries.length - 1] : null;
+  // 2 s de marge : un systeme de fichiers qui date a la seconde (ou a deux,
+  // FAT) arrondit la sauvegarde qui suit une ecriture AVANT cette ecriture.
+  const perimee = Boolean(derniere)
+    && maintenant - derniere.mtimeMs > SAUVEGARDE_PERIMEE_MS
+    && derniereModificationA !== null
+    && derniereModificationA > derniere.mtimeMs + 2000;
+
+  // Une alerte a la fois, la plus grave d'abord.
+  let alerte = null;
+  if (erreurLecture) alerte = { type: "lecture", message: erreurLecture };
+  else if (lastBackupError) alerte = { type: "echec", at: lastBackupError.at, message: lastBackupError.message };
+  else if (backupsSuspendedFreshEmpty) alerte = { type: "suspendues" };
+  else if (!derniere) alerte = { type: "aucune" };
+  else if (perimee) alerte = { type: "perimee", depuis: new Date(derniereModificationA).toISOString() };
+
+  const refus = refusDeTelechargement(identite);
+  return {
+    derniere: derniere
+      ? { nom: derniere.name, date: new Date(derniere.mtimeMs).toISOString(), taille: derniere.size }
+      : null,
+    nombre: entries.length,
+    jours,
+    plusAncienne: plusAncienne ? new Date(plusAncienne.mtimeMs).toISOString() : null,
+    alerte,
+    politique: {
+      heures: BACKUP_THROTTLE_MS / 3600000,
+      dernieres: BACKUP_RETENTION,
+      joursJournalieres: BACKUP_JOURS_JOURNALIERES,
+      perimeeApresHeures: SAUVEGARDE_PERIMEE_MS / 3600000
+    },
+    administration: Boolean(identite && getRole(identite.role).administration),
+    telechargement: { permis: refus === null && Boolean(derniere), raison: refus }
+  };
+}
+
+// Telecharger la derniere sauvegarde (decision de Thomas du 24/09) : le seul
+// moyen d'en avoir une copie HORS de la machine -- les sauvegardes vivent sur
+// le meme disque que la base (DEPLOYMENT.md). Jamais une autre que la
+// derniere : aucun nom de fichier ne vient de la requete.
+app.get("/api/sauvegardes/derniere", requireAdministration, (req, res) => {
+  try {
+    const refus = refusDeTelechargement(req.identite);
+    if (refus) {
+      res.status(403).json({ error: refus });
+      return;
+    }
+    const derniere = listBackupEntries()[0];
+    if (!derniere) {
+      res.status(404).json({ error: "Aucune sauvegarde a telecharger." });
+      return;
+    }
+    res.set("Cache-Control", "no-store");
+    res.download(derniere.fullPath, derniere.name, { headers: { "Content-Type": "application/gzip" } }, error => {
+      if (error && !res.headersSent) handleRouteError(error, res, "Erreur telechargement sauvegarde");
+    });
+  } catch (error) {
+    handleRouteError(error, res, "Erreur telechargement sauvegarde");
+  }
 });
 
 // Chantier 1 (2026-06-04) : force un backup immediat, hors throttle. Utilise
@@ -7064,16 +7533,28 @@ app.get("/api/storage/status", (req, res) => {
 // Revue R1 P0 : addHistory + writeDb dans withWriteLock pour persister
 // l'entree de log (avant, addHistory(readDb(), ...) sans writeDb perdait
 // l'entree silencieusement).
-app.post("/api/backup/now", async (req, res) => {
+// Decision de Thomas du 24/09 : un geste d'administration (la carte
+// « Sauvegardes » de Parametres le porte). Sans authentification (dev), tout le
+// monde est administrateur, comme pour la numerotation des bons.
+app.post("/api/backup/now", requireAdministration, async (req, res) => {
   try {
     const tag = clean(req.body?.tag || "manual").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 32);
     const result = await withWriteLock(async () => {
-      const backupPath = writeBackupNow(tag);
+      let backupPath;
+      try {
+        backupPath = writeBackupNow(tag);
+      } catch (error) {
+        // La carte le dira aussi apres un rechargement, pas seulement le toast.
+        lastBackupError = { at: new Date().toISOString(), message: String(error.message || error) };
+        throw error;
+      }
       if (!backupPath) return { ok: false, error: "Backup impossible (source absente)" };
 
       const db = readDb();
       addHistory(db, "Backup manuel", `Backup forcé créé : ${path.basename(backupPath)}`, { tag, backupPath });
-      writeDb(db, { backup: false }); // pas de double-backup recursif
+      // Pas de double-backup recursif ; et cette ligne d'historique ne rend pas
+      // la sauvegarde qu'elle annonce « perimee ».
+      writeDb(db, { backup: false, modification: false });
       return { ok: true, backupPath: path.basename(backupPath), tag };
     });
     if (!result.ok) {
@@ -7209,6 +7690,35 @@ app.get("/api/settings/order-numbering", (req, res) => {
 app.get("/api/settings/tournee", (req, res) => {
   const db = readDb();
   res.json(normalizeSettings(db.settings || {}).tournee);
+});
+
+// « A recommander » qui voit venir (24/09) : l'horizon en jours. Un reglage du
+// quotidien, comme ceux de la tournee : ouvert a tout compte connecte.
+app.get("/api/settings/stock", (req, res) => {
+  const db = readDb();
+  res.json(normalizeSettings(db.settings || {}).stock);
+});
+
+app.patch("/api/settings/stock", async (req, res) => {
+  try {
+    const result = await withWriteLock(async () => {
+      const db = readDb();
+      db.settings = normalizeSettings(db.settings || {});
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "horizonJours")) {
+        const brut = req.body.horizonJours;
+        // Un nombre entier, borne : Number(null) = 0 et « 14 » passeraient sinon.
+        if (typeof brut !== "number" || !Number.isInteger(brut) || brut < HORIZON_MIN_JOURS || brut > HORIZON_MAX_JOURS) {
+          throw badRequest(`Horizon invalide : un nombre entier de jours, de ${HORIZON_MIN_JOURS} a ${HORIZON_MAX_JOURS}.`);
+        }
+        db.settings.stock.horizonJours = brut;
+      }
+      writeDb(db);
+      return normalizeSettings(db.settings).stock;
+    });
+    res.json(result);
+  } catch (error) {
+    handleRouteError(error, res, "Erreur parametres stock");
+  }
 });
 
 // Le fond de carte choisi par l'environnement (lib/fond-de-carte.js). La page
@@ -7355,9 +7865,10 @@ app.get("/api/crm/clients", (req, res) => {
   const statusFilter = normalizeCrmStatus(req.query.status || "", "");
   const today = jourParis();
 
+  const ventesImportees = buildImportedSalesIndex(db.ventes);
   let list = db.clients
     .filter(client => !client.crmArchived)
-    .map(client => crmClientView(db, client));
+    .map(client => crmClientView(db, client, ventesImportees));
 
   if (query) {
     list = list.filter(client => normalizeTextKey([
@@ -7372,7 +7883,9 @@ app.get("/api/crm/clients", (req, res) => {
   }
 
   if (statusFilter) {
-    list = list.filter(client => client.crmStatus === statusFilter);
+    // « A relancer » compte aussi les clients signales (decision 5, 24/09).
+    list = list.filter(client => client.crmStatus === statusFilter
+      || (statusFilter === "client_a_relancer" && client.relanceSuggeree));
   }
 
   if (req.query.relance === "today") {
@@ -7530,13 +8043,15 @@ app.post("/api/customer-orders", async (req, res) => {
     const result = await withWriteLock(async () => {
       const db = readDb();
       const order = createCustomerOrder(db, req.body || {});
-      addHistory(db, "Commande client", `${order.clientName} : commande ${order.numero} validee`, {
+      // Decision 11 : acceptee sans reservation, faute de stock -- l'ecran le dit.
+      const bloquee = order.status === "stock_a_verifier" && !order.stockReservedAt;
+      addHistory(db, "Commande client", `${order.clientName} : commande ${order.numero} validee${bloquee ? ", bloquee faute de stock" : ""}`, {
         orderId: order.id,
         clientId: order.clientId,
         total: order.total
       });
       writeDb(db);
-      return order;
+      return { ...order, bloquee };
     });
     res.status(201).json(result);
   } catch (error) {
@@ -7699,16 +8214,24 @@ app.delete("/api/delivery-sectors/:id", async (req, res) => {
   }
 });
 
-app.get("/api/exports/commandes-annexes.xlsx", (req, res) => {
+// L'export Excel de l'ecran Commandes : les commandes de SON filtre, dans son
+// ordre (`ids`). Il remplace l'ecran Exports (decision 9, 24/09) et son
+// « commandes annexes », une categorie que rien ne cree. POST et non GET :
+// la liste filtree peut compter des centaines d'identifiants.
+app.post("/api/exports/commandes.xlsx", (req, res) => {
   try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
+    if (!ids.length) throw badRequest("Aucune commande à exporter.");
     const db = readDb();
-    const exportOrders = getOrdersForAnnexExport(db, req.query);
-    const buffer = buildXlsx(orderExportRows(exportOrders));
+    const parId = new Map(db.commandes.map(order => [String(order.id), order]));
+    const commandes = ids.map(id => parId.get(id)).filter(Boolean);
+    if (!commandes.length) throw badRequest("Aucune commande à exporter.");
+    const buffer = buildXlsx(orderExportRows(commandes));
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", 'attachment; filename="commandes-annexes.xlsx"');
+    res.setHeader("Content-Disposition", `attachment; filename="sereo-commandes-${jourParis()}.xlsx"`);
     res.send(buffer);
   } catch (error) {
-    handleRouteError(error, res, "Erreur export commandes annexes");
+    handleRouteError(error, res, "Erreur export commandes");
   }
 });
 
@@ -7946,6 +8469,35 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
   }
 });
 
+// Decision 1 de Thomas (24/09) : un import de ventes ne touche plus une
+// commande deja PRETE, EN TOURNEE ou LIVREE. Mesure de l'audit : une ligne
+// visant une commande en tournee remplacait ses produits (3 Changes + 3 Aleses
+// devenaient 8 Changes, chez le livreur aussi), sans un mot ; et le stock
+// devenait faux, la reservation ayant ete deduite sur les ANCIENS produits
+// alors que releaseOrderStockReservation rend les NOUVEAUX. La commande est
+// laissee telle quelle (produits, quantites, adresse, empreinte) et le resume
+// dit pourquoi. Rend la raison, ou null si l'import peut la mettre a jour.
+//
+// « Partie en tournee » : Probleme et A reprogrammer n'existent qu'apres une
+// tournee ; le carton est prepare et le stock deduit, comme pour une prete.
+//
+// Stock deja RESERVE (relecture adverse du 24/09) : la preparation lancee, la
+// commande terrain (reservee des sa creation), la planifiee confirmee. La
+// reservation a ete deduite sur CES produits : les reecrire, c'est la meme
+// derive (annulee, une commande terrain rendait 8 Changes et jamais ses 3
+// Aleses). Meme regle que la modification a la main : « Impossible de
+// modifier les produits apres reservation du stock ».
+function raisonImportIgnore(db, order) {
+  if (order.status === "livre") return "livree";
+  if (order.status === "en_livraison" || tourneeActiveDeLaCommande(db, order.id)) return "en_tournee";
+  if (order.status === "pret_livraison") return "prete";
+  if (STATUTS_A_RELIVRER.includes(order.status)) return "partie_en_tournee";
+  if (order.stockReservedAt) {
+    return ["en_preparation", "preparation_terminee"].includes(order.status) ? "en_preparation" : "stock_reserve";
+  }
+  return null;
+}
+
 app.post("/api/import/ventes", uploadExcel, async (req, res) => {
   const uploadedPath = req.file?.path;
 
@@ -8039,6 +8591,11 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
         };
       })
       .filter(vente => vente.client || vente.produit);
+    // Les lignes ILLISIBLES : quelque chose d'ecrit, mais ni client ni
+    // produit. Elles etaient ecartees sans un mot ; le resume les compte en
+    // erreurs. Une ligne entierement vide (la fin d'une feuille) n'en est pas une.
+    const lignesIllisibles = dataRows.filter(row => Array.isArray(row) && row.some(cell => clean(cell) !== "")).length
+      - ventes.length;
 
     db.ventes = ventes;
 
@@ -8176,6 +8733,8 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     let updatedCount = 0;
     let skippedIdenticalCount = 0;
     let importedAsLivreCount = 0;
+    // Decision 1 (24/09) : les commandes laissees telles quelles, et pourquoi.
+    const ignorees = [];
 
     importedClients.forEach(client => {
       Object.values(client.ordersByDate || {}).forEach(orderData => {
@@ -8199,6 +8758,19 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
           o.dateCommande === orderData.dateCommande
         );
         if (sameKeyOrder) {
+          // Deja prete, en tournee ou livree : on n'y touche pas (decision 1).
+          // Surtout pas le chemin 3 : ce serait une commande en double.
+          const raison = raisonImportIgnore(db, sameKeyOrder);
+          if (raison) {
+            ignorees.push({
+              id: sameKeyOrder.id,
+              numero: sameKeyOrder.numero || "",
+              clientName: sameKeyOrder.clientName || client.nom,
+              status: sameKeyOrder.status,
+              raison
+            });
+            return;
+          }
           sameKeyOrder.products = normalizeProducts(orderData.produits);
           sameKeyOrder.excelRowHash = hash;
           sameKeyOrder.updatedAt = new Date().toISOString();
@@ -8273,10 +8845,16 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     const positionsMessage = positionsImportRefusees > 0
       ? `, ${positionsImportRefusees} position(s) du fichier ignoree(s) (0,0, inversee ou hors zone)`
       : "";
+    const ignoreesMessage = ignorees.length > 0
+      ? `, ${ignorees.length} commande(s) laissee(s) telle(s) quelle(s) (${ignorees.map(i => `${i.numero || i.id} : ${i.raison}`).join(", ")})`
+      : "";
+    const illisiblesMessage = lignesIllisibles > 0
+      ? `, ${lignesIllisibles} ligne(s) sans client ni produit ecartee(s)`
+      : "";
     addHistory(
       db,
       "Import ventes",
-      `${db.ventes.length} vente(s) importee(s), ${importedClients.length} client(s) detecte(s), ${commandeStats}${preservedMessage}${mergedMessage}${livreMessage}${clampedMessage}${positionsMessage}`,
+      `${db.ventes.length} vente(s) importee(s), ${importedClients.length} client(s) detecte(s), ${commandeStats}${ignoreesMessage}${illisiblesMessage}${preservedMessage}${mergedMessage}${livreMessage}${clampedMessage}${positionsMessage}`,
       {
         fichier: req.file.originalname
       }
@@ -8289,6 +8867,8 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       created: createdCount,
       updated: updatedCount,
       skippedIdentical: skippedIdenticalCount,
+      ignored: ignorees.length,
+      lignesIllisibles,
       importedAsLivre: importedAsLivreCount,
       mergedBySecondary: mergedImport.mergedBySecondary
     });
@@ -8306,6 +8886,11 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       created: createdCount,
       updated: updatedCount,
       skippedIdentical: skippedIdenticalCount,
+      // Decision 1 (24/09) : le resume de l'ecran lit ces comptes, plus
+      // `commandes.length` (toute la base : « 12 elements » pour 3 lignes).
+      ignored: ignorees.length,
+      ignorees,
+      lignesIllisibles,
       clampedNegativeQuantities: clampedNegativeQtyCount,
       positionsRefusees: positionsImportRefusees,
       archive
@@ -8361,7 +8946,12 @@ function declencherGeocodageEnFond(origine) {
 
   geocodageEnCours = true;
   geocodageARelancer = false;
-  geocoderClients()
+  // Hors du contexte de la requete qui l'a declenche (relecture adverse du
+  // 24/09) : le lot suit ses `await` et la file d'ecriture, et la ligne
+  // « N client(s) geolocalise(s) automatiquement » du journal etait signee du
+  // compte qui avait modifie une fiche -- relance comprise, meme quand un autre
+  // compte l'avait provoquee. Un lot de fond est « automatique ».
+  contexteRequete.exit(() => geocoderClients())
     .then(bilan => {
       if (bilan.traites > 0) {
         console.log(
@@ -8584,14 +9174,18 @@ app.patch("/api/clients/:id", async (req, res) => {
       const updates = {};
       if (req.body.nom !== undefined) updates.nom = clean(req.body.nom);
       if (req.body.rue !== undefined) updates.rue = clean(req.body.rue);
-      if (req.body.codePostal !== undefined) updates.codePostal = geocodage.normaliserCodePostal(req.body.codePostal);
+      // Garde-fous de saisie (24/09) : le formulaire du detail de commande
+      // renvoie TOUS ses champs ; une valeur deja en base qui revient telle
+      // quelle est gardee (meme invalide, elle est signalee a l'ecran), une
+      // nouvelle doit etre juste.
+      if (req.body.codePostal !== undefined) updates.codePostal = saisie.codePostalSaisi(req.body.codePostal, client.codePostal, badRequest);
       if (req.body.ville !== undefined) {
         const newVille = normalizeCity(clean(req.body.ville));
         updates.ville = newVille;
         const explicitSector = req.body.secteur !== undefined ? clean(req.body.secteur) : "";
         updates.secteur = deriveSector(newVille, explicitSector);
       }
-      if (req.body.telephone !== undefined) updates.telephone = clean(req.body.telephone);
+      if (req.body.telephone !== undefined) updates.telephone = saisie.telephoneSaisi(req.body.telephone, client.telephone, badRequest);
       if (req.body.notes !== undefined) updates.notes = clean(req.body.notes);
 
       Object.assign(client, updates);
@@ -9040,8 +9634,10 @@ app.post("/api/routes/:routeId/stops/:stopId/correction", async (req, res) => {
 // et l'ecart ne se verrait qu'au premier refus, sur le telephone d'un livreur.
 app.get("/api/delivery-problems", (req, res) => {
   res.json({
+    // `proposes` : les statuts pour lesquels le dialogue montre ce motif (par
+    // defaut, tous ceux qu'il admet). Decision 10 : voir MOTIFS_PROBLEME.
     motifs: [...MOTIFS_PROBLEME.entries()].map(([cle, m]) => ({
-      cle, libelle: m.libelle, statutsAdmis: m.statutsAdmis
+      cle, libelle: m.libelle, statutsAdmis: m.statutsAdmis, proposes: m.proposes || m.statutsAdmis
     }))
   });
 });
@@ -9645,7 +10241,9 @@ module.exports = {
   // Chantier 2 : permet aux tests d'attendre que le backup async finisse
   // avant d'assertioner sur le filesystem.
   _flushPendingBackup: flushPendingBackup,
-  _resetStorageRecoveryForTest: () => { lastStorageRecovery = null; storageRecoveryFatal = null; backupsSuspendedFreshEmpty = false; lastBackupAt = null; lastBackupError = null; },
+  _resetStorageRecoveryForTest: () => { lastStorageRecovery = null; storageRecoveryFatal = null; backupsSuspendedFreshEmpty = false; lastBackupAt = null; lastBackupError = null; derniereModificationA = null; },
+  // Carte « Sauvegardes » (24/09) : la regle de retention, pure.
+  _sauvegardesAGarder: sauvegardesAGarder,
   _isCorruptionError: isCorruptionError,
   _normalizeDateInput: normalizeDateInput,
   _excelDateToIso: excelDateToIso,

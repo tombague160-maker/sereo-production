@@ -126,8 +126,12 @@ for (const schema of ["light", "dark"]) {
         largeur: Math.round(bloc.getBoundingClientRect().width),
         pilules: [...bloc.querySelectorAll(".cli-pilule, .cli-statut-filtre")].map(p => ({
           quoi: p.textContent.trim().slice(0, 20), fond: getComputedStyle(p).backgroundColor,
-          texte: getComputedStyle(p.querySelector("select") || p).color, h: p.getBoundingClientRect().height
-        }))
+          texte: getComputedStyle(p.querySelector("select") || p).color, h: p.getBoundingClientRect().height,
+          vue: p.checkVisibility()
+        })),
+        // Au-dela de deux rangs, le bout se replie derriere « + N » (24/09,
+        // telephone-utilisable.spec.js) : il se compte, il ne se mesure pas.
+        replies: Number((bloc.querySelector(".pilules-plus:not([hidden])")?.textContent || "").replace(/\D/g, "")) || 0
       };
     });
     expect(r.blocFond).toBe(r.vert);
@@ -135,22 +139,28 @@ for (const schema of ["light", "dark"]) {
     expect(r.rayonBloc).toBe("28px");
     expect(r.ecart).toBe(0);
     expect([r.gauche, r.largeur]).toEqual([0, TELEPHONE.width]);
-    // Tous, Besancon, Champagnole, Dole, Abonnes, et le statut (garde).
+    // Tous, Besancon, Champagnole, Dole, Abonnes, et le statut (garde) : les
+    // visibles, plus ceux que « + N » replie.
     expect(r.pilules.length).toBe(6);
-    for (const p of r.pilules) {
+    expect(r.pilules.filter(p => p.vue).length + r.replies).toBe(6);
+    for (const p of r.pilules.filter(p => p.vue)) {
       expect(p.h, p.quoi).toBeGreaterThanOrEqual(44);
       expect(contraste(p.texte, p.fond), p.quoi).toBeGreaterThanOrEqual(4.5);
     }
     // L'active (Tous) se distingue des autres.
     expect(r.pilules[0].fond).not.toBe(r.pilules[1].fond);
-    // « Rappels » (garde) partage sa rangee avec la pastille de synchro et
-    // « Actualiser » : l'en-tete n'a pas une rangee de plus pour eux.
-    const rangee = await page.evaluate(() => ["#crm-rappels", "#syncStatus", "#refreshButton"].map(s => {
-      const e = s === "#crm-rappels" ? document.querySelector(".ecran-entete .cli-rappels") : document.querySelector(s);
-      const b = e.getBoundingClientRect();
-      return Math.round((b.top + b.bottom) / 2);
-    }));
-    expect(Math.max(...rangee) - Math.min(...rangee)).toBeLessThanOrEqual(2);
+    // « Rappels » (garde) partage sa rangee avec la recherche, la pastille de
+    // synchro et « Actualiser » celle du titre (24/09) : l'en-tete n'a pas une
+    // rangee de plus pour eux.
+    const rangee = await page.evaluate(() => {
+      const milieu = e => { const b = e.getBoundingClientRect(); return Math.round((b.top + b.bottom) / 2); };
+      const haut = e => Math.round(e.getBoundingClientRect().top);
+      return { rappels: milieu(document.querySelector(".ecran-entete .cli-rappels")), recherche: milieu(document.querySelector(".ecran-entete .cli-recherche")),
+        titre: document.getElementById("pageTitle").getBoundingClientRect().bottom, synchro: haut(document.getElementById("syncStatus")), actualiser: haut(document.getElementById("refreshButton")) };
+    });
+    expect(Math.abs(rangee.rappels - rangee.recherche)).toBeLessThanOrEqual(2);
+    expect(rangee.synchro).toBeLessThan(rangee.titre);
+    expect(rangee.actualiser).toBeLessThan(rangee.titre);
   });
 
   test(`fiche (${schema === "light" ? "8c" : "12c"}) : le nom, les puces, Appeler et Itinéraire dans le vert, avec la flèche (${schema})`, async ({ page }) => {
@@ -258,8 +268,16 @@ test("liste (9a) : la ligne « N clients », et le tri « Dernière livraison »
   const parNom = await noms(page);
   expect(parNom).toEqual([...parNom].sort((a, b) => a.localeCompare(b, "fr")));
   expect(parNom).not.toEqual(parLivraison);
-  // Le compte suit le filtre.
-  await page.locator('#cliPilules [data-cli-secteur="__abonnes"]').click();
+  // Le compte suit le filtre. Depuis le lot « telephone utilisable » (24/09),
+  // les pilules au-dela de deux rangs se replient derriere « + N » ; selon la
+  // largeur du texte (la CI Linux rend plus large que Windows), « Abonnes »
+  // peut s'y trouver : on la deplie d'abord, comme le ferait l'utilisateur.
+  const abonnes = page.locator('#cliPilules [data-cli-secteur="__abonnes"]');
+  if (await abonnes.evaluate(p => p.classList.contains("pilule-repliee"))) {
+    await page.locator('[data-pilules-plus="clients"]').click();
+    await expect(abonnes).toBeVisible();
+  }
+  await abonnes.click();
   await expect(compte).toHaveText("1 client");
 });
 

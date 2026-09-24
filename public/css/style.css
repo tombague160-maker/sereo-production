@@ -557,7 +557,7 @@ select:disabled {
 .eyebrow {
   color: var(--v8-principal);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 700;
   text-transform: uppercase;
 }
 
@@ -635,7 +635,7 @@ select:disabled {
   color: var(--card-accent-strong, var(--v8-principal));
   border: 1px solid rgba(15, 61, 61, 0.08);
   font-size: 24px;
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1;
   opacity: 1;
 }
@@ -714,7 +714,7 @@ button {
   border: 1px solid transparent;
   border-radius: var(--radius);
   cursor: pointer;
-  font-weight: 800;
+  font-weight: 700;
   transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
 }
 
@@ -823,7 +823,7 @@ select {
 
 label {
   color: var(--text-soft);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .muted {
@@ -843,7 +843,7 @@ label {
   color: var(--v8-principal-appuye);
   border: 1px solid rgba(14, 107, 99, 0.12);
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .summary-grid,
@@ -888,7 +888,7 @@ label {
   display: block;
   color: var(--muted);
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .workflow-card strong {
@@ -1203,7 +1203,7 @@ label {
   padding: 4px 9px;
   border-radius: 999px;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 700;
   text-align: center;
   white-space: normal;
   overflow-wrap: anywhere;
@@ -1254,7 +1254,7 @@ label {
 
 .stock-kpis small {
   color: var(--muted);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .stock-controls {
@@ -1280,7 +1280,7 @@ label {
 
 .stock-threshold-control label {
   color: var(--muted);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .stock-threshold-control input {
@@ -1366,7 +1366,7 @@ label {
 .compact-date {
   display: grid;
   gap: 6px;
-  font-weight: 800;
+  font-weight: 700;
   color: var(--text-soft);
 }
 
@@ -1587,7 +1587,7 @@ label {
 .stat-tile small,
 .stat-tile span {
   color: var(--v8-texte);   /* le secondaire donnait 4,45 sur le fond de tuile, hors des trois surfaces que la charte lui garantit */
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .stats-grid {
@@ -1619,7 +1619,7 @@ label {
   color: var(--muted);
   font-size: 11px;
   font-style: normal;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.1;
   text-align: center;
   overflow-wrap: anywhere;
@@ -1764,7 +1764,7 @@ label {
 
 .delivery-card-title {
   color: var(--text);
-  font-weight: 900;
+  font-weight: 700;
   overflow-wrap: anywhere;
 }
 
@@ -1803,7 +1803,7 @@ label {
   border-radius: var(--radius);
   background: var(--v8-peche-claire);
   color: var(--v8-alerte);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .route-complete {
@@ -1915,7 +1915,7 @@ label {
   background: var(--surface);
   border: 1px solid var(--border);
   color: var(--text-soft);
-  font-weight: 800;
+  font-weight: 700;
   box-shadow: var(--shadow);
 }
 
@@ -1998,7 +1998,7 @@ label {
 .history-head {
   background: var(--v8-vert-clair);
   color: var(--v8-principal);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .settings-grid {
@@ -2117,7 +2117,7 @@ label {
   border-radius: var(--radius);
   background: var(--surface);
   color: var(--text-soft);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .swatches span::before {
@@ -2171,7 +2171,7 @@ label {
 }
 
 .color-scheme-label {
-  font-weight: 900;
+  font-weight: 700;
   font-size: 14px;
   color: var(--v8-principal-appuye);
 }
@@ -2213,7 +2213,7 @@ label {
   background: var(--v8-peche-claire);
   color: var(--v8-principal-appuye);
   cursor: pointer;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .settings-list {
@@ -2265,7 +2265,7 @@ label {
   background: var(--toast-bg);
   color: var(--toast-text);
   box-shadow: var(--shadow);
-  font-weight: 800;
+  font-weight: 700;
   display: flex;
   align-items: flex-start;
   gap: 10px;
@@ -4191,183 +4191,117 @@ html[data-color-scheme="light"] body {
 :root[data-color-scheme="light"] body {
   background-image: none;
   color: var(--text);
-  font-size: 15px;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] body { font-size: 15px; } }
 
 :root[data-color-scheme="light"] .app {
-  grid-template-columns: var(--bl-largeur) minmax(0, 1fr);
   background: var(--v8-fond);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .app { grid-template-columns: var(--bl-largeur) minmax(0, 1fr); } }
 
-:root[data-color-scheme="light"] .content {
-  padding: 0 30px 30px;
-}:root[data-color-scheme="light"] .topbar-search {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  align-items: center;
-  gap: 9px;
-  min-width: 0;
+@media (max-width: 820px) { :root[data-color-scheme="light"] .content { padding: 0 30px 30px; } }
+:root[data-color-scheme="light"] .topbar-search {
   color: var(--v8-texte-secondaire);
-  font-weight: 700;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .topbar-search { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 9px; min-width: 0; font-weight: 700; } }
 
 :root[data-color-scheme="light"] .topbar-search {
-  width: min(440px, 100%);
-  min-height: 42px;
-  padding: 0 14px;
-  justify-self: center;
-  border: 1px solid transparent;
-  border-radius: 999px;
+  border-color: transparent;
   background: var(--v8-surface);
   box-shadow: 0 10px 22px rgba(31, 41, 55, 0.05);
-}:root[data-color-scheme="light"] .topbar-search:focus-within {
+}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .topbar-search { width: min(440px, 100%); min-height: 42px; padding: 0 14px; justify-self: center; border: 1px solid transparent; border-radius: 999px; } }
+:root[data-color-scheme="light"] .topbar-search:focus-within {
   border-color: rgba(59, 115, 116, 0.45);
   box-shadow: 0 0 0 4px rgba(168, 201, 200, 0.28);
 }:root[data-color-scheme="light"] .topbar-search input {
-  min-height: 0;
-  width: 100%;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
   background: transparent;
   color: var(--text);
-  font-size: 0.9rem;
-  font-weight: 700;
   outline: none;
-}:root[data-color-scheme="light"] .topbar-search input::placeholder {
+}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .topbar-search input { min-height: 0; width: 100%; padding: 0; border: 0; border-radius: 0; font-size: 0.9rem; font-weight: 700; } }
+:root[data-color-scheme="light"] .topbar-search input::placeholder {
   color: var(--v8-texte-secondaire);
 }:root[data-color-scheme="light"] .more-sheet-icon {
-  width: 28px;
-  height: 28px;
-  border: 0;
-  border-radius: 8px;
   background: transparent;
   color: var(--v8-texte-secondaire);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .more-sheet-icon { width: 28px; height: 28px; border: 0; border-radius: 8px; } }
 
 :root[data-color-scheme="light"] .topbar {
-  position: sticky;
-  top: 0;
-  z-index: 80;
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(260px, 440px) auto;
-  align-items: center;
-  gap: 18px;
-  margin: 0 -30px 22px;
-  padding: 18px 30px;
   background: rgba(245, 243, 241, 0.92);
-  border: 0;
-  border-bottom: 1px solid var(--border);
-  border-radius: 0;
+  border-bottom-color: var(--border);
   box-shadow: none;
   backdrop-filter: blur(16px);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .topbar { position: sticky; top: 0; z-index: 80; display: grid; grid-template-columns: minmax(220px, 1fr) minmax(260px, 440px) auto; align-items: center; gap: 18px; margin: 0 -30px 22px; padding: 18px 30px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; } }
 
-:root[data-color-scheme="light"] .topbar::after,
-:root[data-color-scheme="light"] .visual-panel::after {
-  display: none;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .topbar::after, :root[data-color-scheme="light"] .visual-panel::after { display: none; } }
 
 :root[data-color-scheme="light"] .topbar h2 {
   color: var(--v8-principal-appuye);
-  font-size: 1.48rem;
-  line-height: 1.15;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .topbar h2 { font-size: 1.48rem; line-height: 1.15; } }
 
 :root[data-color-scheme="light"] .topbar p {
   color: var(--v8-texte-secondaire);
-  font-size: 0.88rem;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .topbar p { font-size: 0.88rem; } }
 
 :root[data-color-scheme="light"] .eyebrow {
   color: var(--v8-texte-secondaire);
-  font-size: 0.72rem;
-  letter-spacing: 0;
-  text-transform: none;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .eyebrow { font-size: 0.72rem; letter-spacing: 0; text-transform: none; } }
 
-:root[data-color-scheme="light"] .topbar-actions {
-  justify-content: flex-end;
-  gap: 9px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .topbar-actions { justify-content: flex-end; gap: 9px; } }
 
 :root[data-color-scheme="light"] .panel,:root[data-color-scheme="light"] .card,:root[data-color-scheme="light"] .item,:root[data-color-scheme="light"] .order-card,:root[data-color-scheme="light"] .delivery-card,:root[data-color-scheme="light"] .route-stop,:root[data-color-scheme="light"] .settings-block,:root[data-color-scheme="light"] .history-cell,:root[data-color-scheme="light"] .stock-line,:root[data-color-scheme="light"] .workflow-card,:root[data-color-scheme="light"] .summary-item,:root[data-color-scheme="light"] .upload-card,:root[data-color-scheme="light"] .empty-state,:root[data-color-scheme="light"] .crm-card,:root[data-color-scheme="light"] .product-card,:root[data-color-scheme="light"] .stat-tile,:root[data-color-scheme="light"] .today-order-card,:root[data-color-scheme="light"] .planned-order-card,:root[data-color-scheme="light"] .current-client-box,:root[data-color-scheme="light"] .current-driver-card {
   background: var(--v8-surface);
   border-color: var(--border);
-  border-radius: 8px;
   box-shadow: var(--shadow-tiny);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .panel,:root[data-color-scheme="light"] .card,:root[data-color-scheme="light"] .item,:root[data-color-scheme="light"] .order-card,:root[data-color-scheme="light"] .delivery-card,:root[data-color-scheme="light"] .route-stop,:root[data-color-scheme="light"] .settings-block,:root[data-color-scheme="light"] .history-cell,:root[data-color-scheme="light"] .stock-line,:root[data-color-scheme="light"] .workflow-card,:root[data-color-scheme="light"] .summary-item,:root[data-color-scheme="light"] .upload-card,:root[data-color-scheme="light"] .empty-state,:root[data-color-scheme="light"] .crm-card,:root[data-color-scheme="light"] .product-card,:root[data-color-scheme="light"] .stat-tile,:root[data-color-scheme="light"] .today-order-card,:root[data-color-scheme="light"] .planned-order-card,:root[data-color-scheme="light"] .current-client-box,:root[data-color-scheme="light"] .current-driver-card { border-radius: 8px; } }
 
-:root[data-color-scheme="light"] .panel {
-  padding: 20px;
-  margin-bottom: 18px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .panel { padding: 20px; margin-bottom: 18px; } }
 
-:root[data-color-scheme="light"] .panel-heading {
-  margin-bottom: 16px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .panel-heading { margin-bottom: 16px; } }
 
 :root[data-color-scheme="light"] .panel h3 {
   color: var(--v8-principal-appuye);
-  font-size: 1.05rem;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .panel h3 { font-size: 1.05rem; } }
 
-:root[data-color-scheme="light"] .cards,
-:root[data-color-scheme="light"] .workflow-grid,
-:root[data-color-scheme="light"] .stats-grid,
-:root[data-color-scheme="light"] .product-catalog,
-:root[data-color-scheme="light"] .crm-list {
-  gap: 14px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .cards, :root[data-color-scheme="light"] .workflow-grid, :root[data-color-scheme="light"] .stats-grid, :root[data-color-scheme="light"] .product-catalog, :root[data-color-scheme="light"] .crm-list { gap: 14px; } }
 
-:root[data-color-scheme="light"] .card {
-  min-height: 118px;
-  padding: 18px 16px 18px 66px;
-  overflow: hidden;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .card { min-height: 118px; padding: 18px 16px 18px 66px; overflow: hidden; } }
 
 :root[data-color-scheme="light"] .card::after {
-  inset: 0;
-  width: auto;
-  height: auto;
-  border: 0;
-  border-radius: inherit;
   background:
     linear-gradient(rgba(228, 221, 218, 0.55) 1px, transparent 1px),
     linear-gradient(90deg, rgba(228, 221, 218, 0.55) 1px, transparent 1px);
   background-size: 28px 28px;
   opacity: 0.38;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .card::after { inset: 0; width: auto; height: auto; border: 0; border-radius: inherit; } }
 
-:root[data-color-scheme="light"] .card > * {
-  position: relative;
-  z-index: 1;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .card > * { position: relative; z-index: 1; } }
 
-:root[data-color-scheme="light"] .card .card-icon {
-  position: absolute;
-  z-index: 2;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .card .card-icon { position: absolute; z-index: 2; } }
 
 :root[data-color-scheme="light"] .card-icon {
-  top: 18px;
-  left: 18px;
-  width: 36px;
-  height: 36px;
-  border: 0;
-  border-radius: 8px;
   box-shadow: none;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .card-icon { top: 18px; left: 18px; width: 36px; height: 36px; border: 0; border-radius: 8px; } }
 
 :root[data-color-scheme="light"] .card strong {
   color: var(--v8-texte);
-  font-size: 2rem;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .card strong { font-size: 2rem; } }
 
 :root[data-color-scheme="light"] .card span {
   color: var(--v8-texte-secondaire);
-  font-size: 0.86rem;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .card span { font-size: 0.86rem; } }
 
 :root[data-color-scheme="light"] .green {
   --card-accent: var(--v8-vert-clair);
@@ -4394,24 +4328,16 @@ html[data-color-scheme="light"] body {
 }
 
 :root[data-color-scheme="light"] .button {
-  min-height: 44px;
-  gap: 8px;
-  padding: 10px 14px;
-  border-radius: 8px;
-  font-size: 0.9rem;
-  font-weight: 850;
   box-shadow: none;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .button { min-height: 44px; gap: 8px; padding: 10px 14px; border-radius: 8px; font-size: 0.9rem; font-weight: 700; } }
 
-:root[data-color-scheme="light"] .button-icon {
-  width: 17px;
-  height: 17px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .button-icon { width: 17px; height: 17px; } }
 
 :root[data-color-scheme="light"] .button:not(:disabled):hover {
-  transform: translateY(-1px);
   box-shadow: 0 12px 22px rgba(31, 41, 55, 0.09);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .button:not(:disabled):hover { transform: translateY(-1px); } }
 
 :root[data-color-scheme="light"] .primary {
   background: var(--v8-principal);
@@ -4483,9 +4409,9 @@ html[data-color-scheme="light"] body {
   border-color: var(--border-strong);
   background: var(--v8-surface);
   color: var(--text);
-  border-radius: 8px;
   box-shadow: inset 0 1px 0 rgba(17, 24, 39, 0.02);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] input, :root[data-color-scheme="light"] select, :root[data-color-scheme="light"] textarea { border-radius: 8px; } }
 
 :root[data-color-scheme="light"] input:focus-visible,
 :root[data-color-scheme="light"] select:focus-visible,
@@ -4501,19 +4427,14 @@ html[data-color-scheme="light"] body {
 
 :root[data-color-scheme="light"] label {
   color: var(--v8-texte-secondaire);
-  font-size: 0.89rem;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] label { font-size: 0.89rem; } }
 
 :root[data-color-scheme="light"] .muted {
   color: var(--v8-texte-secondaire);
 }
 
-:root[data-color-scheme="light"] .status-chip,
-:root[data-color-scheme="light"] .pill {
-  border-radius: 999px;
-  font-size: 0.82rem;
-  font-weight: 850;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .status-chip, :root[data-color-scheme="light"] .pill { border-radius: 999px; font-size: 0.82rem; font-weight: 700; } }
 
 :root[data-color-scheme="light"] .status-chip {
   background: var(--v8-vert-clair);
@@ -4588,8 +4509,9 @@ html[data-color-scheme="light"] body {
 :root[data-color-scheme="light"] .cart-line,
 :root[data-color-scheme="light"] .rank-row {
   background: var(--v8-fond);
-  border: 1px solid var(--border);
+  border-color: var(--border);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .stock-kpis span, :root[data-color-scheme="light"] .crm-meta span, :root[data-color-scheme="light"] .cart-line, :root[data-color-scheme="light"] .rank-row { border: 1px solid var(--border); } }
 
 :root[data-color-scheme="light"] .crm-card {
   border-left-color: var(--v8-principal);
@@ -4600,20 +4522,17 @@ html[data-color-scheme="light"] body {
   border-top-color: var(--v8-vert-eau);
 }
 
-:root[data-color-scheme="light"] .customer-client-panel,
-:root[data-color-scheme="light"] .customer-cart-panel {
-  top: 84px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .customer-client-panel, :root[data-color-scheme="light"] .customer-cart-panel { top: 84px; } }
 
 :root[data-color-scheme="light"] .stats-hero,
 :root[data-color-scheme="light"] .driver-hero {
   background:
     linear-gradient(135deg, rgba(168, 201, 200, 0.22), rgba(241, 140, 121, 0.12)),
     #ffffff;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border-color: var(--border);
   box-shadow: var(--shadow-tiny);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .stats-hero, :root[data-color-scheme="light"] .driver-hero { border: 1px solid var(--border); border-radius: 8px; } }
 
 :root[data-color-scheme="light"] .stat-tile-success {
   border-top-color: var(--v8-principal);
@@ -4643,8 +4562,8 @@ html[data-color-scheme="light"] body {
 :root[data-color-scheme="light"] .list {
   border-color: var(--border);
   background: var(--v8-fond);
-  border-radius: 8px;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .list { border-radius: 8px; } }
 
 :root[data-color-scheme="light"] table {
   background: var(--v8-surface);
@@ -4684,18 +4603,13 @@ html[data-color-scheme="light"] body {
 
 @media (max-width: 1100px) {
   :root[data-color-scheme="light"] .app {
-    grid-template-columns: var(--bl-largeur) minmax(0, 1fr);
     background: var(--v8-fond);
   }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .app { grid-template-columns: var(--bl-largeur) minmax(0, 1fr); } }
 
-  :root[data-color-scheme="light"] .topbar {
-    grid-template-columns: minmax(200px, 1fr) minmax(220px, 360px);
-  }
+  @media (max-width: 820px) { :root[data-color-scheme="light"] .topbar { grid-template-columns: minmax(200px, 1fr) minmax(220px, 360px); } }
 
-  :root[data-color-scheme="light"] .topbar-actions {
-    grid-column: 1 / -1;
-    justify-content: flex-start;
-  }
+  @media (max-width: 820px) { :root[data-color-scheme="light"] .topbar-actions { grid-column: 1 / -1; justify-content: flex-start; } }
 }
 
 @media (max-width: 820px) {
@@ -4785,56 +4699,31 @@ html[data-color-scheme="light"] body {
   --shadow-inset-grid: rgba(228, 221, 218, 0.5);
 }
 
-:root[data-color-scheme="light"] .content {
-  padding: 0 32px 34px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .content { padding: 0 32px 34px; } }
 
 :root[data-color-scheme="light"] .topbar {
-  min-height: 116px;
-  margin: 0 -32px 26px;
-  padding: 22px 32px;
   background: rgba(247, 247, 246, 0.94);
-  border-bottom: 1px solid rgba(228, 221, 218, 0.72);
+  border-bottom-color: rgba(228, 221, 218, 0.72);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .topbar { min-height: 116px; margin: 0 -32px 26px; padding: 22px 32px; border-bottom: 1px solid rgba(228, 221, 218, 0.72); } }
 
-:root[data-color-scheme="light"] .topbar h2 {
-  font-size: 1.55rem;
-  font-weight: 900;
-  letter-spacing: 0;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .topbar h2 { font-size: 1.55rem; font-weight: 700; letter-spacing: 0; } }
 
 :root[data-color-scheme="light"] .topbar-search {
-  min-height: 48px;
-  padding-inline: 18px;
   background: var(--v8-surface);
   border-color: rgba(228, 221, 218, 0.72);
-  border-radius: var(--radius-pill);
   box-shadow: 0 16px 32px rgba(40, 90, 91, 0.08);
-}:root[data-color-scheme="light"] .more-sheet-icon {
-  border-radius: 10px;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .topbar-search { min-height: 48px; padding-inline: 18px; border-radius: var(--radius-pill); } }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .more-sheet-icon { border-radius: 10px; } }
 
-:root[data-color-scheme="light"] .cards,
-:root[data-color-scheme="light"] .summary-grid,
-:root[data-color-scheme="light"] .upload-grid,
-:root[data-color-scheme="light"] .workflow-grid,
-:root[data-color-scheme="light"] .stats-grid,
-:root[data-color-scheme="light"] .stats-kpis,
-:root[data-color-scheme="light"] .product-catalog,
-:root[data-color-scheme="light"] .crm-list,
-:root[data-color-scheme="light"] .order-board,
-:root[data-color-scheme="light"] .delivery-candidates,
-:root[data-color-scheme="light"] .route-stops,
-:root[data-color-scheme="light"] .bdc-list,
-:root[data-color-scheme="light"] .imports-archives-list {
-  gap: 18px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .cards, :root[data-color-scheme="light"] .summary-grid, :root[data-color-scheme="light"] .upload-grid, :root[data-color-scheme="light"] .workflow-grid, :root[data-color-scheme="light"] .stats-grid, :root[data-color-scheme="light"] .stats-kpis, :root[data-color-scheme="light"] .product-catalog, :root[data-color-scheme="light"] .crm-list, :root[data-color-scheme="light"] .order-board, :root[data-color-scheme="light"] .delivery-candidates, :root[data-color-scheme="light"] .route-stops, :root[data-color-scheme="light"] .bdc-list, :root[data-color-scheme="light"] .imports-archives-list { gap: 18px; } }
 
 :root[data-color-scheme="light"] .panel,:root[data-color-scheme="light"] .card,:root[data-color-scheme="light"] .item,:root[data-color-scheme="light"] .order-card,:root[data-color-scheme="light"] .delivery-card,:root[data-color-scheme="light"] .route-stop,:root[data-color-scheme="light"] .settings-block,:root[data-color-scheme="light"] .history-cell,:root[data-color-scheme="light"] .stock-line,:root[data-color-scheme="light"] .workflow-card,:root[data-color-scheme="light"] .summary-item,:root[data-color-scheme="light"] .upload-card,:root[data-color-scheme="light"] .empty-state,:root[data-color-scheme="light"] .crm-card,:root[data-color-scheme="light"] .product-card,:root[data-color-scheme="light"] .stat-tile,:root[data-color-scheme="light"] .today-order-card,:root[data-color-scheme="light"] .planned-order-card,:root[data-color-scheme="light"] .current-client-box,:root[data-color-scheme="light"] .current-driver-card,:root[data-color-scheme="light"] .bdc-card,:root[data-color-scheme="light"] .bdc-detail-card,:root[data-color-scheme="light"] .imports-archives-table-wrap,:root[data-color-scheme="light"] .app-loader-panel,:root[data-color-scheme="light"] .more-sheet-panel,:root[data-color-scheme="light"] .version-modal {
   border-color: rgba(228, 221, 218, 0.76);
-  border-radius: var(--radius);
   box-shadow: var(--shadow-card);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .panel,:root[data-color-scheme="light"] .card,:root[data-color-scheme="light"] .item,:root[data-color-scheme="light"] .order-card,:root[data-color-scheme="light"] .delivery-card,:root[data-color-scheme="light"] .route-stop,:root[data-color-scheme="light"] .settings-block,:root[data-color-scheme="light"] .history-cell,:root[data-color-scheme="light"] .stock-line,:root[data-color-scheme="light"] .workflow-card,:root[data-color-scheme="light"] .summary-item,:root[data-color-scheme="light"] .upload-card,:root[data-color-scheme="light"] .empty-state,:root[data-color-scheme="light"] .crm-card,:root[data-color-scheme="light"] .product-card,:root[data-color-scheme="light"] .stat-tile,:root[data-color-scheme="light"] .today-order-card,:root[data-color-scheme="light"] .planned-order-card,:root[data-color-scheme="light"] .current-client-box,:root[data-color-scheme="light"] .current-driver-card,:root[data-color-scheme="light"] .bdc-card,:root[data-color-scheme="light"] .bdc-detail-card,:root[data-color-scheme="light"] .imports-archives-table-wrap,:root[data-color-scheme="light"] .app-loader-panel,:root[data-color-scheme="light"] .more-sheet-panel,:root[data-color-scheme="light"] .version-modal { border-radius: var(--radius); } }
 
 :root[data-color-scheme="light"] .panel,
 :root[data-color-scheme="light"] .settings-block,
@@ -4843,26 +4732,16 @@ html[data-color-scheme="light"] body {
   box-shadow: var(--shadow-panel);
 }
 
-:root[data-color-scheme="light"] .panel {
-  padding: 24px;
-  margin-bottom: 22px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .panel { padding: 24px; margin-bottom: 22px; } }
 
-:root[data-color-scheme="light"] .panel-heading {
-  margin-bottom: 18px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .panel-heading { margin-bottom: 18px; } }
 
-:root[data-color-scheme="light"] .panel h3 {
-  font-size: 1.12rem;
-  font-weight: 900;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .panel h3 { font-size: 1.12rem; font-weight: 700; } }
 
 :root[data-color-scheme="light"] .card {
-  min-height: 132px;
-  padding: 22px 18px 20px 74px;
-  border-top-width: 5px;
   transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .card { min-height: 132px; padding: 22px 18px 20px 74px; border-top-width: 5px; } }
 
 :root[data-color-scheme="light"] .card::after {
   background:
@@ -4880,55 +4759,23 @@ html[data-color-scheme="light"] body {
 :root[data-color-scheme="light"] .delivery-card:hover,
 :root[data-color-scheme="light"] .bdc-card:hover,
 :root[data-color-scheme="light"] .stat-tile:hover {
-  transform: translateY(-3px);
   box-shadow: var(--shadow-card-hover);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .card:hover, :root[data-color-scheme="light"] .workflow-card:hover, :root[data-color-scheme="light"] .crm-card:hover, :root[data-color-scheme="light"] .product-card:hover, :root[data-color-scheme="light"] .today-order-card:hover, :root[data-color-scheme="light"] .delivery-card:hover, :root[data-color-scheme="light"] .bdc-card:hover, :root[data-color-scheme="light"] .stat-tile:hover { transform: translateY(-3px); } }
 
-:root[data-color-scheme="light"] .card-icon {
-  top: 22px;
-  left: 20px;
-  width: 42px;
-  height: 42px;
-  border-radius: 12px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .card-icon { top: 22px; left: 20px; width: 42px; height: 42px; border-radius: 12px; } }
 
-:root[data-color-scheme="light"] .card strong {
-  margin-top: 12px;
-  font-size: clamp(2rem, 2.5vw, 2.55rem);
-  font-weight: 950;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .card strong { margin-top: 12px; font-size: clamp(2rem, 2.5vw, 2.55rem); font-weight: 700; } }
 
-:root[data-color-scheme="light"] .card span,
-:root[data-color-scheme="light"] .workflow-card span,
-:root[data-color-scheme="light"] .stat-tile span,
-:root[data-color-scheme="light"] .stat-tile small {
-  font-weight: 850;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .card span, :root[data-color-scheme="light"] .workflow-card span, :root[data-color-scheme="light"] .stat-tile span, :root[data-color-scheme="light"] .stat-tile small { font-weight: 700; } }
 
-:root[data-color-scheme="light"] .summary-item,
-:root[data-color-scheme="light"] .upload-card,
-:root[data-color-scheme="light"] .empty-state,
-:root[data-color-scheme="light"] .workflow-card {
-  padding: 18px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .summary-item, :root[data-color-scheme="light"] .upload-card, :root[data-color-scheme="light"] .empty-state, :root[data-color-scheme="light"] .workflow-card { padding: 18px; } }
 
-:root[data-color-scheme="light"] .summary-item::before,
-:root[data-color-scheme="light"] .upload-card::before,
-:root[data-color-scheme="light"] .empty-state::before {
-  width: 7px;
-  border-radius: 999px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .summary-item::before, :root[data-color-scheme="light"] .upload-card::before, :root[data-color-scheme="light"] .empty-state::before { width: 7px; border-radius: 999px; } }
 
-:root[data-color-scheme="light"] .button,
-:root[data-color-scheme="light"] button {
-  border-radius: 10px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .button, :root[data-color-scheme="light"] button { border-radius: 10px; } }
 
-:root[data-color-scheme="light"] .button {
-  min-height: 44px;
-  padding: 11px 18px;
-  font-weight: 900;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .button { min-height: 44px; padding: 11px 18px; font-weight: 700; } }
 
 :root[data-color-scheme="light"] .button.primary,
 :root[data-color-scheme="light"] .button.ok {
@@ -4945,13 +4792,7 @@ html[data-color-scheme="light"] body {
   background: var(--v8-surface);
 }
 
-:root[data-color-scheme="light"] .compact,
-:root[data-color-scheme="light"] .button.secondary.compact,
-:root[data-color-scheme="light"] .bdc-status-filter {
-  min-height: 44px;
-  padding: 8px 12px;
-  border-radius: 9px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .compact, :root[data-color-scheme="light"] .button.secondary.compact, :root[data-color-scheme="light"] .bdc-status-filter { min-height: 44px; padding: 8px 12px; border-radius: 9px; } }
 
 :root[data-color-scheme="light"] input,
 :root[data-color-scheme="light"] select,
@@ -4961,78 +4802,51 @@ html[data-color-scheme="light"] body {
 :root[data-color-scheme="light"] .bdc-form-field input,
 :root[data-color-scheme="light"] .bdc-form-field textarea,
 :root[data-color-scheme="light"] .bdc-search input[type="search"] {
-  min-height: 46px;
-  border-radius: 12px;
   background: var(--v8-surface);
   box-shadow: 0 8px 18px rgba(40, 90, 91, 0.035);
-}:root[data-color-scheme="light"] .pill,
-:root[data-color-scheme="light"] .status-chip,
-:root[data-color-scheme="light"] .bdc-pill {
-  border-radius: var(--radius-pill);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] input, :root[data-color-scheme="light"] select, :root[data-color-scheme="light"] textarea, :root[data-color-scheme="light"] .bdc-field select, :root[data-color-scheme="light"] .bdc-field input[type="date"], :root[data-color-scheme="light"] .bdc-form-field input, :root[data-color-scheme="light"] .bdc-form-field textarea, :root[data-color-scheme="light"] .bdc-search input[type="search"] { min-height: 46px; border-radius: 12px; } }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .pill, :root[data-color-scheme="light"] .status-chip, :root[data-color-scheme="light"] .bdc-pill { border-radius: var(--radius-pill); } }
 
-:root[data-color-scheme="light"] .status-chip,
-:root[data-color-scheme="light"] .pill,
-:root[data-color-scheme="light"] .bdc-pill {
-  min-height: 30px;
-  padding-inline: 11px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .status-chip, :root[data-color-scheme="light"] .pill, :root[data-color-scheme="light"] .bdc-pill { min-height: 30px; padding-inline: 11px; } }
 
 :root[data-color-scheme="light"] .stats-hero,
 :root[data-color-scheme="light"] .driver-hero {
-  padding: 24px;
   background:
     linear-gradient(135deg, rgba(168, 201, 200, 0.28), rgba(233, 195, 189, 0.2)),
     #ffffff;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .stats-hero, :root[data-color-scheme="light"] .driver-hero { padding: 24px; } }
 
-:root[data-color-scheme="light"] .stats-kpis {
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .stats-kpis { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); } }
 
-:root[data-color-scheme="light"] .stat-tile {
-  min-height: 118px;
-  padding: 18px;
-  border-left-width: 0;
-  border-top-width: 5px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .stat-tile { min-height: 118px; padding: 18px; border-left-width: 0; border-top-width: 5px; } }
 
 :root[data-color-scheme="light"] .stat-tile > i {
-  width: 10px;
-  height: 10px;
   box-shadow: 0 0 0 7px var(--info-soft);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .stat-tile > i { width: 10px; height: 10px; } }
 
 :root[data-color-scheme="light"] .bar-chart {
-  min-height: 300px;
-  padding: 12px;
-  border: 1px solid rgba(228, 221, 218, 0.7);
-  border-radius: var(--radius);
+  border-color: rgba(228, 221, 218, 0.7);
   background: linear-gradient(180deg, #ffffff, rgba(247, 247, 246, 0.56));
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .bar-chart { min-height: 300px; padding: 12px; border: 1px solid rgba(228, 221, 218, 0.7); border-radius: var(--radius); } }
 
 :root[data-color-scheme="light"] .bar-item span,
 :root[data-color-scheme="light"] .rank-row > i {
   background: linear-gradient(180deg, var(--v8-accent), var(--v8-principal));
 }
 
-:root[data-color-scheme="light"] .rank-row {
-  border-radius: 14px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .rank-row { border-radius: 14px; } }
 
-:root[data-color-scheme="light"] .stock-kpis span,
-:root[data-color-scheme="light"] .crm-meta span,
-:root[data-color-scheme="light"] .cart-line,
-:root[data-color-scheme="light"] .rank-row,
-:root[data-color-scheme="light"] .product-lines {
-  border-radius: 14px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .stock-kpis span, :root[data-color-scheme="light"] .crm-meta span, :root[data-color-scheme="light"] .cart-line, :root[data-color-scheme="light"] .rank-row, :root[data-color-scheme="light"] .product-lines { border-radius: 14px; } }
 
 :root[data-color-scheme="light"] .list,
 :root[data-color-scheme="light"] .driver-client-list {
-  border-radius: var(--radius);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(247, 247, 246, 0.78));
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .list, :root[data-color-scheme="light"] .driver-client-list { border-radius: var(--radius); } }
 
 :root[data-color-scheme="light"] .product-card,
 :root[data-color-scheme="light"] .crm-card,
@@ -5044,22 +4858,15 @@ html[data-color-scheme="light"] body {
 }
 
 :root[data-color-scheme="light"] .current-client-box {
-  padding: 20px;
   background:
     linear-gradient(135deg, rgba(228, 240, 239, 0.78), rgba(253, 226, 220, 0.58)),
     #ffffff;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .current-client-box { padding: 20px; } }
 
-:root[data-color-scheme="light"] .big-actions {
-  gap: 12px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .big-actions { gap: 12px; } }
 
-:root[data-color-scheme="light"] table,
-:root[data-color-scheme="light"] .bdc-table,
-:root[data-color-scheme="light"] .imports-archives-table {
-  border-radius: var(--radius);
-  overflow: hidden;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] table, :root[data-color-scheme="light"] .bdc-table, :root[data-color-scheme="light"] .imports-archives-table { border-radius: var(--radius); overflow: hidden; } }
 
 :root[data-color-scheme="light"] th,
 :root[data-color-scheme="light"] .bdc-table th,
@@ -5069,32 +4876,23 @@ html[data-color-scheme="light"] body {
 }
 
 :root[data-color-scheme="light"] .toast {
-  border-radius: 16px;
   box-shadow: var(--shadow-card);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .toast { border-radius: 16px; } }
 
-:root[data-color-scheme="light"] .app-loader-panel {
-  border-radius: var(--radius);
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .app-loader-panel { border-radius: var(--radius); } }
 
 :root[data-color-scheme="light"] .mobile-tabbar {
-  border-radius: 24px;
   box-shadow: 0 18px 46px rgba(40, 90, 91, 0.18);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .mobile-tabbar { border-radius: 24px; } }
 
-:root[data-color-scheme="light"] .mobile-tab {
-  border-radius: 16px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .mobile-tab { border-radius: 16px; } }
 
 @media (max-width: 1100px) {
-  :root[data-color-scheme="light"] .content {
-    padding-inline: 24px;
-  }
+  @media (max-width: 820px) { :root[data-color-scheme="light"] .content { padding-inline: 24px; } }
 
-  :root[data-color-scheme="light"] .topbar {
-    margin-inline: -24px;
-    padding-inline: 24px;
-  }
+  @media (max-width: 820px) { :root[data-color-scheme="light"] .topbar { margin-inline: -24px; padding-inline: 24px; } }
 }
 
 @media (max-width: 820px) {
@@ -5212,31 +5010,25 @@ html[data-color-scheme="light"] body,
 
 :root[data-color-scheme="light"] body {
   color: var(--text);
-  font-family: "Poppins", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] body { font-family: "Poppins", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; } }
 
 :root[data-color-scheme="light"] .app {
-  min-height: 100vh;
-  grid-template-columns: var(--bl-largeur) minmax(0, 1fr);
   background: var(--bg);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .app { min-height: 100vh; grid-template-columns: var(--bl-largeur) minmax(0, 1fr); } }
 
-:root[data-color-scheme="light"] .content {
-  min-width: 0;
-  padding: 0 32px 36px;
-}:root[data-color-scheme="light"] .topbar-search {
-  border: 1px solid rgba(216, 207, 203, 0.9);
-  border-radius: var(--radius-pill);
+@media (max-width: 820px) { :root[data-color-scheme="light"] .content { min-width: 0; padding: 0 32px 36px; } }
+:root[data-color-scheme="light"] .topbar-search {
+  border-color: rgba(216, 207, 203, 0.9);
   background: var(--v8-surface);
   color: var(--muted);
   box-shadow: 0 12px 26px rgba(40, 90, 91, 0.055);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .topbar-search { border: 1px solid rgba(216, 207, 203, 0.9); border-radius: var(--radius-pill); } }
 
-:root[data-color-scheme="light"] .topbar-search {
-  min-height: 48px;
-  max-width: 430px;
-  padding-inline: 18px;
-}:root[data-color-scheme="light"] .topbar-search:focus-within,
+@media (max-width: 820px) { :root[data-color-scheme="light"] .topbar-search { min-height: 48px; max-width: 430px; padding-inline: 18px; } }
+:root[data-color-scheme="light"] .topbar-search:focus-within,
 :root[data-color-scheme="light"] input:focus,
 :root[data-color-scheme="light"] select:focus,
 :root[data-color-scheme="light"] textarea:focus {
@@ -5245,70 +5037,49 @@ html[data-color-scheme="light"] body,
   outline: none;
 }:root[data-color-scheme="light"] .topbar-search input {
   color: var(--text);
-  font-weight: 750;
-}:root[data-color-scheme="light"] .topbar-search input::placeholder {
+}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .topbar-search input { font-weight: 700; } }
+:root[data-color-scheme="light"] .topbar-search input::placeholder {
   color: var(--v8-texte-secondaire);
 }:root[data-color-scheme="light"] .more-sheet-icon {
-  width: 28px;
-  height: 28px;
-  border: 0;
-  border-radius: 9px;
   background: transparent;
   color: var(--v8-texte-secondaire);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .more-sheet-icon { width: 28px; height: 28px; border: 0; border-radius: 9px; } }
 
 :root[data-color-scheme="light"] .topbar {
-  position: sticky;
-  top: 0;
-  z-index: 80;
-  grid-template-columns: minmax(240px, 1fr) minmax(260px, 430px) auto;
-  min-height: 104px;
-  margin: 0 -32px 26px;
-  padding: 22px 32px;
-  border: 0;
-  border-bottom: 1px solid rgba(231, 226, 223, 0.76);
-  border-radius: 0;
+  border-bottom-color: rgba(231, 226, 223, 0.76);
   background: rgba(247, 247, 246, 0.95);
   box-shadow: 0 10px 28px rgba(40, 90, 91, 0.045);
   backdrop-filter: blur(18px);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .topbar { position: sticky; top: 0; z-index: 80; grid-template-columns: minmax(240px, 1fr) minmax(260px, 430px) auto; min-height: 104px; margin: 0 -32px 26px; padding: 22px 32px; border: 0; border-bottom: 1px solid rgba(231, 226, 223, 0.76); border-radius: 0; } }
 
-:root[data-color-scheme="light"] .topbar::after,
-:root[data-color-scheme="light"] .visual-panel::after {
-  display: none;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .topbar::after, :root[data-color-scheme="light"] .visual-panel::after { display: none; } }
 
 :root[data-color-scheme="light"] .eyebrow {
   color: var(--muted);
-  font-size: 0.74rem;
-  font-weight: 850;
-  letter-spacing: 0;
-  text-transform: none;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .eyebrow { font-size: 0.74rem; font-weight: 700; letter-spacing: 0; text-transform: none; } }
 
 :root[data-color-scheme="light"] .topbar h2 {
   color: var(--v8-principal-appuye);
-  font-size: 1.5rem;
-  font-weight: 930;
-  letter-spacing: 0;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .topbar h2 { font-size: 1.5rem; font-weight: 700; letter-spacing: 0; } }
 
 :root[data-color-scheme="light"] .topbar p {
   color: var(--v8-texte-secondaire);
 }
 
-:root[data-color-scheme="light"] .topbar-actions {
-  gap: 10px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .topbar-actions { gap: 10px; } }
 
 :root[data-color-scheme="light"] .topbar-actions .status-chip {
-  min-height: 38px;
-  padding-inline: 14px;
   background: var(--v8-surface);
   border-color: rgba(231, 226, 223, 0.96);
   color: var(--v8-principal-appuye);
   box-shadow: 0 12px 24px rgba(40, 90, 91, 0.06);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .topbar-actions .status-chip { min-height: 38px; padding-inline: 14px; } }
 
 :root[data-color-scheme="light"] .page.active {
   animation: pageFadeIn 160ms ease both;
@@ -5319,68 +5090,33 @@ html[data-color-scheme="light"] body,
   to { opacity: 1; transform: translateY(0); }
 }
 
-:root[data-color-scheme="light"] .cards,
-:root[data-color-scheme="light"] .summary-grid,
-:root[data-color-scheme="light"] .upload-grid,
-:root[data-color-scheme="light"] .workflow-grid,
-:root[data-color-scheme="light"] .stats-grid,
-:root[data-color-scheme="light"] .stats-kpis,
-:root[data-color-scheme="light"] .product-catalog,
-:root[data-color-scheme="light"] .crm-list,
-:root[data-color-scheme="light"] .order-board,
-:root[data-color-scheme="light"] .delivery-candidates,
-:root[data-color-scheme="light"] .route-stops,
-:root[data-color-scheme="light"] .bdc-list,
-:root[data-color-scheme="light"] .quick-actions {
-  gap: 18px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .cards, :root[data-color-scheme="light"] .summary-grid, :root[data-color-scheme="light"] .upload-grid, :root[data-color-scheme="light"] .workflow-grid, :root[data-color-scheme="light"] .stats-grid, :root[data-color-scheme="light"] .stats-kpis, :root[data-color-scheme="light"] .product-catalog, :root[data-color-scheme="light"] .crm-list, :root[data-color-scheme="light"] .order-board, :root[data-color-scheme="light"] .delivery-candidates, :root[data-color-scheme="light"] .route-stops, :root[data-color-scheme="light"] .bdc-list, :root[data-color-scheme="light"] .quick-actions { gap: 18px; } }
 
-:root[data-color-scheme="light"] #journee.page.active {
-  display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(320px, 0.78fr);
-  gap: 22px;
-  align-items: start;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] #journee.page.active { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(320px, 0.78fr); gap: 22px; align-items: start; } }
 
-:root[data-color-scheme="light"] #journee .dashboard-cards {
-  grid-column: 1 / -1;
-  grid-template-columns: repeat(4, minmax(170px, 1fr));
-  margin-bottom: 0;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] #journee .dashboard-cards { grid-column: 1 / -1; grid-template-columns: repeat(4, minmax(170px, 1fr)); margin-bottom: 0; } }
 
-:root[data-color-scheme="light"] #journee .secondary-cards {
-  grid-column: 1 / -1;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] #journee .secondary-cards { grid-column: 1 / -1; } }
 
-:root[data-color-scheme="light"] #journee > .panel {
-  margin-bottom: 0;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] #journee > .panel { margin-bottom: 0; } }
 
-:root[data-color-scheme="light"] #journee > .visual-panel {
-  grid-column: 1 / -1;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] #journee > .visual-panel { grid-column: 1 / -1; } }
 
 :root[data-color-scheme="light"] .panel,:root[data-color-scheme="light"] .card,:root[data-color-scheme="light"] .item,:root[data-color-scheme="light"] .order-card,:root[data-color-scheme="light"] .delivery-card,:root[data-color-scheme="light"] .route-stop,:root[data-color-scheme="light"] .settings-block,:root[data-color-scheme="light"] .history-cell,:root[data-color-scheme="light"] .stock-line,:root[data-color-scheme="light"] .workflow-card,:root[data-color-scheme="light"] .summary-item,:root[data-color-scheme="light"] .upload-card,:root[data-color-scheme="light"] .empty-state,:root[data-color-scheme="light"] .crm-card,:root[data-color-scheme="light"] .product-card,:root[data-color-scheme="light"] .stat-tile,:root[data-color-scheme="light"] .today-order-card,:root[data-color-scheme="light"] .planned-order-card,:root[data-color-scheme="light"] .current-client-box,:root[data-color-scheme="light"] .current-driver-card,:root[data-color-scheme="light"] .bdc-card,:root[data-color-scheme="light"] .bdc-detail-card,:root[data-color-scheme="light"] .imports-archives-table-wrap,:root[data-color-scheme="light"] .app-loader-panel,:root[data-color-scheme="light"] .more-sheet-panel {
-  border: 1px solid rgba(231, 226, 223, 0.86);
-  border-radius: var(--radius);
+  border-color: rgba(231, 226, 223, 0.86);
   background: var(--v8-surface);
   box-shadow: var(--shadow-card);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .panel,:root[data-color-scheme="light"] .card,:root[data-color-scheme="light"] .item,:root[data-color-scheme="light"] .order-card,:root[data-color-scheme="light"] .delivery-card,:root[data-color-scheme="light"] .route-stop,:root[data-color-scheme="light"] .settings-block,:root[data-color-scheme="light"] .history-cell,:root[data-color-scheme="light"] .stock-line,:root[data-color-scheme="light"] .workflow-card,:root[data-color-scheme="light"] .summary-item,:root[data-color-scheme="light"] .upload-card,:root[data-color-scheme="light"] .empty-state,:root[data-color-scheme="light"] .crm-card,:root[data-color-scheme="light"] .product-card,:root[data-color-scheme="light"] .stat-tile,:root[data-color-scheme="light"] .today-order-card,:root[data-color-scheme="light"] .planned-order-card,:root[data-color-scheme="light"] .current-client-box,:root[data-color-scheme="light"] .current-driver-card,:root[data-color-scheme="light"] .bdc-card,:root[data-color-scheme="light"] .bdc-detail-card,:root[data-color-scheme="light"] .imports-archives-table-wrap,:root[data-color-scheme="light"] .app-loader-panel,:root[data-color-scheme="light"] .more-sheet-panel { border: 1px solid rgba(231, 226, 223, 0.86); border-radius: var(--radius); } }
 
-:root[data-color-scheme="light"] .panel {
-  padding: 24px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .panel { padding: 24px; } }
 
-:root[data-color-scheme="light"] .panel-heading {
-  align-items: flex-start;
-  margin-bottom: 18px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .panel-heading { align-items: flex-start; margin-bottom: 18px; } }
 
 :root[data-color-scheme="light"] .panel h3 {
   color: var(--v8-principal-appuye);
-  font-size: 1.12rem;
-  font-weight: 920;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .panel h3 { font-size: 1.12rem; font-weight: 700; } }
 
 :root[data-color-scheme="light"] .muted,
 :root[data-color-scheme="light"] .panel p,
@@ -5390,21 +5126,11 @@ html[data-color-scheme="light"] body,
 
 :root[data-color-scheme="light"] .card {
   isolation: isolate;
-  min-height: 132px;
-  padding: 24px 18px 20px 74px;
-  border-top: 0;
-  overflow: hidden;
   transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .card { min-height: 132px; padding: 24px 18px 20px 74px; border-top: 0; overflow: hidden; } }
 
 :root[data-color-scheme="light"] .card::after {
-  content: "";
-  position: absolute;
-  inset: auto 0 0 auto;
-  width: 58%;
-  height: 66%;
-  border: 0;
-  border-radius: 0;
   background:
     linear-gradient(rgba(228, 226, 223, 0.48) 1px, transparent 1px),
     linear-gradient(90deg, rgba(228, 226, 223, 0.48) 1px, transparent 1px);
@@ -5412,38 +5138,27 @@ html[data-color-scheme="light"] body,
   opacity: 0.38;
   pointer-events: none;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .card::after { content: ""; position: absolute; inset: auto 0 0 auto; width: 58%; height: 66%; border: 0; border-radius: 0; } }
 
-:root[data-color-scheme="light"] .card > * {
-  position: relative;
-  z-index: 1;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .card > * { position: relative; z-index: 1; } }
 
 :root[data-color-scheme="light"] .card-icon {
-  top: 22px;
-  left: 22px;
-  width: 40px;
-  height: 40px;
-  border: 0;
-  border-radius: 12px;
   background: var(--card-accent, var(--v8-vert-clair));
   color: var(--card-accent-strong, var(--v8-principal));
   box-shadow: none;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .card-icon { top: 22px; left: 22px; width: 40px; height: 40px; border: 0; border-radius: 12px; } }
 
 :root[data-color-scheme="light"] .card strong {
-  margin-top: 24px;
   color: var(--v8-texte);
-  font-size: clamp(2rem, 2.35vw, 2.5rem);
-  font-weight: 950;
-  line-height: 0.95;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .card strong { margin-top: 24px; font-size: clamp(2rem, 2.35vw, 2.5rem); font-weight: 700; line-height: 0.95; } }
 
 :root[data-color-scheme="light"] .card-label,
 :root[data-color-scheme="light"] .card span:not(.card-icon) {
   color: var(--v8-texte-secondaire);
-  font-size: 0.92rem;
-  font-weight: 760;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .card-label, :root[data-color-scheme="light"] .card span:not(.card-icon) { font-size: 0.92rem; font-weight: 700; } }
 
 :root[data-color-scheme="light"] .card.blue,
 :root[data-color-scheme="light"] .stat-tile-info {
@@ -5470,23 +5185,13 @@ html[data-color-scheme="light"] body,
 }
 
 :root[data-color-scheme="light"] .card:hover,:root[data-color-scheme="light"] .workflow-card:hover,:root[data-color-scheme="light"] .crm-card:hover,:root[data-color-scheme="light"] .product-card:hover,:root[data-color-scheme="light"] .today-order-card:hover,:root[data-color-scheme="light"] .delivery-card:hover,:root[data-color-scheme="light"] .bdc-card:hover,:root[data-color-scheme="light"] .stat-tile:hover {
-  transform: translateY(-3px);
   box-shadow: var(--shadow-card-hover);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .card:hover,:root[data-color-scheme="light"] .workflow-card:hover,:root[data-color-scheme="light"] .crm-card:hover,:root[data-color-scheme="light"] .product-card:hover,:root[data-color-scheme="light"] .today-order-card:hover,:root[data-color-scheme="light"] .delivery-card:hover,:root[data-color-scheme="light"] .bdc-card:hover,:root[data-color-scheme="light"] .stat-tile:hover { transform: translateY(-3px); } }
 
-:root[data-color-scheme="light"] .summary-item,
-:root[data-color-scheme="light"] .upload-card,
-:root[data-color-scheme="light"] .empty-state,
-:root[data-color-scheme="light"] .workflow-card {
-  padding: 18px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .summary-item, :root[data-color-scheme="light"] .upload-card, :root[data-color-scheme="light"] .empty-state, :root[data-color-scheme="light"] .workflow-card { padding: 18px; } }
 
-:root[data-color-scheme="light"] .summary-item::before,
-:root[data-color-scheme="light"] .upload-card::before,
-:root[data-color-scheme="light"] .empty-state::before {
-  width: 7px;
-  border-radius: var(--radius-pill);
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .summary-item::before, :root[data-color-scheme="light"] .upload-card::before, :root[data-color-scheme="light"] .empty-state::before { width: 7px; border-radius: var(--radius-pill); } }
 
 :root[data-color-scheme="light"] .summary-item.status-ok::before,
 :root[data-color-scheme="light"] .upload-card.status-ok::before {
@@ -5503,19 +5208,12 @@ html[data-color-scheme="light"] body,
   background: var(--v8-principal-appuye);
 }
 
-:root[data-color-scheme="light"] .button,
-:root[data-color-scheme="light"] button {
-  border-radius: var(--radius-button);
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .button, :root[data-color-scheme="light"] button { border-radius: var(--radius-button); } }
 
 :root[data-color-scheme="light"] .button {
-  min-height: 44px;
-  padding: 11px 18px;
-  font-size: 0.92rem;
-  font-weight: 900;
-  letter-spacing: 0;
   box-shadow: none;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .button { min-height: 44px; padding: 11px 18px; font-size: 0.92rem; font-weight: 700; letter-spacing: 0; } }
 
 :root[data-color-scheme="light"] .button.primary,
 :root[data-color-scheme="light"] .button.ok {
@@ -5571,14 +5269,7 @@ html[data-color-scheme="light"] body,
   border-color: var(--v8-alerte);
 }
 
-:root[data-color-scheme="light"] .compact,
-:root[data-color-scheme="light"] .button.compact,
-:root[data-color-scheme="light"] .button.secondary.compact {
-  min-height: 44px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  font-size: 0.84rem;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .compact, :root[data-color-scheme="light"] .button.compact, :root[data-color-scheme="light"] .button.secondary.compact { min-height: 44px; padding: 8px 12px; border-radius: 8px; font-size: 0.84rem; } }
 
 :root[data-color-scheme="light"] input,
 :root[data-color-scheme="light"] select,
@@ -5588,27 +5279,23 @@ html[data-color-scheme="light"] body,
 :root[data-color-scheme="light"] .bdc-form-field input,
 :root[data-color-scheme="light"] .bdc-form-field textarea,
 :root[data-color-scheme="light"] .bdc-search input[type="search"] {
-  min-height: 46px;
-  border: 1px solid rgba(216, 207, 203, 0.9);
-  border-radius: 12px;
+  border-color: rgba(216, 207, 203, 0.9);
   background: var(--v8-surface);
   color: var(--text);
   box-shadow: 0 8px 18px rgba(40, 90, 91, 0.035);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] input, :root[data-color-scheme="light"] select, :root[data-color-scheme="light"] textarea, :root[data-color-scheme="light"] .bdc-field select, :root[data-color-scheme="light"] .bdc-field input[type="date"], :root[data-color-scheme="light"] .bdc-form-field input, :root[data-color-scheme="light"] .bdc-form-field textarea, :root[data-color-scheme="light"] .bdc-search input[type="search"] { min-height: 46px; border: 1px solid rgba(216, 207, 203, 0.9); border-radius: 12px; } }
 
 :root[data-color-scheme="light"] label {
   color: var(--text-soft);
-  font-weight: 800;
-}:root[data-color-scheme="light"] .pill,
+}
+@media (max-width: 820px) { :root[data-color-scheme="light"] label { font-weight: 700; } }
+:root[data-color-scheme="light"] .pill,
 :root[data-color-scheme="light"] .status-chip,
 :root[data-color-scheme="light"] .bdc-pill {
-  min-height: 29px;
-  padding-inline: 11px;
-  border-radius: var(--radius-pill);
-  border: 1px solid transparent;
-  font-size: 0.82rem;
-  font-weight: 880;
+  border-color: transparent;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .pill, :root[data-color-scheme="light"] .status-chip, :root[data-color-scheme="light"] .bdc-pill { min-height: 29px; padding-inline: 11px; border-radius: var(--radius-pill); border: 1px solid transparent; font-size: 0.82rem; font-weight: 700; } }
 
 :root[data-color-scheme="light"] .pill-ok,
 :root[data-color-scheme="light"] .status-ok .pill,
@@ -5639,9 +5326,9 @@ html[data-color-scheme="light"] body,
 :root[data-color-scheme="light"] .rank-row,
 :root[data-color-scheme="light"] .product-lines,
 :root[data-color-scheme="light"] .stock-line {
-  border-radius: 14px;
   background: var(--v8-fond);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .stock-kpis span, :root[data-color-scheme="light"] .crm-meta span, :root[data-color-scheme="light"] .cart-line, :root[data-color-scheme="light"] .rank-row, :root[data-color-scheme="light"] .product-lines, :root[data-color-scheme="light"] .stock-line { border-radius: 14px; } }
 
 :root[data-color-scheme="light"] .crm-card,
 :root[data-color-scheme="light"] .product-card,
@@ -5650,11 +5337,10 @@ html[data-color-scheme="light"] body,
 :root[data-color-scheme="light"] .delivery-card,
 :root[data-color-scheme="light"] .route-stop,
 :root[data-color-scheme="light"] .bdc-card {
-  padding: 16px;
-  border-left-width: 0;
-  border-top: 5px solid var(--v8-vert-clair);
+  border-top-color: var(--v8-vert-clair);
   transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .crm-card, :root[data-color-scheme="light"] .product-card, :root[data-color-scheme="light"] .today-order-card, :root[data-color-scheme="light"] .planned-order-card, :root[data-color-scheme="light"] .delivery-card, :root[data-color-scheme="light"] .route-stop, :root[data-color-scheme="light"] .bdc-card { padding: 16px; border-left-width: 0; border-top: 5px solid var(--v8-vert-clair); } }
 
 :root[data-color-scheme="light"] .today-order-card.pill-ok,
 :root[data-color-scheme="light"] .planned-order-card.pill-ok {
@@ -5679,16 +5365,12 @@ html[data-color-scheme="light"] body,
     #ffffff;
 }
 
-:root[data-color-scheme="light"] .stats-kpis {
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .stats-kpis { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); } }
 
 :root[data-color-scheme="light"] .stat-tile {
-  min-height: 118px;
-  padding: 18px;
-  border-left-width: 0;
-  border-top: 5px solid var(--v8-vert-clair);
+  border-top-color: var(--v8-vert-clair);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .stat-tile { min-height: 118px; padding: 18px; border-left-width: 0; border-top: 5px solid var(--v8-vert-clair); } }
 
 :root[data-color-scheme="light"] .stat-tile-success {
   border-top-color: var(--v8-principal);
@@ -5703,45 +5385,35 @@ html[data-color-scheme="light"] body,
 }
 
 :root[data-color-scheme="light"] .stat-tile > i {
-  width: 10px;
-  height: 10px;
   background: var(--v8-principal);
   box-shadow: 0 0 0 7px var(--v8-vert-clair);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .stat-tile > i { width: 10px; height: 10px; } }
 
 :root[data-color-scheme="light"] .bar-chart {
-  min-height: 300px;
-  padding: 12px;
-  border: 1px solid rgba(231, 226, 223, 0.86);
-  border-radius: var(--radius);
+  border-color: rgba(231, 226, 223, 0.86);
   background:
     linear-gradient(rgba(238, 238, 238, 0.6) 1px, transparent 1px),
     linear-gradient(90deg, rgba(238, 238, 238, 0.6) 1px, transparent 1px),
     #ffffff;
   background-size: 32px 32px;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .bar-chart { min-height: 300px; padding: 12px; border: 1px solid rgba(231, 226, 223, 0.86); border-radius: var(--radius); } }
 
 :root[data-color-scheme="light"] .bar-item span,
 :root[data-color-scheme="light"] .rank-row > i {
   background: linear-gradient(180deg, var(--v8-accent), var(--v8-principal));
 }
 
-:root[data-color-scheme="light"] table,
-:root[data-color-scheme="light"] .bdc-table,
-:root[data-color-scheme="light"] .imports-archives-table {
-  border-collapse: separate;
-  border-spacing: 0;
-  border-radius: var(--radius);
-  overflow: hidden;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] table, :root[data-color-scheme="light"] .bdc-table, :root[data-color-scheme="light"] .imports-archives-table { border-collapse: separate; border-spacing: 0; border-radius: var(--radius); overflow: hidden; } }
 
 :root[data-color-scheme="light"] th,
 :root[data-color-scheme="light"] .bdc-table th,
 :root[data-color-scheme="light"] .imports-archives-table th {
   background: var(--v8-vert-clair);
   color: var(--v8-principal-appuye);
-  font-weight: 920;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] th, :root[data-color-scheme="light"] .bdc-table th, :root[data-color-scheme="light"] .imports-archives-table th { font-weight: 700; } }
 
 :root[data-color-scheme="light"] td,
 :root[data-color-scheme="light"] .bdc-table td,
@@ -5755,15 +5427,15 @@ html[data-color-scheme="light"] body,
 }
 
 :root[data-color-scheme="light"] .mobile-tabbar {
-  border-radius: 24px;
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 20px 52px rgba(40, 90, 91, 0.2);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .mobile-tabbar { border-radius: 24px; } }
 
 :root[data-color-scheme="light"] .mobile-tab {
-  border-radius: 16px;
   color: var(--v8-principal-appuye);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .mobile-tab { border-radius: 16px; } }
 
 :root[data-color-scheme="light"] .mobile-tab.active,
 :root[data-color-scheme="light"] .mobile-tab:hover {
@@ -5771,15 +5443,13 @@ html[data-color-scheme="light"] body,
   color: var(--v8-principal-appuye);
 }
 
-:root[data-color-scheme="light"] .more-sheet-panel {
-  border-radius: 28px 28px 0 0;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .more-sheet-panel { border-radius: 28px 28px 0 0; } }
 
 :root[data-color-scheme="light"] .toast,
 :root[data-color-scheme="light"] #sw-update-toast {
-  border-radius: 16px;
   box-shadow: var(--shadow-card);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .toast, :root[data-color-scheme="light"] #sw-update-toast { border-radius: 16px; } }
 
 :root[data-color-scheme="light"] .toast-success {
   background: var(--v8-principal);
@@ -5794,56 +5464,31 @@ html[data-color-scheme="light"] body,
 }
 
 @media (max-width: 1180px) {
-  :root[data-color-scheme="light"] #journee.page.active {
-    grid-template-columns: 1fr;
-  }
+  @media (max-width: 820px) { :root[data-color-scheme="light"] #journee.page.active { grid-template-columns: 1fr; } }
 
-  :root[data-color-scheme="light"] #journee .dashboard-cards,
-  :root[data-color-scheme="light"] .cards {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+  @media (max-width: 820px) { :root[data-color-scheme="light"] #journee .dashboard-cards, :root[data-color-scheme="light"] .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 }
 
 @media (max-width: 920px) {
   :root[data-color-scheme="light"] .app {
-    display: block;
     background: var(--bg);
   }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .app { display: block; } }
 
-  :root[data-color-scheme="light"] .content {
-    padding: 12px 14px calc(104px + env(safe-area-inset-bottom));
-  }
+  @media (max-width: 820px) { :root[data-color-scheme="light"] .content { padding: 12px 14px calc(104px + env(safe-area-inset-bottom)); } }
 
   :root[data-color-scheme="light"] .topbar {
-    position: relative;
-    grid-template-columns: 1fr;
-    min-height: auto;
-    margin: 0 0 18px;
-    padding: 18px;
-    border: 1px solid rgba(231, 226, 223, 0.86);
-    border-radius: var(--radius);
+    border-color: rgba(231, 226, 223, 0.86);
     background: var(--v8-surface);
     box-shadow: var(--shadow-card);
   }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .topbar { position: relative; grid-template-columns: 1fr; min-height: auto; margin: 0 0 18px; padding: 18px; border: 1px solid rgba(231, 226, 223, 0.86); border-radius: var(--radius); } }
 
-  :root[data-color-scheme="light"] .topbar-search {
-    max-width: none;
-    width: 100%;
-  }
+  @media (max-width: 820px) { :root[data-color-scheme="light"] .topbar-search { max-width: none; width: 100%; } }
 
-  :root[data-color-scheme="light"] .topbar-actions {
-    justify-content: flex-start;
-  }
+  @media (max-width: 820px) { :root[data-color-scheme="light"] .topbar-actions { justify-content: flex-start; } }
 
-  :root[data-color-scheme="light"] .field-app-grid,
-  :root[data-color-scheme="light"] .customer-order-layout,
-  :root[data-color-scheme="light"] .stats-grid,
-  :root[data-color-scheme="light"] .driver-tools,
-  :root[data-color-scheme="light"] .delivery-filters,
-  :root[data-color-scheme="light"] .stock-toolbar,
-  :root[data-color-scheme="light"] .crm-toolbar {
-    grid-template-columns: 1fr;
-  }
+  @media (max-width: 820px) { :root[data-color-scheme="light"] .field-app-grid, :root[data-color-scheme="light"] .customer-order-layout, :root[data-color-scheme="light"] .stats-grid, :root[data-color-scheme="light"] .driver-tools, :root[data-color-scheme="light"] .delivery-filters, :root[data-color-scheme="light"] .stock-toolbar, :root[data-color-scheme="light"] .crm-toolbar { grid-template-columns: 1fr; } }
 }
 
 @media (max-width: 560px) {
@@ -5893,12 +5538,6 @@ html[data-color-scheme="light"] body,
 
 /* Navigation categories 2026-07-01 */
 
-@media (max-width: 1180px) {
-}
-
-@media (max-width: 920px) {
-}
-
 /* ============================================================================
    Full redesign 2026-07-01 : SEREO Neo operational CRM shell
    ============================================================================ */
@@ -5936,10 +5575,9 @@ html[data-color-scheme="light"] body,
 }
 
 :root[data-color-scheme="light"] .app {
-  grid-template-columns: var(--bl-largeur) minmax(0, 1fr);
-  min-height: 100vh;
   background: var(--v8-fond);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .app { grid-template-columns: var(--bl-largeur) minmax(0, 1fr); min-height: 100vh; } }
 
 /* Mesure du 18/09 : ce blanc a 72 % rend 3,45:1 sur le vert du champ, qui est
  * lu SOUS les glyphes a rgb(74,119,121). Le defaut avait survecu parce que
@@ -5960,41 +5598,25 @@ html[data-color-scheme="light"] body,
  * passe par le fait que l'une disparait quand on tape.
  *
  * ⛔ RIEN de plus sombre que le blanc ne peut se poser sur ce champ. */:root[data-color-scheme="light"] .more-sheet-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: 12px;
   background: rgba(255, 255, 255, 0.1);
   color: rgba(255, 255, 255, 0.82);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .more-sheet-icon { width: 32px; height: 32px; border-radius: 12px; } }
 
 :root[data-color-scheme="light"] .content {
-  padding: 28px 34px 38px;
   background: var(--v8-fond);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .content { padding: 28px 34px 38px; } }
 
 :root[data-color-scheme="light"] .topbar {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(260px, 1fr) minmax(260px, 420px) auto;
-  min-height: 118px;
-  margin: 0 0 26px;
-  padding: 24px;
-  border: 0;
-  border-radius: 28px;
   background:
     linear-gradient(135deg, var(--v8-principal-appuye), var(--v8-principal) 58%, #4f8584);
   color: var(--v8-surface);
   box-shadow: 0 22px 48px rgba(31, 73, 74, 0.24);
-  overflow: hidden;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .topbar { position: relative; display: grid; grid-template-columns: minmax(260px, 1fr) minmax(260px, 420px) auto; min-height: 118px; margin: 0 0 26px; padding: 24px; border: 0; border-radius: 28px; overflow: hidden; } }
 
 :root[data-color-scheme="light"] .topbar::after {
-  content: "";
-  position: absolute;
-  inset: auto 24px 0 auto;
-  width: min(48%, 520px);
-  height: 72%;
-  display: block;
   background:
     linear-gradient(rgba(255, 255, 255, 0.11) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.11) 1px, transparent 1px);
@@ -6002,11 +5624,9 @@ html[data-color-scheme="light"] body,
   opacity: 0.55;
   pointer-events: none;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .topbar::after { content: ""; position: absolute; inset: auto 24px 0 auto; width: min(48%, 520px); height: 72%; display: block; } }
 
-:root[data-color-scheme="light"] .topbar > * {
-  position: relative;
-  z-index: 1;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .topbar > * { position: relative; z-index: 1; } }
 
 :root[data-color-scheme="light"] .eyebrow,
 :root[data-color-scheme="light"] .topbar p {
@@ -6015,31 +5635,28 @@ html[data-color-scheme="light"] body,
 
 :root[data-color-scheme="light"] .topbar h2 {
   color: var(--v8-surface);
-  font-size: clamp(1.55rem, 2.1vw, 2.1rem);
-  font-weight: 950;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .topbar h2 { font-size: clamp(1.55rem, 2.1vw, 2.1rem); font-weight: 700; } }
 
 :root[data-color-scheme="light"] .topbar-search {
-  min-height: 50px;
-  border: 1px solid rgba(255, 255, 255, 0.34);
-  border-radius: 16px;
+  border-color: rgba(255, 255, 255, 0.34);
   background: rgba(255, 255, 255, 0.94);
   box-shadow: 0 18px 34px rgba(21, 60, 61, 0.16);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .topbar-search { min-height: 50px; border: 1px solid rgba(255, 255, 255, 0.34); border-radius: 16px; } }
 
 :root[data-color-scheme="light"] .topbar-search input {
   color: var(--v8-texte);
 }
 
 :root[data-color-scheme="light"] .topbar-actions .status-chip {
-  min-height: 42px;
   background: rgba(255, 255, 255, 0.94);
   color: var(--v8-principal-appuye);
   border-color: rgba(255, 255, 255, 0.42);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .topbar-actions .status-chip { min-height: 42px; } }
 
 :root[data-color-scheme="light"] .topbar-actions .button.secondary {
-  min-height: 44px;
   /* Etait orange avec du blanc : 2,34, interdit par la charte. Surface +
      principal, comme "A jour" a cote : 6,01. */
   background: var(--v8-surface);
@@ -6047,115 +5664,73 @@ html[data-color-scheme="light"] body,
   color: var(--v8-principal);
   box-shadow: 0 16px 30px rgba(143, 70, 58, 0.26);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .topbar-actions .button.secondary { min-height: 44px; } }
 
 :root[data-color-scheme="light"] .topbar-actions .button.secondary:hover {
   background: var(--v8-principal-appuye);
   border-color: var(--v8-principal-appuye);
 }
 
-:root[data-color-scheme="light"] #journee.page.active {
-  display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(330px, 0.85fr);
-  gap: 22px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] #journee.page.active { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(330px, 0.85fr); gap: 22px; } }
 
-:root[data-color-scheme="light"] #journee .dashboard-cards {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(180px, 1fr));
-  gap: 18px;
-  margin: 0;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] #journee .dashboard-cards { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(180px, 1fr)); gap: 18px; margin: 0; } }
 
-:root[data-color-scheme="light"] #journee .secondary-cards {
-  grid-column: 1 / -1;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] #journee .secondary-cards { grid-column: 1 / -1; } }
 
-:root[data-color-scheme="light"] #journee > .panel {
-  margin-bottom: 0;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] #journee > .panel { margin-bottom: 0; } }
 
-:root[data-color-scheme="light"] #journee > .visual-panel {
-  grid-column: 1 / -1;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] #journee > .visual-panel { grid-column: 1 / -1; } }
 
 :root[data-color-scheme="light"] .panel,:root[data-color-scheme="light"] .card,:root[data-color-scheme="light"] .item,:root[data-color-scheme="light"] .order-card,:root[data-color-scheme="light"] .delivery-card,:root[data-color-scheme="light"] .route-stop,:root[data-color-scheme="light"] .settings-block,:root[data-color-scheme="light"] .history-cell,:root[data-color-scheme="light"] .stock-line,:root[data-color-scheme="light"] .workflow-card,:root[data-color-scheme="light"] .summary-item,:root[data-color-scheme="light"] .upload-card,:root[data-color-scheme="light"] .empty-state,:root[data-color-scheme="light"] .crm-card,:root[data-color-scheme="light"] .product-card,:root[data-color-scheme="light"] .stat-tile,:root[data-color-scheme="light"] .today-order-card,:root[data-color-scheme="light"] .planned-order-card,:root[data-color-scheme="light"] .current-client-box,:root[data-color-scheme="light"] .current-driver-card,:root[data-color-scheme="light"] .bdc-card,:root[data-color-scheme="light"] .bdc-detail-card,:root[data-color-scheme="light"] .imports-archives-table-wrap,:root[data-color-scheme="light"] .more-sheet-panel,:root[data-color-scheme="light"] .app-loader-panel {
-  border: 1px solid rgba(223, 231, 227, 0.95);
-  border-radius: var(--radius);
+  border-color: rgba(223, 231, 227, 0.95);
   background: var(--v8-surface);
   box-shadow: var(--shadow-card);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .panel,:root[data-color-scheme="light"] .card,:root[data-color-scheme="light"] .item,:root[data-color-scheme="light"] .order-card,:root[data-color-scheme="light"] .delivery-card,:root[data-color-scheme="light"] .route-stop,:root[data-color-scheme="light"] .settings-block,:root[data-color-scheme="light"] .history-cell,:root[data-color-scheme="light"] .stock-line,:root[data-color-scheme="light"] .workflow-card,:root[data-color-scheme="light"] .summary-item,:root[data-color-scheme="light"] .upload-card,:root[data-color-scheme="light"] .empty-state,:root[data-color-scheme="light"] .crm-card,:root[data-color-scheme="light"] .product-card,:root[data-color-scheme="light"] .stat-tile,:root[data-color-scheme="light"] .today-order-card,:root[data-color-scheme="light"] .planned-order-card,:root[data-color-scheme="light"] .current-client-box,:root[data-color-scheme="light"] .current-driver-card,:root[data-color-scheme="light"] .bdc-card,:root[data-color-scheme="light"] .bdc-detail-card,:root[data-color-scheme="light"] .imports-archives-table-wrap,:root[data-color-scheme="light"] .more-sheet-panel,:root[data-color-scheme="light"] .app-loader-panel { border: 1px solid rgba(223, 231, 227, 0.95); border-radius: var(--radius); } }
 
-:root[data-color-scheme="light"] .panel {
-  padding: 24px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .panel { padding: 24px; } }
 
 :root[data-color-scheme="light"] .panel h3 {
   color: var(--v8-principal-appuye);
-  font-size: 1.15rem;
-  font-weight: 950;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .panel h3 { font-size: 1.15rem; font-weight: 700; } }
 
-:root[data-color-scheme="light"] .panel-heading {
-  margin-bottom: 18px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .panel-heading { margin-bottom: 18px; } }
 
 :root[data-color-scheme="light"] .card {
-  display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
-  grid-template-areas:
-    "icon label"
-    "icon value";
-  column-gap: 14px;
-  align-items: center;
-  min-height: 134px;
-  padding: 22px;
-  border: 0;
-  border-bottom: 5px solid var(--card-accent-strong, var(--v8-principal));
+  border-bottom-color: var(--card-accent-strong, var(--v8-principal));
   background:
     linear-gradient(180deg, #ffffff, #fbfdfc);
   transition: transform 180ms ease, box-shadow 180ms ease;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .card { display: grid; grid-template-columns: 48px minmax(0, 1fr); grid-template-areas: "icon label"
+    "icon value"; column-gap: 14px; align-items: center; min-height: 134px; padding: 22px; border: 0; border-bottom: 5px solid var(--card-accent-strong, var(--v8-principal)); } }
 
 :root[data-color-scheme="light"] .card::after {
-  inset: auto 0 0 auto;
-  width: 58%;
-  height: 68%;
   background:
     linear-gradient(rgba(223, 231, 227, 0.55) 1px, transparent 1px),
     linear-gradient(90deg, rgba(223, 231, 227, 0.55) 1px, transparent 1px);
   background-size: 28px 28px;
   opacity: 0.48;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .card::after { inset: auto 0 0 auto; width: 58%; height: 68%; } }
 
 :root[data-color-scheme="light"] .card-icon {
-  position: relative;
-  inset: auto;
-  grid-area: icon;
-  width: 48px;
-  height: 48px;
-  border-radius: 16px;
   background: var(--card-accent, var(--v8-vert-clair));
   color: var(--card-accent-strong, var(--v8-principal));
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .card-icon { position: relative; inset: auto; grid-area: icon; width: 48px; height: 48px; border-radius: 16px; } }
 
 :root[data-color-scheme="light"] .card-label,
 :root[data-color-scheme="light"] .card span:not(.card-icon) {
-  grid-area: label;
-  align-self: end;
   color: var(--v8-texte-secondaire);
-  font-size: 0.94rem;
-  font-weight: 850;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .card-label, :root[data-color-scheme="light"] .card span:not(.card-icon) { grid-area: label; align-self: end; font-size: 0.94rem; font-weight: 700; } }
 
 :root[data-color-scheme="light"] .card strong {
-  grid-area: value;
-  align-self: start;
-  margin: 6px 0 0;
   color: var(--v8-texte);
-  font-size: clamp(2rem, 2.45vw, 2.85rem);
-  font-weight: 950;
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .card strong { grid-area: value; align-self: start; margin: 6px 0 0; font-size: clamp(2rem, 2.45vw, 2.85rem); font-weight: 700; } }
 
 :root[data-color-scheme="light"] .card.blue,
 :root[data-color-scheme="light"] .stat-tile-info {
@@ -6181,26 +5756,15 @@ html[data-color-scheme="light"] body,
   --card-accent-strong: var(--v8-principal-appuye);
 }
 
-:root[data-color-scheme="light"] .summary-grid,
-:root[data-color-scheme="light"] .upload-grid,
-:root[data-color-scheme="light"] .workflow-grid,
-:root[data-color-scheme="light"] .stats-kpis,
-:root[data-color-scheme="light"] .product-catalog,
-:root[data-color-scheme="light"] .crm-list,
-:root[data-color-scheme="light"] .order-board,
-:root[data-color-scheme="light"] .delivery-candidates,
-:root[data-color-scheme="light"] .route-stops,
-:root[data-color-scheme="light"] .bdc-list {
-  gap: 16px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .summary-grid, :root[data-color-scheme="light"] .upload-grid, :root[data-color-scheme="light"] .workflow-grid, :root[data-color-scheme="light"] .stats-kpis, :root[data-color-scheme="light"] .product-catalog, :root[data-color-scheme="light"] .crm-list, :root[data-color-scheme="light"] .order-board, :root[data-color-scheme="light"] .delivery-candidates, :root[data-color-scheme="light"] .route-stops, :root[data-color-scheme="light"] .bdc-list { gap: 16px; } }
 
 :root[data-color-scheme="light"] .summary-item,
 :root[data-color-scheme="light"] .upload-card,
 :root[data-color-scheme="light"] .workflow-card {
-  border-left: 0;
-  border-top: 5px solid var(--v8-principal);
+  border-top-color: var(--v8-principal);
   background: var(--v8-surface);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .summary-item, :root[data-color-scheme="light"] .upload-card, :root[data-color-scheme="light"] .workflow-card { border-left: 0; border-top: 5px solid var(--v8-principal); } }
 
 :root[data-color-scheme="light"] .summary-item.status-warning,
 :root[data-color-scheme="light"] .upload-card.status-warning {
@@ -6212,11 +5776,7 @@ html[data-color-scheme="light"] body,
   border-top-color: var(--v8-principal-appuye);
 }
 
-:root[data-color-scheme="light"] .button {
-  min-height: 44px;
-  border-radius: var(--radius-button);
-  font-weight: 950;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] .button { min-height: 44px; border-radius: var(--radius-button); font-weight: 700; } }
 
 :root[data-color-scheme="light"] .button.primary,
 :root[data-color-scheme="light"] .button.ok {
@@ -6261,9 +5821,9 @@ html[data-color-scheme="light"] body,
 :root[data-color-scheme="light"] .bdc-form-field textarea,
 :root[data-color-scheme="light"] .bdc-search input[type="search"] {
   border-color: var(--v8-vert-clair);
-  border-radius: 14px;
   background: var(--v8-surface);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] input, :root[data-color-scheme="light"] select, :root[data-color-scheme="light"] textarea, :root[data-color-scheme="light"] .bdc-field select, :root[data-color-scheme="light"] .bdc-field input[type="date"], :root[data-color-scheme="light"] .bdc-form-field input, :root[data-color-scheme="light"] .bdc-form-field textarea, :root[data-color-scheme="light"] .bdc-search input[type="search"] { border-radius: 14px; } }
 
 :root[data-color-scheme="light"] .pill-ok {
   background: var(--v8-vert-clair);
@@ -6294,9 +5854,9 @@ html[data-color-scheme="light"] body,
 :root[data-color-scheme="light"] .route-stop,
 :root[data-color-scheme="light"] .bdc-card,
 :root[data-color-scheme="light"] .stat-tile {
-  border-top: 0;
-  border-left: 5px solid var(--v8-principal);
+  border-left-color: var(--v8-principal);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .crm-card, :root[data-color-scheme="light"] .product-card, :root[data-color-scheme="light"] .today-order-card, :root[data-color-scheme="light"] .planned-order-card, :root[data-color-scheme="light"] .delivery-card, :root[data-color-scheme="light"] .route-stop, :root[data-color-scheme="light"] .bdc-card, :root[data-color-scheme="light"] .stat-tile { border-top: 0; border-left: 5px solid var(--v8-principal); } }
 
 :root[data-color-scheme="light"] .today-order-card.pill-warning,
 :root[data-color-scheme="light"] .planned-order-card.pill-warning,
@@ -6325,17 +5885,14 @@ html[data-color-scheme="light"] body,
   color: var(--v8-surface);
 }
 
-:root[data-color-scheme="light"] table,
-:root[data-color-scheme="light"] .bdc-table,
-:root[data-color-scheme="light"] .imports-archives-table {
-  border-radius: 18px;
-}
+@media (max-width: 820px) { :root[data-color-scheme="light"] table, :root[data-color-scheme="light"] .bdc-table, :root[data-color-scheme="light"] .imports-archives-table { border-radius: 18px; } }
 
 :root[data-color-scheme="light"] .mobile-tabbar {
-  border: 1px solid rgba(223, 231, 227, 0.9);
+  border-color: rgba(223, 231, 227, 0.9);
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 20px 46px rgba(31, 73, 74, 0.22);
 }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .mobile-tabbar { border: 1px solid rgba(223, 231, 227, 0.9); } }
 
 :root[data-color-scheme="light"] .mobile-tab.active {
   background: var(--v8-principal);
@@ -6348,55 +5905,30 @@ html[data-color-scheme="light"] body,
 
 @media (max-width: 1180px) {
   :root[data-color-scheme="light"] .app {
-    grid-template-columns: var(--bl-largeur) minmax(0, 1fr);
     background: var(--v8-fond);
   }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .app { grid-template-columns: var(--bl-largeur) minmax(0, 1fr); } }
 
-  :root[data-color-scheme="light"] #journee.page.active {
-    grid-template-columns: 1fr;
-  }
+  @media (max-width: 820px) { :root[data-color-scheme="light"] #journee.page.active { grid-template-columns: 1fr; } }
 
-  :root[data-color-scheme="light"] #journee .dashboard-cards,
-  :root[data-color-scheme="light"] .cards {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+  @media (max-width: 820px) { :root[data-color-scheme="light"] #journee .dashboard-cards, :root[data-color-scheme="light"] .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 }
 
 @media (max-width: 920px) {
   :root[data-color-scheme="light"] .app {
-    display: block;
     background: var(--v8-fond);
   }
+@media (max-width: 820px) { :root[data-color-scheme="light"] .app { display: block; } }
 
-  :root[data-color-scheme="light"] .content {
-    padding: 14px 14px calc(106px + env(safe-area-inset-bottom));
-  }
+  @media (max-width: 820px) { :root[data-color-scheme="light"] .content { padding: 14px 14px calc(106px + env(safe-area-inset-bottom)); } }
 
-  :root[data-color-scheme="light"] .topbar {
-    grid-template-columns: 1fr;
-    min-height: auto;
-    padding: 20px;
-    border-radius: 24px;
-  }
+  @media (max-width: 820px) { :root[data-color-scheme="light"] .topbar { grid-template-columns: 1fr; min-height: auto; padding: 20px; border-radius: 24px; } }
 
-  :root[data-color-scheme="light"] .topbar-actions {
-    justify-content: stretch;
-  }
+  @media (max-width: 820px) { :root[data-color-scheme="light"] .topbar-actions { justify-content: stretch; } }
 
-  :root[data-color-scheme="light"] .topbar-actions .button,
-  :root[data-color-scheme="light"] .topbar-actions .status-chip {
-    flex: 1 1 160px;
-  }
+  @media (max-width: 820px) { :root[data-color-scheme="light"] .topbar-actions .button, :root[data-color-scheme="light"] .topbar-actions .status-chip { flex: 1 1 160px; } }
 
-  :root[data-color-scheme="light"] .field-app-grid,
-  :root[data-color-scheme="light"] .customer-order-layout,
-  :root[data-color-scheme="light"] .stats-grid,
-  :root[data-color-scheme="light"] .driver-tools,
-  :root[data-color-scheme="light"] .delivery-filters,
-  :root[data-color-scheme="light"] .stock-toolbar,
-  :root[data-color-scheme="light"] .crm-toolbar {
-    grid-template-columns: 1fr;
-  }
+  @media (max-width: 820px) { :root[data-color-scheme="light"] .field-app-grid, :root[data-color-scheme="light"] .customer-order-layout, :root[data-color-scheme="light"] .stats-grid, :root[data-color-scheme="light"] .driver-tools, :root[data-color-scheme="light"] .delivery-filters, :root[data-color-scheme="light"] .stock-toolbar, :root[data-color-scheme="light"] .crm-toolbar { grid-template-columns: 1fr; } }
 }
 
 @media (max-width: 560px) {
@@ -6444,8 +5976,6 @@ html[data-color-scheme="light"] body,
 /* Final module visibility override 2026-07-01.
    This block must stay last so category modules and the mobile "Plus" sheet
    cannot be clipped by previous dashboard styles. */
-@media (min-width: 921px) {
-}
 
 .more-sheet {
   align-items: stretch;
@@ -6775,8 +6305,6 @@ html[data-color-scheme="light"] body,
 /* Coherence dark : la sidebar passe en barre horizontale des 820px (tous
    themes) -> masquer sa recherche + version des 820px aussi, sinon en dark
    elles reapparaissaient entre 561 et 820px (R2). */
-@media (max-width: 820px) {
-}
 
 /* Champ quantite editable du stepper commande client (audit UI 2026-07).
    font-size 1.3rem : retrouve la proeminence de l'ancien <strong> (R2). */
@@ -6784,7 +6312,7 @@ html[data-color-scheme="light"] body,
   width: 100%;
   min-width: 0;
   text-align: center;
-  font-weight: 800;
+  font-weight: 700;
   font-size: 1.3rem;
   font-variant-numeric: tabular-nums;
   padding-inline: 4px;
@@ -7119,7 +6647,7 @@ html[data-color-scheme="light"] body,
 }
 .op-welcome h2 {
   font-size: clamp(24px, 2.6vw, 36px);
-  font-weight: 650;
+  font-weight: 700;
   letter-spacing: -1.2px;
   margin: 8px 0;
 }
@@ -7129,7 +6657,7 @@ html[data-color-scheme="light"] body,
 .op-eyebrow {
   font-size: 10px;
   letter-spacing: 1.8px;
-  font-weight: 750;
+  font-weight: 700;
   color: var(--muted);
   text-transform: uppercase;
 }
@@ -7175,7 +6703,7 @@ html[data-color-scheme="light"] body,
 .op-kpi > strong {
   font-size: clamp(26px, 2.8vw, 40px);
   line-height: 1.15;
-  font-weight: 650;
+  font-weight: 700;
   letter-spacing: -1.3px;
 }
 .op-kpi small,
@@ -7364,7 +6892,7 @@ html[data-color-scheme="light"] body,
 .op-details > summary {
   cursor: pointer;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 700;
 }
 .op-details[open] > .cards {
   margin-top: 20px;
@@ -8118,7 +7646,7 @@ textarea::placeholder {
 .motif-choix[aria-checked="true"] {
   border-color: var(--v8-principal);
   background: var(--v8-vert-clair);
-  font-weight: 650;
+  font-weight: 700;
 }
 
 /* Un choix retenu ne se signale JAMAIS par la seule couleur : la matrice des
@@ -8330,14 +7858,7 @@ textarea::placeholder {
 }
 
 /* ③ LA BARRE LATERALE : 258 px, angle droit arrondi a 36.
- *    ⛔ SOUS @media (min-width: 921px), ET C EST UNE REGRESSION QUE J AI
- *       CAUSEE PUIS MESUREE. Sans le media, la regle s appliquait AUSSI en
- *       mobile : la barre y passait de 390 px (pleine largeur) a 258, laissant
- *       132 px au contenu. La charte dit "barre laterale DESKTOP" -- le mot
- *       etait dans la ligne, je ne l avais pas lu. */
-@media (min-width: 921px) {
-}
-
+ *    ⛔ SOUS 
 /* ④ LES SHEETS ET MODALES : 28 px. */
 :root[data-color-scheme] .version-modal-card,
 :root[data-color-scheme] .motif-dialog,
@@ -10194,12 +9715,6 @@ textarea::placeholder {
       Le mode sombre, lui, gardait la disposition bureau, et tous les bancs la
       valident : on aligne le clair sur lui plutot que d'inventer un troisieme
       comportement. */
-@media (min-width: 821px) and (max-width: 920px) {
-  :root[data-color-scheme="light"] .app {
-    display: grid;
-    grid-template-columns: var(--bl-largeur) minmax(0, 1fr);
-  }
-}
 
 /* 2. La barre a une hauteur d'ecran et un contenu d'environ 734 px. Sous cette
       hauteur (un portable 1280 x 720), ses blocs se compressaient : le bloc
@@ -11365,8 +10880,9 @@ textarea::placeholder {
 /* --- Stock et Commandes : la relecture ------------------------------------
    Entre 921 et 1280 px, les colonnes fixes des tableaux (Stock 740 px, Commandes
    766 px) ne laissaient rien a la colonne du nom : il disparaissait. La ligne
-   passe en carte des 1280 px, comme au telephone. */
-@media (min-width: 921px) and (max-width: 1280px) {
+   passe en carte sous 1280 px, comme au telephone (a 1280 tout rond, le
+   tableau revient, colonnes resserrees : bloc « Theme clair : finitions »). */
+@media (min-width: 921px) and (max-width: 1279px) {
   .stk-entete, .cmd-entete { display: none; }
   .stk-ligne {
     grid-template-columns: minmax(0, 1fr) auto auto;
@@ -11394,7 +10910,7 @@ textarea::placeholder {
 }
 /* Sans en-tete de colonnes, seuil et stock etaient deux nombres sans nom, et
    rien ne disait qu'ils se modifient (pas de survol au doigt). */
-@media (max-width: 1280px) {
+@media (max-width: 1279px) {
   .stk-ligne > .stk-droite:nth-of-type(4),
   .stk-ligne > .stk-droite:nth-of-type(5) { align-items: center; gap: 6px; }
   .stk-ligne > .stk-droite:nth-of-type(4)::before { content: "Seuil"; }
@@ -13055,10 +12571,10 @@ textarea::placeholder {
    (Commandes) a 290 px (Stock) a l'arrivee des donnees. Mesures du 23/09 :
    carte de commande 95 px, carte de stock 129 px (pas de 36 px), 141 px sous
    920 px (pas de 44 px). */
-@media (min-width: 821px) and (max-width: 1280px) {
+@media (min-width: 821px) and (max-width: 1279px) {
   #cmdLignes { --squelette-ligne: 95px; }
 }
-@media (min-width: 921px) and (max-width: 1280px) {
+@media (min-width: 921px) and (max-width: 1279px) {
   #stockList { --squelette-ligne: 129px; }
 }
 @media (max-width: 920px) {
@@ -14894,7 +14410,7 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 :root[data-color-scheme] .panel p.arret-heure strong,
-:root:not([data-color-scheme]) .panel p.arret-heure strong { color: var(--v8-texte); font-weight: 650; }
+:root:not([data-color-scheme]) .panel p.arret-heure strong { color: var(--v8-texte); font-weight: 700; }
 :root[data-color-scheme] .panel .arret-prochain-trajet,
 :root:not([data-color-scheme]) .panel .arret-prochain-trajet {
   flex-basis: 100%; font-size: 13.5px; font-weight: 500; color: var(--v8-texte-secondaire);
@@ -14935,7 +14451,7 @@ textarea {
   background: var(--v8-surface-basse); color: var(--v8-texte); cursor: pointer;
 }
 .reopt-choix input { width: 20px; height: 20px; margin: 0; accent-color: var(--v8-principal); }
-.reopt-choix:has(input:checked) { border-color: var(--v8-principal); background: var(--v8-vert-clair); font-weight: 650; }
+.reopt-choix:has(input:checked) { border-color: var(--v8-principal); background: var(--v8-vert-clair); font-weight: 700; }
 .reopt-choix:has(input:focus-visible) { box-shadow: var(--focus-ring); }
 
 /* Parametres : le depot par defaut. */
@@ -15102,3 +14618,1098 @@ html, body, main.content { overflow-x: clip; }
    regle `@media (min-width: 821px) .sidebar { overflow-y: auto }` posee plus
    haut (bloc « barre laterale, finitions ») : le compte et la version restent
    atteignables (banc collant-et-clavier, « écran bas »). */
+
+/* ==========================================================================
+   LES PIEGES : IMPORT, TOURNEE PAR SECTEUR, RETOUR APRES VALIDATION (24/09)
+   --------------------------------------------------------------------------
+   Audit du 24/09, decision 1 de Thomas. Jetons V8 seulement : clair et
+   sombre suivent seuls. Contrastes mesures par les bancs du lot
+   (test/e2e/pieges-import-validation.spec.js et pieges-tournee.spec.js) :
+   comptes du resume 7,04 (clair) / 8,55 (sombre), compte « ignoree » 4,89 /
+   4,56, avertissements 5,46 / 11,59.
+   1. Le resume d'un import (#importSummary) : en TETE du tableau de bord.
+   ========================================================================== */
+.import-bilan {
+  display: grid; gap: 12px; margin: 0 0 24px; padding: 18px 20px;
+  border-radius: 20px; background: var(--v8-surface); color: var(--v8-texte);
+  box-shadow: inset 4px 0 0 var(--v8-principal);
+  scroll-margin-top: 16px;
+}
+.import-bilan[hidden] { display: none !important; }
+.import-bilan:focus { outline: none; }
+.import-bilan:focus-visible {
+  box-shadow: inset 4px 0 0 var(--v8-principal), 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus);
+}
+.import-bilan-tete { display: flex; align-items: center; gap: 12px; }
+/* Le titre et l'heure passent a la ligne entre eux, jamais sous « Fermer ». */
+.import-bilan-intitule { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; flex: 1 1 auto; min-width: 0; }
+.import-bilan-titre { margin: 0; font-size: 17px; font-weight: 600; color: var(--v8-texte); }
+.import-bilan-heure { font-size: 13.5px; font-weight: 500; color: var(--v8-texte-secondaire); }
+:root[data-color-scheme] .import-bilan .button.compact.import-bilan-fermer,
+:root:not([data-color-scheme]) .import-bilan .button.compact.import-bilan-fermer {
+  width: 44px; min-width: 44px; height: 44px; min-height: 44px; padding: 0; margin-left: auto;
+  flex: 0 0 auto; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center;
+}
+.import-bilan-fermer svg { width: 20px; height: 20px; }
+.import-bilan-comptes { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.import-bilan-compte {
+  display: inline-flex; align-items: baseline; gap: 6px; padding: 8px 14px; border-radius: 999px;
+  background: var(--v8-vert-clair); color: var(--v8-principal-appuye); font-size: 14.5px; font-weight: 500;
+}
+.import-bilan-compte strong { font-size: 18px; font-weight: 700; }
+.import-bilan-compte--attention { background: var(--v8-avertissement-fond); color: var(--v8-avertissement); }
+.import-bilan-details {
+  display: grid; gap: 6px; margin: 0; padding: 0; list-style: none;
+  font-size: 14px; line-height: 1.45; color: var(--v8-texte-secondaire);
+}
+.import-bilan-detail { display: flex; align-items: flex-start; gap: 8px; }
+.import-bilan-detail strong { font-weight: 600; }
+.import-bilan-detail--attention { color: var(--v8-avertissement); }
+.import-bilan-icone { width: 18px; height: 18px; flex: none; margin-top: 1px; }
+:root[data-color-scheme] .import-bilan .button.compact.import-bilan-suite,
+:root:not([data-color-scheme]) .import-bilan .button.compact.import-bilan-suite {
+  justify-self: start; width: auto; min-height: 44px; flex: 0 0 auto;
+}
+@media (max-width: 820px) {
+  .import-bilan { margin-bottom: 16px; padding: 14px 16px; }
+}
+
+/* 2. Tournee par secteur : les pilules de secteur (le modele de Preparation,
+   `.filtre-pilules`), la date et la ville sans « Filtrer », et « Créer la
+   tournée (N) » SOUS la liste -- colle en bas au telephone, au-dessus de la
+   barre basse (80 px + la zone sure ; mesure par le banc). */
+#routePlanning .trn-secteurs { margin: 4px 0 10px; }
+/* La forme des pilules d'A recommander (planche) : surface basse, 44 px ; la
+   choisie PLEINE, au principal. Sans cette regle, en clair, la pilule choisie
+   ne se distinguait pas des autres (le defaut releve par l'audit sur
+   Preparation) -- ici, c'est elle qui dit de quel secteur partira la tournee.
+   Contrastes : libre 4,56 (clair) / 9,28 (sombre) ; choisie 6,01 / 10,22. */
+:root[data-color-scheme] #deliverySectorPills .button.compact.filtre-pilule,
+:root:not([data-color-scheme]) #deliverySectorPills .button.compact.filtre-pilule {
+  flex: 0 0 auto; width: auto; height: 44px; min-height: 44px; padding: 0 18px;
+  border: 0; border-radius: 999px; box-shadow: none;
+  background: var(--v8-surface-basse); color: var(--v8-texte-secondaire);
+  font-size: 14.5px; font-weight: 500;
+}
+:root[data-color-scheme] #deliverySectorPills .button.compact.filtre-pilule.active-filter,
+:root:not([data-color-scheme]) #deliverySectorPills .button.compact.filtre-pilule.active-filter {
+  background: var(--v8-principal); color: var(--v8-texte-sur-principal); font-weight: 600;
+}
+:root[data-color-scheme] #deliverySectorPills .button.compact.filtre-pilule:focus-visible,
+:root:not([data-color-scheme]) #deliverySectorPills .button.compact.filtre-pilule:focus-visible {
+  outline: none; box-shadow: 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus);
+}
+@media (min-width: 1181px) {
+  #routePlanning .delivery-filters { grid-template-columns: minmax(150px, 190px) minmax(180px, 320px); }
+}
+.trn-creer { display: flex; justify-content: flex-end; margin-top: 16px; }
+.trn-creer[hidden] { display: none !important; }
+:root[data-color-scheme] .trn-creer .button#createRouteButton,
+:root:not([data-color-scheme]) .trn-creer .button#createRouteButton { width: auto; min-height: 48px; padding-inline: 28px; }
+@media (max-width: 820px) {
+  .trn-creer {
+    position: sticky; bottom: calc(92px + env(safe-area-inset-bottom)); z-index: 5;
+    margin-top: 12px; padding: 10px 0; background: var(--v8-surface);
+    box-shadow: 0 -12px 16px -12px rgba(15, 61, 61, 0.18);
+  }
+  :root[data-color-scheme] .trn-creer .button#createRouteButton,
+  :root:not([data-color-scheme]) .trn-creer .button#createRouteButton { width: 100%; }
+}
+
+/* 3. Apres « Valider la commande » : la ligne de la commande creee, mise en
+   avant dans Commandes. Un trait, un fond, et le mot « Nouvelle » (jamais la
+   couleur seule). Fond : surface basse en clair (le secondaire y tient 4,56),
+   surface haute en sombre (la basse s'y confond avec la carte ; 7,67). La
+   regle du telephone (`#commandes .cmd-ligne + .cmd-ligne`, un filet en
+   box-shadow) est battue par la specificite (0,4,1). */
+:root[data-color-scheme] #commandes .cmd-ligne.cmd-ligne--nouvelle,
+:root:not([data-color-scheme]) #commandes .cmd-ligne.cmd-ligne--nouvelle {
+  background: var(--v8-surface-basse); box-shadow: inset 4px 0 0 var(--v8-principal);
+  scroll-margin: 96px 0;
+}
+:root[data-color-scheme="dark"] #commandes .cmd-ligne.cmd-ligne--nouvelle { background: var(--v8-surface-haute); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) #commandes .cmd-ligne.cmd-ligne--nouvelle { background: var(--v8-surface-haute); }
+}
+:root[data-color-scheme] #commandes .cmd-ligne.cmd-ligne--nouvelle:focus-visible,
+:root:not([data-color-scheme]) #commandes .cmd-ligne.cmd-ligne--nouvelle:focus-visible {
+  box-shadow: inset 4px 0 0 var(--v8-principal), var(--focus-ring);
+}
+.cmd-nouvelle { font-size: 12px; font-weight: 600; color: var(--v8-principal); }
+#commandes .cmd-meta .cmd-nouvelle { font-size: inherit; }
+
+/* ==========================================================================
+   LE FILET DE SECURITE : SAUVEGARDES VISIBLES, A RECOMMANDER QUI VOIT VENIR
+   (decisions de Thomas du 24/09)
+   --------------------------------------------------------------------------
+   1. La carte « Sauvegardes » de Parametres : la forme des autres cartes
+      (.par-carte), une alerte cerclee de la couleur d'alerte (le contour de
+      la zone dangereuse, pas un fond : le texte garde la couleur d'alerte sur
+      la surface de la carte), deux faits en liste, deux gestes de 44 px au
+      moins. [hidden] gagne partout.
+   2. Le curseur de l'horizon : 44 px de haut, la cible entiere.
+   3. L'ecran « A recommander » : la phrase du manque (« Manquera le 3/10 :
+      24 demandes, 14 en stock »), dans la couleur d'alerte AVEC ses mots, et
+      la ligne qui dit d'ou vient le besoin, en texte secondaire.
+   ========================================================================== */
+#parametres .par-sauvegardes-alerte {
+  margin: 0; padding: 12px 16px; border-radius: 16px;
+  box-shadow: inset 0 0 0 1.5px var(--v8-alerte);
+  color: var(--v8-alerte); font-size: 14px; font-weight: 600; line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+#parametres .par-sauvegardes-faits { margin: 0; display: grid; gap: 10px; }
+#parametres .par-sauvegardes-faits > div {
+  display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 12px; align-items: baseline;
+}
+#parametres .par-sauvegardes-faits dt { font-size: 13px; font-weight: 500; color: var(--v8-texte-secondaire); }
+#parametres .par-sauvegardes-faits dd {
+  margin: 0; font-size: 15px; font-weight: 500; color: var(--v8-texte);
+  font-variant-numeric: tabular-nums; overflow-wrap: anywhere;
+}
+#parametres .par-sauvegardes-gestes { display: flex; flex-wrap: wrap; gap: 10px; }
+#parametres .par-sauvegardes-gestes .button {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 44px; text-decoration: none;
+}
+:root[data-color-scheme] #parametres .par-sauvegardes-gestes .button:focus-visible,
+:root:not([data-color-scheme]) #parametres .par-sauvegardes-gestes .button:focus-visible {
+  outline: none; box-shadow: 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus);
+}
+#parametres #parHorizonSlider { min-height: 44px; }
+#parametres .par-sauvegardes-alerte[hidden],
+#parametres .par-sauvegardes-gestes[hidden],
+#parametres .par-sauvegardes-gestes .button[hidden],
+#parametres #parSauvegardesNote[hidden] { display: none !important; }
+
+@media (max-width: 820px) {
+  #parametres .par-sauvegardes-faits > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  #parametres .par-sauvegardes-gestes .button { flex: 1 1 100%; }
+}
+
+#recommande .reco-manque { margin: 10px 0 0; font-size: 14px; font-weight: 600; line-height: 1.4; color: var(--v8-alerte); }
+#recommande .reco-detail { margin: 10px 0 0; font-size: 13px; line-height: 1.45; color: var(--v8-texte-secondaire); }
+
+/* ==========================================================================
+   LE TELEPHONE UTILISABLE DEHORS (24/09) -- sous 820 px, mesure a 360 x 740,
+   390 x 844 et 375 x 667 (iPhone SE), clair et sombre. DESIGN.md, section du
+   meme nom. Banc : test/e2e/telephone-utilisable.spec.js.
+   --------------------------------------------------------------------------
+   1. Tournee (planche 4b) : l'en-tete vert et l'anneau « 3 sur 6 » ne font
+      plus qu'UN bloc (app.js deplace l'anneau et la barre dans l'en-tete) ;
+      Client absent et Probleme quittent la barre collee ; la carte de
+      l'arret reprend les mesures de la planche. Mesure avant, 375 x 667 :
+      la barre des gestes commencait a y = 398, le nom du client finissait a
+      467 et les articles a 645 -- tout etait dessous.
+   2. La rangee « A jour + Actualiser », seule sur sa ligne (56 px), monte
+      sur la ligne du titre.
+   3. Commandes et Clients : les pilules se replient au-dela de deux rangs
+      (« + N »), « Exporter » passe dans « Filtres », « Nouvelle commande »
+      devient un bouton fixe en bas. Avant : 0 commande entiere a 360 x 740.
+   4. Le panier de Commande client ne passe plus sous la barre basse.
+   5. Menu « Plus » : icones visibles en clair ; les messages n'en couvrent
+      plus les entrees.
+   6. Textes sous 13 px, « Detail du jour », puces etirees, « En preparation ».
+   ========================================================================== */
+
+/* --- 1. Tournee : un seul bloc vert ---------------------------------------- */
+.entete-tournee { display: none; }
+/* Au bureau, Client absent et Probleme gardent leur place sous « Livre ». */
+.gestes-secondaires { margin-top: 10px; }
+@media (min-width: 921px) { .gestes-secondaires { max-width: 640px; } }
+:root[data-color-scheme] .gestes-secondaires .button,
+:root:not([data-color-scheme]) .gestes-secondaires .button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+}
+
+@media (max-width: 820px) {
+  /* L'en-tete de l'ecran porte l'anneau et la barre (placerEnteteTournee) :
+     « titre | anneau » puis « barre | A jour + Actualiser ». L'en-tete de la
+     tournee, vide au telephone, disparait. */
+  #livreur .tournee-entete { display: none; }
+  body:has(#livreur.active #tourneeActive:not([hidden])) .ecran-entete .entete-tournee { display: contents; }
+  :root[data-color-scheme] body:has(#livreur.active #tourneeActive:not([hidden])) main.content > .ecran-entete,
+  :root:not([data-color-scheme]) body:has(#livreur.active #tourneeActive:not([hidden])) main.content > .ecran-entete {
+    /* Trois colonnes : l'anneau (58 px) et la synchro (~110 px) n'ont pas a
+       partager la leur -- sinon le titre, dans ce qui reste, passait a la
+       ligne a 375 px. */
+    display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas: "texte texte anneau" "barre actions actions";
+    align-items: center; column-gap: 12px; row-gap: 8px;
+    padding: 6px 20px 24px;
+  }
+  /* L'anneau a 56 (58 ailleurs) : la hauteur du titre et de sa ligne. */
+  body:has(#livreur.active #tourneeActive:not([hidden])) .ecran-entete .tournee-anneau { width: 56px; height: 56px; }
+  :root[data-color-scheme] body:has(#livreur.active #tourneeActive:not([hidden])) .ecran-entete #refreshButton,
+  :root:not([data-color-scheme]) body:has(#livreur.active #tourneeActive:not([hidden])) .ecran-entete #refreshButton {
+    height: 44px; min-height: 44px;
+  }
+  body:has(#livreur.active #tourneeActive:not([hidden])) .ecran-entete .ecran-entete-texte { grid-area: texte; }
+  body:has(#livreur.active #tourneeActive:not([hidden])) .ecran-entete .tournee-anneau { grid-area: anneau; }
+  body:has(#livreur.active #tourneeActive:not([hidden])) .ecran-entete .tournee-progression { grid-area: barre; }
+  body:has(#livreur.active #tourneeActive:not([hidden])) .ecran-entete .ecran-entete-actions {
+    grid-area: actions; flex-wrap: nowrap; justify-content: flex-end;
+  }
+  /* La fente est vide sur cet ecran au telephone (« Nouvelle tournee » et
+     « Recalculer » n'y sont rendus qu'au-dela de 1180 px) : elle prenait une
+     ligne entiere, et renvoyait la synchro a la suivante. */
+  body:has(#livreur.active) .ecran-entete .ecran-entete-fente { display: none; }
+  body:has(#livreur.active #tourneeActive:not([hidden])) .ecran-entete #syncStatus { margin-left: 0; }
+  /* Sur le vert de l'en-tete, les couleurs que l'en-tete de tournee donnait. */
+  .ecran-entete .tournee-anneau { color: var(--v8-texte-sur-carte-tournee); }
+  :root[data-color-scheme] .ecran-entete .tournee-anneau small,
+  :root:not([data-color-scheme]) .ecran-entete .tournee-anneau small {
+    font-size: 13px; color: var(--v8-secondaire-sur-carte-tournee);
+  }
+  :root[data-color-scheme] .ecran-entete .tournee-progression,
+  :root:not([data-color-scheme]) .ecran-entete .tournee-progression {
+    background: color-mix(in srgb, var(--v8-texte-sur-carte-tournee) 18%, transparent);
+  }
+  /* La carte de l'arret chevauche le vert (planche : -10 px), sans marge
+     entre les deux -- sauf si un bandeau s'intercale (hors ligne, tournee
+     d'un jour passe) : le vert garde alors son arrondi et sa marge. */
+  :root[data-color-scheme] body:has(#livreur.active #tourneeActive:not([hidden])):not(:has(#bandeauHorsLigne:not([hidden]), #tourneesNonSoldees:not([hidden]))) main.content > .ecran-entete,
+  :root:not([data-color-scheme]) body:has(#livreur.active #tourneeActive:not([hidden])):not(:has(#bandeauHorsLigne:not([hidden]), #tourneesNonSoldees:not([hidden]))) main.content > .ecran-entete {
+    margin-bottom: 0;
+  }
+
+  /* La carte de l'arret, aux mesures de la planche 4b : le nom a 22 px
+     (une ancienne regle mobile le passait a 28), les ecarts resserres. */
+  :root[data-color-scheme] #livreur .tournee .current-driver-card,
+  :root:not([data-color-scheme]) #livreur .tournee .current-driver-card { padding: 14px 16px 16px; }
+  #livreur #currentClient .arret { gap: 6px; }
+  #livreur #currentClient .arret-nom { font-size: 22px; line-height: 1.15; letter-spacing: -0.02em; }
+  :root[data-color-scheme] #livreur .panel p.arret-etat,
+  :root:not([data-color-scheme]) #livreur .panel p.arret-etat { font-size: 13px; }
+  #livreur #currentClient .arret-articles { gap: 6px; margin-top: 2px; padding: 10px 14px 12px; }
+  :root[data-color-scheme] #livreur .panel p.arret-articles-titre,
+  :root:not([data-color-scheme]) #livreur .panel p.arret-articles-titre { font-size: 13px; }
+
+  /* La barre collee ne porte plus que Appeler, « Y aller », Carte et
+     « Livre » (56 px) : 8 px d'air au lieu de 12. */
+  #livreur .current-driver-card .gestes { gap: 8px; padding: 6px 16px 8px; }
+  /* Client absent et Probleme : sous la barre, a 48 px, sans couleur. */
+  :root[data-color-scheme] #livreur .gestes-secondaires .button.tertiary,
+  :root:not([data-color-scheme]) #livreur .gestes-secondaires .button.tertiary {
+    height: 48px; min-height: 48px; font-size: 15.5px;
+  }
+  /* Fin de tournee (4d) : plus d'arret, plus de gestes d'arret. */
+  #livreur .current-driver-card:has(.fin-tournee) .gestes-secondaires { display: none; }
+}
+
+/* --- 2. « A jour + Actualiser » sur la ligne du titre ----------------------
+   Sur ces ecrans, la fente n'a rien a montrer au telephone (Commandes : la
+   recherche et les pilules, pleine largeur, dessous ; Tournee sans tournee :
+   rien) : la synchro etait seule sur une ligne de 56 px. Elle monte a droite
+   du titre. Tournee en cours : voir 1 (elle suit la barre de progression). */
+@media (max-width: 820px) {
+  :root[data-color-scheme] body:has(:is(#statistiques, #exports, #relances, #recommande, #commande-client, #parametres, #commandes).active, #livreur.active #tourneeActive[hidden]) main.content > .ecran-entete,
+  :root:not([data-color-scheme]) body:has(:is(#statistiques, #exports, #relances, #recommande, #commande-client, #parametres, #commandes).active, #livreur.active #tourneeActive[hidden]) main.content > .ecran-entete,
+  :root[data-color-scheme] body:has(#crm.active:not([data-vue="fiche"])) main.content > .ecran-entete,
+  :root:not([data-color-scheme]) body:has(#crm.active:not([data-vue="fiche"])) main.content > .ecran-entete {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; column-gap: 8px; row-gap: 16px;
+  }
+  body:has(:is(#statistiques, #exports, #relances, #recommande, #commande-client, #parametres, #commandes).active, #livreur.active #tourneeActive[hidden]) .ecran-entete .ecran-entete-texte,
+  body:has(#crm.active:not([data-vue="fiche"])) .ecran-entete .ecran-entete-texte { grid-column: 1; grid-row: 1; margin-right: 4px; }
+  body:has(:is(#statistiques, #exports, #relances, #recommande, #commande-client, #parametres, #commandes).active, #livreur.active #tourneeActive[hidden]) .ecran-entete .ecran-entete-actions,
+  body:has(#crm.active:not([data-vue="fiche"])) .ecran-entete .ecran-entete-actions { display: contents; }
+  body:has(:is(#statistiques, #exports, #relances, #recommande, #commande-client, #parametres, #commandes).active, #livreur.active #tourneeActive[hidden]) .ecran-entete #syncStatus,
+  body:has(#crm.active:not([data-vue="fiche"])) .ecran-entete #syncStatus {
+    grid-column: 2; grid-row: 1; align-self: start; margin: 12px 0 0; max-width: 8em;
+  }
+  body:has(:is(#statistiques, #exports, #relances, #recommande, #commande-client, #parametres, #commandes).active, #livreur.active #tourneeActive[hidden]) .ecran-entete #refreshButton,
+  body:has(#crm.active:not([data-vue="fiche"])) .ecran-entete #refreshButton { grid-column: 3; grid-row: 1; align-self: start; }
+  body:has(:is(#statistiques, #exports, #relances, #recommande, #commande-client, #parametres, #commandes).active, #livreur.active #tourneeActive[hidden]) .ecran-entete .ecran-entete-fente,
+  body:has(#crm.active:not([data-vue="fiche"])) .ecran-entete .ecran-entete-fente { grid-column: 1 / -1; grid-row: 2; }
+  body:has(:is(#statistiques, #exports, #relances, #recommande, #commande-client, #parametres).active) .ecran-entete .ecran-entete-fente { display: none; }
+  /* Clients : la recherche et « Rappels » (hors planche, garde) sur une
+     ligne -- « Rappels » partageait jusqu'ici la sienne avec la synchro. */
+  body:has(#crm.active:not([data-vue="fiche"])) .ecran-entete .ecran-entete-fente { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; }
+  body:has(#crm.active:not([data-vue="fiche"])) .ecran-entete .cli-recherche { flex: 1 1 0; width: auto; min-width: 0; }
+  body:has(#crm.active:not([data-vue="fiche"])) .ecran-entete .cli-rappels { flex: none; }
+}
+
+/* --- 3. Commandes et Clients : des lignes a l'ouverture -------------------- */
+/* Les pilules repliees (replierPilules) : [hidden] et le repli gagnent. */
+.pilule-repliee { display: none !important; }
+.pilules-plus[hidden] { display: none !important; }
+@media (max-width: 820px) {
+  /* « + N » : une pilule de plus, sur le vert, a la hauteur des autres. */
+  .pilules-plus {
+    display: inline-flex; align-items: center; justify-content: center; flex: none;
+    height: 44px; min-width: 56px; padding: 0 16px; border: 1.5px solid var(--v8-secondaire-sur-carte-tournee);
+    border-radius: 999px; background: transparent; color: var(--v8-texte-sur-carte-tournee);
+    font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  }
+  .pilules-plus:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--v8-carte-tournee), 0 0 0 5px var(--v8-texte-sur-carte-tournee); }
+  /* Clients : les secteurs, « Abonnes » et le statut dans UN flot, pour
+     que le repli compte leurs rangs ensemble. */
+  #crm .cli-filtres > .cli-pilules { display: contents; }
+
+  /* « Exporter » dans le panneau « Filtres » (placerExportCommandes). */
+  #commandes .cmd-filtres > [data-action="cmd-export"] { order: 5; flex: none; width: auto; }
+  #commandes .cmd-filtres:not(.cmd-filtres--ouverts) > [data-action="cmd-export"] { display: none; }
+}
+/* [hidden] gagne : `.button` (display: inline-flex) l'emportait sur la
+   feuille du navigateur -- l'attribut ne cachait rien, et le « hidden =
+   false » de placerExportCommandes ne se voyait pas (mutant M14 survivant). */
+#commandes .cmd-filtres > [data-action="cmd-export"][hidden] { display: none !important; }
+@media (max-width: 820px) {
+
+  /* « Nouvelle commande », fixe au-dessus de la barre basse, comme « Nouveau
+     client » (placerGestesBas : apres la liste dans l'ordre du clavier). */
+  #gestesBas .cmd-nouvelle { display: inline-flex; align-items: center; gap: 8px; }
+  :root[data-color-scheme] body:has(#commandes.active) #gestesBas .cmd-nouvelle,
+  :root:not([data-color-scheme]) body:has(#commandes.active) #gestesBas .cmd-nouvelle {
+    position: fixed; left: 16px; right: 16px; bottom: calc(104px + env(safe-area-inset-bottom)); z-index: 1000;
+    width: auto; height: 48px; justify-content: center; padding: 0 24px;
+    background: var(--v8-principal); color: var(--v8-texte-sur-principal); border: 0;
+    font-size: 15.5px; font-weight: 600; box-shadow: 0 8px 24px rgba(15, 61, 61, 0.22);
+  }
+  :root[data-color-scheme] body:has(#commandes.active) #gestesBas .cmd-nouvelle:focus-visible,
+  :root:not([data-color-scheme]) body:has(#commandes.active) #gestesBas .cmd-nouvelle:focus-visible {
+    outline: none; box-shadow: 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus), 0 8px 24px rgba(15, 61, 61, 0.22);
+  }
+  /* Sa place : la derniere commande defile au-dessus du bouton. */
+  :root[data-color-scheme] body:has(#commandes.active) main.content,
+  :root:not([data-color-scheme]) body:has(#commandes.active) main.content {
+    padding-bottom: calc(172px + env(safe-area-inset-bottom));
+  }
+}
+
+/* --- 4. Le panier de Commande client, au-dessus de la barre basse ----------
+   `78px` datait d'une barre basse de 78 px ; elle en mesure 90 (« Tableau de
+   bord » sur deux lignes) : 12 px du total et du bouton etaient dessous. La
+   place des boutons fixes de Clients et d'Abonnements : 90 + 14 d'air. */
+@media (max-width: 560px) {
+  .customer-cart-bar:not([hidden]) { bottom: calc(104px + env(safe-area-inset-bottom)); }
+  .customer-cart-bar .ccb-label { font-size: 13px; }
+}
+
+/* --- 5. Menu « Plus » -------------------------------------------------------
+   En clair, une regle ecrite pour une ancienne feuille VERTE peignait les
+   icones en blanc a 82 % sur un panneau blanc (1:1). Le trait de la charte :
+   texte secondaire, sur fond transparent (5,13:1 sur blanc).
+   Integration du 24/09 : la geometrie passe sous 820 px (regle « un seul
+   dessin » du lot theme : une regle du clair ne pose que sa peinture au
+   bureau) ; le menu « Plus » ne s'ouvre que depuis la barre basse du
+   telephone, rien ne change a l'ecran. */
+:root[data-color-scheme="light"] .more-sheet-icon {
+  background: transparent; color: var(--v8-texte-secondaire);
+}
+@media (max-width: 820px) {
+  :root[data-color-scheme="light"] .more-sheet-icon { width: 32px; height: 32px; border-radius: 12px; }
+}
+/* Menu ouvert : les messages passent en haut de l'ecran, au lieu de couvrir
+   Analyse et Parametres au bas de la feuille. */
+@media (max-width: 820px) {
+  body:has(#mobile-more-sheet:not([hidden])) .toast-region {
+    top: calc(12px + env(safe-area-inset-top)); bottom: auto;
+  }
+}
+
+/* --- 6. Lisible dehors, facile a toucher ----------------------------------- */
+/* « Detail du jour » : toute la carte repond au doigt, pas 19 px de texte.
+   Le rembourrage passe du volet a son resume -- meme boite a l'oeil. */
+:root[data-color-scheme] .op-details.tb-detail,
+:root:not([data-color-scheme]) .op-details.tb-detail { padding: 0; }
+.op-details.tb-detail > summary {
+  /* `list-item`, pas `flex` : seul un list-item porte le triangle d'ouverture
+     (relecture du 24/09 -- en flex, il disparaissait au bureau comme au
+     telephone). Le rembourrage suffit a passer 44 px. */
+  display: list-item; min-height: 44px; padding: 18px; box-sizing: border-box;
+}
+.op-details.tb-detail[open] > summary { padding-bottom: 12px; }
+.op-details.tb-detail > .tb-detail-corps { padding: 0 18px 18px; }
+@media (max-width: 820px) {
+  /* La charte : jamais sous 13 px au telephone (« 1 echeance » etait a 11 ;
+     dans « Detail du jour », « Voir mes abonnements » et « Rappels arrives a
+     echeance » a 11, le libelle des cartes a 12). */
+  .op-tag { font-size: 13px; }
+  .op-kpi > span, .op-kpi small, .op-kpi a { font-size: 13px; }
+  /* Une puce reste une puce : dans un titre de carte passe en colonne, elle
+     s'etirait sur toute la largeur (« En livraison » sur 322 px). */
+  .panel-heading > .status-chip { justify-self: start; align-self: start; }
+}
+/* « En preparation » / « En livraison » (.pill-warning) en clair : #9A5A18
+   sur la peche claire ne tient que 4,45:1. Le fond d'avertissement de la
+   charte (--v8-avertissement-fond) : 4,89. */
+:root[data-color-scheme="light"] .pill.pill-warning { background: var(--v8-avertissement-fond); }
+
+/* --- 7. Relecture adverse du 24/09 : l'arret sous le pouce ------------------
+   ajusterArretAuPouce (app.js) mesure, apres chaque rendu de la tournee au
+   telephone, ou commence la barre collee des gestes. */
+@media (max-width: 820px) {
+  /* Les messages AU-DESSUS de la barre collee (12 px d'air) : « Livre --
+     client · Annuler » couvrait « Livre » de l'arret suivant, et un appui sur
+     sa droite annulait la livraison precedente. Menu « Plus » ouvert : en
+     haut, comme ailleurs (5). */
+  body:has(#livreur.active):not(:has(#mobile-more-sheet:not([hidden]))) .toast-region {
+    bottom: var(--toast-bas-tournee, calc(92px + env(safe-area-inset-bottom)));
+  }
+
+  /* « arret-serre » : pose seulement quand, page en haut, le dernier article
+     n'aurait pas 8 px d'air au-dessus de la barre collee (a 375 x 667 : un 3e
+     article a 473 pour une barre a 441 ; deux articles, 2 px d'air). Disques de 24, ecarts de 4, rembourrages reduits ; les
+     gestes gardent leurs 56 px (decision du 23/09). */
+  :root[data-color-scheme] body:has(#livreur.active #tourneeActive:not([hidden]) .current-driver-card.arret-serre) main.content > .ecran-entete,
+  :root:not([data-color-scheme]) body:has(#livreur.active #tourneeActive:not([hidden]) .current-driver-card.arret-serre) main.content > .ecran-entete {
+    row-gap: 4px; padding-top: 4px; padding-bottom: 20px;
+  }
+  :root[data-color-scheme] #livreur .tournee .current-driver-card.arret-serre,
+  :root:not([data-color-scheme]) #livreur .tournee .current-driver-card.arret-serre { padding-top: 10px; }
+  #livreur .arret-serre #currentClient .arret { gap: 4px; }
+  #livreur .arret-serre #currentClient .arret-articles { gap: 4px; margin-top: 0; padding-top: 8px; padding-bottom: 10px; }
+  #livreur .arret-serre #currentClient .arret-article .marqueur { width: 24px; height: 24px; font-size: 12px; }
+  #livreur .current-driver-card.arret-serre .gestes { gap: 6px; padding-top: 4px; padding-bottom: 6px; }
+}
+
+/* ==========================================================================
+   THEME CLAIR : FINITIONS ET UN SEUL DESSIN (24/09)
+   --------------------------------------------------------------------------
+   Clair et sombre ne different plus que par les COULEURS. Les couches
+   anciennes ecrites `:root[data-color-scheme="light"] X` posaient aussi la
+   geometrie (taille et graisse de police, rayons, marges, hauteurs) : elles
+   n'ont garde que leur peinture, et le clair a pris la geometrie du sombre,
+   celle des lots V8. Les graisses au-dessus de 700 (que Poppins n'a pas, et
+   qui s'affichaient en 700) valent 700. Ce bloc aligne ensuite sur la charte
+   ce qui restait faux dans les deux themes, et solde les finitions du bureau
+   relevees par l'audit du 24/09. Banc : test/e2e/un-seul-dessin.spec.js.
+   ========================================================================== */
+
+/* Charte §3 : titres de carte 18 px, 600, interlettrage -0,01 em. Il y en
+   avait trois rendus (19/600, 19/700, et 18,4/950 en clair). Le nom de la
+   tournee (en-tete du cockpit) et le nom du client en tete de sa fiche ne sont
+   pas des titres de carte ; l'encart « a plat » du Stock non plus. */
+@media (min-width: 821px) {
+  :root[data-color-scheme] :is(#journee, #commandes, #preparation, #livreur, #abonnements, #stock, #crm, #statistiques, #exports, #relances, #recommande, #commande-client, #parametres) h3:not(.tournee-nom):not(#stkAPlatTitre) {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+}
+
+/* --- Ce que la geometrie du clair cachait ---------------------------------
+   Les couches claires tenaient, sans le dire, des cas que le sombre ratait
+   (les bancs de forme ne tournent qu'en clair) : ils valent maintenant pour
+   les deux themes. */
+/* « Retour au point de depart » : une case de 22 px de haut (le champ de 46 px
+   du clair la grandissait). */
+:root[data-color-scheme] .route-step .op-check,
+:root:not([data-color-scheme]) .route-step .op-check { min-height: 44px; }
+/* Les pilules de filtre de la tablette sont celles du bureau, 44 px (la
+   regle des boutons de 48 px sous 920 px les prenait). */
+@media (min-width: 821px) and (max-width: 920px) {
+  :root[data-color-scheme] .filtre-pilules .button.compact.filtre-pilule,
+  :root:not([data-color-scheme]) .filtre-pilules .button.compact.filtre-pilule { min-height: 44px; }
+}
+/* Les grilles des anciens ecrans passent en une colonne sous 920 px (en
+   sombre, Commande client debordait de l'ecran). */
+@media (max-width: 920px) {
+  :root[data-color-scheme] :is(.field-app-grid, .customer-order-layout, .stats-grid, .driver-tools, .delivery-filters, .stock-toolbar, .crm-toolbar),
+  :root:not([data-color-scheme]) :is(.field-app-grid, .customer-order-layout, .stats-grid, .driver-tools, .delivery-filters, .stock-toolbar, .crm-toolbar) { grid-template-columns: 1fr; }
+}
+/* Analyse : six tuiles de 120 px au moins ne tiennent pas de 921 a 1100 px ;
+   elles passent a la ligne (au bureau : le telephone a ses regles). */
+@media (min-width: 821px) {
+  :root[data-color-scheme] #statistiques .stats-kpis,
+  :root:not([data-color-scheme]) #statistiques .stats-kpis { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+}
+/* Commande client : deux champs par ligne seulement s'ils logent « Commande
+   immediate » (15 rem), et non 13,5 (a 821 px la liste coupait son texte). */
+:root[data-color-scheme] .customer-client-panel .form-grid.two,
+:root:not([data-color-scheme]) .customer-client-panel .form-grid.two {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, max(15rem, calc((100% - 12px) / 2))), 1fr));
+}
+
+/* --- Les gestes qui detruisent ---------------------------------------------
+   « Purger », « Annuler la commande », « Supprimer » un secteur : un contour
+   d'alerte sur la surface, avec leur mot (et la corbeille pour la purge). Ils
+   ressemblaient a « Enregistrer » en clair (plein #2A5254) et portaient un
+   degrade corail en sombre, que la charte interdit (§4, §7). L'alerte reste
+   un texte et un contour, jamais un fond. */
+:root[data-color-scheme] button.button.danger,
+:root:not([data-color-scheme]) button.button.danger {
+  background: var(--v8-surface); background-image: none;
+  color: var(--v8-alerte); border: 1.5px solid var(--v8-alerte); box-shadow: none;
+}
+:root[data-color-scheme] button.button.danger:not(:disabled):hover,
+:root:not([data-color-scheme]) button.button.danger:not(:disabled):hover {
+  background: var(--v8-surface-basse); color: var(--v8-alerte); border-color: var(--v8-alerte);
+  box-shadow: inset 0 0 0 1px var(--v8-alerte);
+}
+:root[data-color-scheme] button.button.danger:focus-visible,
+:root:not([data-color-scheme]) button.button.danger:focus-visible {
+  outline: none; box-shadow: 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus);
+}
+:root[data-color-scheme] button.button.danger:disabled,
+:root:not([data-color-scheme]) button.button.danger:disabled { opacity: 0.55; }
+button.button.danger .button-icon { width: 18px; height: 18px; flex: none; }
+/* L'icone dans le fil du texte (un `flex` sur la ligne ecartait aussi les
+   mots en gras du reste de la phrase). */
+.danger-icone { width: 16px; height: 16px; margin-right: 8px; vertical-align: -3px; }
+
+/* --- Les liens du tableau de bord ------------------------------------------
+   « Tous les abonnements ↗ », « Tout voir ↗ », « Voir mes abonnements ↗ » : le
+   bleu du navigateur au bureau. La regle existait, bornee au telephone. */
+:root[data-color-scheme] #journee :is(.tb-lien, .panel-heading > a, .op-kpi > a),
+:root:not([data-color-scheme]) #journee :is(.tb-lien, .panel-heading > a, .op-kpi > a) {
+  color: var(--v8-principal); text-decoration: none; font-weight: 600;
+}
+#journee :is(.tb-lien, .panel-heading > a, .op-kpi > a):hover { text-decoration: underline; }
+
+/* --- Le filtre choisi se voit aussi en clair ------------------------------
+   Preparation « Tous », les onglets Analyse / Exports : la pilule choisie
+   restait blanche en clair (`.button.secondary` du clair battait
+   `.active-filter`). Pleine au principal, comme en sombre et comme les
+   pilules des Commandes. */
+:root[data-color-scheme] .button.secondary.compact.active-filter,
+:root[data-color-scheme] .button.compact.filtre-pilule.active-filter,
+:root:not([data-color-scheme]) .button.secondary.compact.active-filter,
+:root:not([data-color-scheme]) .button.compact.filtre-pilule.active-filter {
+  background: var(--v8-principal); color: var(--v8-texte-sur-principal); border-color: var(--v8-principal);
+}
+/* Clients : la ligne de la fiche affichee, et le survol. Leur regle pesait
+   (1,2,0) contre (1,3,0) pour le fond transparent : ni l'un ni l'autre ne se
+   voyait, dans aucun theme. La ligne choisie porte un anneau au principal.
+   Au bureau seulement : au telephone, la vue « liste » cache la fiche, et le
+   premier client, choisi d'office, se serait lu comme ouvert (relecture du
+   24/09 ; la liste du telephone releve de son lot). */
+@media (min-width: 821px) {
+  :root[data-color-scheme] #crm .cli-ligne:hover,
+  :root:not([data-color-scheme]) #crm .cli-ligne:hover { background: var(--v8-fond); }
+  :root[data-color-scheme] #crm .cli-ligne.cli-ligne--choisie,
+  :root:not([data-color-scheme]) #crm .cli-ligne.cli-ligne--choisie {
+    background: var(--v8-fond); box-shadow: inset 0 0 0 2px var(--v8-principal);
+  }
+  :root[data-color-scheme] #crm .cli-ligne.cli-ligne--choisie:focus-visible,
+  :root:not([data-color-scheme]) #crm .cli-ligne.cli-ligne--choisie:focus-visible {
+    box-shadow: inset 0 0 0 2px var(--v8-principal), 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus);
+  }
+}
+
+/* --- Les champs : l'indication legere, la saisie en 500 --------------------
+   Les indications (placeholder) etaient en gras, comme la valeur tapee : un
+   champ vide ressemblait a un champ rempli. Au bureau (le telephone releve de
+   son lot). */
+/* `:not(#_)` compte comme un identifiant (1,0,0) sans rien viser : les regles
+   de champ ecrivent `font: inherit` a (0,3,1) et reprenaient le gras du
+   libelle. Une regle d'ecran a identifiant (la saisie du stock, en 700) garde
+   la main. */
+@media (min-width: 821px) {
+  :root[data-color-scheme] :is(input, select, textarea):not(#_),
+  :root:not([data-color-scheme]) :is(input, select, textarea):not(#_) { font-weight: 500; }
+  :root[data-color-scheme] :is(input, textarea):not(#_)::placeholder,
+  :root:not([data-color-scheme]) :is(input, textarea):not(#_)::placeholder { font-weight: 400; }
+}
+
+/* --- Preparation : « Bloquee » rouge, avec son « ! », au bureau aussi ------ */
+@media (min-width: 821px) {
+  :root[data-color-scheme] #preparationList .pill.prep-badge--bloquee,
+  :root:not([data-color-scheme]) #preparationList .pill.prep-badge--bloquee {
+    display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; white-space: nowrap;
+    background: var(--v8-surface); color: var(--v8-alerte); border-color: transparent;
+    box-shadow: inset 0 0 0 1.5px var(--v8-alerte);
+  }
+  #preparationList .prep-badge-icone { width: 12px; height: 12px; flex: none; }
+}
+
+/* --- Modifier le client : les notes a leur taille, le libelle au-dessus --- */
+:root[data-color-scheme] #cliDialogue textarea,
+:root:not([data-color-scheme]) #cliDialogue textarea {
+  display: block; width: 100%; min-height: 96px; resize: vertical;
+}
+
+/* --- Le detail d'une commande ----------------------------------------------
+   « Technique » (identifiant, empreinte, dates) : replie, utile au depannage
+   seulement. Les icones lineaires remplacent les emojis. */
+#bdc-detail-modal .bdc-detail-tech > summary {
+  display: flex; align-items: center; min-height: 44px; cursor: pointer; list-style: none;
+}
+#bdc-detail-modal .bdc-detail-tech > summary::-webkit-details-marker { display: none; }
+#bdc-detail-modal .bdc-detail-tech > summary::after {
+  content: ""; width: 8px; height: 8px; margin-left: 10px; border: solid currentColor;
+  border-width: 0 2px 2px 0; transform: rotate(45deg) translateY(-2px); color: var(--v8-texte-secondaire);
+}
+#bdc-detail-modal .bdc-detail-tech[open] > summary::after { transform: rotate(-135deg) translateY(-2px); }
+#bdc-detail-modal .bdc-detail-tech > summary h3 { margin: 0; }
+#bdc-detail-modal .bdc-detail-tech > summary:focus-visible { outline: none; border-radius: 12px; box-shadow: 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus); }
+#bdc-detail-modal .bdc-detail-client svg { width: 16px; height: 16px; flex: none; }
+#bdc-detail-modal :is(.bdc-detail-phone a, .bdc-detail-missing, .bdc-detail-client-head .button) { display: inline-flex; align-items: center; gap: 6px; }
+
+/* --- A recommander : des chiffres neutres, le rouge pour la rupture ------
+   Les quatre chiffres (stock, besoin, seuil, a recommander) etaient en rouge
+   d'alerte en clair, blancs en sombre. La charte : l'alerte n'est jamais un
+   simple compteur. Seul un stock a zero la garde, avec son mot. */
+:root[data-color-scheme] #recommande .stock-kpis strong,
+:root:not([data-color-scheme]) #recommande .stock-kpis strong { color: var(--v8-texte); }
+:root[data-color-scheme] #recommande .stock-kpis .reco-rupture strong,
+:root:not([data-color-scheme]) #recommande .stock-kpis .reco-rupture strong { color: var(--v8-alerte); }
+/* Les listes qui defilent d'elles-memes (Exports, Rappels, A recommander) :
+   la premiere et la derniere carte touchaient le bord et y etaient rognees. */
+:root[data-color-scheme] :is(#exports, #relances, #recommande) .list,
+:root:not([data-color-scheme]) :is(#exports, #relances, #recommande) .list { padding: 4px; }
+
+/* --- Nouvel abonnement : [hidden] gagne sur le bouton de la fiche --------- */
+#subscriptionDialog #subNouveauClient[hidden] { display: none; }
+
+/* --- Commandes et Stock sur un portable (1280 a 1439 px) ------------------
+   A 1280 les listes passaient en cartes (3 commandes a l'ecran) et, juste
+   au-dessus, le nom du client tombait a 133 px. Le tableau reste un tableau
+   des 1280 px (les cartes sont gardees sous 1280), colonnes resserrees :
+   numero 120, date 84 (« 24 sept. »), secteur 110, articles 64, statut 132
+   (« En livraison » fait 96 px) -- le client prend le reste, ~300 px a 1280.
+   Le nom d'un produit passe a la ligne plutot que d'etre coupe. */
+@media (min-width: 1280px) and (max-width: 1439px) {
+  .cmd-entete, .cmd-ligne { grid-template-columns: 0 120px 84px minmax(0, 1fr) 110px 64px 132px; }
+  .cmd-carte--choix .cmd-entete, .cmd-carte--choix .cmd-ligne { grid-template-columns: 44px 120px 84px minmax(0, 1fr) 110px 64px 132px; }
+  .stk-entete, .stk-ligne { grid-template-columns: minmax(0, 1fr) 104px 140px 100px 100px 180px; }
+  .stk-ligne .stk-nom { white-space: normal; overflow-wrap: anywhere; }
+  /* Huit commandes a 1280 x 720 (un portable 1920 x 1080 a 150 %) : le haut
+     de l'ecran en prenait la moitie. L'en-tete tient sur une ligne (la
+     recherche a 200 px, « Actualiser » reduit a son icone -- son nom reste
+     « Actualiser » --), les espaces passent de 24 a 12 px et la ligne du
+     tableau de 56 a 48 px, toujours une cible de plus de 44 px. */
+  body:has(#commandes.active) .ecran-entete { margin-bottom: 12px; }
+  body:has(#commandes.active) .ecran-entete-texte { flex: 1 1 190px; }
+  body:has(#commandes.active) .ecran-entete .cmd-recherche { width: 200px; }
+  :root[data-color-scheme] body:has(#commandes.active) .ecran-entete #refreshButton,
+  :root:not([data-color-scheme]) body:has(#commandes.active) .ecran-entete #refreshButton {
+    width: 44px; min-width: 44px; padding: 0; justify-content: center;
+  }
+  body:has(#commandes.active) .ecran-entete #refreshButton > span { display: none; }
+  #commandes .cmd-filtres { margin-bottom: 12px; }
+  .cmd-ligne { min-height: 48px; }
+  #cmdLignes { --squelette-ligne: 48px; }
+}
+
+/* --- Abonnements : le nom de l'etablissement entier ------------------------
+   A 1440 la colonne Client ne recevait que ~120 px : « EHPAD Les Till… »,
+   « EHPAD Resid… ». « Prochaine » (« Jeu. 24 sept. ») et « Etat » (le badge
+   le plus large, « En retard », fait 85 px) se resserrent ; « Frequence »
+   s'elargit pour loger « Toutes les 2 semaines » en entier (decision du 23/09 :
+   un seul vocabulaire). Et « Les 90 jours » passe sous le tableau jusqu'a
+   1599 px, comme deja de 921 a 1439 : a cote, meme resserre, le tableau
+   n'avait pas la place d'un nom d'EHPAD. La planche 13a (1440) les met cote a
+   cote : ecart nomme dans DESIGN.md. */
+@media (min-width: 921px) {
+  .abo-entete,
+  #abonnements .abonnement-ligne .commande-ligne-main { grid-template-columns: minmax(0, 1fr) 168px 112px 96px; }
+}
+@media (min-width: 1440px) and (max-width: 1599px) {
+  .abo-colonne, #abonnements .abo-agenda { grid-column: span 12; }
+}
+
+/* --- L'icone d'un bouton ne colle pas a son mot ----------------------------
+   « Actualiser », « Recalculer le trace » : l'ecart de 8 px venait d'une regle
+   du clair ; le sombre collait l'icone au mot. Au bureau, pour les deux. */
+@media (min-width: 821px) {
+  :root[data-color-scheme] .button,
+  :root:not([data-color-scheme]) .button { gap: 8px; }
+}
+
+/* --- La version : « Derniere version » sur sa ligne --------------------------
+   Le mot « A jour » reste a la pastille des DONNEES. Dans la barre, le badge
+   de la version passe sous le numero plutot que de couper l'un et l'autre en
+   deux lignes. */
+.sidebar-version { flex-wrap: wrap; row-gap: 4px; padding-block: 6px; }
+.sidebar-version-label, .sidebar-version-etat { white-space: nowrap; }
+
+/* ==========================================================================
+   PARCOURS SIMPLIFIES (24/09) -- audit du 24/09, decisions de Thomas
+   --------------------------------------------------------------------------
+   1. La fiche client : « Nouvelle commande » et « Rappel » sous l'en-tete ;
+      le chiffre d'affaires livre et les rappels a faire, que le serveur
+      calculait sans que la fiche les montre.
+   2. La nouvelle commande : la recherche du client de l'abonnement (memes
+      classes abo-cr-*, reprises ici pour #commande-client : celles du
+      dialogue sont prefixees par #subscriptionDialog), les coordonnees
+      repliees, « Valider » sous le total.
+   3. Abonnements : « Creer les N commandes dues ».
+   Couleurs : jetons v8 seulement, donc justes en clair ET en sombre. Cibles
+   44 px (48 au telephone), anneau de focus a deux tons, [hidden] gagne.
+   ========================================================================== */
+
+/* 1. La fiche client ------------------------------------------------------ */
+.cli-fiche-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+:root[data-color-scheme] #crm .cli-fiche-actions .cli-bouton-contour,
+:root:not([data-color-scheme]) #crm .cli-fiche-actions .cli-bouton-contour { gap: 8px; }
+#crm .cli-fiche-actions svg { display: block; width: 18px; height: 18px; flex: none; }
+.cli-ca { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.cli-ca > div { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+:root[data-color-scheme] #crm .cli-ca-valeur,
+:root:not([data-color-scheme]) #crm .cli-ca-valeur {
+  font-size: 22px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2;
+  font-variant-numeric: tabular-nums; color: var(--v8-texte);
+}
+.cli-rappels-client { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.cli-rappel { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cli-rappel-date {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 500; color: var(--v8-texte-secondaire);
+}
+.cli-rappel-date svg { width: 16px; height: 16px; flex: none; }
+.cli-rappel.cli-alerte .cli-rappel-date { color: var(--v8-alerte); font-weight: 600; }
+.cli-rappel-motif { font-size: 15px; font-weight: 500; line-height: 1.4; color: var(--v8-texte); overflow-wrap: anywhere; }
+@media (max-width: 920px) {
+  .cli-ca { grid-template-columns: 1fr; gap: 14px; }
+}
+@media (max-width: 820px) {
+  /* Au telephone (planche 8c) : les deux gestes en pleine largeur, 48 px ;
+     le chiffre d'affaires et les rappels, une carte comme les autres. */
+  /* `auto` et non `0` : « Nouvelle commande » prend la place que « Rappel »
+     n'utilise pas (a parts egales, 174 px ne le tenaient pas a 390). */
+  :root[data-color-scheme] #crm .cli-fiche-actions .cli-bouton-contour,
+  :root:not([data-color-scheme]) #crm .cli-fiche-actions .cli-bouton-contour {
+    flex: 1 1 auto; min-width: 0; height: 48px; padding: 0 14px; white-space: nowrap;
+  }
+  :root[data-color-scheme] #crm .cli-fiche > .cli-ca,
+  :root:not([data-color-scheme]) #crm .cli-fiche > .cli-ca {
+    padding: 18px; border-radius: 24px; background: var(--v8-surface);
+    box-shadow: 0 1px 2px rgba(15, 61, 61, 0.05), 0 12px 28px rgba(15, 61, 61, 0.05);
+  }
+  #crm .cli-ca > div + div { padding-top: 14px; border-top: 1px solid var(--v8-surface-basse); }
+}
+
+/* 2. La nouvelle commande -------------------------------------------------- */
+#commande-client .cc-client { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+:root[data-color-scheme] #commande-client .cc-libelle,
+:root:not([data-color-scheme]) #commande-client .cc-libelle {
+  margin: 0; font-size: 13px; font-weight: 500; letter-spacing: 0; color: var(--v8-texte-secondaire);
+}
+#commande-client .abo-cr-client-recherche { display: flex; flex-direction: column; gap: 10px; }
+#commande-client .abo-cr-client-cartes { display: flex; flex-direction: column; gap: 8px; }
+#commande-client .abo-cr-client-choisi { display: flex; flex-direction: column; gap: 12px; }
+:root[data-color-scheme] #commande-client .abo-cr-champ--recherche,
+:root:not([data-color-scheme]) #commande-client .abo-cr-champ--recherche {
+  display: flex; flex-direction: row; align-items: center; gap: 10px;
+  box-sizing: border-box; width: 100%; height: 48px; min-height: 48px; margin: 0; padding: 0 18px;
+  border: 0; border-radius: 18px; background: var(--v8-surface-basse); box-shadow: none;
+  color: var(--v8-texte-secondaire); font-weight: 500; cursor: text;
+}
+#commande-client .abo-cr-champ--recherche svg { width: 18px; height: 18px; flex: none; }
+:root[data-color-scheme] #commande-client .abo-cr-champ--recherche input,
+:root:not([data-color-scheme]) #commande-client .abo-cr-champ--recherche input {
+  flex: 1 1 auto; width: auto; min-width: 0; height: 100%; min-height: 0; margin: 0; padding: 0;
+  border: 0; border-radius: 0; background: transparent; box-shadow: none; outline: none;
+  color: var(--v8-texte); font: inherit; font-size: 15.5px; font-weight: 500;
+}
+#commande-client .abo-cr-champ--recherche input::placeholder { color: var(--v8-texte-secondaire); opacity: 1; }
+:root[data-color-scheme] #commande-client .abo-cr-client-carte,
+:root:not([data-color-scheme]) #commande-client .abo-cr-client-carte {
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px;
+  box-sizing: border-box; width: 100%; min-height: 60px; margin: 0; padding: 10px 16px;
+  border: 0; border-radius: 18px; background: var(--v8-surface-basse); box-shadow: none;
+  color: var(--v8-texte); font: inherit; text-align: left; cursor: pointer;
+}
+#commande-client .abo-cr-client-carte strong { font-size: 15px; font-weight: 600; }
+#commande-client .abo-cr-client-carte span { font-size: 13px; font-weight: 500; color: var(--v8-texte-secondaire); }
+#commande-client .abo-cr-client-carte:hover { box-shadow: inset 0 0 0 1.5px var(--v8-principal); }
+#commande-client .abo-cr-client-champ {
+  display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 2px 0 18px;
+  border-radius: 18px; background: var(--v8-vert-clair);
+}
+#commande-client .abo-cr-client-nom {
+  flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font-size: 15.5px; font-weight: 600; color: var(--v8-principal-appuye);
+}
+:root[data-color-scheme] #commande-client .abo-cr-client-changer,
+:root:not([data-color-scheme]) #commande-client .abo-cr-client-changer {
+  display: flex; align-items: center; justify-content: center; flex: none;
+  width: 44px; height: 44px; min-width: 44px; min-height: 44px; padding: 0;
+  border: 0; border-radius: 999px; background: var(--v8-surface); box-shadow: none;
+  color: var(--v8-principal); cursor: pointer;
+}
+#commande-client .abo-cr-client-changer svg { width: 16px; height: 16px; }
+#commande-client .abo-cr-client-adresse {
+  display: flex; align-items: center; gap: 10px; margin: 0;
+  font-size: 13.5px; font-weight: 500; color: var(--v8-texte-secondaire);
+}
+#commande-client .abo-cr-client-adresse svg { width: 16px; height: 16px; flex: none; }
+#commande-client .abo-cr-note { margin: 0; font-size: 13px; font-weight: 400; line-height: 1.5; color: var(--v8-texte-secondaire); }
+/* Les coordonnees : repliees quand le client existe (« Modifier les
+   coordonnees »), ouvertes pour une nouvelle fiche. */
+#commande-client .cc-coordonnees { display: block; min-width: 0; }
+:root[data-color-scheme] #commande-client .cc-coordonnees > summary,
+:root:not([data-color-scheme]) #commande-client .cc-coordonnees > summary {
+  display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 4px;
+  border-radius: 12px; list-style: none; cursor: pointer;
+  color: var(--v8-principal); font-size: 14.5px; font-weight: 600;
+}
+#commande-client .cc-coordonnees > summary::-webkit-details-marker { display: none; }
+#commande-client .cc-coordonnees > summary::before {
+  content: ""; width: 8px; height: 8px; flex: none; margin: 0 4px;
+  border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg); transition: transform 200ms ease;
+}
+#commande-client .cc-coordonnees[open] > summary::before { transform: rotate(45deg); }
+#commande-client .cc-coordonnees[open] > .form-grid { margin-top: 12px; }
+@media (prefers-reduced-motion: reduce) {
+  #commande-client .cc-coordonnees > summary::before { transition: none; }
+}
+/* « Valider » sous le total, pleine largeur du panier. */
+:root[data-color-scheme] #commande-client .customer-cart-panel .cc-valider,
+:root:not([data-color-scheme]) #commande-client .customer-cart-panel .cc-valider {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; min-height: 48px; margin-top: 16px;
+}
+/* L'anneau de la charte : deux tons, sur chaque geste de ce bloc. */
+:root[data-color-scheme] #commande-client :is(.abo-cr-client-carte, .abo-cr-client-changer, .cc-valider, .cc-coordonnees > summary):focus-visible,
+:root:not([data-color-scheme]) #commande-client :is(.abo-cr-client-carte, .abo-cr-client-changer, .cc-valider, .cc-coordonnees > summary):focus-visible,
+:root[data-color-scheme] #commande-client .abo-cr-champ--recherche:has(input:focus-visible),
+:root:not([data-color-scheme]) #commande-client .abo-cr-champ--recherche:has(input:focus-visible) {
+  outline: none; box-shadow: 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus);
+}
+
+/* 3. Abonnements : « Creer les N commandes dues » ------------------------- */
+:root[data-color-scheme] #abonnements .abo-dues,
+:root:not([data-color-scheme]) #abonnements .abo-dues {
+  align-self: flex-start; display: inline-flex; align-items: center; min-height: 44px; padding: 0 20px;
+  border: 1.5px solid var(--v8-principal); border-radius: 999px; background: transparent; box-shadow: none;
+  color: var(--v8-principal); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+}
+:root[data-color-scheme] #abonnements .abo-dues:focus-visible,
+:root:not([data-color-scheme]) #abonnements .abo-dues:focus-visible {
+  outline: none; box-shadow: 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus);
+}
+
+/* [hidden] gagne sur tout ce bloc. */
+:is(#commande-client, #crm, #abonnements) [hidden] { display: none !important; }
+
+/* ==========================================================================
+   CE QUE L'APP SAIT DEJA, ENFIN MONTRE (lot « donnees utiles », 24/09)
+   --------------------------------------------------------------------------
+   1. Garde-fous de saisie : le message sous le champ (erreur ou « a
+      verifier »), icone ET mot, jamais la couleur seule.
+   2. Clients : « a verifier » et « a relancer » dans la fiche.
+   3. La carte « Journal » de Parametres.
+   4. La recherche de la barre laterale : clients, commandes, produits.
+   5. Le bon de livraison imprimable (A4, sans les prix).
+   [hidden] gagne sur chacun de ces blocs.
+   ========================================================================== */
+.garde-message[hidden],
+.recherche-resultats[hidden],
+.par-journal[hidden],
+.par-journal-suite[hidden] { display: none !important; }
+
+/* 1. Le message d'un champ garde : sous le champ, dans son libelle. (0,2,0) :
+   « .bdc-form-field span » (0,1,1) le passait en petites capitales. */
+:root .garde-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.35;
+  text-transform: none;
+  letter-spacing: 0;
+}
+:root .garde-message svg { width: 16px; height: 16px; flex: none; margin-top: 1px; }
+:root .garde-message--erreur { color: var(--v8-alerte); }
+:root .garde-message--avertissement { color: var(--v8-avertissement); }
+:root .garde-champ--erreur { border-color: var(--v8-alerte) !important; }
+
+/* 2. Clients : la fiche dit ce qui est a verifier et qui relancer. */
+#crm .cli-a-verifier {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--v8-avertissement);
+  font-weight: 500;
+}
+#crm .cli-a-verifier svg { width: 16px; height: 16px; flex: none; }
+#crm .cli-relance {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 10px 14px;
+  border-radius: 16px;
+  background: var(--v8-avertissement-fond);
+  color: var(--v8-avertissement);
+  font-size: 14px;
+  line-height: 1.4;
+}
+#crm .cli-relance svg { width: 18px; height: 18px; flex: none; margin-top: 1px; }
+
+/* 3. Le journal : une ligne par action, date · qui · quoi. */
+.par-journal-vues { margin: 4px 0 12px; }
+.par-journal-liste {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.par-journal-ligne {
+  display: grid;
+  grid-template-columns: minmax(150px, 190px) minmax(80px, 130px) 1fr;
+  gap: 4px 16px;
+  padding: 10px 0;
+  border-top: 1px solid var(--v8-surface-basse);
+  font-size: 14px;
+  line-height: 1.45;
+}
+.par-journal-ligne:first-child { border-top: 0; }
+.par-journal-quand { color: var(--v8-texte-secondaire); font-variant-numeric: tabular-nums; }
+.par-journal-qui { color: var(--v8-texte); font-weight: 600; overflow-wrap: anywhere; }
+.par-journal-quoi { color: var(--v8-texte); overflow-wrap: anywhere; }
+.par-journal-type { font-weight: 600; }
+.par-journal-vide { padding: 10px 0; color: var(--v8-texte-secondaire); font-size: 14px; }
+.par-journal-suite { margin-top: 12px; min-height: 44px; }
+@media (max-width: 820px) {
+  .par-journal-ligne { grid-template-columns: 1fr auto; }
+  .par-journal-quoi { grid-column: 1 / -1; }
+}
+
+/* 4. La recherche de la barre laterale : les donnees trouvees sous le champ.
+   Sur le vert de la barre : texte et secondaire du composant (--bl-*), fond
+   de survol OPAQUE (--bl-champ) -- aucune couleur composee sous le texte. */
+.recherche-resultats {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: -8px;
+}
+.recherche-titre {
+  margin: 0 0 4px;
+  padding: 0 14px;
+  color: var(--bl-secondaire);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.recherche-groupe ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.recherche-resultat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 18px;
+  background: transparent;
+  color: var(--bl-texte);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.recherche-resultat:hover { background: var(--bl-champ); }
+.recherche-nom { font-size: 14.5px; font-weight: 500; overflow-wrap: anywhere; }
+.recherche-detail { color: var(--bl-secondaire); font-size: 13px; overflow-wrap: anywhere; }
+.recherche-plus,
+.recherche-vide {
+  margin: 2px 0 0;
+  padding: 0 14px;
+  color: var(--bl-secondaire);
+  font-size: 13px;
+}
+.recherche-vide { color: var(--bl-texte); font-size: 14px; line-height: 1.4; }
+
+/* 5. Le bon de livraison. A l'ecran : le bouton du detail de commande. La
+   feuille elle-meme ne se montre qu'a l'impression (body.impression-bon),
+   seule, en A4, dans les couleurs claires de la charte quel que soit le
+   theme (un bon imprime en theme sombre serait clair sur blanc). */
+.bon-outils {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 24px 0;
+}
+.bon-outils .icon { width: 18px; height: 18px; }
+/* Une pilule (charte §4) : « :root[data-color-scheme="light"]
+   .button.secondary.compact » (0,5,0) la passait a un rayon de 8 px. */
+:root[data-color-scheme] .bon-outils .button.secondary.compact,
+:root:not([data-color-scheme]) .bon-outils .button.secondary.compact {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  padding-inline: 18px;
+}
+.bon-livraison { display: none; }
+@media print {
+  @page { size: A4; margin: 14mm; }
+  body.impression-bon { background: #ffffff !important; }
+  body.impression-bon > :not(#bonLivraison) { display: none !important; }
+  body.impression-bon #bonLivraison {
+    display: block !important;
+    color: #0d1518;
+    background: #ffffff;
+    font-size: 11pt;
+    line-height: 1.45;
+  }
+  /* Tout sous #bonLivraison (1,x,x) : les regles generiques des tableaux et
+     des titres de l'application (« th » blanc en sombre, gris en clair) ne
+     doivent pas atteindre le papier. */
+  #bonLivraison * { color: inherit; background: transparent; }
+  #bonLivraison .bon-tete {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding-bottom: 10pt;
+    border-bottom: 1.5pt solid #386b6d;
+  }
+  #bonLivraison .bon-logo { display: block; max-height: 18mm; max-width: 60mm; }
+  #bonLivraison .bon-titre { text-align: right; }
+  #bonLivraison .bon-titre h1 { margin: 0; color: #2a5254; font-size: 18pt; }
+  #bonLivraison .bon-numero { margin: 2pt 0 0; font-size: 12pt; font-weight: 600; }
+  #bonLivraison .bon-infos { display: flex; flex-wrap: wrap; gap: 6pt 24pt; margin: 12pt 0; }
+  #bonLivraison .bon-infos dt { color: #4f7477; font-size: 9pt; }
+  #bonLivraison .bon-infos dd { margin: 0; font-weight: 600; }
+  #bonLivraison .bon-bloc { margin: 12pt 0; break-inside: avoid; }
+  #bonLivraison .bon-bloc h2 { margin: 0 0 4pt; color: #2a5254; font-size: 11pt; }
+  #bonLivraison .bon-bloc p { margin: 0 0 2pt; }
+  #bonLivraison .bon-lignes { width: 100%; margin: 12pt 0; border-collapse: collapse; }
+  #bonLivraison .bon-lignes th,
+  #bonLivraison .bon-lignes td { padding: 5pt 6pt; border: 0; border-bottom: 0.75pt solid #4f7477; text-align: left; vertical-align: top; }
+  #bonLivraison .bon-lignes th { color: #2a5254; font-size: 10pt; font-weight: 600; text-transform: none; letter-spacing: 0; }
+  #bonLivraison .bon-lignes tr { break-inside: avoid; }
+  #bonLivraison .bon-lignes :is(th, td).bon-quantite { width: 25mm; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+  #bonLivraison .bon-code { display: block; color: #4f7477; font-size: 9pt; }
+  #bonLivraison .bon-remis { margin: 10pt 0; }
+  #bonLivraison .bon-signature { display: flex; gap: 12mm; margin-top: 16pt; break-inside: avoid; }
+  #bonLivraison .bon-signature > div { flex: 1; }
+  #bonLivraison .bon-signature p { margin: 0 0 4pt; color: #4f7477; font-size: 10pt; }
+  #bonLivraison .bon-zone { height: 28mm; border: 0.75pt solid #4f7477; border-radius: 3mm; }
+}
+
+/* --- Carte « Chiffre d'affaires livre » au bureau (24/09, demande de Thomas)
+   La carte s'etire a la hauteur de la colonne de droite (deux tuiles + la
+   carte de tournee, plus haute dans l'app que dans la planche 6a : elle porte
+   « Prochain », les arrets et « Ouvrir la carte »). L'histogramme, fixe a
+   150 px, laissait 265 a 293 px VIDES dessous (mesure en production, de 1440
+   a 2560 px). Il prend desormais la hauteur disponible, jamais moins que les
+   150 px de la planche. Sous 921 px (une colonne) et au telephone, rien ne
+   change : la carte n'y est pas etiree. */
+@media (min-width: 921px) {
+  #journee .tb-ca #revenueChart.revenue-chart {
+    flex: 1 1 auto;
+    height: auto;
+    min-height: 150px;
+  }
+}
+
+/* --- Commandes au telephone : compte, « Filtres » et tri sur UNE rangee (24/09)
+   A 360 px, le tri (« Date decroissante ») passait seul sur une seconde rangee :
+   la liste perdait 52 px et ne montrait plus qu'une commande entiere sous
+   Linux (CI), deux sans marge sous Windows. Le tri se resserre au lieu de
+   passer a la ligne ; son texte se coupe proprement s'il le faut, le choix
+   reste entier dans la liste deroulante. */
+@media (max-width: 820px) {
+  #commandes .cmd-filtres:not(.cmd-filtres--ouverts) { flex-wrap: nowrap; }
+  :root[data-color-scheme] #commandes .cmd-filtres > .cmd-resume,
+  :root:not([data-color-scheme]) #commandes .cmd-filtres > .cmd-resume { flex: 0 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #commandes .cmd-filtres > .cmd-tri:not(.cmd-filtre-second) { flex: 1 1 0; min-width: 0; margin-left: auto; max-width: max-content; }
+  :root[data-color-scheme] #commandes .cmd-filtres > .cmd-tri:not(.cmd-filtre-second) select,
+  :root:not([data-color-scheme]) #commandes .cmd-filtres > .cmd-tri:not(.cmd-filtre-second) select { width: 100%; min-width: 0; text-overflow: ellipsis; }
+}

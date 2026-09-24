@@ -278,7 +278,10 @@ test("7b — la ligne ouvre une PAGE : en-tete vert, retour, produits, manque en
   await ctx.close();
 });
 
-test("7b — « Passer en preparation » depuis la page : elle se ferme, la ligne dit « En preparation » et remonte", async ({ browser }) => {
+// Parcours simplifies (24/09) : la page NE SE FERME PLUS apres « Passer en
+// preparation » ; elle offre « Preparation terminee » (parcours-simplifies-
+// telephone.spec.js). On la ferme ici pour lire la liste.
+test("7b — « Passer en preparation » depuis la page : elle reste ouverte, la ligne dit « En preparation » et remonte", async ({ browser }) => {
   test.setTimeout(180000);
   const { ctx, page, erreurs } = await ouvrir(browser, srv.base);
   await page.locator("#preparationList .commande-ligne", { hasText: "Cabinet Infirmier" }).locator(".commande-ligne-main").click();
@@ -288,7 +291,10 @@ test("7b — « Passer en preparation » depuis la page : elle se ferme, la lign
   await bouton.click();
   await page.waitForTimeout(1500);
   expect(erreurs).toEqual([]);
-  expect(await page.evaluate(() => document.getElementById("commandeDetailDialog").open)).toBe(false);
+  expect(await page.evaluate(() => document.getElementById("commandeDetailDialog").open), "la page reste ouverte").toBe(true);
+  expect(await page.locator("#commandeDetailDialog .commande-page-gestes .button").textContent()).toBe("Préparation terminée");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
   const lignes = await lireLignes(page);
   console.log(`[7b/action] ${lignes.map(l => `${l.nom.slice(0, 12)}=${l.mot}`).join(" · ")}`);
   expect(lignes.find(l => l.nom.startsWith("Cabinet Infirmier")).mot).toBe("En préparation");
