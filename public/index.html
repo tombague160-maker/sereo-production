@@ -978,8 +978,10 @@
       <section id="stock" class="page" role="tabpanel" aria-label="Stock">
         <div class="stk-grille">
           <!-- La carte « A recommander » : la vue « recommande » absorbee. Meme
-               compte que la pastille de la barre laterale (stock faible +
-               rupture) : deux nombres ne disent pas deux verites. -->
+               compte que la pastille de la barre laterale et que le filtre
+               « Urgent et bientot » de l'ecran : sous le seuil, OU qui manquera
+               d'ici l'horizon (decision de Thomas du 24/09 ; avant : stock
+               faible + rupture). Deux nombres ne disent pas deux verites. -->
           <article class="stk-carte stk-reco" aria-labelledby="stkRecoTitre">
             <div class="stk-reco-tete">
               <h3 id="stkRecoTitre"><svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3 3 8v8l9 5 9-5V8z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path></svg>À recommander</h3>
@@ -1446,11 +1448,14 @@
         <div class="panel">
           <div class="panel-heading">
             <h3>À recommander</h3>
-            <span class="muted">Stock faible ou rupture</span>
+            <!-- Decision de Thomas du 24/09 : la demande a venir compte (horizon
+                 de Parametres). « Stock faible » ne disait plus ce que le filtre
+                 montre : un produit au-dessus du seuil qui manquera y figure. -->
+            <span class="muted" id="recommandeSousTitre">Sous le seuil, ou qui manquera</span>
           </div>
           <div class="recommend-toolbar">
             <button class="button secondary compact active-filter" type="button" aria-pressed="true" data-recommend-filter="urgent">Urgent</button>
-            <button class="button secondary compact" type="button" aria-pressed="false" data-recommend-filter="low">Stock faible</button>
+            <button class="button secondary compact" type="button" aria-pressed="false" data-recommend-filter="low">Urgent et bientôt</button>
             <button class="button secondary compact" type="button" aria-pressed="false" data-recommend-filter="all">Tout afficher</button>
           </div>
           <div id="recommandeList" class="list"></div>
@@ -1610,6 +1615,38 @@
             <div id="importsArchivesList" class="imports-archives-list" aria-live="polite">
               <p class="muted">Chargement de l'historique…</p>
             </div>
+          </article>
+
+          <!-- Sauvegardes (decision de Thomas du 24/09) : le serveur sauvegardait
+               sans que l'ecran le dise. La derniere, une alerte si elles
+               echouent ou ne couvrent plus les dernieres saisies, « Sauvegarder
+               maintenant » et « Telecharger » (administration seulement). -->
+          <article class="par-carte par-span-6 par-sauvegardes" id="parSauvegardes" aria-labelledby="parSauvegardesTitre">
+            <h3 id="parSauvegardesTitre">Sauvegardes</h3>
+            <p id="parSauvegardesAlerte" class="par-sauvegardes-alerte" role="alert" hidden></p>
+            <dl class="par-sauvegardes-faits">
+              <div><dt>Dernière</dt><dd id="parSauvegardeDerniere">Chargement…</dd></div>
+              <div><dt>Conservées</dt><dd id="parSauvegardesGardees">—</dd></div>
+            </dl>
+            <div class="par-sauvegardes-gestes" id="parSauvegardesGestes" hidden>
+              <button class="button primary" type="button" data-action="sauvegarder-maintenant">Sauvegarder maintenant</button>
+              <a class="button secondary" id="parSauvegardeTelecharger" href="/api/sauvegardes/derniere" download hidden>Télécharger la dernière</a>
+            </div>
+            <p id="parSauvegardesNote" class="par-aide" hidden></p>
+            <p class="par-aide" id="parSauvegardesAide">Une sauvegarde par heure d’activité. Les 30 dernières sont gardées, plus une par jour pendant 30 jours. Elles sont sur le même disque que la base : télécharges-en une de temps en temps.</p>
+          </article>
+
+          <!-- « A recommander » qui voit venir (decision de Thomas du 24/09) :
+               l'horizon des commandes planifiees et des abonnements comptes. -->
+          <article class="par-carte par-span-6" aria-labelledby="parHorizonTitre">
+            <h3 id="parHorizonTitre">À recommander</h3>
+            <p class="par-aide" id="parHorizonAide">Les abonnements actifs et les commandes planifiées de ces jours comptent dans « À recommander », en plus des commandes en cours. Règle-le sur ton délai de réassort fournisseur.</p>
+            <div class="settings-slider-row">
+              <input id="parHorizonSlider" type="range" min="7" max="30" step="1" value="14"
+                     aria-label="Horizon de « À recommander », en jours" aria-describedby="parHorizonAide" />
+              <span id="parHorizonValeur" class="settings-slider-value">14 jours</span>
+            </div>
+            <p id="parHorizonStatut" class="par-aide" aria-live="polite"></p>
           </article>
 
           <article class="par-carte par-span-6" aria-labelledby="parTourneeTitre">

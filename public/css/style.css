@@ -15102,3 +15102,55 @@ html, body, main.content { overflow-x: clip; }
    regle `@media (min-width: 821px) .sidebar { overflow-y: auto }` posee plus
    haut (bloc « barre laterale, finitions ») : le compte et la version restent
    atteignables (banc collant-et-clavier, « écran bas »). */
+
+/* ==========================================================================
+   LE FILET DE SECURITE : SAUVEGARDES VISIBLES, A RECOMMANDER QUI VOIT VENIR
+   (decisions de Thomas du 24/09)
+   --------------------------------------------------------------------------
+   1. La carte « Sauvegardes » de Parametres : la forme des autres cartes
+      (.par-carte), une alerte cerclee de la couleur d'alerte (le contour de
+      la zone dangereuse, pas un fond : le texte garde la couleur d'alerte sur
+      la surface de la carte), deux faits en liste, deux gestes de 44 px au
+      moins. [hidden] gagne partout.
+   2. Le curseur de l'horizon : 44 px de haut, la cible entiere.
+   3. L'ecran « A recommander » : la phrase du manque (« Manquera le 3/10 :
+      24 demandes, 14 en stock »), dans la couleur d'alerte AVEC ses mots, et
+      la ligne qui dit d'ou vient le besoin, en texte secondaire.
+   ========================================================================== */
+#parametres .par-sauvegardes-alerte {
+  margin: 0; padding: 12px 16px; border-radius: 16px;
+  box-shadow: inset 0 0 0 1.5px var(--v8-alerte);
+  color: var(--v8-alerte); font-size: 14px; font-weight: 600; line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+#parametres .par-sauvegardes-faits { margin: 0; display: grid; gap: 10px; }
+#parametres .par-sauvegardes-faits > div {
+  display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 12px; align-items: baseline;
+}
+#parametres .par-sauvegardes-faits dt { font-size: 13px; font-weight: 500; color: var(--v8-texte-secondaire); }
+#parametres .par-sauvegardes-faits dd {
+  margin: 0; font-size: 15px; font-weight: 500; color: var(--v8-texte);
+  font-variant-numeric: tabular-nums; overflow-wrap: anywhere;
+}
+#parametres .par-sauvegardes-gestes { display: flex; flex-wrap: wrap; gap: 10px; }
+#parametres .par-sauvegardes-gestes .button {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 44px; text-decoration: none;
+}
+:root[data-color-scheme] #parametres .par-sauvegardes-gestes .button:focus-visible,
+:root:not([data-color-scheme]) #parametres .par-sauvegardes-gestes .button:focus-visible {
+  outline: none; box-shadow: 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus);
+}
+#parametres #parHorizonSlider { min-height: 44px; }
+#parametres .par-sauvegardes-alerte[hidden],
+#parametres .par-sauvegardes-gestes[hidden],
+#parametres .par-sauvegardes-gestes .button[hidden],
+#parametres #parSauvegardesNote[hidden] { display: none !important; }
+
+@media (max-width: 820px) {
+  #parametres .par-sauvegardes-faits > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  #parametres .par-sauvegardes-gestes .button { flex: 1 1 100%; }
+}
+
+#recommande .reco-manque { margin: 10px 0 0; font-size: 14px; font-weight: 600; line-height: 1.4; color: var(--v8-alerte); }
+#recommande .reco-detail { margin: 10px 0 0; font-size: 13px; line-height: 1.45; color: var(--v8-texte-secondaire); }
