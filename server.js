@@ -9,7 +9,7 @@ const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
 const { zipSync, strToU8 } = require("fflate");
-const { createSqliteStore } = require("./storage/sqliteStore");
+const { createSqliteStore, ETAT_DE_LECTURE, AJOUT_EN_TETE } = require("./storage/sqliteStore");
 const { empreinteDesSources, shellEmpreinte } = require("./lib/empreinte-shell");
 const { fondDeCarte } = require("./lib/fond-de-carte");
 const { GestionnaireOsrm } = require("./lib/osrm-local");
@@ -2479,6 +2479,9 @@ function openSqliteStore(options = {}) {
     defaultDb,
     normalizeDb,
     normaliserTable,
+    // Leur normalisation pose des defauts a la lecture (date, id, secteurs par
+    // defaut) : toujours ecrites, comme avant, meme sans avoir ete lues.
+    tablesToujoursEcrites: ["relances", "deliverySectors", "settings"],
     ensureDir
   });
 }
@@ -2768,7 +2771,16 @@ function normaliserTable(cle, valeur, db) {
 }
 
 function normalizeDb(db) {
-  for (const cle of TABLES_DE_LA_BASE) db[cle] = normaliserTable(cle, db[cle], db);
+  // Lecture paresseuse (25/09) : une table qu'une ecriture n'a pas lue n'a pas
+  // change ; la normaliser la lirait pour rien, et l'ecriture la saute
+  // (storage/sqliteStore.js, persistDatabase). `lue` est relu a chaque tour :
+  // une table lue en normalisant une autre (les reglages, pour les numeros de
+  // commande) est normalisee a son tour, comme avant.
+  const etat = db[ETAT_DE_LECTURE];
+  for (const cle of TABLES_DE_LA_BASE) {
+    if (etat && !etat.lue(cle)) continue;
+    db[cle] = normaliserTable(cle, db[cle], db);
+  }
 
   // P1 v1.14.0 : syncWorkflow N'EST PLUS appele ici (avant : a chaque readDb,
   // ce qui ajoutait 50-100ms a chaque requete GET). Il est maintenant appele
@@ -3394,7 +3406,7 @@ function auteurCourant() {
 }
 
 function addHistory(db, type, message, details = {}) {
-  db.historique.unshift({
+  ajouterEnTete(db, "historique", {
     id: crypto.randomUUID(),
     date: new Date().toISOString(),
     type,
@@ -3402,6 +3414,16 @@ function addHistory(db, type, message, details = {}) {
     details,
     auteur: auteurCourant()
   });
+}
+
+// Une ligne en tete de l'historique ou des mouvements de stock, SANS lire la
+// table quand la base sait l'ecrire seule (25/09) : chaque geste ajoute une
+// ligne a l'historique, et le lire en entier pour l'ecrire en entier coutait
+// plus que le geste. La table lue plus tard dans la meme requete a la ligne
+// en tete, comme avant (storage/sqliteStore.js, AJOUT_EN_TETE).
+function ajouterEnTete(db, cle, ligne) {
+  if (typeof db[AJOUT_EN_TETE] === "function") db[AJOUT_EN_TETE](cle, ligne);
+  else db[cle].unshift(ligne);
 }
 
 function clean(value) {
@@ -4319,7 +4341,7 @@ function getRecommendations(db) {
 function recordStockMovement(db, product, oldQuantity, newQuantity, reason = "Ajustement manuel") {
   if (oldQuantity === newQuantity) return;
 
-  db.stockMovements.unshift({
+  ajouterEnTete(db, "stockMovements", {
     id: `stock-${crypto.randomUUID()}`,
     productId: product.id,
     productName: getProductName(product),

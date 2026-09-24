@@ -17,7 +17,28 @@ const os = require("node:os");
 const path = require("node:path");
 const { once } = require("node:events");
 const { zipSync, strToU8 } = require("fflate");
+const { DatabaseSync } = require("node:sqlite");
 const { jeuProduction } = require("./e2e/jeu-production");
+
+// Le compteur des tables lues : chaque lecture d'une table passe par
+// `SELECT payload FROM <table>` (comme test/lecture-paresseuse.test.js).
+const requetesSql = [];
+let compterSql = false;
+const prepareOrigine = DatabaseSync.prototype.prepare;
+DatabaseSync.prototype.prepare = function prepare(sql) {
+  if (compterSql) requetesSql.push(String(sql));
+  return prepareOrigine.call(this, sql);
+};
+async function tablesLuesPendant(geste) {
+  requetesSql.length = 0;
+  compterSql = true;
+  try {
+    await geste();
+  } finally {
+    compterSql = false;
+  }
+  return requetesSql.map(sql => /SELECT payload FROM (\w+)/.exec(sql)?.[1]).filter(Boolean);
+}
 
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sereo-rapidite-serveur-"));
 fs.mkdirSync(path.join(tmpRoot, "data"), { recursive: true });
@@ -152,7 +173,111 @@ test("une ecriture construit la table de recherche du catalogue une fois, pas un
   assert.ok(appels < 20 * (N + M), `${appels} normalisations de texte pour ${N} commandes et ${M} produits`);
 });
 
-// --- 3. Resultat identique : la table partagee rend ce que rend l'appel isole --
+// --- 3. Une ecriture ne relit ni ne resérialise ce qu'elle n'a pas touche ----
+//
+// La lecture paresseuse (24/09) ne lisait a la requete que ses tables, mais
+// writeDb normalisait TOUT avant d'ecrire : l'historique, les mouvements, les
+// ventes, les archives etaient relus, decodes, resérialises et haches a chaque
+// geste, pour n'en ecrire rien. Et chaque geste ajoute une ligne en tete de
+// l'historique : l'ajouter le lisait en entier.
+
+/** Toute la base, lue par une seconde connexion, sans lecture paresseuse. */
+function lectureComplete() {
+  const { createSqliteStore } = require("../storage/sqliteStore");
+  const complet = createSqliteStore({
+    sqlitePath: process.env.SEREO_SQLITE_PATH, seedJsonPath: null, defaultDb, normalizeDb: S.normalizeDb, ensureDir: () => {}
+  });
+  try {
+    return complet.readDb();
+  } finally {
+    complet.close();
+  }
+}
+
+test("une ecriture ne relit pas les tables qu'elle ne touche pas", async () => {
+  writeDb(readDb(), { backup: false }); // la premiere ecriture apres l'ouverture lit tout : pas celle-ci
+  const db = readDb();
+  const cible = db.commandes[0];
+  cible.notes = "note posee par le banc";
+  const lues = await tablesLuesPendant(() => writeDb(db, { backup: false }));
+  // Temoin : l'instrument voit la table que l'ecriture lit.
+  assert.ok(lues.includes("clients"), `l'instrument n'a pas vu la lecture des clients : ${lues}`);
+  const inutiles = lues.filter(t => ["ventes", "historique", "mouvements_stock", "imports_archives", "abonnements"].includes(t));
+  assert.deepEqual(inutiles, [], `l'ecriture d'une note de commande a relu ${inutiles.join(", ")}`);
+  assert.equal(readDb().commandes.find(c => c.id === cible.id).notes, "note posee par le banc");
+});
+
+test("un geste ecrit sa ligne d'historique et son mouvement sans relire leurs tables, en tete", async () => {
+  writeDb(readDb(), { backup: false });
+  const avant = lectureComplete();
+  const produit = avant.stock.find(p => p.id === "stk-003");
+  const quantite = Number(produit.quantite || 0) + 5;
+  let r;
+  const lues = await tablesLuesPendant(async () => {
+    r = await api("/api/stock/stk-003", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ quantite }) });
+  });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.ok(lues.includes("produits"), `l'instrument n'a rien vu : ${lues}`);
+  assert.deepEqual(lues.filter(t => t === "historique" || t === "mouvements_stock"), [],
+    `l'ajustement a relu ${lues.filter(t => t === "historique" || t === "mouvements_stock").join(", ")}`);
+  const apres = lectureComplete();
+  // Aucune ligne perdue ni deplacee : la ligne neuve en tete, le reste identique.
+  assert.equal(apres.historique.length, avant.historique.length + 1);
+  assert.deepEqual(apres.historique.slice(1), avant.historique);
+  assert.match(apres.historique[0].message, /stock .* -> /);
+  assert.equal(apres.stockMovements.length, avant.stockMovements.length + 1);
+  assert.deepEqual(apres.stockMovements.slice(1), avant.stockMovements);
+  assert.equal(apres.stockMovements[0].productId, "stk-003");
+  assert.equal(apres.stockMovements[0].newQuantity, quantite);
+});
+
+test("une ligne ajoutee en tete puis la table lue dans la meme requete : a sa place, ecrite une fois", () => {
+  writeDb(readDb(), { backup: false });
+  const avant = lectureComplete().historique;
+  const db = readDb();
+  const { AJOUT_EN_TETE } = require("../storage/sqliteStore");
+  db[AJOUT_EN_TETE]("historique", { id: "h-banc-1", date: "2026-09-25T08:00:00.000Z", type: "Banc", message: "premiere" });
+  db[AJOUT_EN_TETE]("historique", { id: "h-banc-2", date: "2026-09-25T08:00:01.000Z", type: "Banc", message: "seconde" });
+  // Lue apres les ajouts : les deux en tete, la derniere d'abord (unshift).
+  assert.deepEqual(db.historique.slice(0, 2).map(h => h.id), ["h-banc-2", "h-banc-1"]);
+  db[AJOUT_EN_TETE]("historique", { id: "h-banc-3", date: "2026-09-25T08:00:02.000Z", type: "Banc", message: "troisieme" });
+  writeDb(db, { backup: false });
+  const apres = lectureComplete().historique;
+  assert.deepEqual(apres.slice(0, 3).map(h => h.id), ["h-banc-3", "h-banc-2", "h-banc-1"]);
+  assert.deepEqual(apres.slice(3), avant);
+});
+
+test("la premiere ecriture apres l'ouverture recrit tout, comme avant (base d'une version d'avant)", () => {
+  writeDb(readDb(), { backup: false });
+  closeStorage();
+  // Une ligne ecrite par une version d'avant : un payload qui n'est pas celui
+  // que JSON.stringify rend aujourd'hui (unicode echappe).
+  const cnx = new DatabaseSync(process.env.SEREO_SQLITE_PATH);
+  let id, brut;
+  try {
+    id = cnx.prepare("SELECT id FROM historique ORDER BY sort_order LIMIT 1").get().id;
+    brut = `{"id":${JSON.stringify(id)},"type":"Banc","message":"caf\\u00e9","date":"2020-01-01"}`;
+    cnx.prepare("UPDATE historique SET payload = ? WHERE id = ?").run(brut, id);
+  } finally {
+    cnx.close();
+  }
+  // Reouverture, puis une ecriture qui ne touche pas l'historique.
+  const db = readDb();
+  db.commandes[0].notes = "apres reouverture";
+  writeDb(db, { backup: false });
+  const cnx2 = new DatabaseSync(process.env.SEREO_SQLITE_PATH);
+  let payload;
+  try {
+    payload = cnx2.prepare("SELECT payload FROM historique WHERE id = ?").get(id)?.payload;
+  } finally {
+    cnx2.close();
+  }
+  assert.ok(payload, `la ligne ${id} a disparu`);
+  assert.notEqual(payload, brut, "la ligne d'une version d'avant n'a pas ete recrite a la premiere ecriture");
+  assert.equal(JSON.parse(payload).message, "café");
+});
+
+// --- 4. Resultat identique : la table partagee rend ce que rend l'appel isole --
 //
 // Un appel isole (un geste sur une commande) construit encore sa propre table.
 // Le catalogue ci-dessous a des doublons : deux produits au meme code, deux au
@@ -191,4 +316,140 @@ test("temoin : l'analyse de stock ecrite est celle de l'appel isole, doublons et
   assert.equal(db.commandes[0].stockLines[0].stockId, "p-b");
   assert.equal(db.commandes[1].stockLines[0].stockId, "p-d");
   assert.equal(db.commandes[4].stockLines[0].status, "unknown");
+});
+
+// --- 5. Aucune donnee perdue : l'ecriture sans relire = une reecriture complete
+//
+// Le risque de ne pas relire : oublier une table modifiee, perdre une ligne
+// ajoutee en tete, la ranger ailleurs. Ce banc joue 120 pas tires au hasard
+// (graine fixe) sur un magasin en LECTURE PARESSEUSE -- chaque pas ne lit que
+// les tables qu'il touche, ajoute en tete avant ou apres avoir lu -- et
+// compare apres CHAQUE pas la base a une base neuve ecrite d'un coup depuis un
+// modele (memes mutations sur des objets ordinaires) : memes lignes, memes
+// colonnes, meme ordre.
+
+test("120 pas au hasard : la base ecrite sans relire egale une base reecrite d'un coup", () => {
+  const { createSqliteStore, ETAT_DE_LECTURE, AJOUT_EN_TETE } = require("../storage/sqliteStore");
+  const CLES = ["clients", "ventes", "stock", "historique", "commandes", "routes", "subscriptions", "relances", "deliverySectors", "stockMovements", "importsArchives", "settings"];
+  const vide = () => ({ clients: [], commandes: [], stock: [], ventes: [], historique: [], routes: [], subscriptions: [], relances: [], deliverySectors: [], stockMovements: [], importsArchives: [], settings: {} });
+  const normaliserTable = (cle, v) => (cle === "settings" ? (v && typeof v === "object" ? v : {}) : (Array.isArray(v) ? v : []));
+  // Meme regle que normalizeDb (server.js) : une table non lue n'est pas normalisee.
+  const normaliser = db => {
+    const etat = db[ETAT_DE_LECTURE];
+    for (const cle of CLES) {
+      if (etat && !etat.lue(cle)) continue;
+      db[cle] = normaliserTable(cle, db[cle]);
+    }
+    return db;
+  };
+  const dossier = path.join(tmpRoot, "sans-relire");
+  fs.mkdirSync(dossier, { recursive: true });
+  const ouvrir = (fichier, paresseux) => createSqliteStore({
+    sqlitePath: fichier, seedJsonPath: "", defaultDb: vide, normalizeDb: normaliser,
+    normaliserTable: paresseux ? normaliserTable : undefined, ensureDir: d => fs.mkdirSync(d, { recursive: true })
+  });
+  const TABLES = {
+    produits: "id, reference, nom, stock_actuel, stock_minimum, stock_bloque, unite, updated_at, payload",
+    clients: "id, nom, adresse, ville, code_postal, telephone, secteur, updated_at, payload",
+    commandes: "id, numero, date_commande, excel_row_hash, client_id, date_import, date_preparation, date_livraison, statut, source_excel, updated_at, payload",
+    lignes_commande: "id, commande_id, produit_id, quantite, quantite_preparee, statut, stock_suffisant, payload",
+    routes: "id, statut, secteur, date_livraison, payload",
+    livraisons: "id, commande_id, client_id, date_livraison, secteur, statut, note_probleme, date_mise_a_jour, payload",
+    abonnements: "id, payload",
+    relances_crm: "id, client_id, commande_id, date_prevue, statut, payload",
+    secteurs_livraison: "id, nom, ville, jour_mois, frequence, point_depart, payload",
+    mouvements_stock: "id, produit_id, type, quantite, raison, reference_commande, date, utilisateur, payload",
+    ventes: "id, payload",
+    historique: "id, type, message, date, payload",
+    imports_archives: "id, type, filename, archived_path, imported_at, rows_count, file_size, sha256, stats_json, payload"
+  };
+  const contenu = fichier => {
+    const cnx = new DatabaseSync(fichier);
+    try {
+      const out = {};
+      for (const [t, cols] of Object.entries(TABLES)) out[t] = cnx.prepare(`SELECT ${cols} FROM ${t} ORDER BY sort_order, id`).all().map(r => ({ ...r }));
+      out.traces = cnx.prepare("SELECT route_id, trace FROM traces_tournees ORDER BY route_id").all().map(r => ({ ...r }));
+      out.reglages = cnx.prepare("SELECT value FROM app_meta WHERE key = 'settings'").get()?.value;
+      return out;
+    } finally {
+      cnx.close();
+    }
+  };
+
+  let graine = 2509;
+  const hasard = n => { graine = (graine * 1103515245 + 12345) % 2147483648; return Math.floor((graine / 2147483648) * n); };
+  let seq = 0;
+  const neuf = p => `${p}-${++seq}`;
+  const ligne = (cle, id) => ({
+    historique: { id, type: "Banc", message: `geste ${id}`, date: "2026-09-25" },
+    stockMovements: { id, productId: "p1", type: "entree", quantity: seq, createdAt: "2026-09-25" },
+    ventes: { id, total: seq },
+    importsArchives: { id, type: "ventes", filename: `${id}.xlsx`, stats: { n: seq } },
+    subscriptions: { id, clientId: "c1", status: "active" },
+    relances: { id, clientId: "c1", datePrevue: "2026-10-01", status: "a_faire" },
+    deliverySectors: { id, secteur: `S${seq}`, villePrincipale: "Dole" },
+    clients: { id, nom: `Client ${seq}`, ville: "Dole" },
+    stock: { id, code: `P${seq}`, nom: `Produit ${seq}`, quantite: seq },
+    commandes: { id, clientId: "c1", status: seq % 2 ? "livre" : "pret_livraison", products: [{ code: "P1", nom: "Produit", quantite: seq }] },
+    routes: { id, status: "prete", stops: [{ id: `${id}-a`, orderId: "o1", status: "pret_livraison" }], geometry: null }
+  })[cle];
+  const LISTES = ["historique", "stockMovements", "ventes", "importsArchives", "subscriptions", "relances", "deliverySectors", "clients", "stock", "commandes", "routes"];
+  const initial = {};
+  for (const cle of LISTES) initial[cle] = Array.from({ length: 6 }, () => ligne(cle, neuf(cle)));
+  initial.settings = { appearance: { themeId: "sereo" } };
+  const modele = structuredClone({ ...vide(), ...initial });
+
+  // Ajouter en tete : sans lire si le magasin le sait, sinon unshift.
+  const enTete = (db, cle, l) => (typeof db[AJOUT_EN_TETE] === "function" ? db[AJOUT_EN_TETE](cle, l) : db[cle].unshift(l));
+  const auHasard = db => { const cle = LISTES[hasard(LISTES.length)]; return [cle, db[cle]]; };
+  const mutations = [
+    ["historique en tete, sans lire", db => enTete(db, "historique", ligne("historique", neuf("h")))],
+    ["mouvement en tete, sans lire", db => enTete(db, "stockMovements", ligne("stockMovements", neuf("m")))],
+    ["deux en tete puis lecture et retouche", db => {
+      enTete(db, "historique", ligne("historique", neuf("h")));
+      enTete(db, "historique", ligne("historique", neuf("h")));
+      db.historique[1].message = neuf("retouche");
+    }],
+    ["lecture puis en tete", db => { void db.stockMovements.length; enTete(db, "stockMovements", ligne("stockMovements", neuf("m"))); }],
+    ["en tete puis table remplacee", db => { enTete(db, "historique", ligne("historique", neuf("h"))); db.historique = db.historique.slice(0, 3); }],
+    ["ligne modifiee", db => { const [, t] = auHasard(db); if (t.length) t[hasard(t.length)].note = neuf("note"); }],
+    ["ligne retiree", db => { const [, t] = auHasard(db); if (t.length > 1) t.splice(hasard(t.length), 1); }],
+    ["ligne au milieu", db => { const [cle, t] = auHasard(db); t.splice(hasard(t.length + 1), 0, ligne(cle, neuf(cle))); }],
+    ["table inversee", db => { const [, t] = auHasard(db); t.reverse(); }],
+    ["table lue sans rien changer", db => { void auHasard(db)[1].length; }],
+    ["table remplacee sans etre lue", db => { const cle = LISTES[hasard(LISTES.length)]; db[cle] = [ligne(cle, neuf(cle)), ligne(cle, neuf(cle))]; }],
+    ["reglages modifies", db => { db.settings = { ...db.settings, marque: neuf("r") }; }],
+    ["commande livree", db => { const c = db.commandes.find(x => x.status !== "livre"); if (c) c.status = "livre"; }],
+    ["rien", () => {}]
+  ];
+
+  const A = ouvrir(path.join(dossier, "a.sqlite"), true);
+  try {
+    A.writeDb(structuredClone(modele));
+    for (let pas = 1; pas <= 120; pas++) {
+      const tirees = Array.from({ length: 1 + hasard(3) }, () => mutations[hasard(mutations.length)]);
+      const [memeGraine, memeSeq] = [graine, seq];
+      // Le chemin reel : lire (paresseux), muter, ecrire. Le modele subit les
+      // memes mutations (memes tirages, memes identifiants).
+      const lu = A.readDb();
+      for (const [, muter] of tirees) muter(lu);
+      A.writeDb(lu);
+      [graine, seq] = [memeGraine, memeSeq];
+      for (const [, muter] of tirees) muter(modele);
+
+      const fichierB = path.join(dossier, `b-${pas}.sqlite`);
+      const B = ouvrir(fichierB, false);
+      B.writeDb(structuredClone(modele));
+      B.close();
+      const attendu = contenu(fichierB);
+      fs.rmSync(fichierB, { force: true });
+      const obtenu = contenu(path.join(dossier, "a.sqlite"));
+      assert.deepEqual(obtenu, attendu, `pas ${pas} (${tirees.map(([nom]) => nom).join(" + ")}) : la base ecrite sans relire a diverge`);
+    }
+    // Et ce que relit le magasin paresseux est le modele, table pour table.
+    const relu = A.readDb();
+    for (const cle of CLES) assert.deepEqual(relu[cle], modele[cle], `la table ${cle} relue differe du modele`);
+  } finally {
+    A.close();
+  }
 });
