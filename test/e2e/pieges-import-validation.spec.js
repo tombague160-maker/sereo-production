@@ -149,7 +149,7 @@ test("import, bureau : le resume est JUSTE et EN HAUT, sans defiler ; la command
   expect(boite.bottom, "il faut defiler pour lire le resume").toBeLessThanOrEqual(boite.bas);
 
   const comptes = (await bilan.locator(".import-bilan-compte").allInnerTexts()).map(t => t.replace(/\s+/g, " ").trim());
-  expect(comptes).toEqual(["1 nouvelle", "1 mise à jour", "1 ignorée", "1 erreur"]);
+  expect(comptes).toEqual(["1 nouvelle", "1 mise à jour", "1 ignorée", "1 ligne en erreur"]);
   await expect(bilan).toContainText("Ignorée : commande déjà en tournée");
   await expect(bilan).toContainText("EHPAD Les Tilleuls du Val de Loue");
   await expect(bilan).toContainText("1 ligne sans client ni produit");
@@ -205,7 +205,7 @@ test("import, telephone et sombre : depuis l'en-tete puis depuis le formulaire d
   // En entier : ni sous l'ecran, ni sous la barre basse (il tient en hauteur).
   expect(enTete.height, "prealable : le resume est plus haut que l'ecran").toBeLessThan(enTete.bas);
   expect(enTete.bottom, "le bas du resume est cache (sous l'ecran ou la barre basse)").toBeLessThanOrEqual(enTete.bas);
-  expect(await comptesDuBilan()).toEqual(["1 nouvelle", "1 mise à jour", "1 ignorée", "1 erreur"]);
+  expect(await comptesDuBilan()).toEqual(["1 nouvelle", "1 mise à jour", "1 ignorée", "1 ligne en erreur"]);
 
   // 2. Le formulaire du pied du tableau de bord : on y descend. Le meme
   // fichier, une seconde fois : tout est identique, la commande en tournee
@@ -219,7 +219,7 @@ test("import, telephone et sombre : depuis l'en-tete puis depuis le formulaire d
   await bouton.click();
   expect((await seconde).status()).toBe(200);
   await page.waitForTimeout(400);
-  expect(await comptesDuBilan()).toEqual(["0 nouvelle", "0 mise à jour", "3 ignorées", "1 erreur"]);
+  expect(await comptesDuBilan()).toEqual(["0 nouvelle", "0 mise à jour", "3 ignorées", "1 ligne en erreur"]);
   const boite = await place(page, "#importSummary .import-bilan-comptes");
   console.log(`[telephone/pied] comptes ${JSON.stringify(boite)} (avant : scrollY ${avant})`);
   expect(boite.top, "les comptes sont au-dessus de l'ecran").toBeGreaterThanOrEqual(0);
@@ -288,9 +288,56 @@ test("import : au-dela de cinq commandes ignorees, le resume en nomme cinq et co
   const bilan = page.locator("#importSummary");
   await expect(bilan).toBeVisible();
   const comptes = (await bilan.locator(".import-bilan-compte").allInnerTexts()).map(t => t.replace(/\s+/g, " ").trim());
-  expect(comptes).toEqual(["0 nouvelle", "0 mise à jour", "6 ignorées", "0 erreur"]);
+  expect(comptes).toEqual(["0 nouvelle", "0 mise à jour", "6 ignorées", "0 ligne en erreur"]);
   await expect(bilan.locator(".import-bilan-detail", { hasText: /^Ignorée/ })).toHaveCount(5);
-  await expect(bilan).toContainText("Et 1 autre commande ignorée (déjà prêtes, en tournée ou livrées), laissées telles quelles.");
+  await expect(bilan).toContainText("Et 1 autre commande ignorée (déjà en préparation, prêtes, en tournée ou livrées), laissées telles quelles.");
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+test("import : une commande au stock deja RESERVE (en preparation, commande terrain) est ignoree, et le resume dit pourquoi", async ({ browser }) => {
+  // Relecture adverse (24/09) : la reservation est deduite sur les produits
+  // de la commande ; l'import les reecrivait (« 1 mise à jour ») et le stock
+  // rendu a l'annulation etait faux. Le serveur la laisse maintenant telle
+  // quelle (test/pieges-import.test.js) ; l'ecran nomme la raison, pas le
+  // repli « commande déjà en cours ».
+  test.setTimeout(120000);
+  const s = seme();
+  const parc = s.commandes.find(o => o.id === "o-parc");
+  Object.assign(parc, { status: "en_preparation", stockReservedAt: new Date().toISOString() });
+  const lac = { id: "c-lac", nom: "Cabinet du Lac", rue: "4 quai du Lac", ville: "Dole", codePostal: "39100", lat: 47.1, lng: 5.5, crmStatus: "client_actif" };
+  s.clients.push(lac);
+  s.commandes.push({
+    id: "o-lac", clientId: lac.id, clientName: lac.nom, status: "stock_a_verifier", source: "commande_terrain",
+    stockReservedAt: new Date().toISOString(),
+    address: lac.rue, city: lac.ville, postalCode: lac.codePostal, lat: lac.lat, lng: lac.lng,
+    deliveryDate: AUJOURDHUI, dateCommande: AUJOURDHUI,
+    products: [{ code: "CH-L", nom: "Changes taille L", prixUnitaire: 12, quantite: 2 }]
+  });
+  await semer(s);
+  const { ctx, page, erreurs } = await ouvrir(browser, "journee");
+  const [selecteur] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    page.locator('#enteteActions [data-action="importer-ventes"]').click()
+  ]);
+  await selecteur.setFiles({
+    name: "ventes.xlsx",
+    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    buffer: classeur([
+      ["Date", "Client", "Code", "Produit", "Quantite", "Rue", "Code Postal", "Ville"],
+      [JOUR_FR, "Foyer du Parc", "CH-L", "Changes taille L", "5", "2 rue du Parc", "39100", "Dole"],
+      [JOUR_FR, "Cabinet du Lac", "CH-L", "Changes taille L", "7", "4 quai du Lac", "39100", "Dole"]
+    ])
+  });
+  const bilan = page.locator("#importSummary");
+  await expect(bilan).toBeVisible();
+  const comptes = (await bilan.locator(".import-bilan-compte").allInnerTexts()).map(t => t.replace(/\s+/g, " ").trim());
+  expect(comptes.slice(0, 3), "une commande au stock reserve a ete mise a jour par l'import").toEqual(["0 nouvelle", "0 mise à jour", "2 ignorées"]);
+  await expect(bilan.locator(".import-bilan-detail", { hasText: "Foyer du Parc" })).toContainText("Ignorée : commande déjà en préparation");
+  await expect(bilan.locator(".import-bilan-detail", { hasText: "Cabinet du Lac" })).toContainText("Ignorée : stock déjà réservé pour cette commande");
+  await expect(bilan).not.toContainText("commande déjà en cours");
+  // Aucune mise a jour : la suite du travail n'est pas « Voir la préparation ».
+  await expect(bilan.locator('[data-target-tab="preparation"]')).toHaveCount(0);
   expect(erreurs).toEqual([]);
   await ctx.close();
 });

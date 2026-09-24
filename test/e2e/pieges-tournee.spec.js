@@ -127,6 +127,40 @@ test("plus de « Filtrer » : les pilules, la ville et « Tous » filtrent tout 
   await ctx.close();
 });
 
+test("telephone : une pause au milieu de la ville ne vide pas la selection (« Besan » garde Besançon)", async ({ browser }) => {
+  // Relecture adverse (24/09). La ville filtre 300 ms apres la derniere
+  // frappe, et chaque filtrage ne garde de la selection que ce qui est a
+  // l'ecran. Sur une egalite EXACTE, « Besan » et une pause (frequent au
+  // clavier tactile) ne montraient plus rien : les 3 commandes cochees
+  // perdaient leur coche, et « Besançon » fini, la liste revenait sans elles.
+  test.setTimeout(120000);
+  await semer();
+  const { ctx, page, erreurs } = await ouvrir(browser, { viewport: TELEPHONE });
+  await choisirBesancon(page);
+  await page.locator('[data-action="select-current-sector"]').click();
+  await expect(cochees(page), "prealable : Besancon selectionne").toHaveCount(3);
+  const ville = page.locator("#deliveryCity");
+  await ville.pressSequentially("Besan", { delay: 40 });
+  await page.waitForTimeout(700); // plus que la pause de frappe (300 ms)
+  await expect(cochees(page), "une pause au milieu de la ville a vide la selection").toHaveCount(3);
+  // La saisie reste dans le champ, et le resume dit qu'elle attend.
+  await expect(ville).toHaveValue("Besan");
+  await expect(page.locator("#deliveryFilterSummary")).toContainText("« Besan » n'est la ville d'aucune commande prête : pas appliquée");
+  await ville.pressSequentially("çon", { delay: 40 });
+  await page.waitForTimeout(700);
+  await expect(cochees(page), "la ville finie, la selection n'est pas revenue").toHaveCount(3);
+  await expect(page.locator("#createRouteButton")).toHaveText("Créer la tournée (3)");
+  // La regle du lot tient : une AUTRE ville retire de la selection ce qu'elle cache.
+  await ville.fill("Dole");
+  await page.waitForTimeout(700);
+  await expect(page.locator("#deliveryCandidates [data-delivery-order]")).toHaveCount(0);
+  await ville.fill("");
+  await page.waitForTimeout(700);
+  await expect(cochees(page), "une ville qui cachait la selection l'a laissee partir").toHaveCount(0);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
 test("bureau : « Créer la tournée (3) » est SOUS la liste, et la tournee creee n'a que Besancon", async ({ browser }) => {
   test.setTimeout(120000);
   await semer();

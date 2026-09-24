@@ -3001,7 +3001,11 @@ const RAISONS_IMPORT_IGNORE = {
   en_tournee: "commande déjà en tournée",
   prete: "commande déjà prête",
   livree: "commande déjà livrée",
-  partie_en_tournee: "commande déjà partie en tournée"
+  partie_en_tournee: "commande déjà partie en tournée",
+  // Relecture du 24/09 : le stock reserve verrouille aussi (server.js,
+  // raisonImportIgnore) -- preparation lancee, commande terrain, planifiee confirmee.
+  en_preparation: "commande déjà en préparation",
+  stock_reserve: "stock déjà réservé pour cette commande"
 };
 const IMPORT_IGNOREES_MONTREES = 5;
 
@@ -3023,7 +3027,10 @@ function bilanImportVentes(result) {
     [nombre(result.created), accorder(nombre(result.created), "nouvelle", "nouvelles"), false],
     [nombre(result.updated), accorder(nombre(result.updated), "mise à jour", "mises à jour"), false],
     [ignorees.length + identiques, accorder(ignorees.length + identiques, "ignorée", "ignorées"), ignorees.length > 0],
-    [erreurs, accorder(erreurs, "erreur", "erreurs"), erreurs > 0]
+    // Les trois premiers comptent des COMMANDES (un bon : client + date) ;
+    // celui-ci des LIGNES du fichier (une ligne sans client ni produit
+    // n'appartient a aucun bon). Il dit donc son unite (relecture du 24/09).
+    [erreurs, accorder(erreurs, "ligne en erreur", "lignes en erreur"), erreurs > 0]
   ];
   const details = [];
   // Les commandes laissees telles quelles : une ligne chacune, les cinq premieres.
@@ -3032,7 +3039,7 @@ function bilanImportVentes(result) {
     details.push({ attention: true, html: `<strong>Ignorée : ${escapeHtml(RAISONS_IMPORT_IGNORE[item.raison] || "commande déjà en cours")}</strong>${qui ? ` — ${escapeHtml(qui)}` : ""}. Elle est laissée telle quelle.` });
   });
   if (ignorees.length > IMPORT_IGNOREES_MONTREES) {
-    details.push({ attention: true, html: `Et ${escapeHtml(accorder(ignorees.length - IMPORT_IGNOREES_MONTREES, "autre commande ignorée", "autres commandes ignorées"))} (déjà prêtes, en tournée ou livrées), laissées telles quelles.` });
+    details.push({ attention: true, html: `Et ${escapeHtml(accorder(ignorees.length - IMPORT_IGNOREES_MONTREES, "autre commande ignorée", "autres commandes ignorées"))} (déjà en préparation, prêtes, en tournée ou livrées), laissées telles quelles.` });
   }
   if (identiques) details.push({ html: `${escapeHtml(accorder(identiques, "commande identique, déjà importée", "commandes identiques, déjà importées"))} : rien à changer.` });
   if (erreurs) details.push({ attention: true, html: `<strong>${escapeHtml(accorder(erreurs, "ligne sans client ni produit", "lignes sans client ni produit"))}</strong> : écartée${erreurs > 1 ? "s" : ""}, vérifie le fichier.` });
@@ -6759,7 +6766,8 @@ function renderDeliveryFilters() {
   }
 
   const cityInput = document.getElementById("deliveryCity");
-  if (cityInput && cityInput.value !== deliveryFilter.city) {
+  // Une ville en attente (« Besan ») n'est pas effacee sous les doigts.
+  if (cityInput && cityInput.value !== deliveryFilter.city && document.activeElement !== cityInput) {
     cityInput.value = deliveryFilter.city;
   }
 
@@ -6770,16 +6778,32 @@ function renderDeliveryFilters() {
 }
 
 /**
+ * Relecture adverse (24/09) : la ville s'applique apres une pause de frappe,
+ * et chaque filtrage ne garde de la selection que ce qui est a l'ecran. Sur
+ * une egalite exacte (celle du serveur, « n'est pas a <ville> »), « Besan » et
+ * une pause vidaient la liste, donc la selection. Une saisie qui n'est la
+ * ville d'AUCUNE commande a livrer -- un debut de nom, une faute -- reste donc
+ * EN ATTENTE : ni la liste ni la selection ne bougent, le resume le dit. Une
+ * ville de la liste s'applique, et la regle du lot tient.
+ */
+function villeEnAttente(saisie) {
+  const cle = normalizeTextKey(saisie);
+  return Boolean(cle) && !getDeliverableOrders().some(order => normalizeTextKey(order.city) === cle);
+}
+
+/**
  * Applique la date et la ville des champs, et le secteur de la pilule
  * choisie (`secteur`, sinon celui deja choisi). La selection ne garde que ce
  * qui est a l'ecran : une commande d'un autre secteur ne part jamais sans
  * avoir ete vue (le serveur la refuserait, « n'est pas du secteur »).
  */
 function applyDeliveryFilter(secteur) {
+  const ville = document.getElementById("deliveryCity")?.value || "";
   deliveryFilter = {
     date: document.getElementById("deliveryDate")?.value || "",
     sector: secteur || deliveryFilter.sector || "Tous",
-    city: document.getElementById("deliveryCity")?.value || ""
+    // Une ville en attente laisse la ville deja appliquee.
+    city: villeEnAttente(ville) ? deliveryFilter.city : ville
   };
   deliverySelection = new Set([...deliverySelection].filter(orderId => getFilteredDeliveryOrders().some(order => String(order.id) === String(orderId))));
   renderDeliveryFilters();
@@ -6888,7 +6912,9 @@ function renderDeliveryCandidates() {
     const city = deliveryFilter.city ? `, ville ${deliveryFilter.city}` : "";
     const date = deliveryFilter.date ? `, ${formatDeliveryDate(deliveryFilter.date)}` : "";
     const dejaPrises = occupees.size ? ` (dont ${occupees.size} déjà en tournée)` : "";
-    summary.textContent = `${filtered.length} commande(s) prête(s)${dejaPrises} - ${sector}${city}${date}${signalHorsDate()}`;
+    const saisie = document.getElementById("deliveryCity")?.value || "";
+    const attente = villeEnAttente(saisie) ? `. « ${saisie.trim()} » n'est la ville d'aucune commande prête : pas appliquée` : "";
+    summary.textContent = `${filtered.length} commande(s) prête(s)${dejaPrises} - ${sector}${city}${date}${attente}${signalHorsDate()}`;
   }
 
   updateSelectedDeliveryCount();
