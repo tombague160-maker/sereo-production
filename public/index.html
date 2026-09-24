@@ -74,7 +74,11 @@
        /js/app.js SANS parametre, et le cache compare l'adresse entiere. Avec
        ?v=, chaque premiere ouverture (et chaque mise a jour) les telechargeait
        deux fois : 240 ko de trop. Le nom du shell porte deja l'empreinte du
-       contenu, et le cache HTTP revalide (ETag) : ?v= ne protegeait de rien. -->
+       contenu, et le cache HTTP revalide (ETag). ?v= ne protegeait que d'un
+       cas, et seulement change a chaque livraison (il ne l'etait plus depuis
+       le 18/09) : le service worker arrete entre la page et ses fichiers
+       (clientsEnRetard) ; ce chargement-la prend alors l'ancien app.js, comme
+       il prenait deja les anciens modules importes, qui n'ont jamais eu de ?v=. -->
   <link rel="stylesheet" href="/css/style.css" />
 </head>
 
