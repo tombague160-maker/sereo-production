@@ -1491,6 +1491,10 @@ async function viderCacheDeDonnees() {
  * peut manquer (au premier jour d'ouverture, son URL a change) ; il garde
  * alors sa valeur courante. Aucun n'en porte depuis le 23/09 (les commandes
  * du jour ont quitte loadData) : la porte reste pour le prochain.
+ * Un endpoint dont l'adresse a change (`copieAvant`, revue du 24/09) se lit,
+ * faute de copie a la nouvelle, dans celle de l'ancienne, ramenee a ce que la
+ * nouvelle rend : sans quoi la premiere ouverture de la version qui change
+ * l'adresse sautait l'affichage immediat de TOUT.
  */
 async function lireDernieresDonnees(endpoints) {
   try {
@@ -1499,9 +1503,12 @@ async function lireDernieresDonnees(endpoints) {
     if (!noms.length) return null;
     const cache = await caches.open(noms[0]);
     const lus = await Promise.all(endpoints.map(async e => {
-      const reponse = await cache.match(e.path);
+      let reponse = await cache.match(e.path);
+      const avant = (!reponse || !reponse.ok) && e.copieAvant ? await cache.match(e.copieAvant.path) : null;
+      if (avant) reponse = avant;
       if (!reponse || !reponse.ok) return null;
-      return { key: e.key, valeur: await reponse.json(), date: Date.parse(reponse.headers.get("Date") || "") };
+      const valeur = await reponse.json();
+      return { key: e.key, valeur: avant ? e.copieAvant.garder(valeur) : valeur, date: Date.parse(reponse.headers.get("Date") || "") };
     }));
     const data = {};
     let date = NaN;
@@ -1702,8 +1709,10 @@ function endpointsDeChargement() {
     { key: "deliverySectors", path: "/api/delivery-sectors", fallback: [] },
     { key: "routes", path: "/api/routes", fallback: [] },
     // Les 12 que l'ecran Stock montre (renderStockMovements), pas les 633 de la
-    // production (222 ko) : 24/09.
-    { key: "stockMovements", path: `/api/stock-movements?limite=${MOUVEMENTS_AFFICHES}`, fallback: [] },
+    // production (222 ko) : 24/09. Au premier chargement de cette version, le
+    // cache n'a que la liste entiere (copieAvant : voir lireDernieresDonnees).
+    { key: "stockMovements", path: `/api/stock-movements?limite=${MOUVEMENTS_AFFICHES}`, fallback: [],
+      copieAvant: { path: "/api/stock-movements", garder: liste => (Array.isArray(liste) ? liste.slice(0, MOUVEMENTS_AFFICHES) : []) } },
     { key: "dashboard", path: "/api/dashboard", fallback: null }
   ];
 }
@@ -1852,6 +1861,28 @@ async function loadData() {
   // n'a lieu que dans ce croisement, jamais apres un geste seul.
   if (ecritureCroisee) loadData();
   if (premier) amorcerCopieDesArchives();
+  if (premier) oublierLesCopiesDAvant();
+}
+
+// Revue du 24/09 : ce que les versions d'avant rangeaient dans le cache de
+// donnees et que plus rien ne lit -- la liste entiere des mouvements, les
+// ventes, l'historique (~720 ko en production). Le nom du cache n'a pas
+// change : elles y restaient, figees, jusqu'a la fin de la session. Plus rien
+// ne demande la liste entiere des mouvements : sa presence signe un cache
+// d'avant. Retirees UNE fois, et seulement quand la nouvelle adresse est
+// rangee : jusque-la, la liste entiere sert de copie (lireDernieresDonnees).
+const COPIES_D_AVANT = ["/api/stock-movements", "/api/ventes", "/api/historique"];
+async function oublierLesCopiesDAvant() {
+  try {
+    if (typeof caches === "undefined") return;
+    const noms = (await caches.keys()).filter(nom => nom.startsWith(PREFIXE_CACHE_DONNEES));
+    for (const nom of noms) {
+      const cache = await caches.open(nom);
+      if (!(await cache.match(COPIES_D_AVANT[0]))) continue;
+      if (!(await cache.match(`/api/stock-movements?limite=${MOUVEMENTS_AFFICHES}`))) continue;
+      await Promise.all(COPIES_D_AVANT.map(chemin => cache.delete(chemin)));
+    }
+  } catch { /* stockage indisponible : rien a oublier */ }
 }
 
 // Hors ligne, les archives d'import des Parametres restaient lisibles : la copie

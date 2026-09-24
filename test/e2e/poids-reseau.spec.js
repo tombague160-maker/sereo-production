@@ -11,6 +11,8 @@
 // Chaque cas a son temoin : ce qui ne part plus a l'ouverture arrive quand
 // l'ecran qui le montre s'affiche, et s'y voit.
 
+const http = require("node:http");
+const { once } = require("node:events");
 const { test, expect, compteurTuiles, remettreCompteurAZero } = require("./tuiles");
 const { demarrer } = require("./serveur-seme");
 
@@ -111,4 +113,113 @@ test("témoin : la Tournée affichée demande son fond de carte, et le dessine",
   await page.evaluate(() => { location.hash = "#livreur"; });
   await expect.poll(compteurTuiles, { message: "la Tournee affichee n'a pas de fond de carte" }).toBeGreaterThan(0);
   await expect(page.locator("#map .leaflet-tile-loaded").first()).toBeVisible();
+});
+
+// Revue adverse du lot (24/09) : la PREMIERE ouverture de cette version, sur
+// un appareil dont le cache de donnees vient d'avant. Il a la liste entiere
+// des mouvements (/api/stock-movements), les ventes et l'historique, pas
+// l'adresse neuve (?limite=12). Avant le correctif : le chargement instantane
+// sautait (tout ou rien), un reseau de plus de 3 s laissait « Partiel
+// (1 indispo) » jusqu'au chargement suivant, et les trois copies restaient
+// dans le cache jusqu'a la fin de la session.
+//
+// Un mandataire (port 3567) retient les requetes d'API : celles que le service
+// worker emet lui-meme ne passent pas par `page.route`.
+async function mandataire(cible, port) {
+  const attente = [];
+  let retenir = null;
+  const server = http.createServer((req, res) => {
+    const passer = () => {
+      const amont = http.request(cible + req.url, { method: req.method, headers: req.headers }, r => {
+        res.writeHead(r.statusCode, r.headers);
+        r.pipe(res);
+      });
+      amont.on("error", () => res.destroy());
+      req.pipe(amont);
+    };
+    if (retenir && retenir.test(req.url)) attente.push(passer);
+    else passer();
+  });
+  server.listen(port, "127.0.0.1");
+  await once(server, "listening");
+  return {
+    base: `http://127.0.0.1:${port}`,
+    retenir(motif) { retenir = motif; },
+    liberer() { retenir = null; for (const f of attente.splice(0)) f(); },
+    async arreter() {
+      this.liberer();
+      server.closeAllConnections();
+      await new Promise(r => server.close(r));
+    }
+  };
+}
+
+const COPIES_D_AVANT = ["/api/historique", "/api/stock-movements", "/api/ventes"];
+
+/** Les adresses du cache de donnees du service worker (avec la requete). */
+function clesDuCache(page) {
+  return page.evaluate(async () => {
+    const cles = [];
+    for (const nom of (await caches.keys()).filter(n => n.startsWith("sereo-api-"))) {
+      for (const r of await (await caches.open(nom)).keys()) cles.push(new URL(r.url).pathname + new URL(r.url).search);
+    }
+    return cles.sort();
+  });
+}
+
+test("première ouverture après la mise à jour : la copie d'avant sert encore, puis s'en va", async ({ browser }) => {
+  test.setTimeout(120000);
+  const mdt = await mandataire(srv.base, 3567);
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  try {
+    const page = await ctx.newPage();
+    await page.goto(mdt.base + "/", { waitUntil: "networkidle" });
+    await page.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 15000 });
+    await page.reload({ waitUntil: "networkidle" });
+    await expect(page.locator("#syncStatus")).toHaveText(/^À jour/);
+    const chiffre = await page.locator("#opRevenue").textContent();
+    expect(chiffre, "prealable : un chiffre au tableau de bord").not.toBe("—");
+
+    // Le cache d'une version d'avant : ses trois adresses, rangees par le
+    // service worker au passage ; l'adresse neuve retiree.
+    await page.evaluate(async chemins => { for (const c of chemins) await fetch(c); }, COPIES_D_AVANT);
+    await expect.poll(() => clesDuCache(page)).toEqual(expect.arrayContaining(COPIES_D_AVANT));
+    await page.evaluate(async () => {
+      const nom = (await caches.keys()).find(n => n.startsWith("sereo-api-"));
+      await (await caches.open(nom)).delete("/api/stock-movements?limite=12");
+    });
+    expect(await clesDuCache(page), "prealable : l'adresse neuve est encore en cache").not.toContain("/api/stock-movements?limite=12");
+    const tous = await (await page.request.get(`${srv.base}/api/stock-movements`)).json();
+
+    mdt.retenir(/^\/api\//);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    // 1. Le chargement instantane : le chiffre du cache AVANT le reseau (sous
+    //    2 s : le repli de 3 s du service worker ne peut pas l'expliquer), et
+    //    les 12 memes mouvements, tires de la liste entiere.
+    await expect.soft(page.locator("#opRevenue"), "le chargement instantane saute").toHaveText(chiffre, { timeout: 2000 });
+    await expect.soft(page.locator("#stockMovementList .item h4"), "les mouvements de la copie d'avant")
+      .toHaveText(tous.slice(0, 12).map(m => m.productName), { timeout: 2000 });
+    // 2. Au-dela de 3 s, le service worker rend ses copies ; l'adresse neuve
+    //    n'en a pas, la page prend celle d'avant.
+    await page.waitForTimeout(4500);
+    expect.soft(await page.locator("#syncStatus").textContent(), "une section « indisponible » alors que sa copie est la")
+      .toMatch(/^Données (de|du) /);
+    // 3. Le reseau repond enfin : les reponses tardives remplacent les copies.
+    mdt.liberer();
+    await expect.soft(page.locator("#syncStatus"), "l'ecran reste « Partiel » apres les reponses tardives")
+      .toHaveText(/^À jour/, { timeout: 15000 });
+
+    // 4. L'ouverture suivante (l'adresse neuve est rangee) oublie les copies d'avant.
+    await page.reload({ waitUntil: "networkidle" });
+    await expect(page.locator("#syncStatus")).toHaveText(/^À jour/);
+    await expect.poll(async () => (await clesDuCache(page)).filter(c => COPIES_D_AVANT.includes(c)),
+      { message: "les copies d'avant restent dans le cache", timeout: 5000 }).toEqual([]);
+    // Temoin : le reste du cache est la.
+    const cles = await clesDuCache(page);
+    expect(cles).toContain("/api/stock-movements?limite=12");
+    expect(cles).toContain("/api/clients");
+  } finally {
+    await ctx.close();
+    await mdt.arreter();
+  }
 });
