@@ -27,8 +27,29 @@ process.env.SEREO_AUTH_USER = "admin-banc";
 process.env.SEREO_AUTH_PASSWORD = "mot-de-passe-banc-sans-valeur";
 process.env.SEREO_AUTH_MAX_ATTEMPTS = "50";
 process.env.SEREO_AUTH_RATE_WINDOW_MS = "60000";
+process.env.SEREO_SKIP_RELEASE_FETCH = "1";
+process.env.SEREO_ROUTING_URL = "http://osrm.test";
+process.env.SEREO_ROUTING_REPLI_URL = "";
+
+// Le calcul routier simule, LENT : la creation d'une tournee attend sa reponse
+// AVANT d'ecrire. C'est la qu'une autre requete passe entre-temps -- le cas ou
+// un « dernier auteur vu » global se tromperait de nom.
+const vraiFetch = globalThis.fetch;
+const DELAI_ROUTAGE_MS = 300;
+globalThis.fetch = async (entree, init = {}) => {
+  const url = new URL(typeof entree === "string" ? entree : String(entree.url || entree));
+  if (url.hostname === "127.0.0.1" || url.hostname === "localhost") return vraiFetch(entree, init);
+  if (url.hostname !== "osrm.test") throw new Error(`appel externe interdit dans ce banc : ${url.hostname}`);
+  await new Promise(r => setTimeout(r, DELAI_ROUTAGE_MS));
+  const points = url.pathname.split("/").pop().split(";");
+  const corps = url.pathname.includes("/table/")
+    ? { code: "Ok", durations: points.map((_, i) => points.map((__, j) => (i === j ? 0 : 600))) }
+    : { code: "Ok", routes: [{ distance: 12000, duration: 1500, geometry: { type: "LineString", coordinates: points.map(p => p.split(",").map(Number)) } }] };
+  return new Response(JSON.stringify(corps), { status: 200, headers: { "content-type": "application/json" } });
+};
 
 const { app, closeStorage, createUserAccount, defaultDb, readDb, writeDb, _resetAuthRateLimitForTest } = require("../server");
+const { jourParis } = require("../lib/jour-paris");
 
 let server;
 let baseUrl;
@@ -44,6 +65,7 @@ before(async () => {
 after(async () => {
   await new Promise(resolve => server.close(resolve));
   closeStorage();
+  globalThis.fetch = vraiFetch;
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
 
@@ -92,22 +114,43 @@ test("auteur — l'action et le mouvement de stock portent l'identifiant du comp
   assert.equal(db.stockMovements[0].createdBy, "julie");
 });
 
-test("auteur — deux comptes qui ecrivent en meme temps gardent chacun leur nom", async () => {
-  ensemencer();
+test("auteur — une ecriture qui attend le calcul routier garde son auteur, meme si un autre compte ecrit entre-temps", async () => {
+  const jour = jourParis();
+  const commande = {
+    id: "o-1", numero: "CMD-2026-001", clientId: "c-1", clientName: "EHPAD Les Tilleuls", status: "pret_livraison",
+    address: "12 avenue du Général de Gaulle", city: "Besançon", postalCode: "25000", sector: "Besancon",
+    lat: 47.238, lng: 6.024, deliveryDate: jour, dateCommande: jour,
+    products: [{ code: "A1", nom: "Alèses", quantite: 1 }]
+  };
+  writeDb({
+    ...defaultDb(),
+    clients: [{ id: "c-1", nom: "EHPAD Les Tilleuls", rue: commande.address, ville: "Besançon", codePostal: "25000", lat: 47.238, lng: 6.024, statut: "restant", produits: [] }],
+    commandes: [commande],
+    stock: [{ id: "p1", code: "A1", nom: "Alèses", quantite: 10 }]
+  }, { backup: false });
   const julie = await connexion("julie", "tournee-du-matin-2026");
   const marc = await connexion("marc", "bureau-du-matin-2026");
-  // Dix ecritures entrelacees : la file d'ecriture les sert une a une, le
-  // contexte de chacune doit rester le sien.
-  await Promise.all(Array.from({ length: 10 }, (_, i) => demander(
-    `/api/stock/${i % 2 ? "p1" : "p2"}`, i % 2 ? julie : marc,
-    { method: "PATCH", body: JSON.stringify({ quantite: 20 + i, reason: `geste ${i}` }) }
-  )));
-  const mouvements = readDb().stockMovements;
-  assert.equal(mouvements.length, 10);
-  for (const m of mouvements) {
-    const attendu = m.productId === "p1" ? "julie" : "marc";
-    assert.equal(m.createdBy, attendu, `${m.reason} : ${m.createdBy} au lieu de ${attendu}`);
-  }
+
+  // Julie cree la tournee (le calcul routier prend 300 ms) ; Marc corrige le
+  // stock pendant ce temps.
+  const tournee = demander("/api/routes", julie, {
+    method: "POST",
+    body: JSON.stringify({ orderIds: ["o-1"], departure: { lat: 47.24, lng: 6.02, label: "Dépôt" }, arrival: { lat: 47.24, lng: 6.02, label: "Dépôt" }, deliveryDate: jour, sector: "Besancon" })
+  });
+  await new Promise(r => setTimeout(r, DELAI_ROUTAGE_MS / 3));
+  const stock = await demander("/api/stock/p1", marc, { method: "PATCH", body: JSON.stringify({ quantite: 8, reason: "Inventaire" }) });
+  assert.equal(stock.res.status, 200);
+  const cree = await tournee;
+  assert.equal(cree.res.status, 201, JSON.stringify(cree.body));
+
+  const db = readDb();
+  const ligneTournee = db.historique.find(h => h.type === "Tournee");
+  const ligneStock = db.historique.find(h => h.type === "Stock");
+  // Temoin : l'ecriture de Marc est bien passee AVANT celle de Julie.
+  assert.ok(db.historique.indexOf(ligneStock) > db.historique.indexOf(ligneTournee), "le stock n'a pas ete ecrit pendant le calcul");
+  assert.equal(ligneStock.auteur, "marc");
+  assert.equal(db.stockMovements[0].createdBy, "marc");
+  assert.equal(ligneTournee.auteur, "julie", `la tournee de julie est signee ${ligneTournee.auteur}`);
 });
 
 test("journal — reserve a l'administration ; l'administrateur lit l'auteur", async () => {
