@@ -140,16 +140,20 @@ test("« Les N autres » d'une fiche client : Commandes s'écrit une fois, sur c
   expect(n).toBe(1);
 });
 
-test("une ancienne adresse (#commandes-jour) : Commandes s'écrit une fois, sur son filtre", async ({ page }) => {
+// Integration du 24/09 : #commandes-jour ouvre desormais « Toutes » (lot
+// pieges : « À envoyer » est vide par construction) -- le filtre par defaut, qui
+// ne distinguerait plus le rendu d'avant de celui du chemin. #commandes-livrees
+// garde un filtre a lui.
+test("une ancienne adresse (#commandes-livrees) : Commandes s'écrit une fois, sur son filtre", async ({ page }) => {
   await ouvrir(page, "crm");
   const lire = await ecrituresDesCommandes(page);
-  await aller(page, "commandes-jour");
+  await aller(page, "commandes-livrees");
   await expect(page.locator("#commandes")).toHaveClass(/active/);
   // Temoins : le filtre de l'ancien ecran, et l'adresse de l'ecran unique.
-  await expect(page.locator('#cmdPilules [data-cmd-filtre="a-envoyer"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator('#cmdPilules [data-cmd-filtre="livrees"]')).toHaveAttribute("aria-pressed", "true");
   await expect(page).toHaveURL(/#commandes$/);
   const n = await lire();
-  console.log(`[commandes] redirection #commandes-jour : ${n} ecriture(s) de la liste`);
+  console.log(`[commandes] redirection #commandes-livrees : ${n} ecriture(s) de la liste`);
   expect(n).toBe(1);
 });
 
