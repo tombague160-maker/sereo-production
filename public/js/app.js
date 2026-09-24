@@ -31,7 +31,11 @@ import {
   splitProductCode,
   productKey,
   inlineMarkdown,
-  renderSimpleMarkdown
+  renderSimpleMarkdown,
+  normaliserTelephone,
+  normaliserCodePostalSaisi,
+  formaterTelephone,
+  verdictSaisie
 } from "./utils/text.js";
 import {
   getAddressParts,
@@ -65,7 +69,8 @@ let orders = [];
 let stock = [];
 let stockMovements = [];
 let ventes = [];
-let historique = [];
+// Plus de `historique` (24/09) : le journal ne se charge plus a l'ouverture,
+// la carte « Journal » de Parametres le lit par pages (chargerJournal).
 let crmClients = [];
 let crmRelances = [];
 let plannedOrders = [];
@@ -416,6 +421,107 @@ function filterNavigation(value) {
     const trouve = !isSearching || termes.some(terme => normalizeTextKey(terme).includes(query));
     entree.classList.toggle("is-hidden-by-search", isSearching && !trouve);
   });
+  renderRechercheGlobale(value);
+}
+
+// --- La recherche de la barre laterale trouve aussi les donnees (24/09) -----
+//
+// Mesure de l'audit : taper « Pharmacie » vidait le menu, sans un mot ; le
+// champ ne cherchait que les huit noms d'ecrans. Il cherche desormais aussi
+// les clients (nom, ville, telephone), les commandes (numero, client) et les
+// produits (code, nom) -- dans les donnees DEJA chargees : aucune requete.
+// Les ecrans restent filtres comme avant ; les donnees s'ajoutent dessous.
+// Au telephone, la barre laterale n'est pas rendue : pas d'equivalent (ecart
+// nomme dans DESIGN.md).
+
+const RECHERCHE_PAR_GROUPE = 5;
+const RECHERCHE_MIN = 2;
+
+function resultatsDeRecherche(query) {
+  if (query.length < RECHERCHE_MIN) return null;
+  const contient = (...termes) => normalizeTextKey(termes.filter(Boolean).join(" ")).includes(query);
+  const clientsTrouves = crmClients
+    .filter(c => contient(nomDuClient(c), c.ville, c.telephone, formaterTelephone(c.telephone)))
+    .sort((a, b) => nomDuClient(a).localeCompare(nomDuClient(b), "fr"));
+  const commandesTrouvees = (orders || [])
+    .filter(o => contient(o.numero, o.clientName))
+    .sort((a, b) => String(b.dateCommande || "").localeCompare(String(a.dateCommande || "")));
+  const produitsTrouves = (stock || [])
+    .filter(p => contient(p.code || p.sku || p.reference, p.nom || p.name || p.produit))
+    .sort((a, b) => String(a.nom || a.name || "").localeCompare(String(b.nom || b.name || ""), "fr"));
+  return { clients: clientsTrouves, commandes: commandesTrouvees, produits: produitsTrouves };
+}
+
+function groupeDeRecherche(titre, genre, liste, ligne) {
+  if (!liste.length) return "";
+  const visibles = liste.slice(0, RECHERCHE_PAR_GROUPE);
+  const reste = liste.length - visibles.length;
+  return `<section class="recherche-groupe" aria-label="${escapeAttribute(titre)}">`
+    + `<h2 class="recherche-titre">${escapeHtml(titre)}</h2><ul>`
+    + visibles.map(item => {
+      const [nom, detail] = ligne(item);
+      return `<li><button class="recherche-resultat" type="button" data-recherche="${genre}" data-id="${escapeAttribute(item.id)}">`
+        + `<span class="recherche-nom">${escapeHtml(nom)}</span>${detail ? `<span class="recherche-detail">${escapeHtml(detail)}</span>` : ""}</button></li>`;
+    }).join("")
+    + `</ul>${reste > 0 ? `<p class="recherche-plus">et ${reste} autre${reste > 1 ? "s" : ""}</p>` : ""}</section>`;
+}
+
+function renderRechercheGlobale(value) {
+  const zone = document.getElementById("rechercheResultats");
+  if (!zone) return;
+  const query = normalizeTextKey(value);
+  if (!query) {
+    zone.hidden = true;
+    zone.innerHTML = "";
+    return;
+  }
+  const resultats = resultatsDeRecherche(query);
+  const ecransVisibles = document.querySelectorAll(".sidebar .tab:not(.is-hidden-by-search)").length;
+  const html = resultats ? [
+    groupeDeRecherche("Clients", "client", resultats.clients, c => [nomDuClient(c), [c.ville, c.telephone ? formaterTelephone(c.telephone) : ""].filter(Boolean).join(" · ")]),
+    groupeDeRecherche("Commandes", "commande", resultats.commandes, o => [o.numero || "(non numérotée)", [o.clientName, STATUT_COMMANDE[o.status]?.[0] || ""].filter(Boolean).join(" · ")]),
+    groupeDeRecherche("Produits", "produit", resultats.produits, p => [p.nom || p.name || p.produit || "Produit", p.code || p.sku || ""])
+  ].join("") : "";
+  // Rien du tout -- ni ecran, ni donnee : le dire, au lieu d'un menu vide.
+  const vide = !html && !ecransVisibles
+    ? `<p class="recherche-vide" role="status">Aucun écran, client, commande ni produit ne correspond à « ${escapeHtml(String(value).trim())} ».</p>`
+    : "";
+  zone.innerHTML = html + vide;
+  zone.hidden = !zone.innerHTML;
+}
+
+/** Ouvre un resultat, puis vide la recherche. */
+function ouvrirResultatDeRecherche(genre, id) {
+  setNavigationSearchValue("");
+  filterNavigation("");
+  if (genre === "client") {
+    // Un filtre laisse d'une visite precedente cacherait le client choisi.
+    Object.assign(crmFilter, { query: "", status: "all", secteur: "" });
+    const recherche = document.getElementById("crmSearch");
+    if (recherche) recherche.value = "";
+    const statut = document.getElementById("crmStatusFilter");
+    if (statut) statut.value = "all";
+    clientChoisi = String(id);
+    showTab("crm");
+    renderCrm();
+    document.querySelector(`[data-cli-choisir="${CSS.escape(String(id))}"]`)?.focus();
+    return;
+  }
+  if (genre === "commande") {
+    ouvrirDetailCommande(id);
+    return;
+  }
+  if (genre === "produit") {
+    const produit = (stock || []).find(p => String(p.id) === String(id));
+    const terme = produit ? (produit.code || produit.nom || produit.name || "") : "";
+    Object.assign(stockFilter, { query: terme, status: "all", category: "all" });
+    const champ = document.getElementById("stockSearch");
+    if (champ) champ.value = terme;
+    const statut = document.getElementById("stockStatusFilter");
+    if (statut) statut.value = "all";
+    showTab("stock");
+    renderStock();
+  }
 }
 
 function navigateToFirstSearchMatch(value) {
@@ -436,13 +542,23 @@ function navigateToFirstSearchMatch(value) {
     .find(tab => !tab.classList.contains("is-hidden-by-search"));
   const cible = ecran || entree?.dataset.tab;
 
-  if (!cible) return;
+  if (!cible) {
+    // Aucun ecran : Entree ouvre le premier client, sinon la premiere
+    // commande, sinon le premier produit trouve (24/09).
+    const premier = document.querySelector("#rechercheResultats [data-recherche]");
+    if (premier) ouvrirResultatDeRecherche(premier.dataset.recherche, premier.dataset.id);
+    return;
+  }
   showTab(cible);
   setNavigationSearchValue("");
   filterNavigation("");
 }
 
 function bindNavigationSearch() {
+  document.getElementById("rechercheResultats")?.addEventListener("click", event => {
+    const resultat = event.target.closest("[data-recherche]");
+    if (resultat) ouvrirResultatDeRecherche(resultat.dataset.recherche, resultat.dataset.id);
+  });
   const inputs = Array.from(document.querySelectorAll("#menuSearch"));
   inputs.forEach(input => {
     input.addEventListener("input", event => {
@@ -466,11 +582,137 @@ function bindNavigationSearch() {
   });
 }
 
+// --- Garde-fous de saisie (lot « donnees utiles », 24/09) ---------------------
+//
+// Un champ `data-garde="telephone"` ou `data-garde="code-postal"` dit son
+// erreur SOUS lui, a la frappe (charte §4) : tout de suite quand la saisie ne
+// pourra plus devenir juste (« 06 12 a »), a la sortie du champ quand elle est
+// seulement incomplete (« 06 12 »). setCustomValidity bloque l'envoi ; le
+// serveur refuse de toute facon (lib/saisie.js).
+//
+// La valeur DEJA enregistree (data-garde-initiale, sinon la valeur rendue du
+// champ) qui revient telle quelle n'est jamais bloquee : elle est signalee
+// « a verifier », sans empecher de modifier le reste de la fiche.
+
+const MESSAGES_GARDE = {
+  telephone: "10 chiffres attendus, par exemple 06 12 34 56 78 (le +33 est accepté).",
+  "code-postal": "5 chiffres attendus, par exemple 25000."
+};
+const MESSAGES_A_VERIFIER = {
+  telephone: "Numéro enregistré à vérifier : il ne compte pas 10 chiffres.",
+  "code-postal": "Code postal enregistré à vérifier : il ne compte pas 5 chiffres."
+};
+const ICONE_ALERTE = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5"></circle><path d="M12 7.5v5.5m0 3.5v.5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg>';
+let numeroDeGarde = 0;
+
+/** Le message sous le champ (cree a la premiere erreur, dans son libelle). */
+function messageDeGarde(champ) {
+  if (!champ.id) champ.id = `garde-champ-${++numeroDeGarde}`;
+  let message = document.getElementById(`${champ.id}-garde`);
+  if (!message) {
+    // Le nom du champ reste son libelle : le message, pose DANS le <label>,
+    // entrerait sinon dans le nom accessible (il est lu par aria-describedby).
+    const libelle = champ.closest("label");
+    if (libelle && !champ.hasAttribute("aria-label")) {
+      const nom = [...libelle.childNodes].filter(n => n !== champ && !(n.classList?.contains("garde-message")))
+        .map(n => n.textContent).join(" ").replace(/\s+/g, " ").trim();
+      if (nom) champ.setAttribute("aria-label", nom);
+    }
+    message = document.createElement("span");
+    message.id = `${champ.id}-garde`;
+    message.className = "garde-message";
+    message.hidden = true;
+    champ.insertAdjacentElement("afterend", message);
+    const decrit = (champ.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean);
+    if (!decrit.includes(message.id)) champ.setAttribute("aria-describedby", [...decrit, message.id].join(" "));
+  }
+  return message;
+}
+
+function afficherGarde(champ, genre, texte) {
+  const message = messageDeGarde(champ);
+  message.className = `garde-message garde-message--${genre}`;
+  message.innerHTML = `${ICONE_ALERTE}${escapeHtml(texte)}`;
+  message.hidden = false;
+  champ.classList.toggle("garde-champ--erreur", genre === "erreur");
+  if (genre === "erreur") champ.setAttribute("aria-invalid", "true");
+  else champ.removeAttribute("aria-invalid");
+}
+
+function cacherGarde(champ) {
+  const message = champ.id ? document.getElementById(`${champ.id}-garde`) : null;
+  if (message) message.hidden = true;
+  champ.classList.remove("garde-champ--erreur");
+  champ.removeAttribute("aria-invalid");
+}
+
+/** Juge un champ garde. `sortie` : le champ vient d'etre quitte (ou l'envoi tente). */
+function jugerGarde(champ, { sortie = false } = {}) {
+  const genre = champ.dataset.garde;
+  if (!MESSAGES_GARDE[genre]) return;
+  const valeur = champ.value;
+  const initiale = champ.dataset.gardeInitiale ?? champ.defaultValue ?? "";
+  const verdict = verdictSaisie(genre, valeur);
+  if (verdict === "vide" || verdict === "valide") {
+    champ.setCustomValidity("");
+    delete champ.dataset.gardeVue;
+    cacherGarde(champ);
+    return;
+  }
+  if (valeur.trim() === String(initiale).trim()) {
+    champ.setCustomValidity("");
+    afficherGarde(champ, "avertissement", MESSAGES_A_VERIFIER[genre]);
+    return;
+  }
+  champ.setCustomValidity(MESSAGES_GARDE[genre]);
+  if (verdict === "invalide" || sortie || champ.dataset.gardeVue) {
+    champ.dataset.gardeVue = "1";
+    afficherGarde(champ, "erreur", MESSAGES_GARDE[genre]);
+  } else {
+    cacherGarde(champ);
+  }
+}
+
+/** Pose la valeur enregistree des champs gardes d'un formulaire, et les juge. */
+function initialiserGardes(racine, valeurs = null) {
+  racine?.querySelectorAll("[data-garde]").forEach(champ => {
+    champ.dataset.gardeInitiale = valeurs ? (valeurs[champ.name] ?? "") : champ.value;
+    delete champ.dataset.gardeVue;
+    jugerGarde(champ);
+  });
+}
+
+function brancherGardesDeSaisie() {
+  document.addEventListener("input", event => {
+    if (event.target.matches?.("[data-garde]")) jugerGarde(event.target);
+  });
+  document.addEventListener("focusout", event => {
+    if (event.target.matches?.("[data-garde]")) jugerGarde(event.target, { sortie: true });
+  });
+  // « invalid » ne remonte pas : on l'ecoute en capture. L'envoi tente montre
+  // le message sous le champ, en plus de la bulle du navigateur.
+  document.addEventListener("invalid", event => {
+    if (event.target.matches?.("[data-garde]")) jugerGarde(event.target, { sortie: true });
+  }, true);
+  document.addEventListener("reset", event => {
+    // L'evenement part AVANT la remise des valeurs, et le code qui a appele
+    // reset() peut poser aussitot une nouvelle fiche (initialiserGardes) :
+    // on oublie l'ancienne maintenant, on rejuge apres.
+    const champs = [...(event.target.querySelectorAll?.("[data-garde]") || [])];
+    champs.forEach(champ => {
+      delete champ.dataset.gardeInitiale;
+      delete champ.dataset.gardeVue;
+    });
+    setTimeout(() => champs.forEach(champ => jugerGarde(champ)), 0);
+  });
+}
+
 function bindUi() {
   document.querySelectorAll("[data-tab]").forEach(button => {
     button.addEventListener("click", () => showTab(button.dataset.tab));
   });
   bindNavigationSearch();
+  brancherGardesDeSaisie();
 
   // Le bouton « Importer les ventes » de l'en-tete ouvre ce selecteur ; le
   // fichier choisi doit alors PARTIR, sinon l'utilisateur croit ses ventes
@@ -850,6 +1092,12 @@ function bindUi() {
     if (action === "par-fermer-feuille") fermerFeuillesParametres();
     if (action === "par-ajouter-compte") basculerFormulaireCompte(actionButton);
     if (action === "par-ajouter-secteur") ouvrirAjoutSecteur();
+    // Le bon de livraison (decision 8, 24/09) : du detail, ou de l'arret a l'ecran.
+    if (action === "imprimer-bon") imprimerBonDuDetail();
+    if (action === "imprimer-bon-arret") imprimerBonDeLArret();
+    // Le journal (24/09) : la vue (actions / stock), puis les pages suivantes.
+    if (action === "journal-vue") choisirVueJournal(actionButton.dataset.journalGenre);
+    if (action === "journal-suite") runAction(actionButton, "Chargement…", () => chargerJournal({ plus: true }));
     // Un geste de la feuille d'un compte la referme : le tableau et les lignes
     // se redessinent, la feuille montrerait un etat perime.
     if (["basculer-compte", "changer-mot-de-passe-compte", "supprimer-compte"].includes(action)
@@ -990,6 +1238,8 @@ function showTab(tabName, options = {}) {
     renderStock();
   }
   if (nextTab === "crm") majSousTitreClients();
+  // Le journal se lit a l'ouverture de Parametres, jamais avant (24/09).
+  if (nextTab === "parametres") majCarteJournal({ rafraichir: true });
   if (nextTab === "abonnements") majSousTitreAbonnements();
   if (nextTab === "livreur") majEnteteTournee();
   if (nextTab === "preparation") {
@@ -1324,7 +1574,7 @@ function poserSquelettes() {
     // Plus de todayOrdersList ni de plannedOrdersList : ces deux listes ont
     // quitte la page le 23/09 (dette 7), la zone cmdLignes les porte.
     ["crmList", 4], ["stockList", 4],
-    ["relanceList", 3], ["exportsList", 3], ["historiqueList", 3], ["stockMovementList", 4],
+    ["relanceList", 3], ["exportsList", 3], ["stockMovementList", 4],
     // Ajoutes apres mesure : la premiere liste avait ete ecrite de memoire, et
     // le graphique du tableau de bord -- le plus grand vide de l'ecran, 556x184
     // -- n'y figurait pas. On ne devine pas quels conteneurs sont vides, on les
@@ -1627,7 +1877,6 @@ function appliquerDonnees(data) {
   }
   if (a("stock")) stock = data.stock;
   if (a("ventes")) ventes = data.ventes;
-  if (a("historique")) historique = data.historique;
   if (a("orders")) orders = data.orders;
   if (a("crmClients")) crmClients = data.crmClients;
   if (a("subscriptions")) abonnementsDonnees = data.subscriptions || { items: [], occurrences: [] };
@@ -1674,7 +1923,9 @@ function endpointsDeChargement() {
     { key: "clients", path: "/api/clients", fallback: [] },
     { key: "stock", path: "/api/stock", fallback: [] },
     { key: "ventes", path: "/api/ventes", fallback: [] },
-    { key: "historique", path: "/api/historique", fallback: [] },
+    // Plus de /api/historique (24/09) : tout le journal partait a chaque
+    // ouverture (549 ko pour 3 000 lignes, mesure de l'audit), pour un ecran
+    // que la navigation n'ouvrait pas. La carte « Journal » le lit par pages.
     { key: "orders", path: "/api/orders", fallback: [] },
     { key: "crmClients", path: "/api/crm/clients", fallback: [] },
     { key: "crmRelances", path: "/api/reminders", fallback: [] },
@@ -1807,7 +2058,7 @@ async function loadData() {
     setStatus(`Partiel (${failed.length} indispo)`);
     // Map cle interne -> label utilisateur lisible
     const labels = {
-      clients: "clients", stock: "stock", ventes: "ventes", historique: "historique",
+      clients: "clients", stock: "stock", ventes: "ventes",
       orders: "commandes", plannedOrders: "commandes planifiées", sectors: "secteurs",
       deliverySectors: "secteurs livraison", routes: "tournées",
       stockMovements: "mouvements stock", dashboard: "tableau de bord"
@@ -2730,7 +2981,6 @@ function renderAll({ lectures = true } = {}) {
   rendreSiAffiche("produits", renderProduits);
   renderVentes();
   rendreSiAffiche("alertes", renderAlertes);
-  renderHistorique();
   renderDeliveryFilters();
   renderDeliveryCandidates();
   // Lot 3 (audit geo) : « N clients a livrer sans position », calcule sur les
@@ -3050,18 +3300,46 @@ function derniereLivraison(clientId) {
     .pop() || null;
 }
 
+// Garde-fous de saisie (24/09) : un telephone ou un code postal DEJA en base
+// et faux n'est jamais corrige en silence ; il est signale « a verifier ».
+function coordonneesAVerifier(client) {
+  return [
+    normaliserTelephone(client.telephone) === null ? "téléphone" : "",
+    normaliserCodePostalSaisi(client.codePostal) === null ? "code postal" : ""
+  ].filter(Boolean);
+}
+
+function libelleAVerifier(manques) {
+  const texte = manques.join(" et ");
+  return `${texte.charAt(0).toUpperCase()}${texte.slice(1)} à vérifier`;
+}
+
+// Decision 5 (24/09) : « pas de livraison depuis 100 jours · d'habitude tous
+// les 30 jours ». Le serveur signale (relanceSuggeree), le statut ne change pas.
+function texteRelance(relance) {
+  const depuis = `pas de livraison depuis ${relance.joursDepuis} jours`;
+  if (relance.rythmeJours === null || relance.rythmeJours === undefined) return `${depuis} · une seule livraison jusqu’ici`;
+  const rythme = Math.round(relance.rythmeJours);
+  return `${depuis} · d’habitude tous les ${rythme} jour${rythme > 1 ? "s" : ""}`;
+}
+
 function clientsFiltres() {
   const query = normalizeTextKey(crmFilter.query);
   const today = getTodayDateInput();
   const filtre = crmFilter.status || "all";
   return crmClients.filter(client => {
-    if (query && !normalizeTextKey([client.nom, client.prenom, client.telephone, client.rue, client.ville, client.email]
+    // Le numero se cherche aussi comme il s'affiche (« 06 12 », 24/09).
+    if (query && !normalizeTextKey([client.nom, client.prenom, client.telephone, formaterTelephone(client.telephone), client.rue, client.ville, client.email]
       .join(" ")).includes(query)) return false;
     if (crmFilter.secteur === "__abonnes") {
       if (abonnementDuClient(client.id)?.status !== "active") return false;
     } else if (crmFilter.secteur && String(client.secteur || "") !== crmFilter.secteur) return false;
     if (filtre === "relance_today") return client.nextReminderDate === today;
     if (filtre === "relance_late") return Boolean(client.nextReminderDate && client.nextReminderDate < today);
+    if (filtre === "coordonnees_a_verifier") return coordonneesAVerifier(client).length > 0;
+    // « Clients a relancer » : le statut pose, ET les clients signales par leur
+    // rythme (decision 5), sans que leur statut change.
+    if (filtre === "client_a_relancer") return client.crmStatus === filtre || Boolean(client.relanceSuggeree);
     if (filtre !== "all") return client.crmStatus === filtre;
     return true;
   }).sort((a, b) => nomDuClient(a).localeCompare(nomDuClient(b), "fr"));
@@ -3088,6 +3366,11 @@ function majSousTitreClients() {
   const aCorriger = crmClients.filter(adresseClientACorriger).length;
   const morceaux = [`${n} client${n > 1 ? "s" : ""}`, `${abonnes} abonné${abonnes > 1 ? "s" : ""}`];
   if (aCorriger) morceaux.push(`${aCorriger} adresse${aCorriger > 1 ? "s" : ""} à corriger`);
+  // Lot « donnees utiles » (24/09) : les deux signaux qui ont chacun leur filtre.
+  const aRelancer = crmClients.filter(c => c.relanceSuggeree).length;
+  if (aRelancer) morceaux.push(`${aRelancer} à relancer`);
+  const aVerifier = crmClients.filter(c => coordonneesAVerifier(c).length).length;
+  if (aVerifier) morceaux.push(`${aVerifier} fiche${aVerifier > 1 ? "s" : ""} à vérifier`);
   setText("pageSubtitle", morceaux.join(" · "));
 }
 
@@ -3137,12 +3420,18 @@ function renderCrm() {
       const choisi = String(client.id) === clientChoisi;
       const abonnement = abonnementDuClient(client.id);
       const livraison = livraisonDe(client);
+      const aVerifier = coordonneesAVerifier(client);
       const meta = adresseClientACorriger(client)
         ? `<span class="cli-meta cli-alerte">${ICONE_CLI.lieu}Adresse à corriger${client.ville ? ` · ${escapeHtml(client.ville)}` : ""}</span>`
-        : `<span class="cli-meta">${escapeHtml([client.ville, livraison ? `livrée le ${dateCourte(livraison)}` : ""].filter(Boolean).join(" · ") || "—")}</span>`;
-      const badge = abonnement
-        ? `<span class="cli-badge cli-badge--${abonnement.status === "active" ? "froid" : "tiede"}">${abonnement.status === "active" ? "Abonné" : "En pause"}</span>`
-        : "";
+        : aVerifier.length
+          ? `<span class="cli-meta cli-alerte">${ICONE_CLI.tel}${escapeHtml(libelleAVerifier(aVerifier))}</span>`
+          : `<span class="cli-meta">${escapeHtml([client.ville, livraison ? `livrée le ${dateCourte(livraison)}` : ""].filter(Boolean).join(" · ") || "—")}</span>`;
+      // Un client signale par son rythme (decision 5) : le mot, pas la couleur seule.
+      const badge = client.relanceSuggeree
+        ? `<span class="cli-badge cli-badge--tiede cli-badge--relance">À relancer</span>`
+        : abonnement
+          ? `<span class="cli-badge cli-badge--${abonnement.status === "active" ? "froid" : "tiede"}">${abonnement.status === "active" ? "Abonné" : "En pause"}</span>`
+          : "";
       return `<div role="listitem"><button class="cli-ligne${choisi ? " cli-ligne--choisie" : ""}" type="button" data-cli-choisir="${escapeAttribute(client.id)}" aria-current="${choisi ? "true" : "false"}">`
         + `<span class="cli-ligne-texte"><span class="cli-nom">${escapeHtml(nomDuClient(client))}</span>${meta}</span>${badge}</button></div>`;
     }).join("");
@@ -3165,8 +3454,12 @@ function renderFicheClient() {
   const lieu = client.secteur ? formatSectorLabel(client.secteur) : client.ville;
   const puces = (lieu ? `<span class="cli-badge cli-badge--froid cli-puce cli-puce--lieu">${escapeHtml(lieu)}</span>` : "")
     + (abonnement ? `<span class="cli-badge cli-badge--${abonnement.status === "active" ? "froid" : "tiede"} cli-puce cli-puce--abonnement">${abonnement.status === "active" ? "Abonné" : "En pause"}</span>` : "");
-  const appeler = client.telephone
-    ? `<a class="button primary cli-appeler" href="tel:${escapeAttribute(String(client.telephone).replace(/[^\d+]/g, ""))}">${ICONE_CLI.tel}<span>Appeler</span></a>`
+  // Garde-fous (24/09) : « abc » donnait un lien tel: VIDE. Un numero juste
+  // appelle sa forme normalisee ; un numero a verifier garde ses chiffres,
+  // et sans aucun chiffre, pas de bouton.
+  const numeroAppel = normaliserTelephone(client.telephone) || String(client.telephone || "").replace(/[^\d+]/g, "");
+  const appeler = numeroAppel
+    ? `<a class="button primary cli-appeler" href="tel:${escapeAttribute(numeroAppel)}">${ICONE_CLI.tel}<span>Appeler</span></a>`
     : "";
   // « Itineraire » (planche 8c, le second geste du terrain) : seulement si
   // l'adresse permet un trajet (rue ET ville) -- sinon le lien serait vide.
@@ -3177,7 +3470,15 @@ function renderFicheClient() {
   const adresse = adresseClientACorriger(client)
     ? `<p class="cli-valeur cli-alerte">Adresse à corriger</p><p class="cli-note">${escapeHtml([client.rue, client.codePostal, client.ville].filter(Boolean).join(" ") || "Aucune adresse")}</p>`
     : `<p class="cli-valeur">${escapeHtml(client.rue)}<br>${escapeHtml([client.codePostal, client.ville].filter(Boolean).join(" "))}</p>`;
-  const contact = `<p class="cli-valeur">${escapeHtml(client.telephone || "Téléphone à compléter")}</p>`
+  // Le numero par deux (« 06 12 34 56 78 ») ; enregistre faux, il est montre
+  // tel quel et dit « a verifier » -- jamais corrige en silence. De meme pour
+  // le code postal.
+  const telephoneFaux = normaliserTelephone(client.telephone) === null;
+  const codePostalFaux = normaliserCodePostalSaisi(client.codePostal) === null;
+  const adresseEtVerif = adresse
+    + (codePostalFaux ? `<p class="cli-note cli-a-verifier">${ICONE_CLI.retard}Code postal à vérifier : il ne compte pas 5 chiffres.</p>` : "");
+  const contact = `<p class="cli-valeur${telephoneFaux ? " cli-alerte" : ""}">${escapeHtml(client.telephone ? formaterTelephone(client.telephone) : "Téléphone à compléter")}</p>`
+    + (telephoneFaux ? `<p class="cli-note cli-a-verifier">${ICONE_CLI.retard}Numéro à vérifier : il ne compte pas 10 chiffres.</p>` : "")
     + (client.email ? `<p class="cli-note">${escapeHtml(client.email)}</p>` : "");
 
   let carteAbonnement = "";
@@ -3229,10 +3530,11 @@ function renderFicheClient() {
       <div class="cli-fiche-gestes">${appeler}${itineraire}<button class="cli-bouton-contour cli-modifier" type="button" data-action="cli-modifier" data-client-id="${escapeAttribute(client.id)}">${ICONE_CLI.crayon}<span class="cli-modifier-mot">Modifier</span></button></div>
     </header>
     <div class="cli-champs">
-      <div><span class="cli-champ-icone" aria-hidden="true">${ICONE_CLI.lieu}</span><p class="cli-libelle">Adresse</p>${adresse}</div>
+      <div><span class="cli-champ-icone" aria-hidden="true">${ICONE_CLI.lieu}</span><p class="cli-libelle">Adresse</p>${adresseEtVerif}</div>
       <div><span class="cli-champ-icone" aria-hidden="true">${ICONE_CLI.tel}</span><p class="cli-libelle">Contact</p>${contact}</div>
     </div>
     ${extras.length ? `<div class="cli-notes">${extras.map(e => `<p class="cli-note">${escapeHtml(e)}</p>`).join("")}</div>` : ""}
+    ${client.relanceSuggeree ? `<p class="cli-relance">${ICONE_CLI.retard}<span><strong>À relancer</strong> · ${escapeHtml(texteRelance(client.relanceSuggeree))}</span></p>` : ""}
     <label class="cli-statut">
       <span class="cli-libelle">Statut commercial</span>
       <select data-cli-statut="${escapeAttribute(client.id)}" aria-label="Statut commercial de ${escapeAttribute(nomDuClient(client))}">
@@ -3266,6 +3568,8 @@ function ouvrirDialogueClient(clientId = null) {
     // Ce que le dialogue a MONTRE : on n'enverra que ce qui en differe.
     form.dataset.initial = JSON.stringify(Object.fromEntries(new FormData(form).entries()));
   }
+  // Garde-fous (24/09) : un numero deja enregistre et faux est signale, pas bloque.
+  initialiserGardes(form, client ? { telephone: client.telephone, codePostal: client.codePostal } : {});
   dialogue.showModal();
   form.elements.nom.focus();
 }
@@ -3674,7 +3978,12 @@ function updateCustomerCartBar() {
 function fillCustomerFormFromClient(clientId) {
   const client = crmClients.find(item => String(item.id) === String(clientId));
   const form = document.getElementById("customerOrderForm");
-  if (!form || !client) return;
+  if (!form) return;
+  // « Nouveau client » : plus de valeur enregistree, tout ce qui est tape se juge.
+  if (!client) {
+    initialiserGardes(form, {});
+    return;
+  }
   form.elements.nom.value = client.nom || "";
   form.elements.prenom.value = client.prenom || "";
   form.elements.telephone.value = client.telephone || "";
@@ -3682,6 +3991,9 @@ function fillCustomerFormFromClient(clientId) {
   form.elements.adresse.value = client.rue || "";
   form.elements.ville.value = client.ville || "";
   form.elements.email.value = client.email || "";
+  // Garde-fous (24/09) : la fiche choisie peut porter un numero ancien et
+  // faux ; il est signale, et n'empeche pas de passer commande.
+  initialiserGardes(form, { telephone: client.telephone, codePostal: client.codePostal });
 }
 
 async function submitCustomerOrder(form) {
@@ -5065,32 +5377,107 @@ function getAlertItems() {
   return alerts;
 }
 
-function renderHistorique() {
-  const container = document.getElementById("historiqueList");
-  if (!container) return;
+// --- Le journal « qui a fait quoi » (lot « donnees utiles », 24/09) -----------
+//
+// Une carte de Parametres, reservee a l'administration (GET /api/journal
+// repond 403 aux autres : on ne l'appelle pas pour eux, une erreur console
+// ferait echouer le parcours des onglets). Chargee a la premiere ouverture de
+// Parametres, par pages de 50 ; jamais a l'ouverture de l'application.
+// Deux vues : les actions (l'historique) et les mouvements de stock.
 
-  container.innerHTML = `
-    <div class="history-cell history-head">Date</div>
-    <div class="history-cell history-head">Type</div>
-    <div class="history-cell history-head">Action</div>
-  `;
+const JOURNAL_PAGE = 50;
+const journal = { genre: "actions", entrees: [], suivant: null, charge: false, enCours: false };
 
-  if (!historique.length) {
-    container.innerHTML += `
-      <div class="history-cell">-</div>
-      <div class="history-cell">-</div>
-      <div class="history-cell">Aucun historique.</div>
-    `;
+function carteJournalOuverte() {
+  const carte = document.getElementById("parJournal");
+  return Boolean(carte && !carte.hidden && document.getElementById("parametres")?.classList.contains("active"));
+}
+
+/**
+ * Montre la carte a l'administration ; la charge si Parametres est a l'ecran.
+ * `rafraichir` : Parametres vient de s'ouvrir, la premiere page se relit (une
+ * requete de 50 lignes, pas le journal entier).
+ */
+function majCarteJournal({ rafraichir = false } = {}) {
+  const carte = document.getElementById("parJournal");
+  if (!carte || !moi) return;
+  carte.hidden = !moi.administration;
+  if (rafraichir && !journal.enCours) Object.assign(journal, { entrees: [], suivant: null, charge: false });
+  if (carteJournalOuverte() && !journal.charge) chargerJournal();
+}
+
+function ligneDuJournal(entree) {
+  const quand = entree.date ? new Date(entree.date) : null;
+  const date = quand && !Number.isNaN(quand.getTime())
+    ? `${quand.toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })} · ${heureCourte(entree.date)}`
+    : (entree.date || "—");
+  // Les lignes d'avant le 24/09 n'ont pas d'auteur : « — », jamais un nom devine.
+  const auteur = entree.auteur || "—";
+  return `<li class="par-journal-ligne">`
+    + `<span class="par-journal-quand">${escapeHtml(date)}</span>`
+    + `<span class="par-journal-qui"><span class="sr-only">Par </span>${escapeHtml(auteur)}</span>`
+    + `<span class="par-journal-quoi"><span class="par-journal-type">${escapeHtml(entree.type || "—")}</span> ${escapeHtml(entree.message || "—")}</span>`
+    + `</li>`;
+}
+
+function renderJournal() {
+  const liste = document.getElementById("parJournalListe");
+  const suite = document.getElementById("parJournalSuite");
+  if (!liste) return;
+  document.querySelectorAll("[data-journal-genre]").forEach(bouton => {
+    bouton.setAttribute("aria-pressed", String(bouton.dataset.journalGenre === journal.genre));
+  });
+  if (!journal.charge) {
+    liste.innerHTML = `<li class="par-journal-vide">${journal.enCours ? "Chargement du journal…" : ""}</li>`;
+  } else if (!journal.entrees.length) {
+    liste.innerHTML = `<li class="par-journal-vide">${journal.genre === "stock" ? "Aucun mouvement de stock." : "Aucune action enregistrée."}</li>`;
+  } else {
+    liste.innerHTML = journal.entrees.map(ligneDuJournal).join("");
+  }
+  if (suite) {
+    suite.hidden = !journal.suivant;
+    suite.textContent = `Afficher les ${JOURNAL_PAGE} suivantes`;
+  }
+}
+
+/** Charge la premiere page (`plus` : la page suivante, ajoutee a la liste). */
+async function chargerJournal({ plus = false } = {}) {
+  if (!moi?.administration || journal.enCours) return;
+  journal.enCours = true;
+  if (!plus) renderJournal();
+  const genre = journal.genre;
+  const parametres = new URLSearchParams({ genre, limite: String(JOURNAL_PAGE) });
+  if (plus && journal.suivant) parametres.set("avant", journal.suivant);
+  let page = null;
+  let erreur = null;
+  try {
+    page = await apiFetch(`/api/journal?${parametres}`);
+  } catch (error) {
+    erreur = error;
+  } finally {
+    journal.enCours = false;
+  }
+  // Une autre vue choisie pendant la requete : cette reponse n'est plus la
+  // bonne, la vue choisie se charge maintenant.
+  if (genre !== journal.genre) {
+    chargerJournal();
     return;
   }
+  if (erreur) {
+    const liste = document.getElementById("parJournalListe");
+    if (liste) liste.innerHTML = `<li class="par-journal-vide">Journal indisponible : ${escapeHtml(erreur.message || "erreur réseau")}</li>`;
+    return;
+  }
+  journal.entrees = plus ? [...journal.entrees, ...(page.entrees || [])] : (page.entrees || []);
+  journal.suivant = page.suivant || null;
+  journal.charge = true;
+  renderJournal();
+}
 
-  historique.forEach(item => {
-    container.innerHTML += `
-      <div class="history-cell">${escapeHtml(formatDate(item.date))}</div>
-      <div class="history-cell">${escapeHtml(item.type || "-")}</div>
-      <div class="history-cell">${escapeHtml(item.message || item.texte || "-")}</div>
-    `;
-  });
+function choisirVueJournal(genre) {
+  if (genre === journal.genre && journal.charge) return;
+  Object.assign(journal, { genre, entrees: [], suivant: null, charge: false });
+  chargerJournal();
 }
 
 // Helpers ERP v1.11.0 (les anciennes listes « Commandes livrees » et « Bons de
@@ -5251,6 +5638,126 @@ function livraisonFaiteHtml(order) {
       </div>`;
 }
 
+// --- Le bon de livraison imprimable (decision 8 de Thomas, 24/09) ------------
+//
+// SANS les prix : le logo, le numero, les dates, le client et son adresse, les
+// lignes (produit, quantite), les consignes, « remis a » s'il existe, et une
+// zone « recu par / signature ». Pas de bibliotheque : une feuille posee en
+// fin de <body>, que @media print montre seule, au format A4, et
+// l'impression du navigateur (au telephone, sa feuille de partage : « Imprimer »
+// ou « Enregistrer en PDF »).
+
+function gabaritBonDeLivraison({ order, stop = null, remisA = "" }) {
+  const source = order || stop || {};
+  const numero = source.numero || order?.numero || "(non numéroté)";
+  const client = source.clientName || "Client";
+  const rue = source.address || source.rue || "";
+  const ville = [source.postalCode || source.codePostal, source.city || source.ville].filter(Boolean).join(" ");
+  const telephone = source.phone || source.telephone || "";
+  const lignes = (Array.isArray(order?.products) && order.products.length ? order.products : (stop?.products || []))
+    .map(ligne => {
+      const brut = ligne.nom || ligne.produit || ligne.designation || "Produit";
+      const decoupe = splitProductCode(brut);
+      const code = ligne.code && ligne.code !== brut ? ligne.code : (decoupe.code || "");
+      return `<tr><td>${escapeHtml(decoupe.name)}${code ? `<span class="bon-code">${escapeHtml(code)}</span>` : ""}</td>`
+        + `<td class="bon-quantite">${escapeHtml(ligne.quantite ?? ligne.quantity ?? 0)}</td></tr>`;
+    }).join("");
+  const livraison = order?.deliveryDate || stop?.deliveryDate || "";
+  const livree = order?.status === "livre" && order.deliveredAt ? new Date(order.deliveredAt) : null;
+  const livreeLe = livree && !Number.isNaN(livree.getTime())
+    ? `${livree.toLocaleDateString("fr-FR")} à ${heureCourte(order.deliveredAt)}`
+    : "";
+  // Les consignes de livraison : celles de la commande (ou de l'arret). Les
+  // notes de la fiche client restent internes (besoins, preferes...).
+  const consignes = [order?.notes || stop?.notes || ""].filter(Boolean);
+  const remis = String(remisA || order?.remisA || stop?.remisA || "").trim();
+  const infos = [
+    ["Date de commande", bdcFormatDate(order?.dateCommande || stop?.dateCommande)],
+    ["Livraison prévue", livraison ? bdcFormatDate(livraison) : "—"],
+    ...(livreeLe ? [["Livrée le", livreeLe]] : [])
+  ];
+  return `
+    <header class="bon-tete">
+      <img class="bon-logo" src="${escapeAttribute(activeBrandImage || DEFAULT_BRAND_IMAGE)}" alt="Séréo" />
+      <div class="bon-titre">
+        <h1>Bon de livraison</h1>
+        <p class="bon-numero">N° ${escapeHtml(numero)}</p>
+      </div>
+    </header>
+    <dl class="bon-infos">${infos.map(([terme, valeur]) => `<div><dt>${escapeHtml(terme)}</dt><dd>${escapeHtml(valeur || "—")}</dd></div>`).join("")}</dl>
+    <section class="bon-bloc bon-client">
+      <h2>Livré à</h2>
+      <p><strong>${escapeHtml(client)}</strong>${rue ? `<br>${escapeHtml(rue)}` : ""}${ville ? `<br>${escapeHtml(ville)}` : ""}</p>
+      ${telephone ? `<p>Tél. ${escapeHtml(formaterTelephone(telephone))}</p>` : ""}
+    </section>
+    <table class="bon-lignes">
+      <thead><tr><th scope="col">Produit</th><th scope="col" class="bon-quantite">Quantité</th></tr></thead>
+      <tbody>${lignes || `<tr><td colspan="2">Aucune ligne.</td></tr>`}</tbody>
+    </table>
+    ${consignes.length ? `<section class="bon-bloc"><h2>Consignes</h2>${consignes.map(c => `<p>${escapeHtml(c)}</p>`).join("")}</section>` : ""}
+    ${remis ? `<p class="bon-remis"><strong>Remis à :</strong> ${escapeHtml(remis)}</p>` : ""}
+    <section class="bon-signature" aria-label="Réception">
+      <div><p>Reçu par (nom)</p><div class="bon-zone"></div></div>
+      <div><p>Date et signature</p><div class="bon-zone"></div></div>
+    </section>`;
+}
+
+async function imprimerBonDeLivraison(donnees) {
+  let feuille = document.getElementById("bonLivraison");
+  if (!feuille) {
+    feuille = document.createElement("section");
+    feuille.id = "bonLivraison";
+    feuille.className = "bon-livraison";
+    feuille.setAttribute("aria-label", "Bon de livraison");
+    // Hors de l'application : @media print ne montre qu'elle.
+    document.body.appendChild(feuille);
+  }
+  feuille.innerHTML = gabaritBonDeLivraison(donnees);
+  // Le logo vient d'etre pose : une impression lancee avant son chargement
+  // part sans lui (mesure du 24/09, PDF sans logo). On l'attend, au plus
+  // 1,5 s ; s'il ne vient pas, le bon part quand meme.
+  const logo = feuille.querySelector(".bon-logo");
+  if (logo && !logo.complete) {
+    await Promise.race([
+      new Promise(fin => {
+        logo.addEventListener("load", fin, { once: true });
+        logo.addEventListener("error", fin, { once: true });
+      }),
+      new Promise(fin => setTimeout(fin, 1500))
+    ]);
+  }
+  document.body.classList.add("impression-bon");
+  const fin = () => {
+    document.body.classList.remove("impression-bon");
+    window.removeEventListener("afterprint", fin);
+  };
+  window.addEventListener("afterprint", fin);
+  window.print();
+}
+
+/** Le bon de la commande affichee dans le detail. */
+function imprimerBonDuDetail() {
+  const order = (orders || []).find(o => String(o.id) === String(bdcState.detailOrderId));
+  if (!order) {
+    notify("Aucune commande ouverte.", "warning");
+    return;
+  }
+  imprimerBonDeLivraison({ order }).catch(error => notifyEchec(error));
+}
+
+/** Le bon de l'arret a l'ecran : sa commande, et « remis a » s'il est saisi. */
+function imprimerBonDeLArret() {
+  const stop = getCurrentDeliveryTarget();
+  if (!stop) {
+    notify("Aucun arrêt sélectionné.", "warning");
+    return;
+  }
+  const order = (orders || []).find(o => String(o.id) === String(stop.orderId)) || null;
+  const champ = document.getElementById("remisAInput");
+  const tape = champ && champ.dataset.arret === String(stop.id) ? champ.value : "";
+  imprimerBonDeLivraison({ order, stop, remisA: stop.remisA || tape }).catch(error => notifyEchec(error));
+}
+
 function openBdcDetail(orderId) {
   const order = (orders || []).find(o => String(o.id) === String(orderId));
   if (!order) return;
@@ -5351,6 +5858,10 @@ function openBdcDetail(orderId) {
     </div>
   `;
 
+  // Garde-fous (24/09) : en edition, un numero enregistre et faux est
+  // signale des l'ouverture du formulaire.
+  if (isEditing) initialiserGardes(bodyEl.querySelector("form"));
+
   modal.setAttribute("aria-hidden", "false");
   document.body.classList.add("version-modal-open");
   // U3 v1.13.0 : focus trap pour empecher Tab de sortir du modal
@@ -5364,7 +5875,7 @@ function renderBdcClientReadView(order) {
   const address = [order.address, order.postalCode, order.city].filter(Boolean).join(" · ");
   const needs = bdcNeedsCompletion(order);
   const phoneHtml = order.phone
-    ? `<p class="bdc-detail-phone"><a href="tel:${escapeAttribute(String(order.phone).replace(/\s+/g, ""))}">📞 ${escapeHtml(order.phone)}</a></p>`
+    ? `<p class="bdc-detail-phone"><a href="tel:${escapeAttribute(String(order.phone).replace(/\s+/g, ""))}">📞 ${escapeHtml(formaterTelephone(order.phone))}</a></p>`
     : `<p class="bdc-detail-missing">⚠ Téléphone non renseigné</p>`;
   const addressHtml = address
     ? `<p class="muted">${escapeHtml(address)}</p>`
@@ -5409,7 +5920,7 @@ function renderBdcClientEditForm(order) {
         </label>
         <label class="bdc-form-field">
           <span>Code postal</span>
-          <input type="text" name="codePostal" value="${escapeAttribute(order.postalCode || "")}" placeholder="25000" inputmode="numeric" pattern="[0-9]{4,5}" />
+          <input type="text" name="codePostal" value="${escapeAttribute(order.postalCode || "")}" placeholder="25000" inputmode="numeric" autocomplete="postal-code" data-garde="code-postal" />
         </label>
         <label class="bdc-form-field">
           <span>Ville</span>
@@ -5417,7 +5928,7 @@ function renderBdcClientEditForm(order) {
         </label>
         <label class="bdc-form-field bdc-form-field-wide">
           <span>Téléphone</span>
-          <input type="tel" name="telephone" value="${escapeAttribute(order.phone || "")}" placeholder="06 81 23 71 71" />
+          <input type="tel" name="telephone" value="${escapeAttribute(order.phone || "")}" placeholder="06 81 23 71 71" inputmode="tel" autocomplete="tel" data-garde="telephone" />
         </label>
         <label class="bdc-form-field bdc-form-field-wide">
           <span>Notes</span>
@@ -5445,6 +5956,9 @@ async function saveBdcClientEdit(triggerBtn) {
   if (!form) return;
   const clientId = triggerBtn.dataset.clientId || form.dataset.clientId;
   if (!clientId) return;
+  // Le clic est intercepte (pas d'envoi natif) : la validation du formulaire
+  // -- dont les garde-fous du telephone et du code postal -- se demande ici.
+  if (!form.reportValidity()) return;
 
   const formData = new FormData(form);
   const body = {
@@ -6141,6 +6655,7 @@ async function loadMoi() {
   majEnteteTableauDeBord(getInitialTab());
   renderComptes();
   majDroitsNumerotation();
+  majCarteJournal();
 }
 
 // La numerotation des bons est reservee a l'administration (decision du
@@ -7875,6 +8390,8 @@ function updateDriverActionButtons(target = getCurrentDeliveryTarget()) {
   setButtonDisabled("markRescheduleButton", !canChangeStatus);
   setButtonDisabled("replanCurrentButton", !canReplan);
   setButtonDisabled("nextClientButton", !hasTarget || !routeStarted || !hasNextStop);
+  // Le bon de livraison (24/09) : il faut un arret, quel que soit son etat.
+  setButtonDisabled("bonLivraisonArretButton", !hasTarget);
   // Decision 10 : « remis a… » n'a de sens que pour l'arret qu'on va livrer.
   const remis = document.getElementById("remisABloc");
   if (remis) remis.hidden = !(hasTarget && routeStarted && !terminalStop);
@@ -9096,7 +9613,8 @@ function getAddressWarning(entity) {
 
 
 function formatPhone(value) {
-  return value ? `Téléphone : ${value}` : "Téléphone manquant";
+  // Par deux (« 06 12 34 56 78 », 24/09) ; un numero a verifier, tel quel.
+  return value ? `Téléphone : ${formaterTelephone(value)}` : "Téléphone manquant";
 }
 
 function isStopTerminal(status) {
