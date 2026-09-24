@@ -203,11 +203,29 @@ test.describe("à la taille de ce qu'ils remplacent", () => {
         // Le panier moyen est aligne a DROITE : c'est son bord droit qui tient.
         const bord = s === "#opBasket" ? "droite" : "gauche";
         const dy = Math.abs(apres[s].haut - avant[s].haut), dx = Math.abs(apres[s][bord] - avant[s][bord]);
-        const dh = Math.abs(apres[s].hauteur - avant[s].hauteur);
+        // L'histogramme REMPLIT sa carte depuis le 24/09 (decision de Thomas,
+        // carte-ca-remplie.spec.js) : sa hauteur suit la rangee, qui grandit
+        // quand la carte de tournee arrive avec les donnees. Sa POSITION reste
+        // jugee ici ; sa hauteur l'est ci-dessous (elle ne suit que la carte).
+        const dh = s === "#revenueChart" ? 0 : Math.abs(apres[s].hauteur - avant[s].hauteur);
         return dy > 2 || dx > 2 || dh > 2
           ? [`${s} : ${Math.round(dy)} px en haut, ${Math.round(dx)} px de cote, ${Math.round(dh)} px de hauteur`] : [];
       });
       expect(sauts, "la page a saute a l'arrivee des donnees").toEqual([]);
+      // L'histogramme ne change de hauteur QUE si sa carte en change autant (il
+      // la remplit), et jamais sous les 150 px de la planche au bureau.
+      const carte = await page.evaluate(() => Math.round(document.querySelector("#journee .tb-ca").getBoundingClientRect().height));
+      const dhGraphe = Math.round(apres["#revenueChart"].hauteur - avant["#revenueChart"].hauteur);
+      if (largeur > 920) {
+        expect(apres["#revenueChart"].hauteur, "histogramme au moins a la hauteur de la planche").toBeGreaterThanOrEqual(150);
+        const vide = await page.evaluate(() => {
+          const c = document.querySelector("#journee .tb-ca"), g = document.getElementById("revenueChart");
+          return Math.round(c.getBoundingClientRect().bottom - parseFloat(getComputedStyle(c).paddingBottom) - g.getBoundingClientRect().bottom);
+        });
+        expect(vide, `l'histogramme a change de ${dhGraphe} px sans remplir sa carte (${carte} px)`).toBeLessThanOrEqual(2);
+      } else {
+        expect(Math.abs(dhGraphe), "au telephone, l'histogramme a une hauteur fixe").toBeLessThanOrEqual(2);
+      }
       await ctx.close();
     });
   }
