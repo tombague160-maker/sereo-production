@@ -231,6 +231,38 @@ test("import, telephone et sombre : depuis l'en-tete puis depuis le formulaire d
   await ctx.close();
 });
 
+test("import du stock : le resume compte les produits NOUVEAUX et MIS A JOUR, pas tout le stock", async ({ browser }) => {
+  // Meme defaut que les ventes : « 4 élément(s) traités » etait `stock.length`.
+  test.setTimeout(120000);
+  await semer();
+  const { ctx, page, erreurs } = await ouvrir(browser, "journee");
+  const bouton = page.locator("#importStockButton");
+  await bouton.scrollIntoViewIfNeeded();
+  await page.locator("#stockFile").setInputFiles({
+    name: "stock.xlsx",
+    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    buffer: classeur([
+      ["Code", "Nom", "Coût", "Tarif", "Quantité"],
+      ["CH-L", "Changes taille L", "5", "12", "80"],
+      ["NEUF", "Produit neuf", "1", "2", "10"]
+    ])
+  });
+  const reponse = page.waitForResponse(r => r.url().includes("/api/import/stock"));
+  await bouton.click();
+  expect((await reponse).status()).toBe(200);
+  const bilan = page.locator("#importSummary");
+  await expect(bilan).toBeVisible();
+  const comptes = (await bilan.locator(".import-bilan-compte").allInnerTexts()).map(t => t.replace(/\s+/g, " ").trim());
+  expect(comptes, "le resume du stock ne compte pas ce que l'import a fait").toEqual(["1 nouveau produit", "1 produit mis à jour"]);
+  await expect(bilan).toContainText("Import du stock terminé");
+  await page.waitForTimeout(300);
+  const boite = await place(page, "#importSummary");
+  expect(boite.top).toBeGreaterThanOrEqual(0);
+  expect(boite.bottom, "il faut defiler pour lire le resume du stock").toBeLessThanOrEqual(boite.bas);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
 // --- 3. Apres « Valider la commande » ------------------------------------------
 
 async function validerUneCommande(page) {
