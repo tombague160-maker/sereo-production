@@ -3707,7 +3707,21 @@ function bilanImportVentes(result) {
     details.push({ attention: true, html: `Et ${escapeHtml(accorder(ignorees.length - IMPORT_IGNOREES_MONTREES, "autre commande ignorée", "autres commandes ignorées"))} (déjà en préparation, prêtes, en tournée ou livrées), laissées telles quelles.` });
   }
   if (identiques) details.push({ html: `${escapeHtml(accorder(identiques, "commande identique, déjà importée", "commandes identiques, déjà importées"))} : rien à changer.` });
-  if (erreurs) details.push({ attention: true, html: `<strong>${escapeHtml(accorder(erreurs, "ligne sans client ni produit", "lignes sans client ni produit"))}</strong> : écartée${erreurs > 1 ? "s" : ""}, vérifie le fichier.` });
+  // Chaque cause d'erreur (25/09) : une quantite vide ne vaut plus 1, une ligne
+  // sans client ne cree plus « Client sans nom », une date illisible ne date
+  // plus le bon du jour -- elles sont ecartees, et le resume dit pourquoi. Un
+  // serveur plus ancien ne rend que le total : c'etait « sans client ni produit ».
+  const causes = result.lignesEnErreur || { sansClientNiProduit: erreurs };
+  [
+    ["sansClientNiProduit", "ligne sans client ni produit", "lignes sans client ni produit"],
+    ["sansClient", "ligne sans client", "lignes sans client"],
+    ["sansProduit", "ligne sans produit", "lignes sans produit"],
+    ["sansQuantite", "ligne sans quantité lisible", "lignes sans quantité lisible"],
+    ["dateIllisible", "ligne sans date lisible", "lignes sans date lisible"]
+  ].forEach(([cle, un, plusieurs]) => {
+    const n = nombre(causes[cle]);
+    if (n) details.push({ attention: true, html: `<strong>${escapeHtml(accorder(n, un, plusieurs))}</strong> : écartée${n > 1 ? "s" : ""}, vérifie le fichier.` });
+  });
   // Les avertissements du serveur, qui ne vivaient que dans l'historique.
   const negatives = nombre(result.clampedNegativeQuantities);
   if (negatives) details.push({ attention: true, html: `<strong>${escapeHtml(accorder(negatives, "quantité négative ramenée", "quantités négatives ramenées"))} à 0</strong> : vérifie les retours ou avoirs dans Ximi.` });

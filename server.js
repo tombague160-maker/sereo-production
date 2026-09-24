@@ -3557,7 +3557,10 @@ function normalizeDateInput(value) {
   if (isoMatch) {
     y = Number(isoMatch[1]); m = Number(isoMatch[2]); d = Number(isoMatch[3]);
   } else {
-    const fr = text.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/);
+    // Une heure apres la date FR (« 18/05/2026 10:30 », « 18/05/2026 10h30 »)
+    // est acceptee et ignoree (25/09) : l'import datait sinon le bon du jour
+    // de l'import (chasse aux defauts du 24/09).
+    const fr = text.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})(?:[ T]+\d{1,2}[:hH]\d{2}(?::\d{2})?)?$/);
     if (!fr) return "";
     d = Number(fr[1]); m = Number(fr[2]);
     // M1 (revue) : pivot 2 chiffres. "01/01/99" doit etre 1999 (legacy
@@ -8730,20 +8733,51 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     // Les lignes dont la colonne Secteur est remplie (fusion des fiches, 25/09).
     const ventesAvecSecteur = new Set();
 
+    // Les colonnes de date du bon (25/09) : « Date », et les noms qu'un export
+    // ou un tableur lui donne. Une date ECRITE mais illisible met la ligne en
+    // erreur (elle datait le bon du jour de l'import) ; une cellule VIDE, ou
+    // pas de colonne, garde le repli documente : le jour de l'import.
+    const NOMS_DE_LA_DATE = ["Date", "Date facture", "Date de facture", "Date commande", "Date de commande", "Date de vente", "Date vente"];
+    // Les lignes ECARTEES, par cause (chasse aux defauts du 24/09, 25/09) :
+    // une quantite vide valait 1, une ligne sans client creait une commande
+    // « Client sans nom », une date illisible datait le bon du jour de
+    // l'import. Une ligne entierement vide (la fin d'une feuille) n'en est pas une.
+    const lignesEnErreur = { sansClientNiProduit: 0, sansClient: 0, sansProduit: 0, sansQuantite: 0, dateIllisible: 0 };
+
     const ventes = dataRows
       .map((row, index) => {
+        if (!Array.isArray(row) || !row.some(cell => clean(cell) !== "")) return null;
         const codeProduit = clean(getCellByNames(row, headers, ["Code", "Reference", "Référence", "SKU"]));
         const nomProduit = clean(getCellByNames(row, headers, ["Nom", "Produit", "Article"]));
+        const produitComplet = clean(getCell(row, headers, "Produit", 1));
         const client = clean(getCellByNames(row, headers, ["Client", "Nom client", "Client final"]));
+        const aUnProduit = Boolean(codeProduit || nomProduit || produitComplet);
+        if (!client) {
+          lignesEnErreur[aUnProduit ? "sansClient" : "sansClientNiProduit"] += 1;
+          return null;
+        }
+        if (!aUnProduit) {
+          lignesEnErreur.sansProduit += 1;
+          return null;
+        }
+        const celluleQuantite = getCellByNames(row, headers, ["Quantite", "Quantité", "Qte", "Qté"]);
+        if (clean(celluleQuantite) === "" || !Number.isFinite(number(celluleQuantite, NaN))) {
+          lignesEnErreur.sansQuantite += 1;
+          return null;
+        }
         const statutFacture = clean(getCell(row, headers, "Statut", 1));
         // ERP v1.9.0 : la date Excel devient le discriminant entre 2 bons de
         // commande du meme client. Format ISO pour permettre le tri et le
         // matching deterministe. excelDate (FR) reste pour le legacy affichage.
-        const dateCell = getCell(row, headers, "Date", 1);
-        const date = excelDate(dateCell);
+        const dateCell = getCellByNames(row, headers, NOMS_DE_LA_DATE);
         const dateCommandeIso = excelDateToIso(dateCell);
+        if (clean(dateCell) !== "" && !dateCommandeIso) {
+          lignesEnErreur.dateIllisible += 1;
+          return null;
+        }
+        const date = excelDate(dateCell);
         const deliveryDate = normalizeDateInput(getCellByNames(row, headers, ["Date livraison", "Livraison", "Date de livraison"]));
-        const rawQty = number(getCellByNames(row, headers, ["Quantite", "Quantité", "Qte", "Qté"]), 1);
+        const rawQty = number(celluleQuantite, 0);
         const quantite = Math.max(0, rawQty);
         if (rawQty < 0) clampedNegativeQtyCount += 1;
         const cellulePrix = getCell(row, headers, "Prix unitaire", 1);
@@ -8761,7 +8795,6 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
           : clean(celluleHt) !== "" ? null
             : lisible(cellulePrix) ? Math.round(number(cellulePrix, 0) * rawQty * 100) / 100
               : null;
-        const produitComplet = clean(getCell(row, headers, "Produit", 1));
         const telephone = clean(getCellByNames(row, headers, ["Telephone favori", "Téléphone favori", "Telephone", "Téléphone", "Mobile", "Phone"]));
         const reference = clean(getCell(row, headers, "Reference", 1));
         const codePostal = geocodage.normaliserCodePostal(getCellByNames(row, headers, ["Code Postal", "Code postal", "CP", "PostalCode"]));
@@ -8803,12 +8836,10 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
           lng
         };
       })
-      .filter(vente => vente.client || vente.produit);
-    // Les lignes ILLISIBLES : quelque chose d'ecrit, mais ni client ni
-    // produit. Elles etaient ecartees sans un mot ; le resume les compte en
-    // erreurs. Une ligne entierement vide (la fin d'une feuille) n'en est pas une.
-    const lignesIllisibles = dataRows.filter(row => Array.isArray(row) && row.some(cell => clean(cell) !== "")).length
-      - ventes.length;
+      .filter(Boolean);
+    // Les lignes EN ERREUR : ecartees, comptees (le resume de l'ecran dit
+    // chaque cause). Le compte garde son nom : l'ecran le lit.
+    const lignesIllisibles = Object.values(lignesEnErreur).reduce((total, n) => total + n, 0);
 
     // Les ventes FUSIONNENT elles aussi (25/09) : `db.ventes = ventes` effacait
     // celles de tout bon absent du fichier -- et le chiffre d'affaires qui en
@@ -9109,8 +9140,15 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     const ignoreesMessage = ignorees.length > 0
       ? `, ${ignorees.length} commande(s) laissee(s) telle(s) quelle(s) (${ignorees.map(i => `${i.numero || i.id} : ${i.raison}`).join(", ")})`
       : "";
+    const causesDesErreurs = [
+      [lignesEnErreur.sansClientNiProduit, "sans client ni produit"],
+      [lignesEnErreur.sansClient, "sans client"],
+      [lignesEnErreur.sansProduit, "sans produit"],
+      [lignesEnErreur.sansQuantite, "sans quantite lisible"],
+      [lignesEnErreur.dateIllisible, "sans date lisible"]
+    ].filter(([n]) => n > 0).map(([n, cause]) => `${n} ${cause}`).join(", ");
     const illisiblesMessage = lignesIllisibles > 0
-      ? `, ${lignesIllisibles} ligne(s) sans client ni produit ecartee(s)`
+      ? `, ${lignesIllisibles} ligne(s) en erreur ecartee(s) (${causesDesErreurs})`
       : "";
     addHistory(
       db,
@@ -9131,6 +9169,7 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       skippedIdentical: skippedIdenticalCount,
       ignored: ignorees.length,
       lignesIllisibles,
+      lignesEnErreur,
       importedAsLivre: importedAsLivreCount,
       mergedBySecondary: mergedImport.mergedBySecondary,
       clientsImport,
@@ -9160,6 +9199,8 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       ignored: ignorees.length,
       ignorees,
       lignesIllisibles,
+      // Chaque cause (25/09) : l'ecran les dit une par une.
+      lignesEnErreur,
       clampedNegativeQuantities: clampedNegativeQtyCount,
       positionsRefusees: positionsImportRefusees,
       archive

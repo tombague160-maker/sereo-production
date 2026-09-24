@@ -229,3 +229,30 @@ test("chiffre d'affaires : « TTC » ecrit sur le tableau de bord, l'Analyse et 
   expect(erreurs).toEqual([]);
   await ctx.close();
 });
+
+// 5. Les lignes ecartees, par cause : une quantite vide ne vaut plus 1, une
+//    ligne sans client ne cree plus « Client sans nom », une date illisible ne
+//    date plus le bon du jour. Le resume dit chaque cause.
+test("lignes en erreur : le resume dit chaque cause ; rien n'est cree pour elles", async ({ browser }) => {
+  test.setTimeout(120000);
+  await semer();
+  const avant = (await (await fetch(srv.base + "/api/orders")).json());
+  const nbAvant = (Array.isArray(avant) ? avant : avant.orders || []).length;
+  const { ctx, page, erreurs } = await ouvrir(browser, "journee");
+  const resultat = await importerParLEcran(page, xlsx([
+    ["Date", "Client", "Code", "Produit", "Quantite", "Rue", "Code Postal", "Ville"],
+    [JOUR_FR, "", "ALE", "Alèses", "4", "", "", ""],
+    [JOUR_FR, "Maison de Santé Arbois", "CH-L", "Changes taille L", "", "10 rue de Faramand", "39600", "Arbois"],
+    ["le 3 mars", "Maison de Santé Arbois", "ALE", "Alèses", "2", "10 rue de Faramand", "39600", "Arbois"]
+  ]));
+  expect(resultat.lignesEnErreur).toEqual({ sansClientNiProduit: 0, sansClient: 1, sansProduit: 0, sansQuantite: 1, dateIllisible: 1 });
+  const bilan = page.locator("#importSummary");
+  await expect(bilan.locator(".import-bilan-compte")).toHaveText(["0 nouvelle", "0 mise à jour", "0 ignorée", "3 lignes en erreur"]);
+  await expect(bilan).toContainText("1 ligne sans client : écartée, vérifie le fichier.");
+  await expect(bilan).toContainText("1 ligne sans quantité lisible : écartée, vérifie le fichier.");
+  await expect(bilan).toContainText("1 ligne sans date lisible : écartée, vérifie le fichier.");
+  const apres = (await (await fetch(srv.base + "/api/orders")).json());
+  expect((Array.isArray(apres) ? apres : apres.orders || []).length, "une ligne en erreur a cree une commande").toBe(nbAvant);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
