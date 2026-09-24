@@ -213,6 +213,13 @@ test("hors ligne, abonnement + NOUVELLE fiche : refus clair, rien en file ; en l
   await ctx.setOffline(false);
   await page.waitForTimeout(1500);
   expect(await compter(), "hors ligne, quelque chose est parti").toEqual(avant);
+  // 4G sans debit : le telephone se croit en ligne, la requete echoue. Meme
+  // refus, rien en file (la page met en file sans consulter navigator.onLine).
+  await page.route("**/api/crm/clients", route => route.abort("internetdisconnected"));
+  await page.locator("#subSave").click();
+  await expect(page.locator("#subError")).toContainText("Pas de réseau");
+  expect(await lireFile(page), "4G sans debit : une fiche seule est partie en file").toEqual([]);
+  await page.unroute("**/api/crm/clients");
   // Temoin : en ligne, le meme geste cree la fiche ET l'abonnement.
   await page.locator("#subSave").click();
   await expect(page.locator("#subscriptionDialog")).toBeHidden();
