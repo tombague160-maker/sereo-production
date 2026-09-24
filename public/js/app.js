@@ -2774,7 +2774,10 @@ function renderAll({ lectures = true } = {}) {
   rendreOuDifferer("statistiques", renderStatistics);
   rendreOuDifferer("exports", renderExports);
   rendreOuDifferer("stock", renderStock);
-  rendreOuDifferer("stock", renderStockMovements);
+  // Les 12 derniers mouvements, eux, a chaque chargement (une centaine
+  // d'elements) : le chargement instantane du lot reseau les lit des
+  // l'ouverture, ou qu'on soit (poids-reseau.spec.js, « la copie d'avant »).
+  renderStockMovements();
   rendreOuDifferer("preparation", renderPreparation);
   rendreOuDifferer("recommande", renderRecommande);
   // Les quatre anciennes listes de commandes n'ont plus de rendu : leurs

@@ -54,6 +54,17 @@ test("à l'ouverture, seul l'écran affiché est dessiné", async ({ page }) => 
   expect(r.dom).toBeLessThan(4000);
 });
 
+test("à l'ouverture, les 12 derniers mouvements du Stock sont dessinés, écran caché", async ({ page }) => {
+  // L'exception au rendu differe : une centaine d'elements, que le banc du lot
+  // reseau (« la copie d'avant sert encore ») lit des l'ouverture, depuis le
+  // tableau de bord. Differes, il y lisait une liste vide (fusion, 24/09).
+  await ouvrir(page);
+  await expect(page.locator("#stock")).not.toHaveClass(/active/);
+  const noms = await page.evaluate(async () => (await (await fetch("/api/stock-movements")).json()).slice(0, 12).map(m => m.productName));
+  expect(noms, "prealable : le jeu a des mouvements").toHaveLength(12);
+  await expect(page.locator("#stockMovementList .item h4")).toHaveText(noms);
+});
+
 test("en arrivant sur un écran, il se dessine en entier", async ({ page }) => {
   await ouvrir(page);
   // Les Rappels EN PREMIER : Clients et Commande client remplissent aussi ce
