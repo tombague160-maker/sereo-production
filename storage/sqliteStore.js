@@ -153,6 +153,21 @@ function createSqliteStore(options) {
       database.exec("PRAGMA wal_checkpoint(FULL)");
     },
 
+    /**
+     * /healthz (25/09) : la base se lit-elle ? Une vraie lecture, table par
+     * table (la premiere ligne de chacune, et les reglages) : quelques
+     * dizaines de microsecondes. Leve si la connexion est perdue, si une page
+     * ne se lit plus (erreur disque, fichier abime) ou si une table manque.
+     * Ne lit pas le contenu de toutes les lignes : une ligne illisible est
+     * mise de cote a la lecture (mettreDeCote), elle ne rend pas la base
+     * malade. N'ecrit rien : un disque plein ou un volume en lecture seule
+     * ne se voit pas ici (ce que /api/storage/status montre des sauvegardes).
+     */
+    sonderLecture() {
+      database.prepare("SELECT value FROM app_meta WHERE key = 'settings'").get();
+      for (const table of TABLES_SONDEES) database.prepare(`SELECT * FROM ${table} LIMIT 1`).get();
+    },
+
     close() {
       database.close();
     },
@@ -1365,6 +1380,10 @@ function readSettings(database) {
 // d'origine remonte comme avant : une ligne n'est JAMAIS ecartee sans avoir ete
 // mise de cote. Idempotent : la meme ligne n'est pas copiee deux fois (meme
 // table, meme id, meme contenu), et un seul message par processus.
+
+// Les tables que /healthz lit (sonderLecture) : toutes celles des donnees.
+const TABLES_SONDEES = ["produits", "clients", "commandes", "lignes_commande", "livraisons", "routes", "traces_tournees",
+  "historique", "ventes", "mouvements_stock", "abonnements", "relances_crm", "secteurs_livraison", "imports_archives", "utilisateurs"];
 
 // Ce qui disparait avec une ligne, a copier avec elle : [table, colonne de lien, colonne du contenu].
 const DEPENDANCES_MISES_DE_COTE = {

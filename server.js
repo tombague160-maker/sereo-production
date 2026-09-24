@@ -438,6 +438,19 @@ app.get("/healthz", (req, res) => {
   if (storageRecoveryFatal) {
     return res.status(503).json({ ok: false, error: "storage indisponible (recovery echouee)" });
   }
+  // Robustesse (25/09) : /healthz ne regardait jamais la base. Une base qui ne
+  // se lisait plus (toutes les pages en 500) restait « healthy » pour Docker.
+  // Une vraie lecture de chaque table (sonderLecture, quelques dizaines de
+  // microsecondes) ; en echec, 503 sans detail (la route est publique), la
+  // cause dans les journaux du serveur.
+  if (useSqliteStorage()) {
+    try {
+      getSqliteStore().sonderLecture();
+    } catch (error) {
+      console.error(`[healthz] la base ne se lit pas : ${error.message || error}`);
+      return res.status(503).json({ ok: false, error: "base illisible" });
+    }
+  }
   res.json({ ok: true });
 });
 
