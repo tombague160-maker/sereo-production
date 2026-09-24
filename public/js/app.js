@@ -2730,7 +2730,9 @@ function renderAll({ lectures = true } = {}) {
   rendreSiAffiche("produits", renderProduits);
   renderVentes();
   rendreSiAffiche("alertes", renderAlertes);
-  renderHistorique();
+  // L'ecran #historique n'est pas atteignable (absent de mainTabs) : il etait
+  // pourtant redessine en entier a chaque chargement (24/09, mesure en prod).
+  rendreSiAffiche("historique", renderHistorique);
   renderDeliveryFilters();
   renderDeliveryCandidates();
   // Lot 3 (audit geo) : « N clients a livrer sans position », calcule sur les
@@ -5084,13 +5086,14 @@ function renderHistorique() {
     return;
   }
 
-  historique.forEach(item => {
-    container.innerHTML += `
+  // UNE seule ecriture (24/09). `innerHTML +=` par ligne relisait et
+  // redessinait toute la liste a chaque ligne : un cout au carre, mesure en
+  // production a 2,4 s au bureau et ~16 s sur un telephone a chaque chargement.
+  container.insertAdjacentHTML("beforeend", historique.map(item => `
       <div class="history-cell">${escapeHtml(formatDate(item.date))}</div>
       <div class="history-cell">${escapeHtml(item.type || "-")}</div>
       <div class="history-cell">${escapeHtml(item.message || item.texte || "-")}</div>
-    `;
-  });
+    `).join(""));
 }
 
 // Helpers ERP v1.11.0 (les anciennes listes « Commandes livrees » et « Bons de
