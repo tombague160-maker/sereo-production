@@ -649,10 +649,6 @@ function bindUi() {
     clearTimeout(villeMinuteur);
     villeMinuteur = setTimeout(() => applyDeliveryFilter(), 300);
   });
-  document.getElementById("deliveryCity")?.addEventListener("change", () => {
-    clearTimeout(villeMinuteur);
-    applyDeliveryFilter();
-  });
   document.getElementById("routePlanning")?.addEventListener("toggle", majCreationTournee);
 
   // Lot 2 (H9) : « Tournées du jour ».
@@ -6757,7 +6753,7 @@ function renderDeliveryFilters() {
   }
 
   const cityInput = document.getElementById("deliveryCity");
-  if (cityInput && cityInput.value !== deliveryFilter.city && document.activeElement !== cityInput) {
+  if (cityInput && cityInput.value !== deliveryFilter.city) {
     cityInput.value = deliveryFilter.city;
   }
 
@@ -6780,7 +6776,6 @@ function applyDeliveryFilter(secteur) {
     city: document.getElementById("deliveryCity")?.value || ""
   };
   deliverySelection = new Set([...deliverySelection].filter(orderId => getFilteredDeliveryOrders().some(order => String(order.id) === String(orderId))));
-  deliveryFirst = new Set([...deliveryFirst].filter(id => deliverySelection.has(id)));
   renderDeliveryFilters();
   renderDeliveryCandidates();
   renderMap();
