@@ -15252,6 +15252,16 @@ html, body, main.content { overflow-x: clip; }
   padding: 10px 24px 0;
 }
 .bon-outils .icon { width: 18px; height: 18px; }
+/* Une pilule (charte §4) : « :root[data-color-scheme="light"]
+   .button.secondary.compact » (0,5,0) la passait a un rayon de 8 px. */
+:root[data-color-scheme] .bon-outils .button.secondary.compact,
+:root:not([data-color-scheme]) .bon-outils .button.secondary.compact {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  padding-inline: 18px;
+}
 .bon-livraison { display: none; }
 @media print {
   @page { size: A4; margin: 14mm; }

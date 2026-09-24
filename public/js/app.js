@@ -4458,11 +4458,13 @@ function renderStockMovements() {
   movements.forEach(movement => {
     const item = document.createElement("article");
     item.className = `item ${movement.type === "entree" ? "status-ok" : "status-warning"}`;
+    // L'auteur du mouvement (24/09) ; « local », que portaient les anciens, n'en est pas un.
+    const auteur = movement.createdBy && movement.createdBy !== "local" ? movement.createdBy : "";
     item.innerHTML = `
       <div class="item-header">
         <div>
           <h4>${escapeHtml(movement.productName || "Produit")}</h4>
-          <p>${escapeHtml(movement.reason || "Ajustement manuel")} · ${escapeHtml(formatDate(movement.createdAt))}</p>
+          <p>${escapeHtml([movement.reason || "Ajustement manuel", formatDate(movement.createdAt), auteur ? `par ${auteur}` : ""].filter(Boolean).join(" · "))}</p>
         </div>
         <span class="pill ${movement.type === "entree" ? "pill-ok" : "pill-warning"}">
           ${movement.type === "entree" ? "+" : "-"}${escapeHtml(movement.quantity || 0)}

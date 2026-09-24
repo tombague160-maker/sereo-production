@@ -248,6 +248,15 @@ test("journal — rien au chargement de l'app ; Paramètres lit une page, avec l
   await expect(lignes.nth(0)).toContainText("Alèses : −10 · 100 → 90 · Inventaire");
   await expect(lignes.nth(0).locator(".par-journal-qui")).toHaveText(/dev/);
   await expect(lignes.nth(1).locator(".par-journal-qui")).toHaveText(/—/);
+
+  // Les « Mouvements récents » du Stock nomment aussi l'auteur ; pas l'ancien
+  // « local ». (Le geste est parti hors de la page : on la recharge -- un goto
+  // qui ne change que l'ancre ne recharge rien.)
+  await page.goto(`${srv.base}/#stock`);
+  await page.reload({ waitUntil: "networkidle" });
+  const mouvements = page.locator("#stockMovementList .item");
+  await expect(mouvements.first()).toContainText("par dev");
+  await expect(mouvements.filter({ hasText: "Changes taille L" })).not.toContainText("local");
 });
 
 test("journal — un compte qui n'administre pas ne voit pas la carte et ne la demande pas", async ({ page }) => {
