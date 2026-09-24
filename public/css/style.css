@@ -15089,13 +15089,16 @@ html, body, main.content { overflow-x: clip; }
       et n'a jamais colle (le `hidden` de body etait deja la) : `clip` la
       faisait coller partout. Un changement que tout utilisateur de bureau
       voit, que personne n'a decide -- le meme cas que le bandeau du
-      telephone. Neutralisee comme lui (`relative` : l'etage 40 reste) ; a
-      trancher par Thomas (DESIGN.md).
+      telephone. Neutralisee d'abord comme lui ; Thomas a tranche le 24/09 :
+      elle RESTE FIXE au bureau (la neutralisation est retiree, plus bas).
    ========================================================================== */
 @media (min-width: 921px) {
   .ecran-entete-actions { max-width: 100%; }
   .ecran-entete-fente { flex-wrap: wrap; justify-content: flex-end; max-width: 100%; }
 }
-@media (min-width: 821px) {
-  .sidebar { position: relative; }
-}
+/* Decision de Thomas du 24/09 : au bureau, la barre laterale RESTE FIXE (son
+   `sticky` d'origine, top 0, 100 vh) ; la neutralisation qui etait ici est
+   retiree. Sur un ecran bas, elle defile dans sa propre hauteur grace a la
+   regle `@media (min-width: 821px) .sidebar { overflow-y: auto }` posee plus
+   haut (bloc « barre laterale, finitions ») : le compte et la version restent
+   atteignables (banc collant-et-clavier, « écran bas »). */

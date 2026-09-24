@@ -145,13 +145,10 @@ test("1 — rien ne se chevauche au bureau : panier, catalogue, barre latérale,
   expect(defauts).toEqual([]);
 });
 
-// Relecture du 23/09 : la barre laterale du bureau declare `position: sticky`
-// depuis juillet, mais n'a jamais colle (le `hidden` de body etait deja la).
-// `clip` la faisait coller sur tous les ecrans : un changement que tout
-// utilisateur de bureau voit, et que personne n'a decide -- le meme cas que
-// le bandeau du telephone, ci-dessous. Neutralisee comme lui ; question a
-// Thomas (DESIGN.md, ecarts nommes).
-test("1 — au bureau, la barre latérale défile avec la page, comme avant", async ({ browser }) => {
+// Decision de Thomas du 24/09 : au bureau, la barre laterale RESTE FIXE quand
+// la page defile (la navigation toujours a portee). Sur un ecran bas, elle
+// defile dans sa propre hauteur : rien du menu n'est coupe.
+test("1 — au bureau, la barre latérale reste fixe quand la page défile", async ({ browser }) => {
   test.setTimeout(120000);
   const vus = {};
   for (const largeur of [921, 1440]) {
@@ -167,7 +164,8 @@ test("1 — au bureau, la barre latérale défile avec la page, comme avant", as
         const max = document.scrollingElement.scrollHeight - innerHeight;
         scrollTo(0, Math.min(400, max));
         await new Promise(r => setTimeout(r, 150));
-        return { defile: Math.round(scrollY), haut: Math.round(document.querySelector("aside.sidebar").getBoundingClientRect().top) };
+        // `+ 0` : Math.round d'un -0,3 rend -0, que toBe (Object.is) distingue de 0.
+        return { defile: Math.round(scrollY), haut: Math.round(document.querySelector("aside.sidebar").getBoundingClientRect().top) + 0 };
       });
       await page.close();
     }
@@ -176,8 +174,32 @@ test("1 — au bureau, la barre latérale défile avec la page, comme avant", as
   console.log("[barre laterale] " + Object.entries(vus).map(([o, v]) => `${o}: defile ${v.defile}, haut ${v.haut}`).join(" · "));
   for (const [cle, v] of Object.entries(vus)) {
     expect(v.defile, `prealable ${cle} : la page defile`).toBeGreaterThan(40);
-    expect(v.haut, `${cle} : la barre laterale part avec la page`).toBe(-v.defile);
+    expect(v.haut, `${cle} : la barre laterale reste en haut de l'ecran`).toBe(0);
   }
+});
+
+test("1 — au bureau, sur un écran bas, tout le menu fixe reste atteignable", async ({ browser }) => {
+  const ctx = await contexte(browser, { viewport: { width: 1280, height: 560 } });
+  const page = await ctx.newPage();
+  await page.goto(srv.base + "/#stock", { waitUntil: "networkidle" });
+  const r = await page.evaluate(async () => {
+    const max = document.scrollingElement.scrollHeight - innerHeight;
+    scrollTo(0, Math.min(400, max));
+    await new Promise(res => setTimeout(res, 150));
+    const barre = document.querySelector("aside.sidebar");
+    const cibles = [...barre.querySelectorAll("button, a[href], input, [tabindex]")].filter(e => e.getClientRects().length);
+    const derniere = cibles[cibles.length - 1];
+    derniere.focus();
+    await new Promise(res => setTimeout(res, 150));
+    const b = derniere.getBoundingClientRect();
+    return { deborde: barre.scrollHeight > barre.clientHeight + 1, haut: Math.round(b.top), bas: Math.round(b.bottom),
+      hauteur: innerHeight, nom: derniere.textContent.trim().slice(0, 30) };
+  });
+  console.log(`[menu bas] deborde ${r.deborde}, derniere cible « ${r.nom} » ${r.haut}..${r.bas}, ecran ${r.hauteur}`);
+  expect(r.deborde, "prealable : a cette hauteur, le menu depasse l'ecran").toBe(true);
+  expect(r.haut, "la derniere commande du menu est visible une fois atteinte").toBeGreaterThanOrEqual(0);
+  expect(r.bas, "la derniere commande du menu est visible une fois atteinte").toBeLessThanOrEqual(r.hauteur);
+  await ctx.close();
 });
 
 test("1 — au téléphone, le bandeau de marque défile avec la page (il ne colle que sur Tournée, comme avant)", async ({ browser }) => {
