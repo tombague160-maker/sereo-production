@@ -6210,3 +6210,81 @@ coordonnées ne se repliaient pas) : M7 en tient lieu.
 - Les pastilles de la barre basse du téléphone.
 - Fusionner les deux déclarations CSS de la recherche de client ; retirer les règles
   mortes d'Exports.
+
+### Relecture adverse (24/09) : six défauts, cinq vrais, un faux
+
+Relecture de `6b73c82`. Chaque défaut vérifié sur le code, les vrais corrigés avec un banc
+rouge sur le code d'avant (cause lue), puis vert.
+
+1. **Vrai (important) — après « Valider », la commande suivante gardait le client
+   d'avant.** `form.reset()` ne vide pas `#customerClientId` : sur un `input type=hidden`,
+   écrire `.value` écrit l'attribut `value`, et `reset()` revient à cet attribut. La
+   commande suivante montrait l'ancienne carte, coordonnées vides et repliées, et partait
+   avec son `clientId` (le serveur reprend alors ce client et ignore le nom tapé). Le
+   champ est vidé à la main après l'envoi : la recherche revient, les coordonnées se
+   rouvrent. Banc : « apres « Valider », la commande suivante repart sans le client
+   d'avant » (rouge d'avant : `Expected "" · Received "c-pharma"`).
+2. **Vrai (important) — « Modifier les coordonnées » promettait ce que le serveur
+   jetait.** `findOrCreateCustomerClient` rend le client existant tel quel dès qu'il a
+   son identifiant ; la commande partait à l'ancienne adresse, la fiche ne bougeait pas.
+   **Décision : ce que l'utilisateur change va sur la FICHE**, par les routes de la fiche
+   (`/api/clients/:id` pour l'identité, recopiée sur les commandes à livrer ;
+   `/api/crm/clients/:id` pour le prénom et l'e-mail — l'aiguillage de `saveCrmClient`,
+   extrait en `enregistrerChangementsDeFiche` et partagé), **avant** la commande, qui
+   prend alors la nouvelle adresse. Le message le dit (« Coordonnées enregistrées sur la
+   fiche du client. »). Seul ce que l'utilisateur a changé part : on compare aux valeurs
+   mises dans les champs au choix du client, pas à la fiche rechargée en fond — sinon un
+   changement fait sur un autre poste serait écrasé. **Hors ligne**, la fiche puis la
+   commande attendent dans la file, dans cet ordre (sans cela, la fiche mise en file
+   arrêtait l'envoi et la commande n'entrait jamais dans la file). Le serveur n'est pas
+   touché : son chemin « doublon » (`Object.assign(duplicate, validateCrmClientPayload(…))`)
+   écrase les notes CRM par les notes de livraison, on ne l'a pas étendu au client choisi.
+   Bancs : « Modifier les coordonnees d'un client existant : la commande et la fiche
+   suivent » (rouge d'avant : `Expected "18 avenue de Lahr" · Received "4 rue Pasteur"`),
+   « hors ligne, la fiche corrigee PUIS la commande attendent dans la file ».
+3. **Vrai (mineur) — la fenêtre de Préparation au bureau disait « À préparer » sur une
+   commande bloquée.** Sa pastille lit « Bloquée » quand le stock manque (`commandeBloquee`,
+   comme le badge de Commandes), sinon `formatOrderStatus`. Banc : « la fenetre d'une
+   commande bloquee dit « Bloquee », comme sa ligne », avec un témoin préparable qui garde
+   « À préparer » (rouge d'avant : `Received "À préparer"`).
+4. **Vrai (mineur) — `preparation_terminee` n'était comptée nulle part et rangée sous « À
+   préparer ».** Son badge dit « Prête » (l'export aussi, et le serveur la livre comme
+   `pret_livraison`) : elle se range sous la pilule « Prêtes » et compte avec les prêtes
+   (`/api/operations`, `delivering` : tuile « En livraison » et liste « À livrer »), avec
+   son mot et sa couleur (`operations.js`). Bancs : `parcours-simplifies.test.js`
+   (`delivering` rendait `[l1, r1]` sans `t1`) et « preparation terminee se range sous
+   Pretes… » (rouge d'avant : `Received array: ["o-8"]`).
+5. **Faux (mineur) — « l'export Excel ouvre les prix aux préparateurs et livreurs ».**
+   Rien ne change pour eux : la séparation des rôles est **désactivée** (décision du
+   26/08, `SEREO_SEPARATION_ROLES` absent) ; activée, elle ne pilote rien non plus —
+   **aucun code du navigateur ne lit `onglets`** de `/api/me` (`git grep "\.onglets"
+   12da3d4 -- public/` : rien), donc l'onglet Exports n'était fermé à personne ; la route
+   d'avant (`GET /api/exports/commandes-annexes.xlsx`) n'avait **aucune garde**, comme
+   `GET /api/orders`, qui rend déjà prix et totaux à tout compte connecté. Aucun
+   changement.
+6. **Vrai (mineur) — l'écran Rappels affichait la clé du statut.** La pastille dit « À
+   faire · Fait · Reporté · Annulé » (`STATUT_RAPPEL`), les gestes « Fait · Reporté ·
+   Annulé » ; les clés envoyées au serveur ne changent pas. Banc : « les Rappels disent
+   « Fait · Reporté · Annulé » » (rouge d'avant : `Reporte`, `Annule`).
+
+*Écarts nommés.* Les gestes des rappels restent des **états** (« Reporté », comme
+« Fait »), pas des verbes. Si l'envoi de la commande échoue après l'enregistrement de la
+fiche, la fiche reste corrigée (c'était voulu) et la commande n'est pas créée : le
+message d'erreur le dit, le panier reste. `preparation_terminee` ne s'affiche toujours
+ni dans la Préparation ni dans la Tournée (statut qu'aucun geste ne crée, seulement
+`PATCH status`) : non traité.
+
+*Mutants* (commités avant, restaurés par copie) : la fiche mise en file arrête l'envoi →
+`["PATCH /api/clients/c-martin"]` sans la commande ; comparer à la fiche rechargée → le
+prénom posé ailleurs écrasé (`Received ""`) ; le mot « Prête » retiré d'`operations.js`
+→ `Received "preparation_terminee"` ; sa couleur → `pill-blue` ; le mot du rappel →
+`Received "reporte"`. Tous tués, de la bonne cause.
+
+*Bancs.* `npm test` 696/696 ; `parcours-simplifies.spec.js` 23/23 ; voisins verts :
+parcours-simplifies-telephone, clients, clients-mobile, commandes, preparation-lignes,
+preparation-mobile, tableau-de-bord, tableau-de-bord-relecture, ecrans-sans-planche,
+collant-et-clavier, operations (180) ; hors-ligne, abonnements, abonnement-creation,
+interface-finitions, badges, tabs, texte-coupe, livreur-ne-perd-rien (68).
+
+*Ce qui reste.* Si Thomas veut un jour « livrer ailleurs, pour cette commande
+seulement » : un champ qui n'existe pas, distinct de la correction de la fiche.
