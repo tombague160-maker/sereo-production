@@ -15698,3 +15698,18 @@ button.button.danger .button-icon { width: 18px; height: 18px; flex: none; }
     min-height: 150px;
   }
 }
+
+/* --- Commandes au telephone : compte, « Filtres » et tri sur UNE rangee (24/09)
+   A 360 px, le tri (« Date decroissante ») passait seul sur une seconde rangee :
+   la liste perdait 52 px et ne montrait plus qu'une commande entiere sous
+   Linux (CI), deux sans marge sous Windows. Le tri se resserre au lieu de
+   passer a la ligne ; son texte se coupe proprement s'il le faut, le choix
+   reste entier dans la liste deroulante. */
+@media (max-width: 820px) {
+  #commandes .cmd-filtres:not(.cmd-filtres--ouverts) { flex-wrap: nowrap; }
+  :root[data-color-scheme] #commandes .cmd-filtres > .cmd-resume,
+  :root:not([data-color-scheme]) #commandes .cmd-filtres > .cmd-resume { flex: 0 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #commandes .cmd-filtres > .cmd-tri:not(.cmd-filtre-second) { flex: 1 1 0; min-width: 0; margin-left: auto; max-width: max-content; }
+  :root[data-color-scheme] #commandes .cmd-filtres > .cmd-tri:not(.cmd-filtre-second) select,
+  :root:not([data-color-scheme]) #commandes .cmd-filtres > .cmd-tri:not(.cmd-filtre-second) select { width: 100%; min-width: 0; text-overflow: ellipsis; }
+}

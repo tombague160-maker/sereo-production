@@ -268,8 +268,16 @@ test("liste (9a) : la ligne « N clients », et le tri « Dernière livraison »
   const parNom = await noms(page);
   expect(parNom).toEqual([...parNom].sort((a, b) => a.localeCompare(b, "fr")));
   expect(parNom).not.toEqual(parLivraison);
-  // Le compte suit le filtre.
-  await page.locator('#cliPilules [data-cli-secteur="__abonnes"]').click();
+  // Le compte suit le filtre. Depuis le lot « telephone utilisable » (24/09),
+  // les pilules au-dela de deux rangs se replient derriere « + N » ; selon la
+  // largeur du texte (la CI Linux rend plus large que Windows), « Abonnes »
+  // peut s'y trouver : on la deplie d'abord, comme le ferait l'utilisateur.
+  const abonnes = page.locator('#cliPilules [data-cli-secteur="__abonnes"]');
+  if (await abonnes.evaluate(p => p.classList.contains("pilule-repliee"))) {
+    await page.locator('[data-pilules-plus="clients"]').click();
+    await expect(abonnes).toBeVisible();
+  }
+  await abonnes.click();
   await expect(compte).toHaveText("1 client");
 });
 
