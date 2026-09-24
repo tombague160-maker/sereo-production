@@ -3952,7 +3952,7 @@ function majSousTitreStock() {
 
 // La carte « A recommander » : ce qui est sous le seuil OU manquera d'ici
 // l'horizon (decision de Thomas du 24/09) -- le meme compte que la pastille et
-// que le filtre « A recommander » de l'ecran (aRecommander). L'urgent d'abord,
+// que le filtre « Urgent et bientot » de l'ecran (aRecommander). L'urgent d'abord,
 // puis le manque le plus proche, puis le plus en retard sur son seuil. Cinq
 // lignes au plus ; la liste complete, avec les besoins estimes, reste sur
 // l'ecran « A recommander ».
@@ -4909,7 +4909,7 @@ function updateRecommendFilterButtons() {
 }
 
 
-// L'ecran « A recommander », avec le filtre choisi (Urgent, A recommander,
+// L'ecran « A recommander », avec le filtre choisi (Urgent, Urgent et bientot,
 // Tout afficher).
 function getRecommendationItems() {
   return evaluerRecommandations()
@@ -4918,8 +4918,8 @@ function getRecommendationItems() {
 }
 
 // Ce qui est a recommander : urgent ou bientot. LE compte de la pastille Stock,
-// de la carte du Stock, de la tuile du tableau de bord et du filtre « A
-// recommander » de l'ecran (decision de Thomas du 24/09 : un produit au-dessus
+// de la carte du Stock, de la tuile du tableau de bord et du filtre « Urgent
+// et bientot » de l'ecran (decision de Thomas du 24/09 : un produit au-dessus
 // du seuil qui manquera pour des commandes deja prises compte aussi). Une
 // seule fonction : deux nombres ne disent pas deux verites (le 23/09, la
 // pastille disait 1 et l'ecran 2).

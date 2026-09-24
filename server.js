@@ -7248,10 +7248,12 @@ function etatDesSauvegardes(identite, maintenant = Date.now()) {
   // Les jours de Paris que les sauvegardes sur le disque couvrent.
   const jours = new Set(entries.map(e => jourParis(e.mtimeMs))).size;
   const plusAncienne = entries.length ? entries[entries.length - 1] : null;
+  // 2 s de marge : un systeme de fichiers qui date a la seconde (ou a deux,
+  // FAT) arrondit la sauvegarde qui suit une ecriture AVANT cette ecriture.
   const perimee = Boolean(derniere)
     && maintenant - derniere.mtimeMs > SAUVEGARDE_PERIMEE_MS
     && derniereModificationA !== null
-    && derniereModificationA > derniere.mtimeMs;
+    && derniereModificationA > derniere.mtimeMs + 2000;
 
   // Une alerte a la fois, la plus grave d'abord.
   let alerte = null;
