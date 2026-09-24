@@ -1,5 +1,5 @@
 import { escapeHtml as h } from "./utils/dom.js";
-import { normalizeTextKey } from "./utils/text.js";
+import { normalizeTextKey, villeAffichee } from "./utils/text.js";
 import { getAddressParts } from "./utils/address.js";
 let context,
   data = {},
@@ -90,7 +90,7 @@ function openSubDetail(id) {
   const etat = etatAbonnement(s);
   document.getElementById("abonnementDetailTitre").textContent = name(client || {}) || "Client introuvable";
   // .subscription-card : le dispatcher y desactive les boutons freres pendant une action.
-  corps.innerHTML = `<div class="subscription-card"><p class="arret-adresse"><span>${h(client?.ville || "Adresse à compléter")}</span><span class="pill ${etat.pill}">${h(etat.mot)}</span></p><p class="sub-basket">${h(products(s.products))}</p><div class="sub-facts"><div><small>Fréquence</small><strong>${h(frequency(s))}</strong></div><div><small>Prochaine échéance</small><strong${retard ? ' class="abo-alerte"' : ""}>${h(next ? day(next.date) + (retard ? " · en retard" : "") : "—")}</strong></div><div><small>Rappel</small><strong>${s.reminderDays} jour(s) avant</strong></div><div><small>Panier prévu</small><strong>${h(money(s.products.reduce((sum, p) => sum + p.totalLigne, 0)))}</strong></div></div><div class="card-actions">${button("edit-sub", "Modifier", `data-id="${h(s.id)}"`, "primary")}${button("toggle-sub", s.status === "active" ? "Mettre en pause" : "Réactiver", `data-id="${h(s.id)}"`)}</div></div>`;
+  corps.innerHTML = `<div class="subscription-card"><p class="arret-adresse"><span>${h(villeAffichee(client?.ville) || "Adresse à compléter")}</span><span class="pill ${etat.pill}">${h(etat.mot)}</span></p><p class="sub-basket">${h(products(s.products))}</p><div class="sub-facts"><div><small>Fréquence</small><strong>${h(frequency(s))}</strong></div><div><small>Prochaine échéance</small><strong${retard ? ' class="abo-alerte"' : ""}>${h(next ? day(next.date) + (retard ? " · en retard" : "") : "—")}</strong></div><div><small>Rappel</small><strong>${s.reminderDays} jour(s) avant</strong></div><div><small>Panier prévu</small><strong>${h(money(s.products.reduce((sum, p) => sum + p.totalLigne, 0)))}</strong></div></div><div class="card-actions">${button("edit-sub", "Modifier", `data-id="${h(s.id)}"`, "primary")}${button("toggle-sub", s.status === "active" ? "Mettre en pause" : "Réactiver", `data-id="${h(s.id)}"`)}</div></div>`;
   dialogue.showModal();
 }
 
@@ -859,7 +859,7 @@ const texteStock = (p) => {
 };
 const adresseClient = (c) => {
   const a = getAddressParts(c);
-  const ville = [a.postalCode, a.city].filter(Boolean).join(" ");
+  const ville = [a.postalCode, villeAffichee(a.city)].filter(Boolean).join(" ");
   const secteur = c.ville ? context.formatSectorLabel(c.ville) : "";
   // La planche ecrit « ..., 25000 Besancon · Besancon » : le secteur n'est
   // ajoute que s'il dit autre chose que la ville.
@@ -941,6 +941,9 @@ function majClient() {
   const bouton = $("subNouveauClient");
   bouton.textContent = ficheNouvelle ? "Choisir un client existant" : "Créer une fiche client";
   bouton.setAttribute("aria-expanded", String(ficheNouvelle));
+  // Le client choisi, la carte se replie sur lui : « Creer une fiche client »
+  // n'a plus lieu d'etre (la croix du champ rend la recherche).
+  bouton.hidden = Boolean(c) && !ficheNouvelle;
   if (c) {
     $("subClientNom").textContent = name(c) || "Client sans nom";
     $("subClientAdresse").querySelector("span").textContent = adresseClient(c) || "Adresse à compléter";

@@ -28,6 +28,7 @@ import { mettreEnAttente, lireFile, rejouer, ESSAIS_MAX } from "./utils/file-att
 import {
   normalizeTextKey,
   normalizePhoneNumber,
+  villeAffichee,
   splitProductCode,
   productKey,
   inlineMarkdown,
@@ -3523,8 +3524,8 @@ function renderCrm() {
       const abonnement = abonnementDuClient(client.id);
       const livraison = livraisonDe(client);
       const meta = adresseClientACorriger(client)
-        ? `<span class="cli-meta cli-alerte">${ICONE_CLI.lieu}Adresse à corriger${client.ville ? ` · ${escapeHtml(client.ville)}` : ""}</span>`
-        : `<span class="cli-meta">${escapeHtml([client.ville, livraison ? `livrée le ${dateCourte(livraison)}` : ""].filter(Boolean).join(" · ") || "—")}</span>`;
+        ? `<span class="cli-meta cli-alerte">${ICONE_CLI.lieu}Adresse à corriger${client.ville ? ` · ${escapeHtml(villeAffichee(client.ville))}` : ""}</span>`
+        : `<span class="cli-meta">${escapeHtml([villeAffichee(client.ville), livraison ? `livrée le ${dateCourte(livraison)}` : ""].filter(Boolean).join(" · ") || "—")}</span>`;
       const badge = abonnement
         ? `<span class="cli-badge cli-badge--${abonnement.status === "active" ? "froid" : "tiede"}">${abonnement.status === "active" ? "Abonné" : "En pause"}</span>`
         : "";
@@ -3547,7 +3548,7 @@ function renderFicheClient() {
   // Deux puces : le lieu (secteur, sinon ville) et l'abonnement. Leur role est
   // nomme (cli-puce--lieu / --abonnement) : sur le vert du telephone (planche
   // 8c), l'une prend la surface sur vert, l'autre le blanc.
-  const lieu = client.secteur ? formatSectorLabel(client.secteur) : client.ville;
+  const lieu = client.secteur ? formatSectorLabel(client.secteur) : villeAffichee(client.ville);
   const puces = (lieu ? `<span class="cli-badge cli-badge--froid cli-puce cli-puce--lieu">${escapeHtml(lieu)}</span>` : "")
     + (abonnement ? `<span class="cli-badge cli-badge--${abonnement.status === "active" ? "froid" : "tiede"} cli-puce cli-puce--abonnement">${abonnement.status === "active" ? "Abonné" : "En pause"}</span>` : "");
   const appeler = client.telephone
@@ -3555,13 +3556,14 @@ function renderFicheClient() {
     : "";
   // « Itineraire » (planche 8c, le second geste du terrain) : seulement si
   // l'adresse permet un trajet (rue ET ville) -- sinon le lien serait vide.
-  const trajet = buildGoogleMapsUrl(client);
+  // L'adresse du lien est celle que la fiche AFFICHE (la ville avec sa cedille).
+  const trajet = buildGoogleMapsUrl({ ...client, ville: villeAffichee(client.ville) });
   const itineraire = trajet
     ? `<a class="cli-bouton-contour cli-itineraire" href="${escapeAttribute(trajet)}" target="_blank" rel="noopener noreferrer">${ICONE_CLI.trajet}<span>Itinéraire</span></a>`
     : "";
   const adresse = adresseClientACorriger(client)
-    ? `<p class="cli-valeur cli-alerte">Adresse à corriger</p><p class="cli-note">${escapeHtml([client.rue, client.codePostal, client.ville].filter(Boolean).join(" ") || "Aucune adresse")}</p>`
-    : `<p class="cli-valeur">${escapeHtml(client.rue)}<br>${escapeHtml([client.codePostal, client.ville].filter(Boolean).join(" "))}</p>`;
+    ? `<p class="cli-valeur cli-alerte">Adresse à corriger</p><p class="cli-note">${escapeHtml([client.rue, client.codePostal, villeAffichee(client.ville)].filter(Boolean).join(" ") || "Aucune adresse")}</p>`
+    : `<p class="cli-valeur">${escapeHtml(client.rue)}<br>${escapeHtml([client.codePostal, villeAffichee(client.ville)].filter(Boolean).join(" "))}</p>`;
   const contact = `<p class="cli-valeur">${escapeHtml(client.telephone || "Téléphone à compléter")}</p>`
     + (client.email ? `<p class="cli-note">${escapeHtml(client.email)}</p>` : "");
 
@@ -3645,7 +3647,9 @@ function ouvrirDialogueClient(clientId = null) {
   form.dataset.initial = "{}";
   if (client) {
     const valeurs = { nom: client.nom, prenom: client.prenom, telephone: client.telephone, email: client.email,
-      adresse: client.rue, codePostal: client.codePostal, ville: client.ville, crmStatus: client.crmStatus || "prospect",
+      // La ville avec son orthographe : le formulaire n'envoie que ce qui
+      // differe de ce qu'il a MONTRE, et le serveur la range comme avant.
+      adresse: client.rue, codePostal: client.codePostal, ville: villeAffichee(client.ville), crmStatus: client.crmStatus || "prospect",
       nextReminderDate: client.nextReminderDate, needs: client.needs, preferences: client.preferences, notes: client.notes };
     for (const [cle, valeur] of Object.entries(valeurs)) if (form.elements[cle]) form.elements[cle].value = valeur ?? "";
     // Ce que le dialogue a MONTRE : on n'enverra que ce qui en differe.
@@ -4928,6 +4932,9 @@ function etapeDePreparation(order) {
   return { cle: "a-faire", mot: "À faire" };
 }
 
+/** Le « ! » du badge « Bloquee » de Preparation, au bureau comme au telephone. */
+const ICONE_PREP_BLOQUEE = `<svg class="prep-badge-icone" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5"></circle><path d="M12 8v4m0 3.5v.5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg>`;
+
 function createPreparationRow(order, { unique = false } = {}) {
   if (unique) return createPreparationRowMobile(order);
   const etape = etapeDePreparation(order);
@@ -4944,6 +4951,12 @@ function createPreparationRow(order, { unique = false } = {}) {
   const detail = etape.cle === "bloquee"
     ? `<span class="commande-ligne-alerte">${escapeHtml(manqueDeLaCommande(order))}</span>`
     : `<span>${escapeHtml([ville, articles].filter(Boolean).join(" · "))}</span>`;
+  // « Bloquee » : le badge du telephone (contour d'alerte et « ! »), et non le
+  // badge vert de « A faire » -- la commande a reperer se lisait comme les
+  // autres. Les autres mots gardent leur badge (decision du 19/09).
+  const badge = etape.cle === "bloquee"
+    ? `<span class="pill prep-badge prep-badge--bloquee">${ICONE_PREP_BLOQUEE}${escapeHtml(etape.mot)}</span>`
+    : `<span class="pill ${getOrderPill(order.status)}">${escapeHtml(etape.mot)}</span>`;
   const row = document.createElement("article");
   row.className = `commande-ligne commande-ligne--${etape.cle}`;
   row.innerHTML = `
@@ -4953,7 +4966,7 @@ function createPreparationRow(order, { unique = false } = {}) {
         <strong>${escapeHtml(order.clientName)}</strong>
         ${detail}
       </span>
-      <span class="pill ${getOrderPill(order.status)}">${escapeHtml(etape.mot)}</span>
+      ${badge}
     </button>
   `;
   return row;
@@ -4990,9 +5003,7 @@ function createPreparationRowMobile(order) {
     ? `<span class="commande-ligne-alerte">${escapeHtml(manqueDeLaCommande(order))}</span>`
     : `<span>${escapeHtml([ville, articles].filter(Boolean).join(" · "))}</span>`;
   // Le « ! » de la planche sur le badge Bloquee : l'alerte voyage avec une forme.
-  const icone = statut.cle === "bloquee"
-    ? `<svg class="prep-badge-icone" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5"></circle><path d="M12 8v4m0 3.5v.5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg>`
-    : "";
+  const icone = statut.cle === "bloquee" ? ICONE_PREP_BLOQUEE : "";
   const row = document.createElement("article");
   row.className = `commande-ligne prep-ligne prep-ligne--${statut.cle}`;
   row.innerHTML = `
@@ -5298,7 +5309,7 @@ function renderRecommande() {
       </div>
       ${manque ? `<p class="reco-manque">${escapeHtml(manque)}</p>` : ""}
       <div class="stock-kpis">
-        <span><strong>${escapeHtml(item.available)}</strong><small>Stock actuel</small></span>
+        <span${Number(item.available) <= 0 ? ' class="reco-rupture"' : ""}><strong>${escapeHtml(item.available)}</strong><small>Stock actuel</small></span>
         <span><strong>${escapeHtml(item.demande)}</strong><small>Besoin estimé</small></span>
         <span><strong>${escapeHtml(item.threshold)}</strong><small>Seuil</small></span>
         <span><strong>${escapeHtml(item.recommended)}</strong><small>À recommander</small></span>
@@ -5494,7 +5505,7 @@ function renderVentes() {
       <h4>${escapeHtml(vente.client || "Client")}</h4>
       <p>Produit : ${escapeHtml(vente.produit || "-")}</p>
       <p>Quantité : ${escapeHtml(vente.quantite || "-")}</p>
-      <p>Ville : ${escapeHtml(vente.ville || "-")}</p>
+      <p>Ville : ${escapeHtml(villeAffichee(vente.ville) || "-")}</p>
       <p>Date : ${escapeHtml(vente.date || "-")}</p>
     `;
 
@@ -5844,7 +5855,7 @@ function openBdcDetail(orderId) {
   const sameDates = order.deliveryDate && order.dateCommande &&
     String(order.deliveryDate).slice(0, 10) === String(order.dateCommande).slice(0, 10);
   const dateLivraisonHtml = order.deliveryDate
-    ? `<strong>${escapeHtml(bdcFormatDate(order.deliveryDate))}</strong>${sameDates ? ` <span class="muted">(idem date commande)</span>` : ""}`
+    ? `<strong>${escapeHtml(bdcFormatDate(order.deliveryDate))}</strong>${sameDates ? ` <span class="muted">le jour de la commande</span>` : ""}`
     : `<span class="muted">Non spécifiée</span>`;
 
   // Section CLIENT : mode lecture OU edition selon bdcState.editingClientId
@@ -5861,7 +5872,7 @@ function openBdcDetail(orderId) {
       </div>
       <div class="bdc-detail-field">
         <span class="bdc-detail-label">Secteur</span>
-        <strong>${escapeHtml(order.sector || "—")}</strong>
+        <strong>${escapeHtml(order.sector ? formatSectorLabel(order.sector) : "—")}</strong>
       </div>
       <div class="bdc-detail-field">
         <span class="bdc-detail-label">Date commande</span>
@@ -5881,8 +5892,8 @@ function openBdcDetail(orderId) {
       ${productsHtml}
     </div>
 
-    <div class="bdc-detail-section bdc-detail-tech">
-      <h3>Technique</h3>
+    <details class="bdc-detail-section bdc-detail-tech">
+      <summary><h3>Technique</h3></summary>
       <dl class="bdc-detail-dl">
         <dt>ID</dt><dd><code>${escapeHtml(order.id)}</code></dd>
         <dt>Empreinte (anti-doublon)</dt><dd>${hash}</dd>
@@ -5890,7 +5901,7 @@ function openBdcDetail(orderId) {
         <dt>Créée le</dt><dd>${escapeHtml(formatDateDayOnly(order.createdAt))}</dd>
         <dt>Mise à jour</dt><dd>${escapeHtml(formatDateDayOnly(order.updatedAt))}</dd>
       </dl>
-    </div>
+    </details>
   `;
 
   modal.setAttribute("aria-hidden", "false");
@@ -5903,14 +5914,16 @@ function openBdcDetail(orderId) {
 // Section CLIENT en mode LECTURE (defaut). Affiche un bouton "Modifier le profil"
 // + un warning visuel si le profil est incomplet (adresse/telephone manquant).
 function renderBdcClientReadView(order) {
-  const address = [order.address, order.postalCode, order.city].filter(Boolean).join(" · ");
+  const address = [order.address, order.postalCode, villeAffichee(order.city)].filter(Boolean).join(" · ");
   const needs = bdcNeedsCompletion(order);
+  // Les icones lineaires de la charte (§7), pas des emojis : un emoji change de
+  // dessin d'un systeme a l'autre et ne prend pas la couleur du texte.
   const phoneHtml = order.phone
-    ? `<p class="bdc-detail-phone"><a href="tel:${escapeAttribute(String(order.phone).replace(/\s+/g, ""))}">📞 ${escapeHtml(order.phone)}</a></p>`
-    : `<p class="bdc-detail-missing">⚠ Téléphone non renseigné</p>`;
+    ? `<p class="bdc-detail-phone"><a href="tel:${escapeAttribute(String(order.phone).replace(/\s+/g, ""))}">${ICONE_CLI.tel}${escapeHtml(order.phone)}</a></p>`
+    : `<p class="bdc-detail-missing">${ICONE_CLI.retard}Téléphone non renseigné</p>`;
   const addressHtml = address
     ? `<p class="muted">${escapeHtml(address)}</p>`
-    : `<p class="bdc-detail-missing">⚠ Adresse non renseignée</p>`;
+    : `<p class="bdc-detail-missing">${ICONE_CLI.retard}Adresse non renseignée</p>`;
   const warnBadge = needs
     ? `<span class="bdc-detail-warn-badge" title="Ce client a un profil incomplet">À compléter</span>`
     : "";
@@ -5921,13 +5934,13 @@ function renderBdcClientReadView(order) {
         <h3>Client ${warnBadge}</h3>
         <button class="button secondary compact" type="button"
                 data-action="bdc-edit-client" data-client-id="${escapeAttribute(order.clientId)}">
-          ✏️ Modifier le profil
+          ${ICONE_CLI.crayon}<span>Modifier le profil</span>
         </button>
       </div>
       <p><strong>${escapeHtml(order.clientName || "—")}</strong></p>
       ${addressHtml}
       ${phoneHtml}
-      ${order.notes ? `<p class="bdc-detail-notes">📝 ${escapeHtml(order.notes)}</p>` : ""}
+      ${order.notes ? `<p class="bdc-detail-notes">${escapeHtml(order.notes)}</p>` : ""}
     </div>
   `;
 }
@@ -5955,7 +5968,7 @@ function renderBdcClientEditForm(order) {
         </label>
         <label class="bdc-form-field">
           <span>Ville</span>
-          <input type="text" name="ville" value="${escapeAttribute(order.city || "")}" placeholder="Besancon" />
+          <input type="text" name="ville" value="${escapeAttribute(villeAffichee(order.city || ""))}" placeholder="Besançon" />
         </label>
         <label class="bdc-form-field bdc-form-field-wide">
           <span>Téléphone</span>
@@ -5968,7 +5981,7 @@ function renderBdcClientEditForm(order) {
       </div>
       <div class="bdc-form-actions">
         <button class="button secondary compact" type="button" data-action="bdc-cancel-edit">Annuler</button>
-        <button class="button compact" type="submit" data-action="bdc-save-client" data-client-id="${escapeAttribute(order.clientId)}">💾 Enregistrer</button>
+        <button class="button compact" type="submit" data-action="bdc-save-client" data-client-id="${escapeAttribute(order.clientId)}">Enregistrer</button>
       </div>
     </form>
   `;
@@ -6764,7 +6777,7 @@ function renderSettings() {
   if (!sectorsContainer) return;
 
   const planned = deliverySectors.length ? deliverySectors : [
-    { id: "preview-besancon", secteur: "Besancon", villePrincipale: "Besancon", jourMois: 25, pointDepart: "Champagnole", frequence: "mensuelle" },
+    { id: "preview-besancon", secteur: "Besancon", villePrincipale: "Besançon", jourMois: 25, pointDepart: "Champagnole", frequence: "mensuelle" },
     { id: "preview-champagnole", secteur: "Champagnole", villePrincipale: "Champagnole", jourMois: 5, pointDepart: "Champagnole", frequence: "mensuelle" },
     { id: "preview-dole", secteur: "Dole", villePrincipale: "Dole", jourMois: 15, pointDepart: "Champagnole", frequence: "mensuelle" }
   ];
@@ -6774,7 +6787,7 @@ function renderSettings() {
       <div class="item-header">
         <div>
           <h4>${escapeHtml(formatSectorLabel(sector.secteur || sector.name))}</h4>
-          <p>${escapeHtml(sector.villePrincipale || "-")} - jour ${escapeHtml(sector.jourMois || "-")} - départ ${escapeHtml(sector.pointDepart || "Champagnole")}</p>
+          <p>${escapeHtml(villeAffichee(sector.villePrincipale) || "-")} - jour ${escapeHtml(sector.jourMois || "-")} - départ ${escapeHtml(sector.pointDepart || "Champagnole")}</p>
           ${avertissementSecteur(sector)}
         </div>
         <div class="card-actions inline-actions">
@@ -7208,7 +7221,9 @@ async function purgeOrdersHandler(btn) {
   ].join("\n");
 
   if (!window.confirm(msg)) return;
-  if (!window.confirm("Es-tu vraiment sûr ? Tape OK pour confirmer.")) return;
+  // La seconde confirmation ne demande rien a taper : elle le disait (« Tape
+  // OK »), et on ne tape rien. Elle redit ce qui est definitif.
+  if (!window.confirm("Dernière vérification : les commandes, clients, ventes et tournées seront supprimés pour de bon. Purger maintenant ?")) return;
 
   await runAction(btn, "Purge en cours...", async () => {
     const result = await apiFetch("/api/orders/purge", { method: "POST" });
@@ -10126,9 +10141,15 @@ async function loadVersionInfo() {
   setText("parVersionValeur", versionInfoCache?.version || "—");
   if (!swUpdateNotificationShown) {
     // La barre laterale au bureau, le pied de Parametres au telephone.
-    for (const etat of [document.getElementById("sidebarVersionEtat"), document.getElementById("parVersionEtat")]) {
+    // Au bureau, pas « A jour » : c'est le mot de la pastille des DONNEES, dans
+    // l'en-tete de chaque ecran. Ni « Derniere version » : rien ici ne sait si
+    // une plus recente est publiee. « Installee » dit ce qui a ete lu -- la
+    // version du serveur. Le telephone garde le mot de sa planche (6a).
+    const mots = { sidebarVersionEtat: "Installée", parVersionEtat: "À jour" };
+    for (const [id, mot] of Object.entries(mots)) {
+      const etat = document.getElementById(id);
       if (!etat) continue;
-      etat.textContent = "À jour";
+      etat.textContent = mot;
       etat.hidden = !versionInfoCache?.version;
     }
   }
@@ -10276,7 +10297,7 @@ function showSwUpdateNotification() {
   if (swUpdateNotificationShown) return;
   swUpdateNotificationShown = true;
   // Une nouvelle version attend un rechargement : la pastille cesse de dire
-  // « A jour », ce qui serait faux, et le dit.
+  // « Installee » (bureau) ou « A jour » (telephone), et le dit.
   for (const etat of [document.getElementById("sidebarVersionEtat"), document.getElementById("parVersionEtat")]) {
     if (!etat) continue;
     etat.textContent = "Mise à jour";

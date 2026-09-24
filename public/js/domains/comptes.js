@@ -197,7 +197,7 @@ function gabaritLigneCompte(compte, identifiantCourant) {
                 data-compte-identifiant="${escapeAttribute(compte.identifiant)}">
           Mot de passe
         </button>
-        <button class="button ghost compact" type="button"
+        <button class="button danger compact" type="button"
                 data-action="supprimer-compte" data-compte-id="${id}"
                 data-compte-identifiant="${escapeAttribute(compte.identifiant)}">
           Supprimer

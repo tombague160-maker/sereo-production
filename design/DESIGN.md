@@ -6754,3 +6754,168 @@ tournée jamais chargée (« null null », sous la charge de la suite) — et se
 lancés ; relancé seul, 4/4, puis `ecran-livreur` et `tournee-mobile` deux fois de suite,
 32/32. `npm test` : 682/682 (lancé pendant les bancs e2e, deux rouges de charge — 286 ms
 pour 250 dans `chantier2-perf`, un `ECONNRESET` dans `lot5-rapidite` — verts relancés).
+
+## 24/09 — Thème clair : finitions et un seul dessin
+
+Branche `fix/theme-clair-finitions`, sur `main` (v1.45.0). Audit « améliorations » du
+24/09, angle bureau (lots 4 et 5 de sa synthèse). CSS : bloc « THEME CLAIR : FINITIONS ET
+UN SEUL DESSIN » en fin de `style.css`, plus le déplacement décrit ci-dessous.
+
+### Un seul dessin
+
+**Le défaut.** Le thème ne changeait pas que les couleurs. Les couches anciennes écrites
+`:root[data-color-scheme="light"] X` posaient AUSSI la géométrie, et le sombre ne les voyait
+pas : corps à 15 px contre 16, boutons à 13,44 px contre 16, pilules à coins de 8 px, titres de
+carte en trois rendus (19/600, 19/700 et 18,4/950). Mesure sur `main`, douze écrans à 1440 px :
+**890** écarts de forme entre clair et sombre, 90 dans trois fenêtres. Depuis le 17/09 le thème
+suit le système : un poste Windows en clair voyait la version la moins finie.
+
+**Ce qui est fait.**
+
+- **Au bureau (≥ 821 px), une règle scopée au clair ne garde que sa peinture** (couleurs,
+  fonds, ombres, contours de focus, opacité). Sa géométrie — taille, graisse, interlignage,
+  rayons, marges, dimensions, grille, affichage, position — est **déplacée**, à la même place
+  dans la cascade, dans un `@media (max-width: 820px)` qui suit la règle ; un raccourci de
+  bordure garde sa couleur au bureau. 335 règles claires : 177 avaient de la géométrie au
+  bureau (410 déclarations déplacées), 35 étaient déjà bornées au téléphone (intactes). Le
+  clair prend donc, au bureau, la géométrie du sombre — celle des lots V8.
+- **Graisses** : Poppins n'est chargée qu'en 400/500/600/700. Les 50 déclarations à 650, 750,
+  760, 800, 850, 880, 900, 920, 930 et 950 valent 700 — le rendu ne change pas (le navigateur
+  prenait déjà la face 700), le code dit enfin ce que l'écran montre.
+- **Titres de carte** (charte §3) : 18 px, 600, −0,01 em, au bureau, dans les deux thèmes (les
+  `h3` des treize écrans ; pas le nom de la tournée dans l'en-tête du cockpit, ni l'encart « à
+  plat » du Stock). Titre d'écran : 30 px / 700, il l'était déjà dans les deux thèmes.
+- **Ce que les règles claires tenaient sans le dire**, et que le sombre ratait (les bancs de
+  forme ne tournent qu'en clair) — révélé par les bancs, corrigé pour les deux thèmes : la case
+  « Retour au point de départ » (22 px de haut) a 44 px ; les pilules de filtre de la tablette
+  (821–920 px) ont 44 px, pas 48 ; les grilles des anciens écrans passent en une colonne sous
+  920 px (Commande client débordait de l'écran en sombre) ; les tuiles d'Analyse passent à la
+  ligne de 921 à 1100 px (six fois 120 px ne tenaient pas) ; les champs de Commande client ne
+  vont par deux que s'ils logent « Commande immédiate » (15 rem et non 13,5 : à 821 px le texte
+  était coupé).
+
+### Finitions du bureau
+
+| Défaut (audit) | Ce qui change |
+|---|---|
+| « Purger », « Annuler la commande », « Supprimer » un secteur (et, après relecture, « Supprimer » un compte dans le tableau du bureau) : habillés comme « Enregistrer » ou comme les gestes courants en clair, dégradé corail ou rose pâle en sombre | Contour d'alerte 1,5 px sur la surface, texte d'alerte, sans dégradé ; au survol, surface basse et contour épaissi (l'alerte n'est jamais un fond, charte §2) ; la corbeille et les listes ✗ / ✓ deviennent des icônes linéaires |
+| La seconde confirmation de la purge dit « Tape OK » | « Dernière vérification : les commandes, clients, ventes et tournées seront supprimés pour de bon. Purger maintenant ? » |
+| « Tous les abonnements ↗ », « Tout voir ↗ » dans le bleu du navigateur | Principal, 600, sans soulignement (souligné au survol) : la règle existait, bornée au téléphone |
+| Filtre choisi invisible en clair (Préparation « Tous », Analyse / Exports) | La pilule choisie est pleine au principal, comme en sombre et comme dans Commandes |
+| Clients : la fiche affichée et le survol ne se voyaient dans aucun thème (spécificité (1,2,0) contre (1,3,0)) | Au bureau : survol au fond ; la ligne choisie au fond avec un anneau de 2 px au principal (le téléphone n'est pas touché) |
+| Indications des champs en gras, comme la valeur | Au bureau : indication 400, saisie 500 |
+| Préparation au bureau : « Bloquée » au badge vert de « À faire » | Le badge du téléphone : contour d'alerte et « ! » (mots du 19/09 gardés) |
+| « Besancon » sans cédille (liste et fiche client, « Modifier », Nouvel abonnement, détail de commande, Adresses à vérifier, secteurs par défaut) | `villeAffichee` (`utils/text.js`) rend l'orthographe **à l'affichage** ; la valeur stockée ne change pas. « Itinéraire » (fiche client) vise l'adresse affichée, cédille comprise (`clients-mobile.spec.js` l'exige) |
+| « Modifier le client » : Notes, un carré de 189 px, libellé en bas | Pleine largeur, 96 px, libellé au-dessus |
+| Commandes et Stock à 1280 px : des cartes, 3 commandes à l'écran ; à 1281, le client coupé à 133 px | Le tableau reste un tableau dès 1280 px ; colonnes resserrées (numéro 120, date 84 « 24 sept. », secteur 110, articles 64, statut 132 ; Stock : code 104) ; le nom d'un produit passe à la ligne. De 1280 à 1439 px : en-tête des Commandes sur une ligne (recherche 200 px, « Actualiser » réduit à son icône), espaces de 12 px, lignes de 48 px — **8 commandes entières à 1280 × 720** |
+| Abonnements : « EHPAD Les Till… », « EHPAD Résid… » coupés à 1440 | Fréquence 168 px (« Toutes les 2 semaines » entier), Prochaine 112, État 96 ; « Les 90 jours » sous le tableau jusqu'à 1599 px. Aucun nom coupé à 1280, 1440 ni 1600 |
+| Détail de commande : « Technique » déplié, ✏️ 📞 ⚠ 📝 💾 | `<details>` fermé ; icônes linéaires ; « (idem date commande) » devient « le jour de la commande » ; le secteur avec sa cédille |
+| Nouvel abonnement : le client choisi, « Créer une fiche client » restait | Il disparaît ; la croix du champ rend la recherche et le bouton |
+| À recommander : les quatre chiffres en rouge d'alerte en clair | Texte courant ; seul un stock à zéro reste en alerte, avec son mot |
+| Exports, Rappels, À recommander : première et dernière carte rognées | 4 px de marge intérieure dans la liste qui défile |
+| Deux « À jour » : données (en-tête) et version (barre latérale) | Au bureau, la version dit « Installée » (dans la barre, sous le numéro) ; « À jour » reste aux données, et au pied de Paramètres du téléphone (planche 6a) |
+| L'icône d'« Actualiser » collée à son mot (en sombre, et en clair une fois sa géométrie partie) | Au bureau, 8 px entre l'icône et le mot de tout bouton, dans les deux thèmes |
+
+### Décisions prises dans le lot
+
+- **La référence est la charte, valeur par valeur, et à défaut la géométrie V8** (celle du
+  sombre) : c'est elle que les lots du 18 au 23/09 ont posée et mesurée, en règles
+  `:root[data-color-scheme]` qui valent pour les deux thèmes. Le clair y perdait ses restes.
+- **Le texte des données ne change pas** : les bancs de la file hors ligne attendent « À jour »
+  (`tournee-hors-ligne`, `livreur-ne-perd-rien`, `chargement-instantane`). C'est la version qui
+  change de mot.
+- **Ne jamais réécrire la fiche d'un client** : la ville s'affiche « Besançon », le formulaire
+  « Modifier » n'envoie toujours que ce qui diffère de ce qu'il a montré (banc : un téléphone
+  modifié part seul, la ville reste « Besancon » en base).
+- **8 lignes à 1280 × 720 par la densité, pas en retirant** : aucun filtre ni geste n'est
+  retiré ; l'en-tête se resserre et la ligne passe à 48 px, au-dessus de la cible de 44.
+
+### Écarts nommés
+
+- **Le téléphone (≤ 820 px) garde, en clair, la géométrie de ses couches** : le lot téléphone
+  y mesure en clair, en parallèle de celui-ci. Clair et sombre y diffèrent encore (corps 15 /
+  16 px, boutons pleine largeur sous 560 px en clair…). `test/un-seul-dessin.test.js` ne juge
+  que ce qui s'applique au bureau, et le dit.
+- **Le clair change à l'œil au bureau** : corps 16 px (15 avant), boutons 16 px (13,44), pilules
+  rondes, titres de carte à 18 px. C'est le but ; c'est aussi un changement que Thomas verra.
+- **La tablette (821–920 px)** prend elle aussi la géométrie du sombre, hors les trois
+  corrections ci-dessus.
+- **Abonnements** : de 1440 à 1599 px, « Les 90 jours » passe sous le tableau, alors que la
+  planche 13a les met côte à côte à 1440 — côte à côte, même resserré, le tableau n'avait pas la
+  place d'un nom d'EHPAD.
+- **Commandes, 1280–1439 px** : lignes de 48 px (la planche 13c : 56) et « Actualiser » en icône
+  (son nom accessible reste « Actualiser »).
+- **La version dit « Installée » au bureau**, la planche 6a écrit « À jour » (le téléphone le
+  garde, `parametres-mobile.spec.js` inchangé depuis `main`).
+- **`normalizeCity` (serveur) range toujours « Besancon »** : c'est aussi la clé de secteur
+  (`CORE_SECTORS`, `deriveSector`). La commande client pré-remplie garde la valeur stockée (seul
+  son texte indicatif a sa cédille). Le champ Ville du détail d'une commande montre « Besançon »
+  (relecture) : ce formulaire renvoie tous ses champs, et le serveur range la ville comme avant.
+- **La page de connexion** (CSS dans `server.js`) garde ses graisses : hors de ce lot.
+- **« Exports »** n'est pas dans le banc de comparaison : l'écran est retiré par un autre lot
+  (décision 9).
+
+### Bancs, et le rouge de chacun
+
+Chaque banc a été lancé sur le code de `main` (fichiers produit remis par `git checkout
+12da3d4 --`, bancs du lot gardés, puis restauration et `git diff --quiet HEAD`) :
+
+- `test/e2e/un-seul-dessin.spec.js` (serveur semé, port **3526**) : douze écrans à 1440 et
+  trois fenêtres, chaque élément visible repéré par son chemin dans le DOM, forme comparée
+  (taille et graisse, rayons, marges, hauteur ; un état `aria-pressed` différent n'est pas un
+  écart). Rouges sur `main` : **890** écarts (1 361 éléments), **90** dans les fenêtres, **197**
+  graisses hors Poppins, **66** titres de carte hors charte.
+- `test/un-seul-dessin.test.js` : aucune règle claire ne pose de géométrie au bureau, aucune
+  graisse hors 400/500/600/700 ; témoins (le sombre `:not([…="light"])` n'est pas pris pour le
+  clair, une règle de 821–920 px est jugée, une règle du téléphone ne l'est pas). Rouge sur
+  `main` : 410 déclarations de géométrie au bureau (la première : `body { font-size: 15px }`),
+  50 graisses hors Poppins (la première : `.eyebrow { font-weight: 800 }`).
+- `test/e2e/theme-clair-finitions.spec.js` (serveur semé, port **3527**, 31 cas) : chacun rouge
+  sur `main`, de la bonne cause — Purger au fond d'« Enregistrer » `rgb(42, 82, 84)` (clair) et
+  `linear-gradient(135deg, …)` (sombre) ; « Annuler la commande » en blanc sur principal ;
+  « Tape OK » ; lien `rgb(0, 0, 238)` / `rgb(158, 158, 255)` ; « Tous » en `rgb(255, 255,
+  255)` ; ligne client transparente ; indications et saisies en 800 ; badge « Bloquée » sans
+  icône ; « Besancon » ; notes de 189 / 210 px pour 584 ; à 1280 × 720 pas d'en-tête de tableau
+  (cartes) ; Abonnements « EHPAD Les Tilleuls du Val de Loue (116/251) » à 1440 et « Toutes les
+  2 semaines (150/161) » à 1280 ; « Technique » en `DIV` ; « Créer une fiche client » visible ;
+  « Besoin estimé 5 » en `rgb(192, 43, 10)` (clair), « Stock actuel 0 » en texte (sombre) ;
+  « À jour » dans la barre ; le champ Ville à « Besancon ».
+
+Non-régression, sur le code final : `npm test` (686/686) ; 38 fichiers e2e du bureau
+(conception, contraste, cibles, focus, typographie, thèmes, texte coupé, et chaque écran) et
+20 fichiers du téléphone et des garanties (file hors ligne, tournée, rapidité, chargement) ;
+`numerotation-admin.spec.js` sur un serveur authentifié à part (copie locale non suivie visant
+3507). Deux rouges de charge pendant la suite (port 3304 pris par un autre arbre de travail ;
+« la page défile » mesuré avant le rendu) : relancés seuls, verts, sans rien changer. Après la
+relecture à l'écran (icônes, barre latérale, Itinéraire), les 18 fichiers qu'elle touche ont été
+relancés : 231 cas verts.
+
+### Relecture adverse (24/09)
+
+Quatre défauts relevés sur `be2b6bb` ; tous vérifiés à l'écran, tous vrais, tous corrigés. Chaque
+banc a d'abord été lancé sur le code de `be2b6bb` (rouge, de la bonne cause), puis sur le
+correctif (vert). Bancs dans `theme-clair-finitions.spec.js`, section 10.
+
+| Défaut | Mesure sur `be2b6bb` | Correctif |
+|---|---|---|
+| Clients au téléphone : la première ligne, choisie d'office par `renderCrm`, portait fond et anneau alors que la fiche est cachée (la règle du lot n'avait pas de media query) | 390 px : fond `rgb(251, 247, 245)` (clair), `rgb(13, 21, 24)` (sombre) | Les règles du survol et de la ligne choisie passent sous `@media (min-width: 821px)`. Banc : à 390 px, fond transparent, aucune ombre, survol transparent ; témoin, la même ligne à 1440 px porte l'anneau |
+| « Supprimer » un compte (tableau du bureau) en `ghost` : en clair, fond, texte et contour identiques à « Désactiver » et « Mot de passe » ; en sombre, rose pâle. La note « les gestes Désactiver gardent leur style ghost » se trompait de bouton | clair : texte `rgb(42, 82, 84)` pour les trois ; sombre : `rgb(236, 148, 130)` sur `rgba(229, 139, 124, 0.1)` | `button danger compact`, comme « Supprimer » un secteur : texte et contour d'alerte (`rgb(192, 43, 10)` / `rgb(242, 99, 90)`), 44 px. Banc : comptes servis par le banc (un vrai compte activerait l'authentification) ; témoin, « Mot de passe » n'est pas en alerte |
+| « Dernière version » affirmait ce que `/api/version` ne sait pas (elle ne rend que la version du serveur), et changeait aussi le mot du téléphone (planche 6a) | barre et pied de Paramètres : « Dernière version » | Barre latérale : « Installée » ; téléphone : « À jour », `parametres-mobile.spec.js` rendu à `main`. « Mise à jour » (nouvelle version en attente) ne change pas |
+| Détail d'une commande, « Modifier le profil » : le champ Ville montrait « Besancon », la fenêtre « Modifier le client » « Besançon » | valeur du champ : « Besancon » | `villeAffichee(order.city)`. Banc : le champ montre « Besançon » ; enregistré (téléphone changé), la fiche garde « Besancon » et son secteur |
+
+Le fichier passe de 31 à 36 cas. Non-régression sur le correctif : `npm test` (686/686) ;
+`theme-clair-finitions`, `parametres-mobile`, `barre-laterale-finitions` (59 cas) ; Clients
+(bureau et téléphone), Paramètres, Commandes, Adresses à vérifier, `un-seul-dessin`, contraste,
+cibles, focus, charte, thèmes, typographie, texte coupé, finitions, intégration, onglets,
+navigation du téléphone (179 cas ; Commandes relancé seul après un port 3160 pris par un autre
+arbre de travail) ; file hors ligne, tournée hors ligne, livreur, chargement instantané, tableau
+de bord, navigation (43 cas).
+
+### Ce qui reste
+
+- Le téléphone en un seul dessin (après le lot téléphone).
+- « Annuler la tournée » reste un bouton secondaire (écran Tournée, hors de ce lot).
+- La feuille d'un compte au téléphone : « Supprimer le compte » reste `ghost` avec le texte
+  d'alerte (`par-geste-danger`) ; c'est au lot téléphone.
+- Migrer la valeur stockée « Besancon » avec un banc, dans un lot à part.
+- Les graisses de la page de connexion.

@@ -17,6 +17,7 @@
 // cycle d'imports.
 
 import { escapeHtml, escapeAttribute } from "../utils/dom.js";
+import { villeAffichee } from "../utils/text.js";
 
 let ctx = null;
 let liste = [];
@@ -166,7 +167,7 @@ function resumer(donnees) {
 }
 
 function adresseLisible(ligne) {
-  return [ligne.rue, [ligne.codePostal, ligne.ville].filter(Boolean).join(" ")].filter(Boolean).join(", ") || "Adresse manquante";
+  return [ligne.rue, [ligne.codePostal, villeAffichee(ligne.ville)].filter(Boolean).join(" ")].filter(Boolean).join(", ") || "Adresse manquante";
 }
 
 function libellePrecision(precision) {
