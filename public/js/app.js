@@ -740,7 +740,6 @@ function bindUi() {
     if (action === "cli-fermer") document.getElementById("cliDialogue")?.close();
     // « Les N autres » : la liste des commandes, cherchee sur ce client.
     if (action === "cli-voir-commandes") {
-      showTab("commandes");
       // Une liste PROPRE, comme une redirection : un filtre laisse d'avant
       // cacherait les commandes du client. Et le client par son IDENTIFIANT.
       for (const id of ["cmdRecherche", "cmdDu", "cmdAu"]) {
@@ -750,7 +749,11 @@ function bindUi() {
       Object.assign(commandesFiltre, { statut: "toutes", recherche: "", page: 1, bloquees: false, completer: false,
         du: "", au: "", secteur: "", jour: "",
         client: actionButton.dataset.clientId || "", clientNom: actionButton.dataset.clientNom || "" });
-      renderCommandes();
+      // Le filtre AVANT l'arrivee, et un seul rendu : celui que showTab fait en
+      // arrivant (24/09 ; avant, le rendu en attente avec l'ancien filtre, puis
+      // celui-ci).
+      rendreOuDifferer("commandes", renderCommandes);
+      showTab("commandes");
     }
     if (action === "importer-stock") {
       const champ = document.getElementById("stockFile");
@@ -934,7 +937,9 @@ function showTab(tabName, options = {}) {
     // deplie, pour que la liste ne paraisse pas amputee sans raison visible.
     commandesFiltresOuverts = Boolean(redirection.completer);
     tabName = redirection.onglet;
-    renderCommandes();
+    // Dessinee en arrivant, une fois, avec ce filtre (24/09 : un rendu ici puis
+    // le rendu en attente, deux pour une arrivee).
+    rendreOuDifferer("commandes", renderCommandes);
     // L'adresse dit ou l'on est vraiment : #commandes, plus l'ancien nom.
     // replaceState ne declenche pas de hashchange, donc pas de boucle.
     history.replaceState(null, "", `#${tabName}`);

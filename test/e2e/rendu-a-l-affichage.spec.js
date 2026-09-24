@@ -4,7 +4,8 @@
 // fois, ce qui est mesure -- pas des chronometres, sauf un, a large marge.
 //
 // 1. L'ouverture ne dessine que l'ecran affiche ; les autres se dessinent en y
-//    arrivant (rendreSiAffiche + showTab), avec les donnees du moment.
+//    arrivant (rendreOuDifferer + showTab), avec les donnees du moment, et
+//    UNE fois, meme par un chemin qui fixe un filtre (« Les N autres »).
 // 2. Les formateurs Intl ne sont plus construits a chaque montant, a chaque date.
 // 3. Le Stock et le catalogue : une ligne hors de l'ecran n'est ni mise en page
 //    ni peinte (content-visibility), et « + » ne redessine pas le catalogue.
@@ -87,6 +88,57 @@ test("un écran quitté pendant un chargement montre, en y revenant, les donnée
   await aller(page, "stock");
   await expect(ligne.locator(".stk-saisie--stock")).toHaveValue(String(nouvelle));
   await page.request.patch(`${srv.base}/api/stock/stk-001`, { data: { quantite: Number(avant || 0), reason: "remise en etat du banc" } });
+});
+
+// Arriver sur Commandes par un chemin qui pose son filtre : la liste s'ecrit
+// UNE fois (#cmdLignes : une ecriture par rendu). Avant (relecture du 24/09) :
+// le rendu en attente, avec le filtre d'avant, puis celui du chemin -- deux.
+// On ouvre sur les Clients : le rendu des Commandes attend depuis l'ouverture.
+async function ecrituresDesCommandes(page) {
+  await page.evaluate(() => {
+    const e = window.__ecrituresCmd = { n: 0 };
+    new MutationObserver(recs => { e.n += recs.length; }).observe(document.getElementById("cmdLignes"), { childList: true });
+  });
+  // Lu apres une image : les enregistrements du geste sont alors tous livres.
+  return () => page.evaluate(() => new Promise(fin => requestAnimationFrame(() => setTimeout(() => fin(window.__ecrituresCmd.n), 0))));
+}
+
+test("« Les N autres » d'une fiche client : Commandes s'écrit une fois, sur ce client", async ({ page }) => {
+  await ouvrir(page, "crm");
+  // Le client qui a le plus de commandes : sa fiche en montre quelques-unes,
+  // puis « Les N autres ».
+  const { id, total } = await page.evaluate(async () => {
+    const n = new Map();
+    for (const c of await (await fetch("/api/orders")).json()) n.set(c.clientId, (n.get(c.clientId) || 0) + 1);
+    const [id, total] = [...n].sort((a, b) => b[1] - a[1])[0];
+    return { id, total };
+  });
+  await page.locator(`#crmList [data-cli-choisir="${id}"]`).click();
+  const autres = page.locator("#cliFiche .cli-autres");
+  await expect(autres).toHaveText(/^Les \d+ autres?$/);
+  const nom = await autres.getAttribute("data-client-nom");
+  const lire = await ecrituresDesCommandes(page);
+  await autres.click();
+  await expect(page.locator("#commandes")).toHaveClass(/active/);
+  // Temoins : le filtre du client, et toutes ses commandes -- les siennes seules.
+  await expect(page.locator("#cmdClientFiltre")).toContainText(nom);
+  await expect(page.locator("#cmdCompte")).toHaveText(new RegExp(` sur ${total}$`));
+  const n = await lire();
+  console.log(`[commandes] « Les N autres » (${total} commandes) : ${n} ecriture(s) de la liste`);
+  expect(n).toBe(1);
+});
+
+test("une ancienne adresse (#commandes-jour) : Commandes s'écrit une fois, sur son filtre", async ({ page }) => {
+  await ouvrir(page, "crm");
+  const lire = await ecrituresDesCommandes(page);
+  await aller(page, "commandes-jour");
+  await expect(page.locator("#commandes")).toHaveClass(/active/);
+  // Temoins : le filtre de l'ancien ecran, et l'adresse de l'ecran unique.
+  await expect(page.locator('#cmdPilules [data-cmd-filtre="a-envoyer"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page).toHaveURL(/#commandes$/);
+  const n = await lire();
+  console.log(`[commandes] redirection #commandes-jour : ${n} ecriture(s) de la liste`);
+  expect(n).toBe(1);
 });
 
 test("les montants et les dates ne construisent plus un formateur chacun", async ({ page }) => {
