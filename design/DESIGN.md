@@ -5969,3 +5969,19 @@ exporté par `toISOString().slice(0, 10)`, et `public/js/domains/tournee-pratiqu
 classe, entre minuit et 2 h. Deux oracles e2e prennent l'année par `getFullYear()`
 (`parametres.spec.js`, `parametres-mobile.spec.js`) : faux une heure par an, le
 31/12 après 23 h UTC.
+
+### Barre latérale fixe au bureau, décidée le 24/09
+
+**Décision de Thomas** : au bureau (≥ 821 px), la barre latérale **reste fixe** quand la page
+défile — la navigation est toujours à portée. Elle déclarait `position: sticky` (top 0, 100 vh)
+depuis juillet, inerte sous l'ancien `overflow-x: hidden`, puis neutralisée le 23/09 en
+attendant cette décision (écart « La barre latérale du bureau », ci-dessus) : la neutralisation
+est retirée. Le bandeau du téléphone, lui, reste neutralisé (il ne colle que sur Tournée).
+
+Sur un écran bas, la barre **défile dans sa propre hauteur** (règle existante
+`@media (min-width: 821px) .sidebar { overflow-y: auto }`) : à 1280 × 560, le menu mesure
+788 px ; le compte, « Se déconnecter » et la version restent atteignables.
+
+*Bancs (`collant-et-clavier.spec.js`)* : « la barre latérale reste fixe » (921 et 1440 px, trois
+écrans ; rouge avant : −400 au lieu de 0) ; « écran bas, tout le menu reste atteignable »
+(rouge si la barre fixe perd son défilement : « Version » à 768 px pour un écran de 560).
