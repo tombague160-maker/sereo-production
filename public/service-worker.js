@@ -73,13 +73,16 @@ const APP_SHELL = [
 // ne dit alors jamais « A jour ».
 // /api/sauvegardes/derniere (24/09) : la base entiere, pour l'administrateur.
 // Jamais une copie dans le cache de l'appareil.
+// /api/journal (24/09) : reserve a l'administration, comme /api/comptes ; une
+// copie en cache le rendrait hors ligne a un autre compte du meme appareil.
 const API_CACHE_EXCLUDED = [
   "/api/storage/status",
   "/api/version",
   "/api/me",
   "/api/comptes",
   "/api/geocode",
-  "/api/sauvegardes/derniere"
+  "/api/sauvegardes/derniere",
+  "/api/journal"
 ];
 
 // Network-first avec timeout puis fallback cache pour les GET /api/*.

@@ -1807,7 +1807,9 @@ test("v1.11.0 PATCH /api/clients/:id : mise a jour partielle propage vers les co
 
   assert.equal(r.res.status, 200);
   assert.equal(r.body.client.rue, "5 nouveau chemin");
-  assert.equal(r.body.client.telephone, "06 11 22 33 44");
+  // Garde-fous de saisie (24/09) : un numero saisi est normalise (chiffres
+  // seuls, l'ecran les regroupe par deux). Avant, il etait garde tel que tape.
+  assert.equal(r.body.client.telephone, "0611223344");
   assert.equal(r.body.client.notes, "Sonner 2 fois");
   // Lot 3 de l'audit geo (H12, decision 8 du 23/09) : la commande LIVREE
   // n'est plus reecrite -- c'est l'historique. Avant, ce test exigeait 2.
@@ -1820,7 +1822,7 @@ test("v1.11.0 PATCH /api/clients/:id : mise a jour partielle propage vers les co
   const aLivrer = cmds.find(o => o.id === "o-edit-1");
   const livree = cmds.find(o => o.id === "o-edit-2");
   assert.equal(aLivrer.address, "5 nouveau chemin", "address propagee");
-  assert.equal(aLivrer.phone, "06 11 22 33 44", "phone propage");
+  assert.equal(aLivrer.phone, "0611223344", "phone propage (normalise, 24/09)");
   assert.equal(aLivrer.notes, "Sonner 2 fois", "notes propagees");
   assert.equal(livree.address, "ancien", "une commande livree garde l'adresse de sa livraison");
   assert.equal(livree.phone, "", "une commande livree n'est pas reecrite");

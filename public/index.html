@@ -161,8 +161,12 @@
 
       <label class="sidebar-search" for="menuSearch">
         <svg class="icon" aria-hidden="true"><use href="#icon-search"></use></svg>
-        <input id="menuSearch" type="search" placeholder="Rechercher" autocomplete="off" />
+        <input id="menuSearch" type="search" placeholder="Rechercher" autocomplete="off" aria-controls="rechercheResultats" aria-describedby="rechercheAide" />
       </label>
+      <span id="rechercheAide" class="sr-only">Cherche un écran, un client, une commande ou un produit. Entrée ouvre le premier résultat.</span>
+      <!-- Les clients, commandes et produits trouves (24/09), sous le champ ;
+           les ecrans restent filtres dans le menu. -->
+      <div id="rechercheResultats" class="recherche-resultats" hidden></div>
 
       <!-- HUIT entrees plates. Mesure sur les 49 planches de l'export :
            zero accordeon, zero groupe repliable. Rien ne se deplie ici.
@@ -697,6 +701,7 @@
                   <option value="client_actif">Clients actifs</option>
                   <option value="client_a_relancer">Clients à rappeler</option>
                   <option value="client_inactif">Clients inactifs</option>
+                  <option value="coordonnees_a_verifier">Coordonnées à vérifier</option>
                   <option value="relance_today">Rappels du jour</option>
                   <option value="relance_late">Rappels en retard</option>
                 </select>
@@ -736,10 +741,10 @@
             <div class="form-grid two">
               <label>Nom<input name="nom" required autocomplete="family-name" /></label>
               <label>Prénom<input name="prenom" autocomplete="given-name" /></label>
-              <label>Téléphone<input name="telephone" autocomplete="tel" /></label>
+              <label>Téléphone<input name="telephone" type="tel" inputmode="tel" autocomplete="tel" data-garde="telephone" /></label>
               <label>Email<input name="email" type="email" autocomplete="email" /></label>
               <label class="span-2">Adresse<input name="adresse" autocomplete="street-address" /></label>
-              <label>Code postal<input name="codePostal" autocomplete="postal-code" /></label>
+              <label>Code postal<input name="codePostal" inputmode="numeric" autocomplete="postal-code" data-garde="code-postal" /></label>
               <label>Ville<input name="ville" autocomplete="address-level2" /></label>
               <label>Statut
                 <select name="crmStatus">
@@ -899,8 +904,8 @@
               <div class="form-grid two">
                 <label>Nom<input name="nom" required /></label>
                 <label>Prénom<input name="prenom" /></label>
-                <label>Téléphone<input name="telephone" /></label>
-                <label>Code postal<input name="codePostal" /></label>
+                <label>Téléphone<input name="telephone" type="tel" inputmode="tel" autocomplete="tel" data-garde="telephone" /></label>
+                <label>Code postal<input name="codePostal" inputmode="numeric" autocomplete="postal-code" data-garde="code-postal" /></label>
                 <label class="span-2">Adresse<input name="adresse" /></label>
                 <label>Ville<input name="ville" /></label>
                 <label>Email<input name="email" type="email" /></label>
@@ -1155,7 +1160,7 @@
               <div id="subClientResults" class="abo-cr-client-cartes" role="list" aria-label="Clients"></div>
               <p id="subClientReste" class="abo-cr-note" hidden></p>
             </div>
-            <fieldset id="subNewClient" class="abo-cr-fiche" disabled hidden><legend>Nouvelle fiche client</legend><label>Nom<input id="subLastName" required></label><label>Prénom<input id="subFirstName"></label><label>Adresse<input id="subAddress" required></label><label>Code postal<input id="subPostal" inputmode="numeric"></label><label>Ville<input id="subCity" required></label><label>Téléphone<input id="subPhone" type="tel"></label></fieldset>
+            <fieldset id="subNewClient" class="abo-cr-fiche" disabled hidden><legend>Nouvelle fiche client</legend><label>Nom<input id="subLastName" required></label><label>Prénom<input id="subFirstName"></label><label>Adresse<input id="subAddress" required></label><label>Code postal<input id="subPostal" inputmode="numeric" autocomplete="postal-code" data-garde="code-postal"></label><label>Ville<input id="subCity" required></label><label>Téléphone<input id="subPhone" type="tel" inputmode="tel" autocomplete="tel" data-garde="telephone"></label></fieldset>
             <button id="subNouveauClient" class="button secondary abo-cr-secondaire" type="button" data-op="sub-nouveau-client" aria-expanded="false" aria-controls="subNewClient">Créer une fiche client</button>
           </section>
           <section class="abo-cr-carte abo-cr-produits" aria-labelledby="subProduitsTitre">
@@ -1308,6 +1313,9 @@
                     <button id="markRescheduleButton" class="button secondary compact" type="button" data-action="mark-reschedule">À reprogrammer</button>
                     <button id="replanCurrentButton" class="button secondary compact" type="button" data-action="replan-current-stop">Planifier suite</button>
                     <button id="nextClientButton" class="button secondary compact" type="button" data-action="next-client">Suivant</button>
+                    <!-- Le bon de livraison de l'arret, sans les prix (decision 8, 24/09) :
+                         a faire signer ; au telephone, la feuille de partage. -->
+                    <button id="bonLivraisonArretButton" class="button secondary compact" type="button" data-action="imprimer-bon-arret">Bon de livraison</button>
                     <!-- Lot 3 (audit geo, H7) : la position du client de l'arret,
                          corrigee depuis la route. Remplace les deux champs
                          numeriques qui envoyaient l'identifiant de l'arret. -->
@@ -1476,6 +1484,13 @@
                HORS du corps : « Modifier le profil » redessine le corps et les
                effacait. -->
           <div id="cmdDetailGestes" class="cmd-detail-gestes card-actions" hidden></div>
+          <!-- Le bon de livraison imprimable, sans les prix (decision 8, 24/09). -->
+          <div class="bon-outils">
+            <button class="button secondary compact" type="button" data-action="imprimer-bon">
+              <svg class="icon" aria-hidden="true" viewBox="0 0 24 24" fill="none"><path d="M7 9V4h10v5M7 17H5a1 1 0 0 1-1-1v-5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v5a1 1 0 0 1-1 1h-2M7 14h10v6H7z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+              Bon de livraison
+            </button>
+          </div>
           <div class="version-modal-body" id="bdc-detail-body"></div>
         </div>
       </div>
@@ -1526,16 +1541,6 @@
           </div>
 
           <div id="alertesList" class="list"></div>
-        </div>
-      </section>
-
-      <section id="historique" class="page" role="tabpanel" aria-label="Historique de l'application">
-        <div class="panel">
-          <div class="panel-heading">
-            <h3>Historique de l'application</h3>
-            <span class="muted">Dernières actions</span>
-          </div>
-          <div id="historiqueList" class="history-grid"></div>
         </div>
       </section>
 
@@ -1760,6 +1765,23 @@
                 <pre id="diagnosticDatesSample" class="settings-pre" hidden></pre>
               </article>
             </div>
+          </article>
+
+          <!-- Le journal « qui a fait quoi » (lot « donnees utiles », 24/09).
+               Reserve a l'administration : cache tant que /api/me n'a pas dit
+               le contraire. Lu par pages a l'ouverture de Parametres, jamais
+               au chargement de l'application. -->
+          <article class="par-carte par-span-12 par-journal" id="parJournal" aria-labelledby="parJournalTitre" hidden>
+            <div class="par-carte-tete">
+              <h3 id="parJournalTitre">Journal</h3>
+            </div>
+            <p class="par-aide">Qui a fait quoi, du plus récent au plus ancien. Les lignes d’avant le 24 septembre 2026 n’ont pas d’auteur (—).</p>
+            <div class="par-segments par-journal-vues" role="group" aria-label="Contenu du journal">
+              <button type="button" class="par-segment" data-action="journal-vue" data-journal-genre="actions" aria-pressed="true">Actions</button>
+              <button type="button" class="par-segment" data-action="journal-vue" data-journal-genre="stock" aria-pressed="false">Mouvements de stock</button>
+            </div>
+            <ol id="parJournalListe" class="par-journal-liste" aria-live="polite"></ol>
+            <button type="button" id="parJournalSuite" class="button secondary par-journal-suite" data-action="journal-suite" hidden>Afficher les 50 suivantes</button>
           </article>
 
           <!-- Zone dangereuse : la planche la reduit a une incise ; une purge
