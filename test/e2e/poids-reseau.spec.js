@@ -55,14 +55,17 @@ test("à l'ouverture, la page ne demande que ce que l'écran montre", async ({ p
   // Temoin : l'instrument voit les reponses et leurs corps.
   expect(reponses.find(r => r.chemin === "/api/orders")?.octets, "prealable : /api/orders lue").toBeGreaterThan(100000);
 
-  expect(chemins.filter(c => /^\/api\/(ventes|historique)(\?|$)/.test(c)), "des ecrans inatteignables chargent leurs donnees").toEqual([]);
-  expect(chemins.filter(c => /^\/api\/(imports\/archives|comptes)(\?|\/|$)/.test(c)), "les lectures des Parametres partent hors des Parametres").toEqual([]);
-  expect(chemins.filter(c => c === "/api/storage/status"), "/api/storage/status (banniere de recuperation) : une fois").toHaveLength(1);
-  expect(chemins.filter(c => c.startsWith("/api/stock-movements")), "les mouvements : les 12 montres").toEqual(["/api/stock-movements?limite=12"]);
-  expect(total, "JSON d'API lu a l'ouverture (avant : 2 098 944 o)").toBeLessThan(1000000);
+  // `soft` : chaque cause se lit seule (sur l'ancien code, toutes a la fois).
+  expect.soft(chemins.filter(c => /^\/api\/(ventes|historique)(\?|$)/.test(c)), "des ecrans inatteignables chargent leurs donnees").toEqual([]);
+  expect.soft(chemins.filter(c => /^\/api\/(imports\/archives|comptes)(\?|\/|$)/.test(c)), "les lectures des Parametres partent hors des Parametres").toEqual([]);
+  expect.soft(chemins.filter(c => c === "/api/storage/status"), "/api/storage/status (banniere de recuperation) : une fois").toHaveLength(1);
+  expect.soft(chemins.filter(c => c.startsWith("/api/stock-movements")), "les mouvements : les 12 montres").toEqual(["/api/stock-movements?limite=12"]);
+  expect.soft(reponses.find(r => r.chemin === "/api/settings/appearance")?.octets, "l'image de marque voyage dans les reglages").toBeLessThan(1000);
+  expect.soft(total, "JSON d'API lu a l'ouverture (avant : 2 098 944 o)").toBeLessThan(1000000);
   // Ni tuile, ni image de marque : la carte et l'apercu du logo sont caches.
-  expect(compteurTuiles(), "une tuile part pour une carte cachee").toBe(0);
-  expect(demandes.filter(c => /^\/(brand\/sereo-logo|api\/settings\/appearance\/image)/.test(c)), "le logo des Parametres part a l'ouverture").toEqual([]);
+  expect.soft(compteurTuiles(), "une tuile part pour une carte cachee").toBe(0);
+  expect.soft(chemins.filter(c => c === "/api/carte/fond"), "le fond de carte est demande pour une carte cachee").toEqual([]);
+  expect.soft(demandes.filter(c => /^\/(brand\/sereo-logo|api\/settings\/appearance\/image)/.test(c)), "le logo des Parametres part a l'ouverture").toEqual([]);
 
   // Ce que l'ecran montre reste montre : le compte des ventes importees.
   await expect(page.locator("#dailySummary")).toContainText("429 ligne(s) importée(s)");
@@ -86,7 +89,8 @@ test("les Paramètres lisent leurs données en s'affichant, et les montrent", as
   await expect(page.locator("#brandImageStatus")).toHaveText("Image personnalisée active pour l'application.");
 });
 
-test("l'écran Stock montre les 12 mouvements les plus récents, comme avant", async ({ page }) => {
+// Temoins (verts avant comme apres) : ce que l'ecran montre n'a pas change.
+test("témoin : l'écran Stock montre les 12 mouvements les plus récents, comme avant", async ({ page }) => {
   await ouvrir(page, "stock");
   const tous = await (await page.request.get(`${srv.base}/api/stock-movements`)).json();
   expect(tous.length, "prealable : la liste complete").toBe(633);
@@ -95,7 +99,9 @@ test("l'écran Stock montre les 12 mouvements les plus récents, comme avant", a
   await expect(lignes).toHaveText(tous.slice(0, 12).map(m => m.productName));
 });
 
-test("la carte ne demande son fond qu'à l'affichage de la Tournée", async ({ page }) => {
+// Le rouge de la tuile est au premier cas (« une tuile part pour une carte
+// cachee ») ; celui-ci garde qu'elle arrive quand la Tournee s'affiche.
+test("témoin : la Tournée affichée demande son fond de carte, et le dessine", async ({ page }) => {
   await ouvrir(page);
   remettreCompteurAZero();
   await page.waitForTimeout(300);
