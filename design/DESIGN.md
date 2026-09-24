@@ -7516,3 +7516,96 @@ depuis le commit) :
 - Le formulaire du détail de commande prérempli avec les coordonnées de la commande, qui
   réécrivent celles de la fiche, reste tel quel (antérieur au lot) : seul le cas signalé et
   intact est corrigé.
+
+## 24/09 — Intégration des améliorations du 24/09
+
+Branche `integration/ameliorations`, partie de `main` (`ef78be1`, v1.45.1). Les six lots de
+l'audit « améliorations », tous partis de `12da3d4` (v1.45.0), fusionnés `--no-ff` dans cet
+ordre : pièges (import, tournée, retour après validation), sauvegardes et prévisions,
+téléphone, thème clair, parcours simplifiés, données utiles. Chaque fusion est contrôlée :
+le diff de la fusion contre son premier parent égale le diff du lot contre `12da3d4`,
+ligne à ligne, hors les conflits nommés ci-dessous.
+
+### Conflits
+
+- **Ajouts en fin de fichier** (`DESIGN.md` à chaque fusion, `style.css`) : reconstruits
+  depuis les trois versions (base + ajout de chaque côté), jamais en ôtant les marqueurs.
+  À partir du lot thème, qui déplace aussi des règles au milieu de `style.css`, les têtes
+  sont fusionnées à trois voies (propre) et les ajouts remis bout à bout, dans l'ordre des
+  lots.
+- **Les deux intentions gardées** : « Besoin estimé » (`item.demande`, sauvegardes) et
+  `reco-rupture` (thème) ; `villeAffichee` (thème) avec le pluriel (parcours) et avec la
+  fiche client du lot données ; après « Valider la commande », le retour du lot pièges
+  (Commandes, la ligne mise en avant, le numéro dans le message) avec les messages du lot
+  parcours (commande bloquée, « Coordonnées enregistrées sur la fiche du client ») ; la
+  ville en attente (pièges) avec le pluriel (parcours) ; « Créer la tournée (N) » (pièges)
+  tutoyé (parcours) ; la commande client repliable (parcours) avec les gardes de saisie
+  (données) ; les deux routes hors du cache du service worker ; le `check` des deux lots.
+- **Le résumé de l'import** : la réécriture du lot pièges (le lot parcours n'y posait que
+  des pluriels, qu'elle a déjà).
+- **v1.45.1 et le lot données** : la v1.45.1 ne dessinait plus l'historique à l'ouverture ;
+  le lot données retire l'écran, `renderHistorique` et `/api/historique` du chargement.
+  Rien n'est chargé ni dessiné à l'ouverture, le Journal se lit par pages dans Paramètres ;
+  le corps réécrit par la v1.45.1 part avec sa fonction.
+- **Conflit que git ne signale pas** : `accorder` importé de `utils/text.js` (parcours) et
+  déclaré dans `app.js` (pièges), un `SyntaxError` au chargement du module. La copie locale
+  part (même effet pour ses appels).
+
+### Réconciliations (commits à part, chacun avec son banc rouge avant)
+
+- **Un seul dessin** (téléphone × thème) : l'icône du menu « Plus » en clair posait sa
+  géométrie à toutes les largeurs ; elle passe sous 820 px (rien ne change à l'écran).
+- **Les dates par l'utilitaire** (pièges, sauvegardes, données × parcours) : « à 16 h 00 »
+  dans le résumé de l'import, « Manquera le dim. 27 sept. » (une fonction locale `jourCourt`
+  rendait « 27/9 »), « 24 sept. · 16 h 00 » au Journal, « Livrée le 24 septembre à 16 h 00 »
+  sur le bon.
+- **Un seul vocabulaire** (données × parcours) : les clients signalés disent « À
+  rappeler », le mot du filtre « Clients à rappeler » ; plus aucun « relance » dans Clients.
+- **Bancs qui suivent la décision d'un autre lot** : la recherche de client et
+  `#customerValider` (pièges) ; le message « Commande CMD-… validée » (parcours) ;
+  « données de 20 h 20 » (`tournee-hors-ligne`, que le lot parcours n'avait pas relancé) ;
+  Analyse sans sous-onglets depuis la suppression d'Exports (thème) ; le repli des pilules
+  de Commandes jugé à 360 px, les six pilules tenant désormais en deux rangs à 390 px
+  (téléphone) ; `historique-lent` juge qu'à l'ouverture ni `/api/historique` ni
+  `/api/journal` ne partent, et que le Journal lit une page de 50 sur 4 000 lignes.
+
+### Exports
+
+Aucun autre lot n'ajoute rien à l'écran supprimé : les lots téléphone et thème ne le
+nomment que dans des listes `:is(…)` de leur CSS (sans effet), comme les règles d'avant
+le 24/09 et l'entrée `exportsList` du squelette de chargement (ignorée : l'élément
+n'existe plus). Le bouton d'export de Commandes que le lot téléphone déplace est celui que
+le lot parcours garde (« Exporter (Excel) »).
+
+### Écarts nommés
+
+- `npm run check` (`node --check` sans type module) ne voit pas une déclaration en double
+  dans un module ES ; `node --input-type=module --check < fichier` la voit. Non changé.
+- « Livrée le … » du bon de livraison n'a pas de banc (aucun bon semé n'est livré).
+- Le bon imprimé perd l'année de « Livrée le » l'année en cours, comme ses autres dates.
+- Restent `#exports` et `exportsList`, morts, dans la feuille et le squelette.
+
+### Bancs
+
+Code final vérifié : `461dd09` (arbre `9bdf567`). `npm run check`, et chaque module du front
+par `node --input-type=module --check` ; `npm test` 745/745 (dont `feuille-equilibree`,
+`ports-e2e`, `un-seul-dessin`). e2e (3100/3101 et les ports des bancs semés) :
+
+- **Liste ciblée** (42 fichiers, 491 cas : les bancs des six lots, `historique-lent`,
+  onglets, fumée, Commandes, Clients, Abonnements, Tournée, Préparation, Paramètres,
+  Stock, connexion, contrastes, cibles, focus, thèmes, texte coupé, navigation au
+  téléphone). Premier passage, sur la dernière fusion : 5 rouges, chacun une décision
+  d'un autre lot, réconciliés ci-dessus. Second passage : 490 verts, 1 rouge —
+  `smoke.spec.js` « sliders tournee », « Enregistré » jamais lu ; vert seul 3 fois sur 3 et
+  dans les deux suites complètes. Instable, cause antérieure aux lots (`bc70081`) : une
+  lecture de `/api/settings/tournee` qui revient après l'enregistrement remet le statut à
+  vide (`tourneeSaveTimer` déjà repassé à `null`), ce qu'une suite chargée rend possible.
+- **Suite complète, passage 1** : 668 verts, 3 rouges, 24 non lancés. Deux rouges « port
+  3334 / 3330 déjà pris » : les agents « perf » lançaient au même moment les mêmes bancs
+  dans leurs arbres. Le troisième (`preparation-lignes`, tablette) a reçu « En cours ·
+  Prêtes livraison · Bloquées stock », les mots d'avant le lot parcours, que ce code ne
+  peut plus écrire (présents dans `main` et les deux branches perf) : le banc a parlé au
+  serveur d'un autre arbre (la course que `serveur-seme.js` nomme). Les trois fichiers,
+  relancés trois fois de suite sans autre suite en cours : 27/27, trois fois.
+- **Suite complète, passage 2** : **695/695** (une suite perf relevée en parallèle
+  pendant ce passage, sans effet).
