@@ -9,6 +9,7 @@ function createSqliteStore(options) {
     seedJsonPath,
     defaultDb,
     normalizeDb,
+    normaliserTable,
     ensureDir
   } = options;
 
@@ -70,25 +71,12 @@ function createSqliteStore(options) {
 
   return {
     readDb() {
-      const db = {
-        ...defaultDb(),
-        stock: readPayloads(database, "produits"),
-        clients: readPayloads(database, "clients"),
-        ventes: readPayloads(database, "ventes"),
-        historique: readPayloads(database, "historique"),
-        commandes: readPayloads(database, "commandes"),
-        // Sans le trace des tournees terminees : voir readRoutes.
-        routes: readRoutes(database),
-        subscriptions: readPayloads(database, "abonnements"),
-        relances: readPayloads(database, "relances_crm"),
-        deliverySectors: readPayloads(database, "secteurs_livraison"),
-        stockMovements: readPayloads(database, "mouvements_stock"),
-        // v1.12.0 : historique des imports Excel archives (metadata + chemin
-        // vers le fichier xlsx brut conserve dans /app/data/imports-archives/)
-        importsArchives: readPayloads(database, "imports_archives"),
-        settings: readSettings(database)
-      };
-
+      // Le serveur passe normaliserTable : lecture table par table, a la
+      // demande (voir lectureParesseuse). Sans elle (bancs qui ouvrent le
+      // magasin seul), toute la base, comme avant.
+      if (normaliserTable) return lectureParesseuse(database, defaultDb(), normaliserTable);
+      const db = defaultDb();
+      for (const [cle, lire] of LECTURES_DES_TABLES) db[cle] = lire(database);
       return normalizeDb(db);
     },
 
@@ -112,6 +100,14 @@ function createSqliteStore(options) {
       if (!exists) return undefined;
       const row = database.prepare("SELECT trace FROM traces_tournees WHERE route_id = ?").get(id);
       return row ? JSON.parse(row.trace) : null;
+    },
+
+    /**
+     * Le nombre de lignes de ventes, sans les lire ni les decoder (24/09) :
+     * le tableau de bord n'en montre que le compte.
+     */
+    compterVentes() {
+      return database.prepare("SELECT COUNT(*) AS n FROM ventes").get().n;
     },
 
     checkpoint() {
@@ -1128,6 +1124,69 @@ function migrateTraces(database) {
     database.exec("ROLLBACK");
     throw error;
   }
+}
+
+// Les tables de readDb : la cle dans `db`, et comment la lire.
+const LECTURES_DES_TABLES = [
+  ["stock", database => readPayloads(database, "produits")],
+  ["clients", database => readPayloads(database, "clients")],
+  ["ventes", database => readPayloads(database, "ventes")],
+  ["historique", database => readPayloads(database, "historique")],
+  ["commandes", database => readPayloads(database, "commandes")],
+  // Sans le trace des tournees terminees : voir readRoutes.
+  ["routes", database => readRoutes(database)],
+  ["subscriptions", database => readPayloads(database, "abonnements")],
+  ["relances", database => readPayloads(database, "relances_crm")],
+  ["deliverySectors", database => readPayloads(database, "secteurs_livraison")],
+  ["stockMovements", database => readPayloads(database, "mouvements_stock")],
+  // v1.12.0 : historique des imports Excel archives (metadata + chemin
+  // vers le fichier xlsx brut conserve dans /app/data/imports-archives/)
+  ["importsArchives", database => readPayloads(database, "imports_archives")],
+  ["settings", database => readSettings(database)]
+];
+
+/**
+ * LECTURE PARESSEUSE (24/09, mesure en production). readDb relisait et
+ * decodait TOUTES les tables a chaque requete. L'ouverture lance ~20 routes
+ * ensemble, Node les traite l'une apres l'autre, et chacune payait la base
+ * entiere -- historique, ventes et mouvements compris, qu'aucune ne lit :
+ * 580 a 710 ms par route en production quand elles partent ensemble.
+ *
+ * Chaque table est desormais lue, decodee et normalisee (normaliserTable) a
+ * son PREMIER acces ; une requete ne paie que ce qu'elle lit. L'objet rendu a
+ * les memes cles et les memes valeurs : `{ ...db }`, JSON.stringify et
+ * Object.keys lisent tout. Une table remplacee (`db.x = ...`) garde la valeur
+ * posee. writeDb normalise tout, donc lit ce qui ne l'a pas ete : l'etat de la
+ * base au moment de l'ecriture (sous le verrou), jamais un etat plus ancien.
+ *
+ * A savoir pour le code asynchrone : une table lue APRES un `await` l'est plus
+ * tard que les autres -- et sur un magasin ferme si une restauration a eu lieu
+ * entre-temps (erreur). Lire ce dont on a besoin avant de suspendre. Releve du
+ * 24/09 (revu apres la relecture adverse) : une seule lecture de ce genre, les
+ * clients dans POST /api/routes/:id/ajouter, desormais lus avant le calcul
+ * routier (test/lecture-paresseuse.test.js ferme le magasin pendant ce calcul).
+ */
+function lectureParesseuse(database, db, normaliserTable) {
+  for (const [cle, lire] of LECTURES_DES_TABLES) {
+    let valeur;
+    let lue = false;
+    Object.defineProperty(db, cle, {
+      configurable: true,
+      enumerable: true,
+      get() {
+        if (!lue) {
+          valeur = normaliserTable(cle, lire(database), db);
+          lue = true;
+        }
+        return valeur;
+      },
+      set(nouvelle) {
+        valeur = nouvelle;
+        lue = true;
+      }
+    });
+  }
+  return db;
 }
 
 /** Les tournees, avec le trace des seules tournees qui ne sont pas terminees. */

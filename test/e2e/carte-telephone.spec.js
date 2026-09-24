@@ -517,7 +517,15 @@ test("relecture — la legende « Livre / En cours / A venir » disparait en pre
 test("relecture — /api/carte/fond echoue une fois : le fond revient sans recharger la page", async ({ browser }) => {
   test.setTimeout(120000);
   let appels = 0;
+  // Integration de la performance (24/09) : la carte ne demande plus son fond
+  // qu'une fois a sa taille (lot reseau : au « resize » de Leaflet, apres
+  // l'affichage de la Tournee), soit APRES que le service worker a pris la page
+  // (clients.claim). La demande passe alors par lui, que `page.route` ne voit
+  // pas : le premier appel n'echouait plus, et le prealable tombait (rouge aussi
+  // sur perf/reseau-donnees seul). Sans service worker, la page parle au
+  // reseau : c'est la relance de la PAGE que ce banc juge.
   const { ctx, page, erreurs } = await ouvrir(browser, tournee, {
+    contexte: { serviceWorkers: "block" },
     avant: p => p.route("**/api/carte/fond", route => {
       appels += 1;
       if (appels === 1) return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "redeploiement" }) });
@@ -527,9 +535,9 @@ test("relecture — /api/carte/fond echoue une fois : le fond revient sans recha
   // Le premier appel a echoue (503, par construction) ; la relance est a 3 s.
   expect(appels, "prealable : /api/carte/fond n'a pas ete demande").toBeGreaterThanOrEqual(1);
   // Le fond revient, sans rechargement.
-  // (La relance ne se compte pas ici : une fois le service worker en place, elle
-  // passe par lui, que `page.route` ne voit pas. Les tuiles, elles, se voient.)
+  // La relance, elle, passe par la route (sans service worker) : deux appels.
   await expect.poll(() => page.locator("#map img.leaflet-tile").count(), { timeout: 12000, message: "la carte reste sans fond jusqu'au rechargement" }).toBeGreaterThan(0);
+  expect(appels, "la relance n'est pas passee par le reseau").toBeGreaterThanOrEqual(2);
   await expect(page.locator("#carteMessage")).toBeHidden();
   expect(await page.locator("#map .leaflet-tile-pane .leaflet-layer").count(), "le fond a ete pose deux fois").toBe(1);
   expect(erreurs).toEqual([]);

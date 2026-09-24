@@ -522,8 +522,10 @@ function ouvrirResultatDeRecherche(genre, id) {
     const statut = document.getElementById("crmStatusFilter");
     if (statut) statut.value = "all";
     clientChoisi = String(id);
+    // Le filtre AVANT l'arrivee, et un seul rendu : celui de l'arrivee
+    // (rendreOuDifferer, lot rendu ; integration du 24/09).
+    rendreOuDifferer("crm", renderCrm);
     showTab("crm");
-    renderCrm();
     document.querySelector(`[data-cli-choisir="${CSS.escape(String(id))}"]`)?.focus();
     return;
   }
@@ -539,8 +541,9 @@ function ouvrirResultatDeRecherche(genre, id) {
     if (champ) champ.value = terme;
     const statut = document.getElementById("stockStatusFilter");
     if (statut) statut.value = "all";
+    // Un seul rendu, a l'arrivee (rendreOuDifferer ; integration du 24/09).
+    rendreOuDifferer("stock", renderStock);
     showTab("stock");
-    renderStock();
   }
 }
 
@@ -779,7 +782,9 @@ function bindUi() {
   // carte y manquaient.
   document.querySelector("#stock .stk-tout-voir")?.addEventListener("click", () => {
     recommendFilter = "low";
-    renderRecommande();
+    // Dessinee une fois, en arrivant (go-tab suit) : pas ici puis a nouveau
+    // par le rendu en attente (24/09).
+    rendreOuDifferer("recommande", renderRecommande);
   });
 
   bindCommandes();
@@ -1049,7 +1054,6 @@ function bindUi() {
     if (action === "cli-fermer") document.getElementById("cliDialogue")?.close();
     // « Les N autres » : la liste des commandes, cherchee sur ce client.
     if (action === "cli-voir-commandes") {
-      showTab("commandes");
       // Une liste PROPRE, comme une redirection : un filtre laisse d'avant
       // cacherait les commandes du client. Et le client par son IDENTIFIANT.
       for (const id of ["cmdRecherche", "cmdDu", "cmdAu"]) {
@@ -1059,7 +1063,11 @@ function bindUi() {
       Object.assign(commandesFiltre, { statut: "toutes", recherche: "", page: 1, bloquees: false, completer: false,
         du: "", au: "", secteur: "", jour: "",
         client: actionButton.dataset.clientId || "", clientNom: actionButton.dataset.clientNom || "" });
-      renderCommandes();
+      // Le filtre AVANT l'arrivee, et un seul rendu : celui que showTab fait en
+      // arrivant (24/09 ; avant, le rendu en attente avec l'ancien filtre, puis
+      // celui-ci).
+      rendreOuDifferer("commandes", renderCommandes);
+      showTab("commandes");
     }
     if (action === "importer-stock") {
       const champ = document.getElementById("stockFile");
@@ -1254,7 +1262,9 @@ function showTab(tabName, options = {}) {
     // deplie, pour que la liste ne paraisse pas amputee sans raison visible.
     commandesFiltresOuverts = Boolean(redirection.completer);
     tabName = redirection.onglet;
-    renderCommandes();
+    // Dessinee en arrivant, une fois, avec ce filtre (24/09 : un rendu ici puis
+    // le rendu en attente, deux pour une arrivee).
+    rendreOuDifferer("commandes", renderCommandes);
     // L'adresse dit ou l'on est vraiment : #commandes, plus l'ancien nom.
     // replaceState ne declenche pas de hashchange, donc pas de boucle.
     history.replaceState(null, "", `#${tabName}`);
@@ -1295,6 +1305,11 @@ function showTab(tabName, options = {}) {
   }
 
   document.getElementById(nextTab)?.classList.add("active");
+  // Un ecran qui etait cache au dernier chargement se dessine en arrivant
+  // (rendreOuDifferer). Son rendu refait aussi l'ordre a plat du Stock.
+  const stockEnAttente = nextTab === "stock" && Boolean(rendusEnAttente.get("stock")?.has(renderStock));
+  if (stockEnAttente) ordreAPlat = null;
+  rendreEnAttente(nextTab);
 
   setText("pageTitle", titles[nextTab].title);
   setText("pageSubtitle", titles[nextTab].subtitle);
@@ -1312,7 +1327,7 @@ function showTab(tabName, options = {}) {
   if (nextTab === "commandes") majSousTitreCommandes();
   if (nextTab === "stock") majSousTitreStock();
   // Rouvrir le Stock refait l'ordre a plat, fige pendant les ajustements.
-  if (nextTab === "stock" && ordreAPlat) {
+  if (nextTab === "stock" && ordreAPlat && !stockEnAttente) {
     ordreAPlat = null;
     renderStock();
   }
@@ -1332,6 +1347,9 @@ function showTab(tabName, options = {}) {
     // Le repli des secteurs se MESURE : cache, la rangee n'a pas de hauteur.
     ajusterRepliDesSecteurs();
   }
+  // Les lectures propres aux Parametres partent quand on y arrive (24/09) ; a
+  // l'ouverture, le premier chargement (renderAll) s'en charge.
+  if (nextTab === "parametres" && !premierChargementDesDonnees) lectureDesParametres();
 
   updateCustomerCartBar();
 
@@ -1475,6 +1493,15 @@ let declencheurPleinEcran = null;
  */
 async function chargerFondDeCarte() {
   if (!map || coucheFond || fondEnCours) return;
+  // Carte cachee (un autre ecran que la Tournee) : ni /api/carte/fond, ni tuile.
+  // Mesure en production (24/09) : une tuile de 46 ko partait a chaque ouverture
+  // pour une carte que personne ne voyait. Leaflet signale « resize » quand la
+  // carte prend sa taille (invalidateSize, a l'affichage de la Tournee).
+  if (!map.getSize().x) {
+    map.off("resize", chargerFondDeCarte);
+    map.once("resize", chargerFondDeCarte);
+    return;
+  }
   fondEnCours = true;
   clearTimeout(fondRelance);
   fondRelance = null;
@@ -1676,6 +1703,9 @@ function poserSquelettes() {
     const zone = document.getElementById(id);
     if (!zone || zone.children.length) continue;
     zone.setAttribute("aria-busy", "true");
+    // La marque de CETTE fonction : retirerSquelettes ne touche qu'aux zones
+    // qu'elle a posees (voir la-bas).
+    zone.dataset.squelettePose = "";
     zone.innerHTML = squelette(lignes, id === "revenueChart" ? "colonnes" : (LIGNES.has(id) ? "lignes" : "liste"));
   }
   poserChiffresEnAttente();
@@ -1731,7 +1761,14 @@ function poserChiffresEnAttente() {
 /** Retire les squelettes restants : une zone qui n'a pas ete remplie l'est par
  *  son propre rendu, mais une zone en erreur garderait des blocs gris a vie. */
 function retirerSquelettes() {
-  for (const zone of document.querySelectorAll('[aria-busy="true"]')) {
+  // Les zones que poserSquelettes a marquees, et elles seules (integration du
+  // 24/09). Tout element aria-busy="true" y passait : <body> aussi, que le
+  // voile d'une action longue marque (showLoader, l'import d'un fichier) -- et
+  // des qu'une liste CACHEE gardait son squelette (un ecran pas encore affiche
+  // ne se dessine plus, lot rendu ; #historiqueList sur main v1.45.1), la page
+  // ENTIERE etait videe.
+  for (const zone of document.querySelectorAll("[data-squelette-pose]")) {
+    delete zone.dataset.squelettePose;
     zone.removeAttribute("aria-busy");
     if (zone.querySelector(".squelette")) zone.innerHTML = "";
   }
@@ -1814,6 +1851,10 @@ async function viderCacheDeDonnees() {
  * peut manquer (au premier jour d'ouverture, son URL a change) ; il garde
  * alors sa valeur courante. Aucun n'en porte depuis le 23/09 (les commandes
  * du jour ont quitte loadData) : la porte reste pour le prochain.
+ * Un endpoint dont l'adresse a change (`copieAvant`, revue du 24/09) se lit,
+ * faute de copie a la nouvelle, dans celle de l'ancienne, ramenee a ce que la
+ * nouvelle rend : sans quoi la premiere ouverture de la version qui change
+ * l'adresse sautait l'affichage immediat de TOUT.
  */
 async function lireDernieresDonnees(endpoints) {
   try {
@@ -1822,9 +1863,12 @@ async function lireDernieresDonnees(endpoints) {
     if (!noms.length) return null;
     const cache = await caches.open(noms[0]);
     const lus = await Promise.all(endpoints.map(async e => {
-      const reponse = await cache.match(e.path);
+      let reponse = await cache.match(e.path);
+      const avant = (!reponse || !reponse.ok) && e.copieAvant ? await cache.match(e.copieAvant.path) : null;
+      if (avant) reponse = avant;
       if (!reponse || !reponse.ok) return null;
-      return { key: e.key, valeur: await reponse.json(), date: Date.parse(reponse.headers.get("Date") || "") };
+      const valeur = await reponse.json();
+      return { key: e.key, valeur: avant ? e.copieAvant.garder(valeur) : valeur, date: Date.parse(reponse.headers.get("Date") || "") };
     }));
     const data = {};
     let date = NaN;
@@ -2007,10 +2051,13 @@ function endpointsDeChargement() {
     { key: "subscriptions", path: "/api/subscriptions", fallback: {items:[],occurrences:[],today:getTodayDateInput()} },
     { key: "clients", path: "/api/clients", fallback: [] },
     { key: "stock", path: "/api/stock", fallback: [] },
-    { key: "ventes", path: "/api/ventes", fallback: [] },
-    // Plus de /api/historique (24/09) : tout le journal partait a chaque
-    // ouverture (549 ko pour 3 000 lignes, mesure de l'audit), pour un ecran
-    // que la navigation n'ouvrait pas. La carte « Journal » le lit par pages.
+    // Plus de /api/ventes a l'ouverture (24/09, mesure en production : 249 ko
+    // de JSON a chaque chargement). Il ne servait qu'a un ecran que la
+    // navigation n'ouvre pas, et a un compte, que /api/dashboard donne
+    // desormais. L'ecran le demande s'il s'affiche (demanderDonneesDeLEcran).
+    // Plus de /api/historique non plus (24/09) : tout le journal partait a
+    // chaque ouverture (549 ko pour 3 000 lignes, mesure de l'audit), pour un
+    // ecran que la navigation n'ouvrait pas. La carte « Journal » le lit par pages.
     { key: "orders", path: "/api/orders", fallback: [] },
     { key: "crmClients", path: "/api/crm/clients", fallback: [] },
     { key: "crmRelances", path: "/api/reminders", fallback: [] },
@@ -2022,7 +2069,11 @@ function endpointsDeChargement() {
     { key: "sectors", path: "/api/sectors", fallback: [] },
     { key: "deliverySectors", path: "/api/delivery-sectors", fallback: [] },
     { key: "routes", path: "/api/routes", fallback: [] },
-    { key: "stockMovements", path: "/api/stock-movements", fallback: [] },
+    // Les 12 que l'ecran Stock montre (renderStockMovements), pas les 633 de la
+    // production (222 ko) : 24/09. Au premier chargement de cette version, le
+    // cache n'a que la liste entiere (copieAvant : voir lireDernieresDonnees).
+    { key: "stockMovements", path: `/api/stock-movements?limite=${MOUVEMENTS_AFFICHES}`, fallback: [],
+      copieAvant: { path: "/api/stock-movements", garder: liste => (Array.isArray(liste) ? liste.slice(0, MOUVEMENTS_AFFICHES) : []) } },
     { key: "dashboard", path: "/api/dashboard", fallback: null }
   ];
 }
@@ -2170,6 +2221,44 @@ async function loadData() {
   // updatedAt (refreshActiveRoute). Un second chargement, frais, suit : il
   // n'a lieu que dans ce croisement, jamais apres un geste seul.
   if (ecritureCroisee) loadData();
+  if (premier) amorcerCopieDesArchives();
+  if (premier) oublierLesCopiesDAvant();
+}
+
+// Revue du 24/09 : ce que les versions d'avant rangeaient dans le cache de
+// donnees et que plus rien ne lit -- la liste entiere des mouvements, les
+// ventes, l'historique (~720 ko en production). Le nom du cache n'a pas
+// change : elles y restaient, figees, jusqu'a la fin de la session. Plus rien
+// ne demande la liste entiere des mouvements : sa presence signe un cache
+// d'avant. Retirees UNE fois, et seulement quand la nouvelle adresse est
+// rangee : jusque-la, la liste entiere sert de copie (lireDernieresDonnees).
+const COPIES_D_AVANT = ["/api/stock-movements", "/api/ventes", "/api/historique"];
+async function oublierLesCopiesDAvant() {
+  try {
+    if (typeof caches === "undefined") return;
+    const noms = (await caches.keys()).filter(nom => nom.startsWith(PREFIXE_CACHE_DONNEES));
+    for (const nom of noms) {
+      const cache = await caches.open(nom);
+      if (!(await cache.match(COPIES_D_AVANT[0]))) continue;
+      if (!(await cache.match(`/api/stock-movements?limite=${MOUVEMENTS_AFFICHES}`))) continue;
+      await Promise.all(COPIES_D_AVANT.map(chemin => cache.delete(chemin)));
+    }
+  } catch { /* stockage indisponible : rien a oublier */ }
+}
+
+// Hors ligne, les archives d'import des Parametres restaient lisibles : la copie
+// du service worker se refaisait a chaque ouverture. Depuis le 24/09 elle ne se
+// refait qu'a leur affichage (lectureDesParametres) ; on l'amorce donc une fois,
+// si elle manque -- une seule requete apres la connexion, aucune ensuite.
+async function amorcerCopieDesArchives() {
+  try {
+    if (typeof caches === "undefined" || !navigator.serviceWorker?.controller) return;
+    const noms = (await caches.keys()).filter(nom => nom.startsWith(PREFIXE_CACHE_DONNEES));
+    for (const nom of noms) {
+      if (await (await caches.open(nom)).match("/api/imports/archives")) return;
+    }
+    await apiFetch("/api/imports/archives");
+  } catch { /* hors ligne, ou stockage indisponible : rien a amorcer */ }
 }
 
 function refreshActiveRoute() {
@@ -2929,7 +3018,8 @@ function dateEnDeuxMorceaux(texte) {
   return `<span class="cmd-date-jour">${escapeHtml(jour)}</span> <span class="cmd-date-mois">${escapeHtml(reste.join(" "))}</span>`;
 }
 
-// « 24 sept. » (l'annee si ce n'est pas celle-ci) : utils/dates.js, jourMois.
+// « 24 sept. » (l'annee si ce n'est pas celle-ci) : utils/dates.js, jourMois
+// (ses formateurs Intl se construisent une fois, 24/09).
 function dateCourte(iso) {
   return iso ? datesFr.jourMois(String(iso).slice(0, 10)) : "—";
 }
@@ -3273,8 +3363,43 @@ function bindCommandes() {
 // du 23/09 sur 2 000 commandes : 78 000 elements sur 108 000, et une tache de
 // 289 ms au demarrage. On ne les dessine que s'ils sont AFFICHES : si l'un
 // redevient atteignable, il se redessine sans qu'on touche a cette liste.
+//
+// CONTRAT : cache, rien -- ni rendu, ni rendu garde pour plus tard. Qui
+// l'appelle dessine lui-meme l'ecran en y arrivant (les Parametres du lot
+// reseau : renderAll ET showTab). Le changer en « plus tard » faisait lire deux
+// ou trois fois ces appelants a chaque arrivee (relecture du 24/09).
 function rendreSiAffiche(idSection, rendu) {
   if (document.getElementById(idSection)?.classList.contains("active")) rendu();
+}
+
+// Le 24/09 (mesure en production, telephone a CPU x4) : l'ouverture dessinait
+// les TREIZE ecrans pour en montrer un -- une tache d'environ 1 s, 12 700
+// elements pour 255 visibles. Un ecran cache garde desormais son rendu EN
+// ATTENTE, et showTab le dessine en y arrivant, avec les donnees du moment :
+// ce que l'ecran montre ne change pas, il est seulement dessine plus tard.
+const rendusEnAttente = new Map();
+
+function rendreOuDifferer(idSection, rendu) {
+  if (document.getElementById(idSection)?.classList.contains("active")) {
+    rendusEnAttente.get(idSection)?.delete(rendu);
+    rendu();
+    return;
+  }
+  // Un Set : deux chargements pendant qu'on est ailleurs = un seul rendu.
+  if (!rendusEnAttente.has(idSection)) rendusEnAttente.set(idSection, new Set());
+  rendusEnAttente.get(idSection).add(rendu);
+}
+
+/** Les rendus qu'un ecran attend (showTab, en y arrivant). */
+function rendreEnAttente(idSection) {
+  const rendus = rendusEnAttente.get(idSection);
+  if (!rendus?.size) return;
+  rendusEnAttente.delete(idSection);
+  // Un rendu qui echoue ne bloque pas le changement d'ecran (titre, adresse) :
+  // l'erreur reste dans la console, ou tabs.spec.js la voit.
+  for (const rendu of rendus) {
+    try { rendu(); } catch (erreur) { console.error(erreur); }
+  }
 }
 
 /**
@@ -3293,20 +3418,29 @@ function renderAll({ lectures = true } = {}) {
   renderStats();
   renderDailySummary();
   renderImportSummary();
-  renderCrm();
-  renderRelances();
-  renderCustomerOrder();
-  renderStatistics();
-  renderStock();
+  // Chaque ecran de liste ne se dessine que s'il est affiche ; sinon en y
+  // arrivant (rendreOuDifferer, 24/09). Les pastilles de la barre laterale et
+  // le tableau de bord (renderStats), eux, restent a jour partout.
+  rendreOuDifferer("crm", renderCrm);
+  rendreOuDifferer("relances", renderRelances);
+  // Le choix du client d'un rappel : renderCrm le remplissait au passage.
+  rendreOuDifferer("relances", renderClientSelects);
+  rendreOuDifferer("commande-client", renderCustomerOrder);
+  rendreOuDifferer("statistiques", renderStatistics);
+  rendreOuDifferer("stock", renderStock);
+  // Les 12 derniers mouvements, eux, a chaque chargement (une centaine
+  // d'elements) : le chargement instantane du lot reseau les lit des
+  // l'ouverture, ou qu'on soit (poids-reseau.spec.js, « la copie d'avant »).
   renderStockMovements();
-  renderPreparation();
-  renderRecommande();
+  rendreOuDifferer("preparation", renderPreparation);
+  rendreOuDifferer("recommande", renderRecommande);
   // Les quatre anciennes listes de commandes n'ont plus de rendu : leurs
   // sections ont quitte la page le 23/09 (dette 7), l'ecran Commandes les
   // porte toutes.
-  renderCommandes();
+  rendreOuDifferer("commandes", renderCommandes);
   rendreSiAffiche("produits", renderProduits);
-  renderVentes();
+  // Hors mainTabs (inatteignable) : 2 579 elements et ~110 ms au telephone.
+  rendreSiAffiche("ventes", renderVentes);
   rendreSiAffiche("alertes", renderAlertes);
   renderDeliveryFilters();
   renderDeliveryCandidates();
@@ -3315,9 +3449,11 @@ function renderAll({ lectures = true } = {}) {
   majAlerteAdresses(clients, orders);
   renderRoute();
   if (lectures) {
+    // Les reglages de tournee (lus par renderSettings) servent aussi a l'ecran
+    // Tournee : ils restent lus a chaque chargement.
     renderSettings();
-    renderImportsArchives();
-    renderComptes();
+    // Ce que SEULS les Parametres montrent (24/09) : lu quand ils s'affichent.
+    rendreSiAffiche("parametres", lectureDesParametres);
   }
   renderMap();
   updateRouteProgress();
@@ -3477,7 +3613,7 @@ function renderDailySummary() {
   container.innerHTML = `
     <article class="summary-item status-ok">
       <h4>Workflow actif</h4>
-      <p>${accorder(orders.length, "commande")}, ${accorder(stock.length, "produit")}, ${accorder(ventes.length, "ligne importée", "lignes importées")}</p>
+      <p>${accorder(orders.length, "commande")}, ${accorder(stock.length, "produit")}, ${accorder(dashboard?.ventes?.total ?? ventes.length, "ligne importée", "lignes importées")}</p>
     </article>
 
     <article class="summary-item ${lowStock ? "status-warning" : "status-ok"}">
@@ -3663,8 +3799,13 @@ function crmStatusPill(status) {
   return "pill-blue";
 }
 
+// Les formateurs Intl se construisent UNE fois (24/09) : un par appel coutait
+// 121 a 135 ms a l'ouverture d'un telephone (profil de la production), pour
+// un texte identique.
+const FORMAT_EUROS = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
+
 function formatMoney(value) {
-  return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(value) || 0);
+  return FORMAT_EUROS.format(Number(value) || 0);
 }
 
 const ICONE_CLI = {
@@ -4141,8 +4282,10 @@ function ouvrirCommandePourClient(clientId) {
 }
 
 function ouvrirRappelPourClient(clientId) {
+  // La liste des clients remplie une fois, a l'arrivee (rendreOuDifferer ;
+  // integration du 24/09) -- avant que le client y soit choisi.
+  rendreOuDifferer("relances", renderClientSelects);
   showTab("relances");
-  renderClientSelects();
   const form = document.getElementById("relanceForm");
   const choix = document.getElementById("relanceClientSelect");
   if (!form || !choix) return;
@@ -4471,7 +4614,12 @@ function changeCustomerCart(productId, delta) {
   if (delta > 0) prevenirManqueDeStock(product, nextQuantity);
   if (nextQuantity === 0) customerCart.delete(String(productId));
   else customerCart.set(String(productId), { ...current, quantite: nextQuantity });
-  renderCustomerCatalog();
+  // Seul le champ de CE produit change (24/09) : refaire les 218 cartes du
+  // catalogue a chaque « + » coutait ~700 ms au telephone, et remplacait le
+  // bouton qu'on venait de toucher. Sans champ a l'ecran, le rendu complet.
+  const champ = document.querySelector(`#customerCatalog [data-customer-qty-input][data-product-id="${CSS.escape(String(productId))}"]`);
+  if (champ) champ.value = nextQuantity;
+  else renderCustomerCatalog();
   renderCustomerCart();
 }
 
@@ -4670,7 +4818,9 @@ function montrerCommandeCreee(order, filtre = "toutes") {
   commandeMiseEnAvant = order?.id ? String(order.id) : "";
   const rang = commandeMiseEnAvant ? commandesFiltrees().findIndex(o => String(o.id) === commandeMiseEnAvant) : -1;
   if (rang >= 0) commandesFiltre.page = Math.floor(rang / COMMANDES_PAR_PAGE) + 1;
-  renderCommandes();
+  // Un seul rendu, a l'arrivee, avec ce filtre et cette page (rendreOuDifferer,
+  // lot rendu ; integration du 24/09).
+  rendreOuDifferer("commandes", renderCommandes);
   showTab("commandes");
   if (!commandeMiseEnAvant) return;
   // showTab remet la page en haut (tout de suite, a l'image suivante, et
@@ -4822,9 +4972,10 @@ function renderStock() {
     return;
   }
 
-  filtered.forEach(product => {
-    container.appendChild(creerLigneStock(product));
-  });
+  // UNE ecriture pour toutes les lignes (24/09). Une par ligne -- 218 analyses
+  // HTML en production -- coutait 200 a 340 ms au telephone, a chaque
+  // arrivee sur le Stock et a chaque recherche.
+  container.innerHTML = filtered.map(creerLigneStock).join("");
 }
 
 // La cle de categorie d'un produit, telle que le filtre la compare.
@@ -4980,6 +5131,7 @@ const ICONE_CATEGORIE = "M12 3 3 8v8l9 5 9-5V8z";
 // du seuil sont GARDEES -- la planche les montre en lecture seule, mais ce sont
 // les seuls chemins de l'application pour les poser. Les identifiants sont
 // propres a l'ecran : l'ecran « produits » rend les memes produits.
+// Rend le HTML de la ligne : renderStock les ecrit toutes en une fois (24/09).
 function creerLigneStock(product) {
   const level = getStockLevel(product);
   const quantite = product.quantityAvailable ?? getProductQuantity(product);
@@ -4992,9 +5144,7 @@ function creerLigneStock(product) {
   // n'en a plus assez ; le rayon passe alors en negatif. Ce negatif se DIT ici
   // (et dans « A regler ») : il appelle un recomptage, pas une rupture de plus.
   const negatif = quantite !== null && Number(quantite) < 0;
-  const ligne = document.createElement("div");
-  ligne.className = `stk-ligne${enAlerte ? " stk-ligne--alerte" : ""}`;
-  ligne.innerHTML = `
+  return `<div class="stk-ligne${enAlerte ? " stk-ligne--alerte" : ""}">
     <span class="stk-nom">${escapeHtml(nom)}${level.status === "a_renseigner" ? ` <span class="stk-a-renseigner">À renseigner</span>` : ""}${negatif ? ` <span class="stk-negatif">Stock négatif · à recompter</span>` : ""}</span>
     <span class="stk-code">${escapeHtml(product.code || product.sku || "-")}</span>
     <span class="stk-reserve">${escapeHtml(reserve)} sur commandes</span>
@@ -5003,8 +5153,7 @@ function creerLigneStock(product) {
     <span class="stk-ajuster">
       <button class="stk-pas" type="button" data-product-id="${id}" data-stock-delta="-1" aria-label="Retirer 1 unité de ${escapeAttribute(nom)}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button>
       <button class="stk-pas stk-pas--plus" type="button" data-product-id="${id}" data-stock-delta="1" aria-label="Ajouter 1 unité à ${escapeAttribute(nom)}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button>
-    </span>`;
-  return ligne;
+    </span></div>`;
 }
 
 function getFilteredStock() {
@@ -5075,11 +5224,14 @@ function createStockCard(product) {
   return div;
 }
 
+// Les mouvements recents de l'ecran Stock : le chargement n'en demande que ceux-la.
+const MOUVEMENTS_AFFICHES = 12;
+
 function renderStockMovements() {
   const container = document.getElementById("stockMovementList");
   if (!container) return;
 
-  const movements = stockMovements.slice(0, 12);
+  const movements = stockMovements.slice(0, MOUVEMENTS_AFFICHES);
   if (!movements.length) {
     container.innerHTML = emptyState("Aucun mouvement", "Les ajustements manuels apparaîtront ici.");
     return;
@@ -5205,9 +5357,15 @@ function renderPreparationFilterOptions() {
   // jamais -- apres un choix, la rangee etait deja depliee -- et une mutation
   // l'a montre en survivant.)
   const ordonnes = current === "all" ? sectors : [current, ...sectors.filter(sector => sector !== current)];
-  conteneur.innerHTML = pilule("all", "Tous") + ordonnes.map(sector => pilule(sector, formatSectorLabel(sector))).join("");
+  const rangee = pilule("all", "Tous") + ordonnes.map(sector => pilule(sector, formatSectorLabel(sector))).join("");
+  // Rangee inchangee (une frappe dans la recherche) : ni refaite, ni remesuree
+  // -- la mesure force une mise en page de toute la page (24/09).
+  if (rangee === rangeeDesSecteurs && conteneur.firstChild) return;
+  rangeeDesSecteurs = rangee;
+  conteneur.innerHTML = rangee;
   ajusterRepliDesSecteurs();
 }
+let rangeeDesSecteurs = "";
 
 /**
  * « Pilules de filtre : repliables plutot que debordantes » (charte §4).
@@ -5225,6 +5383,10 @@ function ajusterRepliDesSecteurs() {
   const conteneur = document.getElementById("preparationSectorPills");
   const bouton = document.getElementById("preparationSectorPlus");
   if (!conteneur || !bouton) return;
+  // Ecran cache : rien a mesurer (la rangee n'a pas de hauteur), et lire
+  // scrollHeight forcait une mise en page de TOUTE la page -- 96 a 136 ms au
+  // telephone a chaque rendu (24/09). showTab mesure en arrivant.
+  if (!document.getElementById("preparation")?.classList.contains("active")) return;
   const deplie = conteneur.classList.contains("filtre-pilules--depliee");
   // On mesure TOUJOURS a l'etat replie : deplie, il n'y a plus rien a voir.
   conteneur.classList.remove("filtre-pilules--depliee");
@@ -6039,9 +6201,40 @@ function renderProduits() {
   });
 }
 
+// LES DONNEES QUE SEUL UN ECRAN MONTRE (24/09). /api/ventes ne part plus a
+// l'ouverture : son ecran le demande quand il se dessine AFFICHE -- a chaque
+// rendu, comme le chargement complet le faisait, pour qu'un ecran ouvert reste
+// a jour. Rend vrai si une demande part : le rendu reviendra quand elle aura
+// abouti (ou echoue : il montre alors ce qu'il a). L'historique n'y est plus :
+// son ecran est parti avec le lot « donnees utiles », le Journal de Parametres
+// le lit par pages (chargerJournal).
+const DONNEES_DES_ECRANS = {
+  ventes: { chemin: "/api/ventes", poser: valeur => { ventes = valeur; }, rendu: () => renderVentes() }
+};
+const donneesDEcranEnCours = new Set();
+const donneesDEcranRecues = new Set();
+
+function demanderDonneesDeLEcran(ecran) {
+  if (donneesDEcranRecues.delete(ecran)) return false;
+  if (!document.getElementById(ecran)?.classList.contains("active")) return false;
+  const donnees = DONNEES_DES_ECRANS[ecran];
+  if (!donneesDEcranEnCours.has(ecran)) {
+    donneesDEcranEnCours.add(ecran);
+    apiFetch(donnees.chemin)
+      .then(valeur => { if (Array.isArray(valeur)) donnees.poser(valeur); }, () => {})
+      .finally(() => {
+        donneesDEcranEnCours.delete(ecran);
+        donneesDEcranRecues.add(ecran);
+        donnees.rendu();
+      });
+  }
+  return true;
+}
+
 function renderVentes() {
   const container = document.getElementById("ventesList");
   if (!container) return;
+  if (demanderDonneesDeLEcran("ventes")) return;
 
   container.innerHTML = "";
 
@@ -7494,10 +7687,21 @@ async function renderHorizonRecommande() {
   }
 }
 
+// LES LECTURES PROPRES AUX PARAMETRES (24/09, mesure en production). Les
+// archives d'import, les comptes et l'etat du calcul routier etaient demandes
+// a CHAQUE chargement (ouverture, et apres chaque ecriture), quel que soit
+// l'ecran -- /api/storage/status deux fois, /api/comptes deux fois. Ils le sont
+// quand les Parametres s'affichent (showTab), et a chaque chargement tant
+// qu'ils restent affiches (renderAll).
+function lectureDesParametres() {
+  afficherCalculRoutier();
+  renderImportsArchives();
+  renderComptes();
+}
+
 function renderSettings() {
   updateBrandImageStatus();
   renderTourneeSettings();
-  afficherCalculRoutier();
   renderHorizonRecommande();
   renderParSecteursPilules();
   chargerNumerotation();
@@ -7574,7 +7778,8 @@ async function loadMoi() {
   // Le titre « Bonjour <identifiant> » depend de /api/me : s'il repond apres
   // le premier rendu, le titre doit suivre.
   majEnteteTableauDeBord(getInitialTab());
-  renderComptes();
+  // La liste des comptes n'est lue que Parametres affiches (24/09).
+  rendreSiAffiche("parametres", renderComptes);
   majDroitsNumerotation();
   majCarteJournal();
 }
