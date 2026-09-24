@@ -5985,3 +5985,180 @@ Sur un écran bas, la barre **défile dans sa propre hauteur** (règle existante
 *Bancs (`collant-et-clavier.spec.js`)* : « la barre latérale reste fixe » (921 et 1440 px, trois
 écrans ; rouge avant : −400 au lieu de 0) ; « écran bas, tout le menu reste atteignable »
 (rouge si la barre fixe perd son défilement : « Version » à 768 px pour un écran de 560).
+
+## 24/09 — Le filet de sécurité : sauvegardes visibles, À recommander qui voit venir
+
+Branche `feat/sauvegardes-et-previsions`, partie de v1.45.0 (`12da3d4`). Décisions de
+Thomas du 24/09 (recommandations de l'audit acceptées) : **2** (« À recommander » compte
+les abonnements actifs et les commandes planifiées des 14 prochains jours, réglable de 7
+à 30), **3** (la pastille Stock compte aussi un produit au-dessus du seuil qui manquera),
+**4** (télécharger une sauvegarde : l'administrateur seul ; une sauvegarde par jour gardée
+30 jours, en plus, sans jamais supprimer plus qu'avant).
+
+### Fait — les sauvegardes
+
+Le serveur sauvegardait seul (au plus une fois par heure d'activité, à la première
+écriture qui suit) et savait quand ça échouait (`lastBackupError`, `backupsSuspended` dans
+`/api/storage/status`, commentés « l'UI doit alerter ») ; l'écran ne lisait que
+`lastRecovery`. `POST /api/backup/now` n'avait aucun appelant et était ouvert à tout compte.
+
+- **Une carte « Sauvegardes »** dans Paramètres, après « Imports et archives » (demi-largeur
+  au bureau, pleine largeur sous 920 px), la forme des autres cartes : **Dernière** (date et
+  taille, lues **sur le disque** — `lastBackupAt` repart à `null` à chaque démarrage),
+  **Conservées** (« 31 sauvegardes sur 12 jours, depuis le 13 septembre »), une **alerte**
+  (`role="alert"`, texte et contour dans la couleur d'alerte, jamais la couleur seule), et
+  deux gestes : « Sauvegarder maintenant », « Télécharger la dernière ».
+- **L'état vient de `/api/storage/status`** (champ `sauvegardes`, là où le serveur le disait
+  déjà) : des faits, pas des phrases — l'écran les écrit. Une alerte à la fois, la plus
+  grave d'abord : dossier illisible (jamais un 500), **échec** (automatique, ou manuel —
+  désormais noté lui aussi), sauvegardes suspendues (base repartie vide), **aucune**
+  sauvegarde, **périmée** (voir les décisions).
+- **« Sauvegarder maintenant »** : `requireAdministration` sur la route ; jamais mise en
+  file hors ligne (`JAMAIS_EN_FILE`) — rejouée des heures plus tard, elle ne garderait pas
+  l'état voulu. La carte se relit ensuite (la nouvelle dernière, ou l'échec qui s'y
+  inscrit). Sa ligne d'historique ne compte pas comme une saisie.
+- **« Télécharger la dernière »** : `GET /api/sauvegardes/derniere`, derrière
+  `requireAdministration` ; la dernière seulement (aucun nom de fichier ne vient de la
+  requête) ; `Cache-Control: no-store`, et la route est **exclue du cache du service
+  worker** (`API_CACHE_EXCLUDED`) : la base entière ne dort jamais dans l'appareil.
+- **La rétention** (`sauvegardesAGarder`) : les 30 plus récentes, comme avant, **plus la
+  dernière de chaque jour de Paris** sur les 30 derniers jours (aujourd'hui compris). Une
+  journalière n'est pas un fichier de plus : c'est une sauvegarde déjà écrite que la
+  rotation épargne ; pour les jours que les 30 dernières couvrent, elle en fait partie.
+  L'ensemble gardé contient toujours les 30 plus récentes : après un mois sans activité, les
+  30 dernières (toutes vieilles) restent, comme avant.
+- Un compte non administrateur **lit** la carte ; ses gestes ne sont pas rendus, et la
+  carte dit « Sauvegarder et télécharger : réservé aux administrateurs. » (comme la
+  numérotation des bons).
+
+### Fait — « À recommander » qui voit venir
+
+- **Le serveur** donne à chaque produit de `/api/stock` sa demande **connue d'avance**, par
+  jour (`upcomingDemand`, `quantityUpcoming`, `upcomingHorizonDays`) : les commandes
+  **planifiées** (`planifiee`, `a_confirmer`) livrées d'ici la fin de l'horizon (une date
+  passée compte aujourd'hui : elle attend encore), et les échéances des abonnements
+  **actifs** pas encore générées, d'aujourd'hui à la fin de l'horizon. Les échéances
+  viennent de `schedule()` (`lib/subscriptions.js`), le calendrier de l'écran Abonnements,
+  **appelé avec l'horizon** : rien n'est recalculé autrement ; un abonnement en pause ou
+  arrêté n'y figure pas ; une échéance déjà générée y porte son `orderId` et n'est comptée
+  que par sa commande. Les lignes se rattachent aux produits comme les réservations (code
+  ou nom, clés canoniques de `buildStockMetricsIndex`).
+- **L'horizon** : `settings.stock.horizonJours` (7 à 30, 14 par défaut),
+  `GET / PATCH /api/settings/stock` (un entier dans les bornes, sinon 400) ; une carte
+  « À recommander » dans Paramètres avec un curseur (44 px de haut), enregistré 500 ms
+  après le dernier mouvement, puis les données sont relues.
+- **L'écran** (`evaluerRecommandations`, une seule évaluation) : besoin estimé = commandes
+  en cours + à venir ; à recommander = de quoi couvrir tout l'horizon, ou repasser
+  au-dessus du seuil — le plus grand des deux ; **le jour du manque** = le premier jour où
+  la demande cumulée dépasse le stock (les commandes en cours d'abord, aujourd'hui, puis
+  chaque échéance à sa date). Chaque produit qui manque le dit : « Manquera le 27/9 : 24
+  demandés, 14 en stock » (ou « Manque dès aujourd'hui : … »), et d'où vient le besoin
+  (« Dont 12 sur commandes en cours et 12 à venir d'ici le 8/10 (abonnements, commandes
+  planifiées). »). Le sous-titre dit l'horizon.
+- **Un seul compte** (`aRecommander()` : urgent ou bientôt) pour la pastille Stock, la carte
+  « À recommander » du Stock (badge et liste), la tuile du tableau de bord et le filtre de
+  l'écran. Mesuré sur le semé de l'audit adapté : 3 partout (l'ancien code : pastille 1).
+
+### Décisions prises dans le lot
+
+- **« Périmée » veut une saisie plus récente que la sauvegarde.** Une sauvegarde ne part
+  qu'après une écriture : sans écriture, une sauvegarde de trois jours est à jour (un
+  week-end sans activité n'est pas une panne, et une alerte qui crie tous les lundis
+  apprend à ne plus la lire). L'alerte veut donc la dernière de plus de 24 h **et** une
+  écriture de ce processus plus récente qu'elle (deux secondes de marge : un système de
+  fichiers daté à la seconde arrondit la sauvegarde avant l'écriture qu'elle suit). Ne
+  comptent pas : la mise en cohérence du démarrage, la ligne d'historique d'une sauvegarde
+  manuelle.
+- **`SEREO_ENABLE_DB_EXPORT`, lu et respecté là où il a un sens.** Il garde `GET /api/db`
+  (export JSON de la base entière, ouvert à **tout** compte connecté, fermé par défaut,
+  « pour diagnostic local »). Le téléchargement d'une sauvegarde est une autre porte vers
+  le même contenu (et les empreintes des mots de passe) : elle est réservée à
+  l'administration. Mais **sans authentification**, tout visiteur est « administrateur »
+  (`getRequestIdentity`) et le rôle ne prouve plus rien : c'est alors la variable qui
+  décide (fermé par défaut ; la carte le dit). Avec authentification, elle ne s'applique
+  pas ici — l'exiger obligerait à l'ouvrir en production, ce qui ouvrirait aussi `/api/db`
+  à tous les comptes.
+- **Urgent / bientôt.** Urgent : stock à zéro ou qui manque **dès aujourd'hui** (une
+  échéance du jour non générée compte comme une commande en cours). Bientôt : sous le
+  seuil, ou qui manquera avant la fin de l'horizon.
+- **« N demandés »** : toute la demande de l'horizon (en cours et à venir), face au stock
+  d'aujourd'hui.
+- **La fin de l'horizon** : aujourd'hui + N jours, inclus — la convention de `schedule()` et
+  celle de la mesure de l'audit (24 sous 14 jours, 60 sous 30).
+- **Une échéance passée sans commande n'est pas « à venir »** (réserve du vérificateur de
+  l'audit) : l'écran Abonnements la montre en retard ; elle peut dater d'avant la saisie
+  de l'abonnement. Une commande planifiée en retard, elle, compte aujourd'hui.
+- **Le filtre « Stock faible » devient « Urgent et bientôt »** : il montre ce que la
+  pastille compte, et un produit au-dessus du seuil qui manquera n'est pas un « stock
+  faible ».
+- **La règle du 23/09 est remplacée** (section « Stock des planches 13d/14d ») : « le badge
+  de la carte est le même compte que la pastille (stock faible + rupture) » devient « le
+  même compte que la pastille : à recommander » (décision 3). « Sous le seuil » garde son
+  sens (quantité ≤ seuil) là où il est écrit : le sous-titre du Stock (« 3 sous le seuil »),
+  les tuiles de catégorie, les filtres de statut.
+- **L'horizon se règle par tout compte connecté**, comme les réglages de tournée : c'est un
+  réglage du quotidien, pas un geste d'administration.
+
+### Écarts nommés
+
+- **`/api/recommendations`** garde sa troisième règle (sous le seuil seulement) : aucun
+  appelant dans `public/`, tenue par `test/api.test.js`. Ni alignée ni retirée ici.
+- **Les alertes du tableau de bord** (`getAlertItems`, tuile « Alertes ») ne disent pas
+  « manquera » : elles restent « rupture / stock faible ».
+- **Après un redémarrage, rien n'est « modifié » tant que rien n'est écrit** : une saisie
+  faite dans l'heure avant un redémarrage, puis plus aucune écriture, n'est pas signalée
+  (la première écriture suivante déclenche de toute façon une sauvegarde).
+- **« Aucune sauvegarde » alerte aussi sur une base neuve et vide.**
+- **Le rythme d'une sauvegarde par heure est inchangé** : les écritures de la dernière heure
+  d'activité ne sont sauvegardées qu'à l'écriture suivante. C'est ce que l'alerte
+  « périmée » rattrape au bout de 24 h, et ce que « Sauvegarder maintenant » couvre.
+- **Disque** : jusqu'à 59 fichiers (30 + 29 journalières) au lieu de 30, sur le même volume
+  que la base et la carte OSRM (`DEPLOYMENT.md`). La taille réelle en production n'est pas
+  mesurée.
+- **L'écran d'un non-administrateur** est jugé en e2e sur la réponse du serveur réécrite
+  (les serveurs semés tournent sans connexion) ; le refus 403 lui-même est jugé en
+  `node --test`, sur un serveur authentifié avec un livreur et un compte bureau.
+- **Hors lot, non touchés** : les chiffres « neutres » en rouge et les listes rognées
+  d'À recommander (lot thème et finitions) ; « commander 6 » sur la carte du Stock et le
+  retrait des anciens écrans (audit, « Simplifier »).
+
+### Preuves rouges (ancien code `12da3d4`, restauré par copie ; cause lue)
+
+- `test/sauvegardes.test.js` : 403 attendu, **200** reçu pour un livreur sur
+  `POST /api/backup/now` ; 200 attendu, **404** pour le téléchargement ; rétention :
+  **jours 11 à 29** sans aucune sauvegarde (attendu : aucun) ; état : « /api/storage/status
+  ne dit rien des sauvegardes » (`'undefined'` au lieu de `'object'`). « Jamais plus
+  agressive » ne se juge pas sur l'ancien code (la fonction est neuve) : par mutant.
+- `test/a-recommander-a-venir.test.js` : `quantityUpcoming` **undefined** au lieu de 24
+  (l'exemple de l'audit), 0, et les demandes par jour ; horizon : `upcomingHorizonDays`
+  undefined au lieu de 14.
+- `test/e2e/a-recommander.spec.js` : pastille Stock **« 1 »** au lieu de « 3 » (le défaut
+  mesuré par l'audit) ; Changes L absent du filtre (« element(s) not found »).
+- `test/e2e/sauvegardes.spec.js` : la carte n'existe pas (« element(s) not found »), pour
+  l'état vide comme pour l'échec.
+
+**Mutants** (nouveau code, un à la fois, restauré par copie) : rétention sans les 30
+dernières → rouge (`[]` gardé au lieu des 30) ; « périmée » à l'âge seul → rouge (alerte
+sur la sauvegarde de deux jours sans saisie) ; sans la marge de 2 s → rouge ; état sans
+contrôle du rôle → rouge (un livreur « peut » télécharger) ; routes sans
+`requireAdministration` → rouge (200 au lieu de 403, sur chacune) ; abonnement en pause
+compté (`lib/subscriptions.js`) → rouge (20 au lieu de 0) ; horizon ignoré (calendrier à
+90 jours) → rouge (140 au lieu de 60) ; commandes planifiées hors horizon → rouge ;
+échéance générée comptée deux fois → rouge (10 au lieu de 6) ; échéances passées comptées
+→ rouge ; `/api/backup/now` retiré de `JAMAIS_EN_FILE` → rouge (« enregistré, sera
+envoyé »).
+
+### Bancs
+
+`test/sauvegardes.test.js` (10 cas, serveur authentifié), `test/a-recommander-a-venir.test.js`
+(5 cas), `test/e2e/sauvegardes.spec.js` (port 3522, trois serveurs semés l'un après l'autre :
+téléchargement ouvert, sauvegardes en échec, téléchargement fermé ; clair et sombre, 1440
+et 390 px ; 10 cas), `test/e2e/a-recommander.spec.js` (port 3523 ; 6 cas).
+
+### Ce qui reste
+
+- Aligner ou retirer `/api/recommendations`.
+- Une sauvegarde « de fin d'activité » (une heure après la dernière écriture non
+  sauvegardée) fermerait l'écart du rythme horaire ; une copie **hors de la machine**
+  automatique reste hors de l'application (aujourd'hui : « Télécharger »).
+- « Manquera » dans les alertes du tableau de bord, si Thomas le veut.
