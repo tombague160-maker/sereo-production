@@ -15326,8 +15326,11 @@ html, body, main.content { overflow-x: clip; }
 .op-details.tb-detail[open] > summary { padding-bottom: 12px; }
 .op-details.tb-detail > .tb-detail-corps { padding: 0 18px 18px; }
 @media (max-width: 820px) {
-  /* La charte : jamais sous 13 px au telephone (« 1 echeance » etait a 11). */
+  /* La charte : jamais sous 13 px au telephone (« 1 echeance » etait a 11 ;
+     dans « Detail du jour », « Voir mes abonnements » et « Rappels arrives a
+     echeance » a 11, le libelle des cartes a 12). */
   .op-tag { font-size: 13px; }
+  .op-kpi > span, .op-kpi small, .op-kpi a { font-size: 13px; }
   /* Une puce reste une puce : dans un titre de carte passe en colonne, elle
      s'etirait sur toute la largeur (« En livraison » sur 322 px). */
   .panel-heading > .status-chip { justify-self: start; align-self: start; }

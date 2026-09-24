@@ -448,6 +448,11 @@ test("tableau de bord — « 1 echeance » a 13 px, « Detail du jour » reagit 
   expect(r.voletLarg - r.resumeLarg).toBeLessThanOrEqual(2);
   // « En livraison » : a sa largeur, pas en bandeau sur toute la carte.
   expect(r.puce.largeur, `la puce « ${r.puce.texte} » s'etire sur ${Math.round(r.puce.largeur)} px`).toBeLessThan(r.puce.parent / 2);
+  // Ouvert : les textes des cartes du detail, a 13 px au moins.
+  await page.locator(".tb-detail > summary").click();
+  const petits = await page.evaluate(() => [...document.querySelectorAll(".tb-detail .op-kpi > span, .tb-detail .op-kpi small, .tb-detail .op-kpi a")]
+    .filter(e => e.checkVisibility()).map(e => [e.textContent.trim(), parseFloat(getComputedStyle(e).fontSize)]).filter(([, t]) => t < 13));
+  expect(petits, "des textes du detail du jour sous 13 px").toEqual([]);
   await ctx.close();
 });
 
