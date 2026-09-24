@@ -282,9 +282,18 @@ test("valider une commande : contrastes de la ligne mise en avant, clair et somb
     const ligne = `#cmdLignes [data-cmd-ouvrir="${creee.id}"]`;
     await expect(page.locator(ligne)).toBeVisible();
     const r = await page.evaluate(sel => {
+      // Le fond VU : le premier fond opaque en remontant (un fond transparent
+      // n'est pas du noir -- lu tel quel, il faussait le contraste).
+      const opaque = el => {
+        for (let n = el; n; n = n.parentElement) {
+          const c = getComputedStyle(n).backgroundColor;
+          if (c && !/rgba\(0, 0, 0, 0\)|transparent/.test(c)) return c;
+        }
+        return getComputedStyle(document.body).backgroundColor;
+      };
       const l = document.querySelector(sel);
-      const fond = getComputedStyle(l).backgroundColor;
-      const carte = getComputedStyle(l.closest(".cmd-carte") || document.body).backgroundColor;
+      const fond = opaque(l);
+      const carte = opaque(l.closest(".cmd-carte") || document.body);
       return {
         fond, carte,
         textes: [...l.querySelectorAll(".cmd-num, .cmd-nouvelle, .cmd-date, .cmd-client, .cmd-secteur, .cmd-articles")]
