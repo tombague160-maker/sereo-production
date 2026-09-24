@@ -15102,3 +15102,19 @@ html, body, main.content { overflow-x: clip; }
    regle `@media (min-width: 821px) .sidebar { overflow-y: auto }` posee plus
    haut (bloc « barre laterale, finitions ») : le compte et la version restent
    atteignables (banc collant-et-clavier, « écran bas »). */
+
+/* --- Carte « Chiffre d'affaires livre » au bureau (24/09, demande de Thomas)
+   La carte s'etire a la hauteur de la colonne de droite (deux tuiles + la
+   carte de tournee, plus haute dans l'app que dans la planche 6a : elle porte
+   « Prochain », les arrets et « Ouvrir la carte »). L'histogramme, fixe a
+   150 px, laissait 265 a 293 px VIDES dessous (mesure en production, de 1440
+   a 2560 px). Il prend desormais la hauteur disponible, jamais moins que les
+   150 px de la planche. Sous 921 px (une colonne) et au telephone, rien ne
+   change : la carte n'y est pas etiree. */
+@media (min-width: 921px) {
+  #journee .tb-ca #revenueChart.revenue-chart {
+    flex: 1 1 auto;
+    height: auto;
+    min-height: 150px;
+  }
+}

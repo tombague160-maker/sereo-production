@@ -5985,3 +5985,15 @@ Sur un écran bas, la barre **défile dans sa propre hauteur** (règle existante
 *Bancs (`collant-et-clavier.spec.js`)* : « la barre latérale reste fixe » (921 et 1440 px, trois
 écrans ; rouge avant : −400 au lieu de 0) ; « écran bas, tout le menu reste atteignable »
 (rouge si la barre fixe perd son défilement : « Version » à 768 px pour un écran de 560).
+
+### Carte « Chiffre d'affaires livré » : l'histogramme remplit la carte (24/09)
+
+**Demande de Thomas** (capture à 2 560 px) : la carte était trop grande pour son contenu.
+**Mesure en production** : de 1 440 à 2 560 px, la carte s'étire à la hauteur de la colonne de
+droite (deux tuiles + « Tournée du jour ») et l'histogramme, fixé à 150 px, laissait **265 à
+293 px vides** dessous. Ce n'était pas une décision : la planche 6a fixe 150 px parce que sa
+carte de tournée est plus courte ; dans l'app, celle-ci porte « Prochain », les arrêts et
+« Ouvrir la carte ». **Posé** : au-dessus de 920 px, l'histogramme prend la hauteur disponible
+de la carte, jamais moins de 150 px (environ 400 px au bureau) ; en une colonne et au téléphone,
+rien ne change. *Banc* : `carte-ca-remplie.spec.js` (1 440 et 1 920 px ; rouge avant : 265 px
+vides ; préalable : la colonne de droite étire bien la carte).
