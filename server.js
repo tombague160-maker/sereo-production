@@ -15,6 +15,11 @@ const { fondDeCarte } = require("./lib/fond-de-carte");
 const { GestionnaireOsrm } = require("./lib/osrm-local");
 // Le jour calendaire est celui de Paris, quel que soit le fuseau du processus (24/09).
 const { jourParis, jourDeLInstant, ajouterJours, debutSemaine, debutMois, moisSuivant, moisPrecedent } = require("./lib/jour-paris");
+// Lot « donnees utiles » (24/09) : garde-fous de saisie, clients qui ne
+// commandent plus, auteur de chaque ecriture.
+const saisie = require("./lib/saisie");
+const { relanceSuggeree } = require("./lib/relance-client");
+const { AsyncLocalStorage } = require("node:async_hooks");
 
 loadEnvFile(path.join(__dirname, ".env"));
 
@@ -518,6 +523,8 @@ function finDeSessionConnue(req, now = Date.now()) {
   return session ? session.issuedAt + duree : null;
 }
 app.use("/api", requireTrustedApiRequest);
+// L'auteur des ecritures : voir auteurCourant (lot « donnees utiles », 24/09).
+app.use("/api", (req, res, next) => contexteRequete.run(req, next));
 app.use("/api", gesteIdempotent);
 
 // --- UN GESTE RENVOYE N'EST APPLIQUE QU'UNE FOIS (lot 1 de l'audit geo) ------
@@ -3282,13 +3289,32 @@ function safeTimestamp(date = new Date()) {
   return date.toISOString().replace(/[:.]/g, "-");
 }
 
+// --- L'AUTEUR D'UNE ECRITURE (lot « donnees utiles », 24/09) -----------------
+//
+// Le journal ne disait pas QUI avait fait quoi : un ecart de stock ne pouvait
+// pas etre attribue (audit du 24/09). addHistory est appele d'une cinquantaine
+// d'endroits, dont deux modules (lib/operations-api.js, lib/tournee-pratique.js) :
+// plutot que de passer la requete a chacun, chaque requete /api s'execute dans
+// un contexte (AsyncLocalStorage) que l'ecriture relit. Il suit les `await` et
+// la file d'ecriture (withWriteLock est appele depuis la requete).
+//
+// Hors requete (purge planifiee, geocodage de fond) : « automatique ».
+const contexteRequete = new AsyncLocalStorage();
+
+function auteurCourant() {
+  const req = contexteRequete.getStore();
+  if (!req) return "automatique";
+  return getRequestIdentity(req)?.identifiant || "";
+}
+
 function addHistory(db, type, message, details = {}) {
   db.historique.unshift({
     id: crypto.randomUUID(),
     date: new Date().toISOString(),
     type,
     message,
-    details
+    details,
+    auteur: auteurCourant()
   });
 }
 
@@ -4122,7 +4148,8 @@ function recordStockMovement(db, product, oldQuantity, newQuantity, reason = "Aj
     newQuantity,
     reason: clean(reason) || "Ajustement manuel",
     createdAt: new Date().toISOString(),
-    createdBy: "local"
+    // Avant le 24/09 : « local », toujours. L'auteur est celui de la requete.
+    createdBy: auteurCourant()
   });
 }
 
@@ -4860,9 +4887,23 @@ function crmClientView(db, client) {
   const latestOrder = orders[0];
   const firstOrder = orders[orders.length - 1];
 
+  const crmStatus = inferCrmStatus(client, orders);
+
   return {
     ...client,
-    crmStatus: inferCrmStatus(client, orders),
+    crmStatus,
+    // Decision 5 (24/09) : un client non abonne qui depasse 1,5 fois son rythme
+    // est SIGNALE, sans que son statut change (lib/relance-client.js). Derive a
+    // chaque lecture, jamais ecrit ; du statut, il ne lit que « client_inactif »
+    // (deja classe a la main) : « Confirmer » fige le statut en « client_actif »,
+    // le signal ne s'y fie donc pas.
+    relanceSuggeree: relanceSuggeree({
+      commandes: orders,
+      abonne: (db.subscriptions || []).some(sub => String(sub.clientId) === String(client.id) && sub.status === "active"),
+      statutCrm: crmStatus,
+      archive: Boolean(client.crmArchived),
+      aujourdhui: jourParis()
+    }),
     firstContactDate: client.firstContactDate || firstOrder?.dateCommande || "",
     lastVisitDate: client.lastVisitDate || latestOrder?.dateCommande || "",
     nextReminderDate: client.nextReminderDate || reminders.find(item => item.status === "a_faire")?.datePrevue || "",
@@ -4911,11 +4952,13 @@ function validateCrmClientPayload(payload = {}, existing = {}) {
     ...existing,
     nom: clean(payload.nom ?? existing.nom ?? "Client sans nom"),
     prenom: clean(payload.prenom ?? existing.prenom),
-    telephone: clean(payload.telephone ?? existing.telephone),
+    // Garde-fous de saisie (24/09) : 10 chiffres, 5 chiffres ; refus nomme,
+    // et une valeur deja en base qui revient telle quelle n'est pas touchee.
+    telephone: saisie.telephoneSaisi(payload.telephone, existing.telephone, badRequest),
     email: clean(payload.email ?? existing.email),
     rue: clean(payload.rue ?? payload.adresse ?? existing.rue),
     ville: city,
-    codePostal: clean(payload.codePostal ?? payload.postalCode ?? existing.codePostal),
+    codePostal: saisie.codePostalSaisi(payload.codePostal ?? payload.postalCode, existing.codePostal, badRequest),
     secteur: deriveSector(city, payload.secteur ?? existing.secteur),
     notes: clean(payload.notes ?? existing.notes),
     crmStatus: normalizeCrmStatus(payload.crmStatus ?? payload.statutCrm ?? existing.crmStatus),
@@ -4933,8 +4976,15 @@ function validateCrmClientPayload(payload = {}, existing = {}) {
   return normalizeClient(next);
 }
 
+// La cle d'un telephone pour reconnaitre un doublon : le numero normalise
+// quand il est valide (« 06 12 34 56 78 » tape = « 0612345678 » en base, depuis
+// que la saisie est normalisee, 24/09), sinon le texte comme avant.
+function cleTelephone(valeur) {
+  return saisie.normaliserTelephone(valeur) || normalizeTextKey(valeur || "");
+}
+
 function findDuplicateClient(db, payload, ignoreId = "") {
-  const phone = normalizeTextKey(payload.telephone || payload.phone || "");
+  const phone = cleTelephone(payload.telephone || payload.phone || "");
   const secondary = clientSecondaryKey({
     nom: [payload.prenom, payload.nom].filter(Boolean).join(" ") || payload.nom,
     codePostal: payload.codePostal || payload.postalCode
@@ -4942,7 +4992,7 @@ function findDuplicateClient(db, payload, ignoreId = "") {
 
   return db.clients.find(client => {
     if (ignoreId && String(client.id) === String(ignoreId)) return false;
-    const clientPhone = normalizeTextKey(client.telephone || "");
+    const clientPhone = cleTelephone(client.telephone || "");
     if (phone && clientPhone && phone === clientPhone) return true;
     if (secondary && clientSecondaryKey(client) === secondary) return true;
     return false;
@@ -5035,6 +5085,10 @@ function createCustomerOrder(db, payload = {}) {
   const lines = buildCustomerOrderLines(db, payload.products || payload.produits);
   const total = Math.round(lines.reduce((sum, line) => sum + line.totalLigne, 0) * 100) / 100;
   const numero = generateOrderNumber(db, dateCommande);
+  // Un code postal de livraison propre a la commande : les memes 5 chiffres (24/09).
+  const postalCode = payload.postalCode
+    ? saisie.codePostalSaisi(payload.postalCode, client.codePostal, badRequest)
+    : client.codePostal;
   const order = normalizeOrder({
     id: `cmd-${numero.toLowerCase()}`,
     numero,
@@ -5042,7 +5096,7 @@ function createCustomerOrder(db, payload = {}) {
     clientName: [client.prenom, client.nom].filter(Boolean).join(" ") || client.nom,
     address: payload.deliveryAddress || client.rue,
     city: payload.city || client.ville,
-    postalCode: payload.postalCode || client.codePostal,
+    postalCode,
     sector: client.secteur,
     phone: client.telephone,
     products: lines,
@@ -7017,8 +7071,80 @@ app.get("/api/stock", (req, res) => {
   res.json(getStockView(db));
 });
 
-app.get("/api/historique", (req, res) => {
+// Le journal « qui a fait quoi » (lot « donnees utiles », 24/09). Avant, la
+// page chargeait /api/historique EN ENTIER a chaque ouverture (loadData), pour
+// le rendre dans un ecran que la navigation n'ouvrait pas ; sans auteur. La
+// page ne le charge plus ; la carte « Journal » de Parametres (administration)
+// le lit par pages. /api/historique reste pour les outils, reserve comme lui.
+app.get("/api/historique", requireAdministration, (req, res) => {
   res.json(readDb().historique);
+});
+
+const JOURNAL_PAGE_DEFAUT = 50;
+const JOURNAL_PAGE_MAX = 200;
+
+/** « Alèses : −2 · 10 → 8 · Inventaire » : un mouvement de stock en une ligne. */
+function messageMouvementStock(mouvement) {
+  const signe = mouvement.type === "entree" ? "+" : "−";
+  const quantite = Number(mouvement.quantity ?? mouvement.quantite);
+  return [
+    `${mouvement.productName || mouvement.sku || "Produit"} : ${signe}${Number.isFinite(quantite) ? quantite : "?"}`,
+    mouvement.oldQuantity !== undefined && mouvement.newQuantity !== undefined ? `${mouvement.oldQuantity} → ${mouvement.newQuantity}` : "",
+    clean(mouvement.reason || mouvement.raison)
+  ].filter(Boolean).join(" · ");
+}
+
+// L'auteur d'une ligne : null quand il n'etait pas connu (lignes d'avant le
+// 24/09, et « local », que les mouvements portaient tous).
+function auteurDuJournal(valeur) {
+  const auteur = clean(valeur);
+  return auteur && auteur !== "local" ? auteur : null;
+}
+
+/**
+ * Une page du journal. `genre` : « actions » (l'historique) ou « stock » (les
+ * mouvements). Du plus recent au plus ancien ; a date egale, l'ordre d'ecriture.
+ * Le curseur `avant` est « date|id » de la derniere ligne de la page precedente :
+ * une ligne ecrite entre deux pages arrive en tete, elle ne decale pas la suite.
+ */
+function pageDuJournal(db, { genre = "actions", limite, avant } = {}) {
+  const taille = Math.min(JOURNAL_PAGE_MAX, Math.max(1, Math.floor(Number(limite)) || JOURNAL_PAGE_DEFAUT));
+  const lignes = genre === "stock"
+    ? (db.stockMovements || []).map(m => ({
+      genre: "stock", id: String(m.id), date: String(m.createdAt || m.date || ""), type: "Stock",
+      message: messageMouvementStock(m), auteur: auteurDuJournal(m.createdBy || m.utilisateur)
+    }))
+    : (db.historique || []).map(h => ({
+      genre: "action", id: String(h.id), date: String(h.date || ""), type: clean(h.type) || "—",
+      message: clean(h.message || h.texte), auteur: auteurDuJournal(h.auteur)
+    }));
+  // Tri stable : a date egale, l'ordre du tableau (le plus recent en tete, unshift).
+  lignes.sort((a, b) => (a.date === b.date ? 0 : a.date < b.date ? 1 : -1));
+
+  let debut = 0;
+  if (avant) {
+    const [dateCurseur, ...reste] = String(avant).split("|");
+    const idCurseur = reste.join("|");
+    const rang = lignes.findIndex(l => l.id === idCurseur);
+    debut = rang >= 0 ? rang + 1 : lignes.findIndex(l => l.date < dateCurseur);
+    if (debut < 0) debut = lignes.length;
+  }
+  const entrees = lignes.slice(debut, debut + taille);
+  const derniere = entrees[entrees.length - 1];
+  const suivant = debut + taille < lignes.length && derniere ? `${derniere.date}|${derniere.id}` : null;
+  return { genre: genre === "stock" ? "stock" : "actions", entrees, suivant, total: lignes.length };
+}
+
+app.get("/api/journal", requireAdministration, (req, res) => {
+  try {
+    res.json(pageDuJournal(readDb(), {
+      genre: req.query.genre === "stock" ? "stock" : "actions",
+      limite: req.query.limite,
+      avant: req.query.avant
+    }));
+  } catch (error) {
+    handleRouteError(error, res, "Erreur lecture du journal");
+  }
 });
 
 app.get("/api/stock-movements", (req, res) => {
@@ -7372,7 +7498,9 @@ app.get("/api/crm/clients", (req, res) => {
   }
 
   if (statusFilter) {
-    list = list.filter(client => client.crmStatus === statusFilter);
+    // « A relancer » compte aussi les clients signales (decision 5, 24/09).
+    list = list.filter(client => client.crmStatus === statusFilter
+      || (statusFilter === "client_a_relancer" && client.relanceSuggeree));
   }
 
   if (req.query.relance === "today") {
@@ -8584,14 +8712,18 @@ app.patch("/api/clients/:id", async (req, res) => {
       const updates = {};
       if (req.body.nom !== undefined) updates.nom = clean(req.body.nom);
       if (req.body.rue !== undefined) updates.rue = clean(req.body.rue);
-      if (req.body.codePostal !== undefined) updates.codePostal = geocodage.normaliserCodePostal(req.body.codePostal);
+      // Garde-fous de saisie (24/09) : le formulaire du detail de commande
+      // renvoie TOUS ses champs ; une valeur deja en base qui revient telle
+      // quelle est gardee (meme invalide, elle est signalee a l'ecran), une
+      // nouvelle doit etre juste.
+      if (req.body.codePostal !== undefined) updates.codePostal = saisie.codePostalSaisi(req.body.codePostal, client.codePostal, badRequest);
       if (req.body.ville !== undefined) {
         const newVille = normalizeCity(clean(req.body.ville));
         updates.ville = newVille;
         const explicitSector = req.body.secteur !== undefined ? clean(req.body.secteur) : "";
         updates.secteur = deriveSector(newVille, explicitSector);
       }
-      if (req.body.telephone !== undefined) updates.telephone = clean(req.body.telephone);
+      if (req.body.telephone !== undefined) updates.telephone = saisie.telephoneSaisi(req.body.telephone, client.telephone, badRequest);
       if (req.body.notes !== undefined) updates.notes = clean(req.body.notes);
 
       Object.assign(client, updates);

@@ -500,7 +500,8 @@ test("relecture — « Modifier le profil » ne remplace pas le telephone d'une 
   const r = await api("/api/clients/c1", { telephone: "06 11 22 33 44", notes: "Sonner deux fois" }, "PATCH");
   assert.equal(r.status, 200);
   assert.equal(commandeLue("o-ehpad").phone, "03 84 00 00 00", "le livreur appellerait le client au lieu de l'EHPAD");
-  assert.equal(commandeLue("o-suit").phone, "06 11 22 33 44");
+  // Le numero suit, normalise (garde-fous de saisie, 24/09).
+  assert.equal(commandeLue("o-suit").phone, "0611223344");
 });
 
 // Un classeur minimal (une feuille, texte en ligne), comme dans api.test.js.
