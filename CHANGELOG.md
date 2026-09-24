@@ -1,5 +1,42 @@
 # Changelog
 
+## [1.44.0](https://github.com/tombague160-maker/sereo-production/compare/v1.43.0...v1.44.0) (2026-09-24)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **stock:** un stock négatif se voit au Stock et dans « À régler » ([4440fed](https://github.com/tombague160-maker/sereo-production/commit/4440fed590da9bcdb92109e297560ec00208accd))
+
+
+### 🐛 Corrections de bugs
+
+* **dates:** côté navigateur aussi, le jour est celui de Paris ([7312aa4](https://github.com/tombague160-maker/sereo-production/commit/7312aa49ab9b7a303f3e4a770db64109850173b9))
+* **dates:** le jour calendaire est celui de Paris, quel que soit le fuseau du processus ([78679b0](https://github.com/tombague160-maker/sereo-production/commit/78679b0ba9b1219faaa72dd38d9e187f972d02de))
+* **interface:** l'en-tete passe a la ligne au lieu de cacher « Actualiser », la barre laterale ne colle plus ([b22f4a4](https://github.com/tombague160-maker/sereo-production/commit/b22f4a49d017cd06279b5957e76e3c62e71318f2))
+* **interface:** le panier colle au defilement et Tab parcourt la liste avant le bouton fixe ([3ce8609](https://github.com/tombague160-maker/sereo-production/commit/3ce860976f9e6e02319043b2ca9537fcaf100ecd))
+* panier collant, ordre du clavier, Livré en retard sur stock à zéro, jour de Paris, banc stabilisé ([#176](https://github.com/tombague160-maker/sereo-production/issues/176)) ([a99be53](https://github.com/tombague160-maker/sereo-production/commit/a99be535c317c0bbee0a99b38832f6a8713f36ef))
+* **stock:** tout « Livré » reprend un stock libéré ; une ligne non déduite n'est jamais rendue ([14587ff](https://github.com/tombague160-maker/sereo-production/commit/14587ff824464d41dcfc5face27a88b7a0a77419))
+* **tournee:** un « Livré » en retard est accepté même sur un stock insuffisant ([b35df0b](https://github.com/tombague160-maker/sereo-production/commit/b35df0bef1ee0815e89ecc43395256c1756a436d))
+
+
+### 📚 Documentation
+
+* **design:** banc chargement-instantane stabilise (23/09) ([a21cac4](https://github.com/tombague160-maker/sereo-production/commit/a21cac477bf1be9cd98651ba92d82fefe3f69c2c))
+* **design:** le jour calendaire est celui de Paris (24/09) ([8ba8aff](https://github.com/tombague160-maker/sereo-production/commit/8ba8aff41b975cc8f0ff24e8e74441695b173a11))
+* **design:** Livré en retard sur un stock à zéro, et session de 12 h gardée ([19dec82](https://github.com/tombague160-maker/sereo-production/commit/19dec8252eb0e3e28a12e71019d768bf606ed601))
+* **design:** panier collant et ordre du clavier (23/09) ([626bc59](https://github.com/tombague160-maker/sereo-production/commit/626bc59f48d917ebee1552c39968a92d1ec592ed))
+* **design:** relecture adverse du « Livré en retard » — trois défauts, leur sort ([582a670](https://github.com/tombague160-maker/sereo-production/commit/582a6705c5d93618dca3e90c4ff458f8db4471a4))
+* **design:** relecture adverse du panier collant (23/09) ([3541602](https://github.com/tombague160-maker/sereo-production/commit/35416027f779020a904ab651e63a592eb65a79f4))
+* **design:** relecture du banc chargement-instantane, le prealable compte /api/operations (23/09) ([6d10f1e](https://github.com/tombague160-maker/sereo-production/commit/6d10f1e558a83126f04804d36c30ef804a74997b))
+
+
+### 🧪 Tests
+
+* **chargement-instantane:** le prealable compte /api/operations, pas toute l'API ([0c67ac8](https://github.com/tombague160-maker/sereo-production/commit/0c67ac8e26eb2ae6235d33130a7147fdbab72295))
+* **chargement-instantane:** lire le prealable a l'arrivee des requetes, pas a l'instant du chiffre ([7813a28](https://github.com/tombague160-maker/sereo-production/commit/7813a2862da24ce20236f98f21054ac5a5594498))
+* **stock:** le badge négatif reste entier sous un nom long ; −/+ mesurés avant le message ([558f5c7](https://github.com/tombague160-maker/sereo-production/commit/558f5c732f25e8b0f24af9f9fe05fccd9e614e35))
+* **stock:** le badge négatif se mesure par ses boîtes, pas par scrollWidth ([8ca4a42](https://github.com/tombague160-maker/sereo-production/commit/8ca4a428c71ed22516f55a9f80ef5b99ec6be386))
+
 ## [1.43.0](https://github.com/tombague160-maker/sereo-production/compare/v1.42.1...v1.43.0) (2026-09-23)
 
 
