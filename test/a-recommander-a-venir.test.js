@@ -139,7 +139,7 @@ test("l'exemple de l'audit : Changes L, 24 demandés sous 14 jours par les abonn
 
 test("l'horizon se règle de 7 à 30 jours, et il est respecté", async () => {
   semer();
-  assert.equal((await (await fetch(`${baseUrl}/api/settings/stock`)).json()).horizonJours, 14, "defaut : 14 jours");
+  assert.equal((await produit("CH-L")).upcomingHorizonDays, 14, "defaut : 14 jours");
 
   const trente = await patchHorizon(30);
   assert.equal(trente.status, 200);
@@ -157,6 +157,8 @@ test("l'horizon se règle de 7 à 30 jours, et il est respecté", async () => {
     assert.equal(refus.status, 400, `horizon ${JSON.stringify(faux)} aurait du etre refuse`);
   }
   assert.equal((await produit("CH-L")).upcomingHorizonDays, 7, "un refus a change l'horizon");
+  const lu = await fetch(`${baseUrl}/api/settings/stock`);
+  assert.deepEqual(await lu.json(), { horizonJours: 7 });
   assert.equal((await patchHorizon(14)).status, 200);
 });
 

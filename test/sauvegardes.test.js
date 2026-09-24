@@ -117,10 +117,15 @@ function plusRecente() {
     .sort((a, b) => b.t - a.t || b.nom.localeCompare(a.nom))[0];
 }
 
+// Un serveur qui ne dit rien des sauvegardes echoue ICI, sur une assertion qui
+// le nomme -- pas plus loin, sur un plantage en lisant `undefined`.
 async function etat(cookie = cookies.admin) {
   const reponse = await appel("/api/storage/status", { cookie });
   assert.equal(reponse.status, 200);
-  return (await reponse.json()).sauvegardes;
+  const { sauvegardes } = await reponse.json();
+  assert.equal(typeof sauvegardes, "object", "/api/storage/status ne dit rien des sauvegardes");
+  assert.notEqual(sauvegardes, null, "/api/storage/status ne dit rien des sauvegardes");
+  return sauvegardes;
 }
 
 // Le jour a Paris d'un instant -- l'oracle du banc, ecrit ici avec Intl, pas
