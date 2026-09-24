@@ -28,6 +28,22 @@ export function lireDate(valeur) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+// Chaque forme a SON formateur Intl, construit une fois (integration de la
+// performance, 24/09) : toLocaleDateString en construisait un a chaque date --
+// 80 ms par frappe dans la recherche des Commandes au telephone. Meme texte :
+// toLocaleDateString(l, o) est new Intl.DateTimeFormat(l, o).format(d) des
+// qu'une option de date est donnee, ce que chaque forme fait.
+const formateurs = new Map();
+function formater(d, options) {
+  const cle = JSON.stringify(options);
+  let formateur = formateurs.get(cle);
+  if (!formateur) {
+    formateur = new Intl.DateTimeFormat("fr-FR", options);
+    formateurs.set(cle, formateur);
+  }
+  return formateur.format(d);
+}
+
 function avecAnnee(d, options) {
   return d.getFullYear() !== new Date().getFullYear() ? { ...options, year: "numeric" } : options;
 }
@@ -35,14 +51,14 @@ function avecAnnee(d, options) {
 /** « 24 sept. » ; « 24 sept. 2025 » une autre annee ; « — » sans date. */
 export function jourMois(valeur) {
   const d = lireDate(valeur);
-  return d ? d.toLocaleDateString("fr-FR", avecAnnee(d, { day: "numeric", month: "short" })) : "—";
+  return d ? formater(d, avecAnnee(d, { day: "numeric", month: "short" })) : "—";
 }
 
 /** « jeu. 24 sept. » ; `majuscule` : « Jeu. 24 sept. » en debut de ligne. */
 export function jourCourt(valeur, { majuscule = false } = {}) {
   const d = lireDate(valeur);
   if (!d) return "—";
-  const texte = d.toLocaleDateString("fr-FR", avecAnnee(d, { weekday: "short", day: "numeric", month: "short" }));
+  const texte = formater(d, avecAnnee(d, { weekday: "short", day: "numeric", month: "short" }));
   return majuscule ? texte.charAt(0).toUpperCase() + texte.slice(1) : texte;
 }
 
@@ -53,9 +69,9 @@ export function jourCourt(valeur, { majuscule = false } = {}) {
 export function jourLong(valeur, { majuscule = false, semaine = true } = {}) {
   const d = lireDate(valeur);
   if (!d) return "—";
-  const mois = d.toLocaleDateString("fr-FR", { month: "long" });
+  const mois = formater(d, { month: "long" });
   const annee = d.getFullYear() !== new Date().getFullYear() ? ` ${d.getFullYear()}` : "";
-  const jour = semaine ? `${d.toLocaleDateString("fr-FR", { weekday: "long" })} ` : "";
+  const jour = semaine ? `${formater(d, { weekday: "long" })} ` : "";
   const texte = `${jour}${d.getDate() === 1 ? "1er" : d.getDate()} ${mois}${annee}`;
   return majuscule ? texte.charAt(0).toUpperCase() + texte.slice(1) : texte;
 }

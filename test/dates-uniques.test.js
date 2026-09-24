@@ -52,3 +52,50 @@ test("dates — une date sans heure se lit a midi : aucun fuseau ne la recule d'
   assert.equal(d.getHours(), 12);
   assert.equal(lireDate(""), null);
 });
+
+// Integration de la performance (24/09) : le lot « rendu » construisait les
+// formateurs Intl une fois (toLocaleDateString en construisait un a CHAQUE
+// date : 80 ms par frappe dans la recherche des Commandes au telephone). Les
+// dates passent desormais par cet utilitaire : il garde ses formateurs.
+test("dates — chaque forme construit son formateur une fois, pas un par date", async () => {
+  const { jourMois, jourCourt, jourLong, jourEtHeure } = await charger();
+  const appeler = () => {
+    for (let j = 1; j <= 28; j++) {
+      const iso = `${AN}-02-${String(j).padStart(2, "0")}`;
+      jourMois(iso); jourMois(`${AN - 1}-02-${String(j).padStart(2, "0")}`);
+      jourCourt(iso); jourCourt(iso, { majuscule: true }); jourCourt(`${AN - 1}-03-${String(j).padStart(2, "0")}`);
+      jourLong(iso); jourLong(iso, { semaine: false }); jourEtHeure(`${iso}T09:42:00`);
+    }
+  };
+  appeler(); // les formateurs de chaque forme existent desormais
+  const vraiFormat = Intl.DateTimeFormat;
+  const vraisLocale = ["toLocaleString", "toLocaleDateString", "toLocaleTimeString"].map(nom => [nom, Date.prototype[nom]]);
+  const n = { intl: 0, locale: 0 };
+  Intl.DateTimeFormat = new Proxy(vraiFormat, {
+    construct(cible, args) { n.intl++; return new cible(...args); },
+    apply(cible, ceci, args) { n.intl++; return cible(...args); }
+  });
+  for (const [nom, vrai] of vraisLocale) Date.prototype[nom] = function (...args) { n.locale++; return vrai.apply(this, args); };
+  try {
+    appeler();
+  } finally {
+    Intl.DateTimeFormat = vraiFormat;
+    for (const [nom, vrai] of vraisLocale) Date.prototype[nom] = vrai;
+  }
+  // 28 x 8 dates : avant, 224 toLocaleDateString (et 56 de plus pour jourLong).
+  assert.deepEqual(n, { intl: 0, locale: 0 });
+});
+
+test("dates (temoin) : le texte est celui de toLocaleDateString, forme par forme", async () => {
+  const { jourMois, jourCourt, jourLong } = await charger();
+  for (const iso of [`${AN}-01-01`, `${AN}-09-24`, `${AN}-12-31`, `${AN - 1}-03-15`, `${AN + 1}-07-04`]) {
+    const d = new Date(`${iso}T12:00:00`);
+    const annee = d.getFullYear() !== AN ? { year: "numeric" } : {};
+    assert.equal(jourMois(iso), d.toLocaleDateString("fr-FR", { day: "numeric", month: "short", ...annee }), iso);
+    assert.equal(jourCourt(iso), d.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short", ...annee }), iso);
+    const mois = d.toLocaleDateString("fr-FR", { month: "long" });
+    const semaine = d.toLocaleDateString("fr-FR", { weekday: "long" });
+    const jour = d.getDate() === 1 ? "1er" : d.getDate();
+    assert.equal(jourLong(iso), `${semaine} ${jour} ${mois}${annee.year ? ` ${d.getFullYear()}` : ""}`, iso);
+  }
+});
