@@ -220,6 +220,31 @@ function createSqliteStore(options) {
       return result.changes > 0;
     },
 
+    /**
+     * Une valeur JSON de app_meta, par cle (garde-fous du 25/09 : les sessions
+     * fermees). persistDatabase n'ecrit que ses propres cles (initialized,
+     * last_write_at, settings) : une autre cle n'est jamais effacee par
+     * writeDb. null si la cle est absente ou illisible.
+     */
+    lireMeta(cle) {
+      const row = database.prepare("SELECT value FROM app_meta WHERE key = ?").get(String(cle));
+      if (!row) return null;
+      try {
+        return JSON.parse(row.value);
+      } catch {
+        return null;
+      }
+    },
+
+    ecrireMeta(cle, valeur) {
+      database
+        .prepare(
+          `INSERT INTO app_meta (key, value, updated_at) VALUES (?, ?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+        )
+        .run(String(cle), JSON.stringify(valeur ?? null), new Date().toISOString());
+    },
+
     touchUserLogin(id, isoDate) {
       database
         .prepare("UPDATE utilisateurs SET derniere_connexion = ? WHERE id = ?")

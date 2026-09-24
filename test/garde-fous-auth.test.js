@@ -129,3 +129,81 @@ test("connexion : la limite par compte vaut aussi pour l'authentification Basic 
   await apres.arrayBuffer();
   assert.equal(apres.status, 200, "temoin : le blocage ne se leve pas");
 });
+
+// --- 2. Deconnexion et changement de mot de passe -----------------------------
+
+async function deconnexion(cookie) {
+  const reponse = await fetch(`${baseUrl}/logout`, { method: "POST", headers: { cookie }, redirect: "manual" });
+  await reponse.arrayBuffer();
+  return reponse.status;
+}
+
+async function patchCompte(cookie, id, corps) {
+  const reponse = await fetch(`${baseUrl}/api/comptes/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { cookie, "content-type": "application/json" },
+    body: JSON.stringify(corps),
+    redirect: "manual"
+  });
+  const cookieNeuf = (reponse.headers.getSetCookie?.() || []).find(v => v.startsWith("sereo_access=") && !/Max-Age=0/.test(v));
+  return { status: reponse.status, corps: await reponse.json().catch(() => null), cookie: cookieNeuf ? cookieNeuf.split(";")[0] : null };
+}
+
+test("se déconnecter invalide la session : le même cookie rejoué ne passe plus (compte en base et compte d'environnement)", async () => {
+  _resetAuthRateLimitForTest();
+  for (const [identifiant, motDePasse] of [["julie", "tournee-du-matin-2026"], ["admin-env", "mot-de-passe-environnement"]]) {
+    const { cookie } = await connexion(identifiant, motDePasse);
+    assert.ok(cookie, `prealable : ${identifiant} ne se connecte pas`);
+    const autre = (await connexion(identifiant, motDePasse)).cookie;
+    assert.equal(await moi(cookie), 200);
+    assert.equal(await deconnexion(cookie), 303);
+    assert.equal(await moi(cookie), 401, `${identifiant} : le cookie d'une session fermee ouvre encore la session`);
+    // Une AUTRE session du meme compte (un autre appareil) reste ouverte.
+    assert.equal(await moi(autre), 200, `${identifiant} : se deconnecter a ferme aussi l'autre appareil`);
+  }
+});
+
+test("changer le mot de passe d'un compte ferme ses sessions ouvertes, pas celles des autres", async () => {
+  _resetAuthRateLimitForTest();
+  const admin = (await connexion("admin-env", "mot-de-passe-environnement")).cookie;
+  const julie = (await connexion("julie", "tournee-du-matin-2026")).cookie;
+  const marc = (await connexion("marc", "bureau-du-matin-2026")).cookie;
+  const comptes = await (await fetch(`${baseUrl}/api/comptes`, { headers: { cookie: admin } })).json();
+  const idJulie = comptes.find(c => c.identifiant === "julie").id;
+  const modif = await patchCompte(admin, idJulie, { motDePasse: "nouveau-mot-de-passe-julie" });
+  assert.equal(modif.status, 200, JSON.stringify(modif.corps));
+  assert.equal(await moi(julie), 401, "l'ancien cookie de julie ouvre encore la session apres le changement de mot de passe");
+  assert.equal(await moi(marc), 200, "le changement de mot de passe de julie a ferme la session de marc");
+  assert.equal(await moi(admin), 200);
+  // Le nouveau mot de passe ouvre une session neuve (temoin).
+  const neuf = (await connexion("julie", "nouveau-mot-de-passe-julie")).cookie;
+  assert.ok(neuf);
+  assert.equal(await moi(neuf), 200);
+  // Changer le role seul ne ferme rien.
+  assert.equal((await patchCompte(admin, idJulie, { role: "preparateur" })).status, 200);
+  assert.equal(await moi(neuf), 200, "un changement de role a ferme la session");
+});
+
+test("changer SON propre mot de passe : l'ancienne session tombe, la réponse en ouvre une neuve", async () => {
+  _resetAuthRateLimitForTest();
+  const chef = (await connexion("chef", "chef-du-bureau-2026")).cookie;
+  const ailleurs = (await connexion("chef", "chef-du-bureau-2026")).cookie;
+  const comptes = await (await fetch(`${baseUrl}/api/comptes`, { headers: { cookie: chef } })).json();
+  const id = comptes.find(c => c.identifiant === "chef").id;
+  const modif = await patchCompte(chef, id, { motDePasse: "chef-nouveau-mot-de-passe" });
+  assert.equal(modif.status, 200);
+  assert.ok(modif.cookie, "la reponse n'ouvre pas de session neuve : l'administrateur serait deconnecte par son propre geste");
+  assert.equal(await moi(modif.cookie), 200);
+  assert.equal(await moi(ailleurs), 401, "une session ouverte avec l'ancien mot de passe (un autre appareil) passe encore");
+});
+
+test("les sessions fermées le restent après un redémarrage (lues dans la base)", async () => {
+  _resetAuthRateLimitForTest();
+  const { cookie } = await connexion("marc", "bureau-du-matin-2026");
+  assert.equal(await deconnexion(cookie), 303);
+  assert.equal(await moi(cookie), 401);
+  // Ce que le processus garde en memoire est oublie, comme au redemarrage.
+  assert.equal(typeof S._oublierRevocationsPourTest, "function", "aucune revocation n'est gardee");
+  S._oublierRevocationsPourTest();
+  assert.equal(await moi(cookie), 401, "apres un redemarrage, la session fermee se rouvre");
+});

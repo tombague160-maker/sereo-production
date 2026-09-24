@@ -1045,6 +1045,9 @@ async function updateUserAccount(id, { role, actif, motDePasse } = {}) {
 
   assertLastAdminRemains(store, cible);
   store.saveUser(cible);
+  // Garde-fous (25/09) : un mot de passe change ferme les sessions ouvertes
+  // avec l'ancien (un telephone perdu, un cookie copie).
+  if (motDePasse !== undefined) fermerSessionsDuCompte(existant.id);
   return store.getUser(id);
 }
 
@@ -1887,9 +1890,82 @@ function createAccessSessionValue(now = Date.now(), identity = null) {
   return `${payload}.${signAuthPayload(payload)}`;
 }
 
+// --- Sessions fermees (garde-fous du 25/09) ------------------------------------
+//
+// Avant : « Se deconnecter » ne faisait qu'effacer le cookie du navigateur, et
+// un changement de mot de passe ne touchait pas aux sessions ouvertes ; une
+// copie du cookie restait valable jusqu'a 12 h (chasse aux defauts, section 3).
+// Maintenant :
+// - se deconnecter FERME la session : son empreinte (sha256 du cookie) est
+//   gardee jusqu'a l'expiration qu'elle aurait eue ; les autres sessions du
+//   meme compte (un autre appareil) restent ouvertes ;
+// - changer le mot de passe d'un compte en base ferme TOUTES ses sessions
+//   ouvertes avant le changement (« sessions depuis ») ; le compte
+//   d'environnement, lui, change deja de secret de signature avec son mot de
+//   passe.
+// Gardees dans app_meta (hors de readDb/writeDb, comme les comptes), relues
+// au premier besoin apres un demarrage ; en memoire ensuite. Verifiees dans
+// readAccessSession : tous les chemins (acces, identite) les voient.
+const CLE_SESSIONS_FERMEES = "sessions_fermees";
+const CLE_SESSIONS_DEPUIS = "sessions_depuis";
+let etatDesSessions = null;
+
+function sessionsFermees() {
+  if (etatDesSessions) return etatDesSessions;
+  const etat = { fermees: new Map(), depuis: new Map() };
+  if (useSqliteStorage()) {
+    try {
+      const store = getSqliteStore();
+      const maintenant = Date.now();
+      for (const [cle, fin] of Object.entries(store.lireMeta(CLE_SESSIONS_FERMEES) || {})) {
+        if (Number(fin) > maintenant) etat.fermees.set(cle, Number(fin));
+      }
+      for (const [uid, depuis] of Object.entries(store.lireMeta(CLE_SESSIONS_DEPUIS) || {})) {
+        if (Number.isFinite(Number(depuis))) etat.depuis.set(String(uid), Number(depuis));
+      }
+    } catch (error) {
+      // Base indisponible (restauration en cours) : rien de garde en memoire,
+      // on relira au prochain appel.
+      console.warn(`[auth] sessions fermees illisibles : ${error.message || error}`);
+      return etat;
+    }
+  }
+  etatDesSessions = etat;
+  return etat;
+}
+
+function cleDeSession(valeur) {
+  return crypto.createHash("sha256").update(String(valeur || "")).digest("hex").slice(0, 32);
+}
+
+function enregistrerSessions(cle, valeur) {
+  if (!useSqliteStorage()) return;
+  try {
+    getSqliteStore().ecrireMeta(cle, valeur);
+  } catch (error) {
+    console.warn(`[auth] sessions fermees non enregistrees (gardees en memoire) : ${error.message || error}`);
+  }
+}
+
+function fermerSession(valeur, session) {
+  const etat = sessionsFermees();
+  const maintenant = Date.now();
+  etat.fermees.set(cleDeSession(valeur), session.issuedAt + AUTH_COOKIE_MAX_AGE_SECONDS * 1000);
+  for (const [cle, fin] of etat.fermees) if (fin <= maintenant) etat.fermees.delete(cle);
+  enregistrerSessions(CLE_SESSIONS_FERMEES, Object.fromEntries(etat.fermees));
+}
+
+function fermerSessionsDuCompte(uid, depuis = Date.now()) {
+  const etat = sessionsFermees();
+  etat.depuis.set(String(uid), depuis);
+  enregistrerSessions(CLE_SESSIONS_DEPUIS, Object.fromEntries(etat.depuis));
+}
+
 /**
  * Verifie la signature et la fraicheur, puis retourne la charge utile.
  * Ne dit RIEN de la validite du compte : c'est le role de l'appelant.
+ * Garde-fous (25/09) : une session fermee (deconnexion, mot de passe change)
+ * n'est plus lue.
  */
 function readAccessSession(value, now = Date.now()) {
   const [payload, signature] = String(value || "").split(".");
@@ -1904,9 +1980,14 @@ function readAccessSession(value, now = Date.now()) {
     if (!Number.isFinite(issuedAt)) return null;
     if (now - issuedAt > AUTH_COOKIE_MAX_AGE_SECONDS * 1000) return null;
 
+    const uid = session.uid ? String(session.uid) : null;
+    const fermees = sessionsFermees();
+    if (fermees.fermees.has(cleDeSession(value))) return null;
+    if (uid && fermees.depuis.has(uid) && issuedAt < fermees.depuis.get(uid)) return null;
+
     return {
       user: typeof session.user === "string" ? session.user : "",
-      uid: session.uid ? String(session.uid) : null,
+      uid,
       issuedAt
     };
   } catch {
@@ -2464,6 +2545,11 @@ async function authenticateCredentials(username, password) {
 }
 
 function handleLogout(req, res) {
+  // Garde-fous (25/09) : la session est FERMEE cote serveur, pas seulement
+  // effacee du navigateur (une copie du cookie ne sert plus a rien).
+  const valeur = getAccessSessionCookie(req);
+  const session = readAccessSession(valeur);
+  if (session) fermerSession(valeur, session);
   res.setHeader("Set-Cookie", buildAuthCookie("", 0, req));
   res.redirect(303, "/login");
 }
@@ -10328,6 +10414,11 @@ app.patch("/api/comptes/:id", requireAdministration, async (req, res) => {
     }
 
     const compte = await updateUserAccount(req.params.id, patch);
+    // Son PROPRE mot de passe : ses sessions viennent d'etre fermees, celle-ci
+    // comprise ; la reponse en ouvre une neuve (sinon le geste deconnecte).
+    if (patch.motDePasse !== undefined && req.identite?.uid && String(req.identite.uid) === String(compte.id)) {
+      res.setHeader("Set-Cookie", buildAuthCookie(createAccessSessionValue(Date.now(), compte), AUTH_COOKIE_MAX_AGE_SECONDS, req));
+    }
 
     const details = [
       patch.role !== undefined ? `role=${patch.role}` : null,
@@ -10633,6 +10724,9 @@ module.exports = {
   isEnvAuthConfigured,
   // Helpers de test : ne pas appeler depuis du code applicatif
   _resetAuthRateLimitForTest: () => { authRateLimitState.clear(); authCompteState.clear(); },
+  // Garde-fous (25/09) : oublier les sessions fermees gardees en memoire, comme
+  // un redemarrage (elles sont relues dans la base).
+  _oublierRevocationsPourTest: () => { etatDesSessions = null; },
   _createAccessSessionValueForTest: createAccessSessionValue,
   _withWriteLockForTest: withWriteLock,
   _normalizeOrder: normalizeOrder,
