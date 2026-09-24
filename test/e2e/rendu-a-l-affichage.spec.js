@@ -122,6 +122,43 @@ test("les montants et les dates ne construisent plus un formateur chacun", async
   expect(n.locale).toBeLessThan(5);
 });
 
+test("téléphone : les lignes du Stock et du catalogue hors de l'écran ne sont pas mises en page", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await ouvrir(page, "stock");
+  await expect(page.locator("#stockList .stk-ligne")).toHaveCount(218);
+  const sautees = sel => page.evaluate(s => {
+    const lignes = [...document.querySelectorAll(s)];
+    return { n: lignes.length, sautees: lignes.filter(l => !l.firstElementChild.checkVisibility({ contentVisibilityAuto: true })).length };
+  }, sel);
+  const stock = await sautees("#stockList .stk-ligne");
+  console.log(`[stock] ${stock.sautees} lignes sur ${stock.n} hors de l'ecran, non mises en page`);
+  // Avant : 0 -- les 218 lignes (36 500 px) etaient mises en page et peintes.
+  expect(stock.sautees).toBeGreaterThan(150);
+  // Rien n'est perdu : la derniere ligne est dans la page, et se montre en y allant.
+  const derniere = page.locator("#stockList .stk-ligne").last();
+  await derniere.scrollIntoViewIfNeeded();
+  await expect(derniere.locator(".stk-nom")).toBeVisible();
+  // La pertinence d'une ligne se met a jour a l'image suivante : on l'attend.
+  await expect.poll(() => derniere.evaluate(l => l.firstElementChild.checkVisibility({ contentVisibilityAuto: true }))).toBe(true);
+  await aller(page, "commande-client");
+  await expect(page.locator("#customerCatalog .product-card")).toHaveCount(218);
+  const catalogue = await sautees("#customerCatalog .product-card");
+  console.log(`[catalogue] ${catalogue.sautees} cartes sur ${catalogue.n} hors de l'ecran`);
+  expect(catalogue.sautees).toBeGreaterThan(150);
+});
+
+test("commande client : « + » change la quantité sans redessiner le catalogue", async ({ page }) => {
+  await ouvrir(page, "commande-client");
+  // Une carte dont le produit a du stock (« Stock 3 - ... »).
+  const carte = page.locator("#customerCatalog .product-card").filter({ hasText: /Stock [1-9]/ }).first();
+  await carte.evaluate(c => { c.dataset.marqueBanc = "1"; });
+  await carte.locator('[data-customer-delta="1"]').click();
+  await expect(carte.locator("[data-customer-qty-input]")).toHaveValue("1");
+  // La MEME carte : avant, les 218 cartes etaient refaites a chaque toucher.
+  expect(await compter(page, '#customerCatalog [data-marque-banc="1"]')).toBe(1);
+  await expect(page.locator("#customerCart")).toContainText(await carte.locator("h4").innerText());
+});
+
 test("préparation : la rangée des secteurs n'est mesurée qu'affichée, et une frappe ne la refait pas", async ({ page }) => {
   await page.addInitScript(() => {
     window.__mesures = 0;

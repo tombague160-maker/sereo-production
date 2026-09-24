@@ -3634,7 +3634,12 @@ function changeCustomerCart(productId, delta) {
   }
   if (nextQuantity === 0) customerCart.delete(String(productId));
   else customerCart.set(String(productId), { ...current, quantite: nextQuantity });
-  renderCustomerCatalog();
+  // Seul le champ de CE produit change (24/09) : refaire les 218 cartes du
+  // catalogue a chaque « + » coutait ~700 ms au telephone, et remplacait le
+  // bouton qu'on venait de toucher. Sans champ a l'ecran, le rendu complet.
+  const champ = document.querySelector(`#customerCatalog [data-customer-qty-input][data-product-id="${CSS.escape(String(productId))}"]`);
+  if (champ) champ.value = nextQuantity;
+  else renderCustomerCatalog();
   renderCustomerCart();
 }
 
@@ -3929,9 +3934,10 @@ function renderStock() {
     return;
   }
 
-  filtered.forEach(product => {
-    container.appendChild(creerLigneStock(product));
-  });
+  // UNE ecriture pour toutes les lignes (24/09). Une par ligne -- 218 analyses
+  // HTML en production -- coutait 200 a 340 ms au telephone, a chaque
+  // arrivee sur le Stock et a chaque recherche.
+  container.innerHTML = filtered.map(creerLigneStock).join("");
 }
 
 // La cle de categorie d'un produit, telle que le filtre la compare.
@@ -4086,6 +4092,7 @@ const ICONE_CATEGORIE = "M12 3 3 8v8l9 5 9-5V8z";
 // du seuil sont GARDEES -- la planche les montre en lecture seule, mais ce sont
 // les seuls chemins de l'application pour les poser. Les identifiants sont
 // propres a l'ecran : l'ecran « produits » rend les memes produits.
+// Rend le HTML de la ligne : renderStock les ecrit toutes en une fois (24/09).
 function creerLigneStock(product) {
   const level = getStockLevel(product);
   const quantite = product.quantityAvailable ?? getProductQuantity(product);
@@ -4098,9 +4105,7 @@ function creerLigneStock(product) {
   // n'en a plus assez ; le rayon passe alors en negatif. Ce negatif se DIT ici
   // (et dans « A regler ») : il appelle un recomptage, pas une rupture de plus.
   const negatif = quantite !== null && Number(quantite) < 0;
-  const ligne = document.createElement("div");
-  ligne.className = `stk-ligne${enAlerte ? " stk-ligne--alerte" : ""}`;
-  ligne.innerHTML = `
+  return `<div class="stk-ligne${enAlerte ? " stk-ligne--alerte" : ""}">
     <span class="stk-nom">${escapeHtml(nom)}${level.status === "a_renseigner" ? ` <span class="stk-a-renseigner">À renseigner</span>` : ""}${negatif ? ` <span class="stk-negatif">Stock négatif · à recompter</span>` : ""}</span>
     <span class="stk-code">${escapeHtml(product.code || product.sku || "-")}</span>
     <span class="stk-reserve">${escapeHtml(reserve)} sur commandes</span>
@@ -4109,8 +4114,7 @@ function creerLigneStock(product) {
     <span class="stk-ajuster">
       <button class="stk-pas" type="button" data-product-id="${id}" data-stock-delta="-1" aria-label="Retirer 1 unité de ${escapeAttribute(nom)}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button>
       <button class="stk-pas stk-pas--plus" type="button" data-product-id="${id}" data-stock-delta="1" aria-label="Ajouter 1 unité à ${escapeAttribute(nom)}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button>
-    </span>`;
-  return ligne;
+    </span></div>`;
 }
 
 function getFilteredStock() {

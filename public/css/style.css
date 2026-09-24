@@ -11405,6 +11405,18 @@ textarea::placeholder {
 }
 .stk-tuile-nom { overflow-wrap: anywhere; }
 
+/* Performance du rendu (24/09, mesure en production) : 218 lignes, 36 500 px
+   au telephone, et chaque pas de defilement repeignait toute la liste
+   (~165 ms). Une ligne hors de l'ecran n'est ni mise en page ni peinte ; elle
+   reste dans la page (recherche du navigateur, lecteur d'ecran, Tab). La
+   hauteur de reserve est celle mesuree, et « auto » retient la vraie une fois
+   la ligne vue : la barre de defilement ne saute pas (hauteur du CONTENU :
+   sans la marge interne de 12 px en haut et en bas). Les anneaux de focus
+   (5 px) tiennent dans la marge interne de la ligne (8 px au moins). */
+#stockList .stk-ligne { content-visibility: auto; contain-intrinsic-height: auto 56px; }
+@media (max-width: 1280px) { #stockList .stk-ligne { contain-intrinsic-height: auto 105px; } }
+@media (max-width: 920px) { #stockList .stk-ligne { contain-intrinsic-height: auto 117px; } }
+
 /* ==========================================================================
    CLIENTS -- planches 13e (clair) / 14e (sombre). Valeurs copiees.
    Noms neufs (cli-*) : les .crm-* portent une couche de surcharges du mode
@@ -14588,6 +14600,11 @@ textarea {
 }
 :root[data-color-scheme] #commande-client .product-card:hover,
 :root:not([data-color-scheme]) #commande-client .product-card:hover { border-color: var(--ecr-filet); }
+/* Performance du rendu (24/09) : le catalogue, 218 cartes et 50 000 px au
+   telephone, comme les lignes du Stock -- une carte hors de l'ecran n'est ni
+   mise en page ni peinte (hauteur mesuree : 187 a 209 px, dont 33 de marge
+   et de bordure). */
+#customerCatalog .product-card { content-visibility: auto; contain-intrinsic-height: auto 154px; }
 :root[data-color-scheme] :is(#statistiques, #exports, #relances, #recommande, #commande-client) .empty-state::before,
 :root:not([data-color-scheme]) :is(#statistiques, #exports, #relances, #recommande, #commande-client) .empty-state::before { display: none; }
 
