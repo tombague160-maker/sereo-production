@@ -242,7 +242,7 @@
 
       <button class="sidebar-version" type="button" data-action="open-version-modal" aria-label="Voir la version et les nouveautes" title="Cliquer pour voir les nouveautés">
         <span class="sidebar-version-label">Version <span class="sidebar-version-value" id="sidebar-version-value">…</span></span>
-        <span class="sidebar-version-etat" id="sidebarVersionEtat" hidden>À jour</span>
+        <span class="sidebar-version-etat" id="sidebarVersionEtat" hidden>Dernière version</span>
       </button>
     </aside>
 
@@ -1695,22 +1695,26 @@
             <h3 id="parDangerTitre">Zone dangereuse — Réinitialiser les bons de commande</h3>
             <div class="danger-zone">
               <p>Cette action <strong>supprime définitivement</strong> :</p>
+              <!-- Les croix et les coches sont des icones lineaires (charte §7),
+                   plus des caracteres ✗ / ✓ ; le bouton porte la corbeille, plus
+                   l'emoji. -->
               <ul class="danger-list">
-                <li>✗ Toutes les <strong>commandes</strong> (bons de commande)</li>
-                <li>✗ Tous les <strong>clients</strong></li>
-                <li>✗ Toutes les <strong>ventes</strong> importées</li>
-                <li>✗ Toutes les <strong>tournées</strong> de livraison</li>
+                <li><svg class="danger-icone" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg>Toutes les <strong>commandes</strong> (bons de commande)</li>
+                <li><svg class="danger-icone" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg>Tous les <strong>clients</strong></li>
+                <li><svg class="danger-icone" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg>Toutes les <strong>ventes</strong> importées</li>
+                <li><svg class="danger-icone" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg>Toutes les <strong>tournées</strong> de livraison</li>
               </ul>
               <p>Et <strong>préserve</strong> :</p>
               <ul class="preserve-list">
-                <li>✓ Le <strong>stock</strong> (catalogue produits + quantités)</li>
-                <li>✓ L'<strong>historique des mouvements de stock</strong></li>
-                <li>✓ L'<strong>historique des évènements</strong></li>
-                <li>✓ Les <strong>archives Excel</strong> (tu peux re-télécharger tes fichiers)</li>
-                <li>✓ Tes <strong>paramètres visuels</strong> (thèmes, logo)</li>
+                <li><svg class="danger-icone" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>Le <strong>stock</strong> (catalogue produits + quantités)</li>
+                <li><svg class="danger-icone" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>L'<strong>historique des mouvements de stock</strong></li>
+                <li><svg class="danger-icone" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>L'<strong>historique des évènements</strong></li>
+                <li><svg class="danger-icone" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>Les <strong>archives Excel</strong> (tu peux re-télécharger tes fichiers)</li>
+                <li><svg class="danger-icone" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>Tes <strong>paramètres visuels</strong> (thèmes, logo)</li>
               </ul>
               <button class="button danger" type="button" data-action="purge-orders">
-                🗑️ Purger les bons de commande
+                <svg class="icon button-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4h6v3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                <span>Purger les bons de commande</span>
               </button>
               <p class="muted danger-note">Après purge, va dans <strong>Imports et archives</strong> ci-dessus pour re-télécharger tes Excel et les ré-importer depuis le Tableau de bord.</p>
             </div>
@@ -1720,7 +1724,7 @@
              barre laterale qui la porte n'est pas rendue. -->
         <button type="button" class="par-version par-telephone" data-action="open-version-modal" aria-label="Voir la version et les nouveautés">
           <span>Version <span id="parVersionValeur">…</span></span>
-          <span class="par-badge" id="parVersionEtat" hidden>À jour</span>
+          <span class="par-badge" id="parVersionEtat" hidden>Dernière version</span>
         </button>
       </section>
       <!-- Au telephone, « Nouveau client » et « Nouvel abonnement » sont fixes

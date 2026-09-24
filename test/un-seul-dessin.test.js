@@ -40,24 +40,50 @@ const GEOMETRIE = new Set([
   "border", "border-top", "border-right", "border-bottom", "border-left"
 ]);
 
-/** Les regles de style (selecteur, declarations, ligne), commentaires retires. */
+/**
+ * Les regles de style (selecteur, declarations, ligne, @media englobants),
+ * commentaires retires. Les chaines ne contiennent pas d'accolade dans cette
+ * feuille (test/feuille-equilibree.test.js tient sa structure).
+ */
 function regles(s) {
   const sans = s.replace(/\/\*[\s\S]*?\*\//g, m => m.replace(/[^\n]/g, " "));
   const out = [];
-  const re = /([^{}]*)\{([^{}]*)\}/g;
-  let m;
-  while ((m = re.exec(sans))) {
-    const selecteur = m[1].trim().replace(/\s+/g, " ");
-    if (!selecteur || selecteur.startsWith("@")) continue;
-    const ligne = sans.slice(0, m.index + m[1].length).split("\n").length;
-    const declarations = m[2].split(";").map(d => d.trim()).filter(Boolean).map(d => {
-      const k = d.indexOf(":");
-      return { propriete: d.slice(0, k).trim().toLowerCase(), valeur: d.slice(k + 1).trim() };
-    });
-    out.push({ selecteur, declarations, ligne });
+  const pile = [];
+  let tampon = "", ligne = 1;
+  for (let i = 0; i < sans.length; i++) {
+    const c = sans[i];
+    if (c === "\n") ligne++;
+    if (c === "{") {
+      const prelude = tampon.trim().replace(/\s+/g, " ");
+      tampon = "";
+      if (prelude.startsWith("@")) { pile.push(prelude); continue; }
+      const fin = sans.indexOf("}", i);
+      const corps = sans.slice(i + 1, fin);
+      const declarations = corps.split(";").map(d => d.trim()).filter(Boolean).map(d => {
+        const k = d.indexOf(":");
+        return { propriete: d.slice(0, k).trim().toLowerCase(), valeur: d.slice(k + 1).trim() };
+      });
+      out.push({ selecteur: prelude, declarations, ligne, media: [...pile] });
+      ligne += (corps.match(/\n/g) || []).length;
+      i = fin;
+      continue;
+    }
+    if (c === "}") { pile.pop(); tampon = ""; continue; }
+    if (c === ";" && tampon.trim().startsWith("@")) { tampon = ""; continue; }
+    tampon += c;
   }
   return out;
 }
+
+// Le telephone (<= 820 px) garde, en clair, la geometrie de ses couches : le lot
+// telephone y mesure en clair, en parallele de celui-ci (ecart nomme dans
+// DESIGN.md, « Theme clair : finitions et un seul dessin »). La regle ne juge
+// donc que ce qui s'applique au bureau.
+const TELEPHONE = 820;
+const auTelephoneSeulement = media => media.some(m => {
+  const x = m.match(/max-width:\s*(\d+)px/);
+  return x && Number(x[1]) <= TELEPHONE;
+});
 
 // Scopee au clair : `:root[data-color-scheme="light"]` ou `html[...]`, hors
 // d'un :not() (`:root:not([data-color-scheme="light"])` est le SOMBRE).
@@ -66,7 +92,7 @@ const scopeeClair = sel => /(:root|html)\[data-color-scheme="light"\]/.test(sel.
 function geometrieDesReglesClaires(s) {
   const trouvees = [];
   for (const r of regles(s)) {
-    if (!scopeeClair(r.selecteur)) continue;
+    if (!scopeeClair(r.selecteur) || auTelephoneSeulement(r.media)) continue;
     for (const d of r.declarations) {
       if (GEOMETRIE.has(d.propriete)) trouvees.push(`ligne ${r.ligne} : ${r.selecteur.slice(0, 90)} { ${d.propriete}: ${d.valeur} }`);
     }
@@ -111,10 +137,14 @@ test("un seul dessin — temoin : l'instrument reconnait la geometrie, la peintu
     'html[data-color-scheme="light"] body { font-size: 15px; }',
     ':root[data-color-scheme="light"] .ok { color: red; border-color: blue; box-shadow: none; }',
     '@media (prefers-color-scheme: dark) { :root:not([data-color-scheme="light"]) .sombre { padding: 4px; } }',
+    '@media (max-width: 820px) { :root[data-color-scheme="light"] .telephone { padding: 4px; } }',
+    '@media (max-width: 920px) { :root[data-color-scheme="light"] .tablette { gap: 4px; } }',
     '.titre { font-weight: 950; } .corps { font-weight: 500; }'
   ].join("\n");
   const geo = geometrieDesReglesClaires(echantillon);
-  assert.equal(geo.length, 4, geo.join("\n"));
+  assert.equal(geo.length, 5, geo.join("\n"));
+  assert.ok(geo.some(g => /\.tablette/.test(g)), "une regle de 821 a 920 px echappe au jugement");
+  assert.ok(!geo.some(g => /\.telephone/.test(g)), "le telephone est juge");
   assert.ok(geo.some(g => /min-height/.test(g)) && geo.some(g => /border-radius/.test(g)));
   assert.ok(geo.some(g => /\{ border: 1px/.test(g)), "le raccourci de bordure n'est pas vu");
   assert.ok(geo.some(g => /font-size: 15px/.test(g)), "html[...] n'est pas vu");

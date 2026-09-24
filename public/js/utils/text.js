@@ -16,6 +16,17 @@ export function normalizeTextKey(value) {
     .trim();
 }
 
+// Les villes que le serveur range SANS accent (normalizeCity : « Besancon »,
+// qui sert aussi de cle de secteur). La valeur stockee ne change pas -- on ne
+// reecrit jamais la fiche d'un client --, seul l'AFFICHAGE rend l'orthographe.
+// Toute autre ville est rendue telle quelle.
+const VILLES_ACCENTUEES = new Map([["besancon", "Besançon"]]);
+
+export function villeAffichee(value) {
+  const texte = String(value ?? "");
+  return VILLES_ACCENTUEES.get(normalizeTextKey(texte)) || texte;
+}
+
 export function normalizePhoneNumber(value) {
   const raw = String(value ?? "").trim();
   if (!raw) return "";
