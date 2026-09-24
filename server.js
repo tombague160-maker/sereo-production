@@ -2869,11 +2869,11 @@ function ensureOrderNumbers(db) {
     }
     if (resetAnnually) {
       const year = String(extractYear(order.dateCommande));
-      const next = (counterByYear.get(year) || 0) + 1;
+      const next = Math.max(counterByYear.get(year) || 0, plancherDeNumero(db, `${prefix}-${year}`)) + 1;
       counterByYear.set(year, next);
       order.numero = `${prefix}-${year}-${String(next).padStart(3, "0")}`;
     } else {
-      continuousCounter += 1;
+      continuousCounter = Math.max(continuousCounter, plancherDeNumero(db, prefix)) + 1;
       order.numero = `${prefix}-${String(continuousCounter).padStart(5, "0")}`;
     }
   });
@@ -4494,7 +4494,7 @@ function generateOrderNumber(db, dateCommande) {
       if (!match) return max;
       const seq = Number(match[1]);
       return Number.isFinite(seq) && seq > max ? seq : max;
-    }, 0);
+    }, plancherDeNumero(db, prefix));
     return `${prefix}-${String(maxSeq + 1).padStart(5, "0")}`;
   }
 
@@ -4506,8 +4506,44 @@ function generateOrderNumber(db, dateCommande) {
     if (!match) return max;
     const seq = Number(match[1]);
     return Number.isFinite(seq) && seq > max ? seq : max;
-  }, 0);
+  }, plancherDeNumero(db, `${prefix}-${year}`));
   return `${prefix}-${year}-${String(maxSeq + 1).padStart(3, "0")}`;
+}
+
+// Chasse aux defauts du 24/09 (lot « stock ») : un numero attribue ne l'est
+// plus jamais deux fois. La purge des bons retient, avant de vider les
+// commandes, le plus grand numero de chaque serie (settings.numerosAttribues,
+// retenirNumerosAttribues) ; le compteur part du plus grand des deux. Avant,
+// la premiere commande d'apres une purge reprenait CMD-2026-001 et
+// l'identifiant cmd-cmd-2026-001 : un rappel survivant visait alors la
+// commande d'un autre client.
+//
+// Le plus grand numero deja attribue d'une serie (« CMD-2026 » : reset
+// annuel ; « CMD » : compteur continu), retenu par une purge. 0 sinon.
+function plancherDeNumero(db, serie) {
+  const retenus = db.settings && typeof db.settings === "object" ? db.settings.numerosAttribues : null;
+  const valeur = retenus && typeof retenus === "object" ? Number(retenus[serie]) : 0;
+  return Number.isInteger(valeur) && valeur > 0 ? valeur : 0;
+}
+
+// A appeler AVANT de supprimer des commandes (la purge) : retient, par serie,
+// le plus grand numero attribue, sans jamais faire redescendre un plancher.
+function retenirNumerosAttribues(db) {
+  const retenus = { ...((db.settings && db.settings.numerosAttribues) || {}) };
+  const retenir = (serie, seq) => {
+    if (Number.isInteger(seq) && seq > (Number(retenus[serie]) || 0)) retenus[serie] = seq;
+  };
+  for (const order of db.commandes || []) {
+    const numero = String(order.numero || "");
+    const annuel = numero.match(/^([A-Z0-9]{2,8})-(\d{4})-(\d+)$/);
+    if (annuel) {
+      retenir(`${annuel[1]}-${annuel[2]}`, Number(annuel[3]));
+      continue;
+    }
+    const continu = numero.match(/^([A-Z0-9]{2,8})-(\d+)$/);
+    if (continu) retenir(continu[1], Number(continu[2]));
+  }
+  db.settings = { ...(db.settings || {}), numerosAttribues: retenus };
 }
 
 // Hash deterministe d'une commande pour detecter les doublons au re-import.
@@ -5363,6 +5399,24 @@ function getOrderTotal(order) {
   }, 0);
 }
 
+// « Prospects convertis ce mois » (chasse aux defauts du 24/09) : un client
+// devient « converti » a sa premiere commande ferme, s'il etait PROSPECT --
+// aucune commande livree ni en cours avant celle-ci (une planifiee pas encore
+// confirmee, une annulee ou un brouillon ne font pas un client). Avant,
+// crmConvertedAt se posait des qu'il etait vide : une pharmacie cliente
+// depuis 2024 qui commandait chez elle comptait comme une conversion (et les
+// 97 fiches importees de la production, qui n'en ont pas, l'auraient toutes
+// ete a leur premiere commande terrain). `commande` : celle qui convertit,
+// ecartee du compte.
+const STATUTS_QUI_NE_FONT_PAS_UN_CLIENT = new Set(["planifiee", "a_confirmer", "annulee", "brouillon"]);
+
+function etaitProspect(db, clientId, commande = null) {
+  return !(db.commandes || []).some(order => String(order.clientId) === String(clientId)
+    && order !== commande
+    && !(commande && String(order.id) === String(commande.id))
+    && !STATUTS_QUI_NE_FONT_PAS_UN_CLIENT.has(order.status));
+}
+
 function createCustomerOrder(db, payload = {}) {
   const requestedType = clean(payload.orderType || payload.typeCommande || payload.type).toLowerCase();
   if (requestedType === "planifiee" || requestedType === "planifie" || requestedType === "planned") {
@@ -5407,7 +5461,7 @@ function createCustomerOrder(db, payload = {}) {
   });
 
   client.crmStatus = "client_actif";
-  client.crmConvertedAt = client.crmConvertedAt || new Date().toISOString();
+  if (!client.crmConvertedAt && etaitProspect(db, client.id)) client.crmConvertedAt = new Date().toISOString();
   client.lastVisitDate = dateCommande;
   client.nextReminderDate = client.nextReminderDate || "";
   heriterPositionDuClient(order, client);
@@ -5586,6 +5640,26 @@ function refreshClientReminderDate(db, clientId) {
   client.nextReminderDate = next?.datePrevue || "";
 }
 
+// Chasse aux defauts du 24/09 (lot « stock et abonnements ») : une commande
+// annulee n'a plus rien a confirmer. Ses rappels encore a faire (« Confirmer
+// la livraison planifiee ») passent « annule », avec le resultat dit ; avant,
+// ils restaient a faire, remontaient dans les relances et le compteur du
+// tableau de bord, et le client aurait ete appele pour une livraison annulee.
+// Les autres rappels du client ne bougent pas ; son prochain rappel est
+// recalcule. Rend le nombre de rappels annules.
+function annulerRappelsDeLaCommande(db, order, resultat = "Commande annulée") {
+  const maintenant = new Date().toISOString();
+  const rappels = (db.relances || [])
+    .filter(reminder => String(reminder.commandeId) === String(order.id) && reminder.status === "a_faire");
+  rappels.forEach(reminder => {
+    reminder.status = "annule";
+    reminder.resultat = reminder.resultat || resultat;
+    reminder.updatedAt = maintenant;
+  });
+  if (rappels.length) refreshClientReminderDate(db, order.clientId);
+  return rappels.length;
+}
+
 function createAutomaticOrderReminder(db, order, options = {}) {
   if (!order?.clientId || !order.deliveryDate) return null;
   const type = clean(options.type || "confirmation_livraison");
@@ -5690,6 +5764,7 @@ function updatePlannedOrder(db, orderId, payload = {}) {
       releaseOrderStockReservation(db, order, "planned_order_cancelled");
     }
     setOrderStatus(order, nextStatus);
+    if (nextStatus === "annulee") annulerRappelsDeLaCommande(db, order);
   }
 
   if (payload.deliveryDate !== undefined || payload.dateLivraison !== undefined) {
@@ -5740,7 +5815,7 @@ function confirmPlannedOrder(db, orderId) {
   const client = findClient(db, order.clientId);
   if (client) {
     client.crmStatus = "client_actif";
-    client.crmConvertedAt = client.crmConvertedAt || order.confirmedAt;
+    if (!client.crmConvertedAt && etaitProspect(db, client.id, order)) client.crmConvertedAt = order.confirmedAt;
     client.lastVisitDate = jourParis(order.confirmedAt);
   }
 
@@ -9240,6 +9315,8 @@ app.post("/api/orders/purge", async (req, res) => {
         if (releaseOrderStockReservation(db, order, "purge")) stockReservationsReleased += 1;
       });
 
+      // Un numero attribue ne revient jamais (lot « stock », 24/09).
+      retenirNumerosAttribues(db);
       db.commandes = [];
       db.clients = [];
       db.ventes = [];
@@ -9619,6 +9696,7 @@ app.patch("/api/orders/:id", async (req, res) => {
           reprendreStockLibere(db, order, "écran Commandes");
         }
         setOrderStatus(order, req.body.status);
+        if (order.status === "annulee") annulerRappelsDeLaCommande(db, order);
       }
 
       order.updatedAt = new Date().toISOString();
