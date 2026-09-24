@@ -49,6 +49,17 @@ test.beforeAll(async () => {
     id: "m-ancien", productId: "st-CH-L", productName: "Changes taille L", sku: "CH-L", type: "sortie", quantity: 4,
     oldQuantity: 104, newQuantity: 100, reason: "Ajustement manuel", createdAt: new Date(Date.now() - 7200000).toISOString(), createdBy: "local"
   }];
+  // Relecture adverse (24/09). Une fiche corrigee dans Clients (numero et code
+  // postal justes) dont une commande ouverte garde les anciens, faux : la
+  // fiche ne les fait pas suivre sur les commandes.
+  const profil = { id: "c-profil", nom: "Cabinet Profil Corrigé", rue: "7 rue Proudhon", ville: "Besançon", codePostal: "25000", telephone: "0698765432", crmStatus: "client_actif", lat: 47.24, lng: 6.02 };
+  seed.clients.push(profil);
+  seed.commandes.push({
+    ...modele, id: "o-profil", clientId: profil.id, clientName: profil.nom, status: "pret_livraison", deliveredAt: undefined,
+    address: profil.rue, city: profil.ville, postalCode: "250", phone: "06 98 76 54", lat: profil.lat, lng: profil.lng
+  });
+  // Une consigne de commande : elle part sur le bon (temoin du renvoi interne).
+  seed.commandes.find(o => o.id === "o-8").notes = "Code portail 1234";
   srv = await demarrer({ port: 3530, seed });
 });
 test.afterAll(async () => { if (srv) await srv.arreter(); });
@@ -249,14 +260,20 @@ test("journal — rien au chargement de l'app ; Paramètres lit une page, avec l
   await expect(lignes.nth(0).locator(".par-journal-qui")).toHaveText(/dev/);
   await expect(lignes.nth(1).locator(".par-journal-qui")).toHaveText(/—/);
 
-  // Les « Mouvements récents » du Stock nomment aussi l'auteur ; pas l'ancien
-  // « local ». (Le geste est parti hors de la page : on la recharge -- un goto
-  // qui ne change que l'ancre ne recharge rien.)
+  // Les « Mouvements récents » du Stock, eux, ne nomment PERSONNE (relecture
+  // adverse du 24/09) : /api/stock-movements part à tous les comptes, et reste
+  // dans le cache du service worker. « Qui » se lit ici, au journal. (Le geste
+  // est parti hors de la page : on la recharge -- un goto qui ne change que
+  // l'ancre ne recharge rien.)
   await page.goto(`${srv.base}/#stock`);
+  const reponse = page.waitForResponse(r => r.url().endsWith("/api/stock-movements") && r.status() === 200);
   await page.reload({ waitUntil: "networkidle" });
+  const recus = await (await reponse).json();
+  expect(recus.map(m => m.productName)).toEqual(["Alèses", "Changes taille L"]); // temoin : le geste y est
+  expect(recus.filter(m => "createdBy" in m)).toEqual([]);
   const mouvements = page.locator("#stockMovementList .item");
-  await expect(mouvements.first()).toContainText("par dev");
-  await expect(mouvements.filter({ hasText: "Changes taille L" })).not.toContainText("local");
+  await expect(mouvements.first()).toContainText("Inventaire");
+  await expect(mouvements.first()).not.toContainText(/par dev|local/);
 });
 
 test("journal — un compte qui n'administre pas ne voit pas la carte et ne la demande pas", async ({ page }) => {
@@ -466,3 +483,88 @@ for (const schema of ["light", "dark"]) {
     expect(faibles).toEqual([]);
   });
 }
+
+// --- 7. Relecture adverse (24/09) ----------------------------------------------
+
+test("modifier le profil — un numéro « à vérifier » propre à la commande, revenu tel quel, n'empêche pas d'enregistrer", async ({ page }) => {
+  await ouvrir(page, "commandes");
+  await page.locator('#cmdPilules [data-cmd-filtre="toutes"]').click();
+  await page.locator('[data-cmd-ouvrir="o-profil"]').click();
+  const detail = page.locator("#bdc-detail-modal");
+  await expect(detail).toHaveAttribute("aria-hidden", "false");
+  await detail.locator('[data-action="bdc-edit-client"]').click();
+  const formulaire = detail.locator("form.bdc-detail-client-form");
+  // L'ecran les signale sans bloquer : c'est la promesse.
+  await expect(formulaire.locator('label:has([name="telephone"]) .garde-message')).toHaveText(/Numéro enregistré à vérifier/);
+  await expect(formulaire.locator('label:has([name="codePostal"]) .garde-message')).toHaveText(/Code postal enregistré à vérifier/);
+  await formulaire.locator('[name="notes"]').fill("Entrée par la cour");
+  const envoi = page.waitForResponse(r => r.request().method() === "PATCH" && r.url().includes("/api/clients/c-profil"));
+  await formulaire.locator('button[data-action="bdc-save-client"]').click();
+  expect((await envoi).status()).toBe(200);
+  // La fiche garde son numero et son code postal justes ; les notes partent.
+  const lu = await (await page.request.get(`${srv.base}/api/crm/clients/c-profil`)).json();
+  expect([lu.telephone, lu.codePostal, lu.notes]).toEqual(["0698765432", "25000", "Entrée par la cour"]);
+
+  // Temoin : un numero TOUCHE part, et le serveur le juge.
+  await expect(detail.locator('[data-action="bdc-edit-client"]')).toBeVisible();
+  await detail.locator('[data-action="bdc-edit-client"]').click();
+  await formulaire.locator('[name="telephone"]').fill("07 11 22 33 44");
+  const envoi2 = page.waitForResponse(r => r.request().method() === "PATCH" && r.url().includes("/api/clients/c-profil"));
+  await formulaire.locator('button[data-action="bdc-save-client"]').click();
+  expect((await envoi2).status()).toBe(200);
+  expect((await (await page.request.get(`${srv.base}/api/crm/clients/c-profil`)).json()).telephone).toBe("0711223344");
+});
+
+test("bon de livraison — la consigne de la commande y est ; le renvoi « Replanification depuis … » n'y est pas", async ({ page }) => {
+  // « Planifier la suite » d'une commande livree : la nouvelle porte d'office
+  // la note « Replanification depuis CMD-… ».
+  const cree = await page.request.post(`${srv.base}/api/orders/o-1/replan`, { data: { deliveryDate: jourDecale(7) } });
+  expect(cree.status()).toBe(201);
+  const commandes = await (await page.request.get(`${srv.base}/api/orders`)).json();
+  const suite = commandes.find(o => o.parentOrderId === "o-1");
+  expect(suite?.notes).toMatch(/^Replanification depuis CMD-/); // temoin : la note existe
+
+  await espionnerImpression(page);
+  await ouvrir(page, "commandes");
+  const champ = page.locator("#menuSearch");
+  const bon = page.locator("#bonLivraison");
+  const imprimer = async (numero, fois) => {
+    await champ.fill(numero);
+    await champ.press("Enter");
+    await expect(page.locator("#bdc-detail-title")).toHaveText(`Bon ${numero}`);
+    await page.locator('#bdc-detail-modal [data-action="imprimer-bon"]').click();
+    await expect.poll(() => impressions(page)).toBe(fois);
+    await page.emulateMedia({ media: "print" });
+    const texte = await bon.innerText();
+    await page.emulateMedia({ media: "screen" });
+    await page.evaluate(() => window.dispatchEvent(new Event("afterprint")));
+    await page.keyboard.press("Escape");
+    return texte;
+  };
+
+  // Temoin : une vraie consigne part sur le papier.
+  const bonO8 = await imprimer(commandes.find(o => o.id === "o-8").numero, 1);
+  expect(bonO8).toContain("Consignes");
+  expect(bonO8).toContain("Code portail 1234");
+
+  const bonSuite = await imprimer(suite.numero, 2);
+  expect(bonSuite).toContain(`N° ${suite.numero}`);
+  expect(bonSuite).not.toContain("Replanification depuis");
+  expect(bonSuite).not.toContain("Consignes");
+});
+
+test("recherche — un seul caractère : elle ne dit pas avoir cherché les données", async ({ page }) => {
+  await ouvrir(page, "journee");
+  const champ = page.locator("#menuSearch");
+  const zone = page.locator("#rechercheResultats");
+  await champ.fill("7");
+  // Temoin : aucun ecran ne s'appelle ainsi, et des commandes contiennent un 7.
+  await expect(page.locator(".sidebar .tab:not(.is-hidden-by-search)")).toHaveCount(0);
+  const commandes = await (await page.request.get(`${srv.base}/api/orders`)).json();
+  expect(commandes.filter(o => String(o.numero).includes("7")).length).toBeGreaterThan(0);
+  await expect(zone.locator(".recherche-vide")).toHaveText("Aucun écran ne correspond à « 7 ». Tape au moins 2 caractères pour chercher un client, une commande ou un produit.");
+  // Deux caracteres : les donnees sont cherchees.
+  await champ.fill("CMD");
+  await expect(zone.locator('.recherche-groupe[aria-label="Commandes"]')).toBeVisible();
+  await expect(zone.locator(".recherche-vide")).toHaveCount(0);
+});

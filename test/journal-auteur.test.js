@@ -170,3 +170,37 @@ test("journal — reserve a l'administration ; l'administrateur lit l'auteur", a
   const actions = await demander("/api/journal", admin);
   assert.equal(actions.body.entrees[0].auteur, "julie");
 });
+
+// Relecture adverse (24/09) : /api/stock-movements part au chargement de
+// l'app, pour TOUS les comptes (et reste dans le cache du service worker).
+// Elle servait toute la table avec `createdBy` : le verrou du journal
+// (?genre=stock, administration) ne gardait rien.
+test("mouvements recents — sans auteur, pour tout compte ; les derniers seulement", async () => {
+  const anciens = Array.from({ length: 60 }, (_, i) => ({
+    id: `m-${i}`, productId: "p2", productName: "Changes L", sku: "CH-L", type: "sortie", quantity: 1,
+    oldQuantity: 70 - i, newQuantity: 69 - i, reason: "Inventaire",
+    createdAt: new Date(Date.UTC(2026, 8, 1) - i * 3600000).toISOString(), createdBy: "marc"
+  }));
+  writeDb({
+    ...defaultDb(),
+    stock: [{ id: "p1", code: "A1", nom: "Alèses", quantite: 10 }, { id: "p2", code: "CH-L", nom: "Changes L", quantite: 10 }],
+    stockMovements: anciens
+  }, { backup: false });
+  const julie = await connexion("julie", "tournee-du-matin-2026");
+  const geste = await demander("/api/stock/p1", julie, { method: "PATCH", body: JSON.stringify({ quantite: 4, reason: "Casse" }) });
+  assert.equal(geste.res.status, 200);
+  // Temoin : l'auteur est bien ecrit, et l'administrateur le lit au journal.
+  assert.equal(readDb().stockMovements[0].createdBy, "julie");
+  const admin = await connexion("admin-banc", "mot-de-passe-banc-sans-valeur");
+  assert.equal((await demander("/api/journal?genre=stock&limite=1", admin)).body.entrees[0].auteur, "julie");
+
+  for (const [qui, cookie] of [["julie", julie], ["admin", admin]]) {
+    const { res, body } = await demander("/api/stock-movements", cookie);
+    assert.equal(res.status, 200, qui);
+    assert.deepEqual(body.filter(m => "createdBy" in m || "auteur" in m || "utilisateur" in m).map(m => m.createdBy), [], `${qui} lit l'auteur des mouvements`);
+    // Les derniers d'abord, 50 au plus (l'ecran en montre 12).
+    assert.equal(body.length, 50, qui);
+    assert.deepEqual([body[0].productName, body[0].reason, body[0].quantity], ["Alèses", "Casse", 6]);
+    assert.equal(body[49].id, "m-48");
+  }
+});

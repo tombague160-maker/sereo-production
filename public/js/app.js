@@ -483,8 +483,13 @@ function renderRechercheGlobale(value) {
     groupeDeRecherche("Produits", "produit", resultats.produits, p => [p.nom || p.name || p.produit || "Produit", p.code || p.sku || ""])
   ].join("") : "";
   // Rien du tout -- ni ecran, ni donnee : le dire, au lieu d'un menu vide.
+  // Sous RECHERCHE_MIN caracteres, les donnees n'ont pas ete cherchees
+  // (relecture adverse du 24/09) : on ne dit pas qu'aucune ne correspond.
+  const tape = escapeHtml(String(value).trim());
   const vide = !html && !ecransVisibles
-    ? `<p class="recherche-vide" role="status">Aucun écran, client, commande ni produit ne correspond à « ${escapeHtml(String(value).trim())} ».</p>`
+    ? `<p class="recherche-vide" role="status">${resultats
+      ? `Aucun écran, client, commande ni produit ne correspond à « ${tape} ».`
+      : `Aucun écran ne correspond à « ${tape} ». Tape au moins ${RECHERCHE_MIN} caractères pour chercher un client, une commande ou un produit.`}</p>`
     : "";
   zone.innerHTML = html + vide;
   zone.hidden = !zone.innerHTML;
@@ -671,6 +676,14 @@ function jugerGarde(champ, { sortie = false } = {}) {
   } else {
     cacherGarde(champ);
   }
+}
+
+/** Vrai si le champ garde montre sa valeur enregistree, fausse (« a verifier »), non touchee. */
+function gardeSignaleeIntacte(champ) {
+  if (!champ || !MESSAGES_GARDE[champ.dataset.garde]) return false;
+  const initiale = champ.dataset.gardeInitiale ?? champ.defaultValue ?? "";
+  if (champ.value.trim() !== String(initiale).trim()) return false;
+  return !["vide", "valide"].includes(verdictSaisie(champ.dataset.garde, champ.value));
 }
 
 /** Pose la valeur enregistree des champs gardes d'un formulaire, et les juge. */
@@ -4458,13 +4471,13 @@ function renderStockMovements() {
   movements.forEach(movement => {
     const item = document.createElement("article");
     item.className = `item ${movement.type === "entree" ? "status-ok" : "status-warning"}`;
-    // L'auteur du mouvement (24/09) ; « local », que portaient les anciens, n'en est pas un.
-    const auteur = movement.createdBy && movement.createdBy !== "local" ? movement.createdBy : "";
+    // Sans auteur (relecture adverse du 24/09) : /api/stock-movements part a
+    // tous les comptes ; « qui » se lit dans le journal, reserve a l'administration.
     item.innerHTML = `
       <div class="item-header">
         <div>
           <h4>${escapeHtml(movement.productName || "Produit")}</h4>
-          <p>${escapeHtml([movement.reason || "Ajustement manuel", formatDate(movement.createdAt), auteur ? `par ${auteur}` : ""].filter(Boolean).join(" · "))}</p>
+          <p>${escapeHtml(movement.reason || "Ajustement manuel")} · ${escapeHtml(formatDate(movement.createdAt))}</p>
         </div>
         <span class="pill ${movement.type === "entree" ? "pill-ok" : "pill-warning"}">
           ${movement.type === "entree" ? "+" : "-"}${escapeHtml(movement.quantity || 0)}
@@ -5669,9 +5682,17 @@ function gabaritBonDeLivraison({ order, stop = null, remisA = "" }) {
   const livreeLe = livree && !Number.isNaN(livree.getTime())
     ? `${livree.toLocaleDateString("fr-FR")} à ${heureCourte(order.deliveredAt)}`
     : "";
-  // Les consignes de livraison : celles de la commande (ou de l'arret). Les
-  // notes de la fiche client restent internes (besoins, preferes...).
-  const consignes = [order?.notes || stop?.notes || ""].filter(Boolean);
+  // Les consignes de livraison : les notes de la commande (ou de l'arret, qui
+  // les recopie a sa creation ; aucun ecran n'y ecrit). Une commande importee
+  // recoit les notes de la fiche client : ce SONT ses consignes de livraison
+  // (PATCH /api/clients les fait suivre sur les commandes). Les besoins
+  // particuliers et produits preferes de la fiche, eux, restent internes.
+  // La note que « Planifier la suite » ecrit d'office (« Replanification
+  // depuis CMD-… ») est un renvoi interne, pas une consigne (relecture adverse
+  // du 24/09) : elle ne part pas sur le papier.
+  const note = String(order?.notes || stop?.notes || "").trim();
+  const renvoiInterne = Boolean(order?.parentOrderId) && /^Replanification depuis \S+$/.test(note);
+  const consignes = note && !renvoiInterne ? [note] : [];
   const remis = String(remisA || order?.remisA || stop?.remisA || "").trim();
   const infos = [
     ["Date de commande", bdcFormatDate(order?.dateCommande || stop?.dateCommande)],
@@ -5971,6 +5992,14 @@ async function saveBdcClientEdit(triggerBtn) {
     telephone: formData.get("telephone") || "",
     notes: formData.get("notes") || ""
   };
+  // Relecture adverse du 24/09. Ce formulaire montre les coordonnees DE LA
+  // COMMANDE ; le serveur compare a celles DU CLIENT. Un numero « a verifier »
+  // propre a la commande (ou reste d'avant une correction de la fiche), revenu
+  // tel quel, y etait refuse (400) -- alors que l'ecran le signalait sans
+  // bloquer. Signale et non touche, il ne part pas : la fiche garde le sien.
+  for (const nom of ["telephone", "codePostal"]) {
+    if (gardeSignaleeIntacte(form.elements[nom])) delete body[nom];
+  }
 
   await runAction(triggerBtn, "Enregistrement...", async () => {
     const result = await apiFetch(`/api/clients/${encodeURIComponent(clientId)}`, {

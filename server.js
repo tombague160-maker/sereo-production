@@ -7147,8 +7147,18 @@ app.get("/api/journal", requireAdministration, (req, res) => {
   }
 });
 
+// Les « Mouvements recents » de l'ecran Stock (relecture adverse du 24/09).
+// Cette route part au chargement de l'app, pour TOUS les comptes, et le
+// service worker la garde en cache. Elle servait toute la table, avec
+// `createdBy` -- qui porte depuis le 24/09 l'identifiant du compte : le verrou
+// de /api/journal?genre=stock (administration) ne gardait donc rien. Elle ne
+// sert plus que les derniers mouvements (l'ecran en montre 12), sans auteur ;
+// « qui » se lit dans le journal de Parametres.
+const MOUVEMENTS_STOCK_RECENTS = 50;
+
 app.get("/api/stock-movements", (req, res) => {
-  res.json(readDb().stockMovements);
+  res.json((readDb().stockMovements || []).slice(0, MOUVEMENTS_STOCK_RECENTS)
+    .map(({ createdBy, utilisateur, auteur, ...mouvement }) => mouvement));
 });
 
 app.get("/api/dashboard", (req, res) => {
@@ -8489,7 +8499,12 @@ function declencherGeocodageEnFond(origine) {
 
   geocodageEnCours = true;
   geocodageARelancer = false;
-  geocoderClients()
+  // Hors du contexte de la requete qui l'a declenche (relecture adverse du
+  // 24/09) : le lot suit ses `await` et la file d'ecriture, et la ligne
+  // « N client(s) geolocalise(s) automatiquement » du journal etait signee du
+  // compte qui avait modifie une fiche -- relance comprise, meme quand un autre
+  // compte l'avait provoquee. Un lot de fond est « automatique ».
+  contexteRequete.exit(() => geocoderClients())
     .then(bilan => {
       if (bilan.traites > 0) {
         console.log(
