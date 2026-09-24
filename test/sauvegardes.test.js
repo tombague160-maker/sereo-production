@@ -224,6 +224,23 @@ test("rétention : la dernière de chaque jour survit à la rotation, 30 jours d
   const parRecence = [...poses].sort((x, y) => y.ms - x.ms);
   const attendu = new Set([nouvelle, ...parRecence.slice(0, 29).map(p => p.nom)]);
   for (let d = 1; d <= 29; d++) attendu.add(parRecence.find(p => p.d === d).nom);
+  // Garde-fous (25/09, decision 4) : et la derniere de chaque semaine de Paris
+  // (lundi-dimanche) sur 8 semaines. La semaine d'aujourd'hui a la nouvelle.
+  const lundi = ms => {
+    const [aa, mm, jj] = jourDeParis(ms).split("-").map(Number);
+    const js = new Date(Date.UTC(aa, mm - 1, jj)).getUTCDay() || 7;
+    return new Date(Date.UTC(aa, mm - 1, jj - (js - 1))).toISOString().slice(0, 10);
+  };
+  const semaineCourante = lundi(Date.now());
+  const semainesVues = new Set([semaineCourante]);
+  for (const p of parRecence) {
+    const s = lundi(p.ms);
+    const [la, lm, lj] = semaineCourante.split("-").map(Number);
+    const premiere = new Date(Date.UTC(la, lm - 1, lj - 49)).toISOString().slice(0, 10);
+    if (s < premiere || semainesVues.has(s)) continue;
+    semainesVues.add(s);
+    attendu.add(p.nom);
+  }
   const restants = new Set(fichiers());
 
   const joursSansSauvegarde = [];
@@ -233,8 +250,10 @@ test("rétention : la dernière de chaque jour survit à la rotation, 30 jours d
   }
   assert.deepEqual(joursSansSauvegarde, [], "jours (en arriere) qui n'ont plus aucune sauvegarde");
   assert.deepEqual([...restants].sort(), [...attendu].sort());
-  // Au-dela de 30 jours, plus de journaliere : la rotation reprend ses droits.
-  assert.equal(poses.filter(p => p.d >= 30 && restants.has(p.nom)).length, 0);
+  // Au-dela de 30 jours, plus de journaliere : ne restent que les
+  // hebdomadaires, une par semaine au plus (decision 4, 25/09).
+  const auDela = poses.filter(p => p.d >= 30 && restants.has(p.nom));
+  assert.equal(new Set(auDela.map(p => lundi(p.ms))).size, auDela.length, "plus d'une sauvegarde par semaine au-dela de 30 jours");
 });
 
 test("rétention : jamais plus agressive qu'avant (les 30 dernières restent, même vieilles)", async () => {

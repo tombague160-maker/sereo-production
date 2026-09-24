@@ -3164,14 +3164,22 @@ const BACKUP_RETENTION = 30;
 // Decision de Thomas du 24/09 : EN PLUS des 30 dernieres, une sauvegarde par
 // jour (de Paris) pendant 30 jours. Voir sauvegardesAGarder().
 const BACKUP_JOURS_JOURNALIERES = 30;
+// Garde-fous (25/09, decision 4) : et une par semaine (de Paris, du lundi au
+// dimanche) pendant 8 semaines.
+const BACKUP_SEMAINES_HEBDOMADAIRES = 8;
+// Decision 5 : la sauvegarde faite avant « Purger les bons de commande » est
+// HORS rotation -- ni les horaires ni les manuelles ne l'evincent. Le nom de
+// genre est reserve (« Sauvegarder maintenant » ne peut pas le prendre).
+const GENRE_AVANT_PURGE_COMMANDES = "avant-purge-commandes";
+const MOTIF_HORS_ROTATION = /-avant-purge-commandes\.(sqlite|json)\.gz$/;
 const BACKUP_FILENAME_PATTERN = /^db-.*\.(sqlite|json)(\.gz)?$/;
 
-function listBackupEntries() {
-  if (!fs.existsSync(BACKUP_DIR)) return [];
-  return fs.readdirSync(BACKUP_DIR)
+function listBackupEntries(dossier = BACKUP_DIR) {
+  if (!fs.existsSync(dossier)) return [];
+  return fs.readdirSync(dossier)
     .filter(name => BACKUP_FILENAME_PATTERN.test(name))
     .map(name => {
-      const fullPath = path.join(BACKUP_DIR, name);
+      const fullPath = path.join(dossier, name);
       try {
         const stat = fs.statSync(fullPath);
         return { name, fullPath, mtimeMs: stat.mtimeMs, size: stat.size };
@@ -3203,22 +3211,47 @@ function listBackupEntries() {
 // la rotation ne supprime jamais plus qu'avant, meme apres un mois sans
 // activite (les 30 plus recentes, toutes vieilles, restent).
 //
+// Garde-fous (25/09, decisions 4 et 5), EN PLUS :
+// - la derniere de chaque semaine de Paris (lundi-dimanche) sur 8 semaines,
+//   celle d'aujourd'hui comprise ; « avant-purge » (des tournees) comprises,
+//   comme toute sauvegarde : elles sont candidates au meme titre ;
+// - les sauvegardes d'avant la purge des bons, toutes : hors rotation. Elles
+//   ne prennent pas non plus de place parmi les 30 : les 30 dernieres se
+//   comptent sans elles (on en garde donc autant ou plus qu'avant).
+// La decision 4 dit « une par jour pendant 14 jours » : les 30 jours posees
+// le 24/09 les contiennent, et les ramener a 14 supprimerait plus qu'avant.
+// L'ensemble garde contient toujours celui de la regle d'avant (banc
+// « jamais plus agressive » de test/garde-fous-sauvegardes.test.js).
+//
 // `entries` : triees de la plus recente a la plus ancienne (listBackupEntries).
 function sauvegardesAGarder(entries, maintenant = new Date()) {
-  const garder = new Set(entries.slice(0, BACKUP_RETENTION).map(entry => entry.name));
-  const premierJour = ajouterJours(jourParis(maintenant), -(BACKUP_JOURS_JOURNALIERES - 1));
+  const horsRotation = entries.filter(entry => MOTIF_HORS_ROTATION.test(entry.name));
+  const rotation = entries.filter(entry => !MOTIF_HORS_ROTATION.test(entry.name));
+  const garder = new Set(horsRotation.map(entry => entry.name));
+  for (const entry of rotation.slice(0, BACKUP_RETENTION)) garder.add(entry.name);
+  const aujourdhui = jourParis(maintenant);
+  const premierJour = ajouterJours(aujourdhui, -(BACKUP_JOURS_JOURNALIERES - 1));
+  const premiereSemaine = ajouterJours(debutSemaine(aujourdhui), -7 * (BACKUP_SEMAINES_HEBDOMADAIRES - 1));
   const joursVus = new Set();
-  for (const entry of entries) {
+  const semainesVues = new Set();
+  for (const entry of rotation) {
     const jour = jourParis(entry.mtimeMs);
-    if (!jour || jour < premierJour || joursVus.has(jour)) continue;
-    joursVus.add(jour);
-    garder.add(entry.name);
+    if (!jour) continue;
+    if (jour >= premierJour && !joursVus.has(jour)) {
+      joursVus.add(jour);
+      garder.add(entry.name);
+    }
+    const semaine = debutSemaine(jour);
+    if (semaine >= premiereSemaine && !semainesVues.has(semaine)) {
+      semainesVues.add(semaine);
+      garder.add(entry.name);
+    }
   }
   return garder;
 }
 
-function pruneOldBackups() {
-  const entries = listBackupEntries();
+function pruneOldBackups(dossier = BACKUP_DIR) {
+  const entries = listBackupEntries(dossier);
   const garder = sauvegardesAGarder(entries);
   entries.filter(entry => !garder.has(entry.name)).forEach(entry => {
     try { fs.unlinkSync(entry.fullPath); } catch { /* best-effort */ }
@@ -7545,6 +7578,7 @@ function etatDesSauvegardes(identite, maintenant = Date.now()) {
       heures: BACKUP_THROTTLE_MS / 3600000,
       dernieres: BACKUP_RETENTION,
       joursJournalieres: BACKUP_JOURS_JOURNALIERES,
+      semainesHebdomadaires: BACKUP_SEMAINES_HEBDOMADAIRES,
       perimeeApresHeures: SAUVEGARDE_PERIMEE_MS / 3600000
     },
     administration: Boolean(identite && getRole(identite.role).administration),

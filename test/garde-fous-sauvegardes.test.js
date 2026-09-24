@@ -304,3 +304,107 @@ test("purge des tournées : une sauvegarde lisible mais SANS la tournée n'autor
   assert.equal(resultat.purgees, 0, "une tournee absente de la sauvegarde a ete effacee");
   assert.ok(readDb().routes.some(r => r.id === "vieille"));
 });
+
+// --- 3. Retention : horaires, journalieres, hebdomadaires, hors rotation ----
+//
+// Decision 4 (24/09) : en plus des 30 dernieres, une par jour et une par
+// semaine (8 semaines), « avant-purge » comprises, sans jamais supprimer plus
+// qu'avant. Decision 5 : la sauvegarde d'avant la purge des bons est HORS
+// rotation (ni les horaires ni les manuelles ne l'evincent).
+
+const JOUR = 24 * 3600 * 1000;
+const PARIS = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" });
+const jourDeParis = ms => PARIS.format(new Date(ms));
+// Le lundi de la semaine (de Paris) d'un instant -- l'oracle du banc, par Intl.
+function lundiDeParis(ms) {
+  const [a, m, j] = jourDeParis(ms).split("-").map(Number);
+  const jourSemaine = new Date(Date.UTC(a, m - 1, j)).getUTCDay() || 7;
+  return new Date(Date.UTC(a, m - 1, j - (jourSemaine - 1))).toISOString().slice(0, 10);
+}
+
+// La regle d'AVANT (v1.46.0), reecrite ici : les 30 plus recentes, plus la
+// derniere de chaque jour de Paris sur 30 jours. Le nouvel ensemble doit la
+// contenir.
+function regleDAvant(entries, maintenant) {
+  const garder = new Set(entries.slice(0, 30).map(e => e.name));
+  const aujourdhui = jourDeParis(maintenant.getTime());
+  const [a, m, j] = aujourdhui.split("-").map(Number);
+  const premier = new Date(Date.UTC(a, m - 1, j - 29)).toISOString().slice(0, 10);
+  const vus = new Set();
+  for (const e of entries) {
+    const jour = jourDeParis(e.mtimeMs);
+    if (jour < premier || vus.has(jour)) continue;
+    vus.add(jour);
+    garder.add(e.name);
+  }
+  return garder;
+}
+
+// 70 jours d'activite, trois sauvegardes par jour (8 h, 12 h, 16 h UTC).
+function dixSemaines(maintenant) {
+  const [a, m, j] = jourDeParis(maintenant.getTime()).split("-").map(Number);
+  const entries = [];
+  for (let d = 1; d <= 70; d++) {
+    for (const h of [16, 12, 8]) {
+      const ms = Date.UTC(a, m - 1, j - d, h, 0, 0);
+      entries.push({ name: `db-${new Date(ms).toISOString().replace(/[:.]/g, "-")}.sqlite.gz`, mtimeMs: ms });
+    }
+  }
+  return entries.sort((x, y) => y.mtimeMs - x.mtimeMs);
+}
+
+test("rétention : une sauvegarde par semaine, 8 semaines durant, en plus des journalières", () => {
+  const maintenant = new Date();
+  const entries = dixSemaines(maintenant);
+  const garder = S._sauvegardesAGarder(entries, maintenant);
+  // Les 8 semaines de Paris, celle d'aujourd'hui comprise : chacune garde au
+  // moins une sauvegarde (celle d'aujourd'hui n'en a pas dans ce jeu).
+  const lundi = lundiDeParis(maintenant.getTime());
+  const [a, m, j] = lundi.split("-").map(Number);
+  const semaines = Array.from({ length: 8 }, (_, i) => new Date(Date.UTC(a, m - 1, j - 7 * i)).toISOString().slice(0, 10));
+  const sansRien = semaines.slice(1).filter(s => !entries.some(e => garder.has(e.name) && lundiDeParis(e.mtimeMs) === s));
+  assert.deepEqual(sansRien, [], "semaines (lundis) sans aucune sauvegarde gardee");
+  // La gardee d'une semaine est sa DERNIERE.
+  for (const s of semaines.slice(1)) {
+    const derniere = entries.find(e => lundiDeParis(e.mtimeMs) === s);
+    if (derniere) assert.ok(garder.has(derniere.name), `la derniere de la semaine du ${s} n'est pas gardee`);
+  }
+  // Au-dela de 8 semaines (et de 30 jours), plus rien : la rotation reprend ses droits.
+  const plusVieille = semaines[7];
+  const auDela = entries.filter(e => lundiDeParis(e.mtimeMs) < plusVieille && garder.has(e.name));
+  assert.deepEqual(auDela.map(e => e.name), [], "des sauvegardes de plus de 8 semaines sont gardees");
+});
+
+test("rétention : la sauvegarde d'avant la purge des bons est hors rotation", () => {
+  const maintenant = new Date();
+  const entries = dixSemaines(maintenant);
+  // Une purge il y a 60 jours : sa sauvegarde, puis 70 jours d'activite ont suivi.
+  const purge = { name: "db-2026-07-26T09-00-00-000Z-avant-purge-commandes.sqlite.gz", mtimeMs: maintenant.getTime() - 60 * JOUR + 3600 * 1000 };
+  // Et une purge d'il y a 120 jours.
+  const ancienne = { name: "db-2026-05-27T09-00-00-000Z-avant-purge-commandes.sqlite.gz", mtimeMs: maintenant.getTime() - 120 * JOUR };
+  const toutes = [...entries, purge, ancienne].sort((x, y) => y.mtimeMs - x.mtimeMs);
+  const garder = S._sauvegardesAGarder(toutes, maintenant);
+  assert.ok(garder.has(purge.name), "la sauvegarde d'avant purge d'il y a 60 jours serait supprimee");
+  assert.ok(garder.has(ancienne.name), "la sauvegarde d'avant purge d'il y a 120 jours serait supprimee");
+  // 30 sauvegardes manuelles juste apres une purge n'evincent pas la sienne.
+  const apres = Array.from({ length: 30 }, (_, i) => ({ name: `db-manuelle-${String(i).padStart(2, "0")}-manuelle.sqlite.gz`, mtimeMs: maintenant.getTime() - i * 1000 }));
+  const recente = { name: "db-recente-avant-purge-commandes.sqlite.gz", mtimeMs: maintenant.getTime() - 60 * 1000 };
+  const melange = [...apres, recente, ...entries].sort((x, y) => y.mtimeMs - x.mtimeMs);
+  assert.ok(S._sauvegardesAGarder(melange, maintenant).has(recente.name), "30 sauvegardes manuelles evincent celle d'avant purge");
+});
+
+test("rétention : jamais plus agressive qu'avant (la règle d'avant est contenue, quel que soit le mélange)", () => {
+  const maintenant = new Date();
+  let graine = 11;
+  const hasard = () => (graine = (graine * 48271) % 2147483647) / 2147483647;
+  for (let essai = 0; essai < 200; essai++) {
+    const entries = Array.from({ length: 10 + Math.floor(hasard() * 120) }, (_, i) => {
+      const tag = hasard() < 0.1 ? "-avant-purge-commandes" : hasard() < 0.2 ? "-avant-purge" : hasard() < 0.3 ? "-manuelle" : "";
+      return { name: `db-${essai}-${String(i).padStart(3, "0")}${tag}.sqlite.gz`, mtimeMs: maintenant.getTime() - hasard() * 100 * JOUR };
+    }).sort((x, y) => y.mtimeMs - x.mtimeMs || y.name.localeCompare(x.name));
+    const garder = S._sauvegardesAGarder(entries, maintenant);
+    for (const nom of regleDAvant(entries, maintenant)) {
+      assert.ok(garder.has(nom), `essai ${essai} : ${nom} (gardee par la regle d'avant) serait supprimee`);
+    }
+  }
+});
