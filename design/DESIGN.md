@@ -5985,3 +5985,178 @@ Sur un écran bas, la barre **défile dans sa propre hauteur** (règle existante
 *Bancs (`collant-et-clavier.spec.js`)* : « la barre latérale reste fixe » (921 et 1440 px, trois
 écrans ; rouge avant : −400 au lieu de 0) ; « écran bas, tout le menu reste atteignable »
 (rouge si la barre fixe perd son défilement : « Version » à 768 px pour un écran de 560).
+
+## 24/09 — Le téléphone utilisable dehors
+
+Branche `fix/telephone-utilisable`, partie de `12da3d4` (release 1.45.0). Sous 820 px, mesuré
+à **375 × 667** (iPhone SE), 360 × 740 et 390 × 844, clair et sombre (captures et sondes de
+l'audit du 24/09 rejouées). CSS : le bloc « LE TELEPHONE UTILISABLE DEHORS » en fin de
+`style.css`. Banc : `test/e2e/telephone-utilisable.spec.js` (34 cas, serveur semé sur 3524,
+téléphone émulé : `isMobile` et toucher).
+
+### Fait
+
+**1. Tournée (planche 4b) : le client, l'adresse et les articles au-dessus des gestes.**
+
+- **Un seul bloc vert.** L'anneau « 3 sur 6 » et la barre de progression rejoignent
+  l'en-tête vert de l'écran (`placerEnteteTournee`, app.js : les MÊMES éléments, déplacés au
+  seuil de 820 px, comme `placerGestesBas` ; au bureau, ils restent dans l'en-tête de la
+  tournée, planche 13b). Deux rangs : « titre et date | anneau », puis « barre | À jour +
+  Actualiser ». La seconde carte verte disparaît au téléphone ; la carte de l'arrêt chevauche
+  le vert comme la planche (sauf si un bandeau s'intercale : hors ligne, tournée d'un jour
+  passé — le vert garde alors sa marge).
+- **Client absent et Problème quittent la barre collée** : une rangée `.gestes-secondaires`
+  juste après elle, à 48 px, sans couleur — à un défilement. La barre ne porte plus
+  qu'Appeler, « Y aller » et Carte (56), et « Livré » (56). L'ordre du clavier ne change pas.
+  Au bureau, la rangée garde sa place et ses 44 px. Fin de tournée : masquée comme les gestes.
+- **La carte aux mesures de la planche** : le nom à 22 px (une ancienne règle mobile,
+  `.current-client-main strong`, le passait à 28), « ARRÊT EN COURS » et « n ARTICLES À
+  DÉCHARGER » à 13 px (12 avant), « sur 6 » à 13 px (11), les écarts resserrés.
+
+| 375 × 667 (clair = sombre) | avant | après |
+|---|---|---|
+| haut de la barre des gestes | 398 | 441 |
+| bas du nom du client | 467 | 289 |
+| bas de l'adresse | 519 | 340 |
+| bas des deux articles | 594 / 631 | 405 / 439 |
+
+À 360 × 740 : barre à 444 → 514, articles 594/631 → 405/439. À 390 × 844 : le titre des
+articles (557) passait sous la barre (548) ; tout tient maintenant.
+
+**2. « À jour + Actualiser » sur la ligne du titre**, là où la rangée était seule (56 px) :
+Analyse, Exports, Rappels, À recommander, Commande client, Paramètres, Commandes, Clients
+(liste), Tournée sans tournée ; sur une tournée en cours, à droite de la barre (point 1).
+Mesure (Analyse, 390) : en-tête 76–254 → 76–182.
+
+**3. Commandes et Clients : des lignes à l'ouverture.**
+
+- **Les pilules se replient au-delà de deux rangs** (`replierPilules`, app.js) : celles du
+  bout se cachent et une pilule « + N » les rend ; « Moins » replie. Mesuré dans la page,
+  jamais déduit du compte ; **ce qui est choisi ne se cache jamais** (la pilule active, le
+  statut commercial quand il n'est pas « Tous »). Remesuré au franchissement de 820 px, à
+  la rotation (`resize`) et à l'arrivée de la police. Clients : secteurs, « Abonnés » et le
+  statut dans UN flot, replié ensemble.
+- **« Exporter en CSV » passe dans « Filtres »** (`placerExportCommandes`) : il exporte la
+  liste filtrée, il vit à côté des filtres. Au bureau, il revient dans l'en-tête.
+- **« Nouvelle commande » devient un bouton fixe en bas**, comme « Nouveau client »
+  (`GESTES_BAS`) : après la liste dans l'ordre du clavier, 14 px au-dessus de la barre basse.
+- **Clients** : « Rappels » (gardé) partage la ligne de la recherche ; la synchro, celle du
+  titre.
+
+| lignes entières à l'ouverture | 390 × 844 | 360 × 740 |
+|---|---|---|
+| Commandes | 1 → **3** (1ʳᵉ ligne 630 → 430) | 0 → **2** (682 → 430) |
+| Clients | 2 → **3** (518 → 410) | 0 → **2** (570 → 410) |
+
+Aucun défilement horizontal (mesuré, 0 px).
+
+**4. Commande client** : la barre « Total · Valider » à `bottom: 104px` (la place des
+boutons fixes de Clients et d'Abonnements) au lieu de 78 : à 390, 699–766 sous une barre
+basse commençant à 754 → 669–740. « TOTAL PANIER » à 13 px (11).
+
+**5. Menu « Plus »** : en clair, une règle écrite pour une ancienne feuille verte peignait
+les icônes en blanc à 82 % sur blanc (1:1) ; elles prennent le texte secondaire (5,13:1 ;
+4,18 sur la ligne active). Clients a une icône de personnes (la maison était celle du
+Tableau de bord). Menu ouvert, les messages passent en haut de l'écran : ils couvraient
+Analyse et Paramètres.
+
+**6. Lisible dehors, facile à toucher** : « 1 échéance » à 13 px (11), et dans « Détail du
+jour », « Voir mes abonnements », « Rappels arrivés à échéance » (11) et le libellé des
+cartes (12) ; « Détail du jour » répond sur toute la carte (le résumé passe de 19 à 55 px :
+le rembourrage passe du volet à son résumé, même boîte à l'œil) ; les puces d'un titre de
+carte passé en colonne restent à leur largeur (« En livraison » : 322 → 103 px) ;
+`.pill-warning` en clair (« En préparation », « En livraison », « En pause ») prend le fond
+d'avertissement de la charte : 4,45 → 4,89:1.
+
+### Décisions prises dans le lot
+
+- **Déplacer, pas dupliquer** : l'anneau, la barre, « Exporter » et « Nouvelle commande »
+  sont les mêmes éléments à deux places (une seule région `aria-live` pour l'anneau, un seul
+  nom accessible par geste).
+- **Sur Tournée, la synchro suit la barre**, pas le titre : l'anneau occupe la droite du
+  titre (planche). Trois colonnes : partager celle de l'anneau faisait passer « Tournée du
+  jour » sur deux lignes à 375 px.
+- **La carte de l'arrêt plus serrée que la planche** (rembourrage 14/16 au lieu de 18,
+  écarts 6 au lieu de 10, nom en interligne 1,15, « Actualiser » à 44 dans cet en-tête) :
+  c'est ce qui fait tenir les deux articles semés à 375 × 667.
+- **« + N » dans le rang**, pas un bouton sous les pilules (le motif de la Préparation,
+  « Tous les secteurs ») : un bouton dessous coûte un rang, et Clients à 360 × 740 n'aurait
+  montré qu'une ligne.
+- **Le repli mesure relativement à son conteneur.** Premier jet en coordonnées d'écran :
+  cacher une pilule raccourcit la page, le défilement se recale, le deuxième rang « glisse »
+  — il ne restait que « Toutes » et « + 6 » (vu au chargement en sombre, reproduit à coup
+  sûr en remesurant en bas de liste).
+- **`[hidden]` gagne sur « Exporter » déplacé** : `.button` (`inline-flex`) l'emportait sur
+  la feuille du navigateur.
+- **Le fond d'avertissement pour `.pill-warning`** (la charte), et non la pastille tiède de
+  la planche : le badge reste un avertissement, pêche → crème.
+- **Messages en haut, menu ouvert**, plutôt que sous le menu : un « Annuler » doit rester
+  atteignable.
+
+### Écarts nommés
+
+- **375 × 667 : deux articles, 2 px de marge.** Un arrêt de trois articles ou plus en montre
+  deux ; le reste demande un défilement. Le bandeau de marque (76 px) et la barre basse
+  (90 px) restent : la planche retire la barre basse pendant un arrêt (−90 px) — une
+  décision de navigation pour Thomas (aucune flèche de retour n'existe).
+- **Le message « Livré — client · Annuler » couvre « Livré »** de l'arrêt suivant pendant ses
+  4 s (il couvrait Client absent et Problème, sortis de la barre). Un appui au milieu tombe
+  sur le texte du message, pas sur « Annuler ».
+- **Clients à 360 px** : la recherche, à côté de « Rappels », coupe son indication
+  (« Nom, ville, télép… »).
+- **À 360 px, « Commande client » et « À recommander »** passent sur deux lignes (la synchro
+  prend ~115 px) ; le gain net reste positif.
+- **Journée, Stock, Préparation, Abonnements** gardent leur rangée de synchro : leur ligne
+  de titre porte déjà un geste (loupe, calendrier) ou leur fente des boutons. L'audit ne
+  relevait la rangée seule que sur six écrans.
+- **Quatre bancs voisins suivent** la décision qu'ils codaient : `tournee-mobile` (« Client
+  absent » jugé après un défilement), `clients-mobile` (les filtres repliés se comptent ;
+  « Rappels » avec la recherche), `commandes` (« Livrées » derrière « + N » : on déplie),
+  `navigation-mobile` (le bouton plein sur le vert est « Importer les ventes »).
+- **Restent sous 13 px**, hors de la liste de l'audit : les libellés de la barre basse
+  (12,5, lot 1), les badges des listes (12,5, valeurs des planches), les chiffres des
+  marqueurs de la liste d'arrêts (11-12), les jours de l'histogramme d'Analyse (11 : trente
+  barres ne tiennent pas 13 px), « SEPT. » des Commandes (11,5).
+
+### Ce qui reste
+
+- Masquer la barre basse pendant un arrêt (planche 4b), avec un retour : à trancher.
+- Un essai sur un vrai téléphone (barres de Safari, encoche) : aucun banc ne les émule.
+- La synchro de Journée, Stock, Préparation et Abonnements ; les feuilles basses qui se
+  ferment différemment ; la barre système beige (audit, hors de ce lot).
+
+### Preuves rouges, bancs
+
+**Ancien code** (`12da3d4`, le banc en mode non sériel) : **33 cas rouges sur 34**, chacun
+sur sa cause — « le nom du client passe sous les gestes » (Expected ≤ 398,9, Received 466,5
+à 375 × 667 ; ≤ 444,5 à 360) ; « n articles a decharger passe sous les gestes » (≤ 548,5,
+556,7 à 390) ; « l'anneau n'est pas dans l'en-tete vert » ; lignes entières Commandes 1 et 0
+(attendu 3 et 2), Clients 2 et 0 ; « les pilules prennent plus de deux rangs » (4 et 3) ;
+« Exporter est encore dans l'en-tete » ; « Actualiser a sa propre rangee sous le titre »
+(sept écrans, 164 à 532 contre < 117) ; « la barre du panier passe sous la barre
+d'onglets » (766 pour 754, 662 pour 652) ; « icone de Commandes » (1 pour ≥ 3) ; « Clients
+porte encore l'icone de la maison » ; 11 px et 12 px pour ≥ 13. Le vert : « au bureau,
+l'anneau reste dans l'en-tête de la tournée » (un garde du déplacement, éprouvé ci-dessous).
+
+**Harnais** (15 mutants, chacun sur le code du lot, restauré par copie) : tous rouges, pour
+la bonne cause — sans l'écoute du seuil (l'anneau ne revient pas au bureau) ; le repli en
+coordonnées d'écran (« remesure en bas de page », 1 rang pour 2) ; la pilule choisie
+cachable (Received hidden) ; le statut choisi cachable ; « Nouvelle commande » hors de
+`GESTES_BAS` (`static` au lieu de `fixed`) ; sans `justify-self` (puce de 322 px) ; sans le
+résumé agrandi (18,8 px) ; sans les messages en haut (« couvre Analyse, Paramètres ») ;
+sans le fond d'avertissement (4,45) ; « TOTAL PANIER » à 11 ; la marge verte rendue (2 px
+de vide) ; « sur 6 » à 11 ; Client absent remis dans la barre ; « Exporter » sans
+`hidden = false` (caché, ouvert par le menu « Plus ») ; les textes du détail à 11/12. Deux
+mutants survivaient au premier tour (le repli en coordonnées d'écran, « Exporter » sans
+`hidden = false`) : le banc émule maintenant un téléphone, remesure en bas de liste et
+ouvre Commandes par le menu.
+
+*Bancs verts sur le code final* : `telephone-utilisable` 34/34 ; `tournee-mobile` 12,
+`ecran-livreur`, `livreur-ne-perd-rien`, `integration-lots-1-5`, `tournee` ; `commandes`,
+`clients-mobile`, `navigation-mobile` ; `collant-et-clavier`, `abonnements-mobile`,
+`texte-coupe`, `tableau-de-bord`, `interface-finitions`, `preparation-mobile`,
+`squelette`, `cibles-tactiles`, `etats-limites`, `parametres-mobile`,
+`ecrans-sans-planche`, `focus-clavier`, `contraste-navigation`, `hors-ligne`,
+`tournee-hors-ligne`, `stock`, `themes` (312 cas) ; `npm test` (682). Une fois,
+`interface-finitions` n'a pas démarré (« port 3301 déjà pris » : un autre worktree lançait le
+même banc) ; relancé seul, 15/15.
