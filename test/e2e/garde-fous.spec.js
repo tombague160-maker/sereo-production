@@ -115,3 +115,82 @@ test.describe("sans seconde copie", () => {
     await expect(page.locator("#parSauvegardesCopie")).toHaveText("Non configurée : les sauvegardes ne sont que sur ce disque.");
   });
 });
+
+// --- 2. Decision 6 : un compte non administrateur voit les cartes fermees ----
+//
+// Le serveur seme tourne sans connexion (tout visiteur y est administrateur) :
+// la reponse de /api/me est celle d'un compte « bureau ». Le refus 403 lui-meme
+// est tenu par test/garde-fous-routes.test.js.
+
+const BUREAU = { identifiant: "marc", role: "bureau", roleLibelle: "Bureau", administration: false, onglets: "*", separationDesRoles: false, source: "compte" };
+const BLOCS_PARAMETRES = ["parSecteursTitre", "parImportsTitre", "parHorizonTitre", "parTourneeTitre", "parDangerTitre"];
+
+test.describe("compte non administrateur", () => {
+  let srv;
+  test.beforeAll(async () => { srv = await lancer(); });
+  test.afterAll(async () => { if (srv) await srv.arreter(); });
+
+  async function commeBureau(page) {
+    await page.route("**/api/me", route => route.fulfill({ json: BUREAU }));
+  }
+
+  test("Paramètres : import, purge, réglages fermés, et la carte dit pourquoi ; « Y aller » reste libre", async ({ page }) => {
+    await commeBureau(page);
+    await ouvrirParametres(page, { base: srv.base });
+    for (const titre of BLOCS_PARAMETRES) {
+      const carte = page.locator(`article[aria-labelledby="${titre}"]`);
+      await expect(carte.locator(":scope > .par-reserve-note"), titre).toHaveText("Réservé aux administrateurs.");
+      const ouverts = await carte.locator("input, select, textarea, button").evaluateAll(els => els
+        .filter(e => !e.disabled && !e.closest("[data-appareil]"))
+        .map(e => e.id || e.dataset.action || e.name || e.className));
+      expect(ouverts, `${titre} : commandes encore ouvertes`).toEqual([]);
+    }
+    await expect(page.locator('[data-action="purge-orders"]')).toBeDisabled();
+    await expect(page.locator("#parHorizonSlider")).toBeDisabled();
+    await expect(page.locator("#tourneeSpeedSlider")).toBeDisabled();
+    // Le logo (dans « Theme ») : ferme ; le mode clair / sombre, reglage de cet appareil, libre.
+    await expect(page.locator("#brandImageInput")).toBeDisabled();
+    await expect(page.locator('[data-action="select-color-scheme"]').first()).toBeEnabled();
+    const yAller = page.locator("#parNavigation button");
+    expect(await yAller.count()).toBeGreaterThan(0);
+    for (const bouton of await yAller.all()) await expect(bouton).toBeEnabled();
+  });
+
+  test("Journée : les imports sont fermés et disent pourquoi", async ({ page }) => {
+    await commeBureau(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(srv.base + "/#journee", { waitUntil: "networkidle" });
+    const panneau = page.locator("#journee .panel.visual-panel[data-reserve-admin]");
+    await expect(panneau.locator(":scope > .par-reserve-note")).toHaveText("Réservé aux administrateurs.");
+    for (const id of ["#importVentesButton", "#importStockButton", "#ventesFile", "#stockFile"]) {
+      await expect(page.locator(id), id).toBeDisabled();
+    }
+    const entete = page.locator('#enteteActions [data-action="importer-ventes"]');
+    await expect(entete).toHaveCount(1);
+    await expect(entete).toBeDisabled();
+    await expect(entete).toHaveAttribute("title", "Réservé aux administrateurs.");
+  });
+
+  for (const schema of ["light", "dark"]) {
+    test(`au téléphone en ${schema === "light" ? "clair" : "sombre"} : la note se lit (4,5:1) et rien ne déborde`, async ({ page }) => {
+      await commeBureau(page);
+      await ouvrirParametres(page, { base: srv.base, largeur: 390, schema });
+      const note = page.locator('article[aria-labelledby="parDangerTitre"] > .par-reserve-note');
+      await note.scrollIntoViewIfNeeded();
+      await expect(note).toBeVisible();
+      expect(await contraste(page, 'article[aria-labelledby="parDangerTitre"] > .par-reserve-note')).toBeGreaterThanOrEqual(4.5);
+      const deborde = await page.evaluate(() => [...document.querySelectorAll("#parametres .par-reserve-note")]
+        .filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.right > window.innerWidth + 0.5; })
+        .map(e => e.parentElement?.getAttribute("aria-labelledby") || e.parentElement?.className));
+      expect(deborde).toEqual([]);
+    });
+  }
+
+  test("témoin : l'administrateur n'a ni note ni commande fermée", async ({ page }) => {
+    await ouvrirParametres(page, { base: srv.base });
+    await expect(page.locator(".par-reserve-note")).toHaveCount(0);
+    await expect(page.locator('[data-action="purge-orders"]')).toBeEnabled();
+    await expect(page.locator("#parHorizonSlider")).toBeEnabled();
+    await expect(page.locator("#tourneeSpeedSlider")).toBeEnabled();
+  });
+});

@@ -179,6 +179,9 @@ let activeColorScheme = "auto";
 // est volontairement vide.
 let moi = null;
 let comptes = [];
+// La note des blocs reserves a l'administration (garde-fous du 25/09, voir
+// majDroitsAdministration) ; en tete : majBandeauHorsLigne la lit des le debut.
+const NOTE_RESERVE_ADMIN = "Réservé aux administrateurs.";
 
 
 if ("scrollRestoration" in history) {
@@ -7746,6 +7749,7 @@ function renderSettings() {
       </div>
     </article>
   `).join("");
+  majDroitsAdministration();
 }
 
 async function saveDeliverySector(form) {
@@ -7796,6 +7800,7 @@ async function loadMoi() {
   // La liste des comptes n'est lue que Parametres affiches (24/09).
   rendreSiAffiche("parametres", renderComptes);
   majDroitsNumerotation();
+  majDroitsAdministration();
   majCarteJournal();
 }
 
@@ -7817,6 +7822,52 @@ function majDroitsNumerotation() {
     form.append(note);
   }
   if (note) note.hidden = !ferme;
+}
+
+// Decision 6 (garde-fous du 25/09) : import, purge, reglages et sauvegardes sont
+// reserves a l'administration (le serveur refuse : requireAdministration). Un
+// autre compte LIT les blocs marques [data-reserve-admin] ; leurs commandes
+// sont fermees et le bloc dit pourquoi -- comme la numerotation des bons, au
+// lieu d'un refus 403 au clic. Les reglages de CET appareil restent libres
+// ([data-appareil] : « Y aller » ; le mode clair / sombre n'est pas marque).
+// Les liens de telechargement des archives sont retires (le serveur les
+// refuse). Tant que /api/me n'a pas repondu, rien ne change. Appelee apres
+// chaque rendu qui refait un bloc marque (reglages, archives, leur feuille).
+function importReserve() {
+  return Boolean(moi && !moi.administration);
+}
+
+function majDroitsAdministration() {
+  if (!moi) return;
+  const ferme = !moi.administration;
+  document.querySelectorAll("[data-reserve-admin]").forEach(bloc => {
+    for (const champ of bloc.querySelectorAll("input, select, textarea, button")) {
+      if (champ.closest("[data-appareil]")) continue;
+      if (ferme) {
+        if (!champ.disabled) {
+          champ.disabled = true;
+          champ.dataset.fermeParDroits = "1";
+        }
+      } else if (champ.dataset.fermeParDroits) {
+        champ.disabled = false;
+        delete champ.dataset.fermeParDroits;
+      }
+    }
+    if (ferme) bloc.querySelectorAll("a[download]").forEach(lien => lien.remove());
+    let note = bloc.querySelector(":scope > .par-reserve-note");
+    if (ferme && !note) {
+      note = document.createElement("p");
+      note.className = "par-aide par-reserve-note";
+      note.textContent = NOTE_RESERVE_ADMIN;
+      const titre = bloc.querySelector(":scope > h3, :scope > .par-carte-tete, :scope > .panel-heading");
+      if (titre) titre.after(note);
+      else bloc.prepend(note);
+    } else if (!ferme && note) {
+      note.remove();
+    }
+  });
+  // Les boutons d'import de l'en-tete et de l'accueil : fermes comme hors ligne.
+  majBandeauHorsLigne();
 }
 
 /**
@@ -7995,6 +8046,7 @@ async function renderImportsArchives() {
 
     if (!archives.length) {
       container.innerHTML = `<p class="muted">Aucun import archivé pour l'instant. Tes prochains imports apparaitront ici.</p>`;
+      majDroitsAdministration();
       return;
     }
 
@@ -8032,6 +8084,7 @@ async function renderImportsArchives() {
         </table>
       </div>
     `;
+    majDroitsAdministration();
   } catch (error) {
     container.innerHTML = `<p class="muted">Impossible de charger l'historique : ${escapeHtml(error.message || "erreur réseau")}</p>`;
   }
@@ -8104,6 +8157,7 @@ function ouvrirFeuilleImports(type) {
       `).join("")}
     </ul>
   `;
+  majDroitsAdministration();
   dialogue.showModal();
 }
 
@@ -10449,10 +10503,15 @@ function majBandeauHorsLigne() {
   // Un import de fichier ne se met pas en file (tenterMiseEnFile) : hors
   // ligne, ses boutons le disent au lieu d'echouer. AVANT le retour anticipe
   // du bandeau masque : sinon, le reseau revenu, ils restaient desactives.
+  // Garde-fous (25/09, decision 6) : l'import est reserve a l'administration ;
+  // pour un autre compte, ces boutons restent fermes, et disent pourquoi.
+  const reserve = importReserve();
   document.querySelectorAll('[data-action="importer-ventes"], [data-action="importer-stock"], #importVentesButton, #importStockButton')
     .forEach(bouton => {
-      bouton.disabled = horsLigne;
-      if (horsLigne) bouton.title = "Import impossible hors ligne"; else bouton.removeAttribute("title");
+      bouton.disabled = horsLigne || reserve;
+      if (reserve) bouton.title = NOTE_RESERVE_ADMIN;
+      else if (horsLigne) bouton.title = "Import impossible hors ligne";
+      else bouton.removeAttribute("title");
     });
   bandeau.hidden = !horsLigne && ecrituresEnAttente === 0;
   if (bandeau.hidden) return;
@@ -11288,6 +11347,9 @@ function initTourneePratique() {
   // « Retour au depot » memorise : la case de la planification ecrit le
   // reglage (discretement ; hors ligne, il attend dans la file).
   retourPlanification?.addEventListener("change", () => {
+    // Garde-fous (25/09) : le reglage partage est reserve a l'administration ;
+    // pour un autre compte, la case ne vaut que pour la tournee preparee.
+    if (importReserve()) return;
     enregistrerReglagesTournee({ retourAuDepot: retourPlanification.checked })
       .catch(erreur => { if (!erreur?.enFile) notifyEchec(erreur); });
   });
