@@ -11416,6 +11416,15 @@ textarea::placeholder {
 #stockList .stk-ligne { content-visibility: auto; contain-intrinsic-height: auto 56px; }
 @media (max-width: 1280px) { #stockList .stk-ligne { contain-intrinsic-height: auto 105px; } }
 @media (max-width: 920px) { #stockList .stk-ligne { contain-intrinsic-height: auto 117px; } }
+/* Performance du rendu (24/09) : les regles « body:has(#ecran...) » de cette
+   feuille (Clients, Abonnements, Tournee, bandeau hors ligne) nomment l'ecran
+   par son CHEMIN, « body:has(> .app > main.content > #ecran...) ». Sans
+   chemin, chaque recalcul du style de <body> -- une frappe, un focus, une
+   ligne ajoutee, n'importe ou -- parcourait TOUTE la page pour chacune :
+   ~400 ms de style pour quatre lettres dans la recherche Clients au telephone
+   (CPU x4), ~50 ms avec le chemin. Memes elements vises : les ecrans et le
+   bandeau sont des enfants directs de main.content, lui-meme enfant de .app,
+   enfant de <body> (test/has-borne.test.js le verifie). */
 
 /* ==========================================================================
    CLIENTS -- planches 13e (clair) / 14e (sombre). Valeurs copiees.
@@ -12125,8 +12134,8 @@ textarea::placeholder {
   :root:not([data-color-scheme]) #crm .cli-itineraire { display: inline-flex; text-decoration: none; }
   /* La fiche ouverte : l'en-tete ne porte plus la recherche ni « Nouveau
      client » de la liste. */
-  body:has(#crm.active[data-vue="fiche"]) .ecran-entete .cli-recherche,
-  body:has(#crm.active[data-vue="fiche"]) .ecran-entete .cli-nouveau { display: none; }
+  body:has(> .app > main.content > #crm.active[data-vue="fiche"]) .ecran-entete .cli-recherche,
+  body:has(> .app > main.content > #crm.active[data-vue="fiche"]) .ecran-entete .cli-nouveau { display: none; }
 }
 
 /* --- Mobile, lot 2 : Tableau de bord, Stock, Parametres -------------------- */
@@ -12464,8 +12473,8 @@ textarea::placeholder {
      defilement : les gestes s'y collaient au bas de <main> (toute la page),
      jamais a celui de l'ecran. `clip` rogne pareil, sans conteneur. Limite a
      l'ecran de la tournee. Barre basse mesuree : 90 px a 390 x 844. */
-  body:has(#livreur.active),
-  body:has(#livreur.active) main.content { overflow-x: clip; }
+  body:has(> .app > main.content > #livreur.active),
+  body:has(> .app > main.content > #livreur.active) main.content { overflow-x: clip; }
   #livreur .current-driver-card .gestes { bottom: calc(90px + env(safe-area-inset-bottom)); }
 }
 
@@ -12744,12 +12753,12 @@ textarea::placeholder {
   /* --- L'en-tete (3a) : le calendrier en haut a droite, les pilules sur le
      vert. La fente garde la recherche (hors planche, gardee), la pastille de
      synchro et « Actualiser ». --- */
-  body:has(#abonnements.active) main.content > .ecran-entete { position: relative; }
-  body:has(#abonnements.active) .ecran-entete .ecran-entete-texte { padding-right: 56px; }
-  :root[data-color-scheme] body:has(#abonnements.active:not([data-vue="agenda"])) .ecran-entete .ecran-entete-fente .abo-agenda-ouvrir,
-  :root:not([data-color-scheme]) body:has(#abonnements.active:not([data-vue="agenda"])) .ecran-entete .ecran-entete-fente .abo-agenda-ouvrir,
-  :root[data-color-scheme] body:has(#abonnements.active[data-vue="agenda"]) .ecran-entete .ecran-entete-fente .abo-agenda-retour,
-  :root:not([data-color-scheme]) body:has(#abonnements.active[data-vue="agenda"]) .ecran-entete .ecran-entete-fente .abo-agenda-retour {
+  body:has(> .app > main.content > #abonnements.active) main.content > .ecran-entete { position: relative; }
+  body:has(> .app > main.content > #abonnements.active) .ecran-entete .ecran-entete-texte { padding-right: 56px; }
+  :root[data-color-scheme] body:has(> .app > main.content > #abonnements.active:not([data-vue="agenda"])) .ecran-entete .ecran-entete-fente .abo-agenda-ouvrir,
+  :root:not([data-color-scheme]) body:has(> .app > main.content > #abonnements.active:not([data-vue="agenda"])) .ecran-entete .ecran-entete-fente .abo-agenda-ouvrir,
+  :root[data-color-scheme] body:has(> .app > main.content > #abonnements.active[data-vue="agenda"]) .ecran-entete .ecran-entete-fente .abo-agenda-retour,
+  :root:not([data-color-scheme]) body:has(> .app > main.content > #abonnements.active[data-vue="agenda"]) .ecran-entete .ecran-entete-fente .abo-agenda-retour {
     position: absolute; top: 10px; display: flex; align-items: center; justify-content: center;
     width: 44px; height: 44px; min-height: 0; padding: 0; border: 0; border-radius: 999px;
     background: var(--v8-surface-sur-vert); color: var(--v8-texte-sur-carte-tournee); cursor: pointer;
@@ -12775,11 +12784,11 @@ textarea::placeholder {
      l'en-tete garde alors son arrondi, et les filtres deviennent une carte
      verte fermee sous le bandeau -- sinon le vert etait coupe en deux, et
      l'en-tete restait a angles droits. */
-  :root[data-color-scheme] body:has(#abonnements.active:not([data-vue="agenda"])):not(:has(#bandeauHorsLigne:not([hidden]))) main.content > .ecran-entete,
-  :root:not([data-color-scheme]) body:has(#abonnements.active:not([data-vue="agenda"])):not(:has(#bandeauHorsLigne:not([hidden]))) main.content > .ecran-entete {
+  :root[data-color-scheme] body:has(> .app > main.content > #abonnements.active:not([data-vue="agenda"])):not(:has(> .app > main.content > #bandeauHorsLigne:not([hidden]))) main.content > .ecran-entete,
+  :root:not([data-color-scheme]) body:has(> .app > main.content > #abonnements.active:not([data-vue="agenda"])):not(:has(> .app > main.content > #bandeauHorsLigne:not([hidden]))) main.content > .ecran-entete {
     margin-bottom: 0; border-radius: 0; padding-bottom: 16px;
   }
-  body:has(#bandeauHorsLigne:not([hidden])) #abonnements .abo-filtres { margin: 0; padding: 16px; border-radius: 28px; }
+  body:has(> .app > main.content > #bandeauHorsLigne:not([hidden])) #abonnements .abo-filtres { margin: 0; padding: 16px; border-radius: 28px; }
   #abonnements:not([data-vue="agenda"]) .abo-grille { gap: 0; }
   #abonnements:not([data-vue="agenda"]) .abo-colonne { gap: 16px; }
   #abonnements .abo-filtres {
@@ -12849,32 +12858,32 @@ textarea::placeholder {
      barre mesure 90 px a 390 (« Tableau de bord » sur deux lignes, + la zone
      sure) ; 14 px d air au-dessus. Sur la surface de la
      page, pas sur le vert : le plein de la charte, pas le blanc de l'en-tete. */
-  :root[data-color-scheme] body:has(#abonnements.active:not([data-vue="agenda"])) .ecran-entete .ecran-entete-fente .abo-nouveau,
-  :root:not([data-color-scheme]) body:has(#abonnements.active:not([data-vue="agenda"])) .ecran-entete .ecran-entete-fente .abo-nouveau {
+  :root[data-color-scheme] body:has(> .app > main.content > #abonnements.active:not([data-vue="agenda"])) .ecran-entete .ecran-entete-fente .abo-nouveau,
+  :root:not([data-color-scheme]) body:has(> .app > main.content > #abonnements.active:not([data-vue="agenda"])) .ecran-entete .ecran-entete-fente .abo-nouveau {
     position: fixed; left: 16px; right: 16px; bottom: calc(104px + env(safe-area-inset-bottom)); z-index: 1000;
     width: auto; height: 48px; justify-content: center; padding: 0 24px;
     background: var(--v8-principal); color: var(--v8-texte-sur-principal); border: 0;
     font-size: 15.5px; font-weight: 600; box-shadow: 0 8px 24px rgba(15, 61, 61, 0.22);
   }
-  :root[data-color-scheme] body:has(#abonnements.active:not([data-vue="agenda"])) .ecran-entete .ecran-entete-fente .abo-nouveau:focus-visible,
-  :root:not([data-color-scheme]) body:has(#abonnements.active:not([data-vue="agenda"])) .ecran-entete .ecran-entete-fente .abo-nouveau:focus-visible {
+  :root[data-color-scheme] body:has(> .app > main.content > #abonnements.active:not([data-vue="agenda"])) .ecran-entete .ecran-entete-fente .abo-nouveau:focus-visible,
+  :root:not([data-color-scheme]) body:has(> .app > main.content > #abonnements.active:not([data-vue="agenda"])) .ecran-entete .ecran-entete-fente .abo-nouveau:focus-visible {
     outline: none; box-shadow: var(--focus-ring), 0 8px 24px rgba(15, 61, 61, 0.22);
   }
   /* La place du bouton : 90 (barre) + 14 + 48 + 20 d air -- le dernier
      abonnement defile au-dessus, jamais dessous. */
-  :root[data-color-scheme] body:has(#abonnements.active:not([data-vue="agenda"])) main.content,
-  :root:not([data-color-scheme]) body:has(#abonnements.active:not([data-vue="agenda"])) main.content {
+  :root[data-color-scheme] body:has(> .app > main.content > #abonnements.active:not([data-vue="agenda"])) main.content,
+  :root:not([data-color-scheme]) body:has(> .app > main.content > #abonnements.active:not([data-vue="agenda"])) main.content {
     padding-bottom: calc(172px + env(safe-area-inset-bottom));
   }
 
   /* --- Les deux vues. La liste : l'agenda s'ouvre par le calendrier. --- */
   #abonnements:not([data-vue="agenda"]) .abo-agenda { display: none; }
   #abonnements[data-vue="agenda"] .abo-colonne { display: none; }
-  body:has(#abonnements.active[data-vue="agenda"]) .ecran-entete .ecran-entete-fente .abo-recherche,
-  body:has(#abonnements.active[data-vue="agenda"]) .ecran-entete .ecran-entete-fente .abo-nouveau { display: none; }
-  body:has(#abonnements.active[data-vue="agenda"]) .ecran-entete .ecran-entete-texte { padding: 0 0 0 58px; min-height: 44px; justify-content: center; }
-  :root[data-color-scheme] body:has(#abonnements.active[data-vue="agenda"]) .ecran-entete .ecran-entete-texte h2,
-  :root:not([data-color-scheme]) body:has(#abonnements.active[data-vue="agenda"]) .ecran-entete .ecran-entete-texte h2 { font-size: 24px; }
+  body:has(> .app > main.content > #abonnements.active[data-vue="agenda"]) .ecran-entete .ecran-entete-fente .abo-recherche,
+  body:has(> .app > main.content > #abonnements.active[data-vue="agenda"]) .ecran-entete .ecran-entete-fente .abo-nouveau { display: none; }
+  body:has(> .app > main.content > #abonnements.active[data-vue="agenda"]) .ecran-entete .ecran-entete-texte { padding: 0 0 0 58px; min-height: 44px; justify-content: center; }
+  :root[data-color-scheme] body:has(> .app > main.content > #abonnements.active[data-vue="agenda"]) .ecran-entete .ecran-entete-texte h2,
+  :root:not([data-color-scheme]) body:has(> .app > main.content > #abonnements.active[data-vue="agenda"]) .ecran-entete .ecran-entete-texte h2 { font-size: 24px; }
 
   /* --- « Les 90 jours » (3c) : une carte par semaine, le jour en deux
      etages, le « + » rond de 44 px. --- */
@@ -13111,7 +13120,7 @@ textarea::placeholder {
 /* Le sous-titre du tableau de bord se complete a l'arrivee des donnees (« · 3
    commandes a preparer · une tournee en cours ») et passait alors sur deux
    lignes : tout l'ecran descendait de 20 a 22 px. Il reserve ses deux lignes. */
-body:has(#journee.active) .ecran-entete #pageSubtitle { min-height: 2lh; }
+body:has(> .app > main.content > #journee.active) .ecran-entete #pageSubtitle { min-height: 2lh; }
 
 /* --- Commandes au telephone (planche 8a) ------------------------------------ */
 .cmd-resume, .cmd-filtres-bouton { display: none; }
@@ -13858,8 +13867,8 @@ textarea {
      quand le bandeau « Hors ligne » s'intercale (il suit l'en-tete dans le
      DOM) : l'en-tete garde son arrondi, les filtres deviennent une carte
      verte fermee -- le motif des Abonnements (3a). --- */
-  :root[data-color-scheme] body:has(#crm.active:not([data-vue="fiche"])):not(:has(#bandeauHorsLigne:not([hidden]))) main.content > .ecran-entete,
-  :root:not([data-color-scheme]) body:has(#crm.active:not([data-vue="fiche"])):not(:has(#bandeauHorsLigne:not([hidden]))) main.content > .ecran-entete {
+  :root[data-color-scheme] body:has(> .app > main.content > #crm.active:not([data-vue="fiche"])):not(:has(> .app > main.content > #bandeauHorsLigne:not([hidden]))) main.content > .ecran-entete,
+  :root:not([data-color-scheme]) body:has(> .app > main.content > #crm.active:not([data-vue="fiche"])):not(:has(> .app > main.content > #bandeauHorsLigne:not([hidden]))) main.content > .ecran-entete {
     margin-bottom: 0; border-radius: 0; padding-bottom: 14px;
   }
   #crm:not([data-vue="fiche"]) .cli-grille { gap: 0; }
@@ -13868,7 +13877,7 @@ textarea {
     margin: 0 -16px; padding: 0 20px 18px; gap: 8px;
     background: var(--v8-carte-tournee); border-radius: 0 0 28px 28px;
   }
-  body:has(#bandeauHorsLigne:not([hidden])) #crm .cli-filtres { margin: 0; padding: 16px; border-radius: 28px; }
+  body:has(> .app > main.content > #bandeauHorsLigne:not([hidden])) #crm .cli-filtres { margin: 0; padding: 16px; border-radius: 28px; }
   :root[data-color-scheme] #crm .cli-filtres .cli-pilule,
   :root:not([data-color-scheme]) #crm .cli-filtres .cli-pilule {
     height: 44px; padding: 0 18px; font-size: 15px; font-weight: 500;
@@ -13912,15 +13921,15 @@ textarea {
   /* « Nouveau client », fixe au-dessus de la barre basse (9a), sur la surface
      de la page : le plein de la charte. La barre mesure 90 px a 390 ; 14 px
      d'air au-dessus. Meme element que celui de l'en-tete du bureau. */
-  :root[data-color-scheme] body:has(#crm.active:not([data-vue="fiche"])) .ecran-entete .ecran-entete-fente .cli-nouveau,
-  :root:not([data-color-scheme]) body:has(#crm.active:not([data-vue="fiche"])) .ecran-entete .ecran-entete-fente .cli-nouveau {
+  :root[data-color-scheme] body:has(> .app > main.content > #crm.active:not([data-vue="fiche"])) .ecran-entete .ecran-entete-fente .cli-nouveau,
+  :root:not([data-color-scheme]) body:has(> .app > main.content > #crm.active:not([data-vue="fiche"])) .ecran-entete .ecran-entete-fente .cli-nouveau {
     position: fixed; left: 16px; right: 16px; bottom: calc(104px + env(safe-area-inset-bottom)); z-index: 1000;
     width: auto; height: 48px; justify-content: center; padding: 0 24px;
     background: var(--v8-principal); color: var(--v8-texte-sur-principal); border: 0;
     font-size: 15.5px; font-weight: 600; box-shadow: 0 8px 24px rgba(15, 61, 61, 0.22);
   }
-  :root[data-color-scheme] body:has(#crm.active:not([data-vue="fiche"])) .ecran-entete .ecran-entete-fente .cli-nouveau:focus-visible,
-  :root:not([data-color-scheme]) body:has(#crm.active:not([data-vue="fiche"])) .ecran-entete .ecran-entete-fente .cli-nouveau:focus-visible {
+  :root[data-color-scheme] body:has(> .app > main.content > #crm.active:not([data-vue="fiche"])) .ecran-entete .ecran-entete-fente .cli-nouveau:focus-visible,
+  :root:not([data-color-scheme]) body:has(> .app > main.content > #crm.active:not([data-vue="fiche"])) .ecran-entete .ecran-entete-fente .cli-nouveau:focus-visible {
     /* Les deux tons ecrits en clair : `--focus-ring` n'est defini que sous le
        theme clair -- en sombre, la declaration devenait invalide, sans anneau.
        (Meme chose pour les commandes et « Les N autres » de la fiche.) */
@@ -13929,22 +13938,22 @@ textarea {
   /* « Nouveau client » parti en bas, « Rappels » (hors planche, garde) partage
      sa rangee avec la pastille de synchro et « Actualiser » : la fente se
      fond dans la rangee des gestes, au lieu de faire une rangee de plus. */
-  body:has(#crm.active) .ecran-entete .ecran-entete-fente { display: contents; }
-  body:has(#crm.active) .ecran-entete #syncStatus { margin-left: auto; }
+  body:has(> .app > main.content > #crm.active) .ecran-entete .ecran-entete-fente { display: contents; }
+  body:has(> .app > main.content > #crm.active) .ecran-entete #syncStatus { margin-left: auto; }
   /* Sa place : 90 (barre) + 14 + 48 + 20 d'air -- le dernier client defile
      au-dessus du bouton, jamais dessous. */
-  :root[data-color-scheme] body:has(#crm.active:not([data-vue="fiche"])) main.content,
-  :root:not([data-color-scheme]) body:has(#crm.active:not([data-vue="fiche"])) main.content {
+  :root[data-color-scheme] body:has(> .app > main.content > #crm.active:not([data-vue="fiche"])) main.content,
+  :root:not([data-color-scheme]) body:has(> .app > main.content > #crm.active:not([data-vue="fiche"])) main.content {
     padding-bottom: calc(172px + env(safe-area-inset-bottom));
   }
 
   /* --- La fiche (8c / 12c). L'en-tete de l'ecran ne garde que la pastille
      de synchro et « Actualiser » (gardes) ; le titre « Clients » et les
      gestes de la liste s'effacent. Le bloc vert de la fiche le prolonge. --- */
-  body:has(#crm.active[data-vue="fiche"]) .ecran-entete .ecran-entete-texte,
-  body:has(#crm.active[data-vue="fiche"]) .ecran-entete .cli-rappels { display: none; }
-  :root[data-color-scheme] body:has(#crm.active[data-vue="fiche"]):not(:has(#bandeauHorsLigne:not([hidden]))) main.content > .ecran-entete,
-  :root:not([data-color-scheme]) body:has(#crm.active[data-vue="fiche"]):not(:has(#bandeauHorsLigne:not([hidden]))) main.content > .ecran-entete {
+  body:has(> .app > main.content > #crm.active[data-vue="fiche"]) .ecran-entete .ecran-entete-texte,
+  body:has(> .app > main.content > #crm.active[data-vue="fiche"]) .ecran-entete .cli-rappels { display: none; }
+  :root[data-color-scheme] body:has(> .app > main.content > #crm.active[data-vue="fiche"]):not(:has(> .app > main.content > #bandeauHorsLigne:not([hidden]))) main.content > .ecran-entete,
+  :root:not([data-color-scheme]) body:has(> .app > main.content > #crm.active[data-vue="fiche"]):not(:has(> .app > main.content > #bandeauHorsLigne:not([hidden]))) main.content > .ecran-entete {
     margin-bottom: 0; border-radius: 0; padding-bottom: 6px;
   }
   :root[data-color-scheme] #crm .cli-fiche.cli-carte,
@@ -13958,7 +13967,7 @@ textarea {
     margin: 0 -16px 4px; padding: 6px 20px 20px;
     background: var(--v8-carte-tournee); border-radius: 0 0 28px 28px;
   }
-  body:has(#bandeauHorsLigne:not([hidden])) #crm .cli-fiche-tete { margin: 0 0 4px; padding: 16px; border-radius: 28px; }
+  body:has(> .app > main.content > #bandeauHorsLigne:not([hidden])) #crm .cli-fiche-tete { margin: 0 0 4px; padding: 16px; border-radius: 28px; }
   :root[data-color-scheme] #crm .cli-fiche-tete .cli-retour,
   :root:not([data-color-scheme]) #crm .cli-fiche-tete .cli-retour {
     grid-area: retour; display: flex; align-items: center; justify-content: center;
@@ -15045,7 +15054,7 @@ html, body, main.content { overflow-x: clip; }
 @media (max-width: 820px) {
   /* `relative` et non `static` : l'etage 950 (au-dessus des volets de la
      carte) reste le sien. */
-  body:not(:has(#livreur.active)) .sidebar { position: relative; }
+  body:not(:has(> .app > main.content > #livreur.active)) .sidebar { position: relative; }
 }
 .storage-recovery-banner { position: relative; }
 
@@ -15068,24 +15077,24 @@ html, body, main.content { overflow-x: clip; }
    L'anneau ecrit ses deux tons en clair, comme celui de Clients. */
 @media (max-width: 820px) {
   #gestesBas :is(.cli-nouveau, .abo-nouveau) { display: inline-flex; align-items: center; gap: 8px; }
-  :root[data-color-scheme] body:has(#crm.active:not([data-vue="fiche"])) #gestesBas .cli-nouveau,
-  :root:not([data-color-scheme]) body:has(#crm.active:not([data-vue="fiche"])) #gestesBas .cli-nouveau,
-  :root[data-color-scheme] body:has(#abonnements.active:not([data-vue="agenda"])) #gestesBas .abo-nouveau,
-  :root:not([data-color-scheme]) body:has(#abonnements.active:not([data-vue="agenda"])) #gestesBas .abo-nouveau {
+  :root[data-color-scheme] body:has(> .app > main.content > #crm.active:not([data-vue="fiche"])) #gestesBas .cli-nouveau,
+  :root:not([data-color-scheme]) body:has(> .app > main.content > #crm.active:not([data-vue="fiche"])) #gestesBas .cli-nouveau,
+  :root[data-color-scheme] body:has(> .app > main.content > #abonnements.active:not([data-vue="agenda"])) #gestesBas .abo-nouveau,
+  :root:not([data-color-scheme]) body:has(> .app > main.content > #abonnements.active:not([data-vue="agenda"])) #gestesBas .abo-nouveau {
     position: fixed; left: 16px; right: 16px; bottom: calc(104px + env(safe-area-inset-bottom)); z-index: 1000;
     width: auto; height: 48px; justify-content: center; padding: 0 24px;
     background: var(--v8-principal); color: var(--v8-texte-sur-principal); border: 0;
     font-size: 15.5px; font-weight: 600; box-shadow: 0 8px 24px rgba(15, 61, 61, 0.22);
   }
-  :root[data-color-scheme] body:has(#crm.active:not([data-vue="fiche"])) #gestesBas .cli-nouveau:focus-visible,
-  :root:not([data-color-scheme]) body:has(#crm.active:not([data-vue="fiche"])) #gestesBas .cli-nouveau:focus-visible,
-  :root[data-color-scheme] body:has(#abonnements.active:not([data-vue="agenda"])) #gestesBas .abo-nouveau:focus-visible,
-  :root:not([data-color-scheme]) body:has(#abonnements.active:not([data-vue="agenda"])) #gestesBas .abo-nouveau:focus-visible {
+  :root[data-color-scheme] body:has(> .app > main.content > #crm.active:not([data-vue="fiche"])) #gestesBas .cli-nouveau:focus-visible,
+  :root:not([data-color-scheme]) body:has(> .app > main.content > #crm.active:not([data-vue="fiche"])) #gestesBas .cli-nouveau:focus-visible,
+  :root[data-color-scheme] body:has(> .app > main.content > #abonnements.active:not([data-vue="agenda"])) #gestesBas .abo-nouveau:focus-visible,
+  :root:not([data-color-scheme]) body:has(> .app > main.content > #abonnements.active:not([data-vue="agenda"])) #gestesBas .abo-nouveau:focus-visible {
     outline: none; box-shadow: 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus), 0 8px 24px rgba(15, 61, 61, 0.22);
   }
   /* La fiche d'un client, l'agenda des abonnements : pas de bouton (8c, 3c). */
-  body:has(#crm.active[data-vue="fiche"]) #gestesBas .cli-nouveau,
-  body:has(#abonnements.active[data-vue="agenda"]) #gestesBas .abo-nouveau { display: none; }
+  body:has(> .app > main.content > #crm.active[data-vue="fiche"]) #gestesBas .cli-nouveau,
+  body:has(> .app > main.content > #abonnements.active[data-vue="agenda"]) #gestesBas .abo-nouveau { display: none; }
 }
 /* [hidden] gagne sur tout ce qui precede. */
 #gestesBas [hidden] { display: none !important; }

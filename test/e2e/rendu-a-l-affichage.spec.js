@@ -186,6 +186,33 @@ test("préparation : la rangée des secteurs n'est mesurée qu'affichée, et une
   expect(await page.evaluate(() => window.__mesures)).toBe(mesures);
 });
 
+test("les règles body:has(...) visent les mêmes écrans par le chemin court", async ({ page }) => {
+  // Chaque condition de la feuille, ecrite sans chemin puis avec : <body> doit
+  // y repondre pareil dans chaque etat (ecran, fiche, agenda, bandeau).
+  const conditions = ['#crm.active[data-vue="fiche"]', '#crm.active:not([data-vue="fiche"])', "#crm.active",
+    '#abonnements.active[data-vue="agenda"]', '#abonnements.active:not([data-vue="agenda"])', "#abonnements.active",
+    "#livreur.active", "#journee.active", "#bandeauHorsLigne:not([hidden])"];
+  await ouvrir(page);
+  const etats = [["journee"], ["crm"], ["crm", "fiche"], ["abonnements"], ["abonnements", "agenda"], ["livreur"], ["crm", "bandeau"]];
+  for (const [ecran, variante] of etats) {
+    await aller(page, ecran);
+    await expect(page.locator(`#${ecran}`)).toHaveClass(/active/);
+    const r = await page.evaluate(([cs, v]) => {
+      if (v === "fiche") document.getElementById("crm").dataset.vue = "fiche";
+      if (v === "agenda") document.getElementById("abonnements").dataset.vue = "agenda";
+      document.getElementById("bandeauHorsLigne").hidden = v !== "bandeau";
+      const res = cs.map(c => [c, document.body.matches(`:has(${c})`), document.body.matches(`:has(> .app > main.content > ${c})`)]);
+      document.getElementById("crm").dataset.vue = "liste";
+      document.getElementById("abonnements").dataset.vue = "liste";
+      document.getElementById("bandeauHorsLigne").hidden = true;
+      return res;
+    }, [conditions, variante]);
+    for (const [c, sans, avec] of r) expect(avec, `${ecran} ${variante || ""} : ${c}`).toBe(sans);
+    // Temoin : l'etat vise est bien vrai quelque part (sinon « faux = faux » partout).
+    expect(r.some(([, sans]) => sans), `${ecran} ${variante || ""}`).toBe(true);
+  }
+});
+
 test("téléphone (CPU x4) : l'ouverture ne fige pas la page 800 ms", async ({ page }) => {
   test.setTimeout(120000);
   await page.setViewportSize({ width: 390, height: 844 });
