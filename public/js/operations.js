@@ -941,7 +941,7 @@ function majClient() {
   const bouton = $("subNouveauClient");
   bouton.textContent = ficheNouvelle ? "Choisir un client existant" : "Créer une fiche client";
   bouton.setAttribute("aria-expanded", String(ficheNouvelle));
-  // Le client choisi, la carte se replie sur lui : « Créer une fiche client »
+  // Le client choisi, la carte se replie sur lui : « Creer une fiche client »
   // n'a plus lieu d'etre (la croix du champ rend la recherche).
   bouton.hidden = Boolean(c) && !ficheNouvelle;
   if (c) {
