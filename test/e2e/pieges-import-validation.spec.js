@@ -369,6 +369,49 @@ for (const [nom, viewport] of [["bureau", BUREAU], ["telephone", TELEPHONE]]) {
   });
 }
 
+test("valider une commande PLANIFIEE : la liste « Planifiées » la montre, mise en avant", async ({ browser }) => {
+  test.setTimeout(120000);
+  await semer();
+  const { ctx, page, erreurs } = await ouvrir(browser, "commande-client");
+  await page.locator("#customerClientSelect").selectOption("c-veto");
+  await page.locator("#customerOrderType").selectOption("planifiee");
+  await page.locator("#customerDeliveryDate").fill("2026-12-15");
+  await page.locator('#customerCatalog [data-customer-product="st-ALE"][data-customer-delta="1"]').click();
+  const reponse = page.waitForResponse(r => r.url().endsWith("/api/planned-orders") && r.request().method() === "POST");
+  await page.locator("#customerOrderForm button[type=submit]").click();
+  const { order } = await (await reponse).json();
+  await expect(page.locator('#cmdPilules [data-cmd-filtre="planifiees"]')).toHaveAttribute("aria-pressed", "true");
+  const ligne = page.locator(`#cmdLignes [data-cmd-ouvrir="${order.id}"]`);
+  await expect(ligne).toBeVisible();
+  await expect(ligne).toHaveClass(/cmd-ligne--nouvelle/);
+  await expect(page.locator(".toast").last()).toContainText(`Commande planifiée ${order.numero} créée.`);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+test("valider une commande quand la liste a plusieurs pages : on arrive sur la page qui la contient", async ({ browser }) => {
+  // Les planifiees se classent a leur date de LIVRAISON : 25 livraisons a
+  // venir passent devant la commande du jour, sur la page 1 et au-dela.
+  test.setTimeout(120000);
+  const s = seme();
+  const modele = s.commandes.find(o => o.id === "o-parc");
+  for (let i = 1; i <= 25; i += 1) {
+    s.commandes.push({ ...structuredClone(modele), id: `o-plan-${i}`, status: "planifiee", orderType: "planifiee",
+      clientName: `Planifiée ${i}`, deliveryDate: `2026-12-${String(i).padStart(2, "0")}` });
+  }
+  await semer(s);
+  const { ctx, page, erreurs } = await ouvrir(browser, "commande-client");
+  const creee = await validerUneCommande(page);
+  const ligne = page.locator(`#cmdLignes [data-cmd-ouvrir="${creee.id}"]`);
+  await expect(ligne, "la commande creee est sur une autre page que celle affichee").toBeVisible();
+  await expect(ligne).toHaveClass(/cmd-ligne--nouvelle/);
+  const compte = await page.locator("#cmdCompte").innerText();
+  console.log(`[pages] ${compte}`);
+  expect(compte, "prealable : la commande n'est pas sur la page 2").toMatch(/^21–/);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
 test("« À envoyer » revient quand une commande l'attend (donnee ancienne), et reste choisie apres l'envoi de la derniere", async ({ browser }) => {
   // Le temoin positif du retrait : la pilule n'est pas supprimee, elle ne se
   // montre que si une commande l'attend -- c'est le seul chemin vers « Envoyer
