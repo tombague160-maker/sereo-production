@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.46.1](https://github.com/tombague160-maker/sereo-production/compare/v1.46.0...v1.46.1) (2026-09-24)
+
+
+### ⚡ Optimisations
+
+* l'ouverture ne charge et ne dessine que ce que l'écran montre ([#184](https://github.com/tombague160-maker/sereo-production/issues/184)) ([7f450f2](https://github.com/tombague160-maker/sereo-production/commit/7f450f2bf82a93fc6b9d5eff91dcff40c6f5dfda))
+
+
+### 📚 Documentation
+
+* **design:** intégration de la performance du 24/09 ([4c12017](https://github.com/tombague160-maker/sereo-production/commit/4c1201766cb91ea63297db80f1b7365899ef58f8))
+
 ## [1.46.0](https://github.com/tombague160-maker/sereo-production/compare/v1.45.1...v1.46.0) (2026-09-24)
 
 
