@@ -522,8 +522,10 @@ function ouvrirResultatDeRecherche(genre, id) {
     const statut = document.getElementById("crmStatusFilter");
     if (statut) statut.value = "all";
     clientChoisi = String(id);
+    // Le filtre AVANT l'arrivee, et un seul rendu : celui de l'arrivee
+    // (rendreOuDifferer, lot rendu ; integration du 24/09).
+    rendreOuDifferer("crm", renderCrm);
     showTab("crm");
-    renderCrm();
     document.querySelector(`[data-cli-choisir="${CSS.escape(String(id))}"]`)?.focus();
     return;
   }
@@ -539,8 +541,9 @@ function ouvrirResultatDeRecherche(genre, id) {
     if (champ) champ.value = terme;
     const statut = document.getElementById("stockStatusFilter");
     if (statut) statut.value = "all";
+    // Un seul rendu, a l'arrivee (rendreOuDifferer ; integration du 24/09).
+    rendreOuDifferer("stock", renderStock);
     showTab("stock");
-    renderStock();
   }
 }
 
@@ -4262,8 +4265,10 @@ function ouvrirCommandePourClient(clientId) {
 }
 
 function ouvrirRappelPourClient(clientId) {
+  // La liste des clients remplie une fois, a l'arrivee (rendreOuDifferer ;
+  // integration du 24/09) -- avant que le client y soit choisi.
+  rendreOuDifferer("relances", renderClientSelects);
   showTab("relances");
-  renderClientSelects();
   const form = document.getElementById("relanceForm");
   const choix = document.getElementById("relanceClientSelect");
   if (!form || !choix) return;
@@ -4796,7 +4801,9 @@ function montrerCommandeCreee(order, filtre = "toutes") {
   commandeMiseEnAvant = order?.id ? String(order.id) : "";
   const rang = commandeMiseEnAvant ? commandesFiltrees().findIndex(o => String(o.id) === commandeMiseEnAvant) : -1;
   if (rang >= 0) commandesFiltre.page = Math.floor(rang / COMMANDES_PAR_PAGE) + 1;
-  renderCommandes();
+  // Un seul rendu, a l'arrivee, avec ce filtre et cette page (rendreOuDifferer,
+  // lot rendu ; integration du 24/09).
+  rendreOuDifferer("commandes", renderCommandes);
   showTab("commandes");
   if (!commandeMiseEnAvant) return;
   // showTab remet la page en haut (tout de suite, a l'image suivante, et

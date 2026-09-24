@@ -435,3 +435,112 @@ test("téléphone (CPU x4) : l'ouverture ne dessine que l'écran affiché (temps
   await expect(page.locator("#statStockTotal")).toHaveText("218");
   expect(r.dom).toBeLessThan(4000);
 });
+
+// --- Integration avec les ameliorations (24/09) : meme classe que « Les N
+// autres ». Les lots d'ameliorations ont ajoute des chemins qui dessinent un
+// ecran PUIS y arrivent (recherche de la barre laterale, « Rappel » d'une
+// fiche, retour apres « Valider la commande ») : l'arrivee redessinait le rendu
+// en attente -- deux ecritures pour une arrivee. Chacun s'ecrit une fois.
+
+/** Le nombre d'ecritures (enregistrements childList) de #id, lu apres une image. */
+async function ecrituresDe(page, id) {
+  await page.evaluate(i => {
+    const e = window.__ecritures = { n: 0 };
+    new MutationObserver(recs => { e.n += recs.length; }).observe(document.getElementById(i), { childList: true });
+  }, id);
+  return () => page.evaluate(() => new Promise(fin => requestAnimationFrame(() => setTimeout(() => fin(window.__ecritures.n), 0))));
+}
+
+test("recherche de la barre latérale, un client : Clients s'écrit une fois (intégration)", async ({ page }) => {
+  await ouvrir(page);
+  const client = (await (await page.request.get(`${srv.base}/api/crm/clients`)).json())[5];
+  // Une ecriture de la liste par rendu : le temoin du compte (une arrivee par
+  // le menu, rendu en attente seul).
+  const parLeMenu = await ecrituresDe(page, "crmList");
+  await aller(page, "crm");
+  await expect(page.locator(`#crmList [data-cli-choisir="${client.id}"]`)).toHaveCount(1);
+  const unRendu = await parLeMenu();
+  expect(unRendu, "prealable : l'arrivee par le menu ecrit la liste").toBeGreaterThan(0);
+  // Rouvrir sur le tableau de bord : le rendu des Clients attend depuis l'ouverture.
+  await aller(page, "journee");
+  await page.reload();
+  await aJour(page);
+  const lire = await ecrituresDe(page, "crmList");
+  await page.locator("#menuSearch").fill(client.nom);
+  await page.locator(`#rechercheResultats [data-recherche="client"][data-id="${client.id}"]`).click();
+  await expect(page.locator("#crm")).toHaveClass(/active/);
+  await expect(page.locator(`[data-cli-choisir="${client.id}"]`)).toBeFocused();
+  const n = await lire();
+  console.log(`[recherche] un client : ${n} ecriture(s) de la liste (une arrivee : ${unRendu})`);
+  expect(n).toBe(unRendu);
+});
+
+test("recherche de la barre latérale, un produit : le Stock s'écrit une fois, filtré (intégration)", async ({ page }) => {
+  await ouvrir(page);
+  const produit = (await (await page.request.get(`${srv.base}/api/stock`)).json())[7];
+  const parLeMenu = await ecrituresDe(page, "stockList");
+  await aller(page, "stock");
+  await expect(page.locator("#stockList .stk-ligne")).toHaveCount(218);
+  const unRendu = await parLeMenu();
+  expect(unRendu, "prealable : l'arrivee par le menu ecrit la liste").toBeGreaterThan(0);
+  // Rouvrir sur le tableau de bord : le rendu du Stock attend depuis l'ouverture.
+  await aller(page, "journee");
+  await page.reload();
+  await aJour(page);
+  const lire = await ecrituresDe(page, "stockList");
+  await page.locator("#menuSearch").fill(produit.code);
+  await page.locator(`#rechercheResultats [data-recherche="produit"][data-id="${produit.id}"]`).click();
+  await expect(page.locator("#stock")).toHaveClass(/active/);
+  // Temoin : la liste est filtree sur ce produit.
+  await expect(page.locator("#stockList .stk-ligne")).toHaveCount(1);
+  await expect(page.locator("#stockList .stk-code")).toHaveText(produit.code);
+  const n = await lire();
+  console.log(`[recherche] un produit : ${n} ecriture(s) de la liste (une arrivee : ${unRendu})`);
+  expect(n).toBe(unRendu);
+});
+
+test("fiche client, « Rappel » : le choix du client s'écrit une fois, sur ce client (intégration)", async ({ page }) => {
+  await ouvrir(page, "crm");
+  const client = (await (await page.request.get(`${srv.base}/api/crm/clients`)).json())[3];
+  await page.locator(`#crmList [data-cli-choisir="${client.id}"]`).click();
+  const lire = await ecrituresDe(page, "relanceClientSelect");
+  await page.locator(`#cliFiche [data-action="cli-rappel"][data-client-id="${client.id}"]`).click();
+  await expect(page.locator("#relances")).toHaveClass(/active/);
+  await expect(page.locator("#relanceClientSelect")).toHaveValue(client.id);
+  const n = await lire();
+  console.log(`[rappel] depuis la fiche : ${n} ecriture(s) du choix du client`);
+  expect(n).toBe(1);
+});
+
+// En DERNIER : il cree une commande (225 au lieu de 224 pour ce qui suivrait).
+test("après « Valider la commande » : Commandes s'écrit une fois, la commande mise en avant (intégration)", async ({ page }) => {
+  await ouvrir(page, "commande-client");
+  const client = (await (await page.request.get(`${srv.base}/api/crm/clients`)).json())[2];
+  const produit = (await (await page.request.get(`${srv.base}/api/stock`)).json()).find(p => Number(p.quantite) > 5);
+  await page.locator("#customerClientSearch").fill(client.nom);
+  await page.locator(`#customerClientResults [data-action="cc-client"][data-id="${client.id}"]`).click();
+  await expect(page.locator("#customerOrderForm [name=clientId]")).toHaveValue(client.id);
+  await page.locator(`#customerCatalog [data-customer-product="${produit.id}"][data-customer-delta="1"]`).click();
+  // Les rendus de la LISTE (des lignes de commande ecrites) : le squelette que
+  // le chargement pose, puis retire, dans une liste encore vide n'en est pas un.
+  await page.evaluate(() => {
+    const e = window.__rendusCmd = { n: 0, squelettes: 0 };
+    new MutationObserver(recs => {
+      for (const r of recs) {
+        const ajoutes = [...r.addedNodes].filter(x => x.nodeType === 1);
+        if (ajoutes.some(x => x.matches(".cmd-ligne"))) e.n++;
+        else if (ajoutes.length) e.squelettes++;
+      }
+    }).observe(document.getElementById("cmdLignes"), { childList: true });
+  });
+  const lire = () => page.evaluate(() => new Promise(fin => requestAnimationFrame(() => setTimeout(() => fin(window.__rendusCmd), 0))));
+  const reponse = page.waitForResponse(r => r.url().endsWith("/api/customer-orders") && r.request().method() === "POST");
+  await page.locator("#customerValider").click();
+  const creee = await (await reponse).json();
+  await expect(page.locator("#commandes")).toHaveClass(/active/);
+  // Temoin : la ligne de la commande creee, mise en avant (lot pieges).
+  await expect(page.locator(`#cmdLignes [data-cmd-ouvrir="${creee.id}"]`)).toHaveClass(/cmd-ligne--nouvelle/);
+  const { n, squelettes } = await lire();
+  console.log(`[commandes] apres « Valider la commande » : ${n} rendu(s) de la liste (${squelettes} squelette(s) du chargement)`);
+  expect(n).toBe(1);
+});
