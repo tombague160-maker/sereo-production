@@ -250,11 +250,15 @@ function rangs(page, selecteurPilules) {
 
 // 390 en sombre : la ou le premier jet, qui mesurait en coordonnees d'ecran
 // pendant que la page se reajustait, ne laissait que « Toutes » et « + 6 ».
-for (const [largeur, hauteur, theme] of [[360, 740, "light"], [390, 844, "dark"]]) test(`pilules — Commandes (${largeur}, ${theme}) : repliees au-dela de deux rangs, « + N » les rend, la choisie ne se cache jamais`, async ({ browser }) => {
+// Integration du 24/09 : a 390 px les six pilules tiennent desormais en deux
+// rangs (« À envoyer » cachee sans commande, lot pieges ; mots plus courts, lot
+// parcours) : rien a replier. Le cas sombre se juge a 360 px.
+for (const [largeur, hauteur, theme] of [[360, 740, "light"], [360, 740, "dark"]]) test(`pilules — Commandes (${largeur}, ${theme}) : repliees au-dela de deux rangs, « + N » les rend, la choisie ne se cache jamais`, async ({ browser }) => {
   test.setTimeout(90000);
   const { ctx, page, erreurs } = await ouvrir(browser, "commandes", { largeur, hauteur, theme });
   const pilules = "#cmdPilules > .filtre-pilule, #cmdPilules > .pilules-plus";
   const plus = page.locator("#cmdPilules > .pilules-plus");
+  expect(await plus.count(), "prealable : a cette largeur, les pilules depassent deux rangs (sinon rien a replier)").toBe(1);
   const replie = await rangs(page, pilules);
   expect(replie, "les pilules prennent plus de deux rangs").toBeLessThanOrEqual(2);
   expect(replie, "le repli cache plus qu'il ne faut : un seul rang reste").toBe(2);
