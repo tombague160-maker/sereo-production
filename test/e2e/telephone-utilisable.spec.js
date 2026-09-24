@@ -241,6 +241,16 @@ for (const [largeur, hauteur, theme] of [[360, 740, "light"], [390, 844, "dark"]
   const replie = await rangs(page, pilules);
   expect(replie, "les pilules prennent plus de deux rangs").toBeLessThanOrEqual(2);
   expect(replie, "le repli cache plus qu'il ne faut : un seul rang reste").toBe(2);
+  // Remesure en bas de la liste (une rotation, la police qui arrive) : cacher
+  // une pilule raccourcit la page, le defilement se recale, et une mesure en
+  // coordonnees d'ecran voyait « glisser » le deuxieme rang (mutant M2 : il
+  // ne restait que « Toutes » et « + 6 »).
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await page.waitForTimeout(150);
+  await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+  await page.waitForTimeout(300);
+  expect(await rangs(page, pilules), "remesure en bas de page : le repli cache plus qu'il ne faut").toBe(2);
+  await page.evaluate(() => window.scrollTo(0, 0));
   await expect(plus).toBeVisible();
   await expect(plus).toHaveText(/^\+ \d+$/);
   await expect(plus).toHaveAttribute("aria-expanded", "false");

@@ -15262,6 +15262,12 @@ html, body, main.content { overflow-x: clip; }
   /* « Exporter » dans le panneau « Filtres » (placerExportCommandes). */
   #commandes .cmd-filtres > [data-action="cmd-export"] { order: 5; flex: none; width: auto; }
   #commandes .cmd-filtres:not(.cmd-filtres--ouverts) > [data-action="cmd-export"] { display: none; }
+}
+/* [hidden] gagne : `.button` (display: inline-flex) l'emportait sur la
+   feuille du navigateur -- l'attribut ne cachait rien, et le « hidden =
+   false » de placerExportCommandes ne se voyait pas (mutant M14 survivant). */
+#commandes .cmd-filtres > [data-action="cmd-export"][hidden] { display: none !important; }
+@media (max-width: 820px) {
 
   /* « Nouvelle commande », fixe au-dessus de la barre basse, comme « Nouveau
      client » (placerGestesBas : apres la liste dans l'ordre du clavier). */
