@@ -188,6 +188,8 @@ test("télécharger la dernière : l'administrateur reçoit CE fichier, les autr
 });
 
 test("l'état dit à chacun ce qu'il peut faire", async () => {
+  // Une sauvegarde a telecharger : sans elle, « permis » est faux pour tous.
+  assert.equal((await appel("/api/backup/now", { cookie: cookies.admin, method: "POST", body: {} })).status, 200);
   const admin = await etat(cookies.admin);
   assert.equal(admin.administration, true);
   assert.equal(admin.telechargement.permis, true);
