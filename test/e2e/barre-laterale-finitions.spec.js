@@ -49,23 +49,18 @@ test.describe("Barre laterale -- finitions de la v1.34.0", () => {
     await ctx.close();
   });
 
-  test("au clavier, activer une pilule garde le focus sur les pilules", async ({ page }) => {
-    // La rangee est reconstruite a chaque changement d'ecran. Sans precaution,
-    // le bouton qui avait le focus est detruit et le focus retombe sur <body> :
-    // Tab repart du haut de la page.
+  test("la rangee de pilules ne se montre plus : aucune entree n'absorbe deux ecrans", async ({ page }) => {
+    // Analyse etait la derniere entree a deux ecrans (statistiques et
+    // exports) ; l'ecran Exports est parti (decision 9, 24/09). La rangee
+    // porte encore la pilule qui NOMME chaque page (aria-labelledby), masquee :
+    // elle ne doit plus apparaitre nulle part, sinon elle offrirait un choix
+    // d'un seul ecran. (Le cas « le focus reste sur les pilules » n'a plus
+    // d'ecran ou se jouer ; son code reste pour un groupe futur.)
     await page.goto("/", { waitUntil: "networkidle" });
-    // Commandes, Stock et Clients n'ont plus de pilules d'ecran (planches
-    // 13c, 13d, 13e) : Analyse en a deux.
-    await page.locator("#nav-analyse").click();
-    await page.locator("#tab-exports").focus();
-    await page.keyboard.press("Enter");
-    await expect(page.locator("#exports")).toHaveClass(/active/);
-    const focus = await page.evaluate(() => ({
-      id: document.activeElement?.id || null,
-      dansLaRangee: !!document.activeElement?.closest("#sousOnglets")
-    }));
-    expect(focus.dansLaRangee, `focus sur ${focus.id}`).toBe(true);
-    expect(focus.id).toBe("tab-exports");
+    for (const entree of await page.locator(".sidebar .tab[data-groupe]").evaluateAll(els => els.map(e => e.id))) {
+      await page.locator(`#${entree}`).click();
+      expect(await page.locator("#sousOnglets").isHidden(), `rangee visible sous ${entree}`).toBe(true);
+    }
   });
 
   test("« A jour » ne s'affiche pas quand la version n'a pas pu etre lue", async ({ page }) => {

@@ -132,6 +132,21 @@ test("2 — le client se cherche comme dans l'abonnement, « Valider » est sous
   await ctx.close();
 });
 
+test("2 — une nouvelle fiche aux coordonnees repliees : « Valider » les deplie sur le nom manquant", async ({ browser }) => {
+  const { ctx, page, erreurs } = await ouvrir(browser, "commande-client");
+  const coordonnees = page.locator("#customerCoordonnees");
+  expect(await coordonnees.evaluate(d => d.open), "sans client, les coordonnees sont ouvertes").toBe(true);
+  await page.locator("#customerCoordonneesTitre").click();
+  expect(await coordonnees.evaluate(d => d.open)).toBe(false);
+  await page.locator('[data-customer-product="st-ALE"][data-customer-delta="1"]').click();
+  await page.locator("#customerValider").click();
+  // Le champ « Nom » manquant ne pouvait pas dire son message, replie.
+  await expect.poll(() => coordonnees.evaluate(d => d.open)).toBe(true);
+  expect(await page.evaluate(() => document.activeElement?.name)).toBe("nom");
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
 // --- 7. Une commande sur un produit en rupture ------------------------------------
 
 test("7 — un produit en rupture entre au panier, la commande est acceptee en « Bloquee »", async ({ browser }) => {
@@ -311,6 +326,30 @@ test("8 — au bureau, la Preparation dit « A preparer / En preparation / Prete
   await ctx.close();
 });
 
+test("8 — les dates : un seul utilitaire, plus de « 24/09/2026 », de « jeu. 24/09 » ni de « 16:00 »", async ({ browser }) => {
+  const { ctx, page, erreurs } = await ouvrir(browser, "relances");
+  const JOUR_COURT = /\b(lun|mar|mer|jeu|ven|sam|dim)\. \d{1,2} [a-zéû]+\.?/;
+  // Les rappels : « jeu. 24 sept. » (la forme d'une echeance), plus « 24/09/2026 ».
+  await page.locator('[data-relance-filter="all"]').click();
+  const rappel = await page.locator("#relanceList article").first().innerText();
+  expect(rappel).not.toMatch(/\d{2}\/\d{2}\/\d{4}/);
+  expect(rappel).toMatch(JOUR_COURT);
+  // L'heure : « 16 h 00 », comme partout ailleurs (« Hors ligne depuis 16 h 00 »).
+  await page.goto(`${srv.base}/#journee`);
+  await expect(page.locator("#opUpdated")).toHaveText(/^Mis à jour à \d{1,2} h \d{2}$/);
+  // Les commandes pretes de la Tournee : « jeu. 24 sept. », plus « jeu. 24/09 ».
+  await page.goto(`${srv.base}/#livreur`);
+  await page.waitForTimeout(600);
+  const dates = await page.locator(".delivery-card .order-meta span:nth-child(2)").allTextContents();
+  expect(dates.length, "le seme a des commandes pretes").toBeGreaterThan(0);
+  for (const d of dates) {
+    expect(d).not.toMatch(/\d{2}\/\d{2}/);
+    if (d !== "Sans date") expect(d).toMatch(JOUR_COURT);
+  }
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
 test("8 — « Rappel » partout, aucun « commande(s) », « nouveau » plutot que +100 %", async ({ browser }) => {
   const { ctx, page, erreurs } = await ouvrir(browser, "crm");
   const textesCrm = await page.locator("#crm").evaluate(e => e.innerText + " " + [...e.querySelectorAll("option")].map(o => o.textContent).join(" "));
@@ -322,7 +361,10 @@ test("8 — « Rappel » partout, aucun « commande(s) », « nouveau » plutot 
   const analyse = await page.locator("#statsKpis").innerText();
   expect(analyse).not.toMatch(/100\s?%/);
   expect(analyse).not.toMatch(/\(s\)/);
-  expect(analyse).toContain("nouveau");
+  // Le mot entier : « nouveau 0% » (l'ancien format sur la nouvelle reponse du
+  // serveur) serait un pourcentage de plus, faux.
+  expect(analyse).toContain("nouveau (rien la période d’avant)");
+  expect(analyse).not.toMatch(/nouveau \d/);
   expect(erreurs).toEqual([]);
   await ctx.close();
 });

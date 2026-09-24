@@ -242,7 +242,9 @@ test("4a — la commande prete se lit « CMD-... · n articles », puis son jour
     // mais le jour et le secteur y restent -- sans filtre de date, la liste
     // melange les dates et les secteurs.
     expect(c.adresse, "l'adresse quitte la ligne au telephone").toBe(false);
-    expect(c.contexte, "le jour et le secteur de la commande ont disparu de la ligne").toMatch(/^[a-zé]+\.? \d{2}\/\d{2} · .+/);
+    // « jeu. 24 sept. · Dole » : la date d'une livraison s'ecrit comme
+    // partout (utils/dates.js, parcours simplifies du 24/09), plus « jeu. 24/09 ».
+    expect(c.contexte, "le jour et le secteur de la commande ont disparu de la ligne").toMatch(/^[a-zé]+\.? \d{1,2} [a-zéû]+\.? · .+/);
   }
   // Deux commandes pretes du meme client, aujourd'hui et demain : la ligne
   // doit dire laquelle est laquelle.

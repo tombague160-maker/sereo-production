@@ -15102,3 +15102,164 @@ html, body, main.content { overflow-x: clip; }
    regle `@media (min-width: 821px) .sidebar { overflow-y: auto }` posee plus
    haut (bloc « barre laterale, finitions ») : le compte et la version restent
    atteignables (banc collant-et-clavier, « écran bas »). */
+
+/* ==========================================================================
+   PARCOURS SIMPLIFIES (24/09) -- audit du 24/09, decisions de Thomas
+   --------------------------------------------------------------------------
+   1. La fiche client : « Nouvelle commande » et « Rappel » sous l'en-tete ;
+      le chiffre d'affaires livre et les rappels a faire, que le serveur
+      calculait sans que la fiche les montre.
+   2. La nouvelle commande : la recherche du client de l'abonnement (memes
+      classes abo-cr-*, reprises ici pour #commande-client : celles du
+      dialogue sont prefixees par #subscriptionDialog), les coordonnees
+      repliees, « Valider » sous le total.
+   3. Abonnements : « Creer les N commandes dues ».
+   Couleurs : jetons v8 seulement, donc justes en clair ET en sombre. Cibles
+   44 px (48 au telephone), anneau de focus a deux tons, [hidden] gagne.
+   ========================================================================== */
+
+/* 1. La fiche client ------------------------------------------------------ */
+.cli-fiche-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+:root[data-color-scheme] #crm .cli-fiche-actions .cli-bouton-contour,
+:root:not([data-color-scheme]) #crm .cli-fiche-actions .cli-bouton-contour { gap: 8px; }
+#crm .cli-fiche-actions svg { display: block; width: 18px; height: 18px; flex: none; }
+.cli-ca { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.cli-ca > div { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+:root[data-color-scheme] #crm .cli-ca-valeur,
+:root:not([data-color-scheme]) #crm .cli-ca-valeur {
+  font-size: 22px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2;
+  font-variant-numeric: tabular-nums; color: var(--v8-texte);
+}
+.cli-rappels-client { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.cli-rappel { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cli-rappel-date {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 500; color: var(--v8-texte-secondaire);
+}
+.cli-rappel-date svg { width: 16px; height: 16px; flex: none; }
+.cli-rappel.cli-alerte .cli-rappel-date { color: var(--v8-alerte); font-weight: 600; }
+.cli-rappel-motif { font-size: 15px; font-weight: 500; line-height: 1.4; color: var(--v8-texte); overflow-wrap: anywhere; }
+@media (max-width: 920px) {
+  .cli-ca { grid-template-columns: 1fr; gap: 14px; }
+}
+@media (max-width: 820px) {
+  /* Au telephone (planche 8c) : les deux gestes en pleine largeur, 48 px ;
+     le chiffre d'affaires et les rappels, une carte comme les autres. */
+  /* `auto` et non `0` : « Nouvelle commande » prend la place que « Rappel »
+     n'utilise pas (a parts egales, 174 px ne le tenaient pas a 390). */
+  :root[data-color-scheme] #crm .cli-fiche-actions .cli-bouton-contour,
+  :root:not([data-color-scheme]) #crm .cli-fiche-actions .cli-bouton-contour {
+    flex: 1 1 auto; min-width: 0; height: 48px; padding: 0 14px; white-space: nowrap;
+  }
+  :root[data-color-scheme] #crm .cli-fiche > .cli-ca,
+  :root:not([data-color-scheme]) #crm .cli-fiche > .cli-ca {
+    padding: 18px; border-radius: 24px; background: var(--v8-surface);
+    box-shadow: 0 1px 2px rgba(15, 61, 61, 0.05), 0 12px 28px rgba(15, 61, 61, 0.05);
+  }
+  #crm .cli-ca > div + div { padding-top: 14px; border-top: 1px solid var(--v8-surface-basse); }
+}
+
+/* 2. La nouvelle commande -------------------------------------------------- */
+#commande-client .cc-client { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+:root[data-color-scheme] #commande-client .cc-libelle,
+:root:not([data-color-scheme]) #commande-client .cc-libelle {
+  margin: 0; font-size: 13px; font-weight: 500; letter-spacing: 0; color: var(--v8-texte-secondaire);
+}
+#commande-client .abo-cr-client-recherche { display: flex; flex-direction: column; gap: 10px; }
+#commande-client .abo-cr-client-cartes { display: flex; flex-direction: column; gap: 8px; }
+#commande-client .abo-cr-client-choisi { display: flex; flex-direction: column; gap: 12px; }
+:root[data-color-scheme] #commande-client .abo-cr-champ--recherche,
+:root:not([data-color-scheme]) #commande-client .abo-cr-champ--recherche {
+  display: flex; flex-direction: row; align-items: center; gap: 10px;
+  box-sizing: border-box; width: 100%; height: 48px; min-height: 48px; margin: 0; padding: 0 18px;
+  border: 0; border-radius: 18px; background: var(--v8-surface-basse); box-shadow: none;
+  color: var(--v8-texte-secondaire); font-weight: 500; cursor: text;
+}
+#commande-client .abo-cr-champ--recherche svg { width: 18px; height: 18px; flex: none; }
+:root[data-color-scheme] #commande-client .abo-cr-champ--recherche input,
+:root:not([data-color-scheme]) #commande-client .abo-cr-champ--recherche input {
+  flex: 1 1 auto; width: auto; min-width: 0; height: 100%; min-height: 0; margin: 0; padding: 0;
+  border: 0; border-radius: 0; background: transparent; box-shadow: none; outline: none;
+  color: var(--v8-texte); font: inherit; font-size: 15.5px; font-weight: 500;
+}
+#commande-client .abo-cr-champ--recherche input::placeholder { color: var(--v8-texte-secondaire); opacity: 1; }
+:root[data-color-scheme] #commande-client .abo-cr-client-carte,
+:root:not([data-color-scheme]) #commande-client .abo-cr-client-carte {
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px;
+  box-sizing: border-box; width: 100%; min-height: 60px; margin: 0; padding: 10px 16px;
+  border: 0; border-radius: 18px; background: var(--v8-surface-basse); box-shadow: none;
+  color: var(--v8-texte); font: inherit; text-align: left; cursor: pointer;
+}
+#commande-client .abo-cr-client-carte strong { font-size: 15px; font-weight: 600; }
+#commande-client .abo-cr-client-carte span { font-size: 13px; font-weight: 500; color: var(--v8-texte-secondaire); }
+#commande-client .abo-cr-client-carte:hover { box-shadow: inset 0 0 0 1.5px var(--v8-principal); }
+#commande-client .abo-cr-client-champ {
+  display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 2px 0 18px;
+  border-radius: 18px; background: var(--v8-vert-clair);
+}
+#commande-client .abo-cr-client-nom {
+  flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font-size: 15.5px; font-weight: 600; color: var(--v8-principal-appuye);
+}
+:root[data-color-scheme] #commande-client .abo-cr-client-changer,
+:root:not([data-color-scheme]) #commande-client .abo-cr-client-changer {
+  display: flex; align-items: center; justify-content: center; flex: none;
+  width: 44px; height: 44px; min-width: 44px; min-height: 44px; padding: 0;
+  border: 0; border-radius: 999px; background: var(--v8-surface); box-shadow: none;
+  color: var(--v8-principal); cursor: pointer;
+}
+#commande-client .abo-cr-client-changer svg { width: 16px; height: 16px; }
+#commande-client .abo-cr-client-adresse {
+  display: flex; align-items: center; gap: 10px; margin: 0;
+  font-size: 13.5px; font-weight: 500; color: var(--v8-texte-secondaire);
+}
+#commande-client .abo-cr-client-adresse svg { width: 16px; height: 16px; flex: none; }
+#commande-client .abo-cr-note { margin: 0; font-size: 13px; font-weight: 400; line-height: 1.5; color: var(--v8-texte-secondaire); }
+/* Les coordonnees : repliees quand le client existe (« Modifier les
+   coordonnees »), ouvertes pour une nouvelle fiche. */
+#commande-client .cc-coordonnees { display: block; min-width: 0; }
+:root[data-color-scheme] #commande-client .cc-coordonnees > summary,
+:root:not([data-color-scheme]) #commande-client .cc-coordonnees > summary {
+  display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 4px;
+  border-radius: 12px; list-style: none; cursor: pointer;
+  color: var(--v8-principal); font-size: 14.5px; font-weight: 600;
+}
+#commande-client .cc-coordonnees > summary::-webkit-details-marker { display: none; }
+#commande-client .cc-coordonnees > summary::before {
+  content: ""; width: 8px; height: 8px; flex: none; margin: 0 4px;
+  border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg); transition: transform 200ms ease;
+}
+#commande-client .cc-coordonnees[open] > summary::before { transform: rotate(45deg); }
+#commande-client .cc-coordonnees[open] > .form-grid { margin-top: 12px; }
+@media (prefers-reduced-motion: reduce) {
+  #commande-client .cc-coordonnees > summary::before { transition: none; }
+}
+/* « Valider » sous le total, pleine largeur du panier. */
+:root[data-color-scheme] #commande-client .customer-cart-panel .cc-valider,
+:root:not([data-color-scheme]) #commande-client .customer-cart-panel .cc-valider {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; min-height: 48px; margin-top: 16px;
+}
+/* L'anneau de la charte : deux tons, sur chaque geste de ce bloc. */
+:root[data-color-scheme] #commande-client :is(.abo-cr-client-carte, .abo-cr-client-changer, .cc-valider, .cc-coordonnees > summary):focus-visible,
+:root:not([data-color-scheme]) #commande-client :is(.abo-cr-client-carte, .abo-cr-client-changer, .cc-valider, .cc-coordonnees > summary):focus-visible,
+:root[data-color-scheme] #commande-client .abo-cr-champ--recherche:has(input:focus-visible),
+:root:not([data-color-scheme]) #commande-client .abo-cr-champ--recherche:has(input:focus-visible) {
+  outline: none; box-shadow: 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus);
+}
+
+/* 3. Abonnements : « Creer les N commandes dues » ------------------------- */
+:root[data-color-scheme] #abonnements .abo-dues,
+:root:not([data-color-scheme]) #abonnements .abo-dues {
+  align-self: flex-start; display: inline-flex; align-items: center; min-height: 44px; padding: 0 20px;
+  border: 1.5px solid var(--v8-principal); border-radius: 999px; background: transparent; box-shadow: none;
+  color: var(--v8-principal); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+}
+:root[data-color-scheme] #abonnements .abo-dues:focus-visible,
+:root:not([data-color-scheme]) #abonnements .abo-dues:focus-visible {
+  outline: none; box-shadow: 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus);
+}
+
+/* [hidden] gagne sur tout ce bloc. */
+:is(#commande-client, #crm, #abonnements) [hidden] { display: none !important; }

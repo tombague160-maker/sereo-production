@@ -108,3 +108,14 @@ export function renderSimpleMarkdown(md) {
   if (inList) out.push("</ul>");
   return out.join("\n");
 }
+
+/**
+ * « 1 commande », « 3 commandes », « 0 commande » : le nombre et son mot,
+ * accorde (parcours simplifies, 24/09 -- plus de « commande(s) »). En
+ * francais, 0 et 1 sont au singulier. `pluriel` quand le mot ne prend pas
+ * seulement un « s ».
+ */
+export function accorder(n, mot, pluriel = `${mot}s`) {
+  const nombre = Number(n) || 0;
+  return `${nombre} ${Math.abs(nombre) > 1 ? pluriel : mot}`;
+}
