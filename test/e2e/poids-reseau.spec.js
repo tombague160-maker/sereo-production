@@ -97,7 +97,8 @@ test("les Paramètres lisent leurs données en s'affichant, et les montrent", as
 test("témoin : l'écran Stock montre les 12 mouvements les plus récents, comme avant", async ({ page }) => {
   await ouvrir(page, "stock");
   const tous = await (await page.request.get(`${srv.base}/api/stock-movements`)).json();
-  expect(tous.length, "prealable : la liste complete").toBe(633);
+  // La route sert les 50 derniers (plafond du lot « donnees utiles », 24/09).
+  expect(tous.length, "prealable : les 50 derniers").toBe(50);
   const lignes = page.locator("#stockMovementList .item h4");
   await expect(lignes).toHaveCount(12);
   await expect(lignes).toHaveText(tous.slice(0, 12).map(m => m.productName));

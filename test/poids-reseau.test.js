@@ -157,11 +157,19 @@ test("image de marque : une nouvelle image change d'adresse, la remise a zero la
   assert.equal((await lire("/api/settings/appearance/image")).res.status, 404);
 });
 
-test("/api/stock-movements?limite=12 : les 12 que l'ecran montre ; sans limite, tous", async () => {
+// Integration du 24/09 : le lot « donnees utiles » plafonne la route aux 50
+// derniers mouvements, sans auteur (« qui » se lit au journal de Parametres,
+// reserve a l'administration) ; `limite` ne passe pas ce plafond.
+test("/api/stock-movements?limite=12 : les 12 que l'ecran montre ; sans limite, les 50 derniers, sans auteur", async () => {
   const tous = (await lire("/api/stock-movements")).json();
   const r = await lire("/api/stock-movements?limite=12");
-  assert.equal(tous.length, 633);
+  assert.equal(tous.length, 50);
   assert.deepEqual(r.json(), tous.slice(0, 12));
+  assert.deepEqual((await lire("/api/stock-movements?limite=500")).json(), tous);
+  assert.deepEqual(tous.filter(m => "createdBy" in m), [], "un mouvement porte son auteur");
+  // Temoin : la base, elle, a ses 633 mouvements et leur auteur.
+  assert.equal(readDb().stockMovements.length, 633);
+  assert.ok(readDb().stockMovements.every(m => m.createdBy));
   assert.ok(r.octets.length < 6000, `${r.octets.length} o pour 12 mouvements (avant : 202 606 pour 633)`);
 });
 
