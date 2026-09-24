@@ -625,7 +625,9 @@ test("delivery route without coordinates falls back to coherent sector city addr
   assert.deepEqual(route.body.stops.map(stop => stop.sector), ["Besancon", "Champagnole", "Dole"]);
 });
 
-test("annex orders export returns a real xlsx file", async () => {
+// Decision 9 (24/09) : l'ecran Exports et son « commandes annexes » sont partis ;
+// le seul export Excel est celui de l'ecran Commandes (POST, liste d'ids).
+test("orders export returns a real xlsx file", async () => {
   seedDb({
     ...defaultDb(),
     commandes: [{
@@ -646,7 +648,9 @@ test("annex orders export returns a real xlsx file", async () => {
     }]
   });
 
-  const res = await fetch(`${baseUrl}/api/exports/commandes-annexes.xlsx`);
+  const res = await fetch(`${baseUrl}/api/exports/commandes.xlsx`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: ["o-annexe"] })
+  });
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("content-type"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   const buffer = Buffer.from(await res.arrayBuffer());
