@@ -5426,7 +5426,7 @@ function renderBdcClientEditForm(order) {
         </label>
         <label class="bdc-form-field">
           <span>Ville</span>
-          <input type="text" name="ville" value="${escapeAttribute(order.city || "")}" placeholder="Besançon" />
+          <input type="text" name="ville" value="${escapeAttribute(villeAffichee(order.city || ""))}" placeholder="Besançon" />
         </label>
         <label class="bdc-form-field bdc-form-field-wide">
           <span>Téléphone</span>
@@ -9378,11 +9378,15 @@ async function loadVersionInfo() {
   setText("parVersionValeur", versionInfoCache?.version || "—");
   if (!swUpdateNotificationShown) {
     // La barre laterale au bureau, le pied de Parametres au telephone.
-    for (const etat of [document.getElementById("sidebarVersionEtat"), document.getElementById("parVersionEtat")]) {
+    // Au bureau, pas « A jour » : c'est le mot de la pastille des DONNEES, dans
+    // l'en-tete de chaque ecran. Ni « Derniere version » : rien ici ne sait si
+    // une plus recente est publiee. « Installee » dit ce qui a ete lu -- la
+    // version du serveur. Le telephone garde le mot de sa planche (6a).
+    const mots = { sidebarVersionEtat: "Installée", parVersionEtat: "À jour" };
+    for (const [id, mot] of Object.entries(mots)) {
+      const etat = document.getElementById(id);
       if (!etat) continue;
-      // Pas « A jour » : c'est le mot de la pastille des DONNEES, dans
-      // l'en-tete de chaque ecran. Deux sens pour un mot, c'etait un de trop.
-      etat.textContent = "Dernière version";
+      etat.textContent = mot;
       etat.hidden = !versionInfoCache?.version;
     }
   }
@@ -9530,7 +9534,7 @@ function showSwUpdateNotification() {
   if (swUpdateNotificationShown) return;
   swUpdateNotificationShown = true;
   // Une nouvelle version attend un rechargement : la pastille cesse de dire
-  // « A jour », ce qui serait faux, et le dit.
+  // « Installee » (bureau) ou « A jour » (telephone), et le dit.
   for (const etat of [document.getElementById("sidebarVersionEtat"), document.getElementById("parVersionEtat")]) {
     if (!etat) continue;
     etat.textContent = "Mise à jour";

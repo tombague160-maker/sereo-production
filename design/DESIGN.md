@@ -6029,11 +6029,11 @@ suit le système : un poste Windows en clair voyait la version la moins finie.
 
 | Défaut (audit) | Ce qui change |
 |---|---|
-| « Purger », « Annuler la commande », « Supprimer » un secteur : habillés comme « Enregistrer » en clair, dégradé corail en sombre | Contour d'alerte 1,5 px sur la surface, texte d'alerte, sans dégradé ; au survol, surface basse et contour épaissi (l'alerte n'est jamais un fond, charte §2) ; la corbeille et les listes ✗ / ✓ deviennent des icônes linéaires |
+| « Purger », « Annuler la commande », « Supprimer » un secteur (et, après relecture, « Supprimer » un compte dans le tableau du bureau) : habillés comme « Enregistrer » ou comme les gestes courants en clair, dégradé corail ou rose pâle en sombre | Contour d'alerte 1,5 px sur la surface, texte d'alerte, sans dégradé ; au survol, surface basse et contour épaissi (l'alerte n'est jamais un fond, charte §2) ; la corbeille et les listes ✗ / ✓ deviennent des icônes linéaires |
 | La seconde confirmation de la purge dit « Tape OK » | « Dernière vérification : les commandes, clients, ventes et tournées seront supprimés pour de bon. Purger maintenant ? » |
 | « Tous les abonnements ↗ », « Tout voir ↗ » dans le bleu du navigateur | Principal, 600, sans soulignement (souligné au survol) : la règle existait, bornée au téléphone |
 | Filtre choisi invisible en clair (Préparation « Tous », Analyse / Exports) | La pilule choisie est pleine au principal, comme en sombre et comme dans Commandes |
-| Clients : la fiche affichée et le survol ne se voyaient dans aucun thème (spécificité (1,2,0) contre (1,3,0)) | Survol au fond ; la ligne choisie au fond avec un anneau de 2 px au principal |
+| Clients : la fiche affichée et le survol ne se voyaient dans aucun thème (spécificité (1,2,0) contre (1,3,0)) | Au bureau : survol au fond ; la ligne choisie au fond avec un anneau de 2 px au principal (le téléphone n'est pas touché) |
 | Indications des champs en gras, comme la valeur | Au bureau : indication 400, saisie 500 |
 | Préparation au bureau : « Bloquée » au badge vert de « À faire » | Le badge du téléphone : contour d'alerte et « ! » (mots du 19/09 gardés) |
 | « Besancon » sans cédille (liste et fiche client, « Modifier », Nouvel abonnement, détail de commande, Adresses à vérifier, secteurs par défaut) | `villeAffichee` (`utils/text.js`) rend l'orthographe **à l'affichage** ; la valeur stockée ne change pas. « Itinéraire » (fiche client) vise l'adresse affichée, cédille comprise (`clients-mobile.spec.js` l'exige) |
@@ -6044,7 +6044,7 @@ suit le système : un poste Windows en clair voyait la version la moins finie.
 | Nouvel abonnement : le client choisi, « Créer une fiche client » restait | Il disparaît ; la croix du champ rend la recherche et le bouton |
 | À recommander : les quatre chiffres en rouge d'alerte en clair | Texte courant ; seul un stock à zéro reste en alerte, avec son mot |
 | Exports, Rappels, À recommander : première et dernière carte rognées | 4 px de marge intérieure dans la liste qui défile |
-| Deux « À jour » : données (en-tête) et version (barre latérale) | La version dit « Dernière version » (dans la barre, sous le numéro) ; « À jour » reste aux données |
+| Deux « À jour » : données (en-tête) et version (barre latérale) | Au bureau, la version dit « Installée » (dans la barre, sous le numéro) ; « À jour » reste aux données, et au pied de Paramètres du téléphone (planche 6a) |
 | L'icône d'« Actualiser » collée à son mot (en sombre, et en clair une fois sa géométrie partie) | Au bureau, 8 px entre l'icône et le mot de tout bouton, dans les deux thèmes |
 
 ### Décisions prises dans le lot
@@ -6076,12 +6076,12 @@ suit le système : un poste Windows en clair voyait la version la moins finie.
   place d'un nom d'EHPAD.
 - **Commandes, 1280–1439 px** : lignes de 48 px (la planche 13c : 56) et « Actualiser » en icône
   (son nom accessible reste « Actualiser »).
-- **La version dit « Dernière version »**, la planche 6a écrit « À jour » ;
-  `parametres-mobile.spec.js` attend le nouveau mot.
+- **La version dit « Installée » au bureau**, la planche 6a écrit « À jour » (le téléphone le
+  garde, `parametres-mobile.spec.js` inchangé depuis `main`).
 - **`normalizeCity` (serveur) range toujours « Besancon »** : c'est aussi la clé de secteur
-  (`CORE_SECTORS`, `deriveSector`). Les valeurs renvoyées par un formulaire (commande client
-  pré-remplie, champ Ville d'une commande) gardent la valeur stockée ; seul leur texte indicatif
-  a sa cédille.
+  (`CORE_SECTORS`, `deriveSector`). La commande client pré-remplie garde la valeur stockée (seul
+  son texte indicatif a sa cédille). Le champ Ville du détail d'une commande montre « Besançon »
+  (relecture) : ce formulaire renvoie tous ses champs, et le serveur range la ville comme avant.
 - **La page de connexion** (CSS dans `server.js`) garde ses graisses : hors de ce lot.
 - **« Exports »** n'est pas dans le banc de comparaison : l'écran est retiré par un autre lot
   (décision 9).
@@ -6121,10 +6121,32 @@ Non-régression, sur le code final : `npm test` (686/686) ; 38 fichiers e2e du b
 relecture à l'écran (icônes, barre latérale, Itinéraire), les 18 fichiers qu'elle touche ont été
 relancés : 231 cas verts.
 
+### Relecture adverse (24/09)
+
+Quatre défauts relevés sur `be2b6bb` ; tous vérifiés à l'écran, tous vrais, tous corrigés. Chaque
+banc a d'abord été lancé sur le code de `be2b6bb` (rouge, de la bonne cause), puis sur le
+correctif (vert). Bancs dans `theme-clair-finitions.spec.js`, section 10.
+
+| Défaut | Mesure sur `be2b6bb` | Correctif |
+|---|---|---|
+| Clients au téléphone : la première ligne, choisie d'office par `renderCrm`, portait fond et anneau alors que la fiche est cachée (la règle du lot n'avait pas de media query) | 390 px : fond `rgb(251, 247, 245)` (clair), `rgb(13, 21, 24)` (sombre) | Les règles du survol et de la ligne choisie passent sous `@media (min-width: 821px)`. Banc : à 390 px, fond transparent, aucune ombre, survol transparent ; témoin, la même ligne à 1440 px porte l'anneau |
+| « Supprimer » un compte (tableau du bureau) en `ghost` : en clair, fond, texte et contour identiques à « Désactiver » et « Mot de passe » ; en sombre, rose pâle. La note « les gestes Désactiver gardent leur style ghost » se trompait de bouton | clair : texte `rgb(42, 82, 84)` pour les trois ; sombre : `rgb(236, 148, 130)` sur `rgba(229, 139, 124, 0.1)` | `button danger compact`, comme « Supprimer » un secteur : texte et contour d'alerte (`rgb(192, 43, 10)` / `rgb(242, 99, 90)`), 44 px. Banc : comptes servis par le banc (un vrai compte activerait l'authentification) ; témoin, « Mot de passe » n'est pas en alerte |
+| « Dernière version » affirmait ce que `/api/version` ne sait pas (elle ne rend que la version du serveur), et changeait aussi le mot du téléphone (planche 6a) | barre et pied de Paramètres : « Dernière version » | Barre latérale : « Installée » ; téléphone : « À jour », `parametres-mobile.spec.js` rendu à `main`. « Mise à jour » (nouvelle version en attente) ne change pas |
+| Détail d'une commande, « Modifier le profil » : le champ Ville montrait « Besancon », la fenêtre « Modifier le client » « Besançon » | valeur du champ : « Besancon » | `villeAffichee(order.city)`. Banc : le champ montre « Besançon » ; enregistré (téléphone changé), la fiche garde « Besancon » et son secteur |
+
+Le fichier passe de 31 à 36 cas. Non-régression sur le correctif : `npm test` (686/686) ;
+`theme-clair-finitions`, `parametres-mobile`, `barre-laterale-finitions` (59 cas) ; Clients
+(bureau et téléphone), Paramètres, Commandes, Adresses à vérifier, `un-seul-dessin`, contraste,
+cibles, focus, charte, thèmes, typographie, texte coupé, finitions, intégration, onglets,
+navigation du téléphone (179 cas ; Commandes relancé seul après un port 3160 pris par un autre
+arbre de travail) ; file hors ligne, tournée hors ligne, livreur, chargement instantané, tableau
+de bord, navigation (43 cas).
+
 ### Ce qui reste
 
 - Le téléphone en un seul dessin (après le lot téléphone).
-- « Annuler la tournée » reste un bouton secondaire (écran Tournée, hors de ce lot) ; les gestes
-  « Désactiver » des comptes gardent leur style `ghost`.
+- « Annuler la tournée » reste un bouton secondaire (écran Tournée, hors de ce lot).
+- La feuille d'un compte au téléphone : « Supprimer le compte » reste `ghost` avec le texte
+  d'alerte (`par-geste-danger`) ; c'est au lot téléphone.
 - Migrer la valeur stockée « Besancon » avec un banc, dans un lot à part.
 - Les graisses de la page de connexion.

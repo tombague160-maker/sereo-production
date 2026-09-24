@@ -14726,16 +14726,21 @@ button.button.danger .button-icon { width: 18px; height: 18px; flex: none; }
 }
 /* Clients : la ligne de la fiche affichee, et le survol. Leur regle pesait
    (1,2,0) contre (1,3,0) pour le fond transparent : ni l'un ni l'autre ne se
-   voyait, dans aucun theme. La ligne choisie porte un anneau au principal. */
-:root[data-color-scheme] #crm .cli-ligne:hover,
-:root:not([data-color-scheme]) #crm .cli-ligne:hover { background: var(--v8-fond); }
-:root[data-color-scheme] #crm .cli-ligne.cli-ligne--choisie,
-:root:not([data-color-scheme]) #crm .cli-ligne.cli-ligne--choisie {
-  background: var(--v8-fond); box-shadow: inset 0 0 0 2px var(--v8-principal);
-}
-:root[data-color-scheme] #crm .cli-ligne.cli-ligne--choisie:focus-visible,
-:root:not([data-color-scheme]) #crm .cli-ligne.cli-ligne--choisie:focus-visible {
-  box-shadow: inset 0 0 0 2px var(--v8-principal), 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus);
+   voyait, dans aucun theme. La ligne choisie porte un anneau au principal.
+   Au bureau seulement : au telephone, la vue « liste » cache la fiche, et le
+   premier client, choisi d'office, se serait lu comme ouvert (relecture du
+   24/09 ; la liste du telephone releve de son lot). */
+@media (min-width: 821px) {
+  :root[data-color-scheme] #crm .cli-ligne:hover,
+  :root:not([data-color-scheme]) #crm .cli-ligne:hover { background: var(--v8-fond); }
+  :root[data-color-scheme] #crm .cli-ligne.cli-ligne--choisie,
+  :root:not([data-color-scheme]) #crm .cli-ligne.cli-ligne--choisie {
+    background: var(--v8-fond); box-shadow: inset 0 0 0 2px var(--v8-principal);
+  }
+  :root[data-color-scheme] #crm .cli-ligne.cli-ligne--choisie:focus-visible,
+  :root:not([data-color-scheme]) #crm .cli-ligne.cli-ligne--choisie:focus-visible {
+    box-shadow: inset 0 0 0 2px var(--v8-principal), 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus);
+  }
 }
 
 /* --- Les champs : l'indication legere, la saisie en 500 --------------------

@@ -343,7 +343,10 @@ test("les deux « À jour » ne disent plus le même mot : données dans l'en-t�
   await ouvrir(page, "journee");
   await expect(page.locator("#syncStatus")).toHaveText("À jour", { timeout: 10000 });
   await expect(page.locator("#sidebarVersionEtat")).toBeVisible();
-  await expect(page.locator("#sidebarVersionEtat")).toHaveText("Dernière version");
+  // « Installee », et non « Derniere version » (relecture du 24/09) :
+  // /api/version ne rend que la version du SERVEUR, elle ne sait pas si une
+  // plus recente est publiee. La pastille ne dit que ce qu'elle a lu.
+  await expect(page.locator("#sidebarVersionEtat")).toHaveText("Installée");
 });
 
 // --- 9. Et ce que l'affichage de la ville ne doit PAS faire -------------------
@@ -365,4 +368,77 @@ test("« Modifier le client » ne réécrit pas la ville : seule la valeur chang
   const clients = await (await page.request.get(srv.base + "/api/crm/clients")).json();
   const liste = Array.isArray(clients) ? clients : clients.items || clients.clients;
   expect(liste.find(c => c.id === "c-veto").ville).toBe("Besancon");
+});
+
+// --- 10. Relecture adverse du 24/09 ------------------------------------------
+
+for (const schema of THEMES) {
+  test(`Clients au téléphone : aucune ligne marquée ni survolée, la fiche n'est pas ouverte (${schema})`, async ({ page }) => {
+    // renderCrm choisit d'office le premier client (la fiche du bureau n'est
+    // jamais vide) : au telephone, la vue « liste » cache la fiche, et la
+    // premiere ligne ne doit pas se lire comme ouverte. La liste du telephone
+    // releve de son lot ; ce lot-ci ne dessine que le bureau.
+    await ouvrir(page, "crm", { largeur: 390, hauteur: 844, schema });
+    await expect(page.locator("#crm")).toHaveAttribute("data-vue", "liste");
+    await expect(page.locator("#cliFiche")).toBeHidden();
+    const choisie = page.locator("#crm .cli-ligne.cli-ligne--choisie");
+    await expect(choisie, "prealable : le premier client est choisi d'office").toHaveCount(1);
+    const c = await style(choisie, ["background-color", "box-shadow"]);
+    expect(c["background-color"], "la premiere ligne a un fond").toBe("rgba(0, 0, 0, 0)");
+    expect(c["box-shadow"], "la premiere ligne porte un anneau").toBe("none");
+    const autre = page.locator("#crm .cli-ligne:not(.cli-ligne--choisie)").first();
+    await autre.hover();
+    await page.waitForTimeout(250);
+    expect((await style(autre, ["background-color"]))["background-color"], "le survol colore une ligne au telephone").toBe("rgba(0, 0, 0, 0)");
+    // Temoin : la meme ligne, au bureau, porte l'anneau -- l'instrument le voit.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.waitForTimeout(250);
+    expect((await style(choisie, ["box-shadow"]))["box-shadow"]).toContain("inset");
+  });
+}
+
+// Un compte SERVI PAR LE BANC : creer un vrai compte activerait
+// l'authentification du serveur seme, et les bancs suivants verraient la page
+// de connexion. Aucune donnee reelle.
+const COMPTES = [{ id: "k-banc", identifiant: "livreur-banc", role: "livreur", actif: true, derniereConnexion: null }];
+
+for (const schema of THEMES) {
+  test(`Comptes au bureau : « Supprimer » a le dessin d'un geste destructeur, distinct de « Mot de passe » (${schema})`, async ({ page }) => {
+    await page.route("**/api/comptes", route => (route.request().method() === "GET" ? route.fulfill({ json: COMPTES }) : route.continue()));
+    await ouvrir(page, "parametres", { schema });
+    const ligne = page.locator("#comptesList .par-bureau tbody tr").first();
+    const supprimer = ligne.locator('[data-action="supprimer-compte"]');
+    await expect(supprimer).toBeVisible();
+    const alerte = await jeton(page, "--v8-alerte");
+    const s = await style(supprimer, ["background-image", "color", "border-top-color"]);
+    const motDePasse = await style(ligne.locator('[data-action="changer-mot-de-passe-compte"]'), ["color", "border-top-color"]);
+    expect(s["background-image"], "un degrade (interdit par la charte)").toBe("none");
+    expect(s.color, "le texte de « Supprimer »").toBe(alerte);
+    expect(s["border-top-color"], "le contour de « Supprimer »").toBe(alerte);
+    // Temoin : le geste courant de la meme ligne n'est pas dessine en alerte.
+    expect(motDePasse.color, "« Mot de passe » en alerte").not.toBe(alerte);
+    expect((await supprimer.boundingBox()).height, "une cible").toBeGreaterThanOrEqual(44);
+  });
+}
+
+test("détail de commande, « Modifier le profil » : la ville avec sa cédille, et la fiche garde sa valeur", async ({ page }) => {
+  // La fenetre « Modifier le client » montre « Besancon » avec sa cedille ; le
+  // formulaire du detail d'une commande montrait la valeur stockee.
+  await ouvrir(page, "commandes");
+  await page.locator('[data-cmd-ouvrir="o-10"]').click();
+  const detail = page.locator("#bdc-detail-modal");
+  await expect(detail).toBeVisible();
+  await detail.locator('[data-action="bdc-edit-client"]').click();
+  await expect(detail.locator('input[name="ville"]')).toHaveValue("Besançon");
+  // Et l'affichage ne reecrit pas la fiche : le formulaire renvoie la ville a
+  // chaque enregistrement, le serveur la range comme avant (normalizeCity).
+  await detail.locator('input[name="telephone"]').fill("0381000002");
+  await detail.locator('button[data-action="bdc-save-client"]').click();
+  await expect(detail.locator('input[name="ville"]')).toHaveCount(0);
+  const clients = await (await page.request.get(srv.base + "/api/crm/clients")).json();
+  const liste = Array.isArray(clients) ? clients : clients.items || clients.clients;
+  const dupont = liste.find(c => c.id === "c-dupont");
+  expect(dupont.telephone, "l'enregistrement n'est pas passe").toBe("0381000002");
+  expect(dupont.ville).toBe("Besancon");
+  expect(dupont.secteur).toBe("Besancon");
 });

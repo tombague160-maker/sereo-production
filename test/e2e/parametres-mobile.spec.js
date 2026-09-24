@@ -154,7 +154,7 @@ test("la version, au pied de l'écran", async ({ page }) => {
   const pied = page.locator("#parametres .par-version");
   await expect(pied).toBeVisible();
   await expect(page.locator("#parVersionValeur")).toHaveText(version);
-  await expect(page.locator("#parVersionEtat")).toHaveText("Dernière version");
+  await expect(page.locator("#parVersionEtat")).toHaveText("À jour");
   expect((await pied.boundingBox()).height).toBeGreaterThanOrEqual(44);
 });
 
