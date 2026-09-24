@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.45.0](https://github.com/tombague160-maker/sereo-production/compare/v1.44.0...v1.45.0) (2026-09-24)
+
+
+### ✨ Nouvelles fonctionnalités
+
+* **interface:** la barre latérale reste fixe au bureau ([93b3722](https://github.com/tombague160-maker/sereo-production/commit/93b372261dd0d5143ae7e6c8b127fa8f8f4a4ae0))
+* **interface:** la barre latérale reste fixe au bureau ([#178](https://github.com/tombague160-maker/sereo-production/issues/178)) ([f45f008](https://github.com/tombague160-maker/sereo-production/commit/f45f0083eccce622f1da8ceaac5c63f7ad7aa72b))
+
 ## [1.44.0](https://github.com/tombague160-maker/sereo-production/compare/v1.43.0...v1.44.0) (2026-09-24)
 
 
