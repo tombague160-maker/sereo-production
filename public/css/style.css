@@ -15356,8 +15356,8 @@ html, body, main.content { overflow-x: clip; }
   }
 
   /* « arret-serre » : pose seulement quand, page en haut, le dernier article
-     passerait sous la barre collee (a 375 x 667 : un 3e article a 473 pour une
-     barre a 441). Disques de 24, ecarts de 4, rembourrages reduits ; les
+     n'aurait pas 8 px d'air au-dessus de la barre collee (a 375 x 667 : un 3e
+     article a 473 pour une barre a 441 ; deux articles, 2 px d'air). Disques de 24, ecarts de 4, rembourrages reduits ; les
      gestes gardent leurs 56 px (decision du 23/09). */
   :root[data-color-scheme] body:has(#livreur.active #tourneeActive:not([hidden]) .current-driver-card.arret-serre) main.content > .ecran-entete,
   :root:not([data-color-scheme]) body:has(#livreur.active #tourneeActive:not([hidden]) .current-driver-card.arret-serre) main.content > .ecran-entete {

@@ -107,6 +107,8 @@ for (const [largeur, hauteur] of TAILLES) {
       for (const [i, bas] of r.articles.entries()) {
         expect(bas, `l'article ${i + 1} passe sous les gestes`).toBeLessThanOrEqual(r.gestes.haut + 0.5);
       }
+      // Relecture du 24/09 : a 375 x 667, 2 px d'air seulement ; 8 au moins.
+      expect(r.gestes.haut - Math.max(...r.articles), "moins de 8 px d'air entre le dernier article et les gestes").toBeGreaterThanOrEqual(8);
       // La barre collee : « Y aller » et « Livre » a 56, au-dessus de la barre basse.
       expect(Math.round(r.livre.h)).toBe(56);
       expect(Math.round(r.aller.h)).toBe(56);
@@ -578,6 +580,9 @@ test.describe("arret de trois articles", () => {
       for (const [i, bas] of r.articles.entries()) {
         expect(bas, `l'article ${i + 1} sur 3 passe sous les gestes`).toBeLessThanOrEqual(r.gestes + 0.5);
       }
+      // 8 px d'air : les polices de Safari ne tombent pas au pixel pres sur
+      // celles de Chromium ; les 2 px du premier jet n'y survivent pas.
+      expect(r.gestes - Math.max(...r.articles), "moins de 8 px d'air entre le dernier article et les gestes").toBeGreaterThanOrEqual(8);
       // Les gestes gardent leurs 56 px (decision du 23/09).
       expect(r.livre).toBe(56);
       expect(r.aller).toBe(56);

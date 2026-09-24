@@ -2391,9 +2391,9 @@ function placerEnteteTournee() {
  * L'arret sous le pouce (relecture adverse du 24/09). Deux mesures, apres
  * chaque rendu de la tournee, quand la barre des gestes colle au bas de
  * l'ecran (telephone) :
- *  - « arret-serre » : page en haut, si le dernier article passe sous la
- *    barre collee, la carte et l'en-tete se resserrent (disques, ecarts,
- *    rembourrages). Mesure avant : a 375 x 667, un 3e article finissait a
+ *  - « arret-serre » : page en haut, si le dernier article n'a pas 8 px
+ *    d'air au-dessus de la barre collee, la carte et l'en-tete se resserrent
+ *    (disques, ecarts, rembourrages). Mesure avant : a 375 x 667, un 3e article finissait a
  *    473 pour une barre a 441. La ou tout tient, les mesures de la planche
  *    restent. Le resserrement ne fait pas de miracle : au-dela de trois
  *    articles sur un petit ecran, un defilement reste (DESIGN.md, ecarts) ;
@@ -2403,6 +2403,7 @@ function placerEnteteTournee() {
  * Mesure dans une image (requestAnimationFrame) : l'en-tete, l'anneau et la
  * carte sont alors tous rendus, et rien n'est peint entre-temps.
  */
+const ARRET_AIR_PX = 8;
 let arretAuPouceEnAttente = 0;
 function planifierArretAuPouce() {
   cancelAnimationFrame(arretAuPouceEnAttente);
@@ -2426,8 +2427,10 @@ function ajusterArretAuPouce() {
   const articles = carte.querySelectorAll("#currentClient .arret-article");
   const dernier = articles[articles.length - 1];
   // En coordonnees de la PAGE (page en haut, a l'ouverture) : ce qui est
-  // mesure ne depend pas du defilement du moment.
-  if (dernier && dernier.getBoundingClientRect().bottom + window.scrollY > window.innerHeight - dessousGestes()) {
+  // mesure ne depend pas du defilement du moment. 8 px d'air : les polices
+  // d'un vrai telephone (Safari) ne tombent pas au pixel pres sur celles de
+  // Chromium -- 2 px de marge, ceux du premier jet, n'y survivent pas.
+  if (dernier && dernier.getBoundingClientRect().bottom + window.scrollY > window.innerHeight - dessousGestes() - ARRET_AIR_PX) {
     carte.classList.add("arret-serre");
   }
   region?.style.setProperty("--toast-bas-tournee", `${Math.ceil(dessousGestes() + 12)}px`);
