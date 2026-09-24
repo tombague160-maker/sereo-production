@@ -165,7 +165,9 @@ test.describe("Parcours complet des onglets", () => {
       "bons-commande": "toutes",
       "commandes-livrees": "livrees",
       "commandes-planifiees": "planifiees",
-      "commandes-jour": "a-envoyer"
+      // 24/09 : « À envoyer » est vide par construction ; l'ancien ecran du
+      // jour ouvre toutes les commandes (pieges-import-validation.spec.js).
+      "commandes-jour": "toutes"
     };
     for (const [ancien, filtre] of Object.entries(ATTENDU)) {
       await page.goto(`/#${ancien}`);

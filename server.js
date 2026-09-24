@@ -7946,6 +7946,35 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
   }
 });
 
+// Decision 1 de Thomas (24/09) : un import de ventes ne touche plus une
+// commande deja PRETE, EN TOURNEE ou LIVREE. Mesure de l'audit : une ligne
+// visant une commande en tournee remplacait ses produits (3 Changes + 3 Aleses
+// devenaient 8 Changes, chez le livreur aussi), sans un mot ; et le stock
+// devenait faux, la reservation ayant ete deduite sur les ANCIENS produits
+// alors que releaseOrderStockReservation rend les NOUVEAUX. La commande est
+// laissee telle quelle (produits, quantites, adresse, empreinte) et le resume
+// dit pourquoi. Rend la raison, ou null si l'import peut la mettre a jour.
+//
+// « Partie en tournee » : Probleme et A reprogrammer n'existent qu'apres une
+// tournee ; le carton est prepare et le stock deduit, comme pour une prete.
+//
+// Stock deja RESERVE (relecture adverse du 24/09) : la preparation lancee, la
+// commande terrain (reservee des sa creation), la planifiee confirmee. La
+// reservation a ete deduite sur CES produits : les reecrire, c'est la meme
+// derive (annulee, une commande terrain rendait 8 Changes et jamais ses 3
+// Aleses). Meme regle que la modification a la main : « Impossible de
+// modifier les produits apres reservation du stock ».
+function raisonImportIgnore(db, order) {
+  if (order.status === "livre") return "livree";
+  if (order.status === "en_livraison" || tourneeActiveDeLaCommande(db, order.id)) return "en_tournee";
+  if (order.status === "pret_livraison") return "prete";
+  if (STATUTS_A_RELIVRER.includes(order.status)) return "partie_en_tournee";
+  if (order.stockReservedAt) {
+    return ["en_preparation", "preparation_terminee"].includes(order.status) ? "en_preparation" : "stock_reserve";
+  }
+  return null;
+}
+
 app.post("/api/import/ventes", uploadExcel, async (req, res) => {
   const uploadedPath = req.file?.path;
 
@@ -8039,6 +8068,11 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
         };
       })
       .filter(vente => vente.client || vente.produit);
+    // Les lignes ILLISIBLES : quelque chose d'ecrit, mais ni client ni
+    // produit. Elles etaient ecartees sans un mot ; le resume les compte en
+    // erreurs. Une ligne entierement vide (la fin d'une feuille) n'en est pas une.
+    const lignesIllisibles = dataRows.filter(row => Array.isArray(row) && row.some(cell => clean(cell) !== "")).length
+      - ventes.length;
 
     db.ventes = ventes;
 
@@ -8176,6 +8210,8 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     let updatedCount = 0;
     let skippedIdenticalCount = 0;
     let importedAsLivreCount = 0;
+    // Decision 1 (24/09) : les commandes laissees telles quelles, et pourquoi.
+    const ignorees = [];
 
     importedClients.forEach(client => {
       Object.values(client.ordersByDate || {}).forEach(orderData => {
@@ -8199,6 +8235,19 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
           o.dateCommande === orderData.dateCommande
         );
         if (sameKeyOrder) {
+          // Deja prete, en tournee ou livree : on n'y touche pas (decision 1).
+          // Surtout pas le chemin 3 : ce serait une commande en double.
+          const raison = raisonImportIgnore(db, sameKeyOrder);
+          if (raison) {
+            ignorees.push({
+              id: sameKeyOrder.id,
+              numero: sameKeyOrder.numero || "",
+              clientName: sameKeyOrder.clientName || client.nom,
+              status: sameKeyOrder.status,
+              raison
+            });
+            return;
+          }
           sameKeyOrder.products = normalizeProducts(orderData.produits);
           sameKeyOrder.excelRowHash = hash;
           sameKeyOrder.updatedAt = new Date().toISOString();
@@ -8273,10 +8322,16 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     const positionsMessage = positionsImportRefusees > 0
       ? `, ${positionsImportRefusees} position(s) du fichier ignoree(s) (0,0, inversee ou hors zone)`
       : "";
+    const ignoreesMessage = ignorees.length > 0
+      ? `, ${ignorees.length} commande(s) laissee(s) telle(s) quelle(s) (${ignorees.map(i => `${i.numero || i.id} : ${i.raison}`).join(", ")})`
+      : "";
+    const illisiblesMessage = lignesIllisibles > 0
+      ? `, ${lignesIllisibles} ligne(s) sans client ni produit ecartee(s)`
+      : "";
     addHistory(
       db,
       "Import ventes",
-      `${db.ventes.length} vente(s) importee(s), ${importedClients.length} client(s) detecte(s), ${commandeStats}${preservedMessage}${mergedMessage}${livreMessage}${clampedMessage}${positionsMessage}`,
+      `${db.ventes.length} vente(s) importee(s), ${importedClients.length} client(s) detecte(s), ${commandeStats}${ignoreesMessage}${illisiblesMessage}${preservedMessage}${mergedMessage}${livreMessage}${clampedMessage}${positionsMessage}`,
       {
         fichier: req.file.originalname
       }
@@ -8289,6 +8344,8 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       created: createdCount,
       updated: updatedCount,
       skippedIdentical: skippedIdenticalCount,
+      ignored: ignorees.length,
+      lignesIllisibles,
       importedAsLivre: importedAsLivreCount,
       mergedBySecondary: mergedImport.mergedBySecondary
     });
@@ -8306,6 +8363,11 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       created: createdCount,
       updated: updatedCount,
       skippedIdentical: skippedIdenticalCount,
+      // Decision 1 (24/09) : le resume de l'ecran lit ces comptes, plus
+      // `commandes.length` (toute la base : « 12 elements » pour 3 lignes).
+      ignored: ignorees.length,
+      ignorees,
+      lignesIllisibles,
       clampedNegativeQuantities: clampedNegativeQtyCount,
       positionsRefusees: positionsImportRefusees,
       archive

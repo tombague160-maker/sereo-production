@@ -317,13 +317,15 @@ test("« Modifier le profil » puis « Annuler » : le détail reste sur la mêm
 });
 
 test("une redirection arrive sur une liste propre", async ({ page }) => {
-  // « Bloquees seulement » coche, puis la saisie d'une commande renvoie vers
-  // « A envoyer » : la commande saisie etait cachee.
+  // « Bloquees seulement » coche, puis un ancien lien : la liste etait cachee.
+  // (24/09 : #commandes-jour ouvre « Toutes » -- « À envoyer » est vide par
+  // construction ; la saisie ne passe plus par la, pieges-import-validation.)
   await ouvrir(page);
+  await page.locator('[data-cmd-filtre="livrees"]').click();
   await page.locator(".cmd-case", { hasText: "Bloqu" }).click();
   await page.fill("#cmdRecherche", "introuvable-xyz");
   await page.evaluate(() => { location.hash = "#commandes-jour"; });
-  await expect(page.locator('[data-cmd-filtre="a-envoyer"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator('[data-cmd-filtre="toutes"]')).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("#cmdBloquees")).not.toBeChecked();
   await expect(page.locator("#cmdRecherche")).toHaveValue("");
   // Et le jour revient a aujourd'hui : la commande saisie est du jour.

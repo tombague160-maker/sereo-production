@@ -15102,3 +15102,122 @@ html, body, main.content { overflow-x: clip; }
    regle `@media (min-width: 821px) .sidebar { overflow-y: auto }` posee plus
    haut (bloc « barre laterale, finitions ») : le compte et la version restent
    atteignables (banc collant-et-clavier, « écran bas »). */
+
+/* ==========================================================================
+   LES PIEGES : IMPORT, TOURNEE PAR SECTEUR, RETOUR APRES VALIDATION (24/09)
+   --------------------------------------------------------------------------
+   Audit du 24/09, decision 1 de Thomas. Jetons V8 seulement : clair et
+   sombre suivent seuls. Contrastes mesures par les bancs du lot
+   (test/e2e/pieges-import-validation.spec.js et pieges-tournee.spec.js) :
+   comptes du resume 7,04 (clair) / 8,55 (sombre), compte « ignoree » 4,89 /
+   4,56, avertissements 5,46 / 11,59.
+   1. Le resume d'un import (#importSummary) : en TETE du tableau de bord.
+   ========================================================================== */
+.import-bilan {
+  display: grid; gap: 12px; margin: 0 0 24px; padding: 18px 20px;
+  border-radius: 20px; background: var(--v8-surface); color: var(--v8-texte);
+  box-shadow: inset 4px 0 0 var(--v8-principal);
+  scroll-margin-top: 16px;
+}
+.import-bilan[hidden] { display: none !important; }
+.import-bilan:focus { outline: none; }
+.import-bilan:focus-visible {
+  box-shadow: inset 4px 0 0 var(--v8-principal), 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus);
+}
+.import-bilan-tete { display: flex; align-items: center; gap: 12px; }
+/* Le titre et l'heure passent a la ligne entre eux, jamais sous « Fermer ». */
+.import-bilan-intitule { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; flex: 1 1 auto; min-width: 0; }
+.import-bilan-titre { margin: 0; font-size: 17px; font-weight: 600; color: var(--v8-texte); }
+.import-bilan-heure { font-size: 13.5px; font-weight: 500; color: var(--v8-texte-secondaire); }
+:root[data-color-scheme] .import-bilan .button.compact.import-bilan-fermer,
+:root:not([data-color-scheme]) .import-bilan .button.compact.import-bilan-fermer {
+  width: 44px; min-width: 44px; height: 44px; min-height: 44px; padding: 0; margin-left: auto;
+  flex: 0 0 auto; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center;
+}
+.import-bilan-fermer svg { width: 20px; height: 20px; }
+.import-bilan-comptes { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.import-bilan-compte {
+  display: inline-flex; align-items: baseline; gap: 6px; padding: 8px 14px; border-radius: 999px;
+  background: var(--v8-vert-clair); color: var(--v8-principal-appuye); font-size: 14.5px; font-weight: 500;
+}
+.import-bilan-compte strong { font-size: 18px; font-weight: 700; }
+.import-bilan-compte--attention { background: var(--v8-avertissement-fond); color: var(--v8-avertissement); }
+.import-bilan-details {
+  display: grid; gap: 6px; margin: 0; padding: 0; list-style: none;
+  font-size: 14px; line-height: 1.45; color: var(--v8-texte-secondaire);
+}
+.import-bilan-detail { display: flex; align-items: flex-start; gap: 8px; }
+.import-bilan-detail strong { font-weight: 600; }
+.import-bilan-detail--attention { color: var(--v8-avertissement); }
+.import-bilan-icone { width: 18px; height: 18px; flex: none; margin-top: 1px; }
+:root[data-color-scheme] .import-bilan .button.compact.import-bilan-suite,
+:root:not([data-color-scheme]) .import-bilan .button.compact.import-bilan-suite {
+  justify-self: start; width: auto; min-height: 44px; flex: 0 0 auto;
+}
+@media (max-width: 820px) {
+  .import-bilan { margin-bottom: 16px; padding: 14px 16px; }
+}
+
+/* 2. Tournee par secteur : les pilules de secteur (le modele de Preparation,
+   `.filtre-pilules`), la date et la ville sans « Filtrer », et « Créer la
+   tournée (N) » SOUS la liste -- colle en bas au telephone, au-dessus de la
+   barre basse (80 px + la zone sure ; mesure par le banc). */
+#routePlanning .trn-secteurs { margin: 4px 0 10px; }
+/* La forme des pilules d'A recommander (planche) : surface basse, 44 px ; la
+   choisie PLEINE, au principal. Sans cette regle, en clair, la pilule choisie
+   ne se distinguait pas des autres (le defaut releve par l'audit sur
+   Preparation) -- ici, c'est elle qui dit de quel secteur partira la tournee.
+   Contrastes : libre 4,56 (clair) / 9,28 (sombre) ; choisie 6,01 / 10,22. */
+:root[data-color-scheme] #deliverySectorPills .button.compact.filtre-pilule,
+:root:not([data-color-scheme]) #deliverySectorPills .button.compact.filtre-pilule {
+  flex: 0 0 auto; width: auto; height: 44px; min-height: 44px; padding: 0 18px;
+  border: 0; border-radius: 999px; box-shadow: none;
+  background: var(--v8-surface-basse); color: var(--v8-texte-secondaire);
+  font-size: 14.5px; font-weight: 500;
+}
+:root[data-color-scheme] #deliverySectorPills .button.compact.filtre-pilule.active-filter,
+:root:not([data-color-scheme]) #deliverySectorPills .button.compact.filtre-pilule.active-filter {
+  background: var(--v8-principal); color: var(--v8-texte-sur-principal); font-weight: 600;
+}
+:root[data-color-scheme] #deliverySectorPills .button.compact.filtre-pilule:focus-visible,
+:root:not([data-color-scheme]) #deliverySectorPills .button.compact.filtre-pilule:focus-visible {
+  outline: none; box-shadow: 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus);
+}
+@media (min-width: 1181px) {
+  #routePlanning .delivery-filters { grid-template-columns: minmax(150px, 190px) minmax(180px, 320px); }
+}
+.trn-creer { display: flex; justify-content: flex-end; margin-top: 16px; }
+.trn-creer[hidden] { display: none !important; }
+:root[data-color-scheme] .trn-creer .button#createRouteButton,
+:root:not([data-color-scheme]) .trn-creer .button#createRouteButton { width: auto; min-height: 48px; padding-inline: 28px; }
+@media (max-width: 820px) {
+  .trn-creer {
+    position: sticky; bottom: calc(92px + env(safe-area-inset-bottom)); z-index: 5;
+    margin-top: 12px; padding: 10px 0; background: var(--v8-surface);
+    box-shadow: 0 -12px 16px -12px rgba(15, 61, 61, 0.18);
+  }
+  :root[data-color-scheme] .trn-creer .button#createRouteButton,
+  :root:not([data-color-scheme]) .trn-creer .button#createRouteButton { width: 100%; }
+}
+
+/* 3. Apres « Valider la commande » : la ligne de la commande creee, mise en
+   avant dans Commandes. Un trait, un fond, et le mot « Nouvelle » (jamais la
+   couleur seule). Fond : surface basse en clair (le secondaire y tient 4,56),
+   surface haute en sombre (la basse s'y confond avec la carte ; 7,67). La
+   regle du telephone (`#commandes .cmd-ligne + .cmd-ligne`, un filet en
+   box-shadow) est battue par la specificite (0,4,1). */
+:root[data-color-scheme] #commandes .cmd-ligne.cmd-ligne--nouvelle,
+:root:not([data-color-scheme]) #commandes .cmd-ligne.cmd-ligne--nouvelle {
+  background: var(--v8-surface-basse); box-shadow: inset 4px 0 0 var(--v8-principal);
+  scroll-margin: 96px 0;
+}
+:root[data-color-scheme="dark"] #commandes .cmd-ligne.cmd-ligne--nouvelle { background: var(--v8-surface-haute); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) #commandes .cmd-ligne.cmd-ligne--nouvelle { background: var(--v8-surface-haute); }
+}
+:root[data-color-scheme] #commandes .cmd-ligne.cmd-ligne--nouvelle:focus-visible,
+:root:not([data-color-scheme]) #commandes .cmd-ligne.cmd-ligne--nouvelle:focus-visible {
+  box-shadow: inset 4px 0 0 var(--v8-principal), var(--focus-ring);
+}
+.cmd-nouvelle { font-size: 12px; font-weight: 600; color: var(--v8-principal); }
+#commandes .cmd-meta .cmd-nouvelle { font-size: inherit; }

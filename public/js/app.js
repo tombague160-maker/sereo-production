@@ -634,6 +634,23 @@ function bindUi() {
     applyDeliveryFilter();
   });
 
+  // Tournee par secteur (audit du 24/09) : la pilule filtre TOUT DE SUITE ; la
+  // ville aussi, sans « Filtrer » (une pause de frappe suffit).
+  document.getElementById("deliverySectorPills")?.addEventListener("click", event => {
+    const pilule = event.target.closest("[data-delivery-sector]");
+    if (!pilule) return;
+    const valeur = pilule.dataset.deliverySector;
+    applyDeliveryFilter(valeur);
+    // Le rendu refait les pilules : le focus clavier reste sur celle choisie.
+    document.querySelector(`#deliverySectorPills [data-delivery-sector="${cssEscape(valeur)}"]`)?.focus();
+  });
+  let villeMinuteur = null;
+  document.getElementById("deliveryCity")?.addEventListener("input", () => {
+    clearTimeout(villeMinuteur);
+    villeMinuteur = setTimeout(() => applyDeliveryFilter(), 300);
+  });
+  document.getElementById("routePlanning")?.addEventListener("toggle", majCreationTournee);
+
   // Lot 2 (H9) : « Tournées du jour ».
   document.getElementById("tourneeChoix")?.addEventListener("change", event => {
     choisirTournee(event.target.value);
@@ -766,6 +783,13 @@ function bindUi() {
         champ.click();
       }
     }
+    if (action === "fermer-bilan-import") {
+      lastImportSummary = null;
+      renderImportSummary();
+      // Le focus ne reste pas sur un bouton qui vient de disparaitre.
+      const retour = document.querySelector('#enteteActions [data-action="importer-ventes"]');
+      if (retour?.offsetParent) retour.focus();
+    }
     if (action === "open-more-menu") openMoreMenu();
     if (action === "close-more-menu") closeMoreMenu();
     if (action === "more-menu-pick") {
@@ -784,7 +808,7 @@ function bindUi() {
     if (action === "start-preparation") runAction(actionButton, "Démarrage...", () => startPreparation(actionButton.dataset.orderId));
     if (action === "finish-preparation") runAction(actionButton, "Validation...", () => finishPreparation(actionButton.dataset.orderId));
     if (action === "open-order-maps") openOrderMaps(actionButton.dataset.orderId);
-    if (action === "apply-delivery-filter") applyDeliveryFilter();
+    // (« Filtrer » est retire le 24/09 : les pilules et les champs filtrent seuls.)
     if (action === "select-all-delivery") selectAllDelivery(true);
     if (action === "clear-delivery-selection") selectAllDelivery(false);
     if (action === "select-current-sector") selectCurrentSector();
@@ -940,6 +964,13 @@ function showTab(tabName, options = {}) {
     history.replaceState(null, "", `#${tabName}`);
   }
   const nextTab = titles[tabName] && mainTabs.has(tabName) ? tabName : "journee";
+  // La commande mise en avant ne l'est que jusqu'a ce qu'on quitte Commandes.
+  // La liste est redessinee : sinon la ligne gardait sa marque au retour
+  // (showTab ne redessine pas les Commandes).
+  if (nextTab !== "commandes" && commandeMiseEnAvant) {
+    commandeMiseEnAvant = "";
+    renderCommandes();
+  }
   // Decision 4 : ouverte sans reseau, seul l'ecran Tournee se montre.
   ongletAffiche = nextTab;
   majEcranDemandeReseau();
@@ -2275,6 +2306,10 @@ const commandesFiltre = {
 // detail se ferme.
 let envoiEnCours = false;
 let retourDuDetail = null;
+// La commande qu'on vient de creer (montrerCommandeCreee), mise en avant dans
+// la liste : une classe, gardee tant qu'on reste sur Commandes sans changer de
+// filtre de statut.
+let commandeMiseEnAvant = "";
 // Le filtre « A completer » a deux sens : false, « profil » (la case : la
 // regle de l'ancien ecran) ou « adresse » (l'alerte du tableau de bord : une
 // adresse manquante sur une commande encore a faire -- operations.js).
@@ -2417,6 +2452,20 @@ function commandesFiltrees() {
   return liste.sort(tris[commandesFiltre.tri] || tris["date-desc"]);
 }
 
+// « À envoyer » est VIDE PAR CONSTRUCTION (audit du 24/09, verifie) : depuis
+// son introduction (897b2ba, 22/07), les deux creations qui posent
+// `commande_client_validee` -- la commande terrain et la planifiee confirmee
+// -- la passent en `stock_a_verifier` dans la meme ecriture, et aucun ecran
+// ne la remet. La pilule est donc retiree de la rangee. Elle ne revient que si
+// une commande l'attend vraiment (une donnee ancienne, un appel direct a
+// l'API) : c'est le seul chemin vers « Envoyer en préparation » pour elle, et
+// une commande ne doit jamais rester sans geste.
+function pilulePresente(filtre) {
+  if (filtre.cle !== "a-envoyer") return true;
+  return commandesFiltre.statut === "a-envoyer"
+    || (orders || []).some(order => filtre.statuts.includes(order.status));
+}
+
 function badgeDeCommande(order) {
   if (commandeBloquee(order)) {
     return `<span class="cmd-badge cmd-badge--alerte"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true">`
@@ -2436,7 +2485,7 @@ function renderCommandes() {
   // Les pilules
   const pilules = document.getElementById("cmdPilules");
   if (pilules) {
-    pilules.innerHTML = FILTRES_COMMANDES.map(f => {
+    pilules.innerHTML = FILTRES_COMMANDES.filter(pilulePresente).map(f => {
       const actif = f.cle === commandesFiltre.statut;
       return `<button class="button secondary compact filtre-pilule${actif ? " active-filter" : ""}" type="button"`
         + ` data-cmd-filtre="${f.cle}" aria-pressed="${actif}">${escapeHtml(f.libelle)}</button>`;
@@ -2502,20 +2551,24 @@ function renderCommandes() {
         + ` aria-label="Choisir ${escapeAttribute(order.numero || order.clientName || "la commande")}"`
         + `${commandesSelection.has(String(order.id)) ? " checked" : ""}></label>`
       : `<span class="cmd-col-choix"></span>`;
-    return `<div class="cmd-ligne" role="listitem" tabindex="0" data-cmd-ouvrir="${escapeAttribute(order.id)}"`
+    // La commande qu'on vient de creer : mise en avant, et dite (« nouvelle »).
+    const nouvelle = commandeMiseEnAvant && String(order.id) === commandeMiseEnAvant;
+    return `<div class="cmd-ligne${nouvelle ? " cmd-ligne--nouvelle" : ""}" role="listitem" tabindex="0" data-cmd-ouvrir="${escapeAttribute(order.id)}"`
       // Le nom accessible dit AUSSI le statut : « Bloquee » ne doit pas etre
       // reserve a qui voit le badge.
-      + ` aria-label="${escapeAttribute(`${order.numero || ""} ${order.clientName || ""}, ${commandeBloquee(order) ? "Bloquée" : (STATUT_COMMANDE[order.status]?.[0] || order.status || "")}`.trim())}">`
+      + ` aria-label="${escapeAttribute(`${order.numero || ""} ${order.clientName || ""}, ${commandeBloquee(order) ? "Bloquée" : (STATUT_COMMANDE[order.status]?.[0] || order.status || "")}${nouvelle ? ", nouvelle" : ""}`.trim())}">`
       + case_
       + `<span class="cmd-num">${escapeHtml(order.numero || "—")}`
-      + `${order.subscriptionId ? '<span class="cmd-abo">Abonnement</span>' : ""}</span>`
+      + `${order.subscriptionId ? '<span class="cmd-abo">Abonnement</span>' : ""}`
+      // Le mot, pas la couleur seule (charte, regle des trois signaux).
+      + `${nouvelle ? '<span class="cmd-nouvelle">Nouvelle</span>' : ""}</span>`
       // La date en deux morceaux (planche 8a : le jour en grand, le mois en
       // petit) ; le texte reste « 16 sept. » pour le bureau et les bancs.
       + `<span class="cmd-date">${dateEnDeuxMorceaux(dateCourte(dateDeLaCommande(order)))}</span>`
       + `<span class="cmd-client">${escapeHtml(order.clientName || "Client")}</span>`
       + `<span class="cmd-secteur">${escapeHtml(order.sector ? formatSectorLabel(order.sector) : "—")}</span>`
       // La ligne de detail du telephone (planche 8a) : « CMD-2026-007 · Champagnole ».
-      + `<span class="cmd-meta">${escapeHtml([order.subscriptionId ? "Abonnement" : (order.numero || ""), order.sector ? formatSectorLabel(order.sector) : ""].filter(Boolean).join(" · "))}</span>`
+      + `<span class="cmd-meta">${nouvelle ? '<span class="cmd-nouvelle">Nouvelle</span> · ' : ""}${escapeHtml([order.subscriptionId ? "Abonnement" : (order.numero || ""), order.sector ? formatSectorLabel(order.sector) : ""].filter(Boolean).join(" · "))}</span>`
       + `<span class="cmd-articles cmd-droite">${colonneArticles}</span>`
       + `<span class="cmd-statut cmd-droite">${badgeDeCommande(order)}</span>`
       + `</div>`;
@@ -2623,6 +2676,7 @@ function bindCommandes() {
     if (!pilule) return;
     commandesFiltre.statut = pilule.dataset.cmdFiltre;
     commandesFiltre.page = 1;
+    commandeMiseEnAvant = "";
     commandesSelection.clear();
     renderCommandes();
     // Le rendu refait les pilules : le focus clavier reste sur celle choisie.
@@ -2784,6 +2838,8 @@ async function importFile(type, inputId) {
   } finally {
     hideLoader();
   }
+  // Apres le loader : le resume, rendu par loadData, vient a l'ecran.
+  montrerBilanImport();
 }
 
 // U1 v1.13.0 : overlay global pour les actions longues (>500ms perceptible).
@@ -2936,37 +2992,134 @@ function renderDailySummary() {
   `;
 }
 
+// LE RESUME D'UN IMPORT (decision 1 de Thomas, 24/09). Avant : « 12 élément(s)
+// traités » -- `commandes.length`, toute la base, pour un fichier de 4 lignes --
+// pose en bas du tableau de bord (y = 1376 au bureau, 2332 au telephone). Il
+// dit maintenant ce que le SERVEUR a fait, bon par bon : nouvelles, mises a
+// jour, ignorees (identiques, ou deja pretes / en tournee / livrees : decision
+// 1), erreurs (lignes sans client ni produit), et ses avertissements. Il vit en
+// TETE du tableau de bord, et l'import l'amene a l'ecran.
+const RAISONS_IMPORT_IGNORE = {
+  en_tournee: "commande déjà en tournée",
+  prete: "commande déjà prête",
+  livree: "commande déjà livrée",
+  partie_en_tournee: "commande déjà partie en tournée",
+  // Relecture du 24/09 : le stock reserve verrouille aussi (server.js,
+  // raisonImportIgnore) -- preparation lancee, commande terrain, planifiee confirmee.
+  en_preparation: "commande déjà en préparation",
+  stock_reserve: "stock déjà réservé pour cette commande"
+};
+const IMPORT_IGNOREES_MONTREES = 5;
+
+function accorder(n, singulier, pluriel) {
+  // « 0 erreur » : en francais, zero s'accorde au singulier.
+  return `${n} ${n > 1 ? pluriel : singulier}`;
+}
+
+function iconeAttention() {
+  return `<svg class="import-bilan-icone" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 8v5M12 16.5h.01" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"></circle></svg>`;
+}
+
+function bilanImportVentes(result) {
+  const nombre = v => Math.max(0, Number(v) || 0);
+  const ignorees = Array.isArray(result.ignorees) ? result.ignorees : [];
+  const identiques = nombre(result.skippedIdentical);
+  const erreurs = nombre(result.lignesIllisibles);
+  const comptes = [
+    [nombre(result.created), accorder(nombre(result.created), "nouvelle", "nouvelles"), false],
+    [nombre(result.updated), accorder(nombre(result.updated), "mise à jour", "mises à jour"), false],
+    [ignorees.length + identiques, accorder(ignorees.length + identiques, "ignorée", "ignorées"), ignorees.length > 0],
+    // Les trois premiers comptent des COMMANDES (un bon : client + date) ;
+    // celui-ci des LIGNES du fichier (une ligne sans client ni produit
+    // n'appartient a aucun bon). Il dit donc son unite (relecture du 24/09).
+    [erreurs, accorder(erreurs, "ligne en erreur", "lignes en erreur"), erreurs > 0]
+  ];
+  const details = [];
+  // Les commandes laissees telles quelles : une ligne chacune, les cinq premieres.
+  ignorees.slice(0, IMPORT_IGNOREES_MONTREES).forEach(item => {
+    const qui = [item.numero, item.clientName].filter(Boolean).join(" · ");
+    details.push({ attention: true, html: `<strong>Ignorée : ${escapeHtml(RAISONS_IMPORT_IGNORE[item.raison] || "commande déjà en cours")}</strong>${qui ? ` — ${escapeHtml(qui)}` : ""}. Elle est laissée telle quelle.` });
+  });
+  if (ignorees.length > IMPORT_IGNOREES_MONTREES) {
+    details.push({ attention: true, html: `Et ${escapeHtml(accorder(ignorees.length - IMPORT_IGNOREES_MONTREES, "autre commande ignorée", "autres commandes ignorées"))} (déjà en préparation, prêtes, en tournée ou livrées), laissées telles quelles.` });
+  }
+  if (identiques) details.push({ html: `${escapeHtml(accorder(identiques, "commande identique, déjà importée", "commandes identiques, déjà importées"))} : rien à changer.` });
+  if (erreurs) details.push({ attention: true, html: `<strong>${escapeHtml(accorder(erreurs, "ligne sans client ni produit", "lignes sans client ni produit"))}</strong> : écartée${erreurs > 1 ? "s" : ""}, vérifie le fichier.` });
+  // Les avertissements du serveur, qui ne vivaient que dans l'historique.
+  const negatives = nombre(result.clampedNegativeQuantities);
+  if (negatives) details.push({ attention: true, html: `<strong>${escapeHtml(accorder(negatives, "quantité négative ramenée", "quantités négatives ramenées"))} à 0</strong> : vérifie les retours ou avoirs dans Ximi.` });
+  const positions = nombre(result.positionsRefusees);
+  if (positions) details.push({ attention: true, html: `${escapeHtml(accorder(positions, "position du fichier ignorée", "positions du fichier ignorées"))} (0,0, inversée ou hors zone) : l'adresse sera placée par la carte.` });
+  const livrees = nombre(result.importedAsLivre);
+  if (livrees) details.push({ html: `${escapeHtml(accorder(livrees, "commande importée comme déjà livrée", "commandes importées comme déjà livrées"))} (facture « Envoyée »).` });
+  const fusionnes = nombre(result.mergedBySecondary);
+  if (fusionnes) details.push({ html: `${escapeHtml(accorder(fusionnes, "client en double fusionné", "clients en double fusionnés"))} avec sa fiche existante.` });
+  return { comptes, details, aPreparer: nombre(result.created) + nombre(result.updated) > 0 };
+}
+
 function renderImportSummary() {
   const container = document.getElementById("importSummary");
   if (!container) return;
 
   if (!lastImportSummary) {
-    container.innerHTML = emptyState("Aucun import récent", "Les prochains imports afficheront ici leur résumé et les alertes détectées.");
+    container.hidden = true;
+    container.innerHTML = "";
     return;
   }
 
   const { type, result, importedAt } = lastImportSummary;
-  const isOrders = type === "ventes";
-  const importedCount = isOrders ? (result.commandes?.length || result.clients?.length || 0) : (result.stock?.length || 0);
-  const blocked = isOrders ? (result.commandes || []).filter(order => !order.canPrepare).length : 0;
-  const sectorsCount = isOrders ? (result.secteurs?.length || 0) : 0;
+  const heure = new Date(importedAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  let comptes;
+  let details = [];
+  let aPreparer = false;
+  if (type === "ventes") {
+    ({ comptes, details, aPreparer } = bilanImportVentes(result || {}));
+  } else {
+    const n = v => Math.max(0, Number(v) || 0);
+    comptes = [
+      [n(result?.created), accorder(n(result?.created), "nouveau produit", "nouveaux produits"), false],
+      [n(result?.updated), accorder(n(result?.updated), "produit mis à jour", "produits mis à jour"), false]
+    ];
+    if (n(result?.duplicatesSkipped)) details.push({ html: `${escapeHtml(accorder(n(result.duplicatesSkipped), "ligne en double ignorée", "lignes en double ignorées"))} (même code).` });
+  }
 
+  container.hidden = false;
   container.innerHTML = `
-    <article class="summary-item status-ok">
-      <h4>${isOrders ? "Dossiers importés" : "Stock importé"}</h4>
-      <p>${escapeHtml(importedCount)} élément(s) traités à ${escapeHtml(formatDate(importedAt))}.</p>
-    </article>
-    ${isOrders ? `
-      <article class="summary-item ${blocked ? "status-warning" : "status-ok"}">
-        <h4>Analyse stock</h4>
-        <p>${escapeHtml(blocked)} commande(s) à corriger ou compléter.</p>
-      </article>
-      <article class="summary-item status-neutral">
-        <h4>Secteurs détectés</h4>
-        <p>${escapeHtml(sectorsCount)} secteur(s) disponible(s) pour la livraison.</p>
-      </article>
-    ` : ""}
+    <div class="import-bilan-tete">
+      <div class="import-bilan-intitule">
+        <h3 class="import-bilan-titre">${type === "ventes" ? "Import des ventes terminé" : "Import du stock terminé"}</h3>
+        <span class="import-bilan-heure">à ${escapeHtml(heure)}</span>
+      </div>
+      <button class="button secondary compact import-bilan-fermer" type="button" data-action="fermer-bilan-import" aria-label="Fermer le résumé de l’import">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path></svg>
+      </button>
+    </div>
+    <ul class="import-bilan-comptes">
+      ${comptes.map(([n, libelle, attention]) => {
+        const [chiffre, ...mots] = libelle.split(" ");
+        return `<li class="import-bilan-compte${attention ? " import-bilan-compte--attention" : ""}"><strong>${escapeHtml(chiffre)}</strong> ${escapeHtml(mots.join(" "))}</li>`;
+      }).join("")}
+    </ul>
+    ${details.length ? `<ul class="import-bilan-details">${details.map(d =>
+      `<li class="import-bilan-detail${d.attention ? " import-bilan-detail--attention" : ""}">${d.attention ? iconeAttention() : ""}<span>${d.html}</span></li>`).join("")}</ul>` : ""}
+    ${aPreparer ? `<button class="button secondary compact import-bilan-suite" type="button" data-action="go-tab" data-target-tab="preparation">Voir la préparation</button>` : ""}
   `;
+}
+
+// L'import fini, son resume vient a l'ecran : sans defiler, au bureau comme au
+// telephone (l'import part souvent du formulaire du BAS de la page). Le focus
+// y entre (tabindex -1) : un lecteur d'ecran le lit, Tab repart de la.
+function montrerBilanImport() {
+  const bilan = document.getElementById("importSummary");
+  // (Un import du stock lance depuis l'ecran Stock : le tableau de bord est
+  // cache, sa boite est vide -- rien ne defile, le focus ne part pas.)
+  if (!bilan || bilan.hidden) return;
+  const boite = bilan.getBoundingClientRect();
+  // La barre basse du telephone est fixe : ce qui passe dessous est cache.
+  const barre = document.querySelector(".mobile-tabbar")?.getBoundingClientRect();
+  const bas = barre && barre.height > 0 ? Math.min(barre.top, window.innerHeight) : window.innerHeight;
+  if (boite.top < 0 || boite.bottom > bas) bilan.scrollIntoView({ block: "start" });
+  bilan.focus({ preventScroll: true });
 }
 
 function crmStatusLabel(status) {
@@ -3698,7 +3851,7 @@ async function submitCustomerOrder(form) {
     return;
   }
   const endpoint = data.orderType === "planifiee" ? "/api/planned-orders" : "/api/customer-orders";
-  await apiFetch(endpoint, {
+  const reponse = await apiFetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -3713,8 +3866,51 @@ async function submitCustomerOrder(form) {
   customerCart.clear();
   form.reset();
   await loadData();
-  notify(data.orderType === "planifiee" ? "Commande planifiée créée." : "Commande client validée.", "success");
-  showTab(data.orderType === "planifiee" ? "commandes-planifiees" : "commandes-jour");
+  // Audit du 24/09 : l'ecran renvoyait vers « À envoyer » (#commandes-jour),
+  // un filtre vide par construction -- le serveur passe la commande terrain
+  // en « À préparer » dans la meme ecriture. On lisait « Aucune commande ne
+  // correspond à ce filtre » juste apres l'avoir validee. On arrive
+  // maintenant sur la liste qui la CONTIENT, la ligne mise en avant.
+  const planifiee = data.orderType === "planifiee";
+  const creee = planifiee ? reponse?.order : reponse;
+  const numero = creee?.numero ? ` ${creee.numero}` : "";
+  notify(planifiee ? `Commande planifiée${numero} créée.` : `Commande${numero} validée : elle est à préparer.`, "success");
+  montrerCommandeCreee(creee, planifiee ? "planifiees" : "toutes");
+}
+
+/**
+ * Ouvre Commandes sur `filtre`, liste PROPRE (comme une redirection : rien de
+ * reste d'une visite precedente ne la cache), a la page qui contient la
+ * commande, et amene sa ligne a l'ecran avec le focus.
+ */
+function montrerCommandeCreee(order, filtre = "toutes") {
+  Object.assign(commandesFiltre, {
+    statut: filtre, completer: false, bloquees: false, recherche: "", du: "", au: "",
+    secteur: "", jour: "", page: 1, client: "", clientNom: ""
+  });
+  for (const id of ["cmdRecherche", "cmdDu", "cmdAu"]) {
+    const champ = document.getElementById(id);
+    if (champ) champ.value = "";
+  }
+  commandesSelection.clear();
+  commandeMiseEnAvant = order?.id ? String(order.id) : "";
+  const rang = commandeMiseEnAvant ? commandesFiltrees().findIndex(o => String(o.id) === commandeMiseEnAvant) : -1;
+  if (rang >= 0) commandesFiltre.page = Math.floor(rang / COMMANDES_PAR_PAGE) + 1;
+  renderCommandes();
+  showTab("commandes");
+  if (!commandeMiseEnAvant) return;
+  // showTab remet la page en haut (tout de suite, a l'image suivante, et
+  // 120 ms plus tard : resetViewportScroll) ; la ligne vient a l'ecran APRES.
+  setTimeout(() => {
+    const ligne = document.querySelector(`#cmdLignes [data-cmd-ouvrir="${cssEscape(commandeMiseEnAvant)}"]`);
+    if (!ligne) return;
+    const boite = ligne.getBoundingClientRect();
+    // La barre basse du telephone est fixe : ce qui passe dessous est cache.
+    const barre = document.querySelector(".mobile-tabbar")?.getBoundingClientRect();
+    const bas = barre && barre.height > 0 ? Math.min(barre.top, window.innerHeight) : window.innerHeight;
+    if (boite.top < 0 || boite.bottom > bas) ligne.scrollIntoView({ block: "center" });
+    ligne.focus({ preventScroll: true });
+  }, 160);
 }
 
 // Confirmer / Annuler une planifiee : les gestes du detail de l'ecran
@@ -6531,21 +6727,50 @@ async function purgeOrdersHandler(btn) {
   });
 }
 
+/*
+ * TOURNEE PAR SECTEUR (audit du 24/09). Le secteur etait un <select> qui
+ * n'agissait qu'apres « Filtrer » ; entre les deux, « Sélectionner ce
+ * secteur » prenait le filtre APPLIQUE -- « tous secteurs » -- et cochait les
+ * 5 commandes pretes au lieu des 3 de Besancon (mesure : verif-parcours/v2.js).
+ * Ce sont des pilules qui filtrent tout de suite, comme dans Preparation. Leur
+ * compte est celui de la liste qu'elles montrent (memes filtres de date et de
+ * ville), et non plus `sectors[].ready` du serveur, qui ignorait la date :
+ * « Besançon (3) » au-dessus d'une liste de 5.
+ */
 function renderDeliveryFilters() {
-  const select = document.getElementById("deliverySector");
-  if (!select) return;
-
-  const current = deliveryFilter.sector || select.value || "Tous";
-  const options = [{ name: "Tous", total: orders.length, ready: getDeliverableOrders().length }, ...sectors];
-
-  select.innerHTML = options.map(sector => `
-    <option value="${escapeAttribute(sector.name)}" ${sector.name === current ? "selected" : ""}>
-      ${escapeHtml(formatSectorLabel(sector.name))} (${sector.ready || 0})
-    </option>
-  `).join("");
+  const conteneur = document.getElementById("deliverySectorPills");
+  if (conteneur) {
+    const choisi = deliveryFilter.sector && deliveryFilter.sector !== "Tous" ? deliveryFilter.sector : "Tous";
+    const cleChoisie = normalizeTextKey(choisi);
+    const pilule = (valeur, libelle, n) => {
+      const actif = normalizeTextKey(valeur) === cleChoisie;
+      // Avant l'arrivee des commandes, un compte serait un faux zero.
+      const compte = commandesChargees ? ` (${n})` : "";
+      return `<button class="button secondary compact filtre-pilule${actif ? " active-filter" : ""}" type="button"`
+        + ` data-delivery-sector="${escapeAttribute(valeur)}" aria-pressed="${actif}">${escapeHtml(libelle)}${compte}</button>`;
+    };
+    // Les secteurs de la liste sous la date et la ville choisies ; le secteur
+    // CHOISI reste toujours, meme vide : on ne cache jamais ce qu'on a choisi.
+    const base = getFilteredDeliveryOrders({ ...deliveryFilter, sector: "Tous" });
+    const parSecteur = new Map();
+    for (const order of base) {
+      const nom = String(order.sector || "").trim();
+      if (!nom) continue;
+      const cle = normalizeTextKey(nom);
+      const entree = parSecteur.get(cle) || { nom, n: 0 };
+      entree.n += 1;
+      parSecteur.set(cle, entree);
+    }
+    if (choisi !== "Tous" && !parSecteur.has(cleChoisie)) parSecteur.set(cleChoisie, { nom: choisi, n: 0 });
+    const secteurs = [...parSecteur.values()]
+      .sort((a, b) => formatSectorLabel(a.nom).localeCompare(formatSectorLabel(b.nom), "fr"));
+    conteneur.innerHTML = pilule("Tous", "Tous", base.length)
+      + secteurs.map(s => pilule(s.nom, formatSectorLabel(s.nom), s.n)).join("");
+  }
 
   const cityInput = document.getElementById("deliveryCity");
-  if (cityInput && cityInput.value !== deliveryFilter.city) {
+  // Une ville en attente (« Besan ») n'est pas effacee sous les doigts.
+  if (cityInput && cityInput.value !== deliveryFilter.city && document.activeElement !== cityInput) {
     cityInput.value = deliveryFilter.city;
   }
 
@@ -6555,15 +6780,48 @@ function renderDeliveryFilters() {
   }
 }
 
-function applyDeliveryFilter() {
+/**
+ * Relecture adverse (24/09) : la ville s'applique apres une pause de frappe,
+ * et chaque filtrage ne garde de la selection que ce qui est a l'ecran. Sur
+ * une egalite exacte (celle du serveur, « n'est pas a <ville> »), « Besan » et
+ * une pause vidaient la liste, donc la selection. Une saisie qui n'est la
+ * ville d'AUCUNE commande a livrer -- un debut de nom, une faute -- reste donc
+ * EN ATTENTE : ni la liste ni la selection ne bougent, le resume le dit. Une
+ * ville de la liste s'applique, et la regle du lot tient.
+ */
+function villeEnAttente(saisie) {
+  const cle = normalizeTextKey(saisie);
+  return Boolean(cle) && !getDeliverableOrders().some(order => normalizeTextKey(order.city) === cle);
+}
+
+/**
+ * Applique la date et la ville des champs, et le secteur de la pilule
+ * choisie (`secteur`, sinon celui deja choisi). La selection ne garde que ce
+ * qui est a l'ecran : une commande d'un autre secteur ne part jamais sans
+ * avoir ete vue (le serveur la refuserait, « n'est pas du secteur »).
+ */
+function applyDeliveryFilter(secteur) {
+  const ville = document.getElementById("deliveryCity")?.value || "";
   deliveryFilter = {
     date: document.getElementById("deliveryDate")?.value || "",
-    sector: document.getElementById("deliverySector")?.value || "Tous",
-    city: document.getElementById("deliveryCity")?.value || ""
+    sector: secteur || deliveryFilter.sector || "Tous",
+    // Une ville en attente laisse la ville deja appliquee.
+    city: villeEnAttente(ville) ? deliveryFilter.city : ville
   };
   deliverySelection = new Set([...deliverySelection].filter(orderId => getFilteredDeliveryOrders().some(order => String(order.id) === String(orderId))));
+  renderDeliveryFilters();
   renderDeliveryCandidates();
   renderMap();
+}
+
+// « Créer la tournée (N) » vit sous la liste, hors du depliant de la
+// planification : il se montre quand elle est ouverte, comme avant (repliee
+// pendant la livraison, le livreur ne voit pas un bouton de creation colle en
+// bas de son ecran).
+function majCreationTournee() {
+  const bloc = document.getElementById("trnCreer");
+  const planification = document.getElementById("routePlanning");
+  if (bloc && planification) bloc.hidden = !planification.open;
 }
 
 // C1 (lot 1 de l'audit geo) : un absent ou un probleme REVIENT ici, marque
@@ -6576,16 +6834,16 @@ function getDeliverableOrders() {
   return orders.filter(order => order.status === "pret_livraison" || STATUTS_A_RELIVRER.includes(order.status));
 }
 
-function getFilteredDeliveryOrders() {
-  const cityKey = normalizeTextKey(deliveryFilter.city);
-  const sectorKey = normalizeTextKey(deliveryFilter.sector);
+function getFilteredDeliveryOrders(filtre = deliveryFilter) {
+  const cityKey = normalizeTextKey(filtre.city);
+  const sectorKey = normalizeTextKey(filtre.sector);
 
   return getDeliverableOrders().filter(order => {
     // Une commande a relivrer a deja manque son jour : le filtre de date ne la
     // cache pas (sinon choisir « demain » la ferait disparaitre).
     const aRelivrer = STATUTS_A_RELIVRER.includes(order.status);
-    if (!aRelivrer && deliveryFilter.date && order.deliveryDate && order.deliveryDate !== deliveryFilter.date) return false;
-    if (!aRelivrer && deliveryFilter.date && !order.deliveryDate) return false;
+    if (!aRelivrer && filtre.date && order.deliveryDate && order.deliveryDate !== filtre.date) return false;
+    if (!aRelivrer && filtre.date && !order.deliveryDate) return false;
     if (sectorKey && sectorKey !== "tous" && normalizeTextKey(order.sector) !== sectorKey) return false;
     if (cityKey && normalizeTextKey(order.city) !== cityKey) return false;
     return true;
@@ -6657,7 +6915,9 @@ function renderDeliveryCandidates() {
     const city = deliveryFilter.city ? `, ville ${deliveryFilter.city}` : "";
     const date = deliveryFilter.date ? `, ${formatDeliveryDate(deliveryFilter.date)}` : "";
     const dejaPrises = occupees.size ? ` (dont ${occupees.size} déjà en tournée)` : "";
-    summary.textContent = `${filtered.length} commande(s) prête(s)${dejaPrises} - ${sector}${city}${date}${signalHorsDate()}`;
+    const saisie = document.getElementById("deliveryCity")?.value || "";
+    const attente = villeEnAttente(saisie) ? `. « ${saisie.trim()} » n'est la ville d'aucune commande prête : pas appliquée` : "";
+    summary.textContent = `${filtered.length} commande(s) prête(s)${dejaPrises} - ${sector}${city}${date}${attente}${signalHorsDate()}`;
   }
 
   updateSelectedDeliveryCount();
@@ -6765,6 +7025,8 @@ function updateSelectedDeliveryCount() {
   if (createButton) {
     createButton.disabled = deliverySelection.size === 0;
     createButton.title = deliverySelection.size === 0 ? "Sélectionnez au moins un client pour créer une tournée" : "";
+    // Le compte sur le bouton (audit du 24/09) : on voit ce qui partira.
+    createButton.textContent = deliverySelection.size ? `Créer la tournée (${deliverySelection.size})` : "Créer la tournée";
   }
 }
 
