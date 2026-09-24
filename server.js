@@ -3702,83 +3702,103 @@ function clientSecondaryKey(value) {
   return `${nom}|${cp}`;
 }
 
-function getRouteClientIds(db) {
-  const ids = new Set();
+// FUSION DES CLIENTS A L'IMPORT DES VENTES (25/09). Regle permanente de Thomas
+// (18/05) : tout import est une FUSION par cle metier, jamais un
+// « wipe-and-replace ». L'import des ventes reconstruisait pourtant la table
+// des clients depuis le fichier (chasse aux defauts du 24/09, constat
+// critique) : une fiche absente du fichier disparaissait (sauf si sa DERNIERE
+// commande etait en cours), et une fiche presente perdait tout ce que le
+// fichier ne porte pas -- email, prenom, preferences, source, archivage. Un
+// abonnement dont le client avait disparu ne se suspendait plus.
+//
+// Maintenant :
+//   - chaque ligne du fichier retrouve SA fiche : par la cle complete (nom,
+//     rue, code postal, ville), sinon par la cle secondaire (nom + code postal
+//     normalises) parmi les fiches que la cle complete ne vise pas ; une fiche
+//     n'est prise que par un seul client du fichier ;
+//   - la fiche trouvee garde son identifiant et tous ses champs ; une cellule
+//     PLEINE du fichier remplace la valeur, une cellule VIDE la laisse ;
+//   - une fiche absente du fichier reste telle quelle, a sa place.
 
-  db.routes.forEach(route => {
-    (route.stops || []).forEach(stop => {
-      if (stop.clientId !== undefined && stop.clientId !== null) {
-        ids.add(String(stop.clientId));
-      }
-    });
+/** Les fiches existantes, indexees pour l'import. `clesDuFichier` : les cles completes du fichier. */
+function indexerClientsExistants(clients, clesDuFichier) {
+  const parCle = new Map();
+  const parSecondaire = new Map();
+  // Deux fiches de meme cle : la derniere repond, comme avant (l'autre reste).
+  clients.forEach(client => parCle.set(clientKey(client), client));
+  clients.forEach(client => {
+    if (clesDuFichier.has(clientKey(client))) return;
+    const secondaire = clientSecondaryKey(client);
+    if (secondaire) parSecondaire.set(secondaire, client);
   });
-
-  return ids;
+  return { parCle, parSecondaire, prises: new Set() };
 }
 
-function shouldPreserveClientAfterImport(client, order, routeClientIds) {
-  const clientId = String(client?.id ?? "");
-  if (!clientId) return false;
-  if (routeClientIds.has(clientId)) return true;
-  if (!order) return false;
-  if (order.routeId) return true;
-
-  return [
-    "en_preparation",
-    "preparation_terminee",
-    "pret_livraison",
-    "en_livraison",
-    "livre",
-    "probleme_livraison",
-    "a_reprogrammer"
-  ].includes(order.status);
+/** La fiche existante d'un client du fichier, ou null ; `parSecondaire` dit comment. */
+function trouverFicheExistante(index, cle, secondaire) {
+  const directe = index.parCle.get(cle);
+  if (directe && !index.prises.has(directe)) {
+    index.prises.add(directe);
+    return { fiche: directe, parSecondaire: false };
+  }
+  const voisine = secondaire ? index.parSecondaire.get(secondaire) : null;
+  if (voisine && !index.prises.has(voisine)) {
+    index.prises.add(voisine);
+    return { fiche: voisine, parSecondaire: true };
+  }
+  return { fiche: null, parSecondaire: false };
 }
 
+/** Une cellule du fichier : pleine, elle remplace ; vide, la valeur en base reste. */
+function valeurFusionnee(duFichier, enBase) {
+  return clean(duFichier) !== "" ? duFichier : (enBase ?? "");
+}
+
+/**
+ * La liste des clients apres l'import : chaque fiche existante a sa place
+ * (remplacee par sa version fusionnee si le fichier la cite), puis les
+ * nouvelles. Rien n'est retire. Les comptes suivent la regle de Thomas :
+ * created / updated / preserved.
+ */
 function mergeImportedClients(db, importedClients) {
-  const importedKeys = new Set(importedClients.map(client => clientKey(client)));
-  // Map secondaire : cle nom+CP normalises -> client importe correspondant.
-  // Permet de rattraper les doublons quand l'adresse rue diverge legerement
-  // (virgule, espace, casse) entre la BDD et le fichier Excel.
-  const importedSecondaryKeys = new Map();
+  const fusionnees = new Map();
+  const nouvelles = [];
+  let mergedBySecondary = 0;
   importedClients.forEach(client => {
-    const secondary = clientSecondaryKey(client);
-    if (secondary && !importedSecondaryKeys.has(secondary)) {
-      importedSecondaryKeys.set(secondary, client);
+    const { _ficheExistante: existante, _parSecondaire: parSecondaire, ...fiche } = client;
+    if (existante) {
+      fusionnees.set(existante, fiche);
+      if (parSecondaire) mergedBySecondary += 1;
+    } else {
+      nouvelles.push(fiche);
     }
   });
-
-  const routeClientIds = getRouteClientIds(db);
-  const existingOrders = new Map(db.commandes.map(order => [String(order.clientId), order]));
-
-  // Phase 1 : pour chaque client existant en DB qui ne match PAS en strict
-  // mais match en secondaire, propager son id vers le client importe pour
-  // preserver les references dans commandes/routes/stops.
-  let mergedBySecondary = 0;
-  db.clients.forEach(existing => {
-    if (importedKeys.has(clientKey(existing))) return;
-    const secondary = clientSecondaryKey(existing);
-    if (!secondary) return;
-    const importedTwin = importedSecondaryKeys.get(secondary);
-    if (!importedTwin) return;
-    importedTwin.id = existing.id;
-    importedKeys.add(clientKey(importedTwin));
-    mergedBySecondary += 1;
-  });
-
-  // Phase 2 : preservation des clients en workflow actif qui ne sont
-  // dans AUCUN des deux match (strict ou secondaire).
-  const preservedClients = db.clients.filter(client => {
-    if (importedKeys.has(clientKey(client))) return false;
-    const secondary = clientSecondaryKey(client);
-    if (secondary && importedSecondaryKeys.has(secondary)) return false;
-    return shouldPreserveClientAfterImport(client, existingOrders.get(String(client.id)), routeClientIds);
-  });
-
+  const clients = [...db.clients.map(client => fusionnees.get(client) || client), ...nouvelles];
   return {
-    clients: [...importedClients, ...preservedClients],
-    preservedCount: preservedClients.length,
+    clients,
+    created: nouvelles.length,
+    updated: fusionnees.size,
+    preserved: db.clients.length - fusionnees.size,
     mergedBySecondary
   };
+}
+
+/** Le bon d'une ligne de vente : client (cle complete) + date de commande. */
+function cleDuBonDeLaVente(vente) {
+  return `${clientKey({ nom: vente.client, rue: vente.rue, codePostal: vente.codePostal, ville: vente.ville })}|${vente.dateCommandeIso || ""}`;
+}
+
+/**
+ * Les ventes apres un import : celles des bons absents du fichier restent,
+ * celles d'un bon du fichier sont remplacees par ses lignes (un bon corrige
+ * dans Ximi ne garde pas ses anciennes lignes, un fichier reimporte ne double
+ * rien). Un fichier cumulatif (le cas de la production) rend donc la meme
+ * table qu'avant ; un fichier partiel ou vide n'efface plus rien.
+ */
+function fusionnerVentes(anciennes, nouvelles) {
+  const bonsDuFichier = new Set(nouvelles.map(cleDuBonDeLaVente));
+  const gardees = (Array.isArray(anciennes) ? anciennes : []).filter(vente => !bonsDuFichier.has(cleDuBonDeLaVente(vente)));
+  return { ventes: [...gardees, ...nouvelles], gardees: gardees.length };
 }
 
 function badRequest(message) {
@@ -8609,7 +8629,8 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     // d'autres imports/PATCH concurrents.
     const response = await withWriteLock(async () => {
     const db = readDb();
-    const existingClients = new Map(db.clients.map(client => [clientKey(client), client]));
+    // Les lignes dont la colonne Secteur est remplie (fusion des fiches, 25/09).
+    const ventesAvecSecteur = new Set();
 
     const ventes = dataRows
       .map((row, index) => {
@@ -8636,14 +8657,17 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
         const codePostal = geocodage.normaliserCodePostal(getCellByNames(row, headers, ["Code Postal", "Code postal", "CP", "PostalCode"]));
         const rue = clean(getCellByNames(row, headers, ["Rue", "Adresse", "Adresse client"]));
         const ville = normalizeCity(getCellByNames(row, headers, ["Ville", "Commune"]));
-        const secteur = deriveSector(ville, getCellByNames(row, headers, ["Secteur", "Sector"]));
+        const secteurDuFichier = getCellByNames(row, headers, ["Secteur", "Sector"]);
+        const secteur = deriveSector(ville, secteurDuFichier);
         const notes = clean(getCellByNames(row, headers, ["Notes", "Remarque", "Remarques"]));
         const priority = clean(getCellByNames(row, headers, ["Priorite", "Priorite livraison", "Priority"]));
         const lat = getCoordinateValue(getCellByNames(row, headers, ["Latitude", "Lat"]), -90, 90);
         const lng = getCoordinateValue(getCellByNames(row, headers, ["Longitude", "Lng"]), -180, 180);
+        const id = crypto.randomUUID();
+        if (clean(secteurDuFichier)) ventesAvecSecteur.add(id);
 
         return {
-          id: crypto.randomUUID(),
+          id,
           codeProduit,
           produit: nomProduit || produitComplet,
           produitComplet,
@@ -8675,7 +8699,12 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     const lignesIllisibles = dataRows.filter(row => Array.isArray(row) && row.some(cell => clean(cell) !== "")).length
       - ventes.length;
 
-    db.ventes = ventes;
+    // Les ventes FUSIONNENT elles aussi (25/09) : `db.ventes = ventes` effacait
+    // celles de tout bon absent du fichier -- et le chiffre d'affaires qui en
+    // venait. Un bon du fichier (client + date) remplace ses lignes ; les
+    // autres restent.
+    const fusionVentes = fusionnerVentes(db.ventes, ventes);
+    db.ventes = fusionVentes.ventes;
 
     // ERP v1.9.0 : bucket par (client, dateCommande) au lieu de juste par client.
     // Chaque (client, date) = 1 bon de commande distinct. Multiples imports
@@ -8683,15 +8712,17 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     // de doublon (anti-doublon via excelRowHash).
     const todayIso = jourParis();
     const clientsMap = {};
+    // Fusion (25/09) : chaque client du fichier retrouve sa fiche existante --
+    // cle complete, sinon nom + code postal -- et la complete sans rien effacer.
+    const cleClientDeLaVente = vente => clientKey({ nom: vente.client, rue: vente.rue, codePostal: vente.codePostal, ville: vente.ville });
+    const indexFiches = indexerClientsExistants(db.clients, new Set(ventes.map(cleClientDeLaVente)));
 
     ventes.forEach(vente => {
-      const key = clientKey({
-        nom: vente.client,
-        rue: vente.rue,
-        codePostal: vente.codePostal,
-        ville: vente.ville
-      });
-      const existingClient = existingClients.get(key) || {};
+      const key = cleClientDeLaVente(vente);
+      const trouvee = clientsMap[key]
+        ? { fiche: clientsMap[key]._ficheExistante, parSecondaire: clientsMap[key]._parSecondaire }
+        : trouverFicheExistante(indexFiches, key, clientSecondaryKey({ nom: vente.client, codePostal: vente.codePostal }));
+      const existingClient = trouvee.fiche || {};
       // Fallback : si la ligne Excel n'a pas de Date, on bucket avec la date du
       // jour (l'utilisateur peut quand meme avoir importe quelque chose hors
       // contexte de bon de commande date). C'est rare en pratique.
@@ -8708,12 +8739,18 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
         if (fichierRefuse) positionsImportRefusees += 1;
         const prendFichier = positionFichier && !manuelle && !fichierRefuse;
         clientsMap[key] = {
+          // Fusion (25/09) : la fiche existante d'abord -- identifiant, email,
+          // prenom, preferences, source, statut CRM, archivage... --, puis ce
+          // que le fichier dit. Une cellule vide ne remplace rien.
+          ...existingClient,
+          _ficheExistante: trouvee.fiche,
+          _parSecondaire: trouvee.parSecondaire,
           id: existingClient.id || crypto.randomUUID(),
-          nom: vente.client || "Client sans nom",
-          rue: vente.rue,
-          ville: vente.ville,
-          codePostal: vente.codePostal,
-          telephone: vente.telephone,
+          nom: vente.client || existingClient.nom || "Client sans nom",
+          rue: valeurFusionnee(vente.rue, existingClient.rue),
+          ville: valeurFusionnee(vente.ville, existingClient.ville),
+          codePostal: valeurFusionnee(vente.codePostal, existingClient.codePostal),
+          telephone: valeurFusionnee(vente.telephone, existingClient.telephone),
           statut: existingClient.statut || "restant",
           // Liste flat (legacy compat pour syncWorkflow et anciennes UIs)
           produits: [],
@@ -8731,8 +8768,10 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
               geoLibelle: existingClient.geoLibelle || "",
               geoAVerifier: existingClient.geoAVerifier || ""
             }),
-          secteur: vente.secteur,
-          deliveryDate: vente.deliveryDate,
+          // Le secteur se deduit de la ville (ou de la colonne Secteur) du
+          // fichier ; sans l'une ni l'autre, celui de la fiche reste.
+          secteur: vente.ville || ventesAvecSecteur.has(vente.id) ? vente.secteur : (existingClient.secteur || vente.secteur),
+          deliveryDate: valeurFusionnee(vente.deliveryDate, existingClient.deliveryDate),
           notes: vente.notes || existingClient.notes || "",
           priority: vente.priority || existingClient.priority || "",
           // Multi-commandes : 1 entree par dateCommande pour ce client
@@ -8907,8 +8946,11 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     });
 
     syncWorkflow(db);
-    const preservedMessage = mergedImport.preservedCount > 0
-      ? `, ${mergedImport.preservedCount} client(s) deja en workflow conserve(s)`
+    // Les comptes de la fusion des fiches (regle de Thomas : created / updated / preserved).
+    const clientsImport = { created: mergedImport.created, updated: mergedImport.updated, preserved: mergedImport.preserved };
+    const fichesMessage = `, fiches clients : ${clientsImport.created} creee(s), ${clientsImport.updated} mise(s) a jour, ${clientsImport.preserved} absente(s) du fichier conservee(s)`;
+    const ventesGardeesMessage = fusionVentes.gardees > 0
+      ? `, ${fusionVentes.gardees} vente(s) d'autres bons conservee(s)`
       : "";
     const mergedMessage = mergedImport.mergedBySecondary > 0
       ? `, ${mergedImport.mergedBySecondary} doublon(s) client(s) fusionne(s) par cle secondaire`
@@ -8932,7 +8974,7 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     addHistory(
       db,
       "Import ventes",
-      `${db.ventes.length} vente(s) importee(s), ${importedClients.length} client(s) detecte(s), ${commandeStats}${ignoreesMessage}${illisiblesMessage}${preservedMessage}${mergedMessage}${livreMessage}${clampedMessage}${positionsMessage}`,
+      `${ventes.length} vente(s) importee(s), ${importedClients.length} client(s) detecte(s), ${commandeStats}${ignoreesMessage}${illisiblesMessage}${fichesMessage}${ventesGardeesMessage}${mergedMessage}${livreMessage}${clampedMessage}${positionsMessage}`,
       {
         fichier: req.file.originalname
       }
@@ -8940,7 +8982,8 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
 
     // v1.12.0 : archivage du fichier Excel brut pour retelechargement futur
     const archive = archiveImportFile(req, db, "ventes", {
-      rowsCount: db.ventes.length,
+      // Les lignes DU FICHIER (la table des ventes, fusionnee, en garde d'autres).
+      rowsCount: ventes.length,
       clientsCount: importedClients.length,
       created: createdCount,
       updated: updatedCount,
@@ -8948,7 +8991,8 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       ignored: ignorees.length,
       lignesIllisibles,
       importedAsLivre: importedAsLivreCount,
-      mergedBySecondary: mergedImport.mergedBySecondary
+      mergedBySecondary: mergedImport.mergedBySecondary,
+      clientsImport
     });
 
     writeDb(db);
@@ -8960,6 +9004,9 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       commandes: db.commandes,
       secteurs: getSectors(db),
       mergedBySecondary: mergedImport.mergedBySecondary,
+      // Fusion des fiches (25/09) : aucune n'est retiree ; `preserved` compte
+      // celles que le fichier ne cite pas, laissees telles quelles.
+      clientsImport,
       importedAsLivre: importedAsLivreCount,
       created: createdCount,
       updated: updatedCount,

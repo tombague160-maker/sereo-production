@@ -3713,6 +3713,17 @@ function bilanImportVentes(result) {
   if (livrees) details.push({ html: `${escapeHtml(accorder(livrees, "commande importée comme déjà livrée", "commandes importées comme déjà livrées"))} (facture « Envoyée »).` });
   const fusionnes = nombre(result.mergedBySecondary);
   if (fusionnes) details.push({ html: `${escapeHtml(accorder(fusionnes, "client en double fusionné", "clients en double fusionnés"))} avec sa fiche existante.` });
+  // Les fiches clients (fusion du 25/09) : l'import ne supprime plus une fiche
+  // absente du fichier et n'efface plus ce que le fichier ne porte pas. Le
+  // resume le dit, fiches gardees comprises.
+  const fiches = result.clientsImport;
+  if (fiches) {
+    details.push({ html: `Fiches clients : ${escapeHtml([
+      accorder(nombre(fiches.created), "nouvelle", "nouvelles"),
+      accorder(nombre(fiches.updated), "complétée", "complétées"),
+      accorder(nombre(fiches.preserved), "absente du fichier, gardée telle quelle", "absentes du fichier, gardées telles quelles")
+    ].join(" · "))}.` });
+  }
   return { comptes, details, aPreparer: nombre(result.created) + nombre(result.updated) > 0 };
 }
 
