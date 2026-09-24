@@ -38,14 +38,36 @@ after(async () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+// Une connexion par requete (`connection: close`, 25/09). Le rouge « fetch
+// failed / read ECONNRESET » qui tombait parfois sur le banc « GET /api/routes
+// n'envoie pas le trace » (CI du 24/09, run 36009519501) : fetch garde la
+// connexion ouverte entre deux requetes (keep-alive), et le serveur, dans le
+// MEME processus, la ferme apres 5 s de repos (+ 1 s de marge). Les bancs
+// synchrones qui precedent (60 mutations : 5,9 s ce jour-la) bloquent la
+// boucle au-dela : le fetch suivant reutilise la connexion, puis la minuterie
+// du serveur, en retard, la ferme avant d'avoir lu la requete -- RST.
+// Reproduit 5 fois sur 5 hors du banc (boucle bloquee 4,5 s, keep-alive 3 s),
+// et 3 fois sur 3 dans ce fichier quand les 60 mutations passent 6 s.
 async function api(chemin, init = {}) {
-  const headers = { Origin: base, ...(init.body ? { "Content-Type": "application/json" } : {}), ...(init.headers || {}) };
+  const headers = { Origin: base, connection: "close", ...(init.body ? { "Content-Type": "application/json" } : {}), ...(init.headers || {}) };
   const res = await fetch(base + chemin, { ...init, headers });
   const texte = await res.text();
   let body;
   try { body = texte ? JSON.parse(texte) : undefined; } catch { body = texte; }
   return { status: res.status, body };
 }
+
+test("lot 5 : le helper api() ouvre une connexion par requete (aucune reutilisation que le serveur pourrait fermer)", async () => {
+  let connexions = 0;
+  const compter = () => { connexions++; };
+  server.on("connection", compter);
+  try {
+    for (let i = 0; i < 3; i++) assert.equal((await api("/healthz")).status, 200);
+  } finally {
+    server.off("connection", compter);
+  }
+  assert.equal(connexions, 3, "une connexion a ete reutilisee (keep-alive) : le rouge ECONNRESET peut revenir");
+});
 
 // --- Une tournee terminee de N arrets, avec son trace ------------------------
 
