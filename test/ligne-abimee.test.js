@@ -226,6 +226,33 @@ test("une commande abimee part en quarantaine AVEC ses lignes de commande et ses
   assert.deepEqual(diff.historique.partis, []);
 });
 
+test("la SEULE commande d'un client, abimee, ne « revient » pas en commande neuve du jour", () => {
+  // syncWorkflow donne une commande « de repli » a un client qui n'en a
+  // aucune (compatibilite) : sans garde, la commande mise de cote revenait en
+  // commande neuve, datee du jour -- mesure sur une base ecrite par v1.45.1 :
+  // CMD-2025-039 illisible -> CMD-2026-164 livree aujourd'hui.
+  repartirDeZero();
+  writeDb({
+    ...defaultDb(),
+    clients: [{ id: "c3", nom: "Client 3", rue: "3 rue du Test", codePostal: "39300", ville: "Champagnole", statut: "livree",
+      produits: [{ code: "P1", nom: "Produit", quantite: 2 }] }],
+    stock: [{ id: "p1", code: "P1", nom: "Produit", quantite: 50 }],
+    commandes: [{ id: "o9", numero: "CMD-2025-039", clientId: "c3", clientName: "Client 3", status: "livre", dateCommande: "2025-12-08",
+      deliveryDate: "2025-12-08", products: [{ code: "P1", nom: "Produit", quantite: 2 }] }]
+  }, { backup: false });
+  closeStorage();
+  abimer("commandes", "payload", "id", "o9");
+  closeStorage();
+  writeDb(readDb(), { backup: false });
+  assert.deepEqual(readDb().commandes.map(o => `${o.id} ${o.numero}`), [], "une commande est apparue a la place de la commande mise de cote");
+  assert.equal(quarantaine().filter(x => x.table_source === "commandes").length, 1);
+  // Temoin : un client SANS commande mise de cote garde sa commande de repli.
+  const db = readDb();
+  db.clients.push({ id: "c4", nom: "Client 4", rue: "4 rue du Test", codePostal: "39300", ville: "Champagnole", produits: [{ code: "P1", nom: "Produit", quantite: 1 }] });
+  writeDb(db, { backup: false });
+  assert.deepEqual(readDb().commandes.map(o => o.clientId), ["c4"], "temoin : la commande de repli ne se cree plus du tout");
+});
+
 test("un trace de tournee abime : la tournee se lit sans sa ligne, le trace est mis de cote", async () => {
   semer();
   const abime = abimer("traces_tournees", "trace", "route_id", "t1");

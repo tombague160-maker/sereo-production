@@ -3090,6 +3090,17 @@ function journaliserLignesMisesDeCote(db, store) {
   return lignes.map(ligne => ligne.numero);
 }
 
+// Les clients dont une commande est en quarantaine (colonne client_id de la
+// ligne mise de cote). Vide hors SQLite, ou si l'etat ne se lit pas.
+function clientsDesCommandesMisesDeCote() {
+  if (!useSqliteStorage() || !sqliteStore) return new Set();
+  try {
+    return sqliteStore.clientsDesCommandesMisesDeCote();
+  } catch {
+    return new Set();
+  }
+}
+
 // Promise du dernier backup async en vol. Utilise par les tests pour
 // `await flushPendingBackup()` avant d'assertioner sur le filesystem.
 let pendingBackup = null;
@@ -4634,9 +4645,15 @@ function syncWorkflow(db) {
   // Legacy compat : un client sans aucune commande recoit une commande
   // fallback (deduite de ses produits) pour ne pas casser les anciennes UIs
   // qui supposent 1 client = 1 commande.
+  // Robustesse (25/09) : pas pour un client dont la commande vient d'etre mise
+  // de cote parce qu'illisible -- sinon elle « revenait » en commande neuve,
+  // datee du jour, a preparer ou comptee dans le chiffre d'affaires du jour
+  // (mesure sur une base de la forme de la production, CMD-2025-039 -> CMD-2026-164).
+  const clientsSansFallback = clientsDesCommandesMisesDeCote();
   db.clients.forEach(client => {
     const orders = ordersByClientId.get(String(client.id)) || [];
     if (orders.length > 0) return;
+    if (clientsSansFallback.has(String(client.id))) return;
     if (!Array.isArray(client.produits) || client.produits.length === 0) return;
 
     const today = jourParis();

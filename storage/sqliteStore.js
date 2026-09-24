@@ -114,6 +114,18 @@ function createSqliteStore(options) {
       ).all().map(ligne => ({ ...ligne }));
     },
 
+    /** Les clients (client_id) des commandes mises de cote. */
+    clientsDesCommandesMisesDeCote() {
+      const clients = new Set();
+      for (const { colonnes } of database.prepare("SELECT colonnes FROM lignes_en_quarantaine WHERE table_source = 'commandes'").all()) {
+        try {
+          const clientId = JSON.parse(colonnes).client_id;
+          if (clientId !== undefined && clientId !== null && clientId !== "") clients.add(String(clientId));
+        } catch { /* colonnes ecrites par nous : toujours lisibles */ }
+      }
+      return clients;
+    },
+
     marquerJournalisees(numeros) {
       const marquer = database.prepare("UPDATE lignes_en_quarantaine SET journalisee = 1 WHERE id = ?");
       for (const numero of numeros) marquer.run(numero);
