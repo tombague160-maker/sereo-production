@@ -185,3 +185,35 @@ test("/api/dashboard donne le compte des ventes importees (la page ne charge plu
   const tableau = (await lire("/api/dashboard")).json();
   assert.deepEqual(tableau.ventes, { total: 429 });
 });
+
+test("un geste d'arret rend le client tel que /api/clients le rend (sans releve d'import)", async () => {
+  // Lot 5 : la reponse d'un geste porte le client « tel que les listes », et
+  // l'ecran le remet dans sa liste. Un client de ce jeu a un releve d'import :
+  // la reponse doit l'avoir perdu, comme la liste.
+  const db = readDb();
+  const client = db.clients.find(c => c.ordersByDate && Object.keys(c.ordersByDate).length);
+  assert.ok(client, "prealable : un client avec releve d'import");
+  const commande = {
+    id: "cmd-banc-geste", numero: "CMD-2026-999", clientId: client.id, clientName: client.nom, address: client.rue || "1 rue Neuve",
+    city: client.ville, postalCode: client.codePostal, status: "en_livraison", preparationStatus: "terminee",
+    products: [{ code: "P1", nom: "Produit", quantite: 1 }], lat: 46.7, lng: 5.9, dateCommande: "2026-09-20"
+  };
+  db.commandes.push(commande);
+  db.routes.unshift({
+    id: "route-banc-geste", sector: client.secteur, status: "en_livraison", deliveryDate: "2026-09-24",
+    stops: [{ id: "stop-banc-geste", routeId: "route-banc-geste", orderId: commande.id, clientId: client.id, orderIndex: 1,
+      clientName: client.nom, address: commande.address, city: commande.city, postalCode: commande.postalCode,
+      status: "en_livraison", lat: 46.7, lng: 5.9, products: [] }],
+    createdAt: "2026-09-24T08:00:00.000Z"
+  });
+  require("../server").writeDb(db, { backup: false });
+
+  const res = await fetch(base + "/api/routes/route-banc-geste/stops/stop-banc-geste", {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "livre" })
+  });
+  const corps = await res.json();
+  assert.equal(res.status, 200, JSON.stringify(corps).slice(0, 300));
+  const liste = (await lire("/api/clients")).json();
+  assert.ok(!("ordersByDate" in corps.client), "la reponse du geste porte le releve d'import");
+  assert.deepEqual(corps.client, liste.find(c => c.id === client.id));
+});

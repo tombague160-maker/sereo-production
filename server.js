@@ -6878,7 +6878,9 @@ function etatApresGesteArret(db, geste) {
   const route = routeAvecTrace(db, geste.route.id) || geste.route;
   const stop = route.stops.find(item => String(item.id) === String(geste.stop.id)) || geste.stop;
   const order = db.commandes.find(item => String(item.id) === String(geste.order.id)) || geste.order;
-  const client = db.clients.find(item => String(item.id) === String(order.clientId)) || null;
+  const trouve = db.clients.find(item => String(item.id) === String(order.clientId));
+  // Le client tel que /api/clients le rend (sans releve d'import, 24/09).
+  const client = trouve ? sansReleveDImport(trouve) : null;
   return { route, stop, order, client };
 }
 
@@ -9291,7 +9293,7 @@ require("./lib/operations-api").registerOperations(app, {
 // Lot 6 de l'audit geo (pratique au quotidien) : reoptimiser, « Faire
 // maintenant », « Ajouter a la tournee en cours ».
 require("./lib/tournee-pratique").registerTourneePratique(app, {
-  readDb, writeDb, withWriteLock, badRequest, notFound, handleRouteError, findClient,
+  readDb, writeDb, withWriteLock, badRequest, notFound, handleRouteError, findClient, sansReleveDImport,
   addHistory, setOrderStatus, createStop, routeAvecTrace, positionPourTournee,
   memoriserPositionDuCalcul, geocoderAdresse, distanceKm: distance,
   statutsAPlanifier: STATUTS_A_PLANIFIER, maxArrets: MAX_COMMANDES_PAR_TOURNEE,
