@@ -197,6 +197,20 @@ test("12 — la page ne remonte pas toute seule si on a défilé pendant le char
     await new Promise(r => setTimeout(r, 3000));
     route.fallback().catch(() => { /* page fermee */ });
   });
+  // Integration de la performance (24/09) : ce logo etait l'apercu des
+  // Parametres, que le lot reseau charge desormais a l'affichage
+  // (loading="lazy") -- il ne retenait plus `load`, et le prealable tombait.
+  // Le banc pose donc SA propre image (1 px, hors du flux), servie avec la
+  // meme lenteur : `load` l'attend, la page n'en est pas changee.
+  await page.addInitScript(() => {
+    document.addEventListener("DOMContentLoaded", () => {
+      const image = document.createElement("img");
+      image.src = "/brand/sereo-logo.svg?banc-retient-load";
+      image.alt = "";
+      image.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none";
+      document.body.appendChild(image);
+    });
+  });
   await page.goto(srv.base + "/#journee", { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(800);
   const charge = await page.evaluate(() => document.readyState);
