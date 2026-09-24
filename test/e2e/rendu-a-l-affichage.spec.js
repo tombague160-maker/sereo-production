@@ -329,6 +329,56 @@ test("les règles body:has(...) visent les mêmes écrans par le chemin court", 
   }
 });
 
+test("les conditions des lots d'améliorations visent les mêmes éléments par leur chemin (intégration)", async ({ page }) => {
+  // Integration de la performance (24/09) : les lots telephone et commandes
+  // ecrivaient leurs body:has(...) sans chemin. Chaque paire [sans, avec] de
+  // la feuille : <body> doit y repondre pareil dans chaque etat. #exports
+  // (ecran supprime) quitte la liste :is(...) : absent, il ne changeait rien.
+  const paires = [
+    ["#livreur.active #tourneeActive:not([hidden])", "> .app > main.content > #livreur.active #tourneeActive:not([hidden])"],
+    ["#livreur.active #tourneeActive[hidden]", "> .app > main.content > #livreur.active #tourneeActive[hidden]"],
+    ["#livreur.active #tourneeActive:not([hidden]) .current-driver-card.arret-serre",
+      "> .app > main.content > #livreur.active #tourneeActive:not([hidden]) .current-driver-card.arret-serre"],
+    [":is(#statistiques, #exports, #relances, #recommande, #commande-client, #parametres, #commandes).active",
+      "> .app > main.content > :is(#statistiques, #relances, #recommande, #commande-client, #parametres, #commandes).active"],
+    ["#tourneesNonSoldees:not([hidden])", "> .app > main.content > #livreur #tourneesNonSoldees:not([hidden])"],
+    ["#mobile-more-sheet:not([hidden])", "> .app > #mobile-more-sheet:not([hidden])"],
+    ["#commandes.active", "> .app > main.content > #commandes.active"],
+    ["#crm.active:not([data-vue=\"fiche\"])", "> .app > main.content > #crm.active:not([data-vue=\"fiche\"])"]
+  ];
+  await ouvrir(page);
+  const etats = [["journee"], ["statistiques"], ["relances"], ["recommande"], ["commande-client"], ["parametres"], ["commandes"], ["crm"],
+    ["livreur", "vide"], ["livreur", "tournee"], ["livreur", "serre"], ["livreur", "retard"], ["journee", "menu"]];
+  const vus = new Set();
+  for (const [ecran, variante] of etats) {
+    await aller(page, ecran);
+    await expect(page.locator(`#${ecran}`)).toHaveClass(/active/);
+    const r = await page.evaluate(([ps, v]) => {
+      const tournee = document.getElementById("tourneeActive");
+      const carte = document.querySelector("#tourneeActive .current-driver-card");
+      const retard = document.getElementById("tourneesNonSoldees");
+      const menu = document.getElementById("mobile-more-sheet");
+      const avant = [tournee.hidden, carte.classList.contains("arret-serre"), retard.hidden, menu.hidden];
+      if (v === "tournee" || v === "serre") tournee.hidden = false;
+      if (v === "vide") tournee.hidden = true;
+      if (v === "serre") carte.classList.add("arret-serre");
+      if (v === "retard") retard.hidden = false;
+      if (v === "menu") menu.hidden = false;
+      const res = ps.map(([sans, avec]) => [sans, document.body.matches(`:has(${sans})`), document.body.matches(`:has(${avec})`)]);
+      [tournee.hidden, , retard.hidden, menu.hidden] = avant;
+      carte.classList.toggle("arret-serre", avant[1]);
+      return res;
+    }, [paires, variante]);
+    for (const [c, sans, avec] of r) {
+      expect(avec, `${ecran} ${variante || ""} : ${c}`).toBe(sans);
+      if (sans) vus.add(c);
+    }
+  }
+  // Temoin : chaque condition a ete VRAIE au moins une fois (sinon « faux =
+  // faux » ne distinguerait rien).
+  expect([...vus].sort()).toEqual(paires.map(([sans]) => sans).sort());
+});
+
 test("téléphone : les règles d'écran de la feuille s'appliquent toujours (chemin court)", async ({ page }) => {
   // Des regles body:has(> .app > main.content > #...) de la feuille, lues dans
   // la page : chacune change ce qu'elle doit, et seulement dans son etat.
