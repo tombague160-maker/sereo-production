@@ -502,7 +502,11 @@ test("au bureau, rien ne change : pas de ligne de tri, pas de bouton fixe, la fi
 // client deja choisi pour un rappel en cours de saisie doit y rester.
 test("tourner la tablette ne perd pas le client choisi d'un rappel en cours de saisie", async ({ page }) => {
   await page.setViewportSize({ width: 1180, height: 820 });
-  await page.goto(srv.base + "/#relances", { waitUntil: "networkidle" });
+  // Par Clients d'abord (24/09) : un ecran cache n'est plus dessine au
+  // chargement, et le temoin ci-dessous lit la liste des clients.
+  await page.goto(srv.base + "/#crm", { waitUntil: "networkidle" });
+  await expect(page.locator("#crmList .cli-nom").first()).toBeVisible();
+  await page.evaluate(() => { location.hash = "#relances"; });
   const choix = page.locator("#relanceClientSelect");
   await expect(choix).toBeVisible();
   await choix.selectOption("c-tilleuls");

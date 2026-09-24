@@ -968,6 +968,11 @@ function showTab(tabName, options = {}) {
   }
 
   document.getElementById(nextTab)?.classList.add("active");
+  // Un ecran qui etait cache au dernier chargement se dessine en arrivant
+  // (rendreSiAffiche). Son rendu refait aussi l'ordre a plat du Stock.
+  const stockEnAttente = nextTab === "stock" && Boolean(rendusEnAttente.get("stock")?.has(renderStock));
+  if (stockEnAttente) ordreAPlat = null;
+  rendreEnAttente(nextTab);
 
   setText("pageTitle", titles[nextTab].title);
   setText("pageSubtitle", titles[nextTab].subtitle);
@@ -985,7 +990,7 @@ function showTab(tabName, options = {}) {
   if (nextTab === "commandes") majSousTitreCommandes();
   if (nextTab === "stock") majSousTitreStock();
   // Rouvrir le Stock refait l'ordre a plat, fige pendant les ajustements.
-  if (nextTab === "stock" && ordreAPlat) {
+  if (nextTab === "stock" && ordreAPlat && !stockEnAttente) {
     ordreAPlat = null;
     renderStock();
   }
@@ -2694,8 +2699,35 @@ function bindCommandes() {
 // du 23/09 sur 2 000 commandes : 78 000 elements sur 108 000, et une tache de
 // 289 ms au demarrage. On ne les dessine que s'ils sont AFFICHES : si l'un
 // redevient atteignable, il se redessine sans qu'on touche a cette liste.
+//
+// Generalise le 24/09 (mesure en production, telephone a CPU x4) : l'ouverture
+// dessinait les TREIZE ecrans pour en montrer un -- une tache d'environ 1 s,
+// 12 700 elements pour 255 visibles. Un ecran cache garde desormais son rendu
+// EN ATTENTE, et showTab le dessine en y arrivant, avec les donnees du moment :
+// ce que l'ecran montre ne change pas, il est seulement dessine plus tard.
+const rendusEnAttente = new Map();
+
 function rendreSiAffiche(idSection, rendu) {
-  if (document.getElementById(idSection)?.classList.contains("active")) rendu();
+  if (document.getElementById(idSection)?.classList.contains("active")) {
+    rendusEnAttente.get(idSection)?.delete(rendu);
+    rendu();
+    return;
+  }
+  // Un Set : deux chargements pendant qu'on est ailleurs = un seul rendu.
+  if (!rendusEnAttente.has(idSection)) rendusEnAttente.set(idSection, new Set());
+  rendusEnAttente.get(idSection).add(rendu);
+}
+
+/** Les rendus qu'un ecran attend (showTab, en y arrivant). */
+function rendreEnAttente(idSection) {
+  const rendus = rendusEnAttente.get(idSection);
+  if (!rendus?.size) return;
+  rendusEnAttente.delete(idSection);
+  // Un rendu qui echoue ne bloque pas le changement d'ecran (titre, adresse) :
+  // l'erreur reste dans la console, ou tabs.spec.js la voit.
+  for (const rendu of rendus) {
+    try { rendu(); } catch (erreur) { console.error(erreur); }
+  }
 }
 
 /**
@@ -2714,21 +2746,27 @@ function renderAll({ lectures = true } = {}) {
   renderStats();
   renderDailySummary();
   renderImportSummary();
-  renderCrm();
-  renderRelances();
-  renderCustomerOrder();
-  renderStatistics();
-  renderExports();
-  renderStock();
-  renderStockMovements();
-  renderPreparation();
-  renderRecommande();
+  // Chaque ecran de liste ne se dessine que s'il est affiche ; sinon en y
+  // arrivant (rendreSiAffiche, 24/09). Les pastilles de la barre laterale et
+  // le tableau de bord (renderStats), eux, restent a jour partout.
+  rendreSiAffiche("crm", renderCrm);
+  rendreSiAffiche("relances", renderRelances);
+  // Le choix du client d'un rappel : renderCrm le remplissait au passage.
+  rendreSiAffiche("relances", renderClientSelects);
+  rendreSiAffiche("commande-client", renderCustomerOrder);
+  rendreSiAffiche("statistiques", renderStatistics);
+  rendreSiAffiche("exports", renderExports);
+  rendreSiAffiche("stock", renderStock);
+  rendreSiAffiche("stock", renderStockMovements);
+  rendreSiAffiche("preparation", renderPreparation);
+  rendreSiAffiche("recommande", renderRecommande);
   // Les quatre anciennes listes de commandes n'ont plus de rendu : leurs
   // sections ont quitte la page le 23/09 (dette 7), l'ecran Commandes les
   // porte toutes.
-  renderCommandes();
+  rendreSiAffiche("commandes", renderCommandes);
   rendreSiAffiche("produits", renderProduits);
-  renderVentes();
+  // Hors mainTabs (inatteignable) : 2 579 elements et ~110 ms au telephone.
+  rendreSiAffiche("ventes", renderVentes);
   rendreSiAffiche("alertes", renderAlertes);
   // L'ecran #historique n'est pas atteignable (absent de mainTabs) : il etait
   // pourtant redessine en entier a chaque chargement (24/09, mesure en prod).
@@ -4262,9 +4300,15 @@ function renderPreparationFilterOptions() {
   // jamais -- apres un choix, la rangee etait deja depliee -- et une mutation
   // l'a montre en survivant.)
   const ordonnes = current === "all" ? sectors : [current, ...sectors.filter(sector => sector !== current)];
-  conteneur.innerHTML = pilule("all", "Tous") + ordonnes.map(sector => pilule(sector, formatSectorLabel(sector))).join("");
+  const rangee = pilule("all", "Tous") + ordonnes.map(sector => pilule(sector, formatSectorLabel(sector))).join("");
+  // Rangee inchangee (une frappe dans la recherche) : ni refaite, ni remesuree
+  // -- la mesure force une mise en page de toute la page (24/09).
+  if (rangee === rangeeDesSecteurs && conteneur.firstChild) return;
+  rangeeDesSecteurs = rangee;
+  conteneur.innerHTML = rangee;
   ajusterRepliDesSecteurs();
 }
+let rangeeDesSecteurs = "";
 
 /**
  * « Pilules de filtre : repliables plutot que debordantes » (charte §4).
@@ -4282,6 +4326,10 @@ function ajusterRepliDesSecteurs() {
   const conteneur = document.getElementById("preparationSectorPills");
   const bouton = document.getElementById("preparationSectorPlus");
   if (!conteneur || !bouton) return;
+  // Ecran cache : rien a mesurer (la rangee n'a pas de hauteur), et lire
+  // scrollHeight forcait une mise en page de TOUTE la page -- 96 a 136 ms au
+  // telephone a chaque rendu (24/09). showTab mesure en arrivant.
+  if (!document.getElementById("preparation")?.classList.contains("active")) return;
   const deplie = conteneur.classList.contains("filtre-pilules--depliee");
   // On mesure TOUJOURS a l'etat replie : deplie, il n'y a plus rien a voir.
   conteneur.classList.remove("filtre-pilules--depliee");
