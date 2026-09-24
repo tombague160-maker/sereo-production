@@ -2856,7 +2856,14 @@ function ajusterArretAuPouce() {
   if (dernier && dernier.getBoundingClientRect().bottom + window.scrollY > window.innerHeight - dessousGestes() - ARRET_AIR_PX) {
     carte.classList.add("arret-serre");
   }
-  region?.style.setProperty("--toast-bas-tournee", `${Math.ceil(dessousGestes() + 12)}px`);
+  // Le message se pose au-dessus du haut REEL de la barre (24/09, CI Linux) :
+  // quand la page est trop courte pour defiler, la barre « collee » reste a sa
+  // place dans le flux, PLUS HAUT que sa position collee ; calcule depuis le
+  // bas de l'ecran, le message couvrait alors sa rangee du haut (Y aller,
+  // Appeler, Voir la carte). On retient la plus haute des deux positions.
+  const hautColle = window.innerHeight - dessousGestes();
+  const hautReel = gestes.getBoundingClientRect().top;
+  region?.style.setProperty("--toast-bas-tournee", `${Math.ceil(window.innerHeight - Math.min(hautColle, hautReel) + 12)}px`);
 }
 
 // Une rotation change la largeur (les lignes se replient autrement) ; la
