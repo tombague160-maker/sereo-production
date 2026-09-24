@@ -122,7 +122,7 @@ for (const schema of THEMES) {
     expect(s["text-decoration-line"]).toBe("none");
   });
 
-  test(`le filtre choisi se voit : Preparation, Analyse, Clients (${schema})`, async ({ page }) => {
+  test(`le filtre choisi se voit : Preparation, Clients ; Analyse n'a plus de sous-onglets (${schema})`, async ({ page }) => {
     await ouvrir(page, "preparation", { schema });
     const principal = await jeton(page, "--v8-principal");
     const tous = await style(page.locator('#preparation .filtre-pilule[aria-pressed="true"]').first(), ["background-color"]);
@@ -130,11 +130,11 @@ for (const schema of THEMES) {
     expect(tous["background-color"], "« Tous » choisi").toBe(principal);
     expect(autre["background-color"], "temoin : une pilule non choisie reste claire").not.toBe(principal);
 
+    // Integration du 24/09 : l'ecran Exports est supprime (decision 9, lot
+    // parcours) ; Analyse, seul dans son groupe, n'a plus de rangee de
+    // sous-onglets -- plus rien a y choisir, donc rien a y voir choisi.
     await ouvrir(page, "statistiques", { schema });
-    const onglet = await style(page.locator('#sousOnglets [aria-selected="true"]'), ["background-color"]);
-    const voisin = await style(page.locator('#sousOnglets [aria-selected="false"]').first(), ["background-color"]);
-    expect(onglet["background-color"], "« Analyse » choisi").toBe(principal);
-    expect(voisin["background-color"]).not.toBe(principal);
+    await expect(page.locator("#sousOnglets")).toBeHidden();
 
     await ouvrir(page, "crm", { schema });
     const choisie = page.locator("#crm .cli-ligne.cli-ligne--choisie");
