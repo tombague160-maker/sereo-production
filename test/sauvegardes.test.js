@@ -14,7 +14,7 @@
 // comptes en base (comme la production). Sans authentification, tout visiteur
 // serait administrateur : le 403 ne se verrait pas.
 
-const { after, before, test } = require("node:test");
+const { after, before, mock, test } = require("node:test");
 const assert = require("node:assert/strict");
 const { once } = require("node:events");
 const fs = require("node:fs");
@@ -298,6 +298,28 @@ test("état : une sauvegarde vieille de 2 jours n'alerte que si une saisie est p
   assert.equal((await etat()).alerte?.type, "perimee");
   assert.equal((await appel("/api/backup/now", { cookie: cookies.admin, method: "POST", body: {} })).status, 200);
   assert.equal((await etat()).alerte, null);
+});
+
+test("état : une horloge de fichiers à la seconde ne fait pas une fausse alerte", async () => {
+  // La saisie a eu lieu il y a 25 h (horloge du processus deplacee le temps de
+  // l'ecriture), et sa sauvegarde est datee d'UNE seconde AVANT elle : c'est
+  // ce que rend un systeme de fichiers qui arrondit a la seconde (ou a deux).
+  // Elle la couvre ; pas d'alerte. A TROIS secondes avant, elle ne la couvre
+  // plus : l'alerte est la (temoin).
+  const saisie = Date.now() - 25 * HEURE;
+  const ecrire = () => {
+    mock.timers.enable({ apis: ["Date"], now: saisie });
+    try { writeDb(readDb(), { backup: false }); } finally { mock.timers.reset(); }
+  };
+  viderLeDossier();
+  _resetStorageRecoveryForTest();
+  ecrire();
+  poser("db-2026-01-01T08-00-00-000Z-arrondie.sqlite.gz", saisie - 1000);
+  assert.equal((await etat()).alerte, null);
+
+  viderLeDossier();
+  poser("db-2026-01-01T08-00-00-000Z-avant.sqlite.gz", saisie - 3000);
+  assert.equal((await etat()).alerte?.type, "perimee");
 });
 
 test("état : un échec de sauvegarde se dit, et un dossier illisible ne fait pas un 500", async () => {
