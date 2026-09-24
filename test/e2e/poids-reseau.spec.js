@@ -78,8 +78,10 @@ test("les Paramètres lisent leurs données en s'affichant, et les montrent", as
   await expect(page.locator("#parametres")).toHaveClass(/active/);
   await expect.poll(() => reponses.map(r => r.chemin).filter(c => /^\/api\/(imports\/archives|comptes|storage\/status)$/.test(c)).sort())
     .toEqual(["/api/comptes", "/api/imports/archives", "/api/storage/status"]);
-  // Les archives s'affichent (123 dans le jeu) ; l'etat du calcul routier aussi.
-  await expect(page.locator("#importsArchivesList")).toContainText("Export_ventes_Ximi");
+  // Les archives s'affichent (la plus recente en tete) ; l'etat du calcul routier aussi.
+  const archives = await (await page.request.get(`${srv.base}/api/imports/archives`)).json();
+  expect(archives.length, "prealable : le jeu a des archives d'import").toBeGreaterThan(100);
+  await expect(page.locator("#importsArchivesList")).toContainText(archives[0].filename);
   await expect(page.locator("#calculRoutierEtat")).not.toHaveText("");
   // L'apercu du logo : l'image importee, servie a son adresse, se dessine.
   await page.locator("#parametres details", { has: page.locator("#brandPreviewImage") }).locator("summary").click();

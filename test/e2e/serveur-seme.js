@@ -139,10 +139,12 @@ function demarrerRoutage({ adaptatif = false } = {}) {
  * Démarre un serveur semé sur `port`. Rend `{ base, arreter }`.
  * Le port doit être distinct de ceux de playwright.config.js (3100, 3101) et
  * des autres bancs à serveur propre (operations.spec.js : 3118).
- * `volume: "production"` : sans `seed`, le jeu de MEME FORME que la production
- * (jeu-production.js : 97 clients, 224 commandes, 218 produits...).
  */
-async function demarrer({ port, volume, seed = volume === "production" ? require("./jeu-production").jeuProduction(AUJOURDHUI) : jeuDeDonnees(), env = {}, routageAdaptatif = false }) {
+async function demarrer({ port, volume = "", seed = volume === "production" ? require("./jeu-production.js").jeuProduction() : jeuDeDonnees(), env = {}, routageAdaptatif = false }) {
+  // `volume: "production"` (24/09) : un jeu de la MEME FORME que la production
+  // (97 clients, 224 commandes, 218 produits, 1 036 entrees d'historique...),
+  // invente et deterministe -- voir jeu-production.js. Pour mesurer ce qui ne
+  // coute qu'a ce volume : le rendu de l'ouverture, le Stock, les recherches.
   // Le port doit etre LIBRE avant le lancement (integration des lots 1 a 7,
   // 23/09). Sinon le serveur seme meurt aussitot (EADDRINUSE, sortie ignoree)
   // et la boucle d'attente ci-dessous recevait le 200 de /healthz... d'un

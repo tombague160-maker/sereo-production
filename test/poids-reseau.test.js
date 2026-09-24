@@ -17,10 +17,9 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 
 const { jeuProduction } = require("./e2e/jeu-production");
-const { AUJOURDHUI } = require("./e2e/serveur-seme");
 
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sereo-poids-"));
-const seme = jeuProduction(AUJOURDHUI);
+const seme = jeuProduction();
 fs.mkdirSync(path.join(tmpRoot, "data"), { recursive: true });
 fs.writeFileSync(path.join(tmpRoot, "data", "seed.json"), JSON.stringify(seme));
 process.env.SEREO_GEOCODAGE_AUTO = "0";
