@@ -257,6 +257,9 @@ test("journal — un compte qui n'administre pas ne voit pas la carte et ne la d
   }));
   const vues = await requetesPendant(page, () => ouvrir(page, "parametres"));
   await expect(page.locator("#parametres")).toHaveClass(/active/);
+  // Temoin : la carte existe (cachee, pas absente) et /api/me a bien repondu.
+  await expect(page.locator("#parJournal")).toHaveCount(1);
+  await expect(page.locator("#sidebarIdentifiant")).toHaveText("julie");
   await expect(page.locator("#parJournal")).toBeHidden();
   expect(vues.filter(u => u.startsWith("/api/journal"))).toEqual([]);
 });

@@ -295,11 +295,12 @@ test("journal — une action et un mouvement de stock portent leur auteur", asyn
 test("journal — GET /api/journal : 50 par page, du plus recent au plus ancien, sans doublon ni trou", async () => {
   const base = Date.parse(`${AUJOURDHUI}T08:00:00Z`);
   const date = minutes => new Date(base - minutes * 60000).toISOString();
-  // 120 actions, dont des paires a la MEME milliseconde (une page ne doit pas
-  // couper entre elles en perdant la seconde), et 30 mouvements anciens
+  // 120 actions, dont des paires a la MEME milliseconde, decalees d'un rang
+  // pour que les pages de 50 coupent AU MILIEU d'une paire (49 | 50) : un
+  // curseur par la seule date perdrait la seconde. Et 30 mouvements anciens
   // (createdBy « local » : l'auteur n'etait pas connu).
   const historique = Array.from({ length: 120 }, (_, i) => ({
-    id: `h-${String(i).padStart(3, "0")}`, date: date(Math.floor(i / 2) * 3), type: "Test", message: `action ${i}`,
+    id: `h-${String(i).padStart(3, "0")}`, date: date(Math.floor((i + 1) / 2) * 3), type: "Test", message: `action ${i}`,
     ...(i % 3 === 0 ? { auteur: "julie" } : {})
   }));
   const stockMovements = Array.from({ length: 30 }, (_, i) => ({
