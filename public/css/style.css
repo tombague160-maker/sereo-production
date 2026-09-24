@@ -15122,7 +15122,9 @@ html, body, main.content { overflow-x: clip; }
 .import-bilan:focus-visible {
   box-shadow: inset 4px 0 0 var(--v8-principal), 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus);
 }
-.import-bilan-tete { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.import-bilan-tete { display: flex; align-items: center; gap: 12px; }
+/* Le titre et l'heure passent a la ligne entre eux, jamais sous « Fermer ». */
+.import-bilan-intitule { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; flex: 1 1 auto; min-width: 0; }
 .import-bilan-titre { margin: 0; font-size: 17px; font-weight: 600; color: var(--v8-texte); }
 .import-bilan-heure { font-size: 13.5px; font-weight: 500; color: var(--v8-texte-secondaire); }
 :root[data-color-scheme] .import-bilan .button.compact.import-bilan-fermer,

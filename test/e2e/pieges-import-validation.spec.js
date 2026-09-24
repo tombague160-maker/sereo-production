@@ -176,29 +176,50 @@ test("import, bureau : le resume est JUSTE et EN HAUT, sans defiler ; la command
   await ctx.close();
 });
 
-test("import, telephone et sombre : depuis le formulaire du BAS de la page, le resume vient a l'ecran", async ({ browser }) => {
+test("import, telephone et sombre : depuis l'en-tete puis depuis le formulaire du BAS, le resume vient a l'ecran", async ({ browser }) => {
   test.setTimeout(120000);
   await semer();
   const { ctx, page, erreurs } = await ouvrir(browser, "journee", { viewport: TELEPHONE, theme: "dark" });
-  // Le formulaire du pied du tableau de bord : on y descend, comme l'audit.
+  const bilan = page.locator("#importSummary");
+  const comptesDuBilan = async () => (await bilan.locator(".import-bilan-compte").allInnerTexts()).map(t => t.replace(/\s+/g, " ").trim());
+
+  // 1. Le chemin de l'audit : « Importer les ventes », en tete (resume a y = 2332).
+  const [selecteur] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    page.locator('#enteteActions [data-action="importer-ventes"]').click()
+  ]);
+  const premiere = page.waitForResponse(r => r.url().includes("/api/import/ventes"));
+  await selecteur.setFiles(FICHIER);
+  expect((await premiere).status()).toBe(200);
+  await expect(bilan).toBeVisible();
+  await page.waitForTimeout(400);
+  const enTete = await place(page, "#importSummary");
+  console.log(`[telephone/en-tete] resume ${JSON.stringify(enTete)}`);
+  expect(enTete.top, "il faut defiler pour trouver le resume").toBeLessThan(enTete.bas);
+  expect(enTete.top).toBeGreaterThanOrEqual(0);
+  // En entier : ni sous l'ecran, ni sous la barre basse (il tient en hauteur).
+  expect(enTete.height, "prealable : le resume est plus haut que l'ecran").toBeLessThan(enTete.bas);
+  expect(enTete.bottom, "le bas du resume est cache (sous l'ecran ou la barre basse)").toBeLessThanOrEqual(enTete.bas);
+  expect(await comptesDuBilan()).toEqual(["1 nouvelle", "1 mise à jour", "1 ignorée", "1 erreur"]);
+
+  // 2. Le formulaire du pied du tableau de bord : on y descend. Le meme
+  // fichier, une seconde fois : tout est identique, la commande en tournee
+  // reste ignoree, la ligne illisible reste une erreur.
   const bouton = page.locator("#importVentesButton");
   await bouton.scrollIntoViewIfNeeded();
   const avant = await page.evaluate(() => Math.round(scrollY));
   expect(avant, "prealable : le formulaire n'est pas en bas de la page").toBeGreaterThan(400);
   await page.locator("#ventesFile").setInputFiles(FICHIER);
-  const reponse = page.waitForResponse(r => r.url().includes("/api/import/ventes"));
+  const seconde = page.waitForResponse(r => r.url().includes("/api/import/ventes"));
   await bouton.click();
-  expect((await reponse).status()).toBe(200);
-
-  const bilan = page.locator("#importSummary");
-  await expect(bilan).toBeVisible();
+  expect((await seconde).status()).toBe(200);
   await page.waitForTimeout(400);
+  expect(await comptesDuBilan()).toEqual(["0 nouvelle", "0 mise à jour", "3 ignorées", "1 erreur"]);
   const boite = await place(page, "#importSummary .import-bilan-comptes");
-  console.log(`[telephone] comptes ${JSON.stringify(boite)} (avant : scrollY ${avant})`);
+  console.log(`[telephone/pied] comptes ${JSON.stringify(boite)} (avant : scrollY ${avant})`);
   expect(boite.top, "les comptes sont au-dessus de l'ecran").toBeGreaterThanOrEqual(0);
   expect(boite.bottom, "il faut defiler pour lire les comptes (ou la barre basse les cache)").toBeLessThanOrEqual(boite.bas);
-  const comptes = (await bilan.locator(".import-bilan-compte").allInnerTexts()).map(t => t.replace(/\s+/g, " ").trim());
-  expect(comptes).toEqual(["1 nouvelle", "1 mise à jour", "1 ignorée", "1 erreur"]);
+  await expect(bilan).toContainText("2 commandes identiques, déjà importées");
   // Le focus est dans le resume : un lecteur d'ecran le lit, Tab repart de la.
   expect(await page.evaluate(() => document.activeElement?.id)).toBe("importSummary");
 

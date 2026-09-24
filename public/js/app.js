@@ -3055,8 +3055,10 @@ function renderImportSummary() {
   container.hidden = false;
   container.innerHTML = `
     <div class="import-bilan-tete">
-      <h3 class="import-bilan-titre">${type === "ventes" ? "Import des ventes terminé" : "Import du stock terminé"}</h3>
-      <span class="import-bilan-heure">à ${escapeHtml(heure)}</span>
+      <div class="import-bilan-intitule">
+        <h3 class="import-bilan-titre">${type === "ventes" ? "Import des ventes terminé" : "Import du stock terminé"}</h3>
+        <span class="import-bilan-heure">à ${escapeHtml(heure)}</span>
+      </div>
       <button class="button secondary compact import-bilan-fermer" type="button" data-action="fermer-bilan-import" aria-label="Fermer le résumé de l’import">
         <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path></svg>
       </button>
@@ -3081,7 +3083,10 @@ function montrerBilanImport() {
   if (!bilan || bilan.hidden) return;
   if (ongletAffiche !== "journee") return;
   const boite = bilan.getBoundingClientRect();
-  if (boite.top < 0 || boite.bottom > window.innerHeight) bilan.scrollIntoView({ block: "start" });
+  // La barre basse du telephone est fixe : ce qui passe dessous est cache.
+  const barre = document.querySelector(".mobile-tabbar")?.getBoundingClientRect();
+  const bas = barre && barre.height > 0 ? Math.min(barre.top, window.innerHeight) : window.innerHeight;
+  if (boite.top < 0 || boite.bottom > bas) bilan.scrollIntoView({ block: "start" });
   bilan.focus({ preventScroll: true });
 }
 
