@@ -212,6 +212,12 @@ document.addEventListener("DOMContentLoaded", () => {
   // Avant showTab aussi : il range les boutons de #gestesBas comme ceux de la fente.
   placerGestesBas();
   ecranTelephone.addEventListener?.("change", placerGestesBas);
+  // Le telephone utilisable dehors (24/09) : l'anneau de la tournee dans
+  // l'en-tete vert, et les pilules remesurees au franchissement de 820 px.
+  placerEnteteTournee();
+  ecranTelephone.addEventListener?.("change", placerEnteteTournee);
+  ecranTelephone.addEventListener?.("change", replierToutesLesPilules);
+  ecranTelephone.addEventListener?.("change", planifierArretAuPouce);
   showTab(getInitialTab(), { updateHash: false });
   loadAppearance();
   loadVersionInfo();
@@ -1022,8 +1028,14 @@ function showTab(tabName, options = {}) {
     renderStock();
   }
   if (nextTab === "crm") majSousTitreClients();
+  // Le repli des pilules se MESURE : cache, l'ecran n'avait pas de rangs.
+  replierToutesLesPilules();
   if (nextTab === "abonnements") majSousTitreAbonnements();
-  if (nextTab === "livreur") majEnteteTournee();
+  if (nextTab === "livreur") {
+    majEnteteTournee();
+    // Cache, l'ecran n'avait rien a mesurer (ajusterArretAuPouce).
+    planifierArretAuPouce();
+  }
   if (nextTab === "preparation") {
     majSousTitrePreparation();
     // Le repli des secteurs se MESURE : cache, la rangee n'a pas de hauteur.
@@ -2358,7 +2370,9 @@ function placerPilulesCommandes() {
 // ecouteurs : les clics sont delegues au document) dans #gestesBas, apres les
 // ecrans dans l'ordre du document ; au bureau, il revient a sa place dans
 // l'en-tete, marquee par un commentaire. Decision de Thomas, 23/09.
-const GESTES_BAS = [".cli-nouveau", ".abo-nouveau"];
+// « Nouvelle commande » les rejoint le 24/09 (le telephone utilisable dehors) :
+// dans l'en-tete, elle prenait un rang entier au-dessus de la liste.
+const GESTES_BAS = [".cli-nouveau", ".abo-nouveau", ".cmd-nouvelle"];
 const placesEnTete = new Map();
 function placerGestesBas() {
   const bas = document.getElementById("gestesBas");
@@ -2382,6 +2396,213 @@ function placerGestesBas() {
     if (avaitLeFocus) bouton.focus({ preventScroll: true });
   }
 }
+
+/*
+ * LE TELEPHONE UTILISABLE DEHORS (24/09). Trois deplacements, sur le modele
+ * de placerGestesBas : le MEME element change de place au seuil de 820 px,
+ * avec ses ecouteurs (les clics sont delegues au document), et revient a la
+ * sienne au bureau.
+ */
+
+// Tournee (planche 4b) : l'anneau « 3 sur 6 » et la barre de progression
+// rejoignent l'en-tete vert de l'ecran -- UN bloc, comme la planche. Avant :
+// l'en-tete vert, puis une seconde carte verte pour l'anneau, ~150 px au-dessus
+// de l'arret, et les articles a decharger tombaient sous les gestes. Au bureau
+// (planche 13b), ils restent dans l'en-tete de la tournee.
+function placerEnteteTournee() {
+  const cible = document.getElementById("enteteTournee");
+  const origine = document.querySelector("#livreur .tournee-entete");
+  const anneau = document.getElementById("routeProgress");
+  // La barre de la TOURNEE, par son identifiant : le premier
+  // `.tournee-progression` du document est celui de la carte « Tournee du
+  // jour » du Tableau de bord (relecture du 24/09). Deplace, il laissait sa
+  // carte sans barre et s'affichait ici sans suivre updateRouteProgress.
+  const barre = document.getElementById("tourneeProgressionBarre")?.parentElement;
+  if (!cible || !origine || !anneau || !barre) return;
+  const place = ecranTelephone.matches ? cible : origine;
+  if (anneau.parentElement !== place) place.append(anneau, barre);
+}
+
+/*
+ * L'arret sous le pouce (relecture adverse du 24/09). Deux mesures, apres
+ * chaque rendu de la tournee, quand la barre des gestes colle au bas de
+ * l'ecran (telephone) :
+ *  - « arret-serre » : page en haut, si le dernier article n'a pas 8 px
+ *    d'air au-dessus de la barre collee, la carte et l'en-tete se resserrent
+ *    (disques, ecarts, rembourrages). Mesure avant : a 375 x 667, un 3e article finissait a
+ *    473 pour une barre a 441. La ou tout tient, les mesures de la planche
+ *    restent. Le resserrement ne fait pas de miracle : au-dela de trois
+ *    articles sur un petit ecran, un defilement reste (DESIGN.md, ecarts) ;
+ *  - le haut de la barre collee, ou se posent les messages : le message
+ *    « Livre -- client · Annuler » couvrait « Livre » de l'arret SUIVANT, et
+ *    un appui sur sa droite annulait la livraison precedente.
+ * Mesure dans une image (requestAnimationFrame) : l'en-tete, l'anneau et la
+ * carte sont alors tous rendus, et rien n'est peint entre-temps.
+ */
+const ARRET_AIR_PX = 8;
+let arretAuPouceEnAttente = 0;
+function planifierArretAuPouce() {
+  cancelAnimationFrame(arretAuPouceEnAttente);
+  arretAuPouceEnAttente = requestAnimationFrame(ajusterArretAuPouce);
+}
+
+function ajusterArretAuPouce() {
+  const carte = document.querySelector("#livreur .current-driver-card");
+  const region = document.getElementById("toastRegion");
+  if (!carte) return;
+  carte.classList.remove("arret-serre");
+  const gestes = carte.querySelector(":scope > .gestes");
+  const collee = ecranTelephone.matches && gestes?.getClientRects().length && getComputedStyle(gestes).position === "sticky";
+  if (!collee) {
+    region?.style.removeProperty("--toast-bas-tournee");
+    return;
+  }
+  // Distance du bas de l'ecran au haut de la barre collee : son decalage
+  // (`bottom`, la barre basse comprise) plus sa hauteur.
+  const dessousGestes = () => parseFloat(getComputedStyle(gestes).bottom) + gestes.getBoundingClientRect().height;
+  const articles = carte.querySelectorAll("#currentClient .arret-article");
+  const dernier = articles[articles.length - 1];
+  // En coordonnees de la PAGE (page en haut, a l'ouverture) : ce qui est
+  // mesure ne depend pas du defilement du moment. 8 px d'air : les polices
+  // d'un vrai telephone (Safari) ne tombent pas au pixel pres sur celles de
+  // Chromium -- 2 px de marge, ceux du premier jet, n'y survivent pas.
+  if (dernier && dernier.getBoundingClientRect().bottom + window.scrollY > window.innerHeight - dessousGestes() - ARRET_AIR_PX) {
+    carte.classList.add("arret-serre");
+  }
+  region?.style.setProperty("--toast-bas-tournee", `${Math.ceil(dessousGestes() + 12)}px`);
+}
+
+// Une rotation change la largeur (les lignes se replient autrement) ; la
+// hauteur seule change quand les barres du navigateur se replient au
+// defilement : la carte ne se re-mesure pas pour si peu (elle sauterait sous
+// le doigt).
+let largeurArretAuPouce = window.innerWidth;
+window.addEventListener("resize", () => {
+  if (window.innerWidth === largeurArretAuPouce) return;
+  largeurArretAuPouce = window.innerWidth;
+  planifierArretAuPouce();
+});
+
+// Commandes : « Exporter » passe, au telephone, dans le panneau « Filtres »
+// (il exporte la liste filtree : sa place est a cote des filtres). Il prenait
+// un rang de l'en-tete. Hors de la fente, showTab ne le range plus : dans
+// l'ecran, il se montre avec lui.
+let placeExportAuBureau = null;
+function placerExportCommandes() {
+  const bouton = document.querySelector('[data-action="cmd-export"]');
+  const filtres = document.querySelector("#commandes .cmd-filtres");
+  if (!bouton || !filtres) return;
+  if (!placeExportAuBureau) {
+    placeExportAuBureau = document.createComment("place de l'export au bureau");
+    bouton.before(placeExportAuBureau);
+  }
+  if (ecranTelephone.matches) {
+    if (bouton.parentElement !== filtres) filtres.append(bouton);
+    bouton.hidden = false;
+  } else if (bouton.parentElement !== placeExportAuBureau.parentElement) {
+    placeExportAuBureau.after(bouton);
+    bouton.hidden = bouton.dataset.ecran !== document.querySelector(".page.active")?.id;
+  }
+}
+
+/*
+ * « Pilules de filtre : repliables plutot que debordantes » (charte §4), au
+ * telephone : au-dela de DEUX rangs, les pilules du bout se cachent et une
+ * pilule « + N » les rend ; « Moins » replie. Le repli se MESURE (les rangs
+ * dans la page), il ne se deduit pas du compte : la largeur d'un libelle
+ * decide autant que leur nombre. Ce que l'utilisateur a choisi ne se cache
+ * jamais. Commandes : 7 pilules sur 3 rangs a 390 px ; Clients : secteurs,
+ * Abonnes et statut sur 4 rangs a 360 px.
+ */
+const REPLIS_DE_PILULES = new Map();
+function declarerRepliDePilules(nom, { conteneur, pilules, choisie }) {
+  REPLIS_DE_PILULES.set(nom, { conteneur, pilules, choisie });
+}
+
+function replierPilules(nom) {
+  const repli = REPLIS_DE_PILULES.get(nom);
+  const conteneur = repli?.conteneur();
+  if (!conteneur) return;
+  let bouton = conteneur.querySelector(":scope > .pilules-plus");
+  const pilules = repli.pilules(conteneur);
+  pilules.forEach(p => p.classList.remove("pilule-repliee"));
+  if (bouton) bouton.hidden = true;
+  // Au bureau, ou ecran cache (rien ne se mesure) : tout reste deplie.
+  if (!ecranTelephone.matches || !conteneur.getClientRects().length) return;
+  const rangs = [];
+  // Relatif au conteneur : cacher une pilule change la hauteur de la page, et
+  // le defilement qui s'ajuste deplacait tout -- en coordonnees d'ecran, le
+  // deuxieme rang « glissait » et le repli cachait six pilules sur sept.
+  const haut = e => Math.round(e.getBoundingClientRect().top - conteneur.getBoundingClientRect().top);
+  const visibles = pilules.filter(p => p.getClientRects().length);
+  for (const p of visibles) if (!rangs.some(r => Math.abs(r - haut(p)) < 4)) rangs.push(haut(p));
+  if (rangs.length <= 2) return;
+  if (!bouton) {
+    bouton = document.createElement("button");
+    bouton.type = "button";
+    bouton.className = "pilules-plus";
+    bouton.dataset.pilulesPlus = nom;
+    conteneur.append(bouton);
+  }
+  bouton.hidden = false;
+  if (conteneur.dataset.pilulesDepliees === "1") {
+    bouton.textContent = "Moins";
+    bouton.setAttribute("aria-expanded", "true");
+    bouton.setAttribute("aria-label", "Replier les filtres");
+    return;
+  }
+  bouton.setAttribute("aria-expanded", "false");
+  // On cache depuis le bout, jamais la pilule choisie, jusqu'a ce que tout --
+  // « + N » compris -- tienne dans les deux premiers rangs.
+  rangs.sort((a, b) => a - b);
+  const limite = rangs[1] + 4;
+  const cachables = visibles.filter(p => !repli.choisie(p)).reverse();
+  let caches = 0;
+  for (;;) {
+    bouton.textContent = `+ ${Math.max(caches, 1)}`;
+    const deborde = [...visibles, bouton].some(e => !e.classList.contains("pilule-repliee") && haut(e) > limite);
+    if (!deborde || caches >= cachables.length) break;
+    cachables[caches].classList.add("pilule-repliee");
+    caches++;
+  }
+  bouton.textContent = `+ ${caches}`;
+  bouton.setAttribute("aria-label", `Afficher ${caches} filtre${caches > 1 ? "s" : ""} de plus`);
+}
+
+function replierToutesLesPilules() {
+  for (const nom of REPLIS_DE_PILULES.keys()) replierPilules(nom);
+}
+
+document.addEventListener("click", event => {
+  const bouton = event.target.closest?.("[data-pilules-plus]");
+  if (!bouton) return;
+  const conteneur = bouton.parentElement;
+  conteneur.dataset.pilulesDepliees = conteneur.dataset.pilulesDepliees === "1" ? "0" : "1";
+  replierPilules(bouton.dataset.pilulesPlus);
+  bouton.focus({ preventScroll: true });
+});
+
+// Une rotation, une fenetre qui change, la police qui arrive (les libelles
+// changent de largeur) : les rangs se remesurent.
+let repliEnAttente = 0;
+function planifierReplis() {
+  cancelAnimationFrame(repliEnAttente);
+  repliEnAttente = requestAnimationFrame(replierToutesLesPilules);
+}
+window.addEventListener("resize", planifierReplis);
+document.fonts?.addEventListener?.("loadingdone", planifierReplis);
+
+declarerRepliDePilules("commandes", {
+  conteneur: () => document.getElementById("cmdPilules"),
+  pilules: c => [...c.querySelectorAll(":scope > .filtre-pilule")],
+  choisie: p => p.classList.contains("active-filter")
+});
+declarerRepliDePilules("clients", {
+  conteneur: () => document.querySelector("#crm .cli-filtres"),
+  pilules: c => [...c.querySelectorAll(":scope > .cli-pilules > .cli-pilule, :scope > .cli-statut-filtre")],
+  // Le statut commercial est un filtre choisi des qu'il n'est plus « Tous ».
+  choisie: p => p.classList.contains("cli-pilule--active") || (p.matches(".cli-statut-filtre") && p.querySelector("select")?.value !== "all")
+});
 
 function commandeBloquee(order) {
   return ["importe", "stock_a_verifier"].includes(order.status) && order.canPrepare === false;
@@ -2491,6 +2712,7 @@ function renderCommandes() {
       return `<button class="button secondary compact filtre-pilule${actif ? " active-filter" : ""}" type="button"`
         + ` data-cmd-filtre="${f.cle}" aria-pressed="${actif}">${escapeHtml(f.libelle)}</button>`;
     }).join("");
+    replierPilules("commandes");
   }
   const caseBloquees = document.getElementById("cmdBloquees");
   if (caseBloquees) caseBloquees.checked = commandesFiltre.bloquees;
@@ -2685,6 +2907,8 @@ function bindCommandes() {
   });
   placerPilulesCommandes();
   ecranTelephone.addEventListener?.("change", placerPilulesCommandes);
+  placerExportCommandes();
+  ecranTelephone.addEventListener?.("change", placerExportCommandes);
   ecran.addEventListener("click", event => {
     if (event.target.closest(".cmd-col-choix")) return;   // la case ne doit pas ouvrir le detail
     const ligne = event.target.closest("[data-cmd-ouvrir]");
@@ -3268,6 +3492,7 @@ function renderCrm() {
     pilules.innerHTML = pilule("", "Tous")
       + secteurs.map(s => pilule(s, formatSectorLabel(s))).join("")
       + pilule("__abonnes", "Abonnés", ICONE_CLI.abonnes);
+    replierPilules("clients");
   }
 
   const rappels = (crmRelances || []).filter(r => r.status === "a_faire" && String(r.datePrevue || "") <= getTodayDateInput()).length;
@@ -7428,6 +7653,9 @@ function renderRoute() {
   const metrics = document.getElementById("routeMetrics");
   // Lot 6 : l'historique suit les tournees chargees (s'il est ouvert).
   rendreHistoriqueTournees();
+  // Le telephone utilisable dehors (relecture du 24/09) : l'arret et les
+  // messages se re-mesurent une fois tout rendu.
+  planifierArretAuPouce();
 
   if (!list || !current) return;
 

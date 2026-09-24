@@ -15273,3 +15273,271 @@ html, body, main.content { overflow-x: clip; }
 
 #recommande .reco-manque { margin: 10px 0 0; font-size: 14px; font-weight: 600; line-height: 1.4; color: var(--v8-alerte); }
 #recommande .reco-detail { margin: 10px 0 0; font-size: 13px; line-height: 1.45; color: var(--v8-texte-secondaire); }
+
+/* ==========================================================================
+   LE TELEPHONE UTILISABLE DEHORS (24/09) -- sous 820 px, mesure a 360 x 740,
+   390 x 844 et 375 x 667 (iPhone SE), clair et sombre. DESIGN.md, section du
+   meme nom. Banc : test/e2e/telephone-utilisable.spec.js.
+   --------------------------------------------------------------------------
+   1. Tournee (planche 4b) : l'en-tete vert et l'anneau « 3 sur 6 » ne font
+      plus qu'UN bloc (app.js deplace l'anneau et la barre dans l'en-tete) ;
+      Client absent et Probleme quittent la barre collee ; la carte de
+      l'arret reprend les mesures de la planche. Mesure avant, 375 x 667 :
+      la barre des gestes commencait a y = 398, le nom du client finissait a
+      467 et les articles a 645 -- tout etait dessous.
+   2. La rangee « A jour + Actualiser », seule sur sa ligne (56 px), monte
+      sur la ligne du titre.
+   3. Commandes et Clients : les pilules se replient au-dela de deux rangs
+      (« + N »), « Exporter » passe dans « Filtres », « Nouvelle commande »
+      devient un bouton fixe en bas. Avant : 0 commande entiere a 360 x 740.
+   4. Le panier de Commande client ne passe plus sous la barre basse.
+   5. Menu « Plus » : icones visibles en clair ; les messages n'en couvrent
+      plus les entrees.
+   6. Textes sous 13 px, « Detail du jour », puces etirees, « En preparation ».
+   ========================================================================== */
+
+/* --- 1. Tournee : un seul bloc vert ---------------------------------------- */
+.entete-tournee { display: none; }
+/* Au bureau, Client absent et Probleme gardent leur place sous « Livre ». */
+.gestes-secondaires { margin-top: 10px; }
+@media (min-width: 921px) { .gestes-secondaires { max-width: 640px; } }
+:root[data-color-scheme] .gestes-secondaires .button,
+:root:not([data-color-scheme]) .gestes-secondaires .button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+}
+
+@media (max-width: 820px) {
+  /* L'en-tete de l'ecran porte l'anneau et la barre (placerEnteteTournee) :
+     « titre | anneau » puis « barre | A jour + Actualiser ». L'en-tete de la
+     tournee, vide au telephone, disparait. */
+  #livreur .tournee-entete { display: none; }
+  body:has(#livreur.active #tourneeActive:not([hidden])) .ecran-entete .entete-tournee { display: contents; }
+  :root[data-color-scheme] body:has(#livreur.active #tourneeActive:not([hidden])) main.content > .ecran-entete,
+  :root:not([data-color-scheme]) body:has(#livreur.active #tourneeActive:not([hidden])) main.content > .ecran-entete {
+    /* Trois colonnes : l'anneau (58 px) et la synchro (~110 px) n'ont pas a
+       partager la leur -- sinon le titre, dans ce qui reste, passait a la
+       ligne a 375 px. */
+    display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas: "texte texte anneau" "barre actions actions";
+    align-items: center; column-gap: 12px; row-gap: 8px;
+    padding: 6px 20px 24px;
+  }
+  /* L'anneau a 56 (58 ailleurs) : la hauteur du titre et de sa ligne. */
+  body:has(#livreur.active #tourneeActive:not([hidden])) .ecran-entete .tournee-anneau { width: 56px; height: 56px; }
+  :root[data-color-scheme] body:has(#livreur.active #tourneeActive:not([hidden])) .ecran-entete #refreshButton,
+  :root:not([data-color-scheme]) body:has(#livreur.active #tourneeActive:not([hidden])) .ecran-entete #refreshButton {
+    height: 44px; min-height: 44px;
+  }
+  body:has(#livreur.active #tourneeActive:not([hidden])) .ecran-entete .ecran-entete-texte { grid-area: texte; }
+  body:has(#livreur.active #tourneeActive:not([hidden])) .ecran-entete .tournee-anneau { grid-area: anneau; }
+  body:has(#livreur.active #tourneeActive:not([hidden])) .ecran-entete .tournee-progression { grid-area: barre; }
+  body:has(#livreur.active #tourneeActive:not([hidden])) .ecran-entete .ecran-entete-actions {
+    grid-area: actions; flex-wrap: nowrap; justify-content: flex-end;
+  }
+  /* La fente est vide sur cet ecran au telephone (« Nouvelle tournee » et
+     « Recalculer » n'y sont rendus qu'au-dela de 1180 px) : elle prenait une
+     ligne entiere, et renvoyait la synchro a la suivante. */
+  body:has(#livreur.active) .ecran-entete .ecran-entete-fente { display: none; }
+  body:has(#livreur.active #tourneeActive:not([hidden])) .ecran-entete #syncStatus { margin-left: 0; }
+  /* Sur le vert de l'en-tete, les couleurs que l'en-tete de tournee donnait. */
+  .ecran-entete .tournee-anneau { color: var(--v8-texte-sur-carte-tournee); }
+  :root[data-color-scheme] .ecran-entete .tournee-anneau small,
+  :root:not([data-color-scheme]) .ecran-entete .tournee-anneau small {
+    font-size: 13px; color: var(--v8-secondaire-sur-carte-tournee);
+  }
+  :root[data-color-scheme] .ecran-entete .tournee-progression,
+  :root:not([data-color-scheme]) .ecran-entete .tournee-progression {
+    background: color-mix(in srgb, var(--v8-texte-sur-carte-tournee) 18%, transparent);
+  }
+  /* La carte de l'arret chevauche le vert (planche : -10 px), sans marge
+     entre les deux -- sauf si un bandeau s'intercale (hors ligne, tournee
+     d'un jour passe) : le vert garde alors son arrondi et sa marge. */
+  :root[data-color-scheme] body:has(#livreur.active #tourneeActive:not([hidden])):not(:has(#bandeauHorsLigne:not([hidden]), #tourneesNonSoldees:not([hidden]))) main.content > .ecran-entete,
+  :root:not([data-color-scheme]) body:has(#livreur.active #tourneeActive:not([hidden])):not(:has(#bandeauHorsLigne:not([hidden]), #tourneesNonSoldees:not([hidden]))) main.content > .ecran-entete {
+    margin-bottom: 0;
+  }
+
+  /* La carte de l'arret, aux mesures de la planche 4b : le nom a 22 px
+     (une ancienne regle mobile le passait a 28), les ecarts resserres. */
+  :root[data-color-scheme] #livreur .tournee .current-driver-card,
+  :root:not([data-color-scheme]) #livreur .tournee .current-driver-card { padding: 14px 16px 16px; }
+  #livreur #currentClient .arret { gap: 6px; }
+  #livreur #currentClient .arret-nom { font-size: 22px; line-height: 1.15; letter-spacing: -0.02em; }
+  :root[data-color-scheme] #livreur .panel p.arret-etat,
+  :root:not([data-color-scheme]) #livreur .panel p.arret-etat { font-size: 13px; }
+  #livreur #currentClient .arret-articles { gap: 6px; margin-top: 2px; padding: 10px 14px 12px; }
+  :root[data-color-scheme] #livreur .panel p.arret-articles-titre,
+  :root:not([data-color-scheme]) #livreur .panel p.arret-articles-titre { font-size: 13px; }
+
+  /* La barre collee ne porte plus que Appeler, « Y aller », Carte et
+     « Livre » (56 px) : 8 px d'air au lieu de 12. */
+  #livreur .current-driver-card .gestes { gap: 8px; padding: 6px 16px 8px; }
+  /* Client absent et Probleme : sous la barre, a 48 px, sans couleur. */
+  :root[data-color-scheme] #livreur .gestes-secondaires .button.tertiary,
+  :root:not([data-color-scheme]) #livreur .gestes-secondaires .button.tertiary {
+    height: 48px; min-height: 48px; font-size: 15.5px;
+  }
+  /* Fin de tournee (4d) : plus d'arret, plus de gestes d'arret. */
+  #livreur .current-driver-card:has(.fin-tournee) .gestes-secondaires { display: none; }
+}
+
+/* --- 2. « A jour + Actualiser » sur la ligne du titre ----------------------
+   Sur ces ecrans, la fente n'a rien a montrer au telephone (Commandes : la
+   recherche et les pilules, pleine largeur, dessous ; Tournee sans tournee :
+   rien) : la synchro etait seule sur une ligne de 56 px. Elle monte a droite
+   du titre. Tournee en cours : voir 1 (elle suit la barre de progression). */
+@media (max-width: 820px) {
+  :root[data-color-scheme] body:has(:is(#statistiques, #exports, #relances, #recommande, #commande-client, #parametres, #commandes).active, #livreur.active #tourneeActive[hidden]) main.content > .ecran-entete,
+  :root:not([data-color-scheme]) body:has(:is(#statistiques, #exports, #relances, #recommande, #commande-client, #parametres, #commandes).active, #livreur.active #tourneeActive[hidden]) main.content > .ecran-entete,
+  :root[data-color-scheme] body:has(#crm.active:not([data-vue="fiche"])) main.content > .ecran-entete,
+  :root:not([data-color-scheme]) body:has(#crm.active:not([data-vue="fiche"])) main.content > .ecran-entete {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; column-gap: 8px; row-gap: 16px;
+  }
+  body:has(:is(#statistiques, #exports, #relances, #recommande, #commande-client, #parametres, #commandes).active, #livreur.active #tourneeActive[hidden]) .ecran-entete .ecran-entete-texte,
+  body:has(#crm.active:not([data-vue="fiche"])) .ecran-entete .ecran-entete-texte { grid-column: 1; grid-row: 1; margin-right: 4px; }
+  body:has(:is(#statistiques, #exports, #relances, #recommande, #commande-client, #parametres, #commandes).active, #livreur.active #tourneeActive[hidden]) .ecran-entete .ecran-entete-actions,
+  body:has(#crm.active:not([data-vue="fiche"])) .ecran-entete .ecran-entete-actions { display: contents; }
+  body:has(:is(#statistiques, #exports, #relances, #recommande, #commande-client, #parametres, #commandes).active, #livreur.active #tourneeActive[hidden]) .ecran-entete #syncStatus,
+  body:has(#crm.active:not([data-vue="fiche"])) .ecran-entete #syncStatus {
+    grid-column: 2; grid-row: 1; align-self: start; margin: 12px 0 0; max-width: 8em;
+  }
+  body:has(:is(#statistiques, #exports, #relances, #recommande, #commande-client, #parametres, #commandes).active, #livreur.active #tourneeActive[hidden]) .ecran-entete #refreshButton,
+  body:has(#crm.active:not([data-vue="fiche"])) .ecran-entete #refreshButton { grid-column: 3; grid-row: 1; align-self: start; }
+  body:has(:is(#statistiques, #exports, #relances, #recommande, #commande-client, #parametres, #commandes).active, #livreur.active #tourneeActive[hidden]) .ecran-entete .ecran-entete-fente,
+  body:has(#crm.active:not([data-vue="fiche"])) .ecran-entete .ecran-entete-fente { grid-column: 1 / -1; grid-row: 2; }
+  body:has(:is(#statistiques, #exports, #relances, #recommande, #commande-client, #parametres).active) .ecran-entete .ecran-entete-fente { display: none; }
+  /* Clients : la recherche et « Rappels » (hors planche, garde) sur une
+     ligne -- « Rappels » partageait jusqu'ici la sienne avec la synchro. */
+  body:has(#crm.active:not([data-vue="fiche"])) .ecran-entete .ecran-entete-fente { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; }
+  body:has(#crm.active:not([data-vue="fiche"])) .ecran-entete .cli-recherche { flex: 1 1 0; width: auto; min-width: 0; }
+  body:has(#crm.active:not([data-vue="fiche"])) .ecran-entete .cli-rappels { flex: none; }
+}
+
+/* --- 3. Commandes et Clients : des lignes a l'ouverture -------------------- */
+/* Les pilules repliees (replierPilules) : [hidden] et le repli gagnent. */
+.pilule-repliee { display: none !important; }
+.pilules-plus[hidden] { display: none !important; }
+@media (max-width: 820px) {
+  /* « + N » : une pilule de plus, sur le vert, a la hauteur des autres. */
+  .pilules-plus {
+    display: inline-flex; align-items: center; justify-content: center; flex: none;
+    height: 44px; min-width: 56px; padding: 0 16px; border: 1.5px solid var(--v8-secondaire-sur-carte-tournee);
+    border-radius: 999px; background: transparent; color: var(--v8-texte-sur-carte-tournee);
+    font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  }
+  .pilules-plus:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--v8-carte-tournee), 0 0 0 5px var(--v8-texte-sur-carte-tournee); }
+  /* Clients : les secteurs, « Abonnes » et le statut dans UN flot, pour
+     que le repli compte leurs rangs ensemble. */
+  #crm .cli-filtres > .cli-pilules { display: contents; }
+
+  /* « Exporter » dans le panneau « Filtres » (placerExportCommandes). */
+  #commandes .cmd-filtres > [data-action="cmd-export"] { order: 5; flex: none; width: auto; }
+  #commandes .cmd-filtres:not(.cmd-filtres--ouverts) > [data-action="cmd-export"] { display: none; }
+}
+/* [hidden] gagne : `.button` (display: inline-flex) l'emportait sur la
+   feuille du navigateur -- l'attribut ne cachait rien, et le « hidden =
+   false » de placerExportCommandes ne se voyait pas (mutant M14 survivant). */
+#commandes .cmd-filtres > [data-action="cmd-export"][hidden] { display: none !important; }
+@media (max-width: 820px) {
+
+  /* « Nouvelle commande », fixe au-dessus de la barre basse, comme « Nouveau
+     client » (placerGestesBas : apres la liste dans l'ordre du clavier). */
+  #gestesBas .cmd-nouvelle { display: inline-flex; align-items: center; gap: 8px; }
+  :root[data-color-scheme] body:has(#commandes.active) #gestesBas .cmd-nouvelle,
+  :root:not([data-color-scheme]) body:has(#commandes.active) #gestesBas .cmd-nouvelle {
+    position: fixed; left: 16px; right: 16px; bottom: calc(104px + env(safe-area-inset-bottom)); z-index: 1000;
+    width: auto; height: 48px; justify-content: center; padding: 0 24px;
+    background: var(--v8-principal); color: var(--v8-texte-sur-principal); border: 0;
+    font-size: 15.5px; font-weight: 600; box-shadow: 0 8px 24px rgba(15, 61, 61, 0.22);
+  }
+  :root[data-color-scheme] body:has(#commandes.active) #gestesBas .cmd-nouvelle:focus-visible,
+  :root:not([data-color-scheme]) body:has(#commandes.active) #gestesBas .cmd-nouvelle:focus-visible {
+    outline: none; box-shadow: 0 0 0 2px var(--v8-focus-halo), 0 0 0 5px var(--v8-focus), 0 8px 24px rgba(15, 61, 61, 0.22);
+  }
+  /* Sa place : la derniere commande defile au-dessus du bouton. */
+  :root[data-color-scheme] body:has(#commandes.active) main.content,
+  :root:not([data-color-scheme]) body:has(#commandes.active) main.content {
+    padding-bottom: calc(172px + env(safe-area-inset-bottom));
+  }
+}
+
+/* --- 4. Le panier de Commande client, au-dessus de la barre basse ----------
+   `78px` datait d'une barre basse de 78 px ; elle en mesure 90 (« Tableau de
+   bord » sur deux lignes) : 12 px du total et du bouton etaient dessous. La
+   place des boutons fixes de Clients et d'Abonnements : 90 + 14 d'air. */
+@media (max-width: 560px) {
+  .customer-cart-bar:not([hidden]) { bottom: calc(104px + env(safe-area-inset-bottom)); }
+  .customer-cart-bar .ccb-label { font-size: 13px; }
+}
+
+/* --- 5. Menu « Plus » -------------------------------------------------------
+   En clair, une regle ecrite pour une ancienne feuille VERTE peignait les
+   icones en blanc a 82 % sur un panneau blanc (1:1). Le trait de la charte :
+   texte secondaire, sur fond transparent (5,13:1 sur blanc). */
+:root[data-color-scheme="light"] .more-sheet-icon {
+  width: 32px; height: 32px; border-radius: 12px;
+  background: transparent; color: var(--v8-texte-secondaire);
+}
+/* Menu ouvert : les messages passent en haut de l'ecran, au lieu de couvrir
+   Analyse et Parametres au bas de la feuille. */
+@media (max-width: 820px) {
+  body:has(#mobile-more-sheet:not([hidden])) .toast-region {
+    top: calc(12px + env(safe-area-inset-top)); bottom: auto;
+  }
+}
+
+/* --- 6. Lisible dehors, facile a toucher ----------------------------------- */
+/* « Detail du jour » : toute la carte repond au doigt, pas 19 px de texte.
+   Le rembourrage passe du volet a son resume -- meme boite a l'oeil. */
+:root[data-color-scheme] .op-details.tb-detail,
+:root:not([data-color-scheme]) .op-details.tb-detail { padding: 0; }
+.op-details.tb-detail > summary {
+  /* `list-item`, pas `flex` : seul un list-item porte le triangle d'ouverture
+     (relecture du 24/09 -- en flex, il disparaissait au bureau comme au
+     telephone). Le rembourrage suffit a passer 44 px. */
+  display: list-item; min-height: 44px; padding: 18px; box-sizing: border-box;
+}
+.op-details.tb-detail[open] > summary { padding-bottom: 12px; }
+.op-details.tb-detail > .tb-detail-corps { padding: 0 18px 18px; }
+@media (max-width: 820px) {
+  /* La charte : jamais sous 13 px au telephone (« 1 echeance » etait a 11 ;
+     dans « Detail du jour », « Voir mes abonnements » et « Rappels arrives a
+     echeance » a 11, le libelle des cartes a 12). */
+  .op-tag { font-size: 13px; }
+  .op-kpi > span, .op-kpi small, .op-kpi a { font-size: 13px; }
+  /* Une puce reste une puce : dans un titre de carte passe en colonne, elle
+     s'etirait sur toute la largeur (« En livraison » sur 322 px). */
+  .panel-heading > .status-chip { justify-self: start; align-self: start; }
+}
+/* « En preparation » / « En livraison » (.pill-warning) en clair : #9A5A18
+   sur la peche claire ne tient que 4,45:1. Le fond d'avertissement de la
+   charte (--v8-avertissement-fond) : 4,89. */
+:root[data-color-scheme="light"] .pill.pill-warning { background: var(--v8-avertissement-fond); }
+
+/* --- 7. Relecture adverse du 24/09 : l'arret sous le pouce ------------------
+   ajusterArretAuPouce (app.js) mesure, apres chaque rendu de la tournee au
+   telephone, ou commence la barre collee des gestes. */
+@media (max-width: 820px) {
+  /* Les messages AU-DESSUS de la barre collee (12 px d'air) : « Livre --
+     client · Annuler » couvrait « Livre » de l'arret suivant, et un appui sur
+     sa droite annulait la livraison precedente. Menu « Plus » ouvert : en
+     haut, comme ailleurs (5). */
+  body:has(#livreur.active):not(:has(#mobile-more-sheet:not([hidden]))) .toast-region {
+    bottom: var(--toast-bas-tournee, calc(92px + env(safe-area-inset-bottom)));
+  }
+
+  /* « arret-serre » : pose seulement quand, page en haut, le dernier article
+     n'aurait pas 8 px d'air au-dessus de la barre collee (a 375 x 667 : un 3e
+     article a 473 pour une barre a 441 ; deux articles, 2 px d'air). Disques de 24, ecarts de 4, rembourrages reduits ; les
+     gestes gardent leurs 56 px (decision du 23/09). */
+  :root[data-color-scheme] body:has(#livreur.active #tourneeActive:not([hidden]) .current-driver-card.arret-serre) main.content > .ecran-entete,
+  :root:not([data-color-scheme]) body:has(#livreur.active #tourneeActive:not([hidden]) .current-driver-card.arret-serre) main.content > .ecran-entete {
+    row-gap: 4px; padding-top: 4px; padding-bottom: 20px;
+  }
+  :root[data-color-scheme] #livreur .tournee .current-driver-card.arret-serre,
+  :root:not([data-color-scheme]) #livreur .tournee .current-driver-card.arret-serre { padding-top: 10px; }
+  #livreur .arret-serre #currentClient .arret { gap: 4px; }
+  #livreur .arret-serre #currentClient .arret-articles { gap: 4px; margin-top: 0; padding-top: 8px; padding-bottom: 10px; }
+  #livreur .arret-serre #currentClient .arret-article .marqueur { width: 24px; height: 24px; font-size: 12px; }
+  #livreur .current-driver-card.arret-serre .gestes { gap: 6px; padding-top: 4px; padding-bottom: 6px; }
+}

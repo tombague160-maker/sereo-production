@@ -141,7 +141,17 @@ test("4b — les gestes sont SOUS LE POUCE : au-dessus de la barre basse, a l'ou
   // Visible sans defiler : entre le haut de l'ecran et la barre basse.
   expect(r.livre.haut).toBeGreaterThan(0);
   expect(r.livre.bas, "« Livre » passe sous la barre basse").toBeLessThanOrEqual(r.barre + 1);
-  expect(r.absent, "« Client absent » passe sous la barre basse").toBeLessThanOrEqual(r.barre + 1);
+  // « Client absent » : hors de la barre collee depuis le 24/09 (elle cachait
+  // les articles a decharger ; telephone-utilisable.spec.js) -- a un
+  // defilement, et alors au-dessus de la barre basse.
+  // (scrollIntoViewIfNeeded ne defile pas : sous la barre basse, le bouton
+  // est encore « dans » la fenetre.)
+  const absent = await page.evaluate(() => {
+    const b = document.getElementById("markAbsentButton");
+    b.scrollIntoView({ block: "center" });
+    return b.getBoundingClientRect().bottom;
+  });
+  expect(absent, "« Client absent » passe sous la barre basse").toBeLessThanOrEqual(r.barre + 1);
   // Appeler : un rond de 56.
   expect(r.appeler.map(Math.round)).toEqual([56, 56]);
   await ctx.close();

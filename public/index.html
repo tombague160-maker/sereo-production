@@ -289,7 +289,8 @@
           <span class="more-sheet-label">Stock</span>
         </button>
         <button class="more-sheet-item" type="button" role="menuitem" data-tab="crm" data-action="more-menu-pick">
-          <span class="more-sheet-icon" aria-hidden="true"><svg class="icon"><use href="#icon-home"></use></svg></span>
+          <!-- Des personnes, pas la maison du Tableau de bord (24/09). -->
+          <span class="more-sheet-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M16 20v-1.5a3.5 3.5 0 0 0-3.5-3.5h-5A3.5 3.5 0 0 0 4 18.5V20M10 11.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7M20 20v-1.5a3.5 3.5 0 0 0-2.6-3.4M15.5 4.6a3.5 3.5 0 0 1 0 6.8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></span>
           <span class="more-sheet-label">Clients</span>
         </button>
         <button class="more-sheet-item" type="button" role="menuitem" data-tab="statistiques" data-action="more-menu-pick">
@@ -411,6 +412,11 @@
             <span>Actualiser</span>
           </button>
         </div>
+        <!-- Tournee au telephone (planche 4b, 24/09) : l'anneau « 3 sur 6 » et
+             la barre de progression viennent ICI, dans l'en-tete vert --
+             un seul bloc, comme la planche (placerEnteteTournee). Au bureau,
+             ils restent dans l'en-tete de la tournee (planche 13b). -->
+        <div id="enteteTournee" class="entete-tournee"></div>
       </header>
 
       <!-- HORS LIGNE (planche 10c) : la file d'attente existe depuis la v1.31 ;
@@ -1266,10 +1272,14 @@
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
                   Livré
                 </button>
-                <div class="gestes-rangee">
-                  <button id="markAbsentButton" class="button tertiary" type="button" data-action="mark-absent">Client absent</button>
-                  <button id="markProblemButton" class="button tertiary" type="button" data-action="mark-problem">Problème</button>
-                </div>
+              </div>
+              <!-- Client absent et Probleme : HORS du bloc des gestes (24/09). Au
+                   telephone, celui-ci colle au bas de l'ecran et cachait les
+                   articles a decharger ; ces deux-la suivent le contenu, a un
+                   defilement. L'ordre du clavier ne change pas. -->
+              <div class="gestes-rangee gestes-secondaires">
+                <button id="markAbsentButton" class="button tertiary" type="button" data-action="mark-absent">Client absent</button>
+                <button id="markProblemButton" class="button tertiary" type="button" data-action="mark-problem">Problème</button>
               </div>
               <!-- Hors du bloc des gestes : au telephone, celui-ci colle au bas
                    de l'ecran, et « Autres actions » n'a pas a y prendre 54 px. -->
