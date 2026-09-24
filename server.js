@@ -4916,6 +4916,8 @@ function normalizeOrder(order) {
     remisA: clean(order.remisA),
     subscriptionId: order.subscriptionId || "",
     subscriptionDate: order.subscriptionDate || "",
+    // Decision 8 (24/09) : annulee par la pause ou l'arret de son abonnement.
+    ...(order.annuleeAvecAbonnement ? { annuleeAvecAbonnement: clean(order.annuleeAvecAbonnement) } : {}),
     source: clean(order.source || order.orderSource || order.sourceExcel),
     orderType: clean(order.orderType || order.typeCommande || order.type || (order.source === "commande_planifiee" ? "planifiee" : "immediate")),
     parentOrderId: clean(order.parentOrderId || order.commandeOrigineId || order.sourceOrderId),
@@ -5658,6 +5660,49 @@ function annulerRappelsDeLaCommande(db, order, resultat = "Commande annulée") {
   });
   if (rappels.length) refreshClientReminderDate(db, order.clientId);
   return rappels.length;
+}
+
+// Decision 8 de Thomas (24/09) : arreter ou mettre en pause un abonnement
+// ANNULE ses commandes deja generees et pas encore livrees, avec leurs
+// rappels ; le stock qu'elles avaient reserve (planifiee confirmee) revient
+// au rayon, et le journal des mouvements le dit. Avant, la commande de
+// l'echeance restait « planifiee » avec son rappel « a faire », et quittait la
+// page Abonnements : une livraison qu'on ne voyait plus. Une commande deja en
+// preparation, prete ou en tournee suit son cours (la machine d'etat ne
+// l'annule pas) : elle est rendue dans `gardees`, pour que l'ecran la nomme.
+// Chaque commande annulee porte `annuleeAvecAbonnement` : l'abonnement repris,
+// son echeance a venir se genere de nouveau (lib/subscriptions.js).
+function suspendreCommandesDeLAbonnement(db, sub) {
+  const statut = sub.status === "cancelled" ? "cancelled" : "paused";
+  const raison = statut === "cancelled" ? "subscription_cancelled" : "subscription_paused";
+  const resultat = statut === "cancelled" ? "Abonnement arrêté" : "Abonnement mis en pause";
+  const annulees = [];
+  const gardees = [];
+  const resume = order => ({ id: order.id, numero: order.numero, date: order.deliveryDate || order.subscriptionDate, status: order.status });
+  for (const order of db.commandes) {
+    if (order.subscriptionId !== sub.id || STATUTS_SANS_RESERVATION.has(order.status)) continue;
+    if (!isValidOrderStatusTransition(order.status, "annulee")) {
+      gardees.push(resume(order));
+      continue;
+    }
+    if (order.stockReservedAt) releaseOrderStockReservation(db, order, raison);
+    setOrderStatus(order, "annulee");
+    order.annuleeAvecAbonnement = statut;
+    annulerRappelsDeLaCommande(db, order, `Commande annulée : ${resultat.toLowerCase()}`);
+    annulees.push(resume(order));
+  }
+  if (annulees.length || gardees.length) {
+    const numeros = liste => liste.map(o => o.numero || o.id).join(", ");
+    addHistory(db, "Abonnement", [
+      `${resultat} : ${annulees.length} commande(s) déjà créée(s) annulée(s)${annulees.length ? ` (${numeros(annulees)})` : ""}`,
+      gardees.length ? `${gardees.length} déjà en préparation ou en livraison, gardée(s) (${numeros(gardees)})` : ""
+    ].filter(Boolean).join(" ; "), {
+      subscriptionId: sub.id,
+      annulees: annulees.map(o => o.id),
+      gardees: gardees.map(o => o.id)
+    });
+  }
+  return { annulees, gardees };
 }
 
 function createAutomaticOrderReminder(db, order, options = {}) {
@@ -10094,7 +10139,9 @@ require("./lib/operations-api").registerOperations(app, {
   buildImportedSalesIndex, getImportedOrderTotal, normalizeDateInput,
   geocoderAdresse, positionPourTournee, memoriserPositionDuCalcul,
   // Lot 5 : la limite de debit du relais de recherche d'adresse, par compte et par IP.
-  cleDeDebit: req => `${getRequestIdentity(req)?.identifiant || "anonyme"}|${getClientIp(req)}`
+  cleDeDebit: req => `${getRequestIdentity(req)?.identifiant || "anonyme"}|${getClientIp(req)}`,
+  // Decision 8 (24/09) : pause ou arret d'un abonnement.
+  suspendreCommandesDeLAbonnement
 });
 
 // Lot 6 de l'audit geo (pratique au quotidien) : reoptimiser, « Faire
