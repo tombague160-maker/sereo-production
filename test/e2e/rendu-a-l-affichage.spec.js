@@ -54,6 +54,10 @@ test("à l'ouverture, seul l'écran affiché est dessiné", async ({ page }) => 
 
 test("en arrivant sur un écran, il se dessine en entier", async ({ page }) => {
   await ouvrir(page);
+  // Les Rappels EN PREMIER : Clients et Commande client remplissent aussi ce
+  // choix en passant, et le masqueraient.
+  await aller(page, "relances");
+  await expect(page.locator("#relanceClientSelect option")).toHaveCount(98);
   await aller(page, "stock");
   await expect(page.locator("#stockList .stk-ligne")).toHaveCount(218);
   await aller(page, "commande-client");
@@ -62,9 +66,6 @@ test("en arrivant sur un écran, il se dessine en entier", async ({ page }) => {
   await expect(page.locator("#crmList .cli-ligne")).toHaveCount(97);
   await aller(page, "commandes");
   await expect(page.locator("#cmdCompte")).toHaveText(/sur 224$/);
-  // Le choix du client d'un rappel : renderCrm le remplissait en passant.
-  await aller(page, "relances");
-  await expect(page.locator("#relanceClientSelect option")).toHaveCount(98);
   // A plat (une seule categorie) : sous le seuil d'abord, la plus petite
   // quantite en tete -- l'ordre que l'arrivee sur le Stock refait.
   await aller(page, "stock");
@@ -231,6 +232,33 @@ test("les règles body:has(...) visent les mêmes écrans par le chemin court", 
     // Temoin : l'etat vise est bien vrai quelque part (sinon « faux = faux » partout).
     expect(r.some(([, sans]) => sans), `${ecran} ${variante || ""}`).toBe(true);
   }
+});
+
+test("téléphone : les règles d'écran de la feuille s'appliquent toujours (chemin court)", async ({ page }) => {
+  // Des regles body:has(> .app > main.content > #...) de la feuille, lues dans
+  // la page : chacune change ce qu'elle doit, et seulement dans son etat.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await ouvrir(page, "crm");
+  // Un element absent LEVE : « absent » passerait pour « pas none ».
+  const style = (sel, prop) => page.evaluate(([s, p]) => { const e = document.querySelector(s); if (!e) throw new Error("absent : " + s); return getComputedStyle(e)[p]; }, [sel, prop]);
+  // Clients : la fiche ouverte retire la recherche de l'en-tete (liste : visible).
+  expect(await style(".ecran-entete .cli-recherche", "display")).not.toBe("none");
+  await page.evaluate(() => { document.getElementById("crm").dataset.vue = "fiche"; });
+  expect(await style(".ecran-entete .cli-recherche", "display")).toBe("none");
+  await page.evaluate(() => { document.getElementById("crm").dataset.vue = "liste"; });
+  // Bandeau hors ligne visible : les filtres des Clients prennent leur marge.
+  const sansBandeau = await style("#crm .cli-filtres", "paddingTop");
+  await page.evaluate(() => { document.getElementById("bandeauHorsLigne").hidden = false; });
+  expect(await style("#crm .cli-filtres", "paddingTop")).toBe("16px");
+  expect(sansBandeau).not.toBe("16px");
+  await page.evaluate(() => { document.getElementById("bandeauHorsLigne").hidden = true; });
+  // Abonnements : l'agenda retire « Nouvel abonnement » des gestes du bas.
+  await aller(page, "abonnements");
+  await expect(page.locator("#abonnements")).toHaveClass(/active/);
+  expect(await style("#gestesBas .abo-nouveau", "display")).not.toBe("none");
+  await page.evaluate(() => { document.getElementById("abonnements").dataset.vue = "agenda"; });
+  expect(await style("#gestesBas .abo-nouveau", "display")).toBe("none");
+  await page.evaluate(() => { document.getElementById("abonnements").dataset.vue = "liste"; });
 });
 
 test("téléphone (CPU x4) : l'ouverture ne fige pas la page 800 ms", async ({ page }) => {

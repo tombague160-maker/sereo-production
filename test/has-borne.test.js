@@ -49,12 +49,15 @@ test("has borne : l'instrument trouve les regles body:has de la feuille", () => 
   assert.ok(hasSurBody().length >= 40, `seulement ${hasSurBody().length} regles body:has trouvees`);
 });
 
+// Le chemin exact : un ecran (ou le bandeau), enfant direct de main.content.
+const CHEMIN = /^> \.app > main\.content > #([\w-]+)/;
+
 test("has borne : chaque body:has(...) cherche par un chemin d'enfants directs", () => {
-  const sansChemin = hasSurBody().filter(([argument]) => !argument.startsWith(">")).map(([, extrait]) => extrait);
+  const sansChemin = hasSurBody().filter(([argument]) => !CHEMIN.test(argument)).map(([, extrait]) => extrait);
   assert.deepEqual(sansChemin, []);
 });
 
-test("has borne (temoin) : les ecrans vises sont enfants de main.content, enfant de .app, enfant de body", () => {
+test("has borne (temoin) : chaque ecran vise est enfant de main.content, enfant de .app, enfant de body", () => {
   // Une pile de balises : la profondeur et le parent de chaque element ouvrant.
   const pile = [];
   const parentDe = new Map();
@@ -76,7 +79,10 @@ test("has borne (temoin) : les ecrans vises sont enfants de main.content, enfant
     if (id) parentDe.set(id, noeud);
     if (!vides.has(nom) && !/\/\s*$/.test(attributs)) pile.push(noeud);
   }
-  for (const id of ["crm", "abonnements", "livreur", "journee", "bandeauHorsLigne"]) {
+  // Chaque identifiant que la feuille nomme au bout d'un chemin.
+  const ids = [...new Set(hasSurBody().map(([argument]) => (argument.match(CHEMIN) || [])[1]).filter(Boolean))];
+  assert.ok(ids.length >= 5, `seulement ${ids.length} identifiants : ${ids}`);
+  for (const id of ids) {
     const e = parentDe.get(id);
     assert.ok(e, `#${id} absent de index.html`);
     const main = e.parent, app = main?.parent, body = app?.parent;
