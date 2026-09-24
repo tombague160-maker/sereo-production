@@ -969,7 +969,7 @@ function showTab(tabName, options = {}) {
 
   document.getElementById(nextTab)?.classList.add("active");
   // Un ecran qui etait cache au dernier chargement se dessine en arrivant
-  // (rendreSiAffiche). Son rendu refait aussi l'ordre a plat du Stock.
+  // (rendreOuDifferer). Son rendu refait aussi l'ordre a plat du Stock.
   const stockEnAttente = nextTab === "stock" && Boolean(rendusEnAttente.get("stock")?.has(renderStock));
   if (stockEnAttente) ordreAPlat = null;
   rendreEnAttente(nextTab);
@@ -2704,14 +2704,22 @@ function bindCommandes() {
 // 289 ms au demarrage. On ne les dessine que s'ils sont AFFICHES : si l'un
 // redevient atteignable, il se redessine sans qu'on touche a cette liste.
 //
-// Generalise le 24/09 (mesure en production, telephone a CPU x4) : l'ouverture
-// dessinait les TREIZE ecrans pour en montrer un -- une tache d'environ 1 s,
-// 12 700 elements pour 255 visibles. Un ecran cache garde desormais son rendu
-// EN ATTENTE, et showTab le dessine en y arrivant, avec les donnees du moment :
+// CONTRAT : cache, rien -- ni rendu, ni rendu garde pour plus tard. Qui
+// l'appelle dessine lui-meme l'ecran en y arrivant (les Parametres du lot
+// reseau : renderAll ET showTab). Le changer en « plus tard » faisait lire deux
+// ou trois fois ces appelants a chaque arrivee (relecture du 24/09).
+function rendreSiAffiche(idSection, rendu) {
+  if (document.getElementById(idSection)?.classList.contains("active")) rendu();
+}
+
+// Le 24/09 (mesure en production, telephone a CPU x4) : l'ouverture dessinait
+// les TREIZE ecrans pour en montrer un -- une tache d'environ 1 s, 12 700
+// elements pour 255 visibles. Un ecran cache garde desormais son rendu EN
+// ATTENTE, et showTab le dessine en y arrivant, avec les donnees du moment :
 // ce que l'ecran montre ne change pas, il est seulement dessine plus tard.
 const rendusEnAttente = new Map();
 
-function rendreSiAffiche(idSection, rendu) {
+function rendreOuDifferer(idSection, rendu) {
   if (document.getElementById(idSection)?.classList.contains("active")) {
     rendusEnAttente.get(idSection)?.delete(rendu);
     rendu();
@@ -2751,23 +2759,23 @@ function renderAll({ lectures = true } = {}) {
   renderDailySummary();
   renderImportSummary();
   // Chaque ecran de liste ne se dessine que s'il est affiche ; sinon en y
-  // arrivant (rendreSiAffiche, 24/09). Les pastilles de la barre laterale et
+  // arrivant (rendreOuDifferer, 24/09). Les pastilles de la barre laterale et
   // le tableau de bord (renderStats), eux, restent a jour partout.
-  rendreSiAffiche("crm", renderCrm);
-  rendreSiAffiche("relances", renderRelances);
+  rendreOuDifferer("crm", renderCrm);
+  rendreOuDifferer("relances", renderRelances);
   // Le choix du client d'un rappel : renderCrm le remplissait au passage.
-  rendreSiAffiche("relances", renderClientSelects);
-  rendreSiAffiche("commande-client", renderCustomerOrder);
-  rendreSiAffiche("statistiques", renderStatistics);
-  rendreSiAffiche("exports", renderExports);
-  rendreSiAffiche("stock", renderStock);
-  rendreSiAffiche("stock", renderStockMovements);
-  rendreSiAffiche("preparation", renderPreparation);
-  rendreSiAffiche("recommande", renderRecommande);
+  rendreOuDifferer("relances", renderClientSelects);
+  rendreOuDifferer("commande-client", renderCustomerOrder);
+  rendreOuDifferer("statistiques", renderStatistics);
+  rendreOuDifferer("exports", renderExports);
+  rendreOuDifferer("stock", renderStock);
+  rendreOuDifferer("stock", renderStockMovements);
+  rendreOuDifferer("preparation", renderPreparation);
+  rendreOuDifferer("recommande", renderRecommande);
   // Les quatre anciennes listes de commandes n'ont plus de rendu : leurs
   // sections ont quitte la page le 23/09 (dette 7), l'ecran Commandes les
   // porte toutes.
-  rendreSiAffiche("commandes", renderCommandes);
+  rendreOuDifferer("commandes", renderCommandes);
   rendreSiAffiche("produits", renderProduits);
   // Hors mainTabs (inatteignable) : 2 579 elements et ~110 ms au telephone.
   rendreSiAffiche("ventes", renderVentes);
