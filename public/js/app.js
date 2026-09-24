@@ -10089,7 +10089,7 @@ let horsLigneDepuis = null;
 // repondu :
 //  - seul l'ecran Tournee se montre ; les autres disent qu'ils demandent le
 //    reseau (#ecranDemandeReseau), sans montrer leurs donnees de secours ;
-//  - le bandeau dit « Hors ligne — données de HH:MM ».
+//  - le bandeau dit « Hors ligne — données de 14 h 32 ».
 // Au premier chargement complet venu du reseau, tout redevient normal.
 let ouverteHorsLigne = typeof document !== "undefined"
   && document.documentElement.hasAttribute("data-ouverte-hors-ligne");
@@ -10232,7 +10232,7 @@ function majBandeauHorsLigne() {
     ? datesFr.heure(horsLigneDepuis)
     : "";
   // Des COPIES a l'ecran : le bandeau dit de quand elles datent (« Hors ligne
-  // — données de 14:32 »), l'information qui compte pour le livreur. Des
+  // — données de 14 h 32 »), l'information qui compte pour le livreur. Des
   // donnees fraiches : depuis quand la coupure dure.
   const titreHorsLigne = copieAffichee !== null
     ? `Hors ligne — ${libelleCopie(copieAffichee).replace(/^D/, "d")}`

@@ -220,7 +220,7 @@ test("fermee puis rouverte HORS LIGNE, telephone redemarre : la tournee revient,
     await expect(ligne(page, a).locator(".route-stop-attente")).toHaveText("En attente d’envoi");
     await expect(page.locator("#currentClient .arret-nom"), "l'ecran propose de relivrer un arret deja livre").not.toHaveText(nomA);
     await expect(page.locator("#bandeauHorsLigne")).toBeVisible();
-    await expect(page.locator("#bandeauHorsLigneTitre")).toHaveText(/^Hors ligne — données de \d{2}:\d{2}$/);
+    await expect(page.locator("#bandeauHorsLigneTitre")).toHaveText(/^Hors ligne — données de \d{1,2} h \d{2}$/);
     await expect(page.locator("#bandeauHorsLigneDetail")).toContainText(`1 livraison en attente d'envoi : ${nomA}.`);
     await expect(page.locator("#syncStatus"), "une copie est annoncee fraiche").not.toContainText("À jour");
 
@@ -287,7 +287,7 @@ test("apres la DECONNEXION, rien ne se rouvre hors ligne (temoin : la meme ouver
     expect(temoin.echec, "temoin : la tournee ne se rouvre pas").toBeNull();
     expect(temoin.copie, "temoin : la page ne vient pas de la copie du service worker").toBe(true);
     await expect(temoin.page.locator("#routeStopsList .route-stop").first()).toBeVisible();
-    await expect(temoin.page.locator("#bandeauHorsLigneTitre")).toHaveText(/^Hors ligne — données de \d{2}:\d{2}$/);
+    await expect(temoin.page.locator("#bandeauHorsLigneTitre")).toHaveText(/^Hors ligne — données de \d{1,2} h \d{2}$/);
     // Le reseau revient, file VIDE : rien ne part, mais tout doit se relire
     // (le premier cas, lui, a un geste en file, dont le renvoi recharge deja).
     await retablir(ctx);
@@ -357,7 +357,7 @@ test("rouverte par une PASSERELLE en erreur (502), telephone qui se croit en lig
     expect(rouverte.copie, "prealable : la page ne vient pas de la copie du service worker").toBe(true);
     expect(await rouverte.page.evaluate(() => navigator.onLine), "prealable : le telephone se croit en ligne").toBe(true);
     await expect(rouverte.page.locator("#routeStopsList .route-stop").first()).toBeVisible();
-    await expect(rouverte.page.locator("#bandeauHorsLigneTitre")).toHaveText(/^Hors ligne — données de \d{2}:\d{2}$/);
+    await expect(rouverte.page.locator("#bandeauHorsLigneTitre")).toHaveText(/^Hors ligne — données de \d{1,2} h \d{2}$/);
 
     // Le serveur revient. Aucun « online » : personne ne l'emettra.
     mdt.etat.passerelle = false;
