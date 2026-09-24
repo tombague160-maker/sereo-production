@@ -2478,6 +2478,7 @@ function openSqliteStore(options = {}) {
     seedJsonPath: options.skipJsonSeed ? null : DB_PATH,
     defaultDb,
     normalizeDb,
+    normaliserTable,
     ensureDir
   });
 }
@@ -2744,25 +2745,30 @@ function readDb() {
   return normalizeDb(db);
 }
 
-function normalizeDb(db) {
-  db.clients = Array.isArray(db.clients) ? db.clients : [];
-  db.ventes = Array.isArray(db.ventes) ? db.ventes : [];
-  db.stock = Array.isArray(db.stock) ? db.stock : [];
-  db.historique = Array.isArray(db.historique) ? db.historique : [];
-  db.commandes = Array.isArray(db.commandes) ? db.commandes : [];
-  db.routes = Array.isArray(db.routes) ? db.routes : [];
-  db.subscriptions = Array.isArray(db.subscriptions) ? db.subscriptions : [];
-  db.relances = Array.isArray(db.relances) ? db.relances.map(normalizeCrmReminder) : [];
-  db.deliverySectors = Array.isArray(db.deliverySectors) ? db.deliverySectors.map(normalizeDeliverySector) : defaultDeliverySectors();
-  if (!db.deliverySectors.length) db.deliverySectors = defaultDeliverySectors().map(normalizeDeliverySector);
-  db.stockMovements = Array.isArray(db.stockMovements) ? db.stockMovements : [];
-  db.importsArchives = Array.isArray(db.importsArchives) ? db.importsArchives : [];
-  db.settings = normalizeSettings(db.settings);
+// Chaque table se normalise SEULE (24/09) : la lecture paresseuse de la base
+// (storage/sqliteStore.js, readDb) ne normalise que les tables qu'une requete
+// lit. normalizeDb les normalise toutes, comme avant.
+const TABLES_DE_LA_BASE = ["clients", "ventes", "stock", "historique", "commandes", "routes", "subscriptions",
+  "relances", "deliverySectors", "stockMovements", "importsArchives", "settings"];
 
+function normaliserTable(cle, valeur, db) {
+  if (cle === "relances") return Array.isArray(valeur) ? valeur.map(normalizeCrmReminder) : [];
+  if (cle === "deliverySectors") {
+    const secteurs = Array.isArray(valeur) ? valeur.map(normalizeDeliverySector) : defaultDeliverySectors();
+    return secteurs.length ? secteurs : defaultDeliverySectors().map(normalizeDeliverySector);
+  }
+  if (cle === "settings") return normalizeSettings(valeur);
+  const liste = Array.isArray(valeur) ? valeur : [];
   // Migration retroactive v1.9.0 : attribuer un numero aux commandes qui n'en
   // ont pas (legacy avant cette release). Numerotation chronologique par
-  // dateImport pour preserver l'ordre historique reel.
-  ensureOrderNumbers(db);
+  // dateImport pour preserver l'ordre historique reel. (ensureOrderNumbers ne
+  // lit que les commandes et les reglages, qu'il normalise lui-meme.)
+  if (cle === "commandes") ensureOrderNumbers({ commandes: liste, settings: db.settings });
+  return liste;
+}
+
+function normalizeDb(db) {
+  for (const cle of TABLES_DE_LA_BASE) db[cle] = normaliserTable(cle, db[cle], db);
 
   // P1 v1.14.0 : syncWorkflow N'EST PLUS appele ici (avant : a chaque readDb,
   // ce qui ajoutait 50-100ms a chaque requete GET). Il est maintenant appele
@@ -4325,7 +4331,7 @@ function recordStockMovement(db, product, oldQuantity, newQuantity, reason = "Aj
   });
 }
 
-function getDashboardSummary(db) {
+function getDashboardSummary(db, { nombreDeVentes = db.ventes.length } = {}) {
   const stockView = getStockView(db);
   const today = jourParis();
   const orderCounts = {
@@ -4389,6 +4395,9 @@ function getDashboardSummary(db) {
   return {
     orders: orderCounts,
     stock: stockCounts,
+    // Le compte des lignes de ventes importees (« Resume du jour ») : la page
+    // ne charge plus /api/ventes a l'ouverture pour ce seul nombre (24/09).
+    ventes: { total: nombreDeVentes },
     alerts: alerts.slice(0, 20),
     routes: {
       draft: db.routes.filter(route => ["brouillon", "prete"].includes(route.status)).length,
@@ -7162,7 +7171,9 @@ function etatApresGesteArret(db, geste) {
   const route = routeAvecTrace(db, geste.route.id) || geste.route;
   const stop = route.stops.find(item => String(item.id) === String(geste.stop.id)) || geste.stop;
   const order = db.commandes.find(item => String(item.id) === String(geste.order.id)) || geste.order;
-  const client = db.clients.find(item => String(item.id) === String(order.clientId)) || null;
+  const trouve = db.clients.find(item => String(item.id) === String(order.clientId));
+  // Le client tel que /api/clients le rend (sans releve d'import, 24/09).
+  const client = trouve ? sansReleveDImport(trouve) : null;
   return { route, stop, order, client };
 }
 
@@ -7291,8 +7302,17 @@ app.get("/api/db", (req, res) => {
   res.json(readDb());
 });
 
+// Poids du reseau (24/09, mesure en production) : `ordersByDate`, le releve de
+// l'import (une entree par date de commande, avec ses lignes), faisait 43 % de
+// /api/clients -- et 14 % de /api/crm/clients, qui le recopie. La page ne le lit
+// nulle part : elle a les commandes elles-memes (/api/orders). Il reste en
+// base, ou l'import le relit ; seules les LISTES envoyees s'allegent.
+function sansReleveDImport({ ordersByDate, ...client }) {
+  return client;
+}
+
 app.get("/api/clients", (req, res) => {
-  res.json(readDb().clients);
+  res.json(readDb().clients.map(sansReleveDImport));
 });
 
 app.get("/api/ventes", (req, res) => {
@@ -7390,13 +7410,23 @@ app.get("/api/journal", requireAdministration, (req, res) => {
 const MOUVEMENTS_STOCK_RECENTS = 50;
 
 app.get("/api/stock-movements", (req, res) => {
-  res.json((readDb().stockMovements || []).slice(0, MOUVEMENTS_STOCK_RECENTS)
+  // Les N premiers (les plus recents : recordStockMovement les met en tete).
+  // L'ecran Stock n'en montre que 12 et les demande ainsi depuis le 24/09
+  // (`limite`, lot reseau) : 222 ko pour 633 mouvements en production, a chaque
+  // ouverture. Jamais plus de MOUVEMENTS_STOCK_RECENTS, jamais d'auteur (lot
+  // « donnees utiles ») : sans `limite`, ou au-dela, les
+  // MOUVEMENTS_STOCK_RECENTS derniers.
+  const limite = Number.parseInt(req.query.limite, 10);
+  const nombre = Number.isInteger(limite) && limite > 0 ? Math.min(limite, MOUVEMENTS_STOCK_RECENTS) : MOUVEMENTS_STOCK_RECENTS;
+  res.json((readDb().stockMovements || []).slice(0, nombre)
     .map(({ createdBy, utilisateur, auteur, ...mouvement }) => mouvement));
 });
 
 app.get("/api/dashboard", (req, res) => {
   const db = readDb();
-  res.json(getDashboardSummary(db));
+  // Le compte des ventes sans lire la table (revue du 24/09) : sur SQLite, un
+  // COUNT ; 429 lignes et 249 ko de JSON decodes pour un nombre, avant.
+  res.json(getDashboardSummary(db, useSqliteStorage() ? { nombreDeVentes: getSqliteStore().compterVentes() } : {}));
 });
 
 app.get("/api/storage/status", (req, res) => {
@@ -7641,8 +7671,48 @@ app.get("/api/diagnostic/suspicious-dates", (req, res) => {
 // L'endpoint /api/version est declare plus haut (avant requireAccessAuth)
 // pour rester accessible sans authentification, notamment sur la page /login.
 
+// L'IMAGE DE MARQUE N'EST PLUS DANS LES REGLAGES (24/09, mesure en production) :
+// une image importee est gardee en base64 dans `appearance.brandImage`, et les
+// 116 ko repartaient a chaque ouverture -- pour un apercu que seuls les
+// Parametres montrent. Les reglages en donnent desormais l'ADRESSE, versionnee
+// par l'empreinte de l'image (?v=) : le navigateur ne la demande que si
+// l'apercu s'affiche, et la garde ensuite (la meme adresse ne change jamais de
+// contenu). La base, l'import et la remise a zero ne changent pas.
+const IMAGE_DE_MARQUE_CHEMIN = "/api/settings/appearance/image";
+
+function empreinteImageDeMarque(dataUrl) {
+  return crypto.createHash("sha256").update(dataUrl).digest("hex").slice(0, 16);
+}
+
+function apparencePourLaPage(appearance) {
+  const image = appearance.brandImage || "";
+  if (!image.startsWith("data:")) return appearance;
+  return { ...appearance, brandImage: `${IMAGE_DE_MARQUE_CHEMIN}?v=${empreinteImageDeMarque(image)}` };
+}
+
 app.get("/api/settings/appearance", (req, res) => {
-  res.json(getAppearanceSettings(readDb()));
+  res.json(apparencePourLaPage(getAppearanceSettings(readDb())));
+});
+
+app.get(IMAGE_DE_MARQUE_CHEMIN, (req, res) => {
+  const image = getAppearanceSettings(readDb()).brandImage || "";
+  const morceaux = /^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]*)$/i.exec(image);
+  if (!morceaux) {
+    res.status(404).json({ error: "Aucune image personnalisee" });
+    return;
+  }
+  const empreinte = empreinteImageDeMarque(image);
+  res.set("Content-Type", morceaux[1].toLowerCase());
+  res.set("ETag", `"${empreinte}"`);
+  // Une image importee peut etre un SVG : ouverte seule, elle ne doit rien
+  // pouvoir executer (aucun script, document isole).
+  res.set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+  res.set("Cache-Control", req.query.v === empreinte ? "private, max-age=31536000, immutable" : "private, no-cache");
+  if (req.fresh) {
+    res.status(304).end();
+    return;
+  }
+  res.send(Buffer.from(morceaux[2], "base64"));
 });
 
 app.patch("/api/settings/appearance", async (req, res) => {
@@ -7675,7 +7745,7 @@ app.patch("/api/settings/appearance", async (req, res) => {
       writeDb(db);
       return appearance;
     });
-    res.json(result);
+    res.json(apparencePourLaPage(result));
   } catch (error) {
     handleRouteError(error, res, "Erreur parametres");
   }
@@ -7866,9 +7936,17 @@ app.get("/api/crm/clients", (req, res) => {
   const today = jourParis();
 
   const ventesImportees = buildImportedSalesIndex(db.ventes);
+  // La LISTE ne porte plus l'historique des commandes de chaque client (24/09) :
+  // `orderHistory` recopiait /api/orders, client par client (66 % des 552 ko
+  // mesures en production), et la page ne le lit pas -- elle a deja toutes les
+  // commandes. La fiche seule (GET /api/crm/clients/:id) le garde ; les totaux
+  // (totalOrders, totalRevenue), les rappels et le reste de la vue restent.
   let list = db.clients
     .filter(client => !client.crmArchived)
-    .map(client => crmClientView(db, client, ventesImportees));
+    .map(client => {
+      const { orderHistory, ...vue } = crmClientView(db, client, ventesImportees);
+      return sansReleveDImport(vue);
+    });
 
   if (query) {
     list = list.filter(client => normalizeTextKey([
@@ -9821,7 +9899,7 @@ require("./lib/operations-api").registerOperations(app, {
 // Lot 6 de l'audit geo (pratique au quotidien) : reoptimiser, « Faire
 // maintenant », « Ajouter a la tournee en cours ».
 require("./lib/tournee-pratique").registerTourneePratique(app, {
-  readDb, writeDb, withWriteLock, badRequest, notFound, handleRouteError, findClient,
+  readDb, writeDb, withWriteLock, badRequest, notFound, handleRouteError, findClient, sansReleveDImport,
   addHistory, setOrderStatus, createStop, routeAvecTrace, positionPourTournee,
   memoriserPositionDuCalcul, geocoderAdresse, distanceKm: distance,
   statutsAPlanifier: STATUTS_A_PLANIFIER, maxArrets: MAX_COMMANDES_PAR_TOURNEE,
@@ -10173,6 +10251,7 @@ module.exports = {
   _osrmLocal: osrmLocal,
   closeStorage,
   defaultDb,
+  normalizeDb,
   readDb,
   writeDb,
   getRecommendations,

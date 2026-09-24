@@ -7621,3 +7621,233 @@ carte de tournée est plus courte ; dans l'app, celle-ci porte « Prochain », l
 de la carte, jamais moins de 150 px (environ 400 px au bureau) ; en une colonne et au téléphone,
 rien ne change. *Banc* : `carte-ca-remplie.spec.js` (1 440 et 1 920 px ; rouge avant : 265 px
 vides ; préalable : la colonne de droite étire bien la carte).
+
+## 24/09 — Poids du réseau et des données (mesuré en production)
+
+**Le constat (production v1.45.0/v1.45.1, mesure en lecture seule du 24/09, section B du
+rapport).** À chaque ouverture : 22 requêtes d'API, 316 Ko transférés, **2,14 Mo de JSON** à
+lire, dont ~1,3 Mo pour rien — `/api/crm/clients` recopiait les commandes de chaque client
+(`orderHistory`, 66 % de ses 552 Ko), `/api/clients` et lui portaient le relevé d'import
+(`ordersByDate`, 43 %), l'image de marque voyageait en base64 dans les réglages (116 Ko),
+`/api/ventes` et `/api/historique` servaient deux écrans que la navigation n'ouvre pas, 633
+mouvements de stock pour 12 montrés, les lectures des Paramètres partaient quel que soit
+l'écran (dont `/api/storage/status` et `/api/comptes` deux fois), une tuile de carte pour une
+carte cachée. Et lancées ensemble, les routes mettaient **580 à 710 ms chacune** : Node les
+traite l'une après l'autre, et chacune relisait la base entière.
+
+**Jeu de mesure.** `demarrer({ port, volume: "production" })` (`test/e2e/jeu-production.js`) :
+un jeu inventé, déterministe, de même forme que la production (97 clients, 224 commandes,
+441 lignes, 218 produits, 429 ventes, 1 036 lignes d'historique, 633 mouvements, 18 tournées,
+123 archives, image de 116 Ko). Le lot « rendu » l'a posé en même temps que ce lot, au même
+chemin et avec la même option : ce lot reprend **leur** fichier, octet pour octet (un seul jeu,
+aucun conflit à l'intégration). Les tailles décompressées suivent celles de la production à
+20 % près (de −19 % pour les mouvements à +9 % pour `/api/clients` ; `/api/crm/clients`
+−4 %, l'image identique) ; la compression locale (gzip de Node, brotli recalculé) est plus
+forte qu'en production, les données inventées se répétant davantage — les octets
+décompressés sont la mesure qui compte.
+
+### Avant / après (local, même machine, jeu de forme production)
+
+Avant = `ef78be1` (v1.45.1, PR #180 comprise) ; après = cette branche.
+
+| Mesure | Avant | Après |
+|---|---|---|
+| Réponses d'API de l'ouverture (tableau de bord) | 27 | **20** |
+| JSON à lire à l'ouverture | 1 986 656 o | **703 492 o** (−65 %) |
+| … compressé (brotli q5 / gzip) | 208 592 / 246 445 o | **54 051 / 68 552 o** (−74 / −72 %) |
+| `/api/crm/clients` | 532 102 o | 131 547 o |
+| `/api/clients` | 193 359 o | 121 326 o |
+| `/api/settings/appearance` | 116 003 o | 106 o (l'image, à part, seulement si l'aperçu s'affiche) |
+| `/api/stock-movements` | 180 498 o (633) | 3 438 o (les 12 montrés) |
+| `/api/ventes` + `/api/historique` | 228 511 + 230 282 o | non demandés |
+| `/api/imports/archives`, `/api/comptes` | 58 003 o, 2 × | à l'affichage des Paramètres |
+| `/api/storage/status` | 2 × | 1 × (bannière de récupération) |
+| Tuile de carte + `/api/carte/fond` (carte cachée) | 1 + 1 | 0 (à l'affichage de la Tournée) |
+| Premier chargement, tout ce qui sort du navigateur (bureau) | 70 requêtes, 898 049 o | **62 requêtes, 493 698 o** (−45 %) |
+| … dont fichiers statiques | 669 765 o | 431 520 o (`app.js` et `style.css` ne partent plus deux fois) |
+| Rechargement, service worker actif, régime établi | 42 à 45 requêtes | 35 à 36 requêtes |
+| Tables lues par les 18 routes de l'ouverture, une à une | 187 | **26** (aucune ne lit l'historique ; `/api/dashboard` plus les ventes) |
+| Rafale serveur des routes de l'ouverture (médiane de 15, trois essais) | 292 à 362 ms | **65 à 82 ms** |
+| « À jour » au bureau, premier chargement | 663 ms | 444 ms |
+| « À jour » au téléphone (390 × 844, CPU × 4), premier / second chargement | 2 783 / 2 320 ms | 2 077 / 1 838 ms |
+
+Les trois dernières lignes sont des temps, mesurés une fois chacun (les rafales : trois essais
+alternés avant/après) : à lire comme un ordre de grandeur. Les autres sont des comptes et des
+octets, identiques d'un passage à l'autre. Le second chargement d'une page dont les données
+n'ont pas changé ne transfère presque rien, avant comme après (304 des ETag) : ce qu'il coûte,
+c'est le travail du serveur (la rafale) et le JSON que la page relit.
+
+### Ce qui est posé
+
+- **Listes de clients allégées.** `GET /api/crm/clients` ne porte plus `orderHistory` ni
+  `ordersByDate`, `GET /api/clients` plus `ordersByDate` (`sansReleveDImport`). La page ne
+  lisait ni l'un ni l'autre (vérifié sur `main` et sur les branches en cours : seuls
+  `reminderHistory` et `totalRevenue` sont lus, par `feat/parcours-simplifies` — gardés). La
+  fiche `GET /api/crm/clients/:id` garde tout ; le relevé reste en base (l'import le relit).
+  La réponse d'un geste d'arrêt rend le client **tel que la liste** (lot 5) : elle passe par la
+  même fonction, sans quoi l'écran y remettait le relevé.
+- **L'image de marque à son adresse.** `/api/settings/appearance` rend
+  `/api/settings/appearance/image?v=<empreinte>` au lieu du base64 ; l'image y est servie
+  identique, `private, max-age=31536000, immutable` quand `v` est le bon, ETag et 304, et une
+  CSP `sandbox` (une image importée peut être un SVG). L'aperçu des Paramètres est
+  `loading="lazy"` : ni logo par défaut ni image importée à l'ouverture.
+- **Ce que l'ouverture ne demande plus.** `/api/ventes` et `/api/historique` quittent
+  `endpointsDeChargement` ; le compte des ventes importées (« Résumé du jour ») vient de
+  `/api/dashboard` (`ventes.total`). Leurs écrans, s'ils s'affichent un jour, demandent leurs
+  données à chaque rendu (`demanderDonneesDeLEcran`). Les mouvements : `?limite=12`.
+- **Les lectures des Paramètres** (archives, comptes, état du calcul routier) partent quand les
+  Paramètres s'affichent, et à chaque chargement tant qu'ils restent affichés. Les réglages de
+  tournée restent lus à chaque chargement : l'écran Tournée s'en sert (dépôt, durée d'arrêt,
+  texte du SMS). La copie hors ligne des archives est **amorcée une fois** si elle manque
+  (une requête après la connexion, aucune ensuite) : hors ligne, elles restent lisibles.
+- **La carte cachée** ne demande ni `/api/carte/fond` ni tuile : le fond se pose à l'événement
+  `resize` de Leaflet, quand la Tournée s'affiche (`invalidateSize`).
+- **Pré-cache aligné.** `index.html` demande `/js/app.js` et `/css/style.css` sans `?v=`, à
+  l'adresse que `APP_SHELL` précharge. Avant, la première ouverture et chaque mise à jour les
+  téléchargeaient deux fois (240 Ko compressés). Le nom du shell porte l'empreinte du contenu
+  et le cache HTTP revalide (ETag). `?v=` ne protégeait que d'un cas, et seulement changé à
+  chaque livraison — il ne l'était plus depuis le 18/09, malgré les livraisons du 19 au
+  23/09 (v1.32 à v1.41) : le service worker arrêté entre la page et ses fichiers (`clientsEnRetard`). Ce
+  chargement-là prend désormais l'ancien `app.js` avec la page neuve, jusqu'au suivant, comme
+  il prenait déjà les anciens modules importés (`utils/`, `domains/`…), qui n'ont jamais eu
+  de `?v=`. Accepté : le cas est l'exception déjà nommée par `service-worker.js`.
+- **Lecture paresseuse de la base.** `readDb` (SQLite) lit, décode et normalise chaque table à
+  son premier accès (`lectureParesseuse`, `normaliserTable`) ; une requête ne paie que ce
+  qu'elle lit — et un compte n'est pas une lecture : `/api/dashboard` prend le nombre de
+  ventes par un `COUNT` (`compterVentes`), plus en décodant les 429 lignes (249 Ko en
+  production). Mêmes clés, mêmes valeurs (`{ ...db }`, `JSON.stringify` lisent tout) ;
+  `writeDb` normalise tout, donc lit ce qui ne l'a pas été — l'état de la base au moment de
+  l'écriture, sous le verrou. Sans `normaliserTable` (bancs qui ouvrent le magasin seul), tout,
+  comme avant. **Ce qui changerait** : une table lue APRÈS un `await` le serait plus tard que
+  les autres (état plus récent), ou sur une base fermée entre-temps par une restauration
+  (erreur au lieu de l'état d'avant). Relevé du 24/09, refait après la relecture adverse
+  (recherche des `… = readDb()` dont l'instantané resert après un `await`, dans `server.js`
+  et `lib/`, 77 lectures) : six signalées, **une réelle**. `POST /api/routes/:id/ajouter`
+  lisait les clients (la position d'un arrêt qui n'a pas la sienne) après ses deux appels au
+  calcul routier, quand la commande ajoutée avait déjà sa position ; ses réglages, eux, sont
+  lus avant (la normalisation des commandes les lit : journal des requêtes SQL). Clients et
+  réglages y sont désormais lus avant de suspendre. Les cinq autres lisent en argument de
+  l'appel qui suspend, ou relisent après ce qu'elles avaient déjà lu avant, ou ne sont pas
+  la base (une liste). Aucun effet visible à ce jour (rien ne ferme le magasin en cours de
+  route) ; une recherche textuelle ne voit pas tout : à garder en tête pour tout nouveau code
+  asynchrone.
+
+**Ce qui ne change pas.** Ce que chaque écran montre (mêmes données, mêmes gestes) ; la liste
+des endpoints de chargement garde ses clés (le chargement instantané relit la copie du service
+worker ; `?limite=12` est une adresse neuve : au premier chargement de la nouvelle version, le
+cache n'a que la liste entière, que la page relit alors, ramenée aux 12 — voir la relecture
+adverse ci-dessous) ; `CACHE_NAME` ; la file hors ligne ; les API complètes sans paramètre
+(`/api/stock-movements`, la fiche client).
+
+### Bancs et preuves
+
+- `test/poids-reseau.test.js` (serveur, octets sur le jeu de forme production). Rouges sur
+  l'ancien code : « des clients recopient encore leurs commandes » (97) ; `ordersByDate`
+  présent ; « `/api/settings/appearance` fait 116191 o » ; l'adresse de l'image absente ;
+  633 mouvements au lieu de 12 ; `index.html` → `["/css/style.css?v=20260918-badges",
+  "/js/app.js?v=20260918-etats-vides"]` ; `ventes.total` absent ; « la réponse du geste porte
+  le relevé d'import ». Témoins : fiche client complète, image servie identique, 304, liste
+  complète sans `limite`.
+- `test/lecture-paresseuse.test.js` : tables lues par route, comptées sur les requêtes SQL
+  (rouge avec l'ancien magasin : 187 lectures, 11 par route, `/api/clients` lisant
+  l'historique) ; témoin : contenu identique à une lecture complète, table pour table ;
+  une écriture après une lecture partielle garde les tables non lues, une table remplacée
+  l'est.
+- `test/e2e/poids-reseau.spec.js` (port 3566) : requêtes et octets de l'ouverture — rouge sur
+  l'ancien code, chaque cause lue seule (`expect.soft`) : `/api/historique` et `/api/ventes`,
+  `/api/comptes` ×2 et les archives, `/api/storage/status` ×2, mouvements entiers, 116 003 o
+  de réglages, 1 986 049 o de JSON, une tuile, `/api/carte/fond`, le logo des Paramètres
+  demandé deux fois (`/brand/sereo-logo.svg?v=20260701`) ; les Paramètres lisent en
+  s'affichant (rouge : rien ne part) et montrent archives, état routier et image importée ;
+  témoins verts avant comme après : le Stock montre les 12 mêmes mouvements, la Tournée
+  affichée a son fond.
+- Verts sur l'arbre final : `npm test` (696, dont un rouge intermittent sous charge,
+  `chantier2-perf` C2.stock.a, seuil de 250 ms, vert seul 4/4 et déjà vu rouge avant la
+  lecture paresseuse) ; e2e du lot et bancs touchés (tabs, smoke, performance,
+  chargement-instantane, tableau-de-bord, commandes, stock, clients, tournee, paramètres,
+  hors ligne, livreur, carte, lots 1-5…) ; `connexion` et `numerotation-admin`, qui visent le
+  serveur authentifié du port 3101, rejoués contre un serveur authentifié local.
+
+### Écarts, et ce qui reste
+
+- **Revalidation en arrière-plan des fichiers statiques** (le service worker redemande ses
+  ~16 fichiers à chaque ouverture) : gardée. C'est une garantie du chargement instantané
+  (« sans changement de shell annoncé, une nouvelle version arrive au chargement suivant »),
+  et ce sont des 304 dans un vrai navigateur.
+- **`/api/operations` répond 200 à chaque fois** : `updatedAt` (la milliseconde du calcul)
+  change son ETag. 1,5 Ko. Le tronquer à la minute garderait « Mis à jour à HH:MM » identique
+  mais ne donnerait un 304 que dans la même minute ; le dater de la dernière écriture
+  changerait ce que l'écran dit. Non fait : à trancher.
+- **`/api/orders` (328 Ko)** reste entier : la page s'en sert partout. Et `leaflet.js`
+  (148 Ko, 31 % exécuté) est chargé au démarrage : le différer touche au lot de la carte.
+- **Pas d'en-tête `Server-Timing`** : la mesure des routes s'est faite ici en comptant les
+  tables lues.
+- **Les écrans Ventes et Historique** (inatteignables) n'ont pas de banc de leur chargement à
+  la demande : aucun geste ne les affiche.
+- **La copie hors ligne des archives** date désormais de la dernière visite des Paramètres en
+  ligne (ou de l'amorçage), plus de la dernière ouverture.
+
+### Relecture adverse du lot (24/09) : cinq défauts mineurs, leur sort
+
+Chacun vérifié avant d'y toucher ; chaque correctif a son banc, rouge sur `57afcae` pour la
+cause annoncée.
+
+1. **Première ouverture après la mise à jour — vrai, corrigé.** Le cache d'un appareil venu
+   de la v1.45.1 a `/api/stock-movements` (liste entière), pas l'adresse neuve `?limite=12`.
+   `lireDernieresDonnees` rend tout ou rien : l'affichage immédiat sautait pour **toutes** les
+   données ; et au-delà de 3 s de réseau, le service worker n'ayant aucune copie de l'adresse
+   neuve, l'écran disait « Partiel (1 indispo) » et le gardait (les réponses tardives ne
+   remettent « À jour » que depuis « Données de… »). Désormais l'endpoint porte `copieAvant` :
+   faute de copie à la nouvelle adresse, la page lit l'ancienne, ramenée aux 12 que l'écran
+   montre (les mêmes : la route coupe la même liste).
+2. **Copies d'avant jamais rafraîchies — vrai, borné, corrigé.** `/api/stock-movements`,
+   `/api/ventes`, `/api/historique` restaient figées dans le cache de données jusqu'à la fin
+   de la session : déconnexion, ou première ouverture après l'expiration du cookie (12 h
+   après la connexion, sans prolongation) — le cache part alors en entier. Un appareil qu'on
+   ne rouvre plus les garde, comme il garde tout le reste du cache. Retirées une fois, à
+   l'ouverture où l'adresse neuve est rangée
+   (`oublierLesCopiesDAvant` ; la liste entière, que plus rien ne demande, signe un cache
+   d'avant).
+3. **« Aucune lecture après un `await` » — à moitié vrai, corrigé.** Les réglages de
+   `/ajouter` sont lus AVANT la suspension (journal SQL : `routes`, `commandes`, `app_meta`,
+   puis la suspension) : cette moitié est fausse. Les clients, eux, étaient lus après, quand
+   la commande avait sa position et un arrêt restant non : vrai. Lus désormais avant ; relevé
+   et commentaire corrigés (plus haut).
+4. **`/api/dashboard` décodait les ventes pour un compte — vrai, corrigé.** `COUNT(*)`.
+5. **« `?v=` ne protégeait de rien » — vrai (la phrase), corrigé dans le texte.** Il
+   protégeait du cas d'exception du service worker, s'il était changé. Rien de rétabli : voir
+   « Pré-cache aligné ».
+
+| Mesure (jeu de forme production, même machine) | `57afcae` | Après |
+|---|---|---|
+| Tables lues par `/api/dashboard` | 5 (dont `ventes`) | **4** |
+| `/api/dashboard` seul, médiane de 200 (trois essais alternés) | 9,8 à 11,5 ms | **6,4 à 7,4 ms** |
+| Première ouverture après la mise à jour, API +300 ms : premier chiffre, CPU ×1 | 1 269 ms | **141 ms** |
+| … CPU ×4 | 2 644 ms (2 383–3 224) | 3 095 ms (2 755–3 367) |
+| Même ouverture, API +3 500 ms (4G faible) : premier chiffre, CPU ×1 / ×4 | 3 369 / 4 547 ms | **151 / 2 358 ms** |
+| … pastille à +6 s | « Partiel (1 indispo) » | « Données de HH:MM » |
+| … « À jour » | jamais (20 s) | quand le réseau a répondu (11 à 13 s) |
+| Copies d'avant dans le cache après l'ouverture suivante | 3 (jusqu'à la fin de session) | **0** |
+| `/ajouter`, magasin fermé pendant le calcul routier | 500 (« database is not open ») | **201** |
+
+Temps : trois essais par case, médiane (écart entre parenthèses quand il chevauche). Au CPU ×4
+et réseau rapide, le premier chiffre n'arrive pas plus tôt : la page lit et dessine la copie,
+puis les données du réseau — le régime de toutes les autres ouvertures (chargement instantané
+du 23/09), que la première retrouve ; le gain est sur réseau lent, là où l'écran restait vide
+ou « Partiel ».
+
+- `test/lecture-paresseuse.test.js` : « le tableau de bord compte les ventes sans lire la
+  table » (rouge : `[ 'ventes' ]` ; témoin : le compte suit une écriture) ; « /ajouter lit
+  dans l'instantané avant de suspendre » (le banc ferme le magasin pendant le premier appel au
+  calcul routier ; rouge : `500 !== 201`, pile `positionPourTournee` → `findClient` →
+  `clients`, `tournee-pratique.js:365`).
+- `test/e2e/poids-reseau.spec.js`, « première ouverture après la mise à jour » (mandataire
+  sur le port 3567) : rouge sur `57afcae`, cinq causes lues seules — chiffre absent sous 2 s
+  (reçu `""`), mouvements absents, « Partiel (1 indispo) » à +4,5 s puis après le réseau,
+  copies d'avant encore là. Mutations : sans l'appel d'`oublierLesCopiesDAvant`, seule la
+  dernière rougit ; sans `copieAvant`, les quatre premières.
+- Verts sur l'arbre après la relecture : `npm test` (698) ; e2e du lot et bancs touchés
+  (poids-reseau, tabs, smoke, performance, chargement-instantane, tableau-de-bord, commandes,
+  stock, clients, tournee, tournee-pratique, tournee-hors-ligne, hors-ligne,
+  rapidite-tournee, integration-lots-1-5, livreur-ne-perd-rien, parametres, historique-lent :
+  190) ; `connexion` et `numerotation-admin` rejoués contre un serveur authentifié local (10).
