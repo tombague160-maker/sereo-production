@@ -7851,3 +7851,192 @@ ou « Partiel ».
   stock, clients, tournee, tournee-pratique, tournee-hors-ligne, hors-ligne,
   rapidite-tournee, integration-lots-1-5, livreur-ne-perd-rien, parametres, historique-lent :
   190) ; `connexion` et `numerotation-admin` rejoués contre un serveur authentifié local (10).
+
+## 24/09 — Performance du rendu (mesurée en production)
+
+**Point de départ.** Le relevé de la production du 24/09 (lecture seule, v1.45.0 puis
+v1.45.1, rapport de mesure sections A et C) : au téléphone (390 × 844, CPU ralenti x4),
+l'ouverture fige la page 0,98 à 1,17 s ; 12 673 éléments dans la page pour 255 visibles ;
+arriver sur le Stock, 2,06 s de tâches longues ; chaque frappe dans une recherche, des
+centaines de ms de style. Au bureau, presque tout sous 150 ms.
+
+**Le jeu de mesure.** Les avant/après se mesurent en local, sur un jeu **de même forme**
+que la production, inventé et déterministe : `demarrer({ port, volume: "production" })`
+(`test/e2e/jeu-production.js` : 97 clients sur 26 secteurs, 224 commandes livrées,
+218 produits, 429 ventes, 1 036 entrées d'historique, 633 mouvements, 18 tournées,
+123 archives, une image de marque de 113 Ko). Il est **validé par le DOM** : Stock
+3 845 éléments (production 3 845), Commande client 2 114 (2 114), Commandes 369 / 361
+(369 / 361), Clients 664 / 691 (660 / 691), ouverture 12 939 (12 673 en v1.45.1) ; et
+par le temps : ouverture au téléphone, pire tâche 486 à 987 ms en local (sept
+ouvertures, médiane 919), 0,98–1,17 s en production. Même machine, bureau 1440 × 900,
+téléphone 390 × 844 CPU x4.
+
+**Ce qui a changé** (quatre commits `perf`, chacun tenu par un banc qui rougit sans lui) :
+
+1. **Un écran caché ne se dessine plus à chaque chargement** (`rendreOuDifferer`).
+   `renderAll` dessinait les treize écrans à l'ouverture, à chaque
+   actualisation et après chaque geste qui recharge. Un écran caché garde son rendu **en
+   attente** ; `showTab` le dessine en y arrivant, **une fois**, avec les données du
+   moment. `rendreSiAffiche` garde le contrat de main (caché : rien) — voir la relecture
+   ci-dessous. Le tableau de bord, les pastilles de la barre latérale et les 12 derniers
+   mouvements du Stock restent à jour partout. La rangée des
+   secteurs de la Préparation n'est plus mesurée cachée (lire `scrollHeight` forçait une
+   mise en page de toute la page), ni refaite à chaque frappe.
+2. **Les formateurs `Intl` se construisent une fois** (`formatMoney`, `formatDate`,
+   `formatDateTimeShort`, `dateCourte`, `money` des opérations) : même texte.
+3. **Stock et catalogue** : les lignes hors de l'écran ne sont ni mises en page ni peintes
+   (`content-visibility: auto`, hauteur de réserve mesurée par largeur ; elles restent
+   dans la page : recherche du navigateur, lecteur d'écran, Tab) ; le Stock écrit ses 218
+   lignes en une fois ; « + » du catalogue ne refait plus les 218 cartes.
+4. **Les règles `body:has(#écran…)` cherchent l'écran par son chemin**
+   (`body:has(> .app > main.content > #crm…)`, 52 sélecteurs). Sans chemin, chaque
+   recalcul du style de `<body>` — une frappe, un focus, une ligne ajoutée — parcourait
+   toute la page pour chacune : c'est ce qui faisait croître avec le DOM le coût des
+   `focus()`, des fiches et des recherches. Essai A/B (seule la feuille change) : quatre
+   lettres dans la recherche Clients, style 396–454 ms → 56 ms.
+
+**Avant → après, ouverture** (pire tâche longue, trois ouvertures) :
+
+| | Avant | Après |
+|---|---|---|
+| Bureau, pire tâche | 52–79 ms | aucune tâche ≥ 50 ms |
+| Téléphone x4, pire tâche | 486–955 ms | 121–164 ms |
+| Téléphone x4, total des tâches longues | 950–1 503 ms | 214–365 ms |
+| Éléments dans la page | 12 939 (12 967 au téléphone) | 2 830 (dont ~1 140 d'archives, que le lot réseau diffère ; 1 677 fusionné avec lui) |
+
+Objectif : aucune tâche > 200 ms au bureau (**tenu**), > 800 ms au téléphone (**tenu**).
+Le temps au téléphone dépend du moment : l'ancien code, remesuré le même soir, donnait
+269–454 ms (huit ouvertures) ; c'est un **journal**, pas un banc (voir la relecture).
+
+**Avant → après, arrivée sur un écran** (depuis le tableau de bord, pire tâche longue,
+médiane de trois passages ; « 0 » = aucune tâche de 50 ms) :
+
+| Écran | Bureau avant | Bureau après | Téléphone avant | Téléphone après |
+|---|---|---|---|---|
+| Commandes | 0 | 0 | 139 | 89 |
+| Préparation | 0 | 0 | 115 | 0 |
+| Tournée | 0 | 0 | 218 | 115 |
+| Abonnements | 0 | 0 | 115 | 0 |
+| Stock | 91 | 0 | 1 189 | 194 |
+| Clients | 0 | 0 | 240 | 116 |
+| Statistiques | 0 | 0 | 156 | 55 |
+| Rappels | 0 | 0 | 132 | 52 |
+| À recommander | 0 | 0 | 169 | 121 |
+| Commande client | 61 | 0 | 710 | 119 |
+| Exports | 0 | 0 | 113 | 0 |
+| Paramètres | 0 (103 au 1er passage) | 63 (126 au 1er passage) | 128 | 60 |
+
+Objectif : changement d'écran < 100 ms au bureau — **tenu partout sauf la première
+arrivée sur Paramètres** (103–127 ms avant, 121–126 après, voir « Ce qui reste »).
+
+**Avant → après, gestes** (téléphone x4, parcours enchaîné, pire tâche / total) :
+
+| Geste | Avant | Après |
+|---|---|---|
+| Recherche Clients, 4 lettres | 247 / 706 ms | 72 / 72 ms |
+| Recherche Commandes, 4 caractères | 225 / 751 ms | 70 / 266 ms |
+| Recherche Stock, vider (218 lignes) | 1 061 / 1 365 ms | 315 / 484 ms |
+| Défiler tout le Stock | 193 / 5 194 ms | 190 / 2 469 ms |
+| Ouvrir une fiche client | 541 ms | 165 ms |
+| Ouvrir le détail d'une commande | 347 ms | 209 ms |
+| Menu Plus, ouvrir / fermer | 196 / 111 ms | 91 / 0 ms |
+
+**Bancs** : `test/e2e/rendu-a-l-affichage.spec.js` (port 3562, jeu « production ») et
+`test/has-borne.test.js`. Structurels : lignes dessinées dans les écrans cachés (218
+lignes de stock, 218 cartes, 97 clients, 20 commandes avant ; 0 après), formateurs
+construits pendant deux rendus de liste (218 et 20 avant ; 0 après), lignes du Stock et
+cartes hors mise en page au téléphone (0 avant ; 210 et 216 après), écritures dans la
+liste du Stock (219 avant ; 2 après), carte du catalogue remplacée par « + », rangée des
+secteurs mesurée cachée (2 fois avant ; 0 après), sélecteurs `body:has` sans chemin (52
+avant ; 0 après), éléments de l'ouverture au téléphone (12 967 avant ; 2 830 après),
+rendus d'une arrivée sur Commandes ou À recommander (2 avant ; 1 après). Aucun
+chronomètre jugé : le temps de l'ouverture au téléphone est journalisé. Témoins
+positifs : chaque écran se dessine en entier en y arrivant ; un écran quitté pendant un rechargement montre la donnée neuve en y
+revenant ; `<body>` répond pareil aux neuf conditions avec et sans chemin ; trois règles
+de la feuille changent ce qu'elles doivent dans leur état. Harnais de mutation : chaque
+correctif retiré seul fait rougir son banc, pour sa cause (14 mutations ; deux restaient
+vertes au premier passage — un chemin `:has` faux, le choix de client d'un rappel non
+rempli — et ont fait resserrer les bancs).
+
+**Ce qui reste.**
+- **Paramètres au bureau**, première arrivée : 121–126 ms. La mise en page du tableau
+  des 123 archives et le **repli de police des émojis** (📋 / 📦 sur chaque ligne ; ✗ ✓ 🗑️
+  dans la zone dangereuse) : remplacer les émojis par du texte, essai A/B, divise la mise
+  en page par deux (42–46 → 24–25 ms). C'est un changement visuel : pas dans ce lot.
+- **Tournée** au téléphone (Leaflet) : 100 à 460 ms à l'arrivée ; non traitée ici (calcul
+  routier et gardes de tournée intouchables ; la carte cachée ne charge plus de tuile
+  dans le lot réseau).
+- **Défilement du Stock au téléphone** : ~190 ms par pas au pire, surtout du dessin
+  (DPR 3). `content-visibility` a divisé le total par deux, pas le pire pas.
+- **Recherches sans délai** : pas de délai ajouté aux recherches Clients et Commandes.
+  Après le point 4, une frappe coûte ≤ 72 ms au téléphone ; et un délai changerait une
+  règle tenue par `commandes.spec.js` (« une recherche retire de la sélection ce qu'elle
+  masque », à chaque frappe).
+- `localeCompare(…, "fr")` coûte ~15 fois un `Intl.Collator` gardé (mesure Node :
+  10 000 comparaisons, 19,8 ms contre 1,3 ms) ; une dizaine d'appels dans des tris de
+  listes, non touchés (quelques ms par rendu).
+- `CACHE_NAME` n'est **pas** incrémenté (consigne du lot) alors que `app.js`,
+  `operations.js` et `style.css` changent : à faire à l'intégration.
+- **Intégration avec le lot réseau** (`perf/reseau-donnees`) : `app.js` fusionne **sans
+  conflit** ; seul `DESIGN.md` en a un (deux sections ajoutées au même endroit : garder
+  les deux). Les deux conflits de sens trouvés à la relecture sont réglés dans ce lot
+  (ci-dessous) et mesurés sur l'arbre fusionné.
+- **Intégration avec `integration/ameliorations`** (lu à `578a4dc`, `git merge-tree`,
+  non exécuté) : **quatre conflits dans `app.js`** — `dateCourte`, `formatDateTimeShort`,
+  `formatDate` (leur texte passe par `utils/dates.js`) et la liste de `renderAll` (garder
+  `rendreOuDifferer`). Leur `utils/dates.js` appelle `toLocaleDateString` à chaque date :
+  garder leur texte, mais avec des formateurs `Intl` construits une fois, sinon le banc
+  « les montants et les dates ne construisent plus un formateur chacun » rougit — et la
+  frappe dans la recherche des Commandes reprend ses 80 ms au téléphone.
+- **Préparation** : à la première arrivée, la rangée des secteurs se mesure deux fois (le
+  rendu en attente, puis `showTab`) ; une fois aux suivantes (mesuré). Aucune tâche de
+  50 ms au téléphone : non traité.
+
+### Relecture adverse du 24/09 — le sort de chaque point
+
+Mesures sur le jeu « production », même machine ; « fusion » = ce lot + `perf/reseau-donnees`
+(`git merge --no-commit`, arbre jetable, jamais poussé).
+
+1. **Rapport faux, et Paramètres lus deux à trois fois après fusion — vrai (important).**
+   Le rapport annonçait des conflits dans `renderAll` et `showTab` : `app.js` fusionne
+   sans conflit. En cause, ce lot : il avait changé le sens de `rendreSiAffiche` (caché :
+   rendu gardé pour l'arrivée), que le lot réseau appelle avec celui de main (caché :
+   rien) avant de lire lui-même les Paramètres en y arrivant. `rendreSiAffiche` revient
+   au texte de main, le rendu différé s'appelle `rendreOuDifferer`. Arrivée sur
+   Paramètres, fusion : `/api/storage/status`, `/api/imports/archives`, `/api/comptes`
+   2 / 2 / 3 → 1 / 1 / 1 ; tableau des 123 archives écrit 2 → 1 fois ; banc du lot
+   réseau « les Paramètres lisent leurs données en s'affichant » rouge → vert. Temps
+   (téléphone x4, trois passages) : 206–263 → 184–300 ms, dans le bruit ; au bureau,
+   aucune tâche de 50 ms ni avant ni après. Banc : `test/rendu-differe.test.js` (les
+   vraies fonctions de `app.js`) ; rouge sur l'ancien code : 1 rendu gardé au lieu de 0,
+   `{ lecture: 2, comptes: 3 }` au lieu de `{ 1, 1 }`.
+   **Trouvé en le vérifiant, même classe** : le banc du lot réseau « la copie d'avant
+   sert encore » lit les 12 derniers mouvements du Stock dès l'ouverture, depuis le
+   tableau de bord ; différés avec le Stock, ils n'y étaient pas (rouge sur la fusion :
+   12 noms attendus, liste vide). `renderStockMovements` redevient appelé à chaque
+   chargement, comme sur main (+72 éléments). Banc : les 12 mouvements sont dans la page
+   à l'ouverture, Stock caché (rouge avant). Fusion : banc réseau 5 / 5, celui-ci 15 / 15,
+   `chargement-instantane` 10 / 10, `npm test` vert.
+2. **Le seul chronomètre ne sépare pas l'ancien code — vrai (mineur).** Rejoué le même
+   soir sur l'ancien code : huit ouvertures de 269 à 454 ms, **toutes sous le seuil de
+   800 ms** (l'ancien banc, rejoué cinq fois : cinq verts). Le temps
+   est journalisé ; le banc juge les éléments de l'ouverture au téléphone (ancien code :
+   12 967 à chaque essai, rouge trois fois sur trois ; nouveau : 2 830, seuil 4 000).
+3. **Deux bancs attendaient un délai fixe — vrai (mineur).** Mutant « rendu à 1 s au lieu
+   de 200 ms » + écriture ligne à ligne : l'ancien banc du Stock est **vert** (« 0
+   écriture ») ; le nouveau, qui attend la première écriture, est rouge (≤ 2 attendu,
+   219 reçu). Même chose pour la Préparation (rendu à 1 s + rangée refaite à chaque
+   frappe) : ancien vert, nouveau rouge (pilule marquée : 1 attendu, 0 reçu) ; il attend
+   que le résumé, refait par chaque rendu, perde sa marque. Rendu à 1 s seul : les deux
+   nouveaux bancs sont verts.
+4. **Commandes dessinée deux fois par « Les N autres » et par une ancienne adresse — vrai
+   (mineur).** Le filtre se pose avant l'arrivée, le rendu passe par `rendreOuDifferer` :
+   écritures de la liste 2 → 1 dans les deux chemins ; script du geste au téléphone x4
+   (médiane de cinq) 33 → 17 ms et 24 → 18 ms. **Même classe, trouvé en cherchant** :
+   « Tout voir » du Stock vers À recommander, 334 → 167 articles créés pour 167
+   affichés, script 93 → 50 ms. Pire tâche du geste, elle, dans le bruit (76 → 64 et
+   222 → 200 ms) : la mise en page de l'écran d'arrivée domine, et elle reste une.
+5. **La jonction `node_modules` du worktree `perf-rendu-avant` — vrai (mineur).** Windows
+   PowerShell 5.1 descend dans une jonction avec `Remove-Item -Recurse`. La jonction est
+   retirée par `rmdir` (le lien seul, sa cible intacte), puis le worktree par
+   `git worktree remove` ; même geste pour l'arbre de fusion jetable.
