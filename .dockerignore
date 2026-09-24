@@ -51,6 +51,25 @@ ASSISTANT_BUGS.md
 IA_ASSISTANT.md
 AGENTS.md
 
+# Design et documentation (25/09) : 7,8 Mo de planches et d'exports (design/)
+# et la doc partaient dans l'image de production. Le serveur ne lit, du depot,
+# que server.js, lib/, storage/, public/, package.json, node_modules et un
+# eventuel VERSION (test/dockerignore.test.js les garde). scripts/ reste :
+# `npm run migrate:sqlite` peut servir dans le conteneur.
+design/
+docs/
+CHANGELOG.md
+CLAUDE.md
+CONTRIBUTING.md
+DEPLOYMENT.md
+README.md
+playwright.config.js
+.release-please-config.json
+.release-please-manifest.json
+# Les worktrees des sessions (copies entieres du depot, node_modules compris)
+# quand l'image est construite depuis un poste de developpement.
+.claude/
+
 # Outils dev / IDE
 .vscode/
 .idea/
