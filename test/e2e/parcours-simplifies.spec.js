@@ -223,6 +223,49 @@ test("2 — « Modifier les coordonnees » d'un client existant : la commande et
   await ctx.close();
 });
 
+/** La file hors ligne, lue dans le vrai indexedDB de la page, dans l'ordre de depot. */
+function lireFile(page) {
+  return page.evaluate(() => new Promise(resolve => {
+    const d = indexedDB.open("sereo-file-attente", 1);
+    d.onerror = () => resolve([]);
+    d.onsuccess = () => {
+      const db = d.result;
+      if (!db.objectStoreNames.contains("ecritures")) { db.close(); resolve([]); return; }
+      const r = db.transaction("ecritures", "readonly").objectStore("ecritures").getAll();
+      r.onsuccess = () => { db.close(); resolve(r.result.sort((a, b) => String(a.depose).localeCompare(String(b.depose)))); };
+      r.onerror = () => { db.close(); resolve([]); };
+    };
+  }));
+}
+
+// La file hors ligne est une garantie : une fiche corrigee hors ligne ne doit
+// pas retenir la commande. Les deux attendent, la fiche d'abord.
+test("2 — hors ligne, la fiche corrigee PUIS la commande attendent dans la file, et partent", async ({ browser }) => {
+  const { ctx, page, erreurs } = await ouvrir(browser, "commande-client");
+  expect(await lireFile(page), "prealable : la file est vide").toEqual([]);
+  await page.locator("#customerClientSearch").fill("martin");
+  await page.locator('#customerClientResults [data-action="cc-client"]').first().click();
+  await page.locator("#customerCoordonneesTitre").click();
+  await page.locator('#customerCoordonnees input[name="adresse"]').fill("7 rue de Besançon");
+  await page.locator('[data-customer-product="st-ALE"][data-customer-delta="1"]').click();
+
+  await ctx.setOffline(true);
+  await page.locator("#customerValider").click();
+  await expect(page.locator(".toast", { hasText: "sera envoyé à la reconnexion" }).first()).toBeVisible();
+  const file = await lireFile(page);
+  expect(file.map(e => `${e.methode} ${new URL(e.url, srv.base).pathname}`), "la fiche, puis la commande")
+    .toEqual(["PATCH /api/clients/c-martin", "POST /api/customer-orders"]);
+
+  await ctx.setOffline(false);
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect.poll(async () => (await lireFile(page)).length, { timeout: 15000 }).toBe(0);
+  const commande = (await api("/api/orders")).find(o => o.clientId === "c-martin" && o.address === "7 rue de Besançon");
+  expect(commande, "la commande rejouee part a la nouvelle adresse").toBeTruthy();
+  // Une page hors ligne journalise ses fetch echoues : seules comptent les erreurs de script.
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
 // --- 7. Une commande sur un produit en rupture ------------------------------------
 
 test("7 — un produit en rupture entre au panier, la commande est acceptee en « Bloquee »", async ({ browser }) => {
