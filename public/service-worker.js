@@ -96,10 +96,54 @@ const API_NETWORK_TIMEOUT_MS = 3000;
 // d'abord pour ce chargement -- le cas « sans bump » ci-dessus, jamais pire.
 const clientsEnRetard = new Set();
 
+// --- UN SHELL, UNE VERSION (chasse aux defauts, 25/09) ----------------------
+//
+// La page gardee pour la tournee et les fichiers qui la font demarrer doivent
+// etre de la MEME version, et ranges ensemble. Trois chemins les melaient :
+//  - une page plus recente que ce service worker (« en retard ») rangeait ses
+//    fichiers neufs dans le cache de CETTE version (reseauDabord), et la
+//    revalidation d'arriere-plan faisait de meme (cacheDabord) : l'ancienne
+//    page gardee se serait rouverte sur de nouveaux scripts ;
+//  - la page neuve REMPLACAIT la copie de l'ancienne, avant que son service
+//    worker soit installe : coupe dans l'intervalle, la tournee ne se
+//    rouvrait plus (« cet ecran demande le reseau ») ;
+//  - l'installation rangeait ce que le serveur rendait AU MOMENT de
+//    l'installation, quelle qu'en soit la version.
+// Chaque fichier annonce sa version (X-Sereo-Shell-Fichier, server.js
+// annoncerShell ; X-Sereo-Shell reste l'annonce de la PAGE) :
+// n'entre dans ce cache que ce qui est de CETTE version. Un fichier sans
+// annonce (serveur qui n'a pas pu calculer l'empreinte) est accepte, comme
+// avant.
+function duMemeShell(response) {
+  const shell = response.headers.get("X-Sereo-Shell-Fichier");
+  return !shell || shell === CACHE_NAME;
+}
+
+// L'installation : chaque fichier revalide aupres du serveur (« no-cache » :
+// jamais une copie du cache HTTP, dont l'annonce serait celle d'avant), de
+// cette version, et pas une redirection (session finie : la page de
+// connexion n'est pas app.js). Un seul manque, et rien n'est range -- tout ou
+// rien, comme cache.addAll : le navigateur reessaiera, et le service worker
+// en place reste, complet. Chaque corps est lu DES son arrivee : une reponse
+// non lue garde sa connexion, et avec six connexions par serveur, les
+// fichiers suivants attendaient sans fin (mesure : installation figee sur
+// trois fichiers, corps non compresses).
+function prechargerShell() {
+  return Promise.all(APP_SHELL.map(chemin => {
+    const adresse = new URL(chemin, self.location.origin).href;
+    return fetch(new Request(adresse, { cache: "no-cache" })).then(response => {
+      if (!response.ok || response.redirected) throw new Error(`${chemin} : ${response.status}`);
+      if (!duMemeShell(response)) throw new Error(`${chemin} : fichier d'une autre version`);
+      return response.blob().then(corps => [adresse, new Response(corps, {
+        status: response.status, statusText: response.statusText, headers: response.headers
+      })]);
+    });
+  })).then(reponses => caches.open(CACHE_NAME)
+    .then(cache => Promise.all(reponses.map(([adresse, response]) => cache.put(adresse, response)))));
+}
+
 self.addEventListener("install", event => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(APP_SHELL)).then(() => self.skipWaiting())
-  );
+  event.waitUntil(prechargerShell().then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", event => {
@@ -107,6 +151,7 @@ self.addEventListener("activate", event => {
   event.waitUntil(
     caches.keys()
       .then(keys => Promise.all(keys.filter(key => !validCaches.has(key)).map(key => caches.delete(key))))
+      .then(() => promouvoirPageSuivante())
       .then(() => self.clients.claim())
   );
 });
@@ -244,7 +289,8 @@ function annoncerReponseTardive(event, url, debut) {
 function cacheDabord(event) {
   const { request } = event;
   const reseau = fetch(request).then(response => {
-    if (!response.ok || response.type !== "basic") return response;
+    // D'une autre version (le serveur a ete mis a jour) : rendu, jamais range.
+    if (!response.ok || response.type !== "basic" || !duMemeShell(response)) return response;
     const copy = response.clone();
     return caches.open(CACHE_NAME).then(cache => cache.put(request, copy)).then(() => response);
   });
@@ -259,7 +305,8 @@ function cacheDabord(event) {
 // L'ancienne strategie, gardee pour une page plus recente que ce service worker.
 function reseauDabord(request) {
   return fetch(request).then(response => {
-    if (!response.ok || response.type !== "basic") return response;
+    // Les fichiers d'une page plus recente ne sont pas ceux de ce cache.
+    if (!response.ok || response.type !== "basic" || !duMemeShell(response)) return response;
     const copy = response.clone();
     caches.open(CACHE_NAME).then(cache => cache.put(request, copy));
     return response;
@@ -308,30 +355,62 @@ function finDeSession(response) {
   return Number.isFinite(fin) ? fin : 0;
 }
 
+// La page d'une AUTRE version que ce service worker (la suivante, dont le
+// service worker n'est pas encore installe) : gardee a part (25/09). Elle ne
+// remplace pas la copie de CETTE version, dont les fichiers sont dans ce
+// cache-ci ; son service worker la reprend en s'activant.
+const CLE_PAGE_SUIVANTE = "/__sereo/page-tournee-suivante";
+
 /** Garde la page, ou vide le cache de donnees si la session est finie. */
 function retenirOuOublier(response) {
   const fin = finDeSession(response);
   if (fin === null) return Promise.resolve();
   if (!(fin > Date.now())) return caches.delete(API_CACHE_NAME);
   if (!response.ok || response.type !== "basic" || response.redirected) return Promise.resolve();
-  if (!response.headers.get("X-Sereo-Shell")) return Promise.resolve();
+  const shell = response.headers.get("X-Sereo-Shell");
+  if (!shell) return Promise.resolve();
   const copy = response.clone();
-  return caches.open(API_CACHE_NAME).then(cache => cache.put(CLE_PAGE_TOURNEE, copy));
+  return caches.open(API_CACHE_NAME).then(cache => {
+    if (shell === CACHE_NAME) return cache.put(CLE_PAGE_TOURNEE, copy);
+    // Une page d'une autre version : a part, tant que la copie de CETTE
+    // version peut encore servir (sinon, rien a proteger : elle prend la place).
+    return cache.match(CLE_PAGE_TOURNEE).then(actuelle => (
+      actuelle && actuelle.headers.get("X-Sereo-Shell") === CACHE_NAME && finDeSession(actuelle) > Date.now()
+        ? cache.put(CLE_PAGE_SUIVANTE, copy)
+        : cache.put(CLE_PAGE_TOURNEE, copy)
+    ));
+  });
 }
 
 /** La page gardee, si elle peut etre rendue maintenant ; sinon null. */
 function pageTourneeValide() {
   return caches.open(API_CACHE_NAME)
-    .then(cache => cache.match(CLE_PAGE_TOURNEE).then(page => {
-      if (!page) return null;
-      const fin = finDeSession(page);
-      if (!(fin > Date.now())) {
-        // Session finie pendant la coupure : la page ne se rouvrira plus.
-        return cache.delete(CLE_PAGE_TOURNEE).then(() => null);
-      }
-      return page.headers.get("X-Sereo-Shell") === CACHE_NAME ? page : null;
-    }))
+    .then(cache => {
+      // La copie de cette version ; a defaut, la « suivante », si c'est la
+      // sienne (gardee par l'ancien service worker juste avant l'activation).
+      const lire = cle => cache.match(cle).then(page => {
+        if (!page) return null;
+        const fin = finDeSession(page);
+        if (!(fin > Date.now())) {
+          // Session finie pendant la coupure : la page ne se rouvrira plus.
+          return cache.delete(cle).then(() => null);
+        }
+        return page.headers.get("X-Sereo-Shell") === CACHE_NAME ? page : null;
+      });
+      return lire(CLE_PAGE_TOURNEE).then(page => page || lire(CLE_PAGE_SUIVANTE));
+    })
     .catch(() => null);
+}
+
+/** A l'activation : la page gardee pour CETTE version devient la copie. */
+function promouvoirPageSuivante() {
+  return caches.has(API_CACHE_NAME)
+    .then(existe => (existe ? caches.open(API_CACHE_NAME) : null))
+    .then(cache => cache && cache.match(CLE_PAGE_SUIVANTE).then(suivante => {
+      if (!suivante || suivante.headers.get("X-Sereo-Shell") !== CACHE_NAME) return undefined;
+      return cache.put(CLE_PAGE_TOURNEE, suivante).then(() => cache.delete(CLE_PAGE_SUIVANTE));
+    }))
+    .catch(() => {});
 }
 
 /** La page gardee, marquee : la page sait qu'elle s'ouvre sans reseau. */

@@ -174,6 +174,16 @@ const SHELL = (() => {
   }
 })();
 const SHELL_ANNONCE = SHELL ? SHELL.nom : "";
+// Chaque fichier du shell dit de quelle version il est (chasse aux defauts,
+// 25/09) : le service worker ne range dans le cache d'une version QUE les
+// fichiers de cette version (public/service-worker.js, duMemeShell). Sans
+// cela, une page plus recente que lui rangeait ses fichiers neufs dans le
+// cache de l'ancienne version, sous l'ancienne page gardee pour la tournee.
+// Un en-tete a part : X-Sereo-Shell reste celui de la PAGE (le shell qu'elle
+// attend), et rien d'autre ne le porte.
+function annoncerShell(res) {
+  if (SHELL_ANNONCE) res.setHeader("X-Sereo-Shell-Fichier", SHELL_ANNONCE);
+}
 const ENABLE_DB_EXPORT = process.env.SEREO_ENABLE_DB_EXPORT === "1";
 const AUTH_USER = cleanEnv(process.env.SEREO_AUTH_USER);
 const AUTH_PASSWORD = cleanEnv(process.env.SEREO_AUTH_PASSWORD);
@@ -422,12 +432,13 @@ app.use(securityHeaders);
 // compresses), et le JSON des commandes grossit avec la base. Les formats deja
 // compresses (polices, images, .xlsx) sont ecartes par le filtre par defaut.
 app.use(compression());
-app.use("/brand", express.static(path.join(__dirname, "public", "brand"), { immutable: true, maxAge: "1d" }));
+app.use("/brand", express.static(path.join(__dirname, "public", "brand"), { immutable: true, maxAge: "1d", setHeaders: annoncerShell }));
 // Les polices : la page de connexion les charge avant toute session. Rien de
 // sensible (des fichiers de police libres, OFL).
 // Pas d'« immutable » : les noms de fichiers n'ont pas d'empreinte.
-app.use("/fonts", express.static(path.join(__dirname, "public", "fonts"), { maxAge: "7d" }));
+app.use("/fonts", express.static(path.join(__dirname, "public", "fonts"), { maxAge: "7d", setHeaders: annoncerShell }));
 app.get("/favicon.svg", (req, res) => {
+  annoncerShell(res);
   res.sendFile(path.join(__dirname, "public", "favicon.svg"));
 });
 app.get("/healthz", (req, res) => {
@@ -492,7 +503,7 @@ app.post("/login", (req, res) => {
 app.post("/logout", handleLogout);
 app.use(requireAccessAuth);
 app.use(express.json({ limit: "5mb" }));
-app.use("/vendor/leaflet", express.static(LEAFLET_DIST, { immutable: true, maxAge: "7d" }));
+app.use("/vendor/leaflet", express.static(LEAFLET_DIST, { immutable: true, maxAge: "7d", setHeaders: annoncerShell }));
 // Le service worker, servi avec le nom de shell a empreinte (voir SHELL plus
 // haut). « no-cache » : le navigateur revalide a chaque controle de mise a jour,
 // comme pour le fichier statique qu'il remplace.
@@ -507,6 +518,9 @@ app.use(express.static(path.join(__dirname, "public"), {
   // les fichiers statiques depuis son cache, et s'il est plus vieux que la page,
   // il doit le savoir AVANT qu'elle demande ses scripts (public/service-worker.js).
   setHeaders(res, chemin) {
+    // Tous les fichiers : leur version. La page, en plus, le shell qu'elle
+    // attend et sa fin de session.
+    annoncerShell(res);
     if (path.basename(chemin) !== "index.html") return;
     if (SHELL_ANNONCE) res.setHeader("X-Sereo-Shell", SHELL_ANNONCE);
     const fin = finDeSessionConnue(res.req);
