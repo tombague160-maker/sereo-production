@@ -3171,7 +3171,8 @@ function renderFicheClient() {
     : "";
   // « Itineraire » (planche 8c, le second geste du terrain) : seulement si
   // l'adresse permet un trajet (rue ET ville) -- sinon le lien serait vide.
-  const trajet = buildGoogleMapsUrl(client);
+  // L'adresse du lien est celle que la fiche AFFICHE (la ville avec sa cedille).
+  const trajet = buildGoogleMapsUrl({ ...client, ville: villeAffichee(client.ville) });
   const itineraire = trajet
     ? `<a class="cli-bouton-contour cli-itineraire" href="${escapeAttribute(trajet)}" target="_blank" rel="noopener noreferrer">${ICONE_CLI.trajet}<span>Itinéraire</span></a>`
     : "";

@@ -14665,9 +14665,11 @@ html, body, main.content { overflow-x: clip; }
   :root:not([data-color-scheme]) :is(.field-app-grid, .customer-order-layout, .stats-grid, .driver-tools, .delivery-filters, .stock-toolbar, .crm-toolbar) { grid-template-columns: 1fr; }
 }
 /* Analyse : six tuiles de 120 px au moins ne tiennent pas de 921 a 1100 px ;
-   elles passent a la ligne. */
-:root[data-color-scheme] #statistiques .stats-kpis,
-:root:not([data-color-scheme]) #statistiques .stats-kpis { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+   elles passent a la ligne (au bureau : le telephone a ses regles). */
+@media (min-width: 821px) {
+  :root[data-color-scheme] #statistiques .stats-kpis,
+  :root:not([data-color-scheme]) #statistiques .stats-kpis { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+}
 /* Commande client : deux champs par ligne seulement s'ils logent « Commande
    immediate » (15 rem), et non 13,5 (a 821 px la liste coupait son texte). */
 :root[data-color-scheme] .customer-client-panel .form-grid.two,
@@ -14698,8 +14700,9 @@ html, body, main.content { overflow-x: clip; }
 :root[data-color-scheme] button.button.danger:disabled,
 :root:not([data-color-scheme]) button.button.danger:disabled { opacity: 0.55; }
 button.button.danger .button-icon { width: 18px; height: 18px; flex: none; }
-.danger-list li, .preserve-list li { display: flex; align-items: center; gap: 8px; }
-.danger-icone { width: 16px; height: 16px; flex: none; }
+/* L'icone dans le fil du texte (un `flex` sur la ligne ecartait aussi les
+   mots en gras du reste de la phrase). */
+.danger-icone { width: 16px; height: 16px; margin-right: 8px; vertical-align: -3px; }
 
 /* --- Les liens du tableau de bord ------------------------------------------
    « Tous les abonnements ↗ », « Tout voir ↗ », « Voir mes abonnements ↗ » : le
@@ -14846,3 +14849,18 @@ button.button.danger .button-icon { width: 18px; height: 18px; flex: none; }
 @media (min-width: 1440px) and (max-width: 1599px) {
   .abo-colonne, #abonnements .abo-agenda { grid-column: span 12; }
 }
+
+/* --- L'icone d'un bouton ne colle pas a son mot ----------------------------
+   « Actualiser », « Recalculer le trace » : l'ecart de 8 px venait d'une regle
+   du clair ; le sombre collait l'icone au mot. Au bureau, pour les deux. */
+@media (min-width: 821px) {
+  :root[data-color-scheme] .button,
+  :root:not([data-color-scheme]) .button { gap: 8px; }
+}
+
+/* --- La version : « Derniere version » sur sa ligne --------------------------
+   Le mot « A jour » reste a la pastille des DONNEES. Dans la barre, le badge
+   de la version passe sous le numero plutot que de couper l'un et l'autre en
+   deux lignes. */
+.sidebar-version { flex-wrap: wrap; row-gap: 4px; padding-block: 6px; }
+.sidebar-version-label, .sidebar-version-etat { white-space: nowrap; }
