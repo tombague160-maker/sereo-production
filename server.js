@@ -3974,24 +3974,48 @@ function getQuantityForProductInOrder(product, order) {
   }, 0);
 }
 
-// Chantier 1 (2026-06-04) : ajout "probleme_livraison" et "a_reprogrammer"
-// dans la liste des statuts qui MAINTIENNENT la reservation. Avant ce fix,
-// `reserveStockForOrder` deduisait physiquement le stock mais
-// `calculateReservedStock` excluait ces statuts de la metrique reserved —
-// asymetrie comptable invisible (stock dispo affiche > stock physique reel).
+// Chantier 1 (2026-06-04) : "probleme_livraison" et "a_reprogrammer"
+// MAINTIENNENT la reservation. Avant ce fix, `reserveStockForOrder` deduisait
+// physiquement le stock mais `calculateReservedStock` excluait ces statuts de
+// la metrique reserved — asymetrie comptable invisible (stock dispo affiche >
+// stock physique reel).
 //
 // Pattern ERP standard (Odoo unrelease, ERPNext stock reservation) : un
 // echec de livraison ne libere PAS la reservation (livraison client absent
 // = relivraison sous 24-72h sur meme stock). Pour annuler une reservation,
 // utiliser l'endpoint explicite POST /api/orders/:id/release-stock.
-const RESERVED_ORDER_STATUSES = [
-  "en_preparation",
-  "preparation_terminee",
-  "pret_livraison",
-  "en_livraison",
-  "probleme_livraison",
-  "a_reprogrammer"
-];
+//
+// Chasse aux defauts du 24/09 (lot « stock ») : la reservation se lit sur la
+// COMMANDE, plus sur une liste de statuts. Une commande saisie chez le client,
+// ou une planifiee confirmee, sort son stock du rayon des sa creation et reste
+// « stock_a_verifier » (a preparer) : absente de l'ancienne liste
+// (RESERVED_ORDER_STATUSES : en preparation jusqu'a a reprogrammer), elle
+// etait reevaluee contre le rayon qu'elle venait de reduire (6 pris sur 10, 4
+// restants, « 6 demandes pour 4 » : « Bloquee stock », bouton grise, Reserve 0
+// au Stock). Est reservee toute commande qui porte stockReservedAt, sauf une
+// livree (la livraison consomme la reservation ; des livrees anciennes gardent
+// stockReservedAt, voir la purge) ou une annulee.
+const STATUTS_SANS_RESERVATION = new Set(["livre", "annulee"]);
+
+function stockReserveActif(order) {
+  return Boolean(order && order.stockReservedAt) && !STATUTS_SANS_RESERVATION.has(order.status);
+}
+
+// Une commande qui n'a pas encore ete preparee (importee, a verifier, validee
+// chez le client) et qu'une transition fait entrer dans la preparation ou
+// au-dela : son stock doit sortir du rayon, comme par « Passer en
+// preparation ». Une commande « a reprogrammer » dont le stock a ete libere a
+// la main n'en est pas : sa livraison le reprend (reprendreStockLibere).
+const STATUTS_AVANT_PREPARATION = new Set(["brouillon", "importe", "stock_a_verifier", "commande_client_validee"]);
+const STATUTS_STOCK_SORTI = new Set(["en_preparation", "preparation_terminee", "pret_livraison", "en_livraison", "livre"]);
+
+function commandeQuiPartEnPreparation(order, statut) {
+  return statut !== order.status
+    && STATUTS_AVANT_PREPARATION.has(order.status)
+    && STATUTS_STOCK_SORTI.has(statut)
+    && isValidOrderStatusTransition(order.status, statut)
+    && !order.stockReservedAt;
+}
 
 // Chantier 2 (audit 2026-06-04) : pre-compute des metriques stock en
 // single-pass O(N+M) au lieu de N*M reduce imbriques par produit.
@@ -4063,7 +4087,7 @@ function buildStockMetricsIndex(commandes) {
   };
 
   for (const order of commandes || []) {
-    const isReserved = Boolean(order.stockReservedAt && RESERVED_ORDER_STATUSES.includes(order.status));
+    const isReserved = stockReserveActif(order);
     const isNeeded = NEEDED_ORDER_STATUSES.has(order.status);
     if (!isReserved && !isNeeded) continue;
     // null : rien de deduit, toute la ligne reste a prendre.
@@ -4199,7 +4223,7 @@ function lookupUpcomingDemand(index, product) {
 function calculateReservedStock(db, product, index) {
   if (index && index.totals) return lookupStockMetric(index, product, "reserved");
   return db.commandes.reduce((total, order) => {
-    const isReserved = Boolean(order.stockReservedAt && RESERVED_ORDER_STATUSES.includes(order.status));
+    const isReserved = stockReserveActif(order);
     return isReserved ? total + getQuantityForProductInOrder(product, order) : total;
   }, 0);
 }
@@ -4297,7 +4321,12 @@ function getRecommendations(db) {
     .filter(product => ["stock_faible", "rupture", "a_renseigner"].includes(product.stockStatus))
     .map(product => {
       const available = Number(product.quantityAvailable) || 0;
-      const needed = Number(product.quantityNeeded) || 0;
+      // Le besoin que le rayon n'a pas encore servi (lot « stock », 24/09) :
+      // une commande en preparation a deja sorti ses quantites du rayon.
+      // Avec quantityNeeded, 7 sortis sur 10 (rayon 3, seuil 5) donnaient
+      // 4 a racheter au lieu de 2. C'est le besoin de l'ecran « A recommander »
+      // depuis la relecture adverse du 24/09 (quantityNeededNotDeducted).
+      const needed = Number(product.quantityNeededNotDeducted) || 0;
       // Seuil 0 legitime preserve : on ne le remplace par 5 que si la valeur est invalide
       // (null, undefined, NaN, "" -> non finite). Cf. fix v1.1.0 sur normalizeProducts.
       const thresholdRaw = Number(product.alertThreshold);
@@ -4312,19 +4341,27 @@ function getRecommendations(db) {
     });
 }
 
-function recordStockMovement(db, product, oldQuantity, newQuantity, reason = "Ajustement manuel") {
+// `commande` (lot « stock », 24/09) : la commande dont le mouvement vient
+// (reservation, liberation, livraison acceptee) -- son id et son numero sont
+// gardes sur le mouvement (orderId : la colonne reference_commande de la
+// table). Une quantite inconnue (« a renseigner », null) compte pour 0 dans
+// le sens et l'ampleur du mouvement, et reste null dans oldQuantity.
+function recordStockMovement(db, product, oldQuantity, newQuantity, reason = "Ajustement manuel", { commande = null } = {}) {
   if (oldQuantity === newQuantity) return;
+  const ancienne = Number(oldQuantity) || 0;
+  const nouvelle = Number(newQuantity) || 0;
 
   db.stockMovements.unshift({
     id: `stock-${crypto.randomUUID()}`,
     productId: product.id,
     productName: getProductName(product),
     sku: getProductCode(product),
-    type: newQuantity >= oldQuantity ? "entree" : "sortie",
-    quantity: Math.round(Math.abs(newQuantity - oldQuantity) * 100) / 100,
+    type: nouvelle >= ancienne ? "entree" : "sortie",
+    quantity: Math.round(Math.abs(nouvelle - ancienne) * 100) / 100,
     oldQuantity,
     newQuantity,
     reason: clean(reason) || "Ajustement manuel",
+    ...(commande ? { orderId: String(commande.id), numero: clean(commande.numero) } : {}),
     createdAt: new Date().toISOString(),
     // Avant le 24/09 : « local », toujours. L'auteur est celui de la requete.
     createdBy: auteurCourant()
@@ -4556,13 +4593,26 @@ function normalizeProducts(products) {
     .filter(product => product.code || product.nom);
 }
 
+// Lot « stock » (chasse aux defauts du 24/09) : deux lignes d'une commande qui
+// designent le MEME produit du stock (le meme productId deux fois, ou la meme
+// reference avec et sans code dans un fichier) etaient controlees chacune
+// seule : 3 + 3 sur un rayon de 5 passait, la reservation ramenait le rayon a
+// 0 (une unite perdue sans trace, setStockQuantity), et la liberation en
+// rendait 6. Les lignes d'un meme produit se partagent desormais le rayon :
+// chacune y prend a son tour, et `available` est ce qu'il en reste pour ELLE
+// (une ligne seule : le rayon, comme avant). Le manque de la commande est la
+// somme des manques, et `quantitesParProduit` donne a la reservation et a la
+// liberation la quantite de chaque produit, lignes additionnees.
 function analyzeOrderStock(order, stock) {
   const lookup = stockLookup(stock);
+  const restantParProduit = new Map(); // produit du stock -> ce que le rayon laisse aux lignes suivantes
   const lines = normalizeProducts(order.products).map(product => {
     const stockItem = lookup.get(productKeyFromLine(product)) || lookup.get(`name:${normalizeTextKey(product.nom)}`);
-    const available = stockItem ? getStockQuantity(stockItem) : null;
+    const enRayon = stockItem ? getStockQuantity(stockItem) : null;
+    const available = enRayon === null ? null : (restantParProduit.has(stockItem) ? restantParProduit.get(stockItem) : enRayon);
     const required = Math.max(0, number(product.quantite, 0));
     const missing = available === null ? required : Math.max(0, required - available);
+    if (available !== null) restantParProduit.set(stockItem, Math.max(0, available - required));
     let status = "ok";
 
     if (!stockItem || available === null) status = "unknown";
@@ -4588,6 +4638,20 @@ function analyzeOrderStock(order, stock) {
     canPrepare: lines.length > 0 && status === "disponible",
     lines
   };
+}
+
+// Les lignes d'une analyse (analyzeOrderStock), regroupees par produit du
+// stock : [{ stockId, quantite }], lignes du meme produit additionnees. Les
+// lignes sans produit connu, ou que `garder` ecarte, ne comptent pas.
+function quantitesParProduit(lines, garder = () => true) {
+  const parProduit = new Map();
+  for (const line of lines) {
+    if (line.stockId === null || line.stockId === undefined) continue;
+    if (!line.required || line.required <= 0 || !garder(line)) continue;
+    const cle = String(line.stockId);
+    parProduit.set(cle, (parProduit.get(cle) || 0) + line.required);
+  }
+  return [...parProduit].map(([stockId, quantite]) => ({ stockId, quantite: Math.round(quantite * 100) / 100 }));
 }
 
 // ERP v1.9.0 : syncWorkflow ne regenere PLUS 1 commande par client. Il
@@ -4829,8 +4893,10 @@ function normalizeOrder(order) {
 
 function enrichOrder(order, stock) {
   const stockCheck = analyzeOrderStock(order, stock);
-  // Chantier 1 : aligne sur RESERVED_ORDER_STATUSES (inclut probleme/a_reprogrammer)
-  const stockReserved = Boolean(order.stockReservedAt && RESERVED_ORDER_STATUSES.includes(order.status));
+  // Chantier 1 : probleme/a_reprogrammer gardent leur reservation. Lot
+  // « stock » (24/09) : une commande a verifier au stock deja sorti aussi --
+  // jamais comparee au rayon qu'elle a elle-meme reduit (stockReserveActif).
+  const stockReserved = stockReserveActif(order);
 
   return {
     ...order,
@@ -4908,7 +4974,13 @@ function setOrderStatus(order, status, quand = null) {
   }
 }
 
-function reserveStockForOrder(db, order) {
+// Lot « stock » (24/09) : la quantite de chaque PRODUIT (lignes du meme
+// produit additionnees, quantitesParProduit) sort du rayon, et chaque sortie
+// est ecrite au journal des mouvements (recordStockMovement : l'auteur est
+// celui de la requete). Avant, rien n'y etait ecrit : un rayon qui avait
+// change trois fois laissait /api/stock-movements vide. `motif` : ce que dit
+// le mouvement (par defaut, la sortie pour la commande).
+function reserveStockForOrder(db, order, motif = `Sortie pour la commande ${nomDeCommande(order)}`) {
   if (order.stockReservedAt) return;
 
   const stockCheck = analyzeOrderStock(order, db.stock);
@@ -4916,18 +4988,33 @@ function reserveStockForOrder(db, order) {
     throw badRequest("Stock insuffisant ou non renseigne pour cette commande");
   }
 
-  stockCheck.lines.forEach(line => {
-    const product = db.stock.find(item => String(item.id) === String(line.stockId));
+  quantitesParProduit(stockCheck.lines).forEach(({ stockId, quantite }) => {
+    const product = db.stock.find(item => String(item.id) === stockId);
     if (!product) return;
 
-    const available = getStockQuantity(product) ?? 0;
-    setStockQuantity(product, available - line.required);
+    const avant = getStockQuantity(product) ?? 0;
+    // canPrepare garantit que le rayon couvre la somme : aucune remise a zero.
+    const apres = Math.round((avant - quantite) * 100) / 100;
+    product.quantite = apres;
+    recordStockMovement(db, product, avant, apres, motif, { commande: order });
   });
 
   order.stockReservedAt = new Date().toISOString();
   // Toutes les lignes viennent d'etre deduites.
   delete order.stockNonDeduit;
 }
+
+// Ce que dit le mouvement d'une liberation, selon sa raison (les codes des
+// appelants ; release-stock passe le texte saisi).
+const MOTIFS_DE_LIBERATION = {
+  order_cancelled: "commande annulée",
+  planned_order_cancelled: "commande planifiée annulée",
+  purge: "purge des bons de commande",
+  manual_release: "libération manuelle",
+  release: "libération",
+  subscription_paused: "abonnement mis en pause",
+  subscription_cancelled: "abonnement arrêté"
+};
 
 // Chantier 1 : symetrique de reserveStockForOrder. Restitue les quantites
 // physiquement deduites quand une commande quitte le workflow sans etre livree
@@ -4947,15 +5034,24 @@ function releaseOrderStockReservation(db, order, reason) {
   // Une ligne qu'aucune deduction n'a sortie du rayon (livraison acceptee sur
   // un stock non suivi) n'y rentre pas : l'ajouter inventerait une quantite.
   const nonDeduites = new Set(order.stockNonDeduit || []);
-  let restoredCount = 0;
-  stockCheck.lines.forEach(line => {
-    if (!line.required || line.required <= 0) return;
-    if (nonDeduites.has(productKeyFromLine(line))) return;
-    const product = db.stock.find(item => String(item.id) === String(line.stockId));
+  const rendue = line => !nonDeduites.has(productKeyFromLine(line));
+  // Le compte de l'historique reste celui des LIGNES rendues (« 2 ligne(s)
+  // restituee(s) ») ; le rayon, lui, recoit la somme par produit (lot
+  // « stock », 24/09 : deux lignes du meme produit rendent ce qu'elles ont pris,
+  // ni plus ni moins), ecrite sans remise a zero -- un rayon negatif (livraison
+  // acceptee sur stock insuffisant) remonte de la quantite rendue, il ne saute
+  // pas a zero.
+  const restoredCount = stockCheck.lines
+    .filter(line => line.required > 0 && rendue(line) && db.stock.some(item => String(item.id) === String(line.stockId)))
+    .length;
+  const motif = `Rendue au rayon : commande ${nomDeCommande(order)} (${MOTIFS_DE_LIBERATION[reason] || clean(reason) || "libération"})`;
+  quantitesParProduit(stockCheck.lines, rendue).forEach(({ stockId, quantite }) => {
+    const product = db.stock.find(item => String(item.id) === stockId);
     if (!product) return;
-    const available = getStockQuantity(product) ?? 0;
-    setStockQuantity(product, available + line.required);
-    restoredCount += 1;
+    const avant = getStockQuantity(product) ?? 0;
+    const apres = Math.round((avant + quantite) * 100) / 100;
+    product.quantite = apres;
+    recordStockMovement(db, product, avant, apres, motif, { commande: order });
   });
 
   order.stockReservedAt = null;
@@ -6759,7 +6855,7 @@ function updateRouteStop(db, routeId, stopId, status, notes = "", motif = null, 
   // toujours. Elle passe desormais a `a_reprogrammer` : elle REVIENT d'elle-meme
   // dans « Commandes pretes a livrer », marquee « A reprogrammer ». La cause
   // reste lisible dans deliveryStatus (absent / probleme) et dans l'arret.
-  // Le stock, lui, reste reserve pour la relivraison (RESERVED_ORDER_STATUSES
+  // Le stock, lui, reste reserve pour la relivraison (stockReserveActif
   // compte a_reprogrammer) : ni libere, ni reserve une seconde fois -- la
   // tournee suivante ne reserve rien, et la livraison consomme la reservation.
   if (status === "livre") {
@@ -7107,7 +7203,7 @@ function reprendreStockLibere(db, order, origine) {
   if (order.stockReservedAt || !order.stockReleaseReason || order.stockReleaseReason === "consumed_by_delivery") return;
   const verification = analyzeOrderStock(order, db.stock);
   if (verification.canPrepare) {
-    reserveStockForOrder(db, order);
+    reserveStockForOrder(db, order, `Sortie pour la commande ${nomDeCommande(order)}, livrée après la libération de son stock (${origine})`);
     addHistory(db, "Stock deduit", `Commande ${order.numero || order.id} : livree apres la liberation de son stock (${origine})`, {
       orderId: order.id,
       numero: order.numero
@@ -7121,6 +7217,9 @@ function reprendreStockLibere(db, order, origine) {
   // au rayon une quantite qu'il n'avait jamais perdue (« a renseigner » + 3).
   const nonDeduites = [];
   let negatif = false;
+  // Lot « stock » (24/09) : chaque deduction est ecrite au journal des
+  // mouvements, negatif compris (« Livree sur stock insuffisant »).
+  const motif = `Livrée sur stock insuffisant : commande ${nomDeCommande(order)} (${origine})`;
   verification.lines.forEach(line => {
     if (!line.required || line.required <= 0) return;
     const nom = clean(line.nom || line.code) || "Produit";
@@ -7138,6 +7237,7 @@ function reprendreStockLibere(db, order, origine) {
     }
     const apres = Math.round((avant - line.required) * 100) / 100;
     product.quantite = apres;
+    recordStockMovement(db, product, avant, apres, motif, { commande: order });
     if (apres < 0) {
       negatif = true;
       manques.push(`${getProductName(product)} : ${avant} en rayon pour ${line.required} livrés, stock à ${apres}`);
@@ -7342,7 +7442,8 @@ function messageMouvementStock(mouvement) {
   const quantite = Number(mouvement.quantity ?? mouvement.quantite);
   return [
     `${mouvement.productName || mouvement.sku || "Produit"} : ${signe}${Number.isFinite(quantite) ? quantite : "?"}`,
-    mouvement.oldQuantity !== undefined && mouvement.newQuantity !== undefined ? `${mouvement.oldQuantity} → ${mouvement.newQuantity}` : "",
+    // Une quantite inconnue (produit cree par un import, « a renseigner ») : « — ».
+    mouvement.oldQuantity !== undefined && mouvement.newQuantity !== undefined ? `${mouvement.oldQuantity ?? "—"} → ${mouvement.newQuantity ?? "—"}` : "",
     clean(mouvement.reason || mouvement.raison)
   ].filter(Boolean).join(" · ");
 }
@@ -8500,6 +8601,20 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
     const importedProducts = Array.from(seenProductKeys.values());
     const updatedCount = importedProducts.filter(p => existingByKey.has(productKey(p))).length;
     const createdCount = importedProducts.length - updatedCount;
+    // Lot « stock » (24/09) : la colonne Quantite qui CHANGE le rayon est
+    // ecrite au journal des mouvements, comme une saisie a la main ; un
+    // produit cree avec une quantite aussi. Un rayon inchange n'ecrit rien.
+    const motifImport = `Import du stock (${clean(req.file.originalname) || "fichier"})`;
+    importedProducts.forEach(product => {
+      const existing = existingByKey.get(productKey(product));
+      const apres = getStockQuantity(product);
+      if (existing) {
+        const avant = getStockQuantity(existing);
+        if (avant !== apres) recordStockMovement(db, product, avant, apres, motifImport);
+      } else if (apres !== null) {
+        recordStockMovement(db, product, null, apres, `${motifImport} : produit créé`);
+      }
+    });
 
     db.stock = [...importedProducts, ...preservedProducts];
 
@@ -9488,6 +9603,14 @@ app.patch("/api/orders/:id", async (req, res) => {
         if (clean(req.body.status) !== order.status) refuserSiDansUneTournee(db, order, "changer son statut");
         if (clean(req.body.status) === "annulee" && order.stockReservedAt) {
           releaseOrderStockReservation(db, order, "order_cancelled");
+        }
+        // Lot « stock » (24/09) : la meme transition que « Passer en
+        // preparation » (POST /start-preparation) sort le stock du rayon.
+        // Avant, « en_preparation » puis « livre » par cette route livraient
+        // la commande sans rien sortir (rayon 10 au lieu de 6). Un rayon qui
+        // ne couvre pas la commande refuse (400), comme le geste de l'ecran.
+        if (commandeQuiPartEnPreparation(order, clean(req.body.status))) {
+          reserveStockForOrder(db, order);
         }
         // Un « livre » d'ici sur une commande dont le stock a ete libere :
         // la reservation est reprise, comme sur l'arret (reprendreStockLibere).
