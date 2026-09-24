@@ -91,7 +91,7 @@ test("Changes L, au-dessus du seuil : « manquera », et combien recommander", a
   await expect(chl.locator(".reco-manque")).toHaveText(`Manquera le ${court(jour(3))} : 24 demandés, 14 en stock`);
   // Stock actuel, besoin estime (en cours + a venir), seuil, a recommander.
   await expect(chl.locator(".stock-kpis strong")).toHaveText(["14", "24", "5", "10"]);
-  await expect(chl.locator(".reco-detail")).toHaveText(`Dont 12 sur commandes en cours et 12 à venir d'ici le ${court(jour(14))} (abonnements, commandes planifiées).`);
+  await expect(chl.locator(".reco-detail")).toHaveText(`Dont 12 sur commandes en cours sans stock réservé et 12 à venir d'ici le ${court(jour(14))} (abonnements, commandes planifiées).`);
   // L'abonnement en pause ne fait pas manquer le gel.
   await expect(article(page, "Gel hydroalcoolique")).toHaveCount(0);
   // Ce qui manque des aujourd'hui est urgent.
@@ -117,7 +117,7 @@ test("l'horizon se règle dans Paramètres : à 30 jours, l'échéance du 20e jo
   // le quatrieme a +20 (4) -- 40 en tout, 26 a recommander.
   await expect(chl.locator(".reco-manque")).toHaveText(`Manquera le ${court(jour(3))} : 40 demandés, 14 en stock`);
   await expect(chl.locator(".stock-kpis strong")).toHaveText(["14", "40", "5", "26"]);
-  await expect(chl.locator(".reco-detail")).toHaveText(`Dont 12 sur commandes en cours et 28 à venir d'ici le ${court(jour(30))} (abonnements, commandes planifiées).`);
+  await expect(chl.locator(".reco-detail")).toHaveText(`Dont 12 sur commandes en cours sans stock réservé et 28 à venir d'ici le ${court(jour(30))} (abonnements, commandes planifiées).`);
   await expect(page.locator("#recommandeSousTitre")).toHaveText("Sous le seuil, ou qui manquera d'ici 30 jours");
 
   // Le reglage revient a 14 pour la suite du fichier.
@@ -150,3 +150,52 @@ for (const [largeur, schema] of [[1440, "dark"], [390, "light"], [390, "dark"]])
     expect(deborde).toEqual([]);
   });
 }
+
+// Relecture adverse du 24/09 : confirmer une commande planifiee RESERVE son
+// stock -- ses quantites sortent du rayon. Le gel : 20 en stock, seuil 5 ; 12
+// confirmes, il en reste 8, rien ne manque. L'ecran comptait encore les 12
+// dans le besoin (« Manque des aujourd'hui : 12 demandes, 8 en stock ») et la
+// pastille passait a 4. La commande passe par ses vraies routes : l'etat est
+// celui que l'application produit (stockReservedAt, stock deduit).
+// DERNIER du fichier : le gel reste a 8 ensuite.
+test("une commande confirmée, son stock réservé, ne fait pas manquer ce qui reste", async ({ page, browser }) => {
+  const cree = await page.request.post(`${srv.base}/api/planned-orders`, {
+    data: { clientId: "c-dupont", deliveryDate: jour(5), products: [{ stockId: "st-GEL", quantite: 12 }] }
+  });
+  expect(cree.status()).toBe(201);
+  const { order } = await cree.json();
+  const confirmee = await page.request.post(`${srv.base}/api/planned-orders/${order.id}/confirm`);
+  expect(confirmee.status()).toBe(200);
+  expect((await confirmee.json()).stockReservedAt).toBeTruthy();
+
+  const verifier = async p => {
+    await ouvrir(p, "stock");
+    await expect(pastille(p)).toHaveText("3");
+    await expect(p.locator("#stkRecoCompte")).toHaveText("3");
+    await expect(p.locator("#stkRecoListe .stk-reco-nom")).toHaveText(["Gants nitrile", "Alèses", "Changes taille L"]);
+    await ouvrir(p, "recommande");
+    await p.locator('[data-recommend-filter="all"]').click();
+    const gel = article(p, "Gel hydroalcoolique");
+    await expect(gel.locator(".pill")).toHaveText("OK");
+    // Stock actuel (deduction faite), besoin estime, seuil, a recommander.
+    await expect(gel.locator(".stock-kpis strong")).toHaveText(["8", "0", "5", "0"]);
+    await expect(gel.locator(".reco-manque")).toHaveCount(0);
+  };
+  await verifier(page);
+
+  // Le repli : une copie hors ligne d'avant le champ (sans
+  // quantityNeededNotDeducted) recompte sur les commandes de la page -- la
+  // confirmee, reservee, n'y compte pas. Sans service worker : page.route ne
+  // voit pas ce qu'il sert.
+  const ctx = await browser.newContext({ serviceWorkers: "block" });
+  try {
+    const copie = await ctx.newPage();
+    await copie.route("**/api/stock", async route => {
+      const vraie = await (await route.fetch()).json();
+      await route.fulfill({ json: vraie.map(({ quantityNeededNotDeducted, ...p }) => p) });
+    });
+    await verifier(copie);
+  } finally {
+    await ctx.close();
+  }
+});

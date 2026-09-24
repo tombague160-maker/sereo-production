@@ -125,6 +125,9 @@ test("l'exemple de l'audit : Changes L, 24 demandés sous 14 jours par les abonn
   const chl = await produit("CH-L");
   assert.equal(chl.quantityAvailable, 14);
   assert.equal(chl.quantityNeeded, 12);
+  // Semees sans stockReservedAt (comme un import) : aucune n'a encore sorti
+  // son stock du rayon, les 12 restent a prendre sur les 14.
+  assert.equal(chl.quantityNeededNotDeducted, 12);
   // L'abonnement en pause (10 par semaine) et l'arrete ne comptent pas : 24, pas 54 ni 84.
   assert.equal(chl.quantityUpcoming, 24);
   assert.equal(chl.upcomingHorizonDays, 14);
@@ -204,4 +207,77 @@ test("une échéance passée sans commande n'est pas « à venir »", async () =
   // retard, montrees par l'ecran Abonnements) et +8 (a venir).
   semer({ abonnements: [abonnement("sub-ancien", "c-6", "active", jour(-20), 3, 14, { code: "GEL", nom: "Gel hydroalcoolique" })] });
   assert.deepEqual((await produit("GEL")).upcomingDemand, [{ date: jour(8), quantite: 3 }]);
+});
+
+// Relecture adverse du 24/09 : une commande dont le stock est RESERVE
+// (confirmee, saisie chez le client, mise en preparation) a deja sorti ses
+// quantites du rayon -- quantityAvailable ne les contient plus. L'ecran les
+// comptait encore dans le besoin : 30 en stock, 20 confirmes, et « Manque des
+// aujourd'hui : 20 demandes, 10 en stock ». quantityNeededNotDeducted ne garde
+// que ce qui reste a prendre sur le stock ; quantityNeeded (« Necessaire » de
+// la carte produit) ne change pas de sens. Chaque reservation passe par sa
+// vraie route : les etats sont ceux que l'application produit.
+const GEL = { code: "GEL", nom: "Gel hydroalcoolique" };
+
+async function envoyer(chemin, corps) {
+  const reponse = await fetch(`${baseUrl}${chemin}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(corps || {})
+  });
+  const lu = await reponse.json();
+  assert.ok(reponse.status < 300, `${chemin} : ${reponse.status} ${JSON.stringify(lu)}`);
+  return lu;
+}
+
+test("une commande dont le stock est réservé ne compte plus dans le besoin", async () => {
+  // Temoin positif : une commande importee, sans reservation, compte.
+  semer({ commandes: [commande("o-gel", "importe", 2, { products: [{ ...GEL, quantite: 2, prixUnitaire: 4 }] })] });
+  let gel = await produit("GEL");
+  assert.equal(gel.quantityAvailable, 20);
+  assert.equal(gel.quantityNeededNotDeducted, 2);
+
+  // Une commande planifiee a J+5 : a venir, rien de reserve.
+  const planifiee = await envoyer("/api/planned-orders", { clientId: "c-1", deliveryDate: jour(5), products: [{ stockId: "st-GEL", quantite: 12 }] });
+  gel = await produit("GEL");
+  assert.equal(gel.quantityUpcoming, 12);
+  assert.equal(gel.quantityNeededNotDeducted, 2);
+
+  // Confirmee : ses 12 sortent du rayon (20 -> 8). Elles ne sont plus a prendre.
+  await envoyer(`/api/planned-orders/${planifiee.order.id}/confirm`);
+  gel = await produit("GEL");
+  assert.equal(gel.quantityAvailable, 8);
+  assert.equal(gel.quantityUpcoming, 0);
+  assert.equal(gel.quantityNeeded, 14, "« Necessaire » garde son sens : toutes les commandes en cours");
+  assert.equal(gel.quantityNeededNotDeducted, 2, "la commande confirmee, deja deduite, est comptee deux fois");
+
+  // Saisie chez le client : reservee des la creation (8 -> 5).
+  await envoyer("/api/customer-orders", { clientId: "c-2", products: [{ stockId: "st-GEL", quantite: 3 }] });
+  gel = await produit("GEL");
+  assert.equal(gel.quantityAvailable, 5);
+  assert.equal(gel.quantityNeeded, 17);
+  assert.equal(gel.quantityNeededNotDeducted, 2, "la commande saisie chez le client, deja deduite, est comptee deux fois");
+
+  // L'importee mise en preparation : reservee a son tour (5 -> 3), plus rien a prendre.
+  await envoyer("/api/orders/o-gel/start-preparation");
+  gel = await produit("GEL");
+  assert.equal(gel.quantityAvailable, 3);
+  assert.equal(gel.quantityNeeded, 17);
+  assert.equal(gel.quantityNeededNotDeducted, 0, "la commande en preparation, deja deduite, est comptee deux fois");
+});
+
+test("une ligne gardée non déduite (livraison sur un stock non suivi) reste à prendre", async () => {
+  // reprendreStockLibere marque stockNonDeduit les lignes qu'il n'a pas pu
+  // sortir du rayon ; la commande porte pourtant une reservation. Revenue
+  // « prete » (tournee defaite), sa ligne GEL n'a jamais ete deduite.
+  semer({
+    commandes: [commande("o-nd", "pret_livraison", 1, {
+      stockReservedAt: `${AUJOURDHUI}T08:00:00.000Z`,
+      stockNonDeduit: ["code:gel"],
+      products: [{ ...CH_L, quantite: 1, prixUnitaire: 12 }, { ...GEL, quantite: 4, prixUnitaire: 4 }]
+    })]
+  });
+  assert.equal((await produit("GEL")).quantityNeededNotDeducted, 4);
+  // CH-L, deduite : seules les quatre commandes semees non reservees (12).
+  assert.equal((await produit("CH-L")).quantityNeededNotDeducted, 12);
 });

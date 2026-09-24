@@ -3995,15 +3995,23 @@ const NEEDED_ORDER_STATUSES = new Set([
 //
 // Correctness : `stockItemMatchesLine` sert de reference (OR sur code/name).
 // L'index reproduit fidelement sa semantique en O(N+M) au lieu de O(N*M).
+//
+// `neededNotDeducted` (relecture adverse du 24/09) : la part de `needed` que
+// le stock n'a pas encore sortie du rayon. Une commande dont le stock est
+// reserve (stockReservedAt : confirmee, saisie chez le client, en
+// preparation) a deja deduit ses quantites de `quantite` ; seules ses lignes
+// gardees non deduites (stockNonDeduit, livraison acceptee sur un stock non
+// suivi) restent a prendre. « A recommander » compare CE besoin au stock
+// d'aujourd'hui : avec `needed`, une commande confirmee manquait deux fois.
 function buildStockMetricsIndex(commandes) {
-  const totals = new Map(); // canonicalKey -> { reserved, needed }
+  const totals = new Map(); // canonicalKey -> { reserved, needed, neededNotDeducted }
   const byCode = new Map(); // codeNorm -> Set<canonicalKey>
   const byName = new Map(); // nameNorm -> Set<canonicalKey>
 
   const ensureCanonical = (canonicalKey) => {
     let slot = totals.get(canonicalKey);
     if (!slot) {
-      slot = { reserved: 0, needed: 0 };
+      slot = { reserved: 0, needed: 0, neededNotDeducted: 0 };
       totals.set(canonicalKey, slot);
     }
     return slot;
@@ -4019,6 +4027,8 @@ function buildStockMetricsIndex(commandes) {
     const isReserved = Boolean(order.stockReservedAt && RESERVED_ORDER_STATUSES.includes(order.status));
     const isNeeded = NEEDED_ORDER_STATUSES.has(order.status);
     if (!isReserved && !isNeeded) continue;
+    // null : rien de deduit, toute la ligne reste a prendre.
+    const nonDeduites = order.stockReservedAt ? new Set(order.stockNonDeduit || []) : null;
 
     for (const line of normalizeProducts(order.products)) {
       const qty = Math.max(0, number(line.quantite, 0));
@@ -4034,6 +4044,7 @@ function buildStockMetricsIndex(commandes) {
       const slot = ensureCanonical(canonicalKey);
       if (isReserved) slot.reserved += qty;
       if (isNeeded) slot.needed += qty;
+      if (isNeeded && (!nonDeduites || nonDeduites.has(productKeyFromLine(line)))) slot.neededNotDeducted += qty;
 
       addReverse(byCode, codeNorm, canonicalKey);
       addReverse(byName, nameNorm, canonicalKey);
@@ -4179,6 +4190,8 @@ function enrichStockItem(db, product, index, upcomingIndex = buildUpcomingDemand
   const quantityAvailable = getStockQuantity(product);
   const quantityReserved = calculateReservedStock(db, product, index);
   const quantityNeeded = calculateNeededStock(db, product, index);
+  // Ce qui reste a prendre sur quantityAvailable (buildStockMetricsIndex).
+  const quantityNeededNotDeducted = lookupStockMetric(index && index.totals ? index : buildStockMetricsIndex(db.commandes), product, "neededNotDeducted");
   // « A recommander » qui voit venir (24/09) : la demande connue d'avance, par
   // jour, sur l'horizon de Parametres. L'ecran en tire le jour du manque.
   const upcomingDemand = lookupUpcomingDemand(upcomingIndex, product);
@@ -4190,6 +4203,7 @@ function enrichStockItem(db, product, index, upcomingIndex = buildUpcomingDemand
     quantityAvailable,
     quantityReserved,
     quantityNeeded,
+    quantityNeededNotDeducted,
     quantityUpcoming: Math.round(upcomingDemand.reduce((total, d) => total + d.quantite, 0) * 100) / 100,
     upcomingDemand,
     upcomingHorizonDays: upcomingIndex.horizonJours,

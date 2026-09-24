@@ -4857,10 +4857,12 @@ function renderRecommande() {
     const article = document.createElement("article");
     article.className = `item ${item.level === "urgent" ? "status-danger" : "status-warning"}`;
     // Le besoin estime compte aussi la demande a venir (24/09) ; la ligne sous
-    // les chiffres dit d'ou il vient, et jusqu'a quand.
+    // les chiffres dit d'ou il vient, et jusqu'a quand. Une commande au stock
+    // deja reserve n'y est plus (il est sorti du « Stock actuel ») : la ligne
+    // le dit, sinon « 0 sur commandes en cours » contredirait l'ecran Commandes.
     const fin = item.horizon ? jourCourt(ajouterJoursCle(getTodayDateInput(), item.horizon)) : "";
     const detail = item.upcoming > 0
-      ? `Dont ${item.needed} sur commandes en cours et ${item.upcoming} à venir${fin ? ` d'ici le ${fin}` : ""} (abonnements, commandes planifiées).`
+      ? `Dont ${item.needed} sur commandes en cours sans stock réservé et ${item.upcoming} à venir${fin ? ` d'ici le ${fin}` : ""} (abonnements, commandes planifiées).`
       : "";
     const manque = phraseDuManque(item);
     article.innerHTML = `
@@ -4927,11 +4929,35 @@ function aRecommander() {
   return evaluerRecommandations().filter(item => item.level === "urgent" || item.level === "bientot");
 }
 
+// Le besoin des commandes en cours que le stock n'a pas encore sorti du rayon
+// (relecture adverse du 24/09). Une commande confirmee, saisie chez le client
+// ou mise en preparation a son stock RESERVE : ses quantites sont deja
+// deduites de quantityAvailable. La compter encore faisait manquer ce qui ne
+// manque pas (30 en stock, 20 confirmes : « Manque des aujourd'hui : 20
+// demandes, 10 en stock »). Le serveur le donne ; une copie hors ligne d'avant
+// ce champ le recompte sur les commandes de la page (les statuts de
+// NEEDED_ORDER_STATUSES, sans reservation).
+function besoinNonDeduit(product) {
+  if (product.quantityNeededNotDeducted !== undefined) return Number(product.quantityNeededNotDeducted) || 0;
+  const productCode = normalizeTextKey(product.code);
+  const productName = normalizeTextKey(getProductName(product));
+  return orders.reduce((total, order) => {
+    if (order.stockReservedAt || !["commande_client_validee", "importe", "stock_a_verifier", "en_preparation", "pret_livraison"].includes(order.status)) return total;
+    return total + (order.products || []).reduce((sum, line) => {
+      const lineCode = normalizeTextKey(line.code);
+      const lineName = normalizeTextKey(line.nom || line.produit);
+      const matches = (productCode && lineCode === productCode) || (productName && lineName === productName);
+      return matches ? sum + (Number(line.quantite) || 0) : sum;
+    }, 0);
+  }, 0);
+}
+
 // Chaque produit du stock, evalue :
-//   - la demande : les commandes en cours (quantityNeeded) ET la demande connue
-//     d'avance sur l'horizon de Parametres (upcomingDemand, par jour : commandes
-//     planifiees et echeances des abonnements actifs, calculees par le serveur
-//     sur le calendrier des Abonnements) ;
+//   - la demande : les commandes en cours dont le stock n'est pas encore
+//     reserve (besoinNonDeduit) ET la demande connue d'avance sur l'horizon de
+//     Parametres (upcomingDemand, par jour : commandes planifiees et echeances
+//     des abonnements actifs, calculees par le serveur sur le calendrier des
+//     Abonnements), face au stock d'aujourd'hui, deductions faites ;
 //   - `manqueLe` : le premier jour ou la demande cumulee depasse le stock (les
 //     commandes en cours d'abord, aujourd'hui, puis chaque echeance a sa date) ;
 //   - le niveau : « urgent » si le stock est a zero ou manque des aujourd'hui,
@@ -4955,7 +4981,7 @@ function evaluerRecommandations() {
   return uniqueStock.map(product => {
     const inconnu = (product.quantityAvailable ?? getProductQuantity(product)) === null;
     const available = product.quantityAvailable ?? getProductQuantity(product) ?? 0;
-    const needed = product.quantityNeeded ?? getNeededQuantityForProduct(product);
+    const needed = besoinNonDeduit(product);
     const aVenir = Array.isArray(product.upcomingDemand) ? product.upcomingDemand : [];
     const upcoming = aVenir.reduce((total, d) => total + (Number(d.quantite) || 0), 0);
     const demande = needed + upcoming;
