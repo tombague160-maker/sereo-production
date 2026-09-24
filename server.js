@@ -9,7 +9,8 @@ const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
 const { zipSync, strToU8 } = require("fflate");
-const { createSqliteStore } = require("./storage/sqliteStore");
+const { createSqliteStore, lireTourneesDuFichier } = require("./storage/sqliteStore");
+const sauvegardeBase = require("./lib/sauvegarde-base");
 const { empreinteDesSources, shellEmpreinte } = require("./lib/empreinte-shell");
 const { fondDeCarte } = require("./lib/fond-de-carte");
 const { GestionnaireOsrm } = require("./lib/osrm-local");
@@ -3234,47 +3235,15 @@ function pruneOldBackups() {
 // - endpoint manuel /api/backup/now pour forcer un backup hors throttle
 let postRestoreBackupDone = false;
 
-function backupDbIfNeeded(options = {}) {
-  const { force = false, tag = "" } = options;
-  const sourcePath = useSqliteStorage() ? SQLITE_PATH : DB_PATH;
-  if (!fs.existsSync(sourcePath)) return null;
-
-  // Cas fresh_empty : pas de backup automatique tant que la base reste vide.
-  // Reste possible via /api/backup/now. Lot 3 : gate sur le flag re-armable
-  // (leve par writeDb a la re-saisie de donnees), plus sur lastStorageRecovery
-  // .mode qui n'etait JAMAIS re-arme (suspension a vie -> perte totale a la 2e
-  // corruption).
-  if (!force && backupsSuspendedFreshEmpty) {
-    return null;
-  }
-
-  // Cas restored_backup : faire UN snapshot post-restore une seule fois, puis
-  // continuer normalement (audit Sereo 2026-06-04 + SQLite docs). Le snapshot
-  // est tagge "post-restore" pour traçabilite forensique.
-  //
-  // Revue R1 P1 #5 : flag postRestoreBackupDone = true APRES succes, pas
-  // avant. Si writeBackupNow throw (disque plein), on doit retenter au
-  // prochain writeDb.
-  if (!force && lastStorageRecovery && lastStorageRecovery.mode === "restored_backup" && !postRestoreBackupDone) {
-    const path = writeBackupNow("post-restore");
-    if (path) postRestoreBackupDone = true;
-    return path;
-  }
-
-  // Throttle normal : skip si un backup recent existe (< 1h).
-  if (!force) {
-    const entries = listBackupEntries();
-    const mostRecent = entries[0];
-    if (mostRecent && Date.now() - mostRecent.mtimeMs < BACKUP_THROTTLE_MS) {
-      return null;
-    }
-  }
-
-  return writeBackupNow(tag);
-}
-
-// Chantier 2 : variante async pour le hot-path `writeDb`. Meme logique de
-// gating mode-aware que la version sync, mais utilise writeBackupNowAsync.
+// La sauvegarde du hot-path `writeDb` (Chantier 2). Garde-fous (25/09) : la
+// variante synchrone, backupDbIfNeeded, n'avait plus d'appelant ; elle est
+// retiree avec writeBackupNow (lecture du fichier de la base, voir plus bas).
+//
+// - fresh_empty : pas de sauvegarde automatique tant que la base reste vide
+//   (Lot 3 : drapeau re-armable, leve par writeDb a la re-saisie) ;
+// - restored_backup : UN instantane « post-restore », une seule fois (Revue R1
+//   P1 #5 : le drapeau n'est pose qu'apres succes) ;
+// - sinon, au plus une sauvegarde par BACKUP_THROTTLE_MS.
 async function backupDbIfNeededAsync(options = {}) {
   const { force = false, tag = "" } = options;
   const sourcePath = useSqliteStorage() ? SQLITE_PATH : DB_PATH;
@@ -3301,69 +3270,121 @@ async function backupDbIfNeededAsync(options = {}) {
   return writeBackupNowAsync(tag);
 }
 
-function writeBackupNow(tag = "") {
+// La derniere sauvegarde ecrite par CE processus, et l'ecriture qu'elle couvre
+// (la valeur de derniereModificationA quand la copie a commence). Sert a
+// « Sauvegarder maintenant » : si rien n'a ete ecrit depuis, la derniere est
+// deja a jour (garde-fous, 25/09).
+let derniereSauvegardeEcrite = null;
+
+// Garde-fous (25/09) : une sauvegarde COHERENTE et RELUE.
+//
+// Avant : writeBackupNowAsync lisait le FICHIER de la base en flux, hors verrou,
+// apres un checkpoint ; un checkpoint (automatique a 1 000 pages, pendant un
+// import) reecrivait le fichier au milieu de la lecture, et la copie melangeait
+// des pages d'avant et d'apres -- nommee comme une sauvegarde valide, jamais
+// relue (la chasse aux defauts : 2 fois sur 2). writeBackupNow (synchrone)
+// lisait d'un bloc, sans ce defaut, mais gelait le serveur le temps de
+// compresser la base, sous le verrou d'ecriture.
+//
+// Maintenant (lib/sauvegarde-base.js, dans un thread de travail) : VACUUM INTO
+// depuis une seconde connexion en lecture seule (un instantane coherent, meme
+// pendant des ecritures), gzip, puis relecture du .gz tel qu'une restauration
+// le lirait (integrity_check « ok », et le releve des `tables` demandees) ;
+// le fichier ne prend son nom qu'apres. Rend { chemin, nom, octets, sha256,
+// comptes, empreintes }, ou null si la base n'existe pas encore ; leve si la
+// copie ou sa relecture echoue (aucun fichier final n'est alors laisse).
+//
+// Le mode JSON (legacy, migration) garde la copie en flux : le fichier JSON est
+// remplace par renommage, jamais reecrit en place. Il est relu (JSON.parse).
+async function ecrireSauvegardeVerifiee(tag = "", { tables = [] } = {}) {
   const sourcePath = useSqliteStorage() ? SQLITE_PATH : DB_PATH;
   if (!fs.existsSync(sourcePath)) return null;
 
   ensureDir(BACKUP_DIR);
-  if (useSqliteStorage()) {
-    getSqliteStore().checkpoint();
-  }
-
   const baseExtension = useSqliteStorage() ? ".sqlite" : ".json";
   const tagPart = tag ? `-${tag.replace(/[^a-zA-Z0-9_-]/g, "")}` : "";
   const backupPath = path.join(BACKUP_DIR, `db-${safeTimestamp()}${tagPart}${baseExtension}.gz`);
+  // Pris AVANT la copie : une ecriture faite entre-temps est dans la copie, et
+  // la sauvegarde se dit couvrir un peu moins qu'elle ne couvre, jamais plus.
+  const couvre = derniereModificationA;
 
-  const sourceData = fs.readFileSync(sourcePath);
-  const compressed = zlib.gzipSync(sourceData);
-  fs.writeFileSync(backupPath, compressed);
+  let resultat;
+  if (useSqliteStorage()) {
+    // Ouvre la base (et la restaure si elle est corrompue) avant de la copier.
+    getSqliteStore();
+    resultat = await sauvegardeBase.copierEtVerifier({
+      source: SQLITE_PATH,
+      destination: backupPath,
+      tables,
+      maxOctets: MAX_BACKUP_DECOMPRESSED_BYTES
+    });
+  } else {
+    resultat = await sauvegarderFichierJson(sourcePath, backupPath);
+  }
 
   pruneOldBackups();
   lastBackupAt = new Date().toISOString();
   lastBackupError = null;
-  return backupPath;
+  derniereSauvegardeEcrite = { nom: path.basename(backupPath), couvre };
+  return { chemin: backupPath, nom: path.basename(backupPath), ...resultat };
 }
 
-// Chantier 2 (audit 2026-06-04) : variante async via stream pipeline.
-// `zlib.createGzip()` delegue la compression au threadpool libuv (Node docs
-// confirme), donc le main thread reste libre pour les requetes HTTP pendant
-// le backup. Sur 50-100 MB c'etait 300-800 ms de freeze, maintenant ~5 ms
-// d'overhead non-bloquant.
-//
-// Pattern recommande (Dennis O'Keeffe 2024) : ecriture vers tmp, rename
-// atomique, cleanup best-effort si le pipeline echoue.
-//
-// Sync writeBackupNow garde sa raison d'etre : boot post-recovery (avant que
-// le serveur n'accepte des requetes, le freeze n'a pas d'impact) + tests.
-async function writeBackupNowAsync(tag = "") {
-  const sourcePath = useSqliteStorage() ? SQLITE_PATH : DB_PATH;
-  if (!fs.existsSync(sourcePath)) return null;
-
-  ensureDir(BACKUP_DIR);
-  if (useSqliteStorage()) {
-    getSqliteStore().checkpoint();
-  }
-
-  const baseExtension = useSqliteStorage() ? ".sqlite" : ".json";
-  const tagPart = tag ? `-${tag.replace(/[^a-zA-Z0-9_-]/g, "")}` : "";
-  const backupPath = path.join(BACKUP_DIR, `db-${safeTimestamp()}${tagPart}${baseExtension}.gz`);
+async function sauvegarderFichierJson(sourcePath, backupPath) {
   const tmpPath = backupPath + ".tmp";
-
   try {
     const { pipeline } = require("node:stream/promises");
     await pipeline(
       fs.createReadStream(sourcePath),
-      zlib.createGzip({ level: 6 }), // 6 = defaut, bon ratio/CPU
+      zlib.createGzip({ level: 6 }),
       fs.createWriteStream(tmpPath)
     );
-    fs.renameSync(tmpPath, backupPath); // atomique
-    pruneOldBackups();
-    lastBackupAt = new Date().toISOString();
-    lastBackupError = null;
-    return backupPath;
+    const compresse = fs.readFileSync(tmpPath);
+    const texte = zlib.gunzipSync(compresse, { maxOutputLength: MAX_BACKUP_DECOMPRESSED_BYTES }).toString("utf8");
+    if (texte.trim()) JSON.parse(texte);
+    fs.renameSync(tmpPath, backupPath);
+    return {
+      octets: compresse.length,
+      sha256: crypto.createHash("sha256").update(compresse).digest("hex"),
+      comptes: {},
+      empreintes: {}
+    };
   } catch (err) {
     try { fs.unlinkSync(tmpPath); } catch { /* best-effort */ }
     throw err;
+  }
+}
+
+// Le chemin de la sauvegarde, ou null (contrat historique : la purge des
+// tournees l'injecte, writeDb l'appelle).
+async function writeBackupNowAsync(tag = "") {
+  const sauvegarde = await ecrireSauvegardeVerifiee(tag);
+  return sauvegarde ? sauvegarde.chemin : null;
+}
+
+// Une sauvegarde a la fois (revue #84 : deux sauvegardes concurrentes donnaient
+// un signal de sante incoherent). Attend celle qui court, puis tient sa place :
+// writeDb n'en lance pas d'autre tant que celle-ci n'est pas finie. Aucun
+// `await` entre la fin de l'attente et la prise de la place.
+async function sauvegardeSeule(ecrire) {
+  await flushPendingBackup();
+  const enVol = Promise.resolve().then(ecrire);
+  const place = enVol.then(() => {}, () => {});
+  pendingBackup = place;
+  place.then(() => { if (pendingBackup === place) pendingBackup = null; });
+  return enVol;
+}
+
+// Une sauvegarde interrompue (arret du processus pendant la copie) laisse ses
+// fichiers de travail : rien d'autre ne les supprime. Au demarrage.
+function nettoyerSauvegardesInterrompues(dossier = BACKUP_DIR) {
+  try {
+    if (!fs.existsSync(dossier)) return;
+    for (const nom of fs.readdirSync(dossier)) {
+      if (!sauvegardeBase.MOTIF_TRAVAIL.test(nom)) continue;
+      try { fs.unlinkSync(path.join(dossier, nom)); } catch { /* best-effort */ }
+    }
+  } catch (error) {
+    console.warn(`[storage] nettoyage des sauvegardes interrompues : ${error.message || error}`);
   }
 }
 
@@ -7566,31 +7587,32 @@ app.get("/api/sauvegardes/derniere", requireAdministration, (req, res) => {
 // Decision de Thomas du 24/09 : un geste d'administration (la carte
 // « Sauvegardes » de Parametres le porte). Sans authentification (dev), tout le
 // monde est administrateur, comme pour la numerotation des bons.
+//
+// Garde-fous (25/09) : la copie est coherente et relue (ecrireSauvegardeVerifiee)
+// et se fait HORS du verrou d'ecriture -- un « Livre » ne l'attend plus ; elle
+// attend la sauvegarde automatique en vol puis tient sa place (sauvegardeSeule).
 app.post("/api/backup/now", requireAdministration, async (req, res) => {
   try {
     const tag = clean(req.body?.tag || "manual").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 32);
-    const result = await withWriteLock(async () => {
-      let backupPath;
-      try {
-        backupPath = writeBackupNow(tag);
-      } catch (error) {
-        // La carte le dira aussi apres un rechargement, pas seulement le toast.
-        lastBackupError = { at: new Date().toISOString(), message: String(error.message || error) };
-        throw error;
-      }
-      if (!backupPath) return { ok: false, error: "Backup impossible (source absente)" };
-
+    let sauvegarde;
+    try {
+      sauvegarde = await sauvegardeSeule(() => ecrireSauvegardeVerifiee(tag));
+    } catch (error) {
+      // La carte le dira aussi apres un rechargement, pas seulement le toast.
+      lastBackupError = { at: new Date().toISOString(), message: String(error.message || error) };
+      throw error;
+    }
+    if (!sauvegarde) {
+      return res.status(503).json({ ok: false, error: "Backup impossible (source absente)" });
+    }
+    await withWriteLock(async () => {
       const db = readDb();
-      addHistory(db, "Backup manuel", `Backup forcé créé : ${path.basename(backupPath)}`, { tag, backupPath });
+      addHistory(db, "Backup manuel", `Backup forcé créé : ${sauvegarde.nom}`, { tag, backupPath: sauvegarde.chemin });
       // Pas de double-backup recursif ; et cette ligne d'historique ne rend pas
       // la sauvegarde qu'elle annonce « perimee ».
       writeDb(db, { backup: false, modification: false });
-      return { ok: true, backupPath: path.basename(backupPath), tag };
     });
-    if (!result.ok) {
-      return res.status(503).json(result);
-    }
-    res.json(result);
+    res.json({ ok: true, backupPath: sauvegarde.nom, tag });
   } catch (error) {
     handleRouteError(error, res, "Erreur backup manuel");
   }
@@ -10133,8 +10155,34 @@ function tourneesAPurger(db, maintenant = new Date(), mois = PURGE_TOURNEES_MOIS
 }
 
 /**
+ * Les tournees que contient une sauvegarde (.sqlite.gz), par identifiant, sous
+ * la forme JSON que readDb leur donne. Decompression hors du fil principal,
+ * copie de travail a cote de la sauvegarde (supprimee ensuite), ouverture en
+ * lecture seule et integrity_check (lireTourneesDuFichier). Leve si le fichier
+ * est illisible.
+ */
+async function tourneesDeLaSauvegarde(chemin) {
+  const compresse = await fs.promises.readFile(chemin);
+  const brut = await new Promise((resolve, reject) => {
+    zlib.gunzip(compresse, { maxOutputLength: MAX_BACKUP_DECOMPRESSED_BYTES }, (error, sortie) => (error ? reject(error) : resolve(sortie)));
+  });
+  const copie = `${chemin}.travail-verif.sqlite`;
+  await fs.promises.writeFile(copie, brut);
+  try {
+    const routes = lireTourneesDuFichier(copie);
+    return new Map(routes.filter(route => route && route.id !== undefined && route.id !== null)
+      .map(route => [String(route.id), JSON.stringify(route)]));
+  } finally {
+    for (const suffixe of ["", "-wal", "-shm", "-journal"]) {
+      try { fs.unlinkSync(copie + suffixe); } catch { /* absent : ok */ }
+    }
+  }
+}
+
+/**
  * @param sauvegarder  la sauvegarde a faire avant (injectable pour les tests) ;
- *                     doit rendre le chemin du fichier, ou lever.
+ *                     doit rendre le chemin du fichier, ou lever. Le fichier
+ *                     est RELU (tourneesDeLaSauvegarde) : un chemin ne suffit pas.
  * @returns {{ purgees: number, sauvegarde?: string, raison?: string }}
  */
 async function purgerTourneesAnciennes({ maintenant = new Date(), mois = PURGE_TOURNEES_MOIS, sauvegarder = writeBackupNowAsync } = {}) {
@@ -10144,20 +10192,13 @@ async function purgerTourneesAnciennes({ maintenant = new Date(), mois = PURGE_T
   // de Mo), chaque jour a l'heure du demarrage plus une minute.
   const candidates = tourneesAPurger(readDb(), maintenant, mois);
   if (!candidates.length) return { purgees: 0 };
-  // Chaque tournee telle que la sauvegarde va la contenir.
-  const sauvees = new Map(candidates.map(route => [String(route.id), JSON.stringify(route)]));
 
   // Une sauvegarde automatique deja en vol lirait la base en meme temps : on
   // la laisse finir, puis la notre tient sa place (writeDb n'en lance pas
   // d'autre tant qu'elle court). Revue #84 : deux sauvegardes concurrentes.
-  await flushPendingBackup();
   let sauvegarde = null;
   try {
-    const enVol = Promise.resolve().then(() => sauvegarder("avant-purge"));
-    const place = enVol.then(() => {}, () => {});
-    pendingBackup = place;
-    place.then(() => { if (pendingBackup === place) pendingBackup = null; });
-    sauvegarde = await enVol;
+    sauvegarde = await sauvegardeSeule(() => sauvegarder("avant-purge"));
   } catch (error) {
     console.error(`[purge] sauvegarde impossible, purge annulee : ${error.message || error}`);
     return { purgees: 0, raison: "sauvegarde impossible" };
@@ -10165,6 +10206,19 @@ async function purgerTourneesAnciennes({ maintenant = new Date(), mois = PURGE_T
   if (!sauvegarde) {
     console.error("[purge] aucune sauvegarde ecrite, purge annulee");
     return { purgees: 0, raison: "sauvegarde impossible" };
+  }
+
+  // Garde-fous (25/09) : la sauvegarde est RELUE -- decompressee, ouverte,
+  // integrity_check -- et chaque tournee comparee a ce qu'ELLE contient. Avant,
+  // un chemin rendu suffisait : la comparaison se faisait a une photo prise en
+  // memoire avant la copie, sur la foi d'une copie jamais relue (et qui pouvait
+  // sortir dechiree). Une sauvegarde illisible : aucune purge.
+  let sauvees;
+  try {
+    sauvees = await tourneesDeLaSauvegarde(String(sauvegarde));
+  } catch (error) {
+    console.error(`[purge] sauvegarde ${path.basename(String(sauvegarde))} illisible, purge annulee : ${error.message || error}`);
+    return { purgees: 0, raison: "sauvegarde illisible" };
   }
 
   return withWriteLock(async () => {
@@ -10209,6 +10263,7 @@ function startServer(port = PORT, host = HOST) {
   // P1 v1.14.0 : healing initial pour garantir la coherence apres restart
   // (notamment apres restauration d'un backup ou montee de version)
   healDatabaseAtBoot();
+  nettoyerSauvegardesInterrompues();
   planifierPurgeDesTournees();
   const serveur = app.listen(port, host, () => {
     console.log(`Sereo lance sur http://${host}:${port}`);
@@ -10323,6 +10378,10 @@ module.exports = {
   _resetStorageRecoveryForTest: () => { lastStorageRecovery = null; storageRecoveryFatal = null; backupsSuspendedFreshEmpty = false; lastBackupAt = null; lastBackupError = null; derniereModificationA = null; },
   // Carte « Sauvegardes » (24/09) : la regle de retention, pure.
   _sauvegardesAGarder: sauvegardesAGarder,
+  // Garde-fous (25/09) : une vraie sauvegarde (coherente, relue), pour les
+  // bancs qui injectent la sauvegarde d'avant purge.
+  _sauvegarderPourTest: tag => writeBackupNowAsync(tag),
+  _nettoyerSauvegardesInterrompues: nettoyerSauvegardesInterrompues,
   _isCorruptionError: isCorruptionError,
   _normalizeDateInput: normalizeDateInput,
   _excelDateToIso: excelDateToIso,

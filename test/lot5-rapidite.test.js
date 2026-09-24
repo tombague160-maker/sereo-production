@@ -537,12 +537,18 @@ test("lot 5 : sans sauvegarde, pas de purge", async () => {
   assert.equal((await S.purgerTourneesAnciennes({ maintenant: MAINTENANT })).purgees, 1);
 });
 
-/** Une sauvegarde qui ne finit que quand on la libere. */
+/**
+ * Une sauvegarde qui ne finit que quand on la libere. Garde-fous (25/09) : la
+ * purge RELIT sa sauvegarde ; celle-ci est donc une vraie sauvegarde, ecrite
+ * au moment de l'appel (l'etat d'avant ce que le banc fait pendant la retenue),
+ * puis retenue. Avant, un nom de fichier inexistant suffisait.
+ */
 function sauvegardeRetenue() {
   let liberer, appelee = false;
   const fin = new Promise(r => { liberer = r; });
   return {
-    sauvegarder: async () => { appelee = true; await fin; return "db-test-avant-purge.sqlite.gz"; },
+    // « appelee » une fois la copie prise : ce que le banc fait ensuite n'y est pas.
+    sauvegarder: async tag => { const fichier = await S._sauvegarderPourTest(tag); appelee = true; await fin; return fichier; },
     appelee: () => appelee,
     liberer: () => liberer()
   };

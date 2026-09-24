@@ -2,6 +2,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { DatabaseSync } = require("node:sqlite");
+const { releverTable } = require("../lib/sauvegarde-base");
 
 function createSqliteStore(options) {
   const {
@@ -112,6 +113,23 @@ function createSqliteStore(options) {
 
     checkpoint() {
       database.exec("PRAGMA wal_checkpoint(FULL)");
+    },
+
+    /**
+     * Compte et empreinte des identifiants de chaque table demandee, dans la
+     * base en service (garde-fous, 25/09) : la meme requete que la
+     * verification d'une sauvegarde (lib/sauvegarde-base.js). Deux releves
+     * egaux = les memes lignes, par identifiant.
+     */
+    releverTables(tables) {
+      const comptes = {};
+      const empreintes = {};
+      for (const table of tables) {
+        const releve = releverTable(database, table);
+        comptes[table] = releve.compte;
+        empreintes[table] = releve.empreinte;
+      }
+      return { comptes, empreintes };
     },
 
     close() {
@@ -1254,8 +1272,29 @@ function stringify(value) {
   return JSON.stringify(value ?? {});
 }
 
+/**
+ * Les tournees d'un fichier SQLite (une sauvegarde decompressee), lues comme
+ * readDb les lit (readRoutes : meme trace, memes champs). Ouverture en lecture
+ * seule, fermee avant de rendre. Sert a la purge des tournees (garde-fous,
+ * 25/09) : elle ne supprime qu'une tournee que la sauvegarde RELUE contient
+ * sous sa forme actuelle.
+ */
+function lireTourneesDuFichier(chemin) {
+  const database = new DatabaseSync(chemin, { readOnly: true });
+  try {
+    const integrite = database.prepare("PRAGMA integrity_check").all().map(row => Object.values(row)[0]);
+    if (integrite.length !== 1 || integrite[0] !== "ok") {
+      throw new Error(`integrity_check : ${integrite.join(" | ").slice(0, 300)}`);
+    }
+    return readRoutes(database);
+  } finally {
+    database.close();
+  }
+}
+
 module.exports = {
-  createSqliteStore
+  createSqliteStore,
+  lireTourneesDuFichier
 };
 
 /**
