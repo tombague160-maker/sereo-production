@@ -5233,7 +5233,9 @@ function renderStockMovements() {
 
   const movements = stockMovements.slice(0, MOUVEMENTS_AFFICHES);
   if (!movements.length) {
-    container.innerHTML = emptyState("Aucun mouvement", "Les ajustements manuels apparaîtront ici.");
+    // Depuis le 25/09, le journal recoit aussi les sorties des commandes, les
+    // retours au rayon et les imports : plus seulement la saisie a la main.
+    container.innerHTML = emptyState("Aucun mouvement", "Les entrées et sorties du stock apparaîtront ici.");
     return;
   }
 
