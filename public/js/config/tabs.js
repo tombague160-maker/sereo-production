@@ -12,7 +12,10 @@ export const mainTabs = new Set(["abonnements", "journee", "stock", "crm", "comm
 // correspond : un lien, un favori, un geste code en dur qui visait l'ancien
 // ecran arrive au bon endroit au lieu de retomber sur le tableau de bord.
 export const REDIRECTIONS = {
-  "commandes-jour": { onglet: "commandes", filtre: "a-envoyer" },
+  // Audit du 24/09 : « À envoyer » est vide par construction (la commande
+  // terrain passe « À préparer » dans la meme ecriture) ; l'ancien ecran des
+  // commandes du jour ouvre donc TOUTES les commandes, les plus recentes en tete.
+  "commandes-jour": { onglet: "commandes", filtre: "toutes" },
   "commandes-planifiees": { onglet: "commandes", filtre: "planifiees" },
   "bons-commande": { onglet: "commandes", filtre: "toutes" },
   "commandes-livrees": { onglet: "commandes", filtre: "livrees" },

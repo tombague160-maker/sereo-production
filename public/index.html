@@ -442,6 +442,10 @@
       <div id="sousOnglets" class="filtre-pilules sous-onglets" role="tablist" aria-label="Vues" hidden></div>
 
       <section id="journee" class="page active" role="tabpanel" aria-labelledby="tab-journee">
+        <!-- LE RESUME DU DERNIER IMPORT (decision 1 de Thomas, 24/09) : en TETE
+             du tableau de bord, et non plus au pied du panneau « Imports Excel »
+             (1376 px plus bas au bureau, 2332 au telephone). Cache sans import. -->
+        <section id="importSummary" class="import-bilan" role="status" aria-live="polite" aria-label="Résumé de l’import" tabindex="-1" hidden></section>
         <!-- PLANCHE 6a / 6b. Grille de 12 colonnes, gap 24. La colonne large
              alterne : 7+5 sur la premiere ligne, 5+7 sur la seconde. C'est
              l'ordre du DOM, et il compte. -->
@@ -651,8 +655,7 @@
               <button id="importStockButton" class="button primary" type="submit">Importer le stock</button>
             </form>
           </div>
-
-          <div id="importSummary" class="import-summary" aria-live="polite"></div>
+          <!-- Le resume de l'import est monte en tete de page (#importSummary). -->
         </div>
       </section>
 

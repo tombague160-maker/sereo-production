@@ -388,7 +388,9 @@ test("dette 7 : les quatre anciennes listes ont quitté la page, leurs adresses 
   await expect(page.locator("#bdc-detail-modal")).toHaveAttribute("aria-hidden", "false");
   await page.keyboard.press("Escape");
   // Les anciennes adresses arrivent sur l'ecran unique, filtre.
-  for (const [ancien, filtre] of [["commandes-jour", "a-envoyer"], ["commandes-livrees", "livrees"]]) {
+  // (24/09 : #commandes-jour ouvre « Toutes » ; en second, pour que le filtre
+  // CHANGE -- la liste s'ouvre deja sur « Toutes ».)
+  for (const [ancien, filtre] of [["commandes-livrees", "livrees"], ["commandes-jour", "toutes"]]) {
     await page.evaluate(h => { location.hash = `#${h}`; }, ancien);
     await expect(page.locator("#commandes")).toHaveClass(/active/);
     await expect(page.locator(`[data-cmd-filtre="${filtre}"]`)).toHaveClass(/active-filter/);
