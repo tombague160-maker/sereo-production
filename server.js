@@ -731,6 +731,54 @@ function clearAuthFailures(ip) {
   authRateLimitState.delete(ip);
 }
 
+// Garde-fous (25/09) : une limite PAR COMPTE, en plus de celle par adresse.
+// Celle par adresse (5 echecs, 15 s de blocage, compteur remis a zero ensuite)
+// laissait ~20 essais par minute et par adresse, sans aucune limite pour un
+// compte vise depuis de nombreuses adresses (chasse aux defauts, section 3).
+// Ici : AUTH_COMPTE_MAX_ATTEMPTS echecs sur un meme identifiant saisi, dans la
+// fenetre, bloquent CET identifiant AUTH_COMPTE_LOCKOUT_MS -- les autres
+// comptes ne sont pas touches. L'identifiant se compte sans casse ni espaces,
+// qu'il existe ou non (rien a enumerer). Le compteur n'est PAS remis a zero a
+// la fin du blocage : une attaque qui continue est rebloquee au premier echec
+// suivant ; une connexion reussie l'efface.
+// Contrepartie assumee : quelqu'un qui connait un identifiant peut le bloquer
+// 15 minutes (en y echouant 20 fois dans l'heure). La page le dit.
+const AUTH_COMPTE_MAX_ATTEMPTS = Math.max(1, Number(process.env.SEREO_AUTH_MAX_ATTEMPTS_COMPTE) || 20);
+const AUTH_COMPTE_WINDOW_MS = Math.max(1000, Number(process.env.SEREO_AUTH_RATE_WINDOW_COMPTE_MS) || 60 * 60 * 1000);
+const AUTH_COMPTE_LOCKOUT_MS = Math.max(1000, Number(process.env.SEREO_AUTH_LOCKOUT_COMPTE_MS) || 15 * 60 * 1000);
+const authCompteState = new Map();
+
+function cleDeCompte(identifiant) {
+  return String(identifiant ?? "").trim().toLowerCase().slice(0, 120);
+}
+
+function statutDuCompte(identifiant, now = Date.now()) {
+  const entree = authCompteState.get(cleDeCompte(identifiant));
+  if (!entree) return { locked: false, remainingMs: 0 };
+  entree.failedTimestamps = entree.failedTimestamps.filter(t => t > now - AUTH_COMPTE_WINDOW_MS);
+  if (entree.lockedUntil && entree.lockedUntil > now) {
+    return { locked: true, remainingMs: entree.lockedUntil - now, lockedUntil: entree.lockedUntil };
+  }
+  return { locked: false, remainingMs: 0 };
+}
+
+function echecDuCompte(identifiant, now = Date.now()) {
+  const cle = cleDeCompte(identifiant);
+  let entree = authCompteState.get(cle);
+  if (!entree) {
+    entree = { failedTimestamps: [], lockedUntil: null };
+    authCompteState.set(cle, entree);
+  }
+  entree.failedTimestamps = entree.failedTimestamps.filter(t => t > now - AUTH_COMPTE_WINDOW_MS);
+  entree.failedTimestamps.push(now);
+  if (entree.failedTimestamps.length >= AUTH_COMPTE_MAX_ATTEMPTS) entree.lockedUntil = now + AUTH_COMPTE_LOCKOUT_MS;
+  return statutDuCompte(identifiant, now);
+}
+
+function effacerEchecsDuCompte(identifiant) {
+  authCompteState.delete(cleDeCompte(identifiant));
+}
+
 function getClientIp(req) {
   return req.ip || req.socket?.remoteAddress || "unknown";
 }
@@ -746,6 +794,11 @@ const authRateLimitCleanupInterval = setInterval(() => {
     if (!recentFailures && !stillLocked) {
       authRateLimitState.delete(ip);
     }
+  }
+  for (const [cle, entree] of authCompteState.entries()) {
+    const recents = entree.failedTimestamps.some(t => t > now - AUTH_COMPTE_WINDOW_MS);
+    const bloque = entree.lockedUntil && entree.lockedUntil > now;
+    if (!recents && !bloque) authCompteState.delete(cle);
   }
 }, 5 * 60 * 1000);
 authRateLimitCleanupInterval.unref();
@@ -1995,19 +2048,27 @@ function requireAccessAuth(req, res, next) {
       denyAccessAttempt(req, res, 429, "Trop de tentatives de connexion. Reessayez plus tard.", status.remainingMs);
       return;
     }
+    // Garde-fous (25/09) : la limite par compte, comme au formulaire.
+    const compte = statutDuCompte(basicCredentials.username);
+    if (compte.locked) {
+      denyAccessAttempt(req, res, 429, "Trop de tentatives de connexion sur ce compte. Reessayez plus tard.", compte.remainingMs);
+      return;
+    }
 
     const valid = constantTimeEqual(basicCredentials.username, AUTH_USER)
       && constantTimeEqual(basicCredentials.password, AUTH_PASSWORD);
 
     if (valid) {
       clearAuthFailures(ip);
+      effacerEchecsDuCompte(basicCredentials.username);
       next();
       return;
     }
 
     const updated = recordAuthFailure(ip);
-    if (updated.locked) {
-      denyAccessAttempt(req, res, 429, "Trop de tentatives de connexion. Reessayez plus tard.", updated.remainingMs);
+    const compteApres = echecDuCompte(basicCredentials.username);
+    if (updated.locked || compteApres.locked) {
+      denyAccessAttempt(req, res, 429, "Trop de tentatives de connexion. Reessayez plus tard.", Math.max(updated.remainingMs, compteApres.remainingMs));
       return;
     }
     denyAccessAttempt(req, res, 401, "Connexion requise");
@@ -2074,16 +2135,30 @@ function renderLoginPage(req, res) {
   // Source de verite serveur (la query ?locked=1 peut etre obsolete si le
   // lockout a expire entre le POST et le GET).
   const status = getAuthRateLimitStatus(getClientIp(req));
-  const isLocked = status.locked;
-  const lockedSeconds = isLocked ? Math.ceil(status.remainingMs / 1000) : 0;
-  const lockedUntilMs = isLocked ? status.lockedUntil : 0;
+  let isLocked = status.locked;
+  let lockedUntilMs = isLocked ? status.lockedUntil : 0;
+  // Garde-fous (25/09) : le blocage d'un COMPTE ne se lit pas depuis l'adresse
+  // (la page ne sait pas quel identifiant sera saisi) ; la redirection du POST
+  // porte son echeance. Affichage seulement : le refus est decide au POST,
+  // cote serveur. Une echeance passee ou invraisemblable n'affiche rien.
+  let parCompte = false;
+  if (!isLocked && req.query.compte === "1") {
+    const jusqua = Number(req.query.until);
+    const reste = jusqua - Date.now();
+    if (Number.isFinite(jusqua) && reste > 0 && reste <= AUTH_COMPTE_LOCKOUT_MS) {
+      isLocked = true;
+      parCompte = true;
+      lockedUntilMs = jusqua;
+    }
+  }
+  const lockedSeconds = isLocked ? Math.ceil((parCompte ? lockedUntilMs - Date.now() : status.remainingMs) / 1000) : 0;
 
   let errorMarkup = "";
   if (isLocked) {
     const plural = lockedSeconds > 1 ? "s" : "";
     // Le mot "seconde(s)" est dans un span separe pour que login.js puisse
     // basculer entre singulier et pluriel quand le compteur descend a 1.
-    errorMarkup = `<p class="login-error" role="alert" aria-live="polite">Trop de tentatives. R&eacute;essaie dans <span id="lockout-countdown">${lockedSeconds}</span> <span id="lockout-unit">seconde${plural}</span>.</p>`;
+    errorMarkup = `<p class="login-error" role="alert" aria-live="polite">Trop de tentatives${parCompte ? " sur ce compte" : ""}. R&eacute;essaie dans <span id="lockout-countdown">${lockedSeconds}</span> <span id="lockout-unit">seconde${plural}</span>.</p>`;
   } else if (hasError) {
     // UNE phrase (planche 9c) : « Identifiant ou mot de passe incorrect. Il te
     // reste 2 tentatives avant un blocage de 15 secondes. » Les essais restants
@@ -2276,14 +2351,27 @@ async function handleLogin(req, res) {
     res.redirect(303, `/login?locked=1&until=${status.lockedUntil}&next=${encodeURIComponent(next)}`);
     return;
   }
+  // Garde-fous (25/09) : le compte vise, lui aussi, avant toute comparaison.
+  const compte = statutDuCompte(username);
+  if (compte.locked) {
+    res.setHeader("Retry-After", String(Math.ceil(compte.remainingMs / 1000)));
+    res.redirect(303, `/login?locked=1&compte=1&until=${compte.lockedUntil}&next=${encodeURIComponent(next)}`);
+    return;
+  }
 
   const identity = await authenticateCredentials(username, password);
 
   if (!identity) {
     const updated = recordAuthFailure(ip);
+    const compteApres = echecDuCompte(username);
     if (updated.locked) {
       res.setHeader("Retry-After", String(Math.ceil(updated.remainingMs / 1000)));
       res.redirect(303, `/login?locked=1&until=${updated.lockedUntil}&next=${encodeURIComponent(next)}`);
+      return;
+    }
+    if (compteApres.locked) {
+      res.setHeader("Retry-After", String(Math.ceil(compteApres.remainingMs / 1000)));
+      res.redirect(303, `/login?locked=1&compte=1&until=${compteApres.lockedUntil}&next=${encodeURIComponent(next)}`);
       return;
     }
     res.redirect(303, `/login?error=1&remaining=${updated.remaining}&next=${encodeURIComponent(next)}`);
@@ -2291,6 +2379,7 @@ async function handleLogin(req, res) {
   }
 
   clearAuthFailures(ip);
+  effacerEchecsDuCompte(username);
 
   if (identity.id) {
     try {
@@ -10543,7 +10632,7 @@ module.exports = {
   getRequestIdentity,
   isEnvAuthConfigured,
   // Helpers de test : ne pas appeler depuis du code applicatif
-  _resetAuthRateLimitForTest: () => authRateLimitState.clear(),
+  _resetAuthRateLimitForTest: () => { authRateLimitState.clear(); authCompteState.clear(); },
   _createAccessSessionValueForTest: createAccessSessionValue,
   _withWriteLockForTest: withWriteLock,
   _normalizeOrder: normalizeOrder,
