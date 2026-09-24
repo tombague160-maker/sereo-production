@@ -6181,6 +6181,15 @@ function phraseAlerteSauvegardes(alerte) {
   }
 }
 
+// « 13 septembre » : le jour seul (l'annee si ce n'est pas celle-ci).
+function formatJourLong(iso) {
+  const d = new Date(iso);
+  if (!iso || Number.isNaN(d.getTime())) return "—";
+  const options = { day: "numeric", month: "long" };
+  if (d.getFullYear() !== new Date().getFullYear()) options.year = "numeric";
+  return d.toLocaleDateString("fr-FR", options);
+}
+
 function renderSauvegardes(etat, erreur = "") {
   const carte = document.getElementById("parSauvegardes");
   if (!carte) return;
@@ -6196,7 +6205,7 @@ function renderSauvegardes(etat, erreur = "") {
     ? `${formatDateLongue(derniere.date)} · ${taille}`
     : (etat ? "Aucune" : "—"));
   setText("parSauvegardesGardees", etat && etat.nombre
-    ? `${etat.nombre} sauvegarde${etat.nombre > 1 ? "s" : ""} sur ${etat.jours} jour${etat.jours > 1 ? "s" : ""}, depuis le ${formatDateLongue(etat.plusAncienne)}`
+    ? `${etat.nombre} sauvegarde${etat.nombre > 1 ? "s" : ""} sur ${etat.jours} jour${etat.jours > 1 ? "s" : ""}, depuis le ${formatJourLong(etat.plusAncienne)}`
     : "—");
 
   // Les gestes : a l'administration seulement (le serveur les refuse aux
