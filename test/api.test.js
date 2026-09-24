@@ -3496,10 +3496,14 @@ test("ERP Phase 2 : re-import qui modifie commande deja livree preserve le statu
   ]), "ventes.xlsx");
   const r2 = await requestJson("/api/import/ventes", { method: "POST", body: form2 });
 
-  assert.equal(r2.body.updated, 1);
+  // Decision 1 de Thomas (24/09) : une commande deja livree n'est plus
+  // reecrite par un import (avant : « Contenu mis a jour », 8). Elle est
+  // laissee telle quelle et comptee « ignoree » (test/pieges-import.test.js).
+  assert.equal(r2.body.updated, 0);
+  assert.equal(r2.body.ignored, 1);
   const cmd = r2.body.commandes.find(c => c.clientName === "Dupont");
   assert.equal(cmd.status, "livre", "Statut livre preserve");
-  assert.equal(cmd.products[0].quantite, 8, "Contenu mis a jour");
+  assert.equal(cmd.products[0].quantite, 5, "Contenu d'une commande livree preserve");
 });
 
 test("ERP Phase 2 : excelRowHash present sur chaque commande importee", async () => {
