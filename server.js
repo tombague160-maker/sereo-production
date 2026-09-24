@@ -7625,9 +7625,46 @@ app.get("/api/sauvegardes/derniere", requireAdministration, (req, res) => {
 // Garde-fous (25/09) : la copie est coherente et relue (ecrireSauvegardeVerifiee)
 // et se fait HORS du verrou d'ecriture -- un « Livre » ne l'attend plus ; elle
 // attend la sauvegarde automatique en vol puis tient sa place (sauvegardeSeule).
+//
+// Et elle ne peut plus evincer les autres (chasse aux defauts : une purge puis
+// 30 appels remplacaient toutes les sauvegardes par une base vide) :
+// - deja a jour : si la derniere sauvegarde sur le disque est celle que ce
+//   processus a ecrite et que rien n'a ete ecrit depuis, aucun fichier de plus
+//   (reponse `dejaAJour`) ;
+// - au plus SAUVEGARDES_MANUELLES_PAR_HEURE sauvegardes manuelles par heure
+//   glissante (au-dela : 503 et Retry-After -- pas 429, qu'apiFetch prend pour
+//   un verrou de connexion). Les sauvegardes automatiques ne sont pas comptees ;
+// - le genre « avant-purge-* » est reserve (hors rotation pour les bons).
+const SAUVEGARDES_MANUELLES_PAR_HEURE = 10;
+const sauvegardesManuelles = [];
+
 app.post("/api/backup/now", requireAdministration, async (req, res) => {
   try {
-    const tag = clean(req.body?.tag || "manual").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 32);
+    let tag = clean(req.body?.tag || "manual").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 32);
+    if (/^avant-purge/i.test(tag)) tag = "manuelle";
+
+    const derniere = listBackupEntries()[0];
+    if (derniere && derniereSauvegardeEcrite
+      && derniere.name === derniereSauvegardeEcrite.nom
+      && derniereModificationA === derniereSauvegardeEcrite.couvre) {
+      res.json({ ok: true, dejaAJour: true, backupPath: derniere.name, tag });
+      return;
+    }
+
+    const maintenant = Date.now();
+    while (sauvegardesManuelles.length && sauvegardesManuelles[0] <= maintenant - 3600000) sauvegardesManuelles.shift();
+    if (sauvegardesManuelles.length >= SAUVEGARDES_MANUELLES_PAR_HEURE) {
+      const attenteMs = sauvegardesManuelles[0] + 3600000 - maintenant;
+      res.setHeader("Retry-After", String(Math.max(1, Math.ceil(attenteMs / 1000))));
+      res.status(503).json({
+        ok: false,
+        error: `Trop de sauvegardes manuelles : ${SAUVEGARDES_MANUELLES_PAR_HEURE} dans l’heure. Réessaie dans ${Math.max(1, Math.ceil(attenteMs / 60000))} min ; les sauvegardes automatiques continuent.`
+      });
+      return;
+    }
+    // Comptee des la tentative : un disque en panne ne se martele pas non plus.
+    sauvegardesManuelles.push(maintenant);
+
     let sauvegarde;
     try {
       sauvegarde = await sauvegardeSeule(() => ecrireSauvegardeVerifiee(tag));
@@ -10458,6 +10495,7 @@ module.exports = {
   // bancs qui injectent la sauvegarde d'avant purge.
   _sauvegarderPourTest: tag => writeBackupNowAsync(tag),
   _nettoyerSauvegardesInterrompues: nettoyerSauvegardesInterrompues,
+  _reinitialiserLimiteSauvegardesPourTest: () => { sauvegardesManuelles.length = 0; },
   _isCorruptionError: isCorruptionError,
   _normalizeDateInput: normalizeDateInput,
   _excelDateToIso: excelDateToIso,

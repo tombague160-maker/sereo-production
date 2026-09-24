@@ -7621,7 +7621,10 @@ async function sauvegarderMaintenant() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tag: "manuelle" })
     });
-    notify(resultat?.ok === false ? (resultat.error || "Sauvegarde impossible.") : "Sauvegarde faite.", resultat?.ok === false ? "error" : "success");
+    // Garde-fous (25/09) : rien d'ecrit depuis la derniere, le serveur n'en
+    // refait pas une copie identique -- il le dit.
+    const faite = resultat?.dejaAJour ? "Déjà à jour : la dernière sauvegarde contient tout." : "Sauvegarde faite.";
+    notify(resultat?.ok === false ? (resultat.error || "Sauvegarde impossible.") : faite, resultat?.ok === false ? "error" : "success");
   } catch (error) {
     notify(`Sauvegarde impossible : ${error.message || "erreur"}`, "error");
   } finally {

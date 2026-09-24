@@ -217,3 +217,65 @@ test("purge des bons : si la sauvegarde ne contient pas exactement ce qui serait
   assert.match(corps.error, /ne contient pas exactement/);
   assert.equal(readDb().commandes.length, 7, "des bons ont ete effaces");
 });
+
+// --- 2. « Sauvegarder maintenant » ------------------------------------------
+
+function nouvelleSaisie() {
+  const db = readDb();
+  db.stock[0].quantite = (Number(db.stock[0].quantite) || 0) + 1;
+  writeDb(db, { backup: false });
+}
+
+test("sauvegarder maintenant : déjà à jour si rien n'a changé depuis la dernière (aucun fichier de plus)", async () => {
+  semerDesBons();
+  viderLeDossier();
+  S._reinitialiserLimiteSauvegardesPourTest?.();
+  const premiere = await appel("/api/backup/now", { cookie: cookies.admin, method: "POST", body: { tag: "manuelle" } });
+  assert.equal(premiere.status, 200);
+  const avant = sauvegardes();
+  assert.equal(avant.length, 1);
+  const seconde = await appel("/api/backup/now", { cookie: cookies.admin, method: "POST", body: { tag: "manuelle" } });
+  const corps = await seconde.json();
+  assert.equal(seconde.status, 200, JSON.stringify(corps));
+  assert.deepEqual(sauvegardes(), avant, "une sauvegarde identique a ete ecrite une seconde fois");
+  assert.equal(corps.dejaAJour, true);
+  assert.equal(corps.backupPath, avant[0]);
+  // Temoin : apres une saisie, une nouvelle part.
+  nouvelleSaisie();
+  assert.equal((await appel("/api/backup/now", { cookie: cookies.admin, method: "POST", body: { tag: "manuelle" } })).status, 200);
+  assert.equal(sauvegardes().length, 2, "temoin : apres une saisie, aucune nouvelle sauvegarde");
+});
+
+test("sauvegarder maintenant : au plus 10 par heure, même avec une saisie entre chaque (503 et Retry-After)", async () => {
+  viderLeDossier();
+  S._reinitialiserLimiteSauvegardesPourTest?.();
+  const statuts = [];
+  let refus = null;
+  for (let i = 0; i < 12; i++) {
+    nouvelleSaisie();
+    const reponse = await appel("/api/backup/now", { cookie: cookies.admin, method: "POST", body: { tag: "manuelle" } });
+    statuts.push(reponse.status);
+    if (reponse.status !== 200 && !refus) refus = { reponse, corps: await reponse.json() };
+  }
+  assert.deepEqual(statuts, [200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 503, 503]);
+  assert.match(refus.corps.error, /Trop de sauvegardes manuelles/);
+  const attente = Number(refus.reponse.headers.get("retry-after"));
+  assert.ok(attente > 0 && attente <= 3600, `Retry-After ${attente}`);
+  assert.equal(sauvegardes().length, 10, "un refus a quand meme ecrit une sauvegarde");
+  // Les sauvegardes automatiques, elles, continuent.
+  const db = readDb();
+  db.stock[0].quantite += 1;
+  writeDb(db, { backup: false });
+  assert.ok(await S._sauvegarderPourTest(""), "la sauvegarde automatique est bloquee par la limite des manuelles");
+});
+
+test("sauvegarder maintenant : le genre « avant-purge-commandes » est réservé (sinon hors rotation, jamais supprimée)", async () => {
+  viderLeDossier();
+  S._reinitialiserLimiteSauvegardesPourTest?.();
+  nouvelleSaisie();
+  const reponse = await appel("/api/backup/now", { cookie: cookies.admin, method: "POST", body: { tag: "avant-purge-commandes" } });
+  assert.equal(reponse.status, 200);
+  const noms = sauvegardes();
+  assert.equal(noms.length, 1);
+  assert.doesNotMatch(noms[0], /avant-purge/, "une sauvegarde manuelle s'est donne le genre reserve");
+});
