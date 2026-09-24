@@ -459,6 +459,10 @@ test("téléphone : les pilules de statut sont DANS l'en-tête vert, sous la rec
 
 test("téléphone : une pilule de l'en-tête filtre la liste", async ({ page }) => {
   await ouvrirTelephone(page);
+  // Au-dela de deux rangs, « Livrees » est derriere « + N » (24/09) : on
+  // deplie d'abord, comme au doigt.
+  const plus = page.locator("#cmdPilules > .pilules-plus:visible");
+  if (await plus.count()) await plus.click();
   await page.locator('#cmdPilules [data-cmd-filtre="livrees"]').click();
   await expect(page.locator('#cmdPilules [data-cmd-filtre="livrees"]')).toHaveAttribute("aria-pressed", "true");
   const statuts = await page.locator("#cmdLignes .cmd-badge").allTextContents();

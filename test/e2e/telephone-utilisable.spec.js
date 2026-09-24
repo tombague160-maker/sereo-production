@@ -228,12 +228,16 @@ function rangs(page, selecteurPilules) {
   }, selecteurPilules);
 }
 
-test("pilules — Commandes : repliees au-dela de deux rangs, « + N » les rend, la choisie ne se cache jamais", async ({ browser }) => {
+// 390 en sombre : la ou le premier jet, qui mesurait en coordonnees d'ecran
+// pendant que la page se reajustait, ne laissait que « Toutes » et « + 6 ».
+for (const [largeur, hauteur, theme] of [[360, 740, "light"], [390, 844, "dark"]]) test(`pilules — Commandes (${largeur}, ${theme}) : repliees au-dela de deux rangs, « + N » les rend, la choisie ne se cache jamais`, async ({ browser }) => {
   test.setTimeout(90000);
-  const { ctx, page, erreurs } = await ouvrir(browser, "commandes", { largeur: 360, hauteur: 740 });
+  const { ctx, page, erreurs } = await ouvrir(browser, "commandes", { largeur, hauteur, theme });
   const pilules = "#cmdPilules > .filtre-pilule, #cmdPilules > .pilules-plus";
   const plus = page.locator("#cmdPilules > .pilules-plus");
-  expect(await rangs(page, pilules), "les pilules prennent plus de deux rangs").toBeLessThanOrEqual(2);
+  const replie = await rangs(page, pilules);
+  expect(replie, "les pilules prennent plus de deux rangs").toBeLessThanOrEqual(2);
+  expect(replie, "le repli cache plus qu'il ne faut : un seul rang reste").toBe(2);
   await expect(plus).toBeVisible();
   await expect(plus).toHaveText(/^\+ \d+$/);
   await expect(plus).toHaveAttribute("aria-expanded", "false");
@@ -262,7 +266,9 @@ test("pilules — Clients : secteurs, Abonnes et statut repliés a deux rangs ; 
   test.setTimeout(90000);
   const { ctx, page, erreurs } = await ouvrir(browser, "crm", { largeur: 360, hauteur: 740 });
   const pilules = "#crm .cli-filtres .cli-pilule, #crm .cli-filtres > .cli-statut-filtre, #crm .cli-filtres > .pilules-plus";
-  expect(await rangs(page, pilules), "les filtres des clients prennent plus de deux rangs").toBeLessThanOrEqual(2);
+  const replie = await rangs(page, pilules);
+  expect(replie, "les filtres des clients prennent plus de deux rangs").toBeLessThanOrEqual(2);
+  expect(replie, "le repli cache plus qu'il ne faut : un seul rang reste").toBe(2);
   const plus = page.locator("#crm .cli-filtres > .pilules-plus");
   await expect(plus).toBeVisible();
   await plus.click();
