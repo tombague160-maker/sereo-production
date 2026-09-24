@@ -6115,6 +6115,13 @@ rempli — et ont fait resserrer les bancs).
   conflit** ; seul `DESIGN.md` en a un (deux sections ajoutées au même endroit : garder
   les deux). Les deux conflits de sens trouvés à la relecture sont réglés dans ce lot
   (ci-dessous) et mesurés sur l'arbre fusionné.
+- **Intégration avec `integration/ameliorations`** (lu à `578a4dc`, `git merge-tree`,
+  non exécuté) : **quatre conflits dans `app.js`** — `dateCourte`, `formatDateTimeShort`,
+  `formatDate` (leur texte passe par `utils/dates.js`) et la liste de `renderAll` (garder
+  `rendreOuDifferer`). Leur `utils/dates.js` appelle `toLocaleDateString` à chaque date :
+  garder leur texte, mais avec des formateurs `Intl` construits une fois, sinon le banc
+  « les montants et les dates ne construisent plus un formateur chacun » rougit — et la
+  frappe dans la recherche des Commandes reprend ses 80 ms au téléphone.
 - **Préparation** : à la première arrivée, la rangée des secteurs se mesure deux fois (le
   rendu en attente, puis `showTab`) ; une fois aux suivantes (mesuré). Aucune tâche de
   50 ms au téléphone : non traité.
