@@ -1,7 +1,8 @@
 // Performance du rendu (24/09), mesuree en production puis sur un jeu de MEME
 // FORME (serveur-seme, volume « production » : 97 clients, 224 commandes,
 // 218 produits...). Des bancs STRUCTURELS : ce qui est dessine, combien de
-// fois, ce qui est mesure -- pas des chronometres, sauf un, a large marge.
+// fois, ce qui est mesure -- pas des chronometres (le seul temps mesure, a
+// l'ouverture au telephone, est journalise, pas juge).
 //
 // 1. L'ouverture ne dessine que l'ecran affiche ; les autres se dessinent en y
 //    arrivant (rendreOuDifferer + showTab), avec les donnees du moment, et
@@ -203,18 +204,21 @@ test("téléphone : les lignes du Stock et du catalogue hors de l'écran ne sont
 test("le Stock écrit ses lignes en une fois", async ({ page }) => {
   await ouvrir(page, "stock");
   await expect(page.locator("#stockList .stk-ligne")).toHaveCount(218);
-  // Un rendu complet (la recherche videe le refait) : combien d'ecritures
-  // dans la liste ? Avant : une par ligne (219 : le vidage, puis 218 ajouts).
-  const ecritures = await page.evaluate(() => new Promise(fin => {
-    const liste = document.getElementById("stockList");
-    let n = 0;
-    const obs = new MutationObserver(recs => { n += recs.length; });
-    obs.observe(liste, { childList: true });
+  // Un rendu complet (la recherche videe le refait, 200 ms apres la frappe) :
+  // combien d'ecritures dans la liste ? Avant : une par ligne (219 : le vidage,
+  // puis 218 ajouts). Le rendu s'ATTEND : un delai fixe, depasse sous charge,
+  // jugeait « <= 2 » sur une liste que personne n'avait encore touchee.
+  await page.evaluate(() => {
+    const e = window.__ecrituresStock = { n: 0 };
+    new MutationObserver(recs => { e.n += recs.length; }).observe(document.getElementById("stockList"), { childList: true });
     const champ = document.getElementById("stockSearch");
     champ.value = "";
     champ.dispatchEvent(new Event("input", { bubbles: true }));
-    setTimeout(() => { obs.disconnect(); fin({ n, lignes: liste.querySelectorAll(".stk-ligne").length }); }, 600);
-  }));
+  });
+  await expect.poll(() => page.evaluate(() => window.__ecrituresStock.n), { timeout: 15000 }).toBeGreaterThan(0);
+  // Un rendu ecrit tout dans la meme tache ; 300 ms de plus pour un second.
+  await page.waitForTimeout(300);
+  const ecritures = await page.evaluate(() => ({ n: window.__ecrituresStock.n, lignes: document.querySelectorAll("#stockList .stk-ligne").length }));
   console.log(`[stock] ${ecritures.n} ecriture(s) pour ${ecritures.lignes} lignes`);
   expect(ecritures.lignes).toBe(218);
   expect(ecritures.n).toBeLessThanOrEqual(2);
@@ -252,9 +256,13 @@ test("préparation : la rangée des secteurs n'est mesurée qu'affichée, et une
   await expect(page.locator("#preparationSectorPills [data-sector]").first()).toBeVisible();
   const pilule = page.locator('#preparationSectorPills [data-sector="all"]');
   await pilule.evaluate(p => { p.dataset.marqueBanc = "1"; });
+  // Temoin du rendu de la frappe (200 ms apres) : le resume, que chaque rendu
+  // refait, perd sa marque. On l'ATTEND -- un delai fixe, depasse sous charge,
+  // laissait survivre la pilule sans qu'aucun rendu ait eu lieu.
+  await page.locator("#preparationStats > *").first().evaluate(r => { r.dataset.marqueBanc = "1"; });
   const mesures = await page.evaluate(() => window.__mesures);
   await page.evaluate(() => { const c = document.getElementById("preparationSearch"); c.value = "CMD"; c.dispatchEvent(new Event("input", { bubbles: true })); });
-  await page.waitForTimeout(400);
+  await expect(page.locator('#preparationStats [data-marque-banc="1"]')).toHaveCount(0, { timeout: 15000 });
   expect(await compter(page, '#preparationSectorPills [data-marque-banc="1"]')).toBe(1);
   expect(await page.evaluate(() => window.__mesures)).toBe(mesures);
 });
@@ -313,7 +321,12 @@ test("téléphone : les règles d'écran de la feuille s'appliquent toujours (ch
   await page.evaluate(() => { document.getElementById("abonnements").dataset.vue = "liste"; });
 });
 
-test("téléphone (CPU x4) : l'ouverture ne fige pas la page 800 ms", async ({ page }) => {
+// Le temps de l'ouverture au telephone est JOURNALISE, pas juge : sur l'ancien
+// code, la pire tache allait de 486 a 987 ms (sept ouvertures), puis de 269 a
+// 454 ms le meme soir (huit) -- l'ancien seuil de 800 ms y etait VERT huit fois
+// sur huit (relecture du 24/09). Le banc juge ce qui la faisait : les elements
+// dessines par l'ouverture, un compte qui ne depend pas de la machine.
+test("téléphone (CPU x4) : l'ouverture ne dessine que l'écran affiché (temps journalisé)", async ({ page }) => {
   test.setTimeout(120000);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.addInitScript(() => {
@@ -327,9 +340,12 @@ test("téléphone (CPU x4) : l'ouverture ne fige pas la page 800 ms", async ({ p
   await page.reload();
   await aJour(page);
   await page.waitForTimeout(1500);
-  const pire = await page.evaluate(() => Math.max(0, ...window.__longues));
+  const r = await page.evaluate(() => ({ pire: Math.max(0, ...window.__longues), dom: document.getElementsByTagName("*").length }));
   await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
-  console.log(`[ouverture x4] pire tache longue ${pire} ms`);
-  // Avant (v1.45.1, meme jeu) : 919 a 987 ms ; apres : ~150 ms. Seuil large.
-  expect(pire).toBeLessThan(800);
+  console.log(`[ouverture x4] pire tache longue ${r.pire} ms ; ${r.dom} elements`);
+  test.info().annotations.push({ type: "mesure", description: `ouverture au telephone x4 : pire tache ${r.pire} ms, ${r.dom} elements` });
+  // Avant (v1.45.1, meme jeu) : 12 967 elements -- les treize ecrans, a chaque
+  // ouverture ; apres : 2 758. Temoin : la page porte bien les donnees.
+  await expect(page.locator("#statStockTotal")).toHaveText("218");
+  expect(r.dom).toBeLessThan(4000);
 });
