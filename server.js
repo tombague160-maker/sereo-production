@@ -140,6 +140,19 @@ const STORAGE_ENGINE = (process.env.SEREO_STORAGE || "sqlite").toLowerCase();
 const SQLITE_PATH = path.resolve(process.env.SEREO_SQLITE_PATH || process.env.SQLITE_PATH || path.join(__dirname, "data", "sereo.sqlite"));
 const UPLOAD_DIR = path.resolve(process.env.SEREO_UPLOAD_DIR || path.join(__dirname, "imports"));
 const BACKUP_DIR = path.resolve(process.env.SEREO_BACKUP_DIR || path.join(path.dirname(STORAGE_ENGINE === "json" ? DB_PATH : SQLITE_PATH), "backups"));
+// Garde-fous (25/09, decision 3) : un SECOND dossier de sauvegarde, optionnel
+// (un autre disque, un partage monte). Chaque sauvegarde y est aussi copiee et
+// relue ; absent, rien ne change. Le meme dossier que le premier ne compte pas.
+const BACKUP_COPY_DIR = (() => {
+  const brut = cleanEnv(process.env.SEREO_BACKUP_COPY_DIR);
+  if (!brut) return null;
+  const dossier = path.resolve(brut);
+  if (dossier === BACKUP_DIR) {
+    console.warn("[storage] SEREO_BACKUP_COPY_DIR designe le dossier des sauvegardes lui-meme : ignore.");
+    return null;
+  }
+  return dossier;
+})();
 // v1.12.0 : dossier ou les Excel importes sont archives au format brut pour
 // retelechargement et audit. Sous-dossier du data dir, donc persistant sur
 // le volume Docker comme la SQLite.
@@ -3359,7 +3372,54 @@ async function ecrireSauvegardeVerifiee(tag = "", { tables = [] } = {}) {
   lastBackupAt = new Date().toISOString();
   lastBackupError = null;
   derniereSauvegardeEcrite = { nom: path.basename(backupPath), couvre };
+  await copierVersSecondDossier(backupPath, resultat.sha256);
   return { chemin: backupPath, nom: path.basename(backupPath), ...resultat };
+}
+
+// Le second dossier (SEREO_BACKUP_COPY_DIR, decision 3) : la derniere copie
+// reussie et la derniere erreur (null apres une copie reussie). En memoire.
+let derniereCopie = null;
+let derniereErreurCopie = null;
+
+function empreinteDuFichier(chemin) {
+  return new Promise((resolve, reject) => {
+    const hachage = crypto.createHash("sha256");
+    fs.createReadStream(chemin)
+      .on("data", morceau => hachage.update(morceau))
+      .on("error", reject)
+      .on("end", () => resolve(hachage.digest("hex")));
+  });
+}
+
+// Copie une sauvegarde deja relue dans le second dossier : fichier provisoire,
+// relecture (meme empreinte sha256 que l'originale), meme date, renommage ;
+// puis la meme retention que le premier dossier. N'echoue jamais : la
+// sauvegarde est faite, seule la copie manque -- et l'alerte « copie » le dit.
+async function copierVersSecondDossier(chemin, sha256) {
+  if (!BACKUP_COPY_DIR) return null;
+  const nom = path.basename(chemin);
+  const cible = path.join(BACKUP_COPY_DIR, nom);
+  const provisoire = `${cible}.tmp`;
+  try {
+    await fs.promises.mkdir(BACKUP_COPY_DIR, { recursive: true });
+    await fs.promises.copyFile(chemin, provisoire);
+    const relue = await empreinteDuFichier(provisoire);
+    if (relue !== sha256) {
+      throw new Error(`la copie ne correspond pas a la sauvegarde (empreinte ${relue.slice(0, 12)} au lieu de ${String(sha256).slice(0, 12)})`);
+    }
+    const { mtime } = await fs.promises.stat(chemin);
+    await fs.promises.utimes(provisoire, mtime, mtime);
+    await fs.promises.rename(provisoire, cible);
+    pruneOldBackups(BACKUP_COPY_DIR);
+    derniereCopie = { nom, at: new Date().toISOString() };
+    derniereErreurCopie = null;
+    return cible;
+  } catch (error) {
+    try { await fs.promises.unlink(provisoire); } catch { /* absent : ok */ }
+    derniereErreurCopie = { at: new Date().toISOString(), message: String(error.message || error) };
+    console.error(`[storage] copie de ${nom} vers le second dossier impossible : ${derniereErreurCopie.message}`);
+    return null;
+  }
 }
 
 async function sauvegarderFichierJson(sourcePath, backupPath) {
@@ -7561,6 +7621,7 @@ function etatDesSauvegardes(identite, maintenant = Date.now()) {
   let alerte = null;
   if (erreurLecture) alerte = { type: "lecture", message: erreurLecture };
   else if (lastBackupError) alerte = { type: "echec", at: lastBackupError.at, message: lastBackupError.message };
+  else if (derniereErreurCopie) alerte = { type: "copie", at: derniereErreurCopie.at, message: derniereErreurCopie.message };
   else if (backupsSuspendedFreshEmpty) alerte = { type: "suspendues" };
   else if (!derniere) alerte = { type: "aucune" };
   else if (perimee) alerte = { type: "perimee", depuis: new Date(derniereModificationA).toISOString() };
@@ -7582,7 +7643,12 @@ function etatDesSauvegardes(identite, maintenant = Date.now()) {
       perimeeApresHeures: SAUVEGARDE_PERIMEE_MS / 3600000
     },
     administration: Boolean(identite && getRole(identite.role).administration),
-    telechargement: { permis: refus === null && Boolean(derniere), raison: refus }
+    telechargement: { permis: refus === null && Boolean(derniere), raison: refus },
+    // Le second dossier (decision 3) : pose ou non, et la derniere copie
+    // reussie par ce processus. Le chemin n'est pas donne.
+    copie: BACKUP_COPY_DIR
+      ? { active: true, derniere: derniereCopie ? { nom: derniereCopie.nom, date: derniereCopie.at } : null }
+      : { active: false }
   };
 }
 
@@ -10377,6 +10443,7 @@ function startServer(port = PORT, host = HOST) {
   // (notamment apres restauration d'un backup ou montee de version)
   healDatabaseAtBoot();
   nettoyerSauvegardesInterrompues();
+  if (BACKUP_COPY_DIR) nettoyerSauvegardesInterrompues(BACKUP_COPY_DIR);
   planifierPurgeDesTournees();
   const serveur = app.listen(port, host, () => {
     console.log(`Sereo lance sur http://${host}:${port}`);

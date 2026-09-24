@@ -7559,6 +7559,8 @@ function phraseAlerteSauvegardes(alerte) {
       return `La dernière sauvegarde a échoué${alerte.at ? ` (${formatDateLongue(alerte.at)})` : ""} : ${alerte.message || "erreur inconnue"}. Les données sont enregistrées, mais pas sauvegardées.`;
     case "lecture":
       return `Le dossier des sauvegardes est illisible : ${alerte.message || "erreur inconnue"}.`;
+    case "copie":
+      return `La copie dans le second dossier a échoué${alerte.at ? ` (${formatDateLongue(alerte.at)})` : ""} : ${alerte.message || "erreur inconnue"}. La sauvegarde est faite, mais seulement sur ce disque.`;
     case "suspendues":
       return "Sauvegardes suspendues : la base a été réinitialisée à vide. Elles reprennent à la première saisie.";
     case "aucune":
@@ -7593,6 +7595,16 @@ function renderSauvegardes(etat, erreur = "") {
   setText("parSauvegardesGardees", etat && etat.nombre
     ? `${etat.nombre} sauvegarde${etat.nombre > 1 ? "s" : ""} sur ${etat.jours} jour${etat.jours > 1 ? "s" : ""}, depuis le ${formatJourLong(etat.plusAncienne)}`
     : "—");
+  // Le second dossier (SEREO_BACKUP_COPY_DIR, garde-fous du 25/09) : la
+  // derniere copie reussie depuis le demarrage, ou pourquoi il n'y en a pas.
+  const copie = etat?.copie;
+  setText("parSauvegardesCopie", !etat || !copie
+    ? "—"
+    : !copie.active
+      ? "Non configurée : les sauvegardes ne sont que sur ce disque."
+      : copie.derniere
+        ? `${formatDateLongue(copie.derniere.date)} · dans le second dossier`
+        : "Aucune depuis le démarrage (à la prochaine sauvegarde).");
 
   // Les gestes : a l'administration seulement (le serveur les refuse aux
   // autres, requireAdministration). Un autre compte lit la carte et sait

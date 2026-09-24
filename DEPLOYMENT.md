@@ -38,6 +38,7 @@ SEREO_SQLITE_PATH=/data/sereo.sqlite
 SEREO_DB_PATH=./data/db.json
 SEREO_UPLOAD_DIR=/tmp/sereo-uploads
 SEREO_BACKUP_DIR=/data/backups
+# SEREO_BACKUP_COPY_DIR=/sauvegardes-copie   (un autre disque : voir « Sauvegardes »)
 SEREO_ENABLE_DB_EXPORT=0
 SEREO_AUTH_USER=votre-identifiant
 SEREO_AUTH_PASSWORD=mot-de-passe-long-et-prive
@@ -114,6 +115,59 @@ Verifier la persistance :
 6. Configurer `SEREO_AUTH_USER` et `SEREO_AUTH_PASSWORD`.
 7. Lancer `npm run migrate:sqlite` une seule fois si des donnees JSON existent.
 8. Lancer `npm start`.
+
+## Sauvegardes
+
+Le serveur sauvegarde la base seul : au plus une fois par heure, a la premiere ecriture
+qui suit. Chaque sauvegarde (`db-<date>[-genre].sqlite.gz` dans `SEREO_BACKUP_DIR`) est
+une copie coherente de la base, meme pendant un import (copie SQLite `VACUUM INTO`), et
+elle est **relue** avant de porter son nom (decompression, `integrity_check`). Une copie
+qui ne se relit pas n'est jamais nommee comme une sauvegarde.
+
+Conservation (garde-fous du 25/09) :
+
+- les 30 plus recentes ;
+- plus la derniere de chaque jour pendant 30 jours ;
+- plus la derniere de chaque semaine (lundi-dimanche) pendant 8 semaines ;
+- plus, toujours, celles faites juste avant « Purger les bons de commande »
+  (`...-avant-purge-commandes.sqlite.gz`) : elles ne sont jamais supprimees
+  automatiquement. Les effacer a la main quand elles ne servent plus.
+
+« Sauvegarder maintenant » (Parametres, administrateur) : au plus 10 par heure ; si rien
+n'a change depuis la derniere, aucun fichier de plus.
+
+### Une copie sur un autre disque
+
+Les sauvegardes vivent par defaut sur le meme disque que la base : une panne de ce disque
+emporte les deux. `SEREO_BACKUP_COPY_DIR` designe un second dossier -- un autre disque, un
+partage reseau -- ou chaque sauvegarde est aussi copiee, relue (meme empreinte sha256) et
+gardee selon la meme regle. Exemple de montage dans le compose :
+
+```yaml
+    volumes:
+      - /srv/dev-disk-by-uuid-XXXX/sereo:/data
+      - /srv/dev-disk-by-uuid-YYYY/sereo-sauvegardes:/sauvegardes-copie   # AUTRE disque
+    environment:
+      SEREO_BACKUP_COPY_DIR: /sauvegardes-copie
+```
+
+Variable absente : rien ne change. Une copie qui echoue (disque demonte, plein) ne fait pas
+echouer la sauvegarde ; la carte « Sauvegardes » l'affiche en alerte jusqu'a la prochaine
+copie reussie. Ce dossier ne doit contenir que les sauvegardes de Sereo : les fichiers
+`db-*.sqlite.gz` y suivent la rotation.
+
+### Restaurer une sauvegarde (a la main)
+
+1. Arreter le conteneur (`docker stop sereo`).
+2. Dans le dossier de donnees, mettre la base actuelle de cote sans rien supprimer :
+   renommer `sereo.sqlite` en `sereo.sqlite.avant-restauration`, et de meme
+   `sereo.sqlite-wal` et `sereo.sqlite-shm` s'ils existent.
+3. Decompresser la sauvegarde choisie a la place : `gunzip -c backups/<sauvegarde>.sqlite.gz`
+   vers `sereo.sqlite`.
+4. Redemarrer le conteneur (`docker start sereo`). Au demarrage, la base est verifiee
+   (`quick_check`) puis remise en coherence.
+
+La derniere sauvegarde se telecharge aussi depuis Parametres (administrateur).
 
 ## Limites connues
 
