@@ -2785,7 +2785,11 @@ function normalizeDb(db) {
 function healDatabaseAtBoot() {
   try {
     const db = readDb();
-    syncWorkflow(db);
+    // La mise en coherence (syncWorkflow) est faite par writeDb, plus bas : la
+    // refaire ici doublait le demarrage (25/09 : 35 s -> 19 s a cinquante fois
+    // la base). Rien entre les deux ne lit ce qu'elle calcule : le journal de
+    // recuperation ne fait qu'ajouter une ligne, et le rognage des traces
+    // arrondit lui-meme la position (positionGpsArrondie).
     // B3 v1.16.0 : si une recovery de corruption a eu lieu pendant le readDb
     // ci-dessus, on la journalise dans l'historique pour que l'operateur la voie
     // (sinon une base vierge ressemble a une install neuve).
@@ -4556,8 +4560,10 @@ function normalizeProducts(products) {
     .filter(product => product.code || product.nom);
 }
 
-function analyzeOrderStock(order, stock) {
-  const lookup = stockLookup(stock);
+// `lookup` : la table de recherche du catalogue, deja construite par
+// l'appelant (syncWorkflow la construit UNE fois pour toutes les commandes).
+// Un appel isole (un geste sur une commande) la construit lui-meme.
+function analyzeOrderStock(order, stock, lookup = stockLookup(stock)) {
   const lines = normalizeProducts(order.products).map(product => {
     const stockItem = lookup.get(productKeyFromLine(product)) || lookup.get(`name:${normalizeTextKey(product.nom)}`);
     const available = stockItem ? getStockQuantity(stockItem) : null;
@@ -4598,7 +4604,12 @@ function analyzeOrderStock(order, stock) {
 // Compatibilite legacy : si un client existe SANS aucune commande (seed test,
 // import historique), on en cree une "fallback" pour preserver le comportement
 // des anciennes UIs qui supposent qu'un client a toujours une commande.
+// Compte des synchronisations, pour les bancs (test/rapidite-serveur.test.js) :
+// une ecriture = une synchronisation.
+let synchronisations = 0;
+
 function syncWorkflow(db) {
+  synchronisations += 1;
   db.clients = db.clients.map(client => normalizeClient(client));
 
   // Bucket des commandes par clientId (1->N relation)
@@ -4644,10 +4655,16 @@ function syncWorkflow(db) {
     ordersByClientId.set(String(client.id), [fallback]);
   });
 
-  // Re-normalisation + enrichissement (analyse stock) de TOUTES les commandes
+  // Re-normalisation + enrichissement (analyse stock) de TOUTES les commandes.
+  // La table de recherche du catalogue se construit UNE fois (25/09) : chaque
+  // commande la reconstruisait -- deux normalisations de texte par produit et
+  // par commande, la moitie d'une ecriture en production, 1,3 s a dix fois la
+  // base. Rien ne touche au stock pendant l'enrichissement : la table vaut
+  // pour toutes les commandes.
+  const catalogue = stockLookup(db.stock);
   db.commandes = db.commandes
     .map(order => normalizeOrder(order))
-    .map(order => enrichOrder(order, db.stock));
+    .map(order => enrichOrder(order, db.stock, catalogue));
 
   // Statut du client = statut de sa commande la plus recente (par dateCommande)
   const latestOrderByClient = new Map();
@@ -4827,8 +4844,8 @@ function normalizeOrder(order) {
   };
 }
 
-function enrichOrder(order, stock) {
-  const stockCheck = analyzeOrderStock(order, stock);
+function enrichOrder(order, stock, lookup = stockLookup(stock)) {
+  const stockCheck = analyzeOrderStock(order, stock, lookup);
   // Chantier 1 : aligne sur RESERVED_ORDER_STATUSES (inclut probleme/a_reprogrammer)
   const stockReserved = Boolean(order.stockReservedAt && RESERVED_ORDER_STATUSES.includes(order.status));
 
@@ -8503,7 +8520,8 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
 
     db.stock = [...importedProducts, ...preservedProducts];
 
-    syncWorkflow(db);
+    // Pas de syncWorkflow ici (25/09) : writeDb le fait, et rien d'ici la ne
+    // lit ce qu'il calcule (les comptes du message sont deja faits).
     const dedupNote = duplicatesSkipped > 0
       ? `, ${duplicatesSkipped} doublon(s) ignore(s)`
       : "";
@@ -8906,7 +8924,8 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       });
     });
 
-    syncWorkflow(db);
+    // Pas de syncWorkflow ici (25/09) : writeDb le fait, et rien d'ici la ne
+    // lit ce qu'il calcule (les comptes du message sont deja faits).
     const preservedMessage = mergedImport.preservedCount > 0
       ? `, ${mergedImport.preservedCount} client(s) deja en workflow conserve(s)`
       : "";
@@ -9196,7 +9215,8 @@ app.patch("/api/stock/:id", async (req, res) => {
         thresholdChanged = nextThreshold !== oldThreshold;
       }
 
-      syncWorkflow(db);
+      // Pas de syncWorkflow ici (25/09) : writeDb le fait. Le refaire doublait
+      // l'ajustement de stock (2,3 s -> 0,5 s a dix fois la base).
       if (quantityChanged) {
         addHistory(db, "Stock", `${product.nom} : stock ${oldQuantity} -> ${product.quantite}`, {
           produitId: product.id,
@@ -10315,6 +10335,7 @@ module.exports = {
   _resetAuthRateLimitForTest: () => authRateLimitState.clear(),
   _createAccessSessionValueForTest: createAccessSessionValue,
   _withWriteLockForTest: withWriteLock,
+  _synchronisationsPourTest: () => synchronisations,
   _normalizeOrder: normalizeOrder,
   _getLastStorageRecovery: () => lastStorageRecovery,
   // Chantier 2 : permet aux tests d'attendre que le backup async finisse
