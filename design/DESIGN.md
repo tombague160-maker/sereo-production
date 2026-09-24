@@ -5985,3 +5985,206 @@ Sur un écran bas, la barre **défile dans sa propre hauteur** (règle existante
 *Bancs (`collant-et-clavier.spec.js`)* : « la barre latérale reste fixe » (921 et 1440 px, trois
 écrans ; rouge avant : −400 au lieu de 0) ; « écran bas, tout le menu reste atteignable »
 (rouge si la barre fixe perd son défilement : « Version » à 768 px pour un écran de 560).
+
+## 24/09 — Ce que l'app sait déjà, enfin montré (lot « données utiles »)
+
+Branche `feat/donnees-utiles`, sur `main` (v1.45.0). Cinq points de l'audit « améliorations »
+du 24/09 : des données que le serveur tenait déjà, et que l'écran ne montrait pas ou montrait
+faux. Décisions de Thomas appliquées : 5 (clients qui ne commandent plus) et 8 (bon de
+livraison sans les prix).
+
+### Fait
+
+**1. Garde-fous de saisie.** Mesure de l'audit : une commande prise avec le téléphone « abc » et
+le code postal « ABCDE » était acceptée ; « Appeler » devenait un lien `tel:` vide.
+
+- *Serveur* (`lib/saisie.js`) : téléphone à **10 chiffres** (espaces, points, tirets, `+33` et
+  `0033` acceptés, « (0) » toléré), code postal à **5 chiffres**. Une saisie juste est
+  **normalisée** (on garde `0612345678`, l'écran l'affiche par deux) ; une saisie fausse est
+  **refusée, 400, nommée** (« Téléphone invalide : 10 chiffres attendus, par exemple 06 12 34 56
+  78 (le +33 est accepté). »). Routes : `POST/PATCH /api/crm/clients` (donc aussi le client créé
+  par une commande client, une commande planifiée, un abonnement), `PATCH /api/clients/:id`, le
+  code postal propre à une commande client.
+- *Une valeur déjà en base n'est jamais réécrite en silence* : renvoyée **telle quelle** (le
+  formulaire du détail de commande renvoie tous ses champs), elle est gardée, même fausse ; elle
+  n'est ni refusée ni corrigée. Elle est **signalée** : filtre « Coordonnées à vérifier » dans
+  Clients, ligne « Téléphone et code postal à vérifier », sous-titre « N fiches à vérifier »,
+  fiche (« Numéro à vérifier : il ne compte pas 10 chiffres. »), et dans le dialogue
+  « Modifier », un avertissement (orange, pas l'erreur rouge) qui ne bloque pas l'envoi.
+- *Page* : un champ `data-garde` dit son erreur **sous lui, à la frappe** (charte §4), icône et
+  mot : tout de suite si la saisie ne pourra plus devenir juste (« 06 12 a »), à la sortie du
+  champ si elle est seulement incomplète (« 06 12 »). `setCustomValidity` bloque l'envoi ; le
+  message est relié au champ (`aria-describedby`), le nom du champ reste son libellé. Champs :
+  « Nouveau / Modifier le client », « Commande client », la fiche neuve de « Nouvel
+  abonnement », « Modifier le profil » du détail de commande (dont l'envoi passe par un clic :
+  `reportValidity()` y est demandé). Le même calcul des deux côtés, vérifié par un banc de parité.
+- *Affichage* : le numéro par deux (« 06 12 34 56 78 ») dans la fiche client, le détail de
+  commande et partout où passe `formatPhone` (arrêt de tournée compris) ; la recherche de Clients
+  le trouve aussi tapé ainsi. « Appeler » compose le numéro normalisé, et disparaît quand la fiche
+  n'a aucun chiffre.
+- *Doublons* : normaliser rendait atteignable un doublon que plus rien ne voyait
+  (« 0612345678 » en base, « 06 12 34 56 78 » tapé : deux clés de texte différentes). La clé du
+  téléphone est désormais le numéro normalisé quand il est valide.
+
+**2. Clients qui ne commandent plus (décision 5).** `lib/relance-client.js` : un client **non
+abonné** qui dépasse **1,5 fois son rythme** — l'intervalle médian entre ses jours de livraison
+(`deliveredAt` lu à Paris, sinon la date prévue) — ou **90 jours** s'il n'a été livré qu'un jour,
+est signalé (`relanceSuggeree` dans `/api/crm/clients` : dernière livraison, jours depuis, rythme,
+seuil). **Dérivé à chaque lecture, jamais écrit : le statut ne change pas.** Le filtre
+« Clients à relancer » (qui existait) les compte, côté page et côté serveur
+(`?status=client_a_relancer`) ; la ligne porte « À relancer », la fiche la phrase « À relancer ·
+pas de livraison depuis 100 jours · d'habitude tous les 30 jours », le sous-titre « N à
+relancer ».
+
+*« Confirmer une commande planifiée fige le client en actif » — vérifié, vrai.*
+`confirmPlannedOrder` (et `createCustomerOrder`) écrivent `crmStatus = "client_actif"` en dur,
+et `inferCrmStatus` rend le statut écrit avant toute déduction : un filtre fondé sur le statut
+ne pouvait plus jamais y voir un client arrêté. **Corrigé à la cause du signal, pas du statut** :
+le signal ne lit pas le statut (sauf « Client inactif », posé à la main) ; « Confirmer » garde
+son geste (un client qui commande à nouveau est actif), et un client ainsi figé est signalé dès
+que plus rien n'est en cours et que son rythme est dépassé (banc « Confirmer … le signal
+revient »).
+
+**3. Le journal « qui a fait quoi ».**
+- *Qui le chargeait* : `loadData`, à **chaque ouverture** (`endpointsDeChargement`,
+  `/api/historique` en entier — 549 ko pour 3 000 lignes, mesure de l'audit), pour le rendre dans
+  la section `#historique`, que la navigation n'ouvrait pas. **Retiré** : l'endpoint ne part plus,
+  la section et `renderHistorique` sont supprimés.
+- *L'auteur* : chaque requête `/api` s'exécute dans un contexte (`AsyncLocalStorage`) ;
+  `addHistory` y lit l'identifiant du compte (`auteur`), `recordStockMovement` aussi
+  (`createdBy`, qui valait « local » pour tous). Il suit les `await` et la file d'écriture, y
+  compris dans `lib/operations-api.js` et `lib/tournee-pratique.js` (aucun appelant à modifier).
+  Hors requête (purge planifiée, géocodage de fond) : « automatique ».
+- *La carte « Journal »* de Paramètres (pleine largeur, avant la zone dangereuse), **réservée à
+  l'administration** : cachée tant que `/api/me` ne l'a pas dit, et jamais demandée pour un
+  autre compte (un 403 ferait une erreur console). Deux vues, « Actions » et « Mouvements de
+  stock » ; date · qui · quoi ; **50 lignes par page**, « Afficher les 50 suivantes ». Lue à
+  l'ouverture de Paramètres (première page relue à chaque ouverture), jamais au chargement.
+  Les lignes d'avant le 24/09 disent « — ».
+- *Serveur* : `GET /api/journal?genre=actions|stock&limite=&avant=` (défaut 50, plafond 200),
+  réservé à l'administration ; le curseur `date|id` de la dernière ligne ne saute rien quand
+  deux lignes partagent la même milliseconde, et une ligne écrite entre deux pages ne décale
+  pas la suite. `/api/historique` garde sa forme (tout le tableau, pour les outils) mais passe
+  lui aussi réservé à l'administration. Le service worker ne met pas `/api/journal` en cache
+  (comme `/api/comptes`).
+- Les « Mouvements récents » du Stock disent aussi « par <compte> ».
+
+**4. Bon de livraison imprimable, sans les prix (décision 8).** Depuis le détail d'une commande
+(« Bon de livraison », sous l'en-tête) et depuis l'arrêt de tournée (« Autres actions »). Logo
+de l'application, numéro, date de commande, livraison prévue (et « Livrée le … à … » si c'est
+fait), client et adresse, téléphone, lignes produit / quantité (le code en petit), consignes de
+la commande, « Remis à » s'il existe (celui de l'arrêt, ou celui tapé dans le champ de l'arrêt
+à l'écran), zones « Reçu par (nom) » et « Date et signature ». Une feuille posée en fin de
+`<body>`, que `@media print` montre **seule**, `@page { size: A4 }`, dans les couleurs claires de
+la charte quel que soit le thème ; l'impression du navigateur (au téléphone : sa feuille de
+partage, « Imprimer » ou « Enregistrer en PDF »). Aucune dépendance. Le logo est **attendu**
+avant d'imprimer (au plus 1,5 s) : le premier PDF de contrôle était parti sans lui.
+
+**5. Recherche de la barre latérale.** Elle trouve toujours les écrans (le menu se filtre comme
+avant), et désormais, sous le champ, les **clients** (nom, ville, téléphone), les **commandes**
+(numéro, client) et les **produits** (code, nom) : cinq par groupe, « et N autres ». **Aucune
+requête** : les données déjà chargées. Choisir un client ouvre sa fiche (filtres de Clients
+remis à zéro), une commande son détail, un produit le Stock filtré dessus ; Entrée ouvre l'écran
+trouvé, sinon le premier résultat. Rien du tout : « Aucun écran, client, commande ni produit ne
+correspond à « … ». » (au lieu d'un menu vide). Deux caractères au moins pour les données.
+
+### Décisions prises dans le lot
+
+- **« Non abonné » = sans abonnement ACTIF** : un abonnement en pause ne protège pas du signal
+  — même règle que la pilule « Abonnés » de Clients. Un client « Client inactif » (posé à la
+  main) n'est pas signalé une seconde fois ; un client qui a une commande en cours (tout statut
+  sauf livrée et annulée, planifiée comprise) non plus.
+- **Le rythme compte les JOURS de livraison** : deux commandes livrées le même jour font une
+  livraison ; « une seule commande » (90 jours) se lit « un seul jour de livraison ».
+- **Stocker les chiffres, afficher par deux** : `0612345678` en base ; l'écran regroupe.
+- **Numéros français seulement**, comme la consigne (`+33` / `0033`) : un numéro suisse (`+41`)
+  est refusé à la saisie. Voir « Écarts ».
+- **Un code postal à 4 chiffres est refusé à la saisie** (5 exigés) ; l'import Excel, lui, garde
+  son complément du zéro perdu (`normaliserCodePostal`, inchangé).
+- **Journal en deux vues, pas un fil unique** : un ajustement de stock écrit une action ET un
+  mouvement ; mêlés, chaque geste apparaîtrait deux fois.
+- **Consignes du bon = notes de la commande** (ou de l'arrêt) ; les notes de la fiche client
+  (besoins, préférés…) restent internes.
+
+### Écarts nommés
+
+- **Import Ximi non gardé** : un téléphone ou un code postal faux venu d'un classeur est importé
+  tel quel, puis signalé « à vérifier » à l'écran. Refuser une ligne d'import pour un numéro
+  aurait bloqué la commande qu'elle porte.
+- **Frontaliers** : un client suisse ne peut plus recevoir un numéro `+41` par la saisie. À
+  trancher par Thomas s'il en a (élargir aux indicatifs étrangers, ou accepter tel quel).
+- **« Planifier la suite » sur une commande dont la fiche client a disparu** repasse par la
+  création de fiche : un numéro faux sur la commande d'origine y serait refusé (400). Cas limite,
+  non rencontré dans les données de test.
+- **Pas de recherche globale au téléphone** : la barre latérale n'y est pas rendue, et l'en-tête
+  vert n'a pas de champ ; les planches mobiles n'en dessinent pas. Hors lot.
+- **Le bon depuis la tournée est dans « Autres actions »** (un geste de plus) : la barre collée
+  des gestes appartient au lot téléphone, et le bon n'est pas un geste de chaque arrêt.
+- **Le bouton « Bon de livraison » d'« Autres actions » a le rayon de ses voisins** (8 px en
+  clair, comme « À reprogrammer ») : ces boutons compacts relèvent du lot « thème et finitions ».
+  Celui du détail de commande, visible au banc de la charte, est une pilule.
+- **L'impression attend le logo** (≤ 1,5 s) : `window.print()` part donc après une attente, hors
+  du geste de l'utilisateur. Non vérifié dans une vraie fenêtre d'impression, ni sur un vrai
+  téléphone : le banc remplace `window.print` (il juge la feuille en media `print` émulé, et le
+  PDF de contrôle de Chromium).
+- **Le journal n'est pas plafonné** en durée (l'audit proposait 12 mois, plage 3 à 36) : pas
+  décidé. Le serveur ne sert plus que des pages, mais la table grandit.
+- **L'affichage par deux passe par `formatPhone`**, donc aussi par la carte de l'arrêt de tournée
+  (affichage seul, aucun geste changé).
+
+### Bancs, et le rouge de chacun
+
+- `test/donnees-utiles.test.js` (10 cas, serveur semé, sans authentification) : saisie (refus,
+  normalisation, valeur ancienne gardée, commande refusée sans rien créer, doublon), relance
+  (signalés / non signalés, rien d'écrit, filtre serveur ; « Confirmer » fige puis le signal
+  revient), journal (auteur ; pages de 50, paires coupées, ligne écrite entre deux pages).
+  **Sur le `server.js` de `main` : 10 rouges sur 10**, chacun de sa cause (201 au lieu de 400,
+  `'06.12.34.56.78'` au lieu de `'0612345678'`, 200 au lieu de 400, 201 au lieu de 409,
+  `relanceSuggeree` `undefined`, auteur `undefined`, `/api/journal` 404).
+- `test/journal-auteur.test.js` (3 cas, authentification allumée, comptes « julie » et
+  « marc ») : l'auteur est le compte connecté ; une tournée dont le calcul routier (simulé, lent)
+  laisse passer l'écriture d'un autre compte garde son auteur ; `/api/journal` et
+  `/api/historique` refusés (403) au livreur. **Sur `main` : 3 rouges** (`undefined` au lieu de
+  `'julie'` / `'marc'`, 404 au lieu de 403).
+- `test/garde-saisie.test.js` (4 cas) : parité page / serveur sur 19 téléphones et 8 codes
+  postaux, affichage par deux, verdicts de frappe.
+- `test/e2e/donnees-utiles.spec.js` (11 cas, serveur semé sur **3530**) : les cinq points, dont
+  l'impression (media `print` émulé : la feuille seule, sans « € », quantités à droite, A4,
+  couleurs du papier en clair et en sombre, logo chargé à l'instant de l'impression), le bureau
+  et le téléphone pour l'arrêt, et le contraste ≥ 4,5:1 de chaque texte neuf en clair et en
+  sombre. **Avec le front de `main` (serveur du lot) : 10 rouges sur 11**, chacun sur l'élément
+  absent ou la requête de trop (`/api/historique` au chargement) ; le onzième (« un compte qui
+  n'administre pas ») est une garde : il a reçu un témoin de présence, et son mutant le fait
+  rougir.
+- **Mutants** (un fichier muté à la fois, restauré par copie depuis le commit) : 20 posés, 20
+  rouges. Serveur : le signal lit le statut ; l'ancienne valeur réécrite ; le curseur par la
+  seule date ; `/api/journal` sans garde ; la page accepte « / » ; le doublon par texte. Page :
+  la carte montrée à tous ; le bon sans attendre le logo (`naturalWidth` 0 à l'impression) ;
+  l'en-tête du tableau par la règle générique (blanc en sombre) ; les quantités à gauche ;
+  l'avertissement pâle (contraste) ; la valeur enregistrée bloquée ; l'incomplet dit à la
+  frappe ; le filtre « à relancer » sur le seul statut ; la recherche sans message vide ; la
+  recherche par le serveur (une requête par frappe) ; le numéro brut dans la fiche ;
+  `/api/historique` rechargé ; le mouvement sans auteur ; le bouton du bon carré.
+- **Deux instruments corrigés en route.** ① Le premier cas « deux comptes en même temps »
+  n'utilisait que des écritures synchrones : un auteur GLOBAL (le mutant) y donnait le bon nom
+  — vert sans rien distinguer. Remplacé par une écriture qui attend le calcul routier. ② Le cas
+  de pagination avait des paires alignées sur les pages : le curseur par la seule date y
+  survivait. Les paires sont décalées d'un rang, la page coupe l'une d'elles.
+- **Oracles changés par la décision** : `api.test.js` et `adresses-justes.test.js` attendaient
+  le numéro tel que tapé (« 06 11 22 33 44 ») ; il est désormais normalisé (`0611223344`).
+- Bancs voisins relancés, verts : clients, clients-mobile, commandes, paramètres (bureau et
+  téléphone), tabs, barre latérale, nav, écran livreur, tournée (bureau et téléphone), cibles
+  tactiles, focus clavier, squelette, chargement instantané, création d'abonnement, fumée,
+  contraste (application, champs), thèmes, collant et clavier, texte coupé, hors ligne (page et
+  tournée), le livreur ne perd rien, tournées débloquées, états limites, typographie, écrans
+  sans planche, performance, opérations, stock, rapidité tournée, intégration, finitions,
+  charte des composants (rouge d'abord : le bouton du bon, 8 px — corrigé) ; `npm test` vert.
+
+### Ce qui reste
+
+- Plafonner le journal (durée à décider) ; filtrer le journal par compte ou par type.
+- Le tableau de bord (« À régler ») ne compte pas encore les clients à relancer ; la ligne
+  signalée n'a pas de geste « Poser un rappel » (`POST /api/crm/relances` existe).
+- Les numéros étrangers, si Thomas en a besoin.
+- Un « Imprimer les bons de la tournée » (tous les arrêts d'un coup) : non demandé.
+- La recherche au téléphone, si les planches mobiles en dessinent une.
