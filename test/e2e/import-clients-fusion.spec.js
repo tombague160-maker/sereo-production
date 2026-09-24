@@ -77,3 +77,31 @@ test("import partiel : le resume dit les fiches gardees ; aucune fiche ne dispar
   expect(erreurs).toEqual([]);
   await ctx.close();
 });
+
+test("reimport : une commande saisie au terrain n'est pas reecrite, et le resume dit pourquoi", async ({ browser }) => {
+  test.setTimeout(120000);
+  const seed = jeuDeDonnees();
+  const parc = { id: "c-parc", nom: "Foyer du Parc", rue: "2 rue du Parc", ville: "Dole", codePostal: "39100", lat: 47.09, lng: 5.49 };
+  seed.clients.push(parc);
+  // Acceptee « bloquee » faute de stock (decision 11) : rien de reserve.
+  seed.commandes.push({
+    id: "o-parc", numero: "CMD-2026-090", clientId: parc.id, clientName: parc.nom, status: "stock_a_verifier",
+    source: "commande_terrain", total: 24, address: parc.rue, city: parc.ville, postalCode: parc.codePostal,
+    lat: parc.lat, lng: parc.lng, deliveryDate: AUJOURDHUI, dateCommande: AUJOURDHUI,
+    products: [{ code: "CH-L", nom: "Changes taille L", prixUnitaire: 12, quantite: 2, totalLigne: 24 }]
+  });
+  await semer(seed);
+  const { ctx, page, erreurs } = await ouvrir(browser, "journee");
+  await importerParLEcran(page, xlsx([
+    ["Date", "Client", "Code", "Produit", "Quantite", "Rue", "Code Postal", "Ville"],
+    [JOUR_FR, parc.nom, "ALE", "Alèses", "9", parc.rue, parc.codePostal, parc.ville]
+  ]));
+  const bilan = page.locator("#importSummary");
+  await expect(bilan).toContainText("Ignorée : commande saisie au terrain");
+  await expect(bilan).toContainText("CMD-2026-090");
+  const commandes = await (await fetch(srv.base + "/api/orders")).json();
+  const o = (Array.isArray(commandes) ? commandes : commandes.orders || []).find(x => x.id === "o-parc");
+  expect(o.products.map(p => [p.code, Number(p.quantite)])).toEqual([["CH-L", 2]]);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});

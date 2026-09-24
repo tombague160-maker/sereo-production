@@ -8585,14 +8585,25 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
 // derive (annulee, une commande terrain rendait 8 Changes et jamais ses 3
 // Aleses). Meme regle que la modification a la main : « Impossible de
 // modifier les produits apres reservation du stock ».
+//
+// Chasse aux defauts du 24/09 (lot « donnees clients », 25/09) : seul un bon
+// IMPORTE, encore a preparer, suit le fichier. Restaient reecrites : la
+// preparation lancee SANS reservation (PATCH de statut -- l'ecart nomme du lot
+// pieges), la commande annulee, et surtout les commandes SAISIES dans Sereo --
+// la commande terrain acceptee « bloquee » sans reservation (decision 11 du
+// 24/09) devenait un autre produit en gardant son ancien total ; une
+// planifiee (ou celle d'un abonnement) changeait avant sa confirmation. Le
+// fichier Ximi n'en est pas la source : elles gardent ce qui a ete saisi.
 function raisonImportIgnore(db, order) {
   if (order.status === "livre") return "livree";
   if (order.status === "en_livraison" || tourneeActiveDeLaCommande(db, order.id)) return "en_tournee";
   if (order.status === "pret_livraison") return "prete";
   if (STATUTS_A_RELIVRER.includes(order.status)) return "partie_en_tournee";
-  if (order.stockReservedAt) {
-    return ["en_preparation", "preparation_terminee"].includes(order.status) ? "en_preparation" : "stock_reserve";
-  }
+  if (["en_preparation", "preparation_terminee"].includes(order.status)) return "en_preparation";
+  if (order.stockReservedAt) return "stock_reserve";
+  if (order.status === "annulee") return "annulee";
+  if (order.source === "commande_terrain") return "saisie_terrain";
+  if (order.source === "commande_planifiee" || order.subscriptionId) return "planifiee";
   return null;
 }
 

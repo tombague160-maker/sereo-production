@@ -3668,7 +3668,11 @@ const RAISONS_IMPORT_IGNORE = {
   // Relecture du 24/09 : le stock reserve verrouille aussi (server.js,
   // raisonImportIgnore) -- preparation lancee, commande terrain, planifiee confirmee.
   en_preparation: "commande déjà en préparation",
-  stock_reserve: "stock déjà réservé pour cette commande"
+  stock_reserve: "stock déjà réservé pour cette commande",
+  // Donnees clients (25/09) : seul un bon IMPORTE a preparer suit le fichier.
+  annulee: "commande annulée",
+  saisie_terrain: "commande saisie au terrain",
+  planifiee: "commande planifiée"
 };
 const IMPORT_IGNOREES_MONTREES = 5;
 
