@@ -4190,6 +4190,9 @@ function getDashboardSummary(db) {
   return {
     orders: orderCounts,
     stock: stockCounts,
+    // Le compte des lignes de ventes importees (« Resume du jour ») : la page
+    // ne charge plus /api/ventes a l'ouverture pour ce seul nombre (24/09).
+    ventes: { total: db.ventes.length },
     alerts: alerts.slice(0, 20),
     routes: {
       draft: db.routes.filter(route => ["brouillon", "prete"].includes(route.status)).length,
@@ -7004,8 +7007,17 @@ app.get("/api/db", (req, res) => {
   res.json(readDb());
 });
 
+// Poids du reseau (24/09, mesure en production) : `ordersByDate`, le releve de
+// l'import (une entree par date de commande, avec ses lignes), faisait 43 % de
+// /api/clients -- et 14 % de /api/crm/clients, qui le recopie. La page ne le lit
+// nulle part : elle a les commandes elles-memes (/api/orders). Il reste en
+// base, ou l'import le relit ; seules les LISTES envoyees s'allegent.
+function sansReleveDImport({ ordersByDate, ...client }) {
+  return client;
+}
+
 app.get("/api/clients", (req, res) => {
-  res.json(readDb().clients);
+  res.json(readDb().clients.map(sansReleveDImport));
 });
 
 app.get("/api/ventes", (req, res) => {
@@ -7022,7 +7034,13 @@ app.get("/api/historique", (req, res) => {
 });
 
 app.get("/api/stock-movements", (req, res) => {
-  res.json(readDb().stockMovements);
+  const mouvements = readDb().stockMovements;
+  // Les N premiers (les plus recents : recordStockMovement les met en tete).
+  // L'ecran Stock n'en montre que 12 et les demande ainsi depuis le 24/09 :
+  // 222 ko pour 633 mouvements en production, a chaque ouverture. Sans
+  // `limite`, la liste entiere, comme avant.
+  const limite = Number.parseInt(req.query.limite, 10);
+  res.json(Number.isInteger(limite) && limite > 0 ? mouvements.slice(0, limite) : mouvements);
 });
 
 app.get("/api/dashboard", (req, res) => {
@@ -7160,8 +7178,48 @@ app.get("/api/diagnostic/suspicious-dates", (req, res) => {
 // L'endpoint /api/version est declare plus haut (avant requireAccessAuth)
 // pour rester accessible sans authentification, notamment sur la page /login.
 
+// L'IMAGE DE MARQUE N'EST PLUS DANS LES REGLAGES (24/09, mesure en production) :
+// une image importee est gardee en base64 dans `appearance.brandImage`, et les
+// 116 ko repartaient a chaque ouverture -- pour un apercu que seuls les
+// Parametres montrent. Les reglages en donnent desormais l'ADRESSE, versionnee
+// par l'empreinte de l'image (?v=) : le navigateur ne la demande que si
+// l'apercu s'affiche, et la garde ensuite (la meme adresse ne change jamais de
+// contenu). La base, l'import et la remise a zero ne changent pas.
+const IMAGE_DE_MARQUE_CHEMIN = "/api/settings/appearance/image";
+
+function empreinteImageDeMarque(dataUrl) {
+  return crypto.createHash("sha256").update(dataUrl).digest("hex").slice(0, 16);
+}
+
+function apparencePourLaPage(appearance) {
+  const image = appearance.brandImage || "";
+  if (!image.startsWith("data:")) return appearance;
+  return { ...appearance, brandImage: `${IMAGE_DE_MARQUE_CHEMIN}?v=${empreinteImageDeMarque(image)}` };
+}
+
 app.get("/api/settings/appearance", (req, res) => {
-  res.json(getAppearanceSettings(readDb()));
+  res.json(apparencePourLaPage(getAppearanceSettings(readDb())));
+});
+
+app.get(IMAGE_DE_MARQUE_CHEMIN, (req, res) => {
+  const image = getAppearanceSettings(readDb()).brandImage || "";
+  const morceaux = /^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]*)$/i.exec(image);
+  if (!morceaux) {
+    res.status(404).json({ error: "Aucune image personnalisee" });
+    return;
+  }
+  const empreinte = empreinteImageDeMarque(image);
+  res.set("Content-Type", morceaux[1].toLowerCase());
+  res.set("ETag", `"${empreinte}"`);
+  // Une image importee peut etre un SVG : ouverte seule, elle ne doit rien
+  // pouvoir executer (aucun script, document isole).
+  res.set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+  res.set("Cache-Control", req.query.v === empreinte ? "private, max-age=31536000, immutable" : "private, no-cache");
+  if (req.fresh) {
+    res.status(304).end();
+    return;
+  }
+  res.send(Buffer.from(morceaux[2], "base64"));
 });
 
 app.patch("/api/settings/appearance", async (req, res) => {
@@ -7194,7 +7252,7 @@ app.patch("/api/settings/appearance", async (req, res) => {
       writeDb(db);
       return appearance;
     });
-    res.json(result);
+    res.json(apparencePourLaPage(result));
   } catch (error) {
     handleRouteError(error, res, "Erreur parametres");
   }
@@ -7355,9 +7413,17 @@ app.get("/api/crm/clients", (req, res) => {
   const statusFilter = normalizeCrmStatus(req.query.status || "", "");
   const today = jourParis();
 
+  // La LISTE ne porte plus l'historique des commandes de chaque client (24/09) :
+  // `orderHistory` recopiait /api/orders, client par client (66 % des 552 ko
+  // mesures en production), et la page ne le lit pas -- elle a deja toutes les
+  // commandes. La fiche seule (GET /api/crm/clients/:id) le garde ; les totaux
+  // (totalOrders, totalRevenue), les rappels et le reste de la vue restent.
   let list = db.clients
     .filter(client => !client.crmArchived)
-    .map(client => crmClientView(db, client));
+    .map(client => {
+      const { orderHistory, ...vue } = crmClientView(db, client);
+      return sansReleveDImport(vue);
+    });
 
   if (query) {
     list = list.filter(client => normalizeTextKey([

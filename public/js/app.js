@@ -997,6 +997,9 @@ function showTab(tabName, options = {}) {
     // Le repli des secteurs se MESURE : cache, la rangee n'a pas de hauteur.
     ajusterRepliDesSecteurs();
   }
+  // Les lectures propres aux Parametres partent quand on y arrive (24/09) ; a
+  // l'ouverture, le premier chargement (renderAll) s'en charge.
+  if (nextTab === "parametres" && !premierChargementDesDonnees) lectureDesParametres();
 
   updateCustomerCartBar();
 
@@ -1140,6 +1143,15 @@ let declencheurPleinEcran = null;
  */
 async function chargerFondDeCarte() {
   if (!map || coucheFond || fondEnCours) return;
+  // Carte cachee (un autre ecran que la Tournee) : ni /api/carte/fond, ni tuile.
+  // Mesure en production (24/09) : une tuile de 46 ko partait a chaque ouverture
+  // pour une carte que personne ne voyait. Leaflet signale « resize » quand la
+  // carte prend sa taille (invalidateSize, a l'affichage de la Tournee).
+  if (!map.getSize().x) {
+    map.off("resize", chargerFondDeCarte);
+    map.once("resize", chargerFondDeCarte);
+    return;
+  }
   fondEnCours = true;
   clearTimeout(fondRelance);
   fondRelance = null;
@@ -1673,8 +1685,11 @@ function endpointsDeChargement() {
     { key: "subscriptions", path: "/api/subscriptions", fallback: {items:[],occurrences:[],today:getTodayDateInput()} },
     { key: "clients", path: "/api/clients", fallback: [] },
     { key: "stock", path: "/api/stock", fallback: [] },
-    { key: "ventes", path: "/api/ventes", fallback: [] },
-    { key: "historique", path: "/api/historique", fallback: [] },
+    // Plus de /api/ventes ni de /api/historique a l'ouverture (24/09, mesure en
+    // production : 249 et 271 ko de JSON a chaque chargement). Ils ne servaient
+    // qu'a deux ecrans que la navigation n'ouvre pas, et a un compte, que
+    // /api/dashboard donne desormais. Ces ecrans les demandent s'ils s'affichent
+    // (demanderDonneesDeLEcran).
     { key: "orders", path: "/api/orders", fallback: [] },
     { key: "crmClients", path: "/api/crm/clients", fallback: [] },
     { key: "crmRelances", path: "/api/reminders", fallback: [] },
@@ -1686,7 +1701,9 @@ function endpointsDeChargement() {
     { key: "sectors", path: "/api/sectors", fallback: [] },
     { key: "deliverySectors", path: "/api/delivery-sectors", fallback: [] },
     { key: "routes", path: "/api/routes", fallback: [] },
-    { key: "stockMovements", path: "/api/stock-movements", fallback: [] },
+    // Les 12 que l'ecran Stock montre (renderStockMovements), pas les 633 de la
+    // production (222 ko) : 24/09.
+    { key: "stockMovements", path: `/api/stock-movements?limite=${MOUVEMENTS_AFFICHES}`, fallback: [] },
     { key: "dashboard", path: "/api/dashboard", fallback: null }
   ];
 }
@@ -1834,6 +1851,22 @@ async function loadData() {
   // updatedAt (refreshActiveRoute). Un second chargement, frais, suit : il
   // n'a lieu que dans ce croisement, jamais apres un geste seul.
   if (ecritureCroisee) loadData();
+  if (premier) amorcerCopieDesArchives();
+}
+
+// Hors ligne, les archives d'import des Parametres restaient lisibles : la copie
+// du service worker se refaisait a chaque ouverture. Depuis le 24/09 elle ne se
+// refait qu'a leur affichage (lectureDesParametres) ; on l'amorce donc une fois,
+// si elle manque -- une seule requete apres la connexion, aucune ensuite.
+async function amorcerCopieDesArchives() {
+  try {
+    if (typeof caches === "undefined" || !navigator.serviceWorker?.controller) return;
+    const noms = (await caches.keys()).filter(nom => nom.startsWith(PREFIXE_CACHE_DONNEES));
+    for (const nom of noms) {
+      if (await (await caches.open(nom)).match("/api/imports/archives")) return;
+    }
+    await apiFetch("/api/imports/archives");
+  } catch { /* hors ligne, ou stockage indisponible : rien a amorcer */ }
 }
 
 function refreshActiveRoute() {
@@ -2740,9 +2773,11 @@ function renderAll({ lectures = true } = {}) {
   majAlerteAdresses(clients, orders);
   renderRoute();
   if (lectures) {
+    // Les reglages de tournee (lus par renderSettings) servent aussi a l'ecran
+    // Tournee : ils restent lus a chaque chargement.
     renderSettings();
-    renderImportsArchives();
-    renderComptes();
+    // Ce que SEULS les Parametres montrent (24/09) : lu quand ils s'affichent.
+    rendreSiAffiche("parametres", lectureDesParametres);
   }
   renderMap();
   updateRouteProgress();
@@ -2896,7 +2931,7 @@ function renderDailySummary() {
   container.innerHTML = `
     <article class="summary-item status-ok">
       <h4>Workflow actif</h4>
-      <p>${orders.length} commande(s), ${stock.length} produit(s), ${ventes.length} ligne(s) importée(s)</p>
+      <p>${orders.length} commande(s), ${stock.length} produit(s), ${dashboard?.ventes?.total ?? ventes.length} ligne(s) importée(s)</p>
     </article>
 
     <article class="summary-item ${lowStock ? "status-warning" : "status-ok"}">
@@ -4134,11 +4169,14 @@ function createStockCard(product) {
   return div;
 }
 
+// Les mouvements recents de l'ecran Stock : le chargement n'en demande que ceux-la.
+const MOUVEMENTS_AFFICHES = 12;
+
 function renderStockMovements() {
   const container = document.getElementById("stockMovementList");
   if (!container) return;
 
-  const movements = stockMovements.slice(0, 12);
+  const movements = stockMovements.slice(0, MOUVEMENTS_AFFICHES);
   if (!movements.length) {
     container.innerHTML = emptyState("Aucun mouvement", "Les ajustements manuels apparaîtront ici.");
     return;
@@ -4936,9 +4974,39 @@ function renderProduits() {
   });
 }
 
+// LES DONNEES QUE SEUL UN ECRAN MONTRE (24/09). /api/ventes et /api/historique
+// ne partent plus a l'ouverture : leurs ecrans les demandent quand ils se
+// dessinent AFFICHES -- a chaque rendu, comme le chargement complet le faisait,
+// pour qu'un ecran ouvert reste a jour. Rend vrai si une demande part : le
+// rendu reviendra quand elle aura abouti (ou echoue : il montre alors ce qu'il a).
+const DONNEES_DES_ECRANS = {
+  ventes: { chemin: "/api/ventes", poser: valeur => { ventes = valeur; }, rendu: () => renderVentes() },
+  historique: { chemin: "/api/historique", poser: valeur => { historique = valeur; }, rendu: () => renderHistorique() }
+};
+const donneesDEcranEnCours = new Set();
+const donneesDEcranRecues = new Set();
+
+function demanderDonneesDeLEcran(ecran) {
+  if (donneesDEcranRecues.delete(ecran)) return false;
+  if (!document.getElementById(ecran)?.classList.contains("active")) return false;
+  const donnees = DONNEES_DES_ECRANS[ecran];
+  if (!donneesDEcranEnCours.has(ecran)) {
+    donneesDEcranEnCours.add(ecran);
+    apiFetch(donnees.chemin)
+      .then(valeur => { if (Array.isArray(valeur)) donnees.poser(valeur); }, () => {})
+      .finally(() => {
+        donneesDEcranEnCours.delete(ecran);
+        donneesDEcranRecues.add(ecran);
+        donnees.rendu();
+      });
+  }
+  return true;
+}
+
 function renderVentes() {
   const container = document.getElementById("ventesList");
   if (!container) return;
+  if (demanderDonneesDeLEcran("ventes")) return;
 
   container.innerHTML = "";
 
@@ -5070,6 +5138,7 @@ function getAlertItems() {
 function renderHistorique() {
   const container = document.getElementById("historiqueList");
   if (!container) return;
+  if (demanderDonneesDeLEcran("historique")) return;
 
   container.innerHTML = `
     <div class="history-cell history-head">Date</div>
@@ -6063,10 +6132,21 @@ async function afficherCalculRoutier() {
   }
 }
 
+// LES LECTURES PROPRES AUX PARAMETRES (24/09, mesure en production). Les
+// archives d'import, les comptes et l'etat du calcul routier etaient demandes
+// a CHAQUE chargement (ouverture, et apres chaque ecriture), quel que soit
+// l'ecran -- /api/storage/status deux fois, /api/comptes deux fois. Ils le sont
+// quand les Parametres s'affichent (showTab), et a chaque chargement tant
+// qu'ils restent affiches (renderAll).
+function lectureDesParametres() {
+  afficherCalculRoutier();
+  renderImportsArchives();
+  renderComptes();
+}
+
 function renderSettings() {
   updateBrandImageStatus();
   renderTourneeSettings();
-  afficherCalculRoutier();
   renderParSecteursPilules();
   chargerNumerotation();
   majDroitsNumerotation();
@@ -6142,7 +6222,8 @@ async function loadMoi() {
   // Le titre « Bonjour <identifiant> » depend de /api/me : s'il repond apres
   // le premier rendu, le titre doit suivre.
   majEnteteTableauDeBord(getInitialTab());
-  renderComptes();
+  // La liste des comptes n'est lue que Parametres affiches (24/09).
+  rendreSiAffiche("parametres", renderComptes);
   majDroitsNumerotation();
 }
 
