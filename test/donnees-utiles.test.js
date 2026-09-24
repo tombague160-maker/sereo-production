@@ -323,7 +323,11 @@ test("journal — GET /api/journal : 50 par page, du plus recent au plus ancien,
       // Une ligne ecrite entre deux pages ne decale pas la suite.
       if (genre === "actions" && tailles.length === 1) {
         const db = readDb();
-        db.historique.unshift({ id: "h-neuve", date: new Date().toISOString(), type: "Test", message: "entre deux pages" });
+        // Plus recente que tout le seme (25/09) : `new Date()` tombait AVANT
+        // lui la nuit (00 h a 10 h a Paris : le seme est date du jour a
+        // 05-08 h UTC), et la ligne « neuve » arrivait en page 3 -- un rouge
+        // selon l'heure du banc, pas selon le code.
+        db.historique.unshift({ id: "h-neuve", date: date(-1), type: "Test", message: "entre deux pages" });
         writeDb(db, { backup: false });
       }
     } while (curseur && tailles.length < 10);
