@@ -3,7 +3,7 @@
 // Sur un jeu de MEME FORME que la production (jeu-production.js), ce que la
 // page demande a l'ouverture du tableau de bord : des requetes et des octets,
 // comptes a la reponse -- pas des millisecondes. Avant ce lot : 27 requetes
-// d'API et 2,1 Mo de JSON a lire a chaque ouverture, dont /api/ventes et
+// d'API et 2,0 Mo de JSON a lire a chaque ouverture, dont /api/ventes et
 // /api/historique (deux ecrans que la navigation n'ouvre pas), 633 mouvements
 // pour 12 montres, l'image de marque en base64, une tuile de carte cachee, et
 // les lectures des Parametres (deux fois /api/storage/status et /api/comptes).
@@ -61,7 +61,7 @@ test("à l'ouverture, la page ne demande que ce que l'écran montre", async ({ p
   expect.soft(chemins.filter(c => c === "/api/storage/status"), "/api/storage/status (banniere de recuperation) : une fois").toHaveLength(1);
   expect.soft(chemins.filter(c => c.startsWith("/api/stock-movements")), "les mouvements : les 12 montres").toEqual(["/api/stock-movements?limite=12"]);
   expect.soft(reponses.find(r => r.chemin === "/api/settings/appearance")?.octets, "l'image de marque voyage dans les reglages").toBeLessThan(1000);
-  expect.soft(total, "JSON d'API lu a l'ouverture (avant : 2 098 944 o)").toBeLessThan(1000000);
+  expect.soft(total, "JSON d'API lu a l'ouverture (avant : 1 986 049 o)").toBeLessThan(1000000);
   // Ni tuile, ni image de marque : la carte et l'apercu du logo sont caches.
   expect.soft(compteurTuiles(), "une tuile part pour une carte cachee").toBe(0);
   expect.soft(chemins.filter(c => c === "/api/carte/fond"), "le fond de carte est demande pour une carte cachee").toEqual([]);

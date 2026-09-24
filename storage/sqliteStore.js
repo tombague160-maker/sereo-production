@@ -1150,6 +1150,11 @@ const LECTURES_DES_TABLES = [
  * Object.keys lisent tout. Une table remplacee (`db.x = ...`) garde la valeur
  * posee. writeDb normalise tout, donc lit ce qui ne l'a pas ete : l'etat de la
  * base au moment de l'ecriture (sous le verrou), jamais un etat plus ancien.
+ *
+ * A savoir pour le code asynchrone : une table lue APRES un `await` l'est plus
+ * tard que les autres -- et sur un magasin ferme si une restauration a eu lieu
+ * entre-temps (erreur). Releve du 24/09 : aucune lecture de ce genre ; lire ce
+ * dont on a besoin avant de suspendre.
  */
 function lectureParesseuse(database, db, normaliserTable) {
   for (const [cle, lire] of LECTURES_DES_TABLES) {
