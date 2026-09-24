@@ -322,7 +322,14 @@ test("le sheet de détail dit la même prochaine échéance que la ligne, une fo
   await expect(page.locator(`#subscriptionAgenda [data-op="generate-sub"][data-id="sub-retard"][data-date="${d2}"]`)).toHaveCount(1);
   await page.locator('#subscriptionList [data-op="open-sub-detail"][data-id="sub-retard"]').click();
   await expect(page.locator("#abonnementDetailDialog")).toHaveAttribute("open", "");
-  const attendu = await page.evaluate(v => new Date(`${v}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "short" }), d2);
+  // La forme longue de utils/dates.js (parcours simplifies, 24/09) : « lundi
+  // 21 septembre », « 1er » le premier du mois, l'annee si ce n'est pas
+  // celle-ci. Recalculee ici par Intl, pas par le module juge.
+  const attendu = await page.evaluate(v => {
+    const d = new Date(`${v}T12:00:00`);
+    const t = d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }).replace(/ 1 /, " 1er ");
+    return d.getFullYear() !== new Date().getFullYear() ? `${t} ${d.getFullYear()}` : t;
+  }, d2);
   const fait = page.locator("#abonnementDetailCorps .sub-facts > div").filter({ hasText: "Prochaine échéance" }).locator("strong");
   // J-3, la meme que la ligne -- et dite en retard, comme la ligne.
   await expect(fait).toHaveText(`${attendu} · en retard`);
