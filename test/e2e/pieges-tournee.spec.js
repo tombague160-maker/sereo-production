@@ -133,10 +133,10 @@ test("bureau : « Créer la tournée (3) » est SOUS la liste, et la tournee cre
   await choisirBesancon(page);
   await page.locator('[data-action="select-current-sector"]').click();
   const creer = page.locator("#createRouteButton");
-  await expect(creer).toHaveText("Créer la tournée (3)");
   const [bouton, liste] = await Promise.all([creer.boundingBox(), page.locator("#deliveryCandidates").boundingBox()]);
   console.log(`[bureau] creer ${JSON.stringify(bouton)} liste ${JSON.stringify(liste)}`);
   expect(bouton.y, "« Créer » est au-dessus de la liste").toBeGreaterThanOrEqual(liste.y + liste.height);
+  await expect(creer, "le bouton ne dit pas combien de commandes partiront").toHaveText("Créer la tournée (3)");
 
   await page.route("**/api/geocode?*", route => route.fulfill({ json: [{ label: "Dépôt confirmé", lat: 47.2378, lng: 6.0241 }] }));
   await page.locator("#departureQuery").fill("Dépôt");
@@ -159,8 +159,8 @@ test("telephone : « Créer la tournée (N) » reste colle en bas, au-dessus de 
   const { ctx, page, erreurs } = await ouvrir(browser, { viewport: TELEPHONE });
   // Toute la liste (six cartes, plus haute que l'ecran), cinq choisies.
   await page.locator('[data-action="select-all-delivery"]').click();
+  await expect(page.locator("#selectedDeliveryCount")).toHaveText("5 sélection");
   const creer = page.locator("#createRouteButton");
-  await expect(creer).toHaveText("Créer la tournée (5)");
   // On parcourt la liste : la premiere carte en haut de l'ecran.
   await page.locator("#deliveryCandidates .delivery-card").first().evaluate(e => e.scrollIntoView({ block: "start" }));
   await page.waitForTimeout(200);
@@ -175,6 +175,7 @@ test("telephone : « Créer la tournée (N) » reste colle en bas, au-dessus de 
   expect(r.haut, "« Créer » n'est pas a l'ecran pendant qu'on parcourt la liste").toBeGreaterThanOrEqual(0);
   expect(r.bas, "« Créer » passe sous la barre basse").toBeLessThanOrEqual(r.barre);
   expect(r.hauteur, "cible trop petite").toBeGreaterThanOrEqual(44);
+  await expect(creer).toHaveText("Créer la tournée (5)");
   // Les pilules de secteur : des cibles de 44 px.
   const hauteurs = await page.locator("#deliverySectorPills [data-delivery-sector]").evaluateAll(ps => ps.map(p => Math.round(p.getBoundingClientRect().height)));
   for (const h of hauteurs) expect(h, "pilule de secteur sous 44 px").toBeGreaterThanOrEqual(44);
