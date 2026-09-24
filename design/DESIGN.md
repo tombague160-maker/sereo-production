@@ -6014,8 +6014,9 @@ prête, en tournée ou livrée ; elle est laissée telle quelle et le résumé l
   feuille) n'en est pas une.
 - *Écran*. Le résumé disait « 12 élément(s) traités » (`commandes.length` : toute la base,
   pour un fichier de 4 lignes), à y = 1376 px au bureau et 2332 au téléphone. `#importSummary`
-  monte **en tête du tableau de bord** (caché sans import) ; quatre comptes, bon par bon :
-  **nouvelles · mises à jour · ignorées · erreurs** (« 0 erreur » au singulier). Dessous :
+  monte **en tête du tableau de bord** (caché sans import) ; quatre comptes :
+  **nouvelles · mises à jour · ignorées** (des commandes, bon par bon) **· lignes en erreur**
+  (des lignes du fichier ; « 0 ligne en erreur » au singulier — voir la relecture). Dessous :
   chaque commande ignorée, « **Ignorée : commande déjà en tournée** — CMD-2026-004 · EHPAD Les
   Tilleuls… Elle est laissée telle quelle. » (cinq au plus, puis « Et N autres commandes
   ignorées… ») ; les identiques ; les lignes sans client ni produit ; et les **avertissements
@@ -6039,7 +6040,8 @@ Champagnole partaient dans la tournée de Besançon. « Créer une tournée opti
   principal). Leur compte est **celui de la liste** qu'elles montrent (mêmes date et ville,
   commandes grisées comprises) : l'ancien menu affichait `sectors[].ready` du serveur, qui
   ignorait la date (« Besançon (3) » au-dessus de 5 cartes). Le secteur choisi reste toujours,
-  même vide. La **ville** filtre après une pause de frappe (300 ms). **« Filtrer » est retiré.**
+  même vide. La **ville** filtre après une pause de frappe (300 ms), quand elle nomme la ville
+  d'une commande à livrer (sinon elle attend : voir la relecture). **« Filtrer » est retiré.**
 - Changer de pilule ne garde de la sélection que ce qui est à l'écran : une commande d'un autre
   secteur ne part jamais sans avoir été vue (le serveur la refuserait, « n'est pas du secteur »).
 - **« Créer la tournée (N) »** passe **sous la liste**, avec le compte de la sélection ;
@@ -6075,8 +6077,11 @@ elle. `#commandes-jour` ouvre « Toutes ».
   produisait (banc « stock juste » : rendu 28 + 20 au lieu de 23 + 23). C'est une lecture de la
   décision 1, pas une décision de Thomas.
 - **« Ignorées » réunit les identiques et les verrouillées** : chaque bon du fichier tombe dans
-  exactement un des quatre comptes ; le détail sépare les raisons.
+  exactement un des **trois premiers** comptes ; le détail sépare les raisons.
 - **« Erreurs » = lignes sans client ni produit** (rien d'autre n'était rejeté ligne à ligne).
+  Ce compte-là est en **lignes** : une ligne sans client ni produit n'appartient à aucun bon.
+  (La première version disait « chaque bon tombe dans un des quatre comptes » et affichait
+  « 1 erreur » à côté de « 1 nouvelle » : corrigé par la relecture, plus bas.)
 - **La pilule « À envoyer » est cachée, pas supprimée** (voir plus haut).
 - **Pas de présélection au choix d'un secteur** : l'audit visait 3 gestes (pilule, Créer,
   Démarrer) ; le lot demandait des pilules immédiates. Aujourd'hui : pilule, « Sélectionner ce
@@ -6154,11 +6159,94 @@ choisie 6,01 / 10,22 ; ligne mise en avant, secondaire 4,56 / 7,67.
 
 ### Ce qui reste
 
-- **Une commande en préparation** (`en_preparation`, `preparation_terminee`) ou une commande
-  terrain réservée à la création reste **réécrite** par l'import (hors de la décision 1), et sa
-  réservation garde la même dérive de stock (déduite sur les anciens produits, rendue sur les
-  nouveaux). À décider : la verrouiller aussi, ou rendre l'ancienne réservation et refaire la
-  nouvelle à l'import.
+- ~~Une commande en préparation ou une commande terrain réservée reste réécrite par l'import~~ :
+  **fait** par la relecture (plus bas).
 - La présélection au choix d'un secteur (3 gestes) ; « Créer la tournée » actif sans départ
   réglé (l'erreur « Choisis ton départ » n'arrive qu'après le clic).
 - L'écran Historique, seul lecteur des comptes de l'import dans le détail, reste inatteignable.
+
+### Relecture adverse (24/09) : trois défauts, trois vrais
+
+Relecture de `45936e9`. Chaque défaut remesuré sur ce commit avant d'y toucher.
+
+**1. Important — le stock réservé restait réécrit. Vrai, corrigé.** La décision 1 ne visait que
+prête, en tournée et livrée ; la première version l'avait laissé dans « ce qui reste ». Mesure
+(sonde sur `45936e9`) : une commande terrain de 3 Changes L + 3 Alèses, réservée à sa création
+(`createCustomerOrder` → `reserveStockForOrder`), encore « à préparer » : l'import renvoie
+`updated 1`, la commande devient `[['CH-L', 8]]` ; annulée, elle rend `{ CH-L: 28, ALE: 20 }` au
+lieu de `{ 23, 23 }`. Même réécriture en `en_preparation`.
+
+- *Décision (la mienne, dans le périmètre)* : **verrouiller**, pas « rendre puis refaire la
+  réservation ». Le serveur a déjà la règle : le seul autre chemin qui change des produits,
+  `PATCH /api/planned-orders/:id` (`updatePlannedOrder`), refuse après réservation
+  (« Impossible de modifier les produits apres reservation du stock ») ; l'import était le seul
+  chemin qui la contournait. Rendre puis refaire échouerait sur un stock devenu
+  insuffisant (une commande en préparation sans réservation) et changerait le carton sous les
+  mains du préparateur. `raisonImportIgnore` rend `en_preparation` (préparation lancée ou
+  terminée) ou `stock_reserve` (commande terrain, planifiée confirmée, envoyée en préparation)
+  dès que `stockReservedAt` est posé. L'écran : « Ignorée : commande déjà en préparation » /
+  « Ignorée : stock déjà réservé pour cette commande » (le repli « commande déjà en cours »
+  n'est plus atteint). L'historique nomme chaque commande avec sa raison
+  (« 1 commande(s) laissee(s) telle(s) quelle(s) (CMD-2026-003 : en_tournee) »).
+- *Ce qui change pour l'utilisateur* : une correction Ximi d'une commande au stock réservé n'est
+  plus reprise ; le résumé la nomme. Aucun écran ne change les produits d'une telle commande
+  (c'était déjà vrai) : une commande terrain encore à préparer peut être annulée (la transition
+  existe, et rend exactement sa réservation) puis refaite ; une commande **en préparation** ne
+  s'annule pas (`en_preparation` → `annulee` n'est pas une transition) — voir *ce qui reste*
+  ci-dessous. Le témoin tient : une commande importée, pas encore réservée, est toujours mise à
+  jour.
+
+**2. Mineur — une pause au milieu de la ville vidait la sélection. Vrai, corrigé.** Mesure
+(téléphone, `45936e9`) : Besançon choisi, 3 cochées, « Besan » et 700 ms → 0 cochée ; la ville
+finie, la liste revient sans coche. La correction ne peut pas être une recherche par début de nom
+côté écran : le serveur compare la ville **exactement** (« n'est pas à Besan » refuserait la
+tournée). Une saisie qui n'est la ville d'**aucune** commande à livrer — un début de nom, une
+faute — reste **en attente** (`villeEnAttente`) : la ville déjà appliquée tient, ni la liste ni la
+sélection ne bougent, le champ n'est pas réécrit tant qu'il a le focus, et le résumé le dit
+(« « Besan » n'est la ville d'aucune commande prête : pas appliquée »). Une ville de la liste
+s'applique après la pause, et la règle du lot tient (ce qu'elle cache quitte la sélection).
+
+**3. Mineur — les comptes du résumé ne comptaient pas la même chose. Vrai, corrigé.** « Nouvelles »,
+« mises à jour » et « ignorées » comptent des bons (client + date), « erreurs » des lignes ; la
+phrase « chaque bon tombe dans un des quatre comptes » laissait croire à une partition du
+fichier. Le quatrième compte dit son unité : **« 1 ligne en erreur »** (« 0 ligne en erreur »,
+« 2 lignes en erreur ») ; la phrase est corrigée plus haut.
+
+*Écarts nommés.*
+- « Ignorées » reste compté **par commande** : un bon de trois lignes visant une commande en
+  tournée fait « 1 ignorée », nommée par son numéro. La phrase de la décision (« 1 ligne ignorée :
+  commande déjà en tournée ») est lue comme un exemple : ce qu'on laisse tel quel, c'est la
+  commande. Si Thomas veut des lignes, c'est un compte de plus côté serveur.
+- Une ville en attente laissée dans le champ : un geste qui refait le rendu hors du champ (une
+  pilule, la date) le ramène à la ville appliquée ; la saisie inconnue est perdue, sans effet sur
+  la liste.
+- Une commande `en_preparation` **sans** réservation (possible par `PATCH` de statut, que l'écran
+  n'emploie pas) reste mise à jour par l'import : rien n'est déduit, pas de dérive de stock, mais
+  le carton peut changer en cours de préparation.
+
+*Preuves rouges* (ancien code `45936e9` restauré par copie ; cause lue) :
+- `test/pieges-import.test.js`, 2 cas nouveaux : « la commande au stock reserve a ete reecrite
+  par l'import » (`[['CH-L', 8]]`) ; « commande en_preparation reecrite ». Le stock rendu
+  (`{ CH-L: 28, ALE: 20 }`) est mesuré par une sonde, l'assertion des produits tombant avant.
+- `test/e2e/pieges-tournee.spec.js`, « une pause au milieu de la ville » : Expected 3, Received 0.
+- `test/e2e/pieges-import-validation.spec.js`, chaque cas seul : les trois comptes (`"1 erreur"`
+  reçu pour `"1 ligne en erreur"`, `"0 erreur"` au plafond de cinq) ; le cas nouveau « stock déjà
+  réservé » : `"2 mises à jour", "0 ignorée"` reçus pour `"0 mise à jour", "2 ignorées"`.
+- *Mutants* sur le nouveau code (copie restaurée, `git diff` vide vérifié) : **7 sur 7 rouges**,
+  chacun de sa cause — la clause `stockReservedAt` retirée (2 cas unitaires), `en_preparation`
+  confondu avec `stock_reserve`, les deux libellés retirés (« commande déjà en cours » reçu),
+  l'unité du compte, `villeEnAttente` toujours faux (3 → 0), la garde du focus (champ vidé : `""`
+  reçu pour `"Besan"`), la phrase du résumé.
+
+*Bancs* : `npm run check` ; `npm test` **691/691** ; e2e (config de lot) : les deux bancs du
+lot **19/19** ; écrans voisins, avec eux (138 cas) — tournées débloquées, chargement de la
+livraison, tournée, tournée au téléphone, meilleur trajet, tournée pratique, écran livreur,
+rapidité, collant et clavier, tableau de bord (et relecture), smoke, états limites, cibles
+tactiles, focus clavier, hors ligne, tournée hors ligne : 128 verts, 1 rouge de la mauvaise cause
+(`tournee.spec.js` : « port 3166 déjà pris par un autre processus », un autre worktree) et ses
+9 suivants non lancés ; `tournee.spec.js` relancé seul, port libéré : **10/10**.
+
+*Ce qui reste.* Une correction Ximi d'une commande **déjà en préparation** n'a aucun chemin :
+l'import la laisse (et le dit), aucun écran ne change ses produits, et elle ne s'annule pas. À
+trancher si le cas arrive : un geste « reprendre la correction » qui rend la réservation et
+refait la nouvelle (refusé si le stock ne suffit pas), ou une préparation qu'on peut défaire.
