@@ -1703,6 +1703,9 @@ function poserSquelettes() {
     const zone = document.getElementById(id);
     if (!zone || zone.children.length) continue;
     zone.setAttribute("aria-busy", "true");
+    // La marque de CETTE fonction : retirerSquelettes ne touche qu'aux zones
+    // qu'elle a posees (voir la-bas).
+    zone.dataset.squelettePose = "";
     zone.innerHTML = squelette(lignes, id === "revenueChart" ? "colonnes" : (LIGNES.has(id) ? "lignes" : "liste"));
   }
   poserChiffresEnAttente();
@@ -1758,7 +1761,14 @@ function poserChiffresEnAttente() {
 /** Retire les squelettes restants : une zone qui n'a pas ete remplie l'est par
  *  son propre rendu, mais une zone en erreur garderait des blocs gris a vie. */
 function retirerSquelettes() {
-  for (const zone of document.querySelectorAll('[aria-busy="true"]')) {
+  // Les zones que poserSquelettes a marquees, et elles seules (integration du
+  // 24/09). Tout element aria-busy="true" y passait : <body> aussi, que le
+  // voile d'une action longue marque (showLoader, l'import d'un fichier) -- et
+  // des qu'une liste CACHEE gardait son squelette (un ecran pas encore affiche
+  // ne se dessine plus, lot rendu ; #historiqueList sur main v1.45.1), la page
+  // ENTIERE etait videe.
+  for (const zone of document.querySelectorAll("[data-squelette-pose]")) {
+    delete zone.dataset.squelettePose;
     zone.removeAttribute("aria-busy");
     if (zone.querySelector(".squelette")) zone.innerHTML = "";
   }

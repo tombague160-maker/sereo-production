@@ -512,6 +512,34 @@ test("fiche client, « Rappel » : le choix du client s'écrit une fois, sur ce 
   expect(n).toBe(1);
 });
 
+// Un chargement sous le voile d'une action longue (showLoader : l'import d'un
+// fichier Excel) : <body> porte aria-busy="true". retirerSquelettes videait
+// TOUT element aria-busy qui contenait un squelette -- <body> compris, des
+// qu'une liste CACHEE garde le sien (un ecran pas encore affiche ne se dessine
+// plus). La page entiere partait (banc du lot pieges : l'import au bureau, page
+// blanche). Meme defaut sur main v1.45.1, par #historiqueList.
+test("un chargement sous le voile d'une action ne vide pas la page ; le squelette d'une liste cachée part (intégration)", async ({ page }) => {
+  await ouvrir(page);
+  // Prealable : Commandes n'a jamais ete affiche, sa liste est vide.
+  expect(await compter(page, "#cmdLignes > *")).toBe(0);
+  await page.evaluate(() => document.body.setAttribute("aria-busy", "true"));
+  const reponse = page.waitForResponse(r => r.url().endsWith("/api/orders"));
+  await page.locator("#refreshButton").click();
+  await reponse;
+  // « videe » : la page n'a plus son application ; « ok » : a jour, entiere.
+  await expect.poll(() => page.evaluate(() => {
+    if (!document.querySelector(".app")) return "videe";
+    return /^À jour/.test(document.getElementById("syncStatus")?.textContent || "") ? "ok" : "en cours";
+  }), { timeout: 15000 }).toBe("ok");
+  await expect(page.locator("#statStockTotal")).toHaveText("218");
+  // Le squelette pose dans la liste cachee est retire, et la liste se dessine
+  // en y arrivant.
+  expect(await compter(page, "#cmdLignes .squelette")).toBe(0);
+  await page.evaluate(() => document.body.removeAttribute("aria-busy"));
+  await aller(page, "commandes");
+  await expect(page.locator("#cmdLignes .cmd-ligne")).toHaveCount(20);
+});
+
 // En DERNIER : il cree une commande (225 au lieu de 224 pour ce qui suivrait).
 test("après « Valider la commande » : Commandes s'écrit une fois, la commande mise en avant (intégration)", async ({ page }) => {
   await ouvrir(page, "commande-client");
