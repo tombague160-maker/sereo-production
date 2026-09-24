@@ -168,7 +168,8 @@ test("purge des bons : si la sauvegarde échoue, la purge est refusée et rien n
   }
   const corps = await reponse.json();
   assert.equal(reponse.status, 503, `la purge est partie sans sauvegarde : ${JSON.stringify(corps)}`);
-  assert.match(corps.error, /sauvegarde/i);
+  // La cause elle-meme : l'echec de la sauvegarde (pas un autre refus).
+  assert.match(corps.error, /sauvegarde d.avant purge a échoué/);
   assert.match(corps.error, /Rien n.a été effacé/);
   const db = readDb();
   assert.equal(db.commandes.length, 6, "des bons ont ete effaces");
