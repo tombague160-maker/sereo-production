@@ -5985,3 +5985,180 @@ Sur un écran bas, la barre **défile dans sa propre hauteur** (règle existante
 *Bancs (`collant-et-clavier.spec.js`)* : « la barre latérale reste fixe » (921 et 1440 px, trois
 écrans ; rouge avant : −400 au lieu de 0) ; « écran bas, tout le menu reste atteignable »
 (rouge si la barre fixe perd son défilement : « Version » à 768 px pour un écran de 560).
+
+## 24/09 — Les pièges : import, tournée par secteur, retour après validation
+
+Branche `fix/pieges-import-tournee`, partie de `12da3d4` (release 1.45.0). Source : l'audit
+« améliorations » du 24/09 (angle parcours, revérifié par un second contrôleur) et la
+**décision 1 de Thomas** (24/09) : un import de ventes ne modifie pas une commande déjà
+prête, en tournée ou livrée ; elle est laissée telle quelle et le résumé le dit.
+
+### Fait
+
+**1. Import des ventes.**
+
+- *Serveur* (`POST /api/import/ventes`, chemin 2 « même client, même date »). Mesure de
+  l'audit : une ligne visant une commande **en tournée** remplaçait ses produits (3 Changes L +
+  3 Alèses → 8 Changes L, chez le livreur aussi), sans un mot ; et le stock devenait faux (la
+  réservation déduite sur les **anciens** produits, `releaseOrderStockReservation` rendant les
+  **nouveaux**). `raisonImportIgnore` rend la raison de ne pas y toucher : `livree` (livrée),
+  `en_tournee` (« en livraison », ou un arrêt encore à faire dans une tournée active,
+  `tourneeActiveDeLaCommande` — une tournée prête pas encore partie compte), `prete`
+  (`pret_livraison` hors tournée), `partie_en_tournee` (Problème, À reprogrammer). La commande
+  n'est **pas touchée du tout** : produits, quantités, adresse, position, empreinte
+  (`excelRowHash`) ; jamais le chemin 3 (ce serait un doublon). La réponse porte `ignored`,
+  `ignorees` (`id`, `numero`, `clientName`, `status`, `raison`) et `lignesIllisibles` ;
+  l'historique et l'archive de l'import les comptent aussi.
+- *Lignes illisibles* : une ligne où quelque chose est écrit mais ni client ni produit était
+  écartée en silence ; elle est comptée en **erreur**. Une ligne entièrement vide (la fin d'une
+  feuille) n'en est pas une.
+- *Écran*. Le résumé disait « 12 élément(s) traités » (`commandes.length` : toute la base,
+  pour un fichier de 4 lignes), à y = 1376 px au bureau et 2332 au téléphone. `#importSummary`
+  monte **en tête du tableau de bord** (caché sans import) ; quatre comptes, bon par bon :
+  **nouvelles · mises à jour · ignorées · erreurs** (« 0 erreur » au singulier). Dessous :
+  chaque commande ignorée, « **Ignorée : commande déjà en tournée** — CMD-2026-004 · EHPAD Les
+  Tilleuls… Elle est laissée telle quelle. » (cinq au plus, puis « Et N autres commandes
+  ignorées… ») ; les identiques ; les lignes sans client ni produit ; et les **avertissements
+  du serveur**, qui ne vivaient que dans l'historique : quantités négatives ramenées à 0
+  (« vérifie les retours ou avoirs dans Ximi »), positions du fichier refusées, commandes
+  importées comme déjà livrées, clients en double fusionnés. « Voir la préparation » quand des
+  commandes sont nouvelles ou mises à jour ; « Fermer » (44 px) rend le focus à « Importer les
+  ventes ». L'import fini, le résumé **vient à l'écran** (défilement si besoin, au-dessus de la
+  barre basse du téléphone) et prend le focus (`tabindex -1`, `role="status"`).
+- Le résumé de l'**import du stock** avait le même défaut (`stock.length`) : il compte
+  « N nouveaux produits · N produits mis à jour » (+ doublons ignorés).
+
+**2. Tournée par secteur.** Mesure de l'audit (et du contrôleur) : le secteur était un menu qui
+n'agissait qu'après « Filtrer » ; entre les deux, « Sélectionner ce secteur » prenait le filtre
+**appliqué** (« tous secteurs ») et cochait 5 commandes au lieu des 3 de Besançon — Dole et
+Champagnole partaient dans la tournée de Besançon. « Créer une tournée optimisée » était
+**au-dessus** de la liste (575 contre 782 au bureau).
+
+- Le secteur devient une rangée de **pilules qui filtrent tout de suite** (`#deliverySectorPills`,
+  forme des pilules d'À recommander : surface basse, 44 px ; la choisie **pleine**, au
+  principal). Leur compte est **celui de la liste** qu'elles montrent (mêmes date et ville,
+  commandes grisées comprises) : l'ancien menu affichait `sectors[].ready` du serveur, qui
+  ignorait la date (« Besançon (3) » au-dessus de 5 cartes). Le secteur choisi reste toujours,
+  même vide. La **ville** filtre après une pause de frappe (300 ms). **« Filtrer » est retiré.**
+- Changer de pilule ne garde de la sélection que ce qui est à l'écran : une commande d'un autre
+  secteur ne part jamais sans avoir été vue (le serveur la refuserait, « n'est pas du secteur »).
+- **« Créer la tournée (N) »** passe **sous la liste**, avec le compte de la sélection ;
+  **collé en bas au téléphone**, au-dessus de la barre basse, tant que la liste est à l'écran.
+  Il se montre quand « Préparer une tournée » est ouvert (`toggle` du dépliant), comme
+  avant : sorti du dépliant, il aurait collé sous le pouce du livreur en pleine tournée.
+- Gardes du lot 2 inchangées : une commande déjà dans une tournée active est grisée et
+  « Sélectionner ce secteur » ne la prend pas ; « à livrer en premier » suit la sélection.
+
+**3. Après « Valider la commande ».** Mesure : l'écran renvoyait vers `#commandes-jour`, redirigé
+sur « À envoyer » — « Aucune commande ne correspond à ce filtre » juste après la validation.
+On arrive sur **« Toutes »** (« Planifiées » pour une planifiée), liste propre (comme une
+redirection), **à la page qui contient la commande** (les planifiées se classent à leur date
+de livraison et peuvent la repousser en page 2), la ligne **mise en avant** — un trait, un
+fond (surface basse en clair, surface haute en sombre) et le mot « Nouvelle » —, amenée à
+l'écran et focalisée. La marque part quand on change de filtre ou qu'on quitte Commandes. Le
+message dit le numéro : « Commande CMD-2026-011 validée : elle est à préparer. »
+
+**« À envoyer » : vide par construction, vérifié.** Les deux seules créations qui posent
+`commande_client_validee` — la commande terrain (`createCustomerOrder`) et la planifiée
+confirmée (`confirmPlannedOrder`) — la passent en `stock_a_verifier` **dans la même écriture**,
+depuis l'introduction du statut (`897b2ba`, 22/07, même commit) ; aucun écran ne l'envoie
+(`grep` des `apiFetch` du front). Seul un appel direct `PATCH /api/orders/:id` (depuis
+`brouillon` ou `a_confirmer`) ou une donnée ancienne peut en produire une. La pilule est donc
+**retirée de la rangée** ; elle ne revient que si une commande l'attend (et reste pressée
+après l'envoi de la dernière) : c'est le seul chemin vers « Envoyer en préparation » pour
+elle. `#commandes-jour` ouvre « Toutes ».
+
+### Décisions prises dans le lot
+
+- **« En tournée » comprend « partie en tournée »** : Problème et À reprogrammer n'existent
+  qu'après une tournée ; le carton est préparé, le stock déduit — le même défaut de stock s'y
+  produisait (banc « stock juste » : rendu 28 + 20 au lieu de 23 + 23). C'est une lecture de la
+  décision 1, pas une décision de Thomas.
+- **« Ignorées » réunit les identiques et les verrouillées** : chaque bon du fichier tombe dans
+  exactement un des quatre comptes ; le détail sépare les raisons.
+- **« Erreurs » = lignes sans client ni produit** (rien d'autre n'était rejeté ligne à ligne).
+- **La pilule « À envoyer » est cachée, pas supprimée** (voir plus haut).
+- **Pas de présélection au choix d'un secteur** : l'audit visait 3 gestes (pilule, Créer,
+  Démarrer) ; le lot demandait des pilules immédiates. Aujourd'hui : pilule, « Sélectionner ce
+  secteur », Créer, Démarrer — 4 gestes (5 et plus avant), sans rien cocher que l'on n'a pas vu.
+- **Hors périmètre, au plus petit** : la pilule choisie en clair ne se distinguait pas des
+  autres (défaut relevé par l'audit sur Préparation, lot « thème et finitions ») ; la règle
+  pleine est posée **pour les seules pilules de secteur de la tournée** (`#deliverySectorPills`),
+  puisque c'est elle qui dit de quel secteur partira la tournée.
+- **Bancs existants adaptés à une décision** : `api.test.js` « re-import qui modifie commande
+  déjà livrée » attendait « Contenu mis à jour » (8) — la décision 1 l'inverse (5, ignorée) ;
+  les quatre bancs de redirection (`tabs.spec.js`, `ecrans-sans-planche.spec.js` et `.test.js`,
+  `commandes.spec.js`) attendent « Toutes » pour `#commandes-jour` (le banc e2e passe d'abord
+  par « Livrées » pour que le filtre change) ; `livraison-chargement.spec.js` touche la pilule
+  « Tous » au lieu de « Filtrer » pendant le chargement (même jugement : pas de faux état vide).
+
+### Écarts nommés
+
+- Les pilules de secteur **passent à la ligne** (deux rangs à 390 px avec trois secteurs) ; elles
+  ne se replient pas comme celles de Préparation (charte : « repliables plutôt que
+  débordantes »). Avec beaucoup de secteurs prêts le même jour, la rangée grandit.
+- `sectors` (`/api/sectors`) est toujours chargé par `loadData` mais n'est plus lu par le front
+  (les pilules comptent la liste) : une requête morte, laissée (elle touche la liste des données
+  du chargement instantané et de la copie hors ligne).
+- La règle `.import-summary` de la feuille ne sert plus.
+- Un import du stock lancé depuis l'écran **Stock** met son résumé en tête du tableau de bord,
+  qu'on ne voit pas depuis Stock (le message « Stock importé. » reste).
+
+### Preuves rouges (ancien code `12da3d4`, restauré par copie, cause lue)
+
+- `test/pieges-import.test.js` (7 cas) : 7 rouges — « la commande en tournée a été réécrite »
+  (`[['CH-L', 8]]` au lieu de `[['CH-L', 3], ['ALE', 3]]`), stock rendu `{ CH-L: 28, ALE: 20 }`
+  au lieu de `{ 23, 23 }`, prête et livrée réécrites, tournée prête réécrite, témoin (`ignored`
+  absent ; la mise à jour d'une commande à préparer, elle, passe), comptes (`updated` 1 au lieu
+  de 0), historique muet.
+- `test/e2e/pieges-import-validation.spec.js` (11 cas, port 3520) : 7 rejoués **seuls** sur
+  l'ancien code, 7 rouges — résumé à y = 1512 au bureau et 2280 au téléphone (« il faut
+  défiler ») ; après validation, « la liste est vide » (bureau et téléphone) ; ligne
+  introuvable (contrastes) ; stock : aucun compte (`[]`) ; avertissements absents du résumé.
+  Les 4 autres (plafond de cinq, planifiée, page 2, « À envoyer » revient) sont prouvés par
+  mutant.
+- `test/e2e/pieges-tournee.spec.js` (6 cas, port 3521) : 4 rouges sur l'ancien code —
+  « Sélectionner ce secteur » coche `["Besançon", "Besançon", "Champagnole", "Besançon", "Dole"]` ;
+  « Filtrer » encore là ; « Créer » à y = 427 pour une liste finissant à 1603 ; au téléphone,
+  « Créer » à −251 (hors de l'écran) pendant qu'on parcourt la liste. Les 2 autres (repli avec
+  la planification, contrastes des pilules) visent des éléments que l'ancien écran n'avait pas
+  (ils y tombent sur « introuvable », la mauvaise cause) : prouvés par mutant.
+- **Mutants** sur le nouveau code (copie restaurée, empreinte comparée octet à octet) : **24 sur
+  24 rouges**, chacun de sa cause — côté serveur la garde, la tournée active, « partie en
+  tournée » (le stock 28/20), les lignes vides comptées ; côté écran le défilement et l'appel
+  du résumé, le plafond de cinq, les avertissements, « Fermer » et le focus, la pilule
+  immédiate, la ville, le compte du bouton, le repli avec la planification, la pilule choisie
+  pleine, le collé au téléphone, la pilule « À envoyer » (cachée / restée pressée), le filtre
+  « Toutes », la page, la mise en avant, la planifiée, la marque retirée en quittant Commandes,
+  le fond de la ligne. Deux défauts pris en route par ces bancs : la marque « Nouvelle » restait
+  au retour sur Commandes (corrigé) ; le banc de contraste lisait un fond transparent comme du
+  noir (3,49 au lieu d'« a le fond de la carte » : corrigé, il remonte au premier fond opaque).
+
+### Bancs et résultats
+
+`npm run check` ; `npm test` **689/689** (deux passes ; une passe antérieure a montré 10 rouges
+dans `tournees-debloquees.test.js`, non reproduits — 23/23 seul, puis deux suites vertes ;
+cause non lue). e2e (config de lot, serveur commun sur 3500) : les deux bancs du lot (17/17) ;
+écrans voisins — commandes, écrans sans planche, onglets, tableau de bord (et relecture),
+smoke, états limites, collant et clavier, chargement de la livraison, tournées débloquées,
+meilleur trajet, opérations, adresses à vérifier, rapidité, tournée pratique, tournée,
+tournée mobile, écran livreur, hors ligne, tournée hors ligne, chargement instantané,
+intégration des lots 1-5, livreur ne perd rien, cibles tactiles, focus clavier, contraste
+application, finitions, navigation mobile, texte coupé, thèmes, badges, navigation plate :
+verts. Rouges vus en route, non imputables : `collant-et-clavier` « port 3350 déjà pris par un
+autre processus » (un autre worktree), vert relancé seul (14/14) ; `numerotation-admin` demande
+le serveur authentifié du port 3101, que la configuration de lot ne lance pas (non touché).
+Contrastes mesurés par les bancs : comptes du résumé 7,04 (clair) / 8,55 (sombre), compte
+« ignorée » 4,89 / 4,56, avertissements 5,46 / 11,59 ; pilule de secteur libre 4,56 / 9,28,
+choisie 6,01 / 10,22 ; ligne mise en avant, secondaire 4,56 / 7,67.
+
+### Ce qui reste
+
+- **Une commande en préparation** (`en_preparation`, `preparation_terminee`) ou une commande
+  terrain réservée à la création reste **réécrite** par l'import (hors de la décision 1), et sa
+  réservation garde la même dérive de stock (déduite sur les anciens produits, rendue sur les
+  nouveaux). À décider : la verrouiller aussi, ou rendre l'ancienne réservation et refaire la
+  nouvelle à l'import.
+- La présélection au choix d'un secteur (3 gestes) ; « Créer la tournée » actif sans départ
+  réglé (l'erreur « Choisis ton départ » n'arrive qu'après le clic).
+- L'écran Historique, seul lecteur des comptes de l'import dans le détail, reste inatteignable.

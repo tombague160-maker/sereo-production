@@ -15107,8 +15107,10 @@ html, body, main.content { overflow-x: clip; }
    LES PIEGES : IMPORT, TOURNEE PAR SECTEUR, RETOUR APRES VALIDATION (24/09)
    --------------------------------------------------------------------------
    Audit du 24/09, decision 1 de Thomas. Jetons V8 seulement : clair et
-   sombre suivent seuls. Contrastes mesures par le banc du lot
-   (test/e2e/pieges-import.spec.js et pieges-tournee.spec.js).
+   sombre suivent seuls. Contrastes mesures par les bancs du lot
+   (test/e2e/pieges-import-validation.spec.js et pieges-tournee.spec.js) :
+   comptes du resume 7,04 (clair) / 8,55 (sombre), compte « ignoree » 4,89 /
+   4,56, avertissements 5,46 / 11,59.
    1. Le resume d'un import (#importSummary) : en TETE du tableau de bord.
    ========================================================================== */
 .import-bilan {
