@@ -147,6 +147,26 @@ test("téléphone : les lignes du Stock et du catalogue hors de l'écran ne sont
   expect(catalogue.sautees).toBeGreaterThan(150);
 });
 
+test("le Stock écrit ses lignes en une fois", async ({ page }) => {
+  await ouvrir(page, "stock");
+  await expect(page.locator("#stockList .stk-ligne")).toHaveCount(218);
+  // Un rendu complet (la recherche videe le refait) : combien d'ecritures
+  // dans la liste ? Avant : une par ligne (219 : le vidage, puis 218 ajouts).
+  const ecritures = await page.evaluate(() => new Promise(fin => {
+    const liste = document.getElementById("stockList");
+    let n = 0;
+    const obs = new MutationObserver(recs => { n += recs.length; });
+    obs.observe(liste, { childList: true });
+    const champ = document.getElementById("stockSearch");
+    champ.value = "";
+    champ.dispatchEvent(new Event("input", { bubbles: true }));
+    setTimeout(() => { obs.disconnect(); fin({ n, lignes: liste.querySelectorAll(".stk-ligne").length }); }, 600);
+  }));
+  console.log(`[stock] ${ecritures.n} ecriture(s) pour ${ecritures.lignes} lignes`);
+  expect(ecritures.lignes).toBe(218);
+  expect(ecritures.n).toBeLessThanOrEqual(2);
+});
+
 test("commande client : « + » change la quantité sans redessiner le catalogue", async ({ page }) => {
   await ouvrir(page, "commande-client");
   // Une carte dont le produit a du stock (« Stock 3 - ... »).
