@@ -30,6 +30,8 @@ DatabaseSync.prototype.prepare = function prepare(sql) {
   return prepareOrigine.call(this, sql);
 };
 async function tablesLuesPendant(geste) {
+  // Sans la lecture memorisee : toute lecture de table passe par la base.
+  S.getSqliteStoreForTests().oublierLecturesMemorisees();
   requetesSql.length = 0;
   compterSql = true;
   try {
@@ -347,6 +349,64 @@ test("la liste des rappels ne cherche pas le client et la commande de chaque rap
   }
   // Avant : deux find par rappel, chacun sur toute une table.
   assert.ok(compte < R, `${compte} appels a find pour ${R} rappels`);
+});
+
+// La vague de l'ouverture : huit routes lisent les commandes, trois les ventes.
+// Le texte d'une table lue est garde tant que la base n'a pas change.
+
+/** Les tables relues EN BASE pendant une requete, SANS oublier la memoire. */
+async function tablesRelues(geste) {
+  requetesSql.length = 0;
+  compterSql = true;
+  try {
+    await geste();
+  } finally {
+    compterSql = false;
+  }
+  return requetesSql.map(sql => /SELECT payload FROM (\w+)/.exec(sql)?.[1]).filter(Boolean);
+}
+
+test("deux routes de la vague ne relisent pas en base la table que la premiere a lue", async () => {
+  S.getSqliteStoreForTests().oublierLecturesMemorisees();
+  const premiere = await tablesRelues(() => api("/api/orders"));
+  assert.ok(premiere.includes("commandes"), `temoin : la premiere route lit les commandes (${premiere})`);
+  const seconde = await tablesRelues(() => api("/api/planned-orders"));
+  assert.deepEqual(seconde.filter(t => t === "commandes"), [], "la seconde route a relu les commandes en base");
+});
+
+test("temoin : apres une ecriture, la table est relue et la route rend le neuf", async () => {
+  await api("/api/orders");
+  const db = readDb();
+  const id = db.commandes[1].id;
+  db.commandes[1].notes = "ecrite apres la lecture";
+  writeDb(db, { backup: false });
+  let r;
+  const relues = await tablesRelues(async () => { r = await api("/api/orders"); });
+  assert.ok(relues.includes("commandes"), "la route n'a pas relu les commandes apres l'ecriture");
+  assert.equal(r.body.find(c => c.id === id).notes, "ecrite apres la lecture");
+});
+
+test("temoin : une ecriture d'une AUTRE connexion est vue (data_version)", async () => {
+  const avant = (await api("/api/orders")).body;
+  const id = avant[2].id;
+  const cnx = new DatabaseSync(process.env.SEREO_SQLITE_PATH);
+  try {
+    cnx.exec("PRAGMA busy_timeout = 5000");
+    cnx.prepare("UPDATE commandes SET payload = json_set(payload, '$.notes', 'ecrite par une autre connexion') WHERE id = ?").run(id);
+  } finally {
+    cnx.close();
+  }
+  const apres = (await api("/api/orders")).body;
+  assert.equal(apres.find(c => c.id === id).notes, "ecrite par une autre connexion");
+});
+
+test("temoin : chaque lecture a ses objets, modifier l'un ne change pas l'autre", () => {
+  const a = readDb();
+  const id = a.commandes[0].id;
+  const note = a.commandes[0].notes;
+  a.commandes[0].notes = "modifiee sans etre ecrite";
+  const b = readDb();
+  assert.equal(b.commandes.find(c => c.id === id).notes, note);
 });
 
 // --- 5. Resultat identique : la table partagee rend ce que rend l'appel isole --

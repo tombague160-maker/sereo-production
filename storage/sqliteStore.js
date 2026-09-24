@@ -133,7 +133,13 @@ function createSqliteStore(options) {
       database.exec("PRAGMA wal_checkpoint(FULL)");
     },
 
+    /** Les bancs qui comptent les lectures de table : repartir sans memoire. */
+    oublierLecturesMemorisees() {
+      oublierLectures(database);
+    },
+
     close() {
+      oublierLectures(database);
       database.close();
     },
 
@@ -1124,10 +1130,13 @@ function persistDatabase(database, db, cache, etat = null) {
     `).run(stringify(db.settings || {}), now);
 
     database.exec("COMMIT");
+    // La base a change : les lectures memorisees ne valent plus (readPayloads).
+    oublierLectures(database);
     next.dataVersion = dataVersion(database);
     return next;
   } catch (error) {
     database.exec("ROLLBACK");
+    oublierLectures(database);
     throw error;
   }
 }
@@ -1201,8 +1210,10 @@ function migrateTraces(database) {
       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
     `).run(new Date().toISOString());
     database.exec("COMMIT");
+    oublierLectures(database);
   } catch (error) {
     database.exec("ROLLBACK");
+    oublierLectures(database);
     throw error;
   }
 }
@@ -1324,11 +1335,55 @@ function readRoutes(database) {
   });
 }
 
+/*
+ * LECTURE MEMORISEE (25/09). L'ouverture lance une vingtaine de routes
+ * ensemble ; huit lisent les commandes, trois les ventes, quatre les clients :
+ * chacune relisait la table en base. Le TEXTE des lignes (payload) est garde,
+ * par table, tant que la base n'a pas change -- ni par ce magasin (generation,
+ * avancee a chaque COMMIT), ni par une autre connexion (PRAGMA data_version).
+ * Chaque lecture decode ce texte a neuf : chaque requete a ses objets, qu'elle
+ * peut modifier sans rien changer pour les autres (seul le texte est partage).
+ * La memoire s'oublie DUREE_MEMOIRE_MS apres la derniere lecture en base : elle
+ * sert une vague, elle ne double pas la base en memoire entre deux vagues.
+ */
+const lecturesMemorisees = new WeakMap();
+const DUREE_MEMOIRE_MS = 5000;
+
+function memoireDe(database) {
+  let memoire = lecturesMemorisees.get(database);
+  if (!memoire) {
+    memoire = { generation: 0, tables: new Map(), oubli: null };
+    lecturesMemorisees.set(database, memoire);
+  }
+  return memoire;
+}
+
+/** La base a change (COMMIT de ce magasin) ou se ferme : plus rien de memorise. */
+function oublierLectures(database) {
+  const memoire = lecturesMemorisees.get(database);
+  if (!memoire) return;
+  memoire.generation += 1;
+  memoire.tables.clear();
+  clearTimeout(memoire.oubli);
+  memoire.oubli = null;
+}
+
 function readPayloads(database, table) {
-  return database
-    .prepare(`SELECT payload FROM ${table} ORDER BY sort_order ASC`)
-    .all()
-    .map(row => JSON.parse(row.payload));
+  const memoire = memoireDe(database);
+  const cle = `${memoire.generation}:${dataVersion(database)}`;
+  let lu = memoire.tables.get(table);
+  if (!lu || lu.cle !== cle) {
+    const lignes = database
+      .prepare(`SELECT payload FROM ${table} ORDER BY sort_order ASC`)
+      .all()
+      .map(row => row.payload);
+    lu = { cle, lignes };
+    memoire.tables.set(table, lu);
+    clearTimeout(memoire.oubli);
+    memoire.oubli = setTimeout(() => memoire.tables.clear(), DUREE_MEMOIRE_MS);
+    if (memoire.oubli.unref) memoire.oubli.unref();
+  }
+  return lu.lignes.map(payload => JSON.parse(payload));
 }
 
 function readSettings(database) {

@@ -46,7 +46,7 @@ process.env.SEREO_AUTH_USER = "";
 process.env.SEREO_AUTH_PASSWORD = "";
 process.env.SEREO_SKIP_RELEASE_FETCH = "1";
 
-const { app, readDb, writeDb, defaultDb, normalizeDb, closeStorage, _flushPendingBackup } = require("../server");
+const { app, readDb, writeDb, defaultDb, normalizeDb, closeStorage, _flushPendingBackup, getSqliteStoreForTests } = require("../server");
 const { createSqliteStore } = require("../storage/sqliteStore");
 
 let server;
@@ -70,6 +70,9 @@ const OUVERTURE = ["/api/operations", "/api/subscriptions", "/api/clients", "/ap
 
 /** Les tables lues (SELECT payload FROM ...) pendant une requete, une a la fois. */
 async function tablesLues(chemin) {
+  // La lecture memorisee (25/09) garde le texte d'une table lue par la route
+  // d'avant : sans l'oublier, une route ne relirait pas en base ce qu'elle lit.
+  getSqliteStoreForTests().oublierLecturesMemorisees();
   requetesSql.length = 0;
   compter = true;
   try {
