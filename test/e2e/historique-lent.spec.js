@@ -73,19 +73,19 @@ test("à l'ouverture, l'historique (4 000 lignes) n'est ni chargé ni dessiné, 
   expect(r.pire, "aucune tache ne fige la page une seconde").toBeLessThan(1000);
 });
 
-test("Paramètres : le Journal lit une page de 50 des 4 000 lignes, sans figer la page", async ({ page }) => {
+test("Paramètres : le Journal lit une page de 200 des 4 000 lignes (décision 10), sans figer la page", async ({ page }) => {
   test.setTimeout(240000);
   await releverTachesLongues(page);
   const vues = releverRequetes(page);
   await page.goto(srv.base + "/#parametres", { waitUntil: "networkidle" });
   const lignes = page.locator("#parJournal .par-journal-ligne");
   await expect(lignes.first()).toBeVisible();
-  await expect(lignes).toHaveCount(50);
+  await expect(lignes).toHaveCount(200);
   // La plus recente d'abord : la derniere ligne semee.
   await expect(lignes.first()).toContainText(`Evenement numero ${N - 1} du journal de test`);
   expect(vues.filter(u => /^\/api\/historique/.test(u)), "le journal ne recharge pas tout l'historique").toEqual([]);
-  expect(vues.filter(u => u.startsWith("/api/journal"))).toEqual(["/api/journal?genre=actions&limite=50"]);
+  expect(vues.filter(u => u.startsWith("/api/journal"))).toEqual(["/api/journal?genre=actions&limite=200"]);
   const pire = await page.evaluate(() => Math.max(0, ...window.__longues));
-  console.log(`[historique] Journal de Parametres : 50 lignes, pire tache longue ${pire} ms`);
+  console.log(`[historique] Journal de Parametres : 200 lignes, pire tache longue ${pire} ms`);
   expect(pire, "aucune tache ne fige la page une seconde").toBeLessThan(1000);
 });

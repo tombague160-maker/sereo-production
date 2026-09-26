@@ -6545,10 +6545,11 @@ function getAlertItems() {
 // Une carte de Parametres, reservee a l'administration (GET /api/journal
 // repond 403 aux autres : on ne l'appelle pas pour eux, une erreur console
 // ferait echouer le parcours des onglets). Chargee a la premiere ouverture de
-// Parametres, par pages de 50 ; jamais a l'ouverture de l'application.
-// Deux vues : les actions (l'historique) et les mouvements de stock.
+// Parametres, par pages de 200 (decision 10 de Thomas, 24/09 : les 200
+// dernieres lignes, puis « voir plus ») ; jamais a l'ouverture de
+// l'application. Deux vues : les actions (l'historique) et les mouvements de stock.
 
-const JOURNAL_PAGE = 50;
+const JOURNAL_PAGE = 200;
 const journal = { genre: "actions", entrees: [], suivant: null, charge: false, enCours: false };
 
 function carteJournalOuverte() {
@@ -6559,7 +6560,7 @@ function carteJournalOuverte() {
 /**
  * Montre la carte a l'administration ; la charge si Parametres est a l'ecran.
  * `rafraichir` : Parametres vient de s'ouvrir, la premiere page se relit (une
- * requete de 50 lignes, pas le journal entier).
+ * requete de 200 lignes, pas le journal entier).
  */
 function majCarteJournal({ rafraichir = false } = {}) {
   const carte = document.getElementById("parJournal");

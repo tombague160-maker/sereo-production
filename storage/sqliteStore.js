@@ -37,7 +37,14 @@ function createSqliteStore(options) {
     // (ce qui, avant, etait interprete a tort comme une corruption -> wipe).
     database.exec("PRAGMA busy_timeout = 5000");
     database.exec("PRAGMA journal_mode = WAL");
-    database.exec("PRAGMA synchronous = NORMAL");
+    // Robustesse (25/09) : FULL, plus NORMAL. En WAL, NORMAL n'attend le
+    // disque (fsync) qu'au checkpoint : une coupure de courant pouvait effacer
+    // les derniers gestes deja confirmes au livreur (reponse 200 recue, la
+    // file hors ligne ne les garde plus). FULL attend le disque a chaque
+    // validation. Cout mesure : 3,1 ms par validation sur le poste de
+    // developpement (0,03 ms en NORMAL), une par ecriture, contre 80 a 100 ms
+    // pour l'ecriture d'un geste sur une base de la forme de la production.
+    database.exec("PRAGMA synchronous = FULL");
     database.exec("PRAGMA foreign_keys = ON");
 
     // quick_check : detecte la corruption STRUCTURELLE du b-tree (chainage de
@@ -79,6 +86,15 @@ function createSqliteStore(options) {
   // qu'une ecriture n'a pas lue n'a pas pu changer (voir persistDatabase).
   let premiereEcriture = true;
   const toujoursEcrites = new Set(tablesToujoursEcrites);
+  // Sur un objet de la lecture paresseuse : les tables que la prochaine
+  // ecriture lira de toute facon (voir lireCeQueLEcritureLira).
+  const lireAvantEcriture = db => {
+    const etat = db ? db[ETAT_DE_LECTURE] : null;
+    if (!etat) return;
+    for (const [cle] of LECTURES_DES_TABLES) {
+      if (premiereEcriture || toujoursEcrites.has(cle)) void db[cle];
+    }
+  };
 
   return {
     readDb() {
@@ -91,16 +107,25 @@ function createSqliteStore(options) {
       return normalizeDb(db);
     },
 
+    /**
+     * Lit, sur un objet de la lecture paresseuse, les tables que la prochaine
+     * ecriture lira de toute facon : toutes pour la premiere apres
+     * l'ouverture, ensuite les tables toujours ecrites. Rien d'autre.
+     * Integration du 26/09 : le journal des lignes mises de cote (server.js,
+     * journaliserLignesMisesDeCote) decouvre ainsi AVANT l'ecriture ce qu'elle
+     * va normaliser -- sans relire, a chaque ecriture, les tables qu'une
+     * ecriture ordinaire ne lit plus (lecture paresseuse du 25/09).
+     */
+    lireCeQueLEcritureLira(db) {
+      lireAvantEcriture(db);
+    },
+
     writeDb(db) {
       try {
         // Un objet rendu par la lecture paresseuse dit ce qui a ete lu. La
         // premiere ecriture, et les tables toujours ecrites, lisent le reste.
         const etat = db ? db[ETAT_DE_LECTURE] : null;
-        if (etat) {
-          for (const [cle] of LECTURES_DES_TABLES) {
-            if (premiereEcriture || toujoursEcrites.has(cle)) void db[cle];
-          }
-        }
+        lireAvantEcriture(db);
         writeCache = persistDatabase(database, normalizeDb(db), writeCache, etat);
         premiereEcriture = false;
       } catch (error) {
@@ -119,7 +144,49 @@ function createSqliteStore(options) {
       const exists = database.prepare("SELECT 1 AS ok FROM routes WHERE id = ?").get(id);
       if (!exists) return undefined;
       const row = database.prepare("SELECT trace FROM traces_tournees WHERE route_id = ?").get(id);
-      return row ? JSON.parse(row.trace) : null;
+      return row ? lireTrace(database, id, row.trace) : null;
+    },
+
+    /**
+     * Les lignes illisibles mises de cote et pas encore inscrites au journal
+     * (le serveur les y inscrit a l'ecriture suivante, puis les marque :
+     * marquerJournalisees). Survit a un redemarrage : c'est la table qui le dit.
+     */
+    misesDeCoteAJournaliser() {
+      return database.prepare(
+        `SELECT id AS numero, table_source AS "table", ligne_id AS ligne, erreur, detectee_le AS detecteeLe
+         FROM lignes_en_quarantaine WHERE principale = 1 AND journalisee = 0 ORDER BY id`
+      ).all().map(ligne => ({ ...ligne }));
+    },
+
+    /**
+     * Les commandes mises de cote : id -> { clientId, numero }, lus dans les
+     * colonnes lisibles de la ligne (client_id, numero ; null si vides).
+     */
+    commandesMisesDeCote() {
+      return lireCommandesMisesDeCote(database);
+    },
+
+    /** Les clients (client_id) des commandes mises de cote. */
+    clientsDesCommandesMisesDeCote() {
+      const clients = new Set();
+      for (const { clientId } of lireCommandesMisesDeCote(database).values()) if (clientId !== null) clients.add(clientId);
+      return clients;
+    },
+
+    marquerJournalisees(numeros) {
+      const marquer = database.prepare("UPDATE lignes_en_quarantaine SET journalisee = 1 WHERE id = ?");
+      for (const numero of numeros) marquer.run(numero);
+    },
+
+    /** Les lignes en quarantaine (sans leur contenu), les plus recentes d'abord. */
+    lignesMisesDeCote(limite = 20) {
+      const nombre = database.prepare("SELECT COUNT(*) AS n FROM lignes_en_quarantaine").get().n;
+      const dernieres = database.prepare(
+        `SELECT q.table_source AS "table", q.ligne_id AS ligne, q.erreur, q.detectee_le AS detecteeLe
+         FROM lignes_en_quarantaine q ORDER BY q.id DESC LIMIT ?`
+      ).all(limite).map(ligne => ({ ...ligne }));
+      return { nombre, dernieres };
     },
 
     /**
@@ -154,6 +221,39 @@ function createSqliteStore(options) {
     /** Les bancs qui comptent les lectures de table : repartir sans memoire. */
     oublierLecturesMemorisees() {
       oublierLectures(database);
+    },
+
+    /**
+     * /healthz (25/09), la sonde RAPIDE : la premiere ligne de chaque table,
+     * et les reglages (moins d'une milliseconde). Leve si la connexion est
+     * perdue ou si une table manque. Ne voit pas une page abimee plus loin
+     * dans une table (relecture adverse du 26/09 : LIMIT 1 ne descend que dans
+     * la feuille la plus a gauche) : c'est verifierPages.
+     * Leve aussi quand une ligne illisible n'a pas pu etre mise de cote (disque
+     * plein, volume en lecture seule) : sa table ne se lit plus, les gestes
+     * repondent 500. Une ligne mise de cote, elle, ne rend pas la base malade.
+     */
+    sonderLecture() {
+      database.prepare("SELECT value FROM app_meta WHERE key = 'settings'").get();
+      for (const table of TABLES_SONDEES) database.prepare(`SELECT * FROM ${table} LIMIT 1`).get();
+      const echecs = echecsDeMiseDeCote(database);
+      if (echecs.size) {
+        throw new Error(`${echecs.size} ligne(s) illisible(s) NON mise(s) de cote : ${[...echecs.values()].slice(0, 3).join(" ; ")}`);
+      }
+    },
+
+    /**
+     * /healthz, la sonde COMPLETE (relecture adverse du 26/09) : chaque page
+     * de la base se lit-elle ? PRAGMA quick_check, le controle de l'ouverture :
+     * il parcourt toutes les pages de toutes les tables et de tous les index
+     * (debordements compris). Mesure sur une base de la forme de la
+     * production : 5 ms ; une page abimee n'importe ou (en-tete de feuille,
+     * cellules, enregistrement, debordement, page interieure) le fait echouer
+     * comme elle fait echouer la lecture. Le serveur l'espace (route publique).
+     */
+    verifierPages() {
+      const lignes = database.prepare("PRAGMA quick_check").all().map(ligne => Object.values(ligne)[0]);
+      if (!(lignes.length === 1 && lignes[0] === "ok")) throw new Error(`quick_check : ${lignes.join(" | ").slice(0, 300)}`);
     },
 
     close() {
@@ -581,6 +681,26 @@ function migrateSchema(database) {
     CREATE TABLE IF NOT EXISTS traces_tournees (
       route_id TEXT PRIMARY KEY,
       trace TEXT NOT NULL
+    );
+
+    -- Robustesse (25/09) : les lignes dont le texte ne se lit plus (un
+    -- caractere abime sur le disque), mises de cote au lieu de faire tomber
+    -- toutes les pages. Voir mettreDeCote. Hors de readDb/writeDb, comme
+    -- geocodages : writeDb n'y touche jamais. « contenu » est copie par SQL,
+    -- octets inchanges ; « colonnes » porte les autres colonnes en JSON.
+    -- « principale » = 0 : une ligne copiee parce qu'elle depend de la ligne
+    -- illisible (lignes de commande, livraisons, trace). « journalisee » = 1 :
+    -- la mise de cote est inscrite au journal (historique).
+    CREATE TABLE IF NOT EXISTS lignes_en_quarantaine (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      table_source TEXT NOT NULL,
+      ligne_id TEXT NOT NULL,
+      contenu TEXT,
+      colonnes TEXT NOT NULL,
+      erreur TEXT NOT NULL,
+      detectee_le TEXT NOT NULL,
+      principale INTEGER NOT NULL DEFAULT 1,
+      journalisee INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS utilisateurs (
@@ -1110,6 +1230,28 @@ function persistDatabase(database, db, cache, etat = null) {
     //    Une tournee qui part emporte son trace.
     const deletionOrder = [...plans].sort((a, b) => (a.spec.table === "lignes_commande" ? -1 : b.spec.table === "lignes_commande" ? 1 : 0));
     const delTrace = database.prepare("DELETE FROM traces_tournees WHERE route_id = ?");
+
+    // Robustesse (25/09) : une table REMPLACEE sans avoir ete lue
+    // (`db.clients = ...` a l'import, la purge) n'est pas passee par
+    // readPayloads. Une ligne illisible qu'elle retire est donc mise de cote
+    // ici, comme a la lecture (json_valid, sur les seules lignes retirees), et
+    // AVANT toute suppression : une commande emporte ses lignes de commande.
+    // Une table NON LUE (plan partiel, lecture paresseuse du 25/09) ne perd
+    // aucune ligne : rien a mettre de cote -- et son plan n'a pas de `seen`
+    // (integration du 26/09 : sans ce saut, chaque ecriture qui laissait une
+    // table de lignes non lue levait « Cannot read properties of undefined »).
+    for (const plan of plans) {
+      if (plan.partiel) continue;
+      if (!plan.spec.columns.includes("payload")) continue;
+      const illisible = database.prepare(`SELECT rowid AS rang_physique FROM ${plan.spec.table} WHERE id = ? AND json_valid(payload) = 0`);
+      for (const id of plan.cached.keys()) {
+        if (plan.seen.has(id)) continue;
+        const ligne = illisible.get(id);
+        if (!ligne) continue;
+        mettreDeCote(database, { table: plan.spec.table, colonneId: "rowid", id: ligne.rang_physique, idLigne: id, colonneContenu: "payload" },
+          new Error("texte illisible, retire par une ecriture"));
+      }
+    }
     for (const plan of deletionOrder) {
       // Une table non lue ne perd aucune ligne.
       if (plan.partiel) continue;
@@ -1384,8 +1526,9 @@ function readRoutes(database) {
   return readPayloads(database, "routes").map((route, index) => {
     if (!route || typeof route !== "object") return route;
     if (STATUTS_TOURNEE_SANS_TRACE.has(route.status)) return route;
-    const row = traceOf.get(stableId(route, "route", index));
-    if (row) route.geometry = JSON.parse(row.trace);
+    const id = stableId(route, "route", index);
+    const row = traceOf.get(id);
+    if (row) route.geometry = lireTrace(database, id, row.trace);
     else if (!Object.prototype.hasOwnProperty.call(route, "geometry")) route.geometry = null;
     return route;
   });
@@ -1424,6 +1567,20 @@ function oublierLectures(database) {
   memoire.oubli = null;
 }
 
+/**
+ * Le trace d'une tournee, decode. Illisible : mis de cote (mettreDeCote) et
+ * rendu comme absent -- la tournee s'affiche sans sa ligne, le trajet se
+ * recalcule ; l'ecriture suivante retire le trace illisible de sa table.
+ */
+function lireTrace(database, routeId, trace) {
+  try {
+    return JSON.parse(trace);
+  } catch (error) {
+    mettreDeCote(database, { table: "traces_tournees", colonneId: "route_id", id: routeId, colonneContenu: "trace" }, error);
+    return null;
+  }
+}
+
 function readPayloads(database, table) {
   const memoire = memoireDe(database);
   const cle = `${memoire.generation}:${dataVersion(database)}`;
@@ -1439,7 +1596,31 @@ function readPayloads(database, table) {
     memoire.oubli = setTimeout(() => memoire.tables.clear(), DUREE_MEMOIRE_MS);
     if (memoire.oubli.unref) memoire.oubli.unref();
   }
-  return lu.lignes.map(payload => JSON.parse(payload));
+  try {
+    return lu.lignes.map(payload => JSON.parse(payload));
+  } catch {
+    // Rare (robustesse, 25/09) : relue ligne a ligne EN BASE, pour ecarter
+    // la ou les lignes illisibles (mettreDeCote) -- la relecture porte le
+    // rowid et l'id de chaque ligne, que la memoire n'a pas. Le chemin
+    // courant garde sa lecture memorisee ; la memoire garde le texte
+    // illisible jusqu'a l'ecriture qui retire la ligne de sa table.
+    return lireEnEcartantLesIllisibles(database, table);
+  }
+}
+
+function lireEnEcartantLesIllisibles(database, table) {
+  const valeurs = [];
+  const lignes = database
+    .prepare(`SELECT rowid AS rang_physique, id, payload FROM ${table} ORDER BY sort_order ASC`)
+    .all();
+  for (const ligne of lignes) {
+    try {
+      valeurs.push(JSON.parse(ligne.payload));
+    } catch (error) {
+      mettreDeCote(database, { table, colonneId: "rowid", id: ligne.rang_physique, idLigne: ligne.id, colonneContenu: "payload" }, error);
+    }
+  }
+  return valeurs;
 }
 
 function readSettings(database) {
@@ -1451,9 +1632,169 @@ function readSettings(database) {
 
   try {
     return JSON.parse(row.value);
-  } catch {
+  } catch (error) {
+    // Avant : {} en silence, et l'ecriture suivante remplacait les reglages
+    // (numerotation, apparence, logo) par des reglages vides, sans trace.
+    // Le texte illisible est desormais mis de cote avant.
+    mettreDeCote(database, { table: "app_meta", colonneId: "key", id: "settings", colonneContenu: "value" }, error);
     return {};
   }
+}
+
+// ============================================================================
+// Robustesse (25/09, chasse aux defauts) : UNE LIGNE ABIMEE EST MISE DE COTE
+// ============================================================================
+//
+// Un seul caractere abime dans le texte JSON d'UNE ligne (erreur disque : un
+// « { » devenu « [ ») faisait lever JSON.parse a chaque readDb : toutes les
+// pages et tous les gestes en 500, aucune restauration (quick_check ne lit pas
+// le contenu des cellules, et une SyntaxError n'est pas une corruption SQLite
+// pour isCorruptionError), et /healthz au vert. Mesure du rapport : un « { »
+// remplace par « [ » dans une ligne d'historique -> /api/orders, /api/stock,
+// /api/routes en 500.
+//
+// Maintenant la ligne illisible est COPIEE dans lignes_en_quarantaine, avec ce
+// qui en depend et disparaitrait avec elle (les lignes de commande et les
+// livraisons d'une commande, le trace d'une tournee), journalisee, puis ecartee
+// de la lecture : le reste de l'application marche. L'ecriture suivante la
+// retire de sa table comme toute ligne disparue -- la copie est deja faite.
+//
+// Le texte illisible est copie PAR SQL (INSERT ... SELECT) : les octets restent
+// ceux du disque, meme s'ils ne sont plus de l'UTF-8 valide (une copie par JS
+// les aurait remplaces par U+FFFD). Les autres colonnes, lisibles, vont en JSON.
+//
+// Si la copie echoue (disque plein, volume en lecture seule), l'erreur
+// d'origine remonte comme avant : une ligne n'est JAMAIS ecartee sans avoir ete
+// mise de cote. Idempotent : la meme ligne n'est pas copiee deux fois (meme
+// table, meme id, meme contenu), et un message par copie faite.
+//
+// « Deja copiee » se demande a la TABLE, jamais a une memoire du processus
+// (relecture adverse du 26/09) : une copie faite dans la transaction d'une
+// ecriture (le pre-controle de persistDatabase) disparait avec son ROLLBACK si
+// cette ecriture echoue plus loin (disque plein). Le processus, lui, s'en
+// souvenait : a l'essai suivant, la ligne quittait sa table sans copie.
+
+// Les tables que /healthz lit (sonderLecture) : toutes celles des donnees.
+const TABLES_SONDEES = ["produits", "clients", "commandes", "lignes_commande", "livraisons", "routes", "traces_tournees",
+  "historique", "ventes", "mouvements_stock", "abonnements", "relances_crm", "secteurs_livraison", "imports_archives", "utilisateurs"];
+
+// Ce qui disparait avec une ligne, a copier avec elle : [table, colonne (ou
+// expression) de lien, colonne du contenu]. Les livraisons d'une tournee
+// (relecture adverse du 26/09) : tirees de ses arrets (deliveryRows), elles ne
+// sont plus produites une fois la tournee ecartee, et c'est le seul exemplaire
+// LISIBLE de ce qui a ete fait (statut, heure, motif). Leur lien est dans le
+// payload (routeId) : lu seulement sur un payload lisible. Pas les lignes
+// « commande-… » : tirees des commandes (qui portent aussi routeId), elles
+// restent dans leur table.
+const DEPENDANCES_MISES_DE_COTE = {
+  commandes: [["lignes_commande", "commande_id", "payload"], ["livraisons", "commande_id", "payload"]],
+  routes: [["traces_tournees", "route_id", "trace"],
+    ["livraisons", "CASE WHEN id NOT LIKE 'commande-%' AND json_valid(payload) THEN CAST(json_extract(payload, '$.routeId') AS TEXT) END", "payload"]]
+};
+
+// Par base ouverte : les lignes illisibles dont la mise de cote a ECHOUE, et
+// pas reussi depuis (cle -> message). Tant qu'il en reste, leur table ne se lit
+// plus : sonderLecture le dit (/healthz). Une copie reussie efface la cle.
+const echecsParBase = new WeakMap();
+
+function echecsDeMiseDeCote(database) {
+  let echecs = echecsParBase.get(database);
+  if (!echecs) {
+    echecs = new Map();
+    echecsParBase.set(database, echecs);
+  }
+  return echecs;
+}
+
+function lireCommandesMisesDeCote(database) {
+  const commandes = new Map();
+  const valeur = v => (v === undefined || v === null || v === "" ? null : String(v));
+  for (const { ligne_id: id, colonnes } of database.prepare("SELECT ligne_id, colonnes FROM lignes_en_quarantaine WHERE table_source = 'commandes'").all()) {
+    let lues = {};
+    try { lues = JSON.parse(colonnes) || {}; } catch { /* colonnes ecrites par nous : toujours lisibles */ }
+    commandes.set(String(id), { clientId: valeur(lues.client_id), numero: valeur(lues.numero) });
+  }
+  return commandes;
+}
+
+/**
+ * Copie la ligne illisible (et ce qui en depend) dans lignes_en_quarantaine.
+ * `colonneId`/`id` : de quoi retrouver la ligne (« rowid » pour les tables de
+ * readDb) ; `idLigne` : son identifiant metier, s'il se lit (journal, et lien
+ * vers ses dependances) ; `colonneContenu` : la colonne illisible.
+ * Leve `erreurDOrigine` si la copie n'a pas pu se faire.
+ */
+function mettreDeCote(database, { table, colonneId, id, idLigne = id, colonneContenu }, erreurDOrigine) {
+  const nom = idLigne === undefined || idLigne === null ? `rowid ${id}` : String(idLigne);
+  const message = String((erreurDOrigine && erreurDOrigine.message) || erreurDOrigine).slice(0, 300);
+  const maintenant = new Date().toISOString();
+
+  const lignesDe = (t, colonneLien, valeur) =>
+    database.prepare(`SELECT rowid AS rang_physique, * FROM ${t} WHERE ${colonneLien} = ?`).all(valeur);
+  const idDeCopie = ligne => String(ligne.id ?? ligne.route_id ?? ligne.key ?? `rowid ${ligne.rang_physique}`);
+  // Deja en quarantaine : meme table, meme id, meme contenu (octets). Validee,
+  // ou copiee plus tot dans la transaction en cours ; une copie defaite par un
+  // ROLLBACK n'y est plus, et se refait.
+  const dejaCopiee = (t, ligne, colonneTexte) => Boolean(database.prepare(`
+    SELECT 1 AS ok FROM lignes_en_quarantaine q, ${t} AS s
+    WHERE s.rowid = ? AND q.table_source = ? AND q.ligne_id = ? AND q.contenu IS s.${colonneTexte}
+  `).get(ligne.rang_physique, t, idDeCopie(ligne)));
+  // Rend le nombre de lignes copiees ; une ligne deja en quarantaine ne l'est
+  // pas deux fois.
+  const copier = (t, lignes, colonneTexte, principale) => {
+    let copiees = 0;
+    for (const ligne of lignes) {
+      const { rang_physique: rang, [colonneTexte]: _texte, ...autres } = ligne;
+      const idCopie = idDeCopie(ligne);
+      copiees += Number(database.prepare(`
+        INSERT INTO lignes_en_quarantaine (table_source, ligne_id, contenu, colonnes, erreur, detectee_le, principale)
+        SELECT ?, ?, s.${colonneTexte}, ?, ?, ?, ? FROM ${t} AS s
+        WHERE s.rowid = ? AND NOT EXISTS (
+          SELECT 1 FROM lignes_en_quarantaine q
+          WHERE q.table_source = ? AND q.ligne_id = ? AND q.contenu IS s.${colonneTexte}
+        )
+      `).run(t, idCopie, JSON.stringify(autres), message, maintenant, principale ? 1 : 0, rang, t, idCopie).changes);
+    }
+    return copiees;
+  };
+
+  // Le controle lui-meme est dans le savepoint : s'il echoue (table de
+  // quarantaine absente), l'erreur d'origine remonte, comme une copie ratee.
+  // Sans copie a faire, rien n'est ecrit (un volume en lecture seule relit une
+  // ligne deja mise de cote sans erreur).
+  const echecs = echecsDeMiseDeCote(database);
+  const cle = `${table}/${nom}`;
+  database.exec("SAVEPOINT mise_de_cote");
+  let copiee = 0;
+  let dependances = 0;
+  try {
+    const principales = lignesDe(table, colonneId, id);
+    if (!principales.length) throw new Error(`ligne ${table}/${nom} introuvable`);
+    if (!principales.every(ligne => dejaCopiee(table, ligne, colonneContenu))) {
+      copiee = copier(table, principales, colonneContenu, true);
+      if (idLigne !== undefined && idLigne !== null) {
+        for (const [t, lien, texte] of DEPENDANCES_MISES_DE_COTE[table] || []) {
+          dependances += copier(t, lignesDe(t, lien, idLigne), texte, false);
+        }
+      }
+    }
+    database.exec("RELEASE mise_de_cote");
+  } catch (erreurCopie) {
+    try {
+      database.exec("ROLLBACK TO mise_de_cote");
+      database.exec("RELEASE mise_de_cote");
+    } catch { /* savepoint deja defait avec la transaction */ }
+    console.error(`[stockage] ligne illisible ${table}/${nom} NON mise de cote (${erreurCopie.message}) : l'erreur d'origine remonte.`);
+    echecs.set(cle, `${cle} (${String(erreurCopie.message).slice(0, 120)})`);
+    throw erreurDOrigine;
+  }
+
+  echecs.delete(cle);
+  if (!copiee) return;
+  console.error(
+    `[stockage] ligne illisible mise de cote : ${table}/${nom} (${message})`
+    + `${dependances ? `, avec ${dependances} ligne(s) qui en dependent` : ""}. Copie dans lignes_en_quarantaine ; le reste des donnees se lit normalement.`
+  );
 }
 
 function stableId(item, prefix, index) {

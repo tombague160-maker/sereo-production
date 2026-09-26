@@ -4,6 +4,7 @@ const express = require("express");
 const compression = require("compression");
 const multer = require("multer");
 const readXlsxFile = require("read-excel-file/node");
+const { classeurVerifie, ClasseurRefuse } = require("./lib/garde-excel");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
@@ -68,6 +69,9 @@ const GITHUB_REPO = "tombague160-maker/sereo-production";
 let releaseNotesCache = null;
 let releaseNotesCacheAt = 0;
 const RELEASE_NOTES_CACHE_TTL_MS = 60 * 60 * 1000;
+// Robustesse (25/09) : un GitHub qui ne repond pas laissait /api/version
+// pendant jusqu'aux delais d'undici (plusieurs minutes). 3 s, puis le repli.
+const RELEASE_NOTES_TIMEOUT_MS = 3000;
 
 async function fetchReleaseNotes(version) {
   const now = Date.now();
@@ -76,13 +80,30 @@ async function fetchReleaseNotes(version) {
     return releaseNotesCache;
   }
   const fallbackUrl = `https://github.com/${GITHUB_REPO}/releases/tag/v${version}`;
+  // Robustesse (25/09) : les bancs et les serveurs d'essai posent
+  // SEREO_SKIP_RELEASE_FETCH=1 depuis longtemps, mais rien ne la lisait :
+  // chaque serveur de banc interrogeait l'API GitHub (60 appels par heure et
+  // par adresse, sans compte). Posee a 1 : aucun appel sortant, notes vides.
+  if (process.env.SEREO_SKIP_RELEASE_FETCH === "1") {
+    return {
+      version,
+      releaseUrl: fallbackUrl,
+      releaseName: `v${version}`,
+      publishedAt: "",
+      pourToi: "",
+      fullNotes: "",
+      fetchedAt: new Date().toISOString(),
+      fetchError: "SEREO_SKIP_RELEASE_FETCH=1"
+    };
+  }
   try {
     const url = `https://api.github.com/repos/${GITHUB_REPO}/releases/tags/v${version}`;
     const response = await fetch(url, {
       headers: {
         "Accept": "application/vnd.github+json",
         "User-Agent": "sereo-app"
-      }
+      },
+      signal: AbortSignal.timeout(RELEASE_NOTES_TIMEOUT_MS)
     });
     if (!response.ok) {
       const cache = {
@@ -430,6 +451,26 @@ app.disable("x-powered-by");
 // est indispensable pour que le rate limit s'applique par utilisateur et pas
 // sur l'IP unique du reverse proxy.
 app.set("trust proxy", 1);
+// Arret propre (robustesse, 25/09) : les requetes en cours sont comptees, pour
+// que l'arret (SIGTERM au redeploiement) les laisse finir ; une requete qui
+// arrive pendant l'arret recoit 503 (la file hors ligne garde le geste et le
+// renvoie, X-Sereo-Geste le rend idempotent) au lieu d'etre coupee.
+app.use((req, res, next) => {
+  if (arretEnCours) {
+    res.set("Connection", "close");
+    return res.status(503).json({ error: "Serveur en cours de redemarrage, reessaie dans un instant." });
+  }
+  requetesEnCours += 1;
+  let finie = false;
+  const finir = () => {
+    if (finie) return;
+    finie = true;
+    requetesEnCours -= 1;
+  };
+  res.once("finish", finir);
+  res.once("close", finir);
+  next();
+});
 app.use(securityHeaders);
 // Compression des reponses texte (HTML, CSS, JS, JSON de l'API). Mesure du
 // 23/09 : Node envoyait tout brut -- 750 Ko a chaque chargement (175 Ko une fois
@@ -444,6 +485,14 @@ app.use("/fonts", express.static(path.join(__dirname, "public", "fonts"), { maxA
 app.get("/favicon.svg", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "favicon.svg"));
 });
+// /healthz : la relecture de chaque page (verifierPages, 5 ms sur une base de
+// la forme de la production, plus avec les traces) au plus toutes les 20 s.
+// Docker appelle toutes les 30 s : chacun de ses appels relit tout ; un appel
+// en boucle sur cette route publique, lui, ne fait pas relire la base a chaque
+// fois. Par magasin ouvert : une base rouverte (restauration) se relit.
+const SONDE_COMPLETE_MS = 20000;
+let sondeComplete = { store: null, a: 0, erreur: null };
+
 app.get("/healthz", (req, res) => {
   // Revue #4 : si la recovery storage a totalement echoue (disque plein, FS
   // read-only), le serveur ecoute mais sert 500 sur toutes les routes data.
@@ -451,6 +500,35 @@ app.get("/healthz", (req, res) => {
   // detectent le container comme non-sain (sinon il reste declare "healthy").
   if (storageRecoveryFatal) {
     return res.status(503).json({ ok: false, error: "storage indisponible (recovery echouee)" });
+  }
+  // Robustesse (25/09) : /healthz ne regardait jamais la base. Une base qui ne
+  // se lisait plus (toutes les pages en 500) restait « healthy » pour Docker.
+  // A chaque appel, la sonde rapide (sonderLecture : la premiere ligne de
+  // chaque table, et les lignes illisibles qu'on n'a pas pu mettre de cote) ;
+  // et, au plus toutes les SONDE_COMPLETE_MS, la relecture de chaque page
+  // (verifierPages), dont le verdict tient jusqu'a la suivante (relecture
+  // adverse du 26/09 : une page abimee au-dela de la premiere feuille ne se
+  // voyait pas). En echec, 503 sans detail (la route est publique), la cause
+  // dans les journaux du serveur.
+  if (useSqliteStorage()) {
+    try {
+      const store = getSqliteStore();
+      store.sonderLecture();
+      const maintenant = Date.now();
+      if (sondeComplete.store !== store || maintenant - sondeComplete.a >= SONDE_COMPLETE_MS) {
+        let erreur = null;
+        try {
+          store.verifierPages();
+        } catch (echec) {
+          erreur = echec;
+        }
+        sondeComplete = { store, a: maintenant, erreur };
+      }
+      if (sondeComplete.erreur) throw sondeComplete.erreur;
+    } catch (error) {
+      console.error(`[healthz] la base ne se lit pas : ${error.message || error}`);
+      return res.status(503).json({ ok: false, error: "base illisible" });
+    }
   }
   res.json({ ok: true });
 });
@@ -3144,7 +3222,7 @@ function ensureOrderNumbers(db) {
   // incremente localement a chaque allocation. O(N+M).
   const settings = normalizeSettings(db.settings || {});
   const { prefix, resetAnnually } = settings.orderNumbering;
-  const existingNumeros = db.commandes.map(o => o.numero).filter(Boolean);
+  const existingNumeros = numerosDejaAttribues(db);
 
   let continuousCounter = 0;
   const counterByYear = new Map();
@@ -3346,7 +3424,10 @@ function writeDb(db, options = {}) {
   // l'application echoue sur l'ecriture des donnees (visible) plutot que sur
   // un backup invisible. Cf revue R1 chantier 1 P1 #2.
   if (useSqliteStorage()) {
-    getSqliteStore().writeDb(db);
+    const store = getSqliteStore();
+    const misesDeCote = journaliserLignesMisesDeCote(db, store);
+    store.writeDb(db);
+    if (misesDeCote.length) store.marquerJournalisees(misesDeCote);
   } else {
     ensureDir(path.dirname(DB_PATH));
     const tempPath = `${DB_PATH}.${process.pid}.${Date.now()}.tmp`;
@@ -3376,6 +3457,52 @@ function writeDb(db, options = {}) {
         console.error(`[storage] Backup async echec (mutation deja persistee): ${backupError.message || backupError}`);
       })
       .finally(() => { pendingBackup = null; });
+  }
+}
+
+// Robustesse (25/09) : une ligne illisible (un caractere abime sur le disque)
+// est mise de cote a la lecture au lieu de faire tomber toutes les pages
+// (storage/sqliteStore.js, mettreDeCote). Elle va au journal dans l'ecriture
+// qui suit. Ce que cette ecriture va normaliser de toute facon est lu d'abord :
+// elle le decouvre ici, pas apres. Depuis la lecture paresseuse du 25/09
+// (integration du 26/09), une ecriture ne normalise plus que les tables deja
+// lues -- plus, la premiere apres l'ouverture, toutes : le magasin lit
+// exactement celles-la (lireCeQueLEcritureLira), pas toutes a chaque
+// ecriture. Une ligne d'une table qu'aucune ecriture ne lit est decouverte a
+// sa lecture, et journalisee a l'ecriture qui suit. Rend les numeros a
+// marquer « journalisees » une fois l'ecriture faite (un echec d'ecriture les
+// laisse pour la suivante).
+function journaliserLignesMisesDeCote(db, store) {
+  store.lireCeQueLEcritureLira(db);
+  const lignes = store.misesDeCoteAJournaliser();
+  if (!lignes.length) return [];
+  const noms = lignes.slice(0, 5).map(ligne => `${ligne.table} ${ligne.ligne}`).join(", ");
+  addHistory(db, "Stockage",
+    `${lignes.length} ligne(s) illisible(s) mise(s) de côté (${noms}${lignes.length > 5 ? ", …" : ""}) : `
+    + "leur texte est gardé tel quel dans la base (table lignes_en_quarantaine), le reste des données se lit normalement.",
+    { lignes: lignes.map(({ numero, ...ligne }) => ligne) });
+  return lignes.map(ligne => ligne.numero);
+}
+
+// Les clients dont une commande est en quarantaine (colonne client_id de la
+// ligne mise de cote). Vide hors SQLite, ou si l'etat ne se lit pas.
+function clientsDesCommandesMisesDeCote() {
+  if (!useSqliteStorage() || !sqliteStore) return new Set();
+  try {
+    return sqliteStore.clientsDesCommandesMisesDeCote();
+  } catch {
+    return new Set();
+  }
+}
+
+// Les commandes en quarantaine : id -> { clientId, numero }. Vide hors
+// SQLite, ou si l'etat ne se lit pas.
+function commandesMisesDeCote() {
+  if (!useSqliteStorage() || !sqliteStore) return new Map();
+  try {
+    return sqliteStore.commandesMisesDeCote();
+  } catch {
+    return new Map();
   }
 }
 
@@ -4039,7 +4166,20 @@ function validateAndFormatYMD(y, m, d) {
 
 async function readExcelRows(filePath) {
   try {
-    const parsed = await readXlsxFile(filePath);
+    // Robustesse (25/09) : taille reelle, cellules, lignes et colonnes
+    // comptees AVANT la lecture (lib/garde-excel.js) ; au-dela, un refus clair
+    // au lieu de 600 Mo de memoire pour un fichier de 0,5 Mo.
+    // Relecture adverse (26/09) : la lecture se fait sur le classeur que la
+    // garde rend (ses seules parties comptees), jamais sur le fichier envoye :
+    // une partie cachee hors du repertoire du zip n'est plus decompressee.
+    let classeur;
+    try {
+      classeur = classeurVerifie(await fs.promises.readFile(filePath));
+    } catch (error) {
+      if (error instanceof ClasseurRefuse) throw badRequest(error.message);
+      throw error;
+    }
+    const parsed = await readXlsxFile(classeur);
     const rows = Array.isArray(parsed[0]) ? parsed : (parsed[0]?.data || []);
 
     if (!rows.length) {
@@ -4976,12 +5116,20 @@ function extractYear(dateString) {
 //
 // Format reset annuel    : CMD-2026-001, CMD-2026-002, ..., CMD-2027-001
 // Format continu (jamais) : CMD-00001, CMD-00002, ..., CMD-12847
+// Les numeros deja attribues : ceux des commandes, et ceux des commandes mises
+// de cote (relecture adverse du 26/09). Sans ces derniers, le numero de la
+// derniere commande, illisible, etait redonne a la suivante -- et avec lui
+// son identifiant cmd-<numero>, que ses arrets de tournee nomment encore.
+function numerosDejaAttribues(db) {
+  const numeros = (db.commandes || []).map(order => order.numero).filter(Boolean);
+  for (const { numero } of commandesMisesDeCote().values()) if (numero) numeros.push(numero);
+  return numeros;
+}
+
 function generateOrderNumber(db, dateCommande) {
   const settings = normalizeSettings(db.settings || {});
   const { prefix, resetAnnually } = settings.orderNumbering;
-  const existingNumeros = (db.commandes || [])
-    .map(order => order.numero)
-    .filter(Boolean);
+  const existingNumeros = numerosDejaAttribues(db);
 
   if (!resetAnnually) {
     // Compteur continu : extraire le plus grand suffixe numerique tout prefixe confondu
@@ -5217,9 +5365,15 @@ function syncWorkflow(db) {
   // Legacy compat : un client sans aucune commande recoit une commande
   // fallback (deduite de ses produits) pour ne pas casser les anciennes UIs
   // qui supposent 1 client = 1 commande.
+  // Robustesse (25/09) : pas pour un client dont la commande vient d'etre mise
+  // de cote parce qu'illisible -- sinon elle « revenait » en commande neuve,
+  // datee du jour, a preparer ou comptee dans le chiffre d'affaires du jour
+  // (mesure sur une base de la forme de la production, CMD-2025-039 -> CMD-2026-164).
+  const clientsSansFallback = clientsDesCommandesMisesDeCote();
   db.clients.forEach(client => {
     const orders = ordersByClientId.get(String(client.id)) || [];
     if (orders.length > 0) return;
+    if (clientsSansFallback.has(String(client.id))) return;
     if (!Array.isArray(client.produits) || client.produits.length === 0) return;
 
     const today = jourParis();
@@ -5625,6 +5779,22 @@ function findOrder(db, orderId) {
   const order = db.commandes.find(item => String(item.id) === String(orderId));
   if (!order) throw notFound("Commande introuvable");
   return order;
+}
+
+/**
+ * La commande d'un arret de tournee ; null si elle est MISE DE COTE (texte
+ * illisible, lignes_en_quarantaine). Relecture adverse du 26/09 : l'arret la
+ * nommait encore, et findOrder levait « Commande introuvable » -- toute la
+ * tournee ne demarrait plus, l'arret ne se marquait plus. L'arret porte de
+ * quoi etre fait (client, adresse, produits) : il vit sans sa commande, qui
+ * attend d'etre reparee a la main (ni son statut ni le stock ne suivent).
+ * Une commande absente pour une autre raison reste une erreur, comme avant.
+ */
+function commandeDeLArret(db, stop) {
+  const order = db.commandes.find(item => String(item.id) === String(stop.orderId));
+  if (order) return order;
+  if (commandesMisesDeCote().has(String(stop.orderId))) return null;
+  throw notFound("Commande introuvable");
 }
 
 function findClient(db, clientId) {
@@ -7499,10 +7669,10 @@ function startRoute(db, routeId) {
   route.stops.forEach(stop => {
     if (["livre", "absent", "probleme", "a_reprogrammer"].includes(stop.status)) return;
     stop.status = "en_livraison";
-    const order = findOrder(db, stop.orderId);
-    setOrderStatus(order, "en_livraison");
+    const order = commandeDeLArret(db, stop);
+    if (order) setOrderStatus(order, "en_livraison");
 
-    const client = findClient(db, order.clientId);
+    const client = findClient(db, order ? order.clientId : stop.clientId);
     if (client) client.statut = "en_cours";
   });
 
@@ -7592,7 +7762,7 @@ function updateRouteStop(db, routeId, stopId, status, notes = "", motif = null, 
     if (STATUTS_ARRET_SOLDE.has(stop.status)) {
       // Le meme geste deux fois (un renvoi sans cle d'idempotence) : rien a
       // faire, et ce n'est pas une erreur.
-      if (stop.status === status) return { route, stop, order: findOrder(db, stop.orderId), inchange: true };
+      if (stop.status === status) return { route, stop, order: commandeDeLArret(db, stop), inchange: true };
       throw conflit(`${stop.clientName || "Cet arrêt"} est déjà « ${libelleStatutArret(stop.status)} » : utilise « Corriger le statut ».`);
     }
   }
@@ -7604,7 +7774,9 @@ function updateRouteStop(db, routeId, stopId, status, notes = "", motif = null, 
   // stock a ete libere (release-stock) reste « a reprogrammer », donc
   // livrable : elle repart dans une nouvelle tournee, qui ne reserve rien.
   // Son « Livre » la faisait sortir sans deduire le rayon, en silence.
-  if (status === "livre") reprendreStockLibere(db, findOrder(db, stop.orderId), retard ? "geste arrivé après la clôture" : "livrée en tournée");
+  // null : commande mise de cote (commandeDeLArret) -- l'arret seul change.
+  const order = commandeDeLArret(db, stop);
+  if (status === "livre" && order) reprendreStockLibere(db, order, retard ? "geste arrivé après la clôture" : "livrée en tournée");
   if (retard) {
     // Le livreur l'a fait AVANT la cloture : c'est la verite du terrain, la
     // cloture avait devine « a reprogrammer ». L'arret n'est plus une
@@ -7620,8 +7792,7 @@ function updateRouteStop(db, routeId, stopId, status, notes = "", motif = null, 
   // copie plus ancienne (refreshActiveRoute, H4).
   route.updatedAt = new Date().toISOString();
 
-  const order = findOrder(db, stop.orderId);
-  const client = findClient(db, order.clientId);
+  const client = findClient(db, order ? order.clientId : stop.clientId);
 
   // C1 (lot 1 de l'audit geo) : un absent ou un probleme n'est plus une
   // impasse. La commande passait en `probleme_livraison`, qu'aucune liste ne
@@ -7632,30 +7803,37 @@ function updateRouteStop(db, routeId, stopId, status, notes = "", motif = null, 
   // Le stock, lui, reste reserve pour la relivraison (stockReserveActif
   // compte a_reprogrammer) : ni libere, ni reserve une seconde fois -- la
   // tournee suivante ne reserve rien, et la livraison consomme la reservation.
+  // Sans commande (mise de cote) : seuls l'arret et le client changent.
   if (status === "livre") {
     // Un « Livre » arrive apres la cloture : la commande est « a reprogrammer »,
     // qui n'a pas de sortie directe vers « livre ».
-    if (retard && STATUTS_A_RELIVRER.includes(order.status)) setOrderStatus(order, "en_livraison");
-    setOrderStatus(order, "livre", now);
+    if (order) {
+      if (retard && STATUTS_A_RELIVRER.includes(order.status)) setOrderStatus(order, "en_livraison");
+      setOrderStatus(order, "livre", now);
+    }
     if (client) client.statut = "livree";
     // Decision 10 de Thomas (23/09) : « remis a… », facultatif. Sur l'arret ET
     // la commande : le detail de la commande le montre, l'historique aussi.
     const remis = clean(remisA).slice(0, REMIS_A_MAX);
     stop.remisA = remis;
-    order.remisA = remis;
+    if (order) order.remisA = remis;
   } else if (status === "absent") {
-    setOrderStatus(order, "a_reprogrammer");
-    order.deliveryStatus = "absent";
+    if (order) {
+      setOrderStatus(order, "a_reprogrammer");
+      order.deliveryStatus = "absent";
+    }
     if (client) client.statut = "absent";
   } else if (status === "probleme") {
-    setOrderStatus(order, "a_reprogrammer");
-    order.deliveryStatus = "probleme";
+    if (order) {
+      setOrderStatus(order, "a_reprogrammer");
+      order.deliveryStatus = "probleme";
+    }
     if (client) client.statut = "probleme";
   } else if (status === "a_reprogrammer") {
-    setOrderStatus(order, "a_reprogrammer");
+    if (order) setOrderStatus(order, "a_reprogrammer");
     if (client) client.statut = "non_livre";
   } else if (status === "en_livraison") {
-    setOrderStatus(order, "en_livraison");
+    if (order) setOrderStatus(order, "en_livraison");
     if (client) client.statut = "en_cours";
   }
 
@@ -7812,32 +7990,37 @@ function corrigerArret(db, routeId, stopId, { status, cause } = {}, par = "") {
     throw conflit(`${nomDeTournee(route)} est clôturée : un arrêt n'y redevient pas « à faire ». La commande est dans les commandes prêtes.`);
   }
 
-  const order = findOrder(db, stop.orderId);
-  const nom = nomDeCommande(order);
-  // Sans `routeId` (donnee d'avant createRoute, ou semee a la main), seule la
-  // presence dans une autre tournee active compte.
-  if ((order.routeId && String(order.routeId) !== String(route.id)) || tourneeActiveDeLaCommande(db, order.id, route.id)) {
-    throw conflit(`La commande ${nom} est repartie dans une autre tournée : corrige-la là-bas.`);
+  // null : commande mise de cote (commandeDeLArret) -- l'arret seul se corrige.
+  const order = commandeDeLArret(db, stop);
+  if (order) {
+    const nom = nomDeCommande(order);
+    // Sans `routeId` (donnee d'avant createRoute, ou semee a la main), seule la
+    // presence dans une autre tournee active compte.
+    if ((order.routeId && String(order.routeId) !== String(route.id)) || tourneeActiveDeLaCommande(db, order.id, route.id)) {
+      throw conflit(`La commande ${nom} est repartie dans une autre tournée : corrige-la là-bas.`);
+    }
+    // Un arret en echec dont la commande est restee « en livraison » (donnee
+    // d'avant le lot 1, ou semee ainsi) se corrige aussi : rien n'est reparti.
+    const attendus = stop.status === "livre" ? ["livre"] : [...STATUTS_A_RELIVRER, "en_livraison"];
+    if (!attendus.includes(order.status)) {
+      throw conflit(`La commande ${nom} a changé depuis ce geste : corrige-la depuis l'écran Commandes.`);
+    }
+    // Une reservation liberee a la main (release-stock) a rendu le stock au
+    // rayon : dire la commande livree la ferait sortir du stock sans la deduire.
+    // Avant, la correction etait refusee ; depuis la decision de Thomas (23/09),
+    // la reservation est reprise, meme sur un rayon insuffisant, comme pour le
+    // geste arrive apres la cloture (reprendreStockLibere, qui le journalise).
+    if (status === "livre") reprendreStockLibere(db, order, "correction du statut");
   }
-  // Un arret en echec dont la commande est restee « en livraison » (donnee
-  // d'avant le lot 1, ou semee ainsi) se corrige aussi : rien n'est reparti.
-  const attendus = stop.status === "livre" ? ["livre"] : [...STATUTS_A_RELIVRER, "en_livraison"];
-  if (!attendus.includes(order.status)) {
-    throw conflit(`La commande ${nom} a changé depuis ce geste : corrige-la depuis l'écran Commandes.`);
-  }
-  // Une reservation liberee a la main (release-stock) a rendu le stock au
-  // rayon : dire la commande livree la ferait sortir du stock sans la deduire.
-  // Avant, la correction etait refusee ; depuis la decision de Thomas (23/09),
-  // la reservation est reprise, meme sur un rayon insuffisant, comme pour le
-  // geste arrive apres la cloture (reprendreStockLibere, qui le journalise).
-  if (status === "livre") reprendreStockLibere(db, order, "correction du statut");
 
   const avant = stop.status;
   const now = new Date().toISOString();
-  const client = findClient(db, order.clientId);
+  const client = findClient(db, order ? order.clientId : stop.clientId);
 
   // 1. La commande quitte son etat, vers « en livraison ».
-  if (order.status === "livre") {
+  if (!order) {
+    // Mise de cote : rien a faire suivre.
+  } else if (order.status === "livre") {
     // Hors de la machine d'etat, deliberement : `livre` n'a aucune sortie pour
     // les gestes ordinaires (ni le livreur ni un import ne defont une
     // livraison). Seule cette correction, journalisee, le fait.
@@ -7860,14 +8043,16 @@ function corrigerArret(db, routeId, stopId, { status, cause } = {}, par = "") {
   if (status === "livre") {
     // L'heure du geste d'origine : c'est la que le livreur etait sur place.
     const quand = Number.isFinite(Date.parse(stop.deliveredAt || "")) ? stop.deliveredAt : now;
-    setOrderStatus(order, "livre", quand);
+    if (order) setOrderStatus(order, "livre", quand);
     stop.deliveredAt = quand;
     stop.problemReason = "";
     stop.problemReasonKey = "";
     if (client) client.statut = "livree";
   } else if (status === "absent" || status === "probleme") {
-    setOrderStatus(order, "a_reprogrammer");
-    order.deliveryStatus = status;
+    if (order) {
+      setOrderStatus(order, "a_reprogrammer");
+      order.deliveryStatus = status;
+    }
     stop.deliveredAt = stop.deliveredAt || now;
     stop.problemReason = `${libelleStatutArret(status)} (correction : ${pourquoi})`;
     stop.problemReasonKey = "";
@@ -8041,11 +8226,16 @@ function reprendreStockLibere(db, order, origine) {
  * A appeler APRES writeDb : syncWorkflow a remplace les objets par leur forme
  * normalisee.
  */
+// Le geste sur un arret dont la commande est mise de cote (commandeDeLArret),
+// dit dans l'historique : la commande n'a pas suivi.
+const SANS_COMMANDE_MISE_DE_COTE = " — commande mise de côté (texte illisible) : ni son statut ni le stock n'ont suivi";
+
 function etatApresGesteArret(db, geste) {
   const route = routeAvecTrace(db, geste.route.id) || geste.route;
   const stop = route.stops.find(item => String(item.id) === String(geste.stop.id)) || geste.stop;
-  const order = db.commandes.find(item => String(item.id) === String(geste.order.id)) || geste.order;
-  const trouve = db.clients.find(item => String(item.id) === String(order.clientId));
+  // null : commande mise de cote (commandeDeLArret).
+  const order = geste.order ? db.commandes.find(item => String(item.id) === String(geste.order.id)) || geste.order : null;
+  const trouve = db.clients.find(item => String(item.id) === String(order ? order.clientId : stop.clientId));
   // Le client tel que /api/clients le rend (sans releve d'import, 24/09).
   const client = trouve ? sansReleveDImport(trouve) : null;
   return { route, stop, order, client };
@@ -8211,7 +8401,9 @@ app.get("/api/historique", requireAdministration, (req, res) => {
   res.json(readDb().historique);
 });
 
-const JOURNAL_PAGE_DEFAUT = 50;
+// Decision 10 de Thomas (24/09) : les 200 dernieres lignes, puis « voir plus »
+// (relecture adverse du 26/09 : la page etait restee a 50).
+const JOURNAL_PAGE_DEFAUT = 200;
 const JOURNAL_PAGE_MAX = 200;
 
 /** « Alèses : −2 · 10 → 8 · Inventaire » : un mouvement de stock en une ligne. */
@@ -8308,6 +8500,15 @@ app.get("/api/dashboard", (req, res) => {
   res.json(getDashboardSummary(db, useSqliteStorage() ? { nombreDeVentes: getSqliteStore().compterVentes() } : {}));
 });
 
+function lignesMisesDeCotePourEtat() {
+  if (!useSqliteStorage()) return { nombre: 0, dernieres: [] };
+  try {
+    return getSqliteStore().lignesMisesDeCote();
+  } catch {
+    return null;
+  }
+}
+
 app.get("/api/storage/status", (req, res) => {
   res.json({
     engine: useSqliteStorage() ? "sqlite" : "json",
@@ -8328,6 +8529,9 @@ app.get("/api/storage/status", (req, res) => {
     backupsSuspended: backupsSuspendedFreshEmpty,
     lastBackupAt,
     lastBackupError,
+    // Robustesse (25/09) : les lignes illisibles mises de cote (sans leur
+    // contenu) ; null si l'etat ne se lit pas.
+    lignesMisesDeCote: lignesMisesDeCotePourEtat(),
     // Calcul routier (23/09) : carte locale ou serveur public, zone, date de
     // la carte, derniere erreur, espace utilise ; `resume` est la ligne de
     // l'ecran Parametres.
@@ -10915,10 +11119,10 @@ app.post("/api/routes/:routeId/stops/:stopId/correction", async (req, res) => {
       const db = readDb();
       const par = getRequestIdentity(req)?.identifiant || "";
       const r = corrigerArret(db, req.params.routeId, req.params.stopId, req.body || {}, par);
-      addHistory(db, "Correction", `${r.stop.clientName} : ${libelleStatutArret(r.avant)} → ${libelleStatutArret(r.stop.status)} — ${r.cause}`, {
+      addHistory(db, "Correction", `${r.stop.clientName} : ${libelleStatutArret(r.avant)} → ${libelleStatutArret(r.stop.status)} — ${r.cause}${r.order ? "" : SANS_COMMANDE_MISE_DE_COTE}`, {
         routeId: r.route.id,
         stopId: r.stop.id,
-        orderId: r.order.id,
+        orderId: r.order ? r.order.id : r.stop.orderId,
         de: r.avant,
         vers: r.stop.status,
         par
@@ -10960,10 +11164,11 @@ app.patch("/api/routes/:routeId/stops/:stopId", async (req, res) => {
       // Decision 10 : « remis a… » s'y lit aussi.
       const remis = r.stop.status === "livre" && r.stop.remisA ? ` — remis à ${r.stop.remisA}` : "";
       const tard = r.retard ? " (geste fait avant la clôture de la tournée)" : "";
-      addHistory(db, "Livraison", `${r.stop.clientName} : ${r.stop.status}${cause}${remis}${tard}`, {
+      const sansCommande = r.order ? "" : SANS_COMMANDE_MISE_DE_COTE;
+      addHistory(db, "Livraison", `${r.stop.clientName} : ${r.stop.status}${sansCommande}${cause}${remis}${tard}`, {
         routeId: r.route.id,
         stopId: r.stop.id,
-        orderId: r.order.id,
+        orderId: r.order ? r.order.id : r.stop.orderId,
         ...(r.stop.status === "livre" && r.stop.remisA ? { remisA: r.stop.remisA } : {})
       });
 
@@ -11468,7 +11673,118 @@ function planifierPurgeDesTournees() {
   if (suivants.unref) suivants.unref();
 }
 
+// ============================================================================
+// ARRET PROPRE (robustesse, 25/09, chasse aux defauts section 4)
+// ============================================================================
+//
+// Avant : aucun gestionnaire de SIGTERM. A chaque redeploiement (sereo-updater,
+// `docker stop` : SIGTERM, puis SIGKILL 10 s plus tard), Node mourait sur le
+// coup : la requete en cours etait coupee (mesure du rapport : un PATCH en
+// attente du verrou recoit une reponse vide), la base n'etait ni validee au
+// fichier principal ni fermee, et une sauvegarde en cours laissait son
+// fichier temporaire (db-...gz.tmp) pour toujours.
+//
+// Maintenant, au premier SIGTERM ou SIGINT : plus de nouvelle connexion (et
+// 503 pour une requete qui arriverait sur une connexion deja ouverte : la
+// file hors ligne la renvoie), les requetes en cours finissent, puis la file
+// des ecritures et la sauvegarde en vol, la carte OSRM locale s'arrete, la
+// base est validee (checkpoint) et fermee, et le processus sort avec 0. Le
+// tout plafonne a ARRET_DELAI_MS, sous les 10 s de `docker stop`. Un second
+// signal garde son effet par defaut (arret immediat).
+
+const ARRET_DELAI_MS = 8000;
+let requetesEnCours = 0;
+let arretEnCours = null;
+let quitterLeProcessus = code => process.exit(code);
+
+function attendre(ms) {
+  return new Promise(resolve => {
+    const minuterie = setTimeout(resolve, ms);
+    if (minuterie.unref) minuterie.unref();
+  });
+}
+
+// La promesse, ou rien de plus que `ms` millisecondes.
+function auPlus(promesse, ms) {
+  return Promise.race([Promise.resolve(promesse).catch(() => {}), attendre(Math.max(0, ms))]);
+}
+
+async function arreterProprement(serveur, { signal = "SIGTERM", delaiMs = ARRET_DELAI_MS } = {}) {
+  if (arretEnCours) return arretEnCours;
+  arretEnCours = (async () => {
+    const debut = Date.now();
+    const reste = () => delaiMs - (Date.now() - debut);
+    console.log(`[arret] ${signal} recu : plus de nouvelle requete ; ${requetesEnCours} en cours.`);
+    if (serveur) {
+      serveur.close();
+      if (serveur.closeIdleConnections) serveur.closeIdleConnections();
+    }
+    while (requetesEnCours > 0 && reste() > 0) await attendre(20);
+    // Les ecritures deja en file (y compris hors requete : geocodage, purge).
+    let file;
+    do {
+      file = writeQueue;
+      await auPlus(file, reste());
+    } while (file !== writeQueue && reste() > 0);
+    await auPlus(flushPendingBackup(), reste());
+    if (serveur && serveur.closeAllConnections) serveur.closeAllConnections();
+    await auPlus(osrmLocal.arreter(), Math.min(1000, Math.max(0, reste())));
+    const restantes = requetesEnCours;
+    try {
+      if (useSqliteStorage() && sqliteStore) sqliteStore.checkpoint();
+    } catch (error) {
+      console.error(`[arret] validation de la base impossible : ${error.message || error}`);
+    }
+    closeStorage();
+    console.log(`[arret] termine en ${Date.now() - debut} ms${restantes ? ` (${restantes} requete(s) coupee(s) au bout du delai)` : ""}.`);
+    quitterLeProcessus(0);
+  })();
+  return arretEnCours;
+}
+
+let signauxInstalles = false;
+let serveurCourant = null;
+
+function installerArretPropre(serveur) {
+  serveurCourant = serveur;
+  if (signauxInstalles) return;
+  signauxInstalles = true;
+  for (const signal of ["SIGTERM", "SIGINT"]) {
+    process.once(signal, function arretPropreDeSereo() {
+      arreterProprement(serveurCourant, { signal }).catch(error => {
+        console.error(`[arret] ${error.message || error}`);
+        quitterLeProcessus(1);
+      });
+    });
+  }
+}
+
+// Les fichiers temporaires d'une sauvegarde interrompue (processus tue pendant
+// la compression) : ni la rotation ni la restauration ne les voient
+// (BACKUP_FILENAME_PATTERN), ils restaient pour toujours. Supprimes au
+// demarrage : aucune sauvegarde de CE processus n'a encore commence.
+function nettoyerSauvegardesInachevees() {
+  let noms = [];
+  try {
+    noms = fs.readdirSync(BACKUP_DIR);
+  } catch {
+    return [];
+  }
+  const supprimes = [];
+  for (const nom of noms.filter(n => /^db-.*\.tmp$/.test(n))) {
+    try {
+      fs.unlinkSync(path.join(BACKUP_DIR, nom));
+      supprimes.push(nom);
+    } catch (error) {
+      console.error(`[sauvegarde] fichier temporaire ${nom} non supprime : ${error.message || error}`);
+    }
+  }
+  if (supprimes.length) console.log(`[sauvegarde] ${supprimes.length} fichier(s) temporaire(s) d'une sauvegarde interrompue supprime(s) : ${supprimes.join(", ")}`);
+  return supprimes;
+}
+
 function startServer(port = PORT, host = HOST) {
+  nettoyerSauvegardesInachevees();
   // P1 v1.14.0 : healing initial pour garantir la coherence apres restart
   // (notamment apres restauration d'un backup ou montee de version)
   healDatabaseAtBoot();
@@ -11500,6 +11816,7 @@ function startServer(port = PORT, host = HOST) {
       console.warn(`[osrm-local] ${error?.message || error}`);
     }
   });
+  installerArretPropre(serveur);
   return serveur;
 }
 
@@ -11566,6 +11883,8 @@ module.exports = {
   // Lot 3 de l audit geo : des adresses justes
   listerAdressesAVerifier,
   getSqliteStoreForTests: () => getSqliteStore(),
+  // /healthz (26/09) : la prochaine sonde fait la relecture complete.
+  _oublierSondeCompletePourTest: () => { sondeComplete = { store: null, a: 0, erreur: null }; },
   // Comptes utilisateurs (V8 phase 1)
   hashPassword,
   verifyPassword,
@@ -11606,6 +11925,9 @@ module.exports = {
   _sauvegarderPourTest: tag => writeBackupNowAsync(tag),
   _nettoyerSauvegardesInterrompues: nettoyerSauvegardesInterrompues,
   _reinitialiserLimiteSauvegardesPourTest: () => { sauvegardesManuelles.length = 0; },
+  // Arret propre (25/09) : les bancs remplacent la sortie du processus.
+  _quitterPourTest: fn => { quitterLeProcessus = fn; },
+  _arreterProprement: arreterProprement,
   _isCorruptionError: isCorruptionError,
   _normalizeDateInput: normalizeDateInput,
   _excelDateToIso: excelDateToIso,

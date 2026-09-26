@@ -323,7 +323,11 @@ test("journal — GET /api/journal : 50 par page, du plus recent au plus ancien,
       // Une ligne ecrite entre deux pages ne decale pas la suite.
       if (genre === "actions" && tailles.length === 1) {
         const db = readDb();
-        db.historique.unshift({ id: "h-neuve", date: new Date().toISOString(), type: "Test", message: "entre deux pages" });
+        // Plus recente que tout le seme (25/09) : `new Date()` tombait AVANT
+        // lui la nuit (00 h a 10 h a Paris : le seme est date du jour a
+        // 05-08 h UTC), et la ligne « neuve » arrivait en page 3 -- un rouge
+        // selon l'heure du banc, pas selon le code.
+        db.historique.unshift({ id: "h-neuve", date: date(-1), type: "Test", message: "entre deux pages" });
         writeDb(db, { backup: false });
       }
     } while (curseur && tailles.length < 10);
@@ -348,4 +352,22 @@ test("journal — GET /api/journal : 50 par page, du plus recent au plus ancien,
   assert.equal(mouvement.genre, "stock");
   assert.equal(mouvement.auteur, null, "« local » n'est pas un auteur");
   assert.equal(mouvement.message, "Alèses : −2 · 10 → 8 · Ajustement manuel");
+});
+
+test("journal — decision 10 : sans limite demandee, les 200 dernieres lignes, puis la suite", async () => {
+  // Relecture adverse du 26/09 : la page restait a 50 lignes, la decision de
+  // Thomas (24/09) dit « 200 dernieres lignes affichees, voir plus ».
+  const base = Date.parse(`${AUJOURDHUI}T08:00:00Z`);
+  ensemencer({
+    historique: Array.from({ length: 250 }, (_, i) => ({ id: `h-${String(i).padStart(3, "0")}`, date: new Date(base - i * 60000).toISOString(), type: "Test", message: `action ${i}` }))
+  });
+  const premiere = await demander("/api/journal?genre=actions");
+  assert.equal(premiere.res.status, 200, JSON.stringify(premiere.body));
+  assert.equal(premiere.body.entrees.length, 200);
+  assert.equal(premiere.body.entrees[0].id, "h-000", "la plus recente d'abord");
+  assert.ok(premiere.body.suivant, "rien n'annonce la suite");
+  const suite = await demander(`/api/journal?genre=actions&avant=${encodeURIComponent(premiere.body.suivant)}`);
+  assert.equal(suite.body.entrees.length, 50);
+  assert.equal(suite.body.suivant, null);
+  assert.equal(suite.body.total, 250, "une ligne a ete supprimee");
 });
