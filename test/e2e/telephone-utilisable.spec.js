@@ -672,6 +672,12 @@ test.describe("arret de trois articles", () => {
       const toast = page.locator("#toastRegion .toast", { hasText: "Livré — EHPAD Les Tilleuls du Val de Loue" });
       await expect(toast).toBeVisible();
       await expect(page.locator("#currentClient .arret-nom")).toHaveText("Pharmacie Centrale de la Gare");
+      // Le message se place a l'image SUIVANTE (ajusterArretAuPouce, en
+      // requestAnimationFrame), AVANT qu'elle soit peinte : l'utilisateur ne
+      // voit jamais l'ancienne place. Mesurer entre l'arret affiche et cette
+      // image lisait la place de l'arret precedent (CI du 26/09 : 538..606 au
+      // premier essai, 501..569 au second). On attend deux images.
+      await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
       const r = await page.evaluate(() => {
         const t = document.querySelector("#toastRegion .toast").getBoundingClientRect();
         const couverts = ["markDeliveredButton", "mapsButton", "callClientButton", "voirCarteButton"].filter(id => {

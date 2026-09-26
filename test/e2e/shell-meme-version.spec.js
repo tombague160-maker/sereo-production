@@ -162,8 +162,15 @@ test("apres une mise a jour INSTALLEE, la tournee rouverte hors ligne demarre, s
   // Deploiement : le serveur passe en version B, le livreur ouvre l'application.
   mdt.etat.version = "B";
   await page.reload({ waitUntil: "domcontentloaded" });
-  await expect.poll(() => shells(page), { timeout: 30000, message: "le service worker B ne s'est pas installe a la place de A" })
+  // B ne prend la main (skipWaiting, puis l'ancien cache supprime) qu'APRES
+  // avoir telecharge tout son shell. En CI chargee, c'etait parfois plus de
+  // 30 s (26/09 : [A, A-b] au bout de 30 s, juste au second essai) : on attend
+  // la prise de main REELLE (B actif, A efface) jusqu'a 90 s, et on journalise
+  // sa duree -- un vrai blocage reste rouge.
+  const debutB = Date.now();
+  await expect.poll(() => shells(page), { timeout: 90000, message: "le service worker B ne s'est pas installe a la place de A" })
     .toEqual([`${nomA}-b`]);
+  console.log(`[shell] B a pris la main en ${Date.now() - debutB} ms`);
   await page.close();
   const { page: rouverte, etat, echecs } = await rouvrirHorsLigne(ctx);
   expect(etat, `rouverte hors ligne (titre : « ${etat.titre} ») ; requetes echouees : ${echecs.join(", ")}`).toMatchObject({
