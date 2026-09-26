@@ -8331,3 +8331,67 @@ leurs voisins — `import-*`, `pieges-import-validation`, `pieges-tournee`, `com
 `integration-lots-1-5`, `barre-laterale-finitions` — **298/298** (`rendu-a-l-affichage` rejoué
 seul : son port 3562 était pris par un autre worktree). Non lancé : `numerotation-admin` (serveur
 authentifié, hors du lot).
+
+### Relecture adverse du 26/09 — le sort de chaque défaut
+
+Relecture de `a7554de`. Quatre défauts, tous vrais, tous corrigés, chacun avec son banc rouge sur
+`a7554de`.
+
+1. **Important — la commande pouvait encore se perdre au rejeu** (`48c7704`). Le chemin que la
+   reprise disait fermer : la page envoie avec `demanderSiDoublon` et la clé `X-Sereo-Geste` K,
+   le serveur trouve une fiche que la liste n'avait pas et répond 409 ; `gesteIdempotent`
+   enregistrait ce 409 comme **la** réponse de K. Si elle se perdait (4G, délai de 30 s), la file
+   gardait l'écriture avec la même clé K et le corps « nouvelle fiche » : le serveur rendait
+   `409 {rejoue}` sans lire le corps, la file retirait tout 4xx. Le 409 « doublon de fiche » est
+   une **question**, rien n'est appliqué : sa clé n'est plus enregistrée (`erreur.question` →
+   `res.locals.gesteSansEffet`). Le rejeu est traité ; la clé prend alors sa réponse (201), et un
+   renvoi suivant est rejoué, pas refait. Le banc e2e de la reprise coupait la requête **avant**
+   le serveur (aucune clé) ; le nouveau laisse le serveur traiter (`route.fetch()`) puis coupe la
+   réponse.
+2. **Important — une ligne en erreur réécrivait un bon déjà importé** (`a8247ea`). Jusqu'au 25/09
+   une quantité vide valait 1 et une ligne sans produit restait dans le bon. Au réimport du
+   fichier cumulatif, les seules lignes lisibles remplaçaient les lignes de vente du bon et la
+   commande encore à préparer : un produit en sortait, son montant baissait, le résumé ne disait
+   qu'« 1 ligne écartée ». Un bon **incomplet** du fichier (une ligne sans quantité ou sans
+   produit dont le client et la date se lisent) déjà connu est laissé tel quel : commande non
+   réécrite (raison `ligne_en_erreur`, « une ligne de ce bon est en erreur dans le fichier »),
+   lignes de vente gardées. Un bon nouveau est créé avec ses lignes lisibles, comme avant. La
+   fusion des ventes passe après la décision sur les commandes. Une date illisible ne dit pas le
+   bon (jusqu'au 25/09 la ligne allait dans un bon daté du jour de l'import) : non concernée.
+3. **Mineur — une adresse changée dans Ximi doublait les ventes** (`8b1313b`). Le bon d'une vente
+   se reconnaissait à l'adresse complète ; la fiche et la commande se retrouvaient (nom + code
+   postal), les anciennes lignes restaient et les nouvelles s'y ajoutaient, pour toujours. Une
+   ancienne vente prend la clé du bon du fichier quand sa fiche est **sûre des deux côtés** (une
+   seule fiche porte son adresse complète ; le fichier rattache son bon de même date à cette
+   fiche par la clé complète ou par un nom + code postal qu'aucune autre fiche ne partage) :
+   l'identité de la commande. Sinon, sa clé reste la sienne : on garde plutôt que d'effacer.
+4. **Mineur — « Planifier la suite » d'une commande orpheline créait une fiche en double**
+   (`14e2b28`). `replanOrder` n'a personne à qui poser la question : il rattache à la fiche au
+   même téléphone (ou nom + code postal), prise **telle quelle** (option interne
+   `rattacherSiDoublon`, jamais lue dans une requête). Appelants recensés : la route
+   `/api/planned-orders` et `createCustomerOrder` (la page demande), les abonnements
+   (`operations-api.js` : `clientId` seul, sans nom ni téléphone — inchangés).
+
+Réserves de la relecture :
+
+- Un **nom** ou un **code postal** changé dans Ximi ne retrouve pas la fiche (clé complète et nom +
+  code postal diffèrent) : une nouvelle fiche et une nouvelle commande par bon, et ses ventes en
+  plus des anciennes. C'était déjà le cas des fiches et des commandes avant le lot ; le correctif
+  3 n'y touche pas (le rattacher au téléphone risquerait d'effacer les ventes d'un autre client
+  au même standard).
+- Un homonyme au même code postal dont l'adresse change garde ses anciennes lignes (doublon) :
+  choix délibéré, aucune vente d'un autre client ne peut disparaître.
+
+Bancs ajoutés : `commande-doublon-fiche` (même clé : 409 puis « nouvelle fiche » → 201, puis
+renvoi rejoué ; commande orpheline replanifiée et son témoin), `import-lignes` (quantité vide,
+sans produit ; témoins : bon corrigé, bon nouveau), `import-fusion-clients` (rue, ville
+changées ; deux témoins homonymes — le second mord le mutant « nom + code postal toujours sûr »),
+e2e `import-clients-fusion` (409 traité puis réponse perdue ; le résumé nomme `ligne_en_erreur`).
+
+Code vérifié : `8b1313b`. `npm run check` ; `npm test` **817/817** (806 + 11 nouveaux). e2e :
+`import-clients-fusion`, `import-fusion-production`, `pieges-import-validation`, `hors-ligne`,
+`livreur-ne-perd-rien`, `tournee-hors-ligne`, `donnees-utiles`, `commandes`, `clients`,
+`clients-mobile`, `operations`, `carte-ca-remplie`, `tableau-de-bord-relecture`,
+`chargement-instantane`, `integration-lots-1-5` — **177/177** ; le banc « aucune donnée perdue »
+sur la base écrite par v1.45.1, **4/4**, mêmes comptes qu'avant la relecture, base source
+inchangée (même SHA-256).
