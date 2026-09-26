@@ -313,6 +313,25 @@ test("PATCH en preparation d'une « à reprogrammer » liberee, rayon insuffisan
   assert.equal((await produit("p1")).rayon, 3);
 });
 
+// Temoin (vert avant et apres) : la reprise ne vaut que pour les statuts ou la
+// liberation est admise. Une commande EN LIVRAISON au stock libere (hors de
+// toute tournee active : donnee d'avant le lot 1, ou semee ainsi) que PATCH
+// dit « livre » sur un rayon insuffisant reste ACCEPTEE (decision de Thomas du
+// 23/09, reprendreStockLibere) : la reprise ne doit pas la refuser.
+test("temoin : PATCH « livre » d'une commande en livraison au stock libere, rayon insuffisant : acceptee, rayon negatif", async () => {
+  ensemencer({
+    commandes: [{
+      ...commandeImportee(12), status: "en_livraison",
+      stockReservedAt: null, stockReleasedAt: "2026-09-20T10:00:00.000Z", stockReleaseReason: "manual_release"
+    }]
+  });
+  const r = await envoyer("PATCH", "/api/orders/o-patch", { status: "livre" });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal((await commande("o-patch")).status, "livre");
+  assert.equal((await demander("/api/stock")).body.find(p => p.id === "p1").quantite, -2,
+    "livree quand meme : le rayon passe en negatif, et le dit");
+});
+
 // Temoin (vert avant et apres) : une « a reprogrammer » qui a GARDE sa
 // reservation ne sort pas son stock une seconde fois.
 test("temoin : PATCH en preparation d'une « à reprogrammer » qui garde sa reservation : rien ne ressort", async () => {
