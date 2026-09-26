@@ -128,6 +128,36 @@ test("un zip qui MENT sur sa taille decompressee est refuse sur ce qu'il contien
   assert.match(r.body.error, /trop volumineux une fois décompressé/);
 });
 
+/**
+ * Relecture adverse du 26/09 : la garde lit le REPERTOIRE CENTRAL du zip ;
+ * read-excel-file lit les en-tetes LOCAUX, en flux (unzipper.Parse), sans
+ * jamais le consulter. `cachees` : des parties ajoutees en en-tete local
+ * seulement, apres celles du classeur, absentes du repertoire central.
+ */
+function avecPartiesCachees(visible, cachees) {
+  const finDuRepertoire = buf => { for (let i = buf.length - 22; i >= 0; i--) if (buf.readUInt32LE(i) === 0x06054b50) return i; return -1; };
+  const fin = finDuRepertoire(visible);
+  const debut = visible.readUInt32LE(fin + 16);
+  const autre = Buffer.from(zipSync(cachees, { level: 9 }));
+  const locauxCaches = autre.subarray(0, autre.readUInt32LE(finDuRepertoire(autre) + 16));
+  const repertoire = Buffer.from(visible.subarray(debut));
+  repertoire.writeUInt32LE(debut + locauxCaches.length, fin - debut + 16);
+  return Buffer.concat([visible.subarray(0, debut), locauxCaches, repertoire]);
+}
+
+test("une partie cachee (en-tete local absent du repertoire central) n'est jamais lue : la lecture ne voit que ce que la garde a compte", async () => {
+  const visible = `${ENTETE_STOCK}<row r="2">${enLigne("A2", "VISIBLE")}${enLigne("B2", "Produit visible")}${enLigne("C2", "12")}</row>`;
+  const cachee = `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${ENTETE_STOCK}`
+    + `<row r="2">${enLigne("A2", "PIEGE")}${enLigne("B2", "Produit cache")}${enLigne("C2", "99")}</row></sheetData></worksheet>`;
+  const fichier = avecPartiesCachees(classeur(visible), { "xl/worksheets/sheet1.xml": strToU8(cachee) });
+  const r = await importer("/api/import/stock", fichier, "cachee.xlsx");
+  assert.equal(r.status, 200, JSON.stringify(r.body).slice(0, 300));
+  const stock = await (await fetch(`${base}/api/stock`, { headers: { connection: "close" } })).json();
+  const codes = (Array.isArray(stock) ? stock : stock.products || stock.stock || []).map(p => p.code || p.reference || p.sku);
+  assert.ok(!codes.includes("PIEGE"), `la lecture a lu une partie que la garde n'a pas comptee : ${JSON.stringify(codes)}`);
+  assert.ok(codes.includes("VISIBLE"), `temoin : la partie comptee n'a pas ete lue (${JSON.stringify(codes)})`);
+});
+
 test("temoin : un fichier de stock ordinaire et des ventes au format Ximi (500 lignes) passent", async () => {
   const stock = await importer("/api/import/stock", classeur(`${ENTETE_STOCK}<row r="2">${enLigne("A2", "P1")}${enLigne("B2", "Produit")}${enLigne("C2", "12")}</row>`));
   assert.equal(stock.status, 200, JSON.stringify(stock.body).slice(0, 300));
