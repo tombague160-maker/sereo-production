@@ -8194,3 +8194,179 @@ liste ciblée — les bancs des deux lots, `chargement-instantane`, `hors-ligne`
 `stock*`, `tabs`, `smoke` — **312/312** ; suite complète, deux passages : **723/723** et
 **723/723**. Un passage complet préalable (avant `4d8f513` et le banc de la carte) : 721 verts,
 le rouge de `carte-telephone` réglé ci-dessus.
+
+## 25/09 — Garde-fous : droits, sauvegardes, purge
+
+Branche `fix/garde-fous`, partie de `5b52268` (v1.46.0 et la performance du 24/09). Décisions de
+Thomas du 24/09 : 1, 3, 4, 5 et 6 (la 2, protection de la branche, revient à l'intégrateur). Chasse
+aux défauts du 24/09 : section 3 (sécurité) et section 4 (exploitation), partie serveur.
+
+### Qui peut écrire quoi (décision 6)
+
+Avant, les rôles ne gardaient que les onglets. Un compte « livreur » atteignait 49 routes
+d'écriture sur 55 par appel direct, que `SEREO_SEPARATION_ROLES` soit posée ou non : `peutEcrire`
+n'est lu nulle part, et la variable ne pilote que la navigation. Les gardes sont désormais sur les
+routes, et ne dépendent pas de la variable :
+
+- `requireAdministration` : 401 sans session, 403 « Réservé aux administrateurs. » pour un compte
+  livreur, bureau ou préparateur ;
+- `refuserAuLivreur` : 403 pour le seul livreur.
+
+La table ci-dessous reprend `GARDES` de `test/garde-fous-routes.test.js`. Ce banc relève toutes
+les routes d'écriture de `server.js` et `lib/*.js`. Il rougit si l'une d'elles n'est pas déclarée,
+ou si une route déclarée a disparu. Il éprouve ensuite chaque garde par un vrai appel avec chaque
+rôle, l'administrateur servant de témoin. **Une route d'écriture ajoutée s'ajoute aux deux
+endroits.**
+
+| Garde | Routes d'écriture (52) |
+|---|---|
+| Hors session (2) | `POST /login`, `POST /logout` |
+| Administration (14) | `POST /api/backup/now` ; `PATCH /api/settings/appearance`, `/api/settings/stock`, `/api/settings/order-numbering`, `/api/settings/tournee` ; `POST /api/delivery-sectors`, `PATCH` et `DELETE /api/delivery-sectors/:id` ; `POST /api/import/stock` et `/api/import/ventes` (refusés AVANT la réception du fichier) ; `POST /api/orders/purge` ; `POST /api/comptes`, `PATCH` et `DELETE /api/comptes/:id` |
+| Tout compte sauf livreur (1) | `PATCH /api/stock/:id` (bureau et préparation gardent l'ajustement du stock) |
+| Tout compte connecté (35) | Clients et CRM : `POST /api/crm/clients`, `PATCH` et `DELETE /api/crm/clients/:id`, `POST /api/crm/relances`, `PATCH /api/crm/relances/:id`, `PATCH /api/clients/:id`, `PATCH /api/clients/:id/coordinates`. Commandes : `POST /api/customer-orders`, `POST /api/customer-orders/send-preparation`, `POST /api/planned-orders`, `PATCH /api/planned-orders/:id`, `POST /api/planned-orders/:id/confirm`, `POST /api/orders/:id/replan`, `…/start-preparation`, `…/finish-preparation`, `…/release-stock`, `PATCH /api/orders/:id`, `POST /api/exports/commandes.xlsx`. Tournées et livraison : `POST /api/routes/decoupage`, `POST /api/routes`, `POST /api/routes/:id/start`, `…/annuler`, `…/cloturer`, `…/recalculate`, `…/reoptimiser`, `…/ajouter`, `POST /api/routes/:id/stops/:stopId/maintenant`, `POST /api/routes/:routeId/stops/:stopId/correction`, `PATCH /api/routes/:routeId/stops/:stopId`, `PATCH /api/routes/:id/reorder`, `POST /api/livraison`. Et `POST /api/geocodage/lancer` ; abonnements : `POST /api/subscriptions`, `PATCH /api/subscriptions/:id`, `POST /api/subscriptions/:id/orders` |
+
+**Lectures réservées à l'administration**, par la même garde (elles ne figurent pas dans la table,
+qui ne recense que les écritures) :
+
+- `GET /api/db` : l'export complet de la base. Il est fermé par défaut, mais
+  `SEREO_ENABLE_DB_EXPORT=1` l'ouvrait à **tout** compte connecté. Il est réservé à
+  l'administration depuis le 25/09 ; son banc est dans le même fichier.
+- `GET /api/sauvegardes/derniere`, `GET /api/imports/archives/:id/download`.
+- `GET /api/historique`, `GET /api/journal`, `GET /api/comptes`.
+
+**Retirée : `POST /api/reset-tournee`.** Aucun écran ne l'appelait et elle était ouverte à tous.
+Elle répondait 200 et défaisait une tournée en cours sur une base sans commande livrée. Le banc
+exige désormais 404.
+
+**À l'écran.** Les blocs `[data-reserve-admin]` gardent leur lecture pour les autres comptes. Ces
+blocs sont : les imports Excel de l'accueil, le logo, les secteurs, les imports et archives (et
+leur feuille au téléphone), l'horizon d'« À recommander », les réglages de tournée et la zone
+dangereuse. Pour les autres comptes, les commandes de ces blocs sont fermées, et une note dit
+« Réservé aux administrateurs. », comme pour la numérotation des bons. Les réglages de CET appareil
+restent libres (`[data-appareil]`). Les boutons d'import de l'en-tête sont fermés comme hors ligne,
+avec la même raison en titre. La carte « Sauvegardes » l'était déjà (v1.46.0).
+
+### Sauvegardes
+
+- **Cohérentes, puis relues.** Avant, la sauvegarde automatique lisait le fichier de la base en
+  flux pendant que d'autres écritures vidaient le WAL. Mesure de la chasse : pendant un gros import,
+  2 fois sur 2, la copie sortait déchirée, et rien ne la relisait. Désormais, un thread de travail
+  (`lib/sauvegarde-base.js`, `lib/sauvegarde-travail.js`) fait un `VACUUM INTO` depuis une seconde
+  connexion en lecture seule : on obtient un instantané cohérent. La copie est compressée, puis
+  relue comme une restauration : `integrity_check`, et relevé des tables demandées. Le fichier ne
+  prend son nom final qu'après cette relecture. Un échec ne laisse ni fichier final ni fichier de
+  travail. Au démarrage, les fichiers de travail d'une sauvegarde interrompue (`.gz.tmp`,
+  `.travail-*`) sont effacés, jamais un `.gz` fini.
+- **Conservation (décision 4).** Sont gardées : les 30 plus récentes ; la dernière de chaque jour
+  de Paris sur 30 jours ; la dernière de chaque semaine (lundi-dimanche) sur 8 semaines. Les
+  sauvegardes « avant-purge » des tournées comptent comme les autres. La décision dit « 14 jours » :
+  les 30 jours posés le 24/09 les contiennent, et revenir à 14 supprimerait plus qu'avant. Le banc
+  aléatoire (200 mélanges) vérifie que l'ensemble gardé contient toujours celui de la règle
+  d'avant.
+- **Hors rotation (décision 5).** Les sauvegardes `avant-purge-commandes` ne sont jamais évincées,
+  et ne prennent aucune place parmi les 30.
+- **« Sauvegarder maintenant ».** Réservé à l'administration. Au plus 10 par heure glissante :
+  au-delà, 503 avec `Retry-After` (pas 429, que l'écran prend pour un verrou de connexion). Si
+  rien n'a été écrit depuis la dernière sauvegarde de ce processus, le serveur répond « Déjà à
+  jour » sans écrire de fichier. Le genre `avant-purge-*` est réservé. Avant, une purge suivie de
+  30 appels remplaçait toutes les sauvegardes par une base vide.
+- **Second dossier (décision 3).** `SEREO_BACKUP_COPY_DIR` désigne un second dossier, idéalement
+  sur un autre disque. Chaque sauvegarde y est aussi copiée : fichier provisoire, relecture (même
+  empreinte sha256), même date, puis même conservation. Sans la variable, rien ne change. Une copie
+  qui échoue ne fait pas échouer la sauvegarde : la carte le dit, en mots et dans la couleur
+  d'alerte. La variable est documentée dans `.env.example` et `DEPLOYMENT.md` (« Sauvegardes » :
+  montage, conservation, restauration à la main).
+- **La purge des tournées relit sa sauvegarde.** Elle décompresse le fichier, l'ouvre en lecture
+  seule et lance `integrity_check`. Elle ne supprime qu'une tournée que ce fichier contient sous sa
+  forme actuelle. Si la sauvegarde est illisible, rien n'est purgé.
+
+### Purge des bons (décisions 5 et 6)
+
+`POST /api/orders/purge` est réservée à l'administration. Avant d'effacer, sous le verrou
+d'écriture, elle fait une sauvegarde `avant-purge-commandes` hors rotation, cohérente et relue.
+Cette sauvegarde doit porter, pour les commandes, les clients, les ventes et les tournées,
+exactement les mêmes comptes et les mêmes identifiants que ce qui va être effacé. Sinon (échec,
+écart), la réponse est 503 : « Purge refusée : … Rien n'a été effacé. » Le journal, la réponse et
+l'écran nomment la sauvegarde. Ce que la purge efface n'a pas changé.
+
+### Connexion et sessions
+
+- **Limite par compte.** 20 échecs sur un même identifiant saisi (casse et espaces ignorés, que
+  l'identifiant existe ou non) dans l'heure bloquent cet identifiant 15 minutes. La limite vaut au
+  formulaire comme en authentification Basic, et s'ajoute à celle par adresse. Le compteur n'est
+  pas remis à zéro à la fin du blocage ; une connexion réussie l'efface. Réglages :
+  `SEREO_AUTH_MAX_ATTEMPTS_COMPTE`, `SEREO_AUTH_RATE_WINDOW_COMPTE_MS`,
+  `SEREO_AUTH_LOCKOUT_COMPTE_MS`. Contrepartie : quelqu'un qui connaît un identifiant peut le
+  bloquer 15 minutes.
+- **Les sessions fermées le sont côté serveur.** « Se déconnecter » ferme la session : l'empreinte
+  sha256 du cookie est gardée jusqu'à l'expiration qu'il aurait eue, et les autres appareils du
+  compte restent connectés. Changer le mot de passe d'un compte en base ferme toutes ses sessions
+  ouvertes ; qui change le sien reçoit une session neuve. Ces sessions fermées sont gardées dans
+  `app_meta` (deux clés, sans table ni colonne nouvelle) et relues après un redémarrage.
+  Conséquence : une lecture de l'écran partie pendant la déconnexion reçoit 401. `apiFetch` lançait
+  alors sa propre navigation, qui interrompait celle du formulaire (`net::ERR_ABORTED`) : le banc
+  `connexion.spec.js` rougissait parfois. La fenêtre existait déjà avant, plus étroite. Pendant une
+  déconnexion en ligne, le 401 ne navigue plus.
+- **Mot de passe d'environnement court.** Sous 12 caractères, le serveur démarre quand même : un
+  refus verrouillerait Thomas hors de son application après la mise à jour. Le journal du démarrage
+  signale la longueur insuffisante, sans le mot de passe ni sa longueur. `/api/me` le signale à
+  l'administration seulement, et l'écran en fait un bandeau d'alerte, fermable.
+
+### Décision 1
+
+La ligne 38 de `docs/internal/AUDIT_2026_05_20.md` portait en clair le mot de passe de
+production : ses deux occurrences sont remplacées par « [retiré] ». Aucune autre occurrence dans
+l'arbre (vérifié par `git grep`). La valeur reste dans l'historique git et dans les forks : elle
+est compromise, et Thomas la change sur l'OMV.
+
+### Aucune donnée perdue : la preuve
+
+Le script de preuve est hors dépôt (`preuve-donnees.js`, dans le scratchpad du lot). Il a tourné
+sur deux bases :
+
+- **forme production** : `jeuProduction()`, soit 97 clients, 224 commandes, 429 ventes, 18
+  tournées, 1 036 lignes d'historique, 633 mouvements et 123 archives ;
+- **écrite par v1.45.1** (`ef78be1`, worktree jetable) : le même jeu, plus les gestes de v1.45.1.
+  Six fiches enrichies, une archivée, un prospect, un rappel, une commande terrain mise en
+  préparation (du stock réservé) et un compte livreur.
+
+Sur une copie de chaque base, avec le code du lot, les tables ont été relevées une à une (comptes,
+empreinte de toutes les lignes, identifiants) :
+
+1. **Au démarrage**, aucune ligne n'a disparu ; seul `app_meta` change. **Au second démarrage**,
+   rien ne change : le code est idempotent.
+2. **« Sauvegarder maintenant »** : décompressée, la sauvegarde est identique à la base en service,
+   table par table (toutes les tables).
+3. **Purge des bons.** La sauvegarde `avant-purge-commandes`, décompressée, est identique à la base
+   d'avant la purge, table par table. Après la purge, la base est celle que laisse le code de la
+   base (`5b52268`) sur une autre copie. Seuls diffèrent `app_meta` et les lignes d'historique
+   ajoutées pendant l'essai : mêmes comptes, identifiants générés différents. Aucune ligne d'avant
+   ne disparaît de l'historique.
+
+### Bancs
+
+- **Unitaires** : `garde-fous-routes`, `garde-fous-droits`, `garde-fous-sauvegardes`,
+  `garde-fous-copie`, `garde-fous-auth` et `garde-fous-mot-de-passe` (`.test.js`). Quatre bancs
+  voisins suivent la nouvelle règle : `sauvegardes` (l'oracle compte les hebdomadaires),
+  `chantier1-concurrence`, `lot5-rapidite` et `journal-auteur`. `npm test` : **809/809**.
+- **e2e** : `garde-fous.spec.js`, sur les ports 3600 (sans connexion) et 3601 (avec). L'adresse du
+  serveur authentifié de `connexion`, `contraste-login` et `numerotation-admin` se règle
+  (`SEREO_E2E_AUTH_BASE_URL`, 3101 par défaut). La liste ciblée — les bancs du lot, Paramètres,
+  connexion, hors ligne, chargement instantané, poids du réseau, rendu à l'affichage, barre
+  latérale, tournée, stock, imports, tableau de bord — donne **242/242**.
+
+### Ce qui reste
+
+- **Hors code.** Changer le mot de passe de production, et vérifier que la clé de session de l'OMV
+  n'est pas celle de l'exemple du même fichier d'audit (Thomas). Protéger la branche
+  (intégrateur). Mettre en place la copie hors disque (Thomas : le code est prêt,
+  `SEREO_BACKUP_COPY_DIR`). L'en-tête `Referrer-Policy` que SWAG double (hors dépôt).
+- **Autres lots.** Le fichier Excel piégé et les variables d'environnement non documentées
+  relèvent du lot « robustesse ». Ce lot-là efface aussi les fichiers temporaires de sauvegarde au
+  démarrage : les deux nettoyages sont à accorder à l'intégration.
+- **Choix nommés.**
+  - Les sauvegardes « avant-purge » des tournées restent dans la rotation, comme avant : seule
+    celle des bons est hors rotation (décision 5).
+  - Deux connexions d'un même compte dans la même milliseconde auraient le même cookie : fermer
+    l'une fermerait l'autre. C'est négligeable, et laissé tel quel.
+  - Hors SQLite (stockage JSON), les sessions fermées ne survivent pas à un redémarrage.
