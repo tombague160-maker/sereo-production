@@ -733,3 +733,28 @@ test("resume : une phrase par etat, tailles lisibles (Mo sous 1 Go)", () => {
     "Serveur public en attendant la carte locale « Bourgogne-Franche-Comté » : téléchargement 1/2 : 42 %.");
   assert.equal(resumer({ actif: false, raison: "coupé par SEREO_OSRM_LOCAL=0" }), "Serveur public (coupé par SEREO_OSRM_LOCAL=0).");
 });
+
+// Decision 9 (robustesse, 25/09) : la production tourne a 512 Mo et reste sur
+// le service public. La ligne de Parametres le dit, et dit ce qui activerait
+// la carte locale -- par le vrai chemin : demarrer, choisir la zone, etat().
+test("resume : a 512 Mo, « Service public — la carte locale s'active quand le conteneur a au moins 3 Go de mémoire »", async () => {
+  const resume = async (options) => {
+    const g = gestionnaire(installation(), options);
+    g.demarrer();
+    await g.demarrage;
+    await g.zoneVoulue();
+    return g.etat();
+  };
+  const production = await resume({ memoire: 512 * 1024 ** 2, libre: 300 * GO });
+  assert.equal(production.zone, null);
+  assert.equal(production.resume,
+    "Service public — la carte locale s'active quand le conteneur a au moins 3 Go de mémoire (il en a 512 Mo).");
+  // Memoire suffisante, disque trop juste : c'est le disque que la phrase nomme.
+  assert.equal((await resume({ memoire: 8 * GO, libre: 5 * GO })).resume,
+    "Service public — la carte locale s'active quand le volume de données a au moins 6 Go libres en plus des 2 Go gardés pour la base (3 Go aujourd'hui).");
+  // Temoins : assez de tout, la zone est choisie ; une zone forcee a « aucune »
+  // garde sa phrase (ce n'est pas une affaire de memoire).
+  assert.equal((await resume({ memoire: 4 * GO, libre: 20 * GO })).zoneVoulue, "Bourgogne-Franche-Comté");
+  assert.equal((await resume({ memoire: 512 * 1024 ** 2, env: { SEREO_OSRM_ZONE: "aucune" } })).resume,
+    "Serveur public (zone « aucune » demandée par SEREO_OSRM_ZONE).");
+});
