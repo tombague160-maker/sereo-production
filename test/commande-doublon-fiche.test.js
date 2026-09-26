@@ -165,3 +165,43 @@ test("sans demande ni choix (page d'avant, file rejouee) : jamais refusee ni rep
     assert.deepEqual(extraire(ficheEhpad()), avant, `${chemin} : la fiche existante a ete renommee ou videe`);
   }
 });
+
+// Relecture adverse du 26/09 : la CLE D'IDEMPOTENCE (X-Sereo-Geste). La page
+// envoie avec `demanderSiDoublon` et la cle K ; le serveur trouve le doublon
+// et repond 409 -- une QUESTION, rien n'est applique. En 4G faible, cette
+// reponse se perd : la file garde l'ecriture avec la MEME cle K, mais le corps
+// « nouvelle fiche ». Si le 409 etait enregistre comme LA reponse de K, le
+// rejeu recevait 409 {rejoue: true} sans que le nouveau corps soit lu, la file
+// retirait l'ecriture (4xx) : commande perdue, « refusee et abandonnee ».
+async function posterAvecCle(chemin, corps, cle) {
+  const res = await fetch(`${baseUrl}${chemin}`, {
+    method: "POST", headers: { "Content-Type": "application/json", "X-Sereo-Geste": cle }, body: JSON.stringify(corps)
+  });
+  return { status: res.status, body: await res.json(), rejoue: res.headers.get("X-Sereo-Geste-Rejoue") === "1" };
+}
+
+test("cle d'idempotence : le 409 « doublon » (une question) n'est pas la reponse de la cle -- rejouee en « nouvelle fiche » avec la meme cle, la commande est creee, une seule fois", async () => {
+  for (const chemin of ["/api/customer-orders", "/api/planned-orders"]) {
+    semer();
+    const avant = extraire(ficheEhpad());
+    const extra = chemin === "/api/planned-orders" ? { deliveryDate: "2026-12-01" } : {};
+    const cle = `k-${chemin.length}-${Date.now().toString(36)}`;
+    const question = await posterAvecCle(chemin, commande(ROUX, { ...DEMANDE, ...extra }), cle);
+    assert.equal(question.status, 409, `${chemin} : prealable -- le doublon n'est pas signale`);
+    // La reponse s'est perdue ; la file rejoue la version « nouvelle fiche », meme cle.
+    const rejeu = await posterAvecCle(chemin, commande(ROUX, { nouvelleFiche: true, ...extra }), cle);
+    assert.equal(rejeu.status, 201, `${chemin} : rejeu refuse (${rejeu.status} ${JSON.stringify(rejeu.body)}) -- la file le retirerait, commande perdue`);
+    assert.equal(rejeu.rejoue, false, `${chemin} : le serveur a rendu la reponse enregistree du 409 sans lire le corps`);
+    let db = readDb();
+    assert.equal(db.commandes.length, 1, `${chemin} : la commande n'est pas creee`);
+    assert.equal(db.clients.length, 2, `${chemin} : pas de nouvelle fiche`);
+    assert.deepEqual(extraire(ficheEhpad()), avant, `${chemin} : la fiche existante a ete renommee ou videe`);
+    // L'idempotence tient toujours : la cle a maintenant SA reponse (201),
+    // un troisieme renvoi est rejoue, pas refait.
+    const encore = await posterAvecCle(chemin, commande(ROUX, { nouvelleFiche: true, ...extra }), cle);
+    assert.equal(encore.status, 201);
+    assert.equal(encore.rejoue, true, `${chemin} : un renvoi apres le 201 n'est pas reconnu`);
+    db = readDb();
+    assert.equal(db.commandes.length, 1, `${chemin} : commande en double au renvoi`);
+  }
+});

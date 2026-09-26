@@ -246,6 +246,54 @@ test("commande terrain mise en file (reseau muet), doublon que seul le serveur c
   await ctx.close();
 });
 
+// Relecture adverse du 26/09 : le banc precedent coupe la requete AVANT le
+// serveur (aucune cle enregistree). Le cas qui perdait la commande : le serveur
+// a TRAITE l'envoi -- doublon, 409 -- et c'est sa reponse qui se perd (4G).
+// La file garde la meme cle X-Sereo-Geste ; si le 409 etait la reponse de
+// cette cle, le rejeu recevait 409 {rejoue} et la commande etait abandonnee.
+test("commande terrain : le serveur a repondu 409 (doublon archive) mais la reponse s'est perdue -- au rejeu, meme cle, la commande n'est pas perdue", async ({ browser }) => {
+  test.setTimeout(120000);
+  await semer(semeAvecTelephone({ archive: true }));
+  const avant = champsFiche(await ficheTilleuls());
+  const { ctx, page, erreurs } = await ouvrir(browser, "commande-client");
+  await page.evaluate(() => {
+    window.__toasts = [];
+    new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => {
+      if (n.classList && n.classList.contains("toast")) window.__toasts.push(n.textContent);
+    }))).observe(document, { childList: true, subtree: true });
+  });
+  const premier = [];
+  await page.route("**/api/customer-orders", async route => {
+    if (route.request().method() !== "POST") return route.continue();
+    if (premier.length === 0) {
+      // Le serveur recoit l'envoi et repond ; la page ne recoit rien.
+      const reponse = await route.fetch();
+      premier.push({ statut: reponse.status(), cle: route.request().headers()["x-sereo-geste"] || "" });
+      return route.abort("connectionreset");
+    }
+    return route.abort("connectionrefused");
+  });
+  await commandePourMmeRoux(page);
+  await expect.poll(async () => (await lireFile(page)).length, { timeout: 15000, message: "la commande n'a pas ete mise en file" }).toBe(1);
+  expect(premier.map(p => p.statut), "prealable : le serveur doit avoir traite l'envoi et repondu 409").toEqual([409]);
+  const [entree] = await lireFile(page);
+  const cleEnFile = Object.entries(entree.entetes || {}).find(([nom]) => nom.toLowerCase() === "x-sereo-geste")?.[1];
+  expect(cleEnFile, "prealable : la file doit rejouer avec la cle deja vue par le serveur").toBe(premier[0].cle);
+
+  await page.unroute("**/api/customer-orders");
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect.poll(async () => (await lireFile(page)).length, { timeout: 40000, message: "la file ne s'est pas videe" }).toBe(0);
+  const toasts = await page.evaluate(() => window.__toasts);
+  expect(toasts.join(" | "), "la commande a ete refusee au rejeu et abandonnee").not.toMatch(/refus/i);
+  const liste = await (await fetch(srv.base + "/api/orders")).json();
+  const commandes = (Array.isArray(liste) ? liste : liste.orders || []).filter(o => o.clientName.includes("Roux"));
+  expect(commandes.length, "la commande en file est perdue").toBe(1);
+  expect(commandes[0].clientId, "la commande est partie sur la fiche archivee").not.toBe("c-tilleuls");
+  expect(champsFiche(await ficheTilleuls()), "la fiche archivee a ete renommee ou videe").toEqual(avant);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
 // 4. Decision 7 de Thomas (24/09) : le chiffre d'affaires est TTC, et l'ecran
 //    le dit -- tableau de bord, Analyse, fiche client. Un avoir ajoute a un bon
 //    deja importe se soustrait ; le resume le dit.

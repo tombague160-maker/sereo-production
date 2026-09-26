@@ -607,7 +607,12 @@ function gesteIdempotent(req, res, next) {
     if (note) return;
     note = true;
     // Un 5xx n'est pas une reponse definitive : le renvoi doit pouvoir reessayer.
-    if (res.statusCode < 500) {
+    // Une QUESTION non plus (relecture adverse du 26/09) : le 409 « une fiche
+    // existe deja » n'applique rien, et la file renvoie la REPONSE (« nouvelle
+    // fiche ») sous la meme cle quand ce 409 s'est perdu en route. Lui rendre
+    // le 409 enregistre, sans lire son corps, la faisait abandonner : commande
+    // perdue. `res.locals.gesteSansEffet` : pose par handleRouteError.
+    if (res.statusCode < 500 && !res.locals.gesteSansEffet) {
       try {
         enregistrerGesteRecu({ cle, methode: req.method, chemin, statut: res.statusCode, recuLe: new Date().toISOString() });
       } catch (error) {
@@ -3819,6 +3824,9 @@ function handleRouteError(error, res, fallbackMessage) {
   if (status >= 500) {
     console.error(error);
   }
+  // Un refus qui est une question (doublonDeFiche) : sa cle d'idempotence
+  // reste libre pour la reponse (gesteIdempotent).
+  if (error.question) res.locals.gesteSansEffet = true;
 
   res.status(status).json({
     error: status >= 500 ? fallbackMessage : error.message,
@@ -5237,6 +5245,8 @@ function doublonDeFiche(fiche) {
   const nom = [fiche.prenom, fiche.nom].filter(Boolean).join(" ") || fiche.nom || "sans nom";
   const erreur = badRequest(`Une fiche existe déjà avec ce téléphone ou ce nom : ${nom}. Rattache la commande à cette fiche, ou crée une nouvelle fiche.`);
   erreur.statusCode = 409;
+  // Une question, rien n'est applique : la cle X-Sereo-Geste ne la garde pas.
+  erreur.question = true;
   erreur.details = {
     doublon: {
       id: fiche.id, nom: fiche.nom || "", prenom: fiche.prenom || "", telephone: fiche.telephone || "",
