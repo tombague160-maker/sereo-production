@@ -33,7 +33,7 @@ process.env.SEREO_AUTH_PASSWORD = "mot-de-passe-environnement";
 process.env.SEREO_AUTH_MAX_ATTEMPTS = "50";
 process.env.SEREO_AUTH_RATE_WINDOW_MS = "60000";
 // Le telechargement ne depend PAS de cette variable quand l'authentification
-// est active (elle garde /api/db, ouvert a tout compte connecte).
+// est active (elle garde /api/db, reserve a l'administration).
 delete process.env.SEREO_ENABLE_DB_EXPORT;
 
 const {

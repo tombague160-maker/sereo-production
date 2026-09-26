@@ -136,6 +136,8 @@ process.env.SEREO_AUTH_RATE_WINDOW_MS = "60000";
 process.env.SEREO_GEOCODER_URL = "http://127.0.0.1:9/";
 process.env.SEREO_ROUTING_URL = "http://127.0.0.1:9";
 delete process.env.SEREO_BACKUP_COPY_DIR;
+// L export complet de la base, ouvert ici pour juger sa garde (ferme par defaut).
+process.env.SEREO_ENABLE_DB_EXPORT = "1";
 
 const { app, closeStorage, createUserAccount, _flushPendingBackup, _resetAuthRateLimitForTest } = require("../server");
 
@@ -242,4 +244,22 @@ test("routes d'écriture : l'administrateur passe toutes les gardes (témoin des
 test("la vieille route de remise à zéro des tournées n'existe plus", async () => {
   const statut = await appeler("POST /api/reset-tournee", cookies.admin);
   assert.equal(statut, 404, `POST /api/reset-tournee repond ${statut}`);
+});
+
+// Une lecture, pas une ecriture (hors de la table) : mais c'est la base
+// entiere, clients et comptes compris -- un telechargement de sauvegarde sous
+// un autre nom (decision 6). Fermee par defaut ; SEREO_ENABLE_DB_EXPORT=1
+// (diagnostic) l'ouvrait a TOUT compte connecte.
+test("l'export complet de la base (GET /api/db, s'il est ouvert) est réservé à l'administration", async () => {
+  for (const role of ROLES_NON_ADMIN) {
+    const reponse = await fetch(`${baseUrl}/api/db`, { headers: { cookie: cookies[role] }, redirect: "manual" });
+    const corps = await reponse.text();
+    assert.equal(reponse.status, 403, `GET /api/db (${role}) : ${reponse.status}`);
+    assert.ok(!corps.includes('"commandes"'), `GET /api/db (${role}) a recu la base`);
+  }
+  // Temoin : ouverte, la route sert bien la base a l'administrateur (sinon
+  // le 403 des autres viendrait de la variable, pas de la garde).
+  const admin = await fetch(`${baseUrl}/api/db`, { headers: { cookie: cookies.admin }, redirect: "manual" });
+  assert.equal(admin.status, 200, "temoin : l'administrateur ne recoit pas l'export ouvert");
+  assert.ok(Array.isArray((await admin.json()).commandes));
 });

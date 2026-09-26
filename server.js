@@ -7606,7 +7606,11 @@ function distance(a, b) {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-app.get("/api/db", (req, res) => {
+// La base entiere (clients, adresses, telephones, comptes) : un telechargement
+// de sauvegarde sous un autre nom. Reservee a l'administration (decision 6 du
+// 24/09, garde-fous du 25/09) : SEREO_ENABLE_DB_EXPORT=1 l'ouvrait a TOUT
+// compte connecte, livreur compris.
+app.get("/api/db", requireAdministration, (req, res) => {
   if (!ENABLE_DB_EXPORT) {
     res.status(403).json({
       error: "Export complet de la base desactive. Utiliser SEREO_ENABLE_DB_EXPORT=1 pour diagnostic local."
@@ -7782,10 +7786,10 @@ app.get("/api/storage/status", (req, res) => {
 // requireAdministration sur la route). Mais sans authentification (dev, ou un
 // deploiement sans SEREO_AUTH_* ni compte), TOUT visiteur est « administrateur »
 // (getRequestIdentity) : le role ne prouve plus rien. C'est le cas que
-// SEREO_ENABLE_DB_EXPORT garde deja pour /api/db (export JSON de la base, ouvert
-// a tout compte connecte, 0 par defaut) : sans authentification, c'est lui qui
-// decide. Avec authentification, la variable ne s'applique pas ici -- l'ouvrir
-// pour la sauvegarde ouvrirait aussi /api/db a tous les comptes.
+// SEREO_ENABLE_DB_EXPORT garde deja pour /api/db (export JSON de la base,
+// reserve lui aussi a l'administration depuis le 25/09, 0 par defaut) : sans
+// authentification, c'est lui qui decide. Avec authentification, la variable
+// ne s'applique pas ici : le role suffit.
 // Rend null si le telechargement est permis, sinon la raison du refus.
 function refusDeTelechargement(identite) {
   if (!identite || !getRole(identite.role).administration) return "Reserve aux administrateurs.";
