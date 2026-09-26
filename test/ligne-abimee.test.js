@@ -343,7 +343,12 @@ test("une tournee abimee part en quarantaine AVEC les livraisons de ses arrets (
   const db = readDb();
   const arret = db.routes.find(t => t.id === "t1").stops[0];
   Object.assign(arret, { status: "probleme", deliveredAt: "2026-09-25T09:10:00.000Z", problemReason: "Portail ferme" });
+  // La commande porte aussi routeId : sa ligne livraisons (« commande-o1 »),
+  // tiree de la commande qui reste, ne part pas et n'a pas a etre copiee.
+  db.commandes.find(o => o.id === "o1").routeId = "t1";
   writeDb(db, { backup: false });
+  assert.ok(brut(cnx => cnx.prepare("SELECT 1 FROM livraisons WHERE id = 'commande-o1' AND json_extract(payload, '$.routeId') = 't1'").get()),
+    "prealable : la ligne livraisons de la commande ne nomme pas la tournee");
   const livraison = brut(cnx => cnx.prepare("SELECT hex(payload) AS h FROM livraisons WHERE id = 's1'").get());
   assert.ok(livraison, "prealable : l'arret n'a pas de ligne livraisons");
   closeStorage();
@@ -356,8 +361,9 @@ test("une tournee abimee part en quarantaine AVEC les livraisons de ses arrets (
   assert.ok(copie, `la livraison de l'arret n'est pas copiee : ${JSON.stringify(q.map(x => [x.table_source, x.ligne_id]))}`);
   assert.equal(copie.contenu, livraison.h);
   assert.ok(q.some(x => x.table_source === "traces_tournees" && x.ligne_id === "t1"), "le trace ne suit plus la tournee");
-  // Seules les livraisons de CETTE tournee : celle de la commande o2 (hors tournee) reste.
+  // Seules les livraisons des ARRETS de cette tournee : celles des commandes restent dans leur table.
   assert.ok(!q.some(x => x.table_source === "livraisons" && x.ligne_id !== "s1"), JSON.stringify(q.map(x => [x.table_source, x.ligne_id])));
+  assert.ok(brut(cnx => cnx.prepare("SELECT 1 FROM livraisons WHERE id = 'commande-o1'").get()), "temoin : la livraison de la commande devait rester");
 });
 
 test("des reglages abimes sont mis de cote AVANT que l'ecriture suivante ne les remplace", () => {

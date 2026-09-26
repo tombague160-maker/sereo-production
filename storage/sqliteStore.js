@@ -1424,11 +1424,13 @@ const TABLES_SONDEES = ["produits", "clients", "commandes", "lignes_commande", "
 // (relecture adverse du 26/09) : tirees de ses arrets (deliveryRows), elles ne
 // sont plus produites une fois la tournee ecartee, et c'est le seul exemplaire
 // LISIBLE de ce qui a ete fait (statut, heure, motif). Leur lien est dans le
-// payload (routeId) : lu seulement sur un payload lisible.
+// payload (routeId) : lu seulement sur un payload lisible. Pas les lignes
+// « commande-… » : tirees des commandes (qui portent aussi routeId), elles
+// restent dans leur table.
 const DEPENDANCES_MISES_DE_COTE = {
   commandes: [["lignes_commande", "commande_id", "payload"], ["livraisons", "commande_id", "payload"]],
   routes: [["traces_tournees", "route_id", "trace"],
-    ["livraisons", "CASE WHEN json_valid(payload) THEN CAST(json_extract(payload, '$.routeId') AS TEXT) END", "payload"]]
+    ["livraisons", "CASE WHEN id NOT LIKE 'commande-%' AND json_valid(payload) THEN CAST(json_extract(payload, '$.routeId') AS TEXT) END", "payload"]]
 };
 
 // Par base ouverte : les lignes illisibles dont la mise de cote a ECHOUE, et
