@@ -4004,14 +4004,30 @@ function stockReserveActif(order) {
 // Une commande qui n'a pas encore ete preparee (importee, a verifier, validee
 // chez le client) et qu'une transition fait entrer dans la preparation ou
 // au-dela : son stock doit sortir du rayon, comme par « Passer en
-// preparation ». Une commande « a reprogrammer » dont le stock a ete libere a
-// la main n'en est pas : sa livraison le reprend (reprendreStockLibere).
+// preparation ».
+//
+// Relecture adverse (25/09) : une commande « a reprogrammer » (ou en probleme
+// de livraison) dont le stock a ete libere a la main (release-stock, admis sur
+// ces deux statuts seulement) en est aussi, quand une transition la remet en
+// preparation ou en route. « Passer en preparation » sortait son stock ;
+// PATCH non : preparee, en carton, pendant que le rayon comptait encore ses
+// articles (une autre commande pouvait les prendre, et sa livraison mettait
+// le rayon en negatif). Seule la livraison le reprenait (reprendreStockLibere).
+// Une commande de ces statuts jamais liberee n'est pas concernee : elle garde
+// sa reservation, ou n'en a jamais eu (donnees anciennes).
 const STATUTS_AVANT_PREPARATION = new Set(["brouillon", "importe", "stock_a_verifier", "commande_client_validee"]);
 const STATUTS_STOCK_SORTI = new Set(["en_preparation", "preparation_terminee", "pret_livraison", "en_livraison", "livre"]);
+const STATUTS_AU_STOCK_LIBERABLE = new Set(["probleme_livraison", "a_reprogrammer"]);
+
+function stockLibereALaMain(order) {
+  return STATUTS_AU_STOCK_LIBERABLE.has(order.status)
+    && Boolean(order.stockReleaseReason)
+    && order.stockReleaseReason !== "consumed_by_delivery";
+}
 
 function commandeQuiPartEnPreparation(order, statut) {
   return statut !== order.status
-    && STATUTS_AVANT_PREPARATION.has(order.status)
+    && (STATUTS_AVANT_PREPARATION.has(order.status) || stockLibereALaMain(order))
     && STATUTS_STOCK_SORTI.has(statut)
     && isValidOrderStatusTransition(order.status, statut)
     && !order.stockReservedAt;

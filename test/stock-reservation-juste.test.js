@@ -261,6 +261,69 @@ test("PATCH directement « pret_livraison » depuis « a verifier » : le stock 
   assert.deepEqual(await produit("p1"), { rayon: 6, reserve: 4, total: 10, statut: "reserve" });
 });
 
+// Relecture adverse (25/09) : une commande « a reprogrammer » dont le stock a
+// ete libere a la main (release-stock), puis que PATCH remet en preparation.
+// « Passer en preparation » (start-preparation) sort son stock ; PATCH ne le
+// sortait pas : preparee, en carton, et le rayon comptait encore ses articles
+// (une autre commande pouvait les prendre, la livraison mettait le rayon en
+// negatif).
+async function commandeAReprogrammerLiberee(quantite) {
+  ensemencer({ commandes: [commandeImportee(quantite)] });
+  for (const status of ["en_preparation", "pret_livraison", "en_livraison", "a_reprogrammer"]) {
+    const r = await envoyer("PATCH", "/api/orders/o-patch", { status });
+    assert.equal(r.status, 200, `${status} : ${JSON.stringify(r.body)}`);
+  }
+  const liberee = await envoyer("POST", "/api/orders/o-patch/release-stock", {});
+  assert.equal(liberee.body.released, true, "prealable : la reservation est liberee");
+  assert.deepEqual(await produit("p1"), { rayon: 10, reserve: 0, total: 10, statut: "disponible" },
+    "prealable : le rayon a recupere ses 4 articles");
+}
+
+test("PATCH en preparation d'une commande « à reprogrammer » au stock libere : le stock ressort, une fois", async () => {
+  await commandeAReprogrammerLiberee(4);
+  const r = await envoyer("PATCH", "/api/orders/o-patch", { status: "en_preparation" });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.deepEqual(await produit("p1"), { rayon: 6, reserve: 4, total: 10, statut: "reserve" },
+    "la meme sortie que « Passer en preparation » (avant : rayon 10, rien de reserve)");
+  const etapes = [];
+  for (const status of ["pret_livraison", "en_livraison", "livre"]) {
+    const suite = await envoyer("PATCH", "/api/orders/o-patch", { status });
+    assert.equal(suite.status, 200, `${status} : ${JSON.stringify(suite.body)}`);
+    etapes.push([status, (await produit("p1")).rayon]);
+  }
+  assert.deepEqual(etapes, [["pret_livraison", 6], ["en_livraison", 6], ["livre", 6]],
+    "la livraison consomme la reservation reprise, sans sortir le stock une seconde fois");
+});
+
+test("PATCH « pret_livraison » d'une commande « à reprogrammer » au stock libere : le stock ressort aussi", async () => {
+  await commandeAReprogrammerLiberee(4);
+  const r = await envoyer("PATCH", "/api/orders/o-patch", { status: "pret_livraison" });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.deepEqual(await produit("p1"), { rayon: 6, reserve: 4, total: 10, statut: "reserve" });
+});
+
+test("PATCH en preparation d'une « à reprogrammer » liberee, rayon insuffisant : refuse, rien ne bouge", async () => {
+  await commandeAReprogrammerLiberee(4);
+  // Le rayon est tombe a 3 entre-temps (saisie a la main).
+  assert.equal((await envoyer("PATCH", "/api/stock/p1", { quantite: 3 })).status, 200);
+  const r = await envoyer("PATCH", "/api/orders/o-patch", { status: "en_preparation" });
+  assert.equal(r.status, 400, "refusee, comme « Passer en preparation » sur ce rayon");
+  assert.match(r.body.error, /Stock insuffisant/);
+  assert.equal((await commande("o-patch")).status, "a_reprogrammer", "la commande n'a pas bouge");
+  assert.equal((await produit("p1")).rayon, 3);
+});
+
+// Temoin (vert avant et apres) : une « a reprogrammer » qui a GARDE sa
+// reservation ne sort pas son stock une seconde fois.
+test("temoin : PATCH en preparation d'une « à reprogrammer » qui garde sa reservation : rien ne ressort", async () => {
+  ensemencer({ commandes: [commandeImportee(4)] });
+  for (const status of ["en_preparation", "pret_livraison", "en_livraison", "a_reprogrammer", "en_preparation"]) {
+    const r = await envoyer("PATCH", "/api/orders/o-patch", { status });
+    assert.equal(r.status, 200, `${status} : ${JSON.stringify(r.body)}`);
+  }
+  assert.deepEqual(await produit("p1"), { rayon: 6, reserve: 4, total: 10, statut: "reserve" });
+});
+
 test("PATCH en preparation sur un rayon insuffisant : refuse, comme le geste de l'ecran", async () => {
   ensemencer({ commandes: [commandeImportee(12)] });
   const r = await envoyer("PATCH", "/api/orders/o-patch", { status: "en_preparation" });

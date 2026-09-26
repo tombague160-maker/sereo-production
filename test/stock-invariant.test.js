@@ -218,6 +218,14 @@ test("invariant stock <-> commandes, a chaque etape d'un parcours complet", asyn
   await reussir("PATCH", `/api/orders/${o3.id}`, { status: "en_preparation" });
   await reussir("PATCH", `/api/orders/${o3.id}`, { status: "pret_livraison" });
   await verifier("PATCH en preparation puis prete");
+  // Relecture adverse (25/09) : partie, « a reprogrammer », stock libere a la
+  // main, puis remise en preparation par PATCH : son stock ressort du rayon.
+  await reussir("PATCH", `/api/orders/${o3.id}`, { status: "en_livraison" });
+  await reussir("PATCH", `/api/orders/${o3.id}`, { status: "a_reprogrammer" });
+  await reussir("POST", `/api/orders/${o3.id}/release-stock`, { reason: "client injoignable" });
+  await verifier("a reprogrammer, stock libere");
+  await reussir("PATCH", `/api/orders/${o3.id}`, { status: "en_preparation" });
+  await verifier("remise en preparation par PATCH apres liberation");
 
   // Planifiee confirmee puis annulee.
   const planifiee = await reussir("POST", "/api/planned-orders", { clientId: "c1", products: [{ productId: "pA", quantite: 2 }], deliveryDate: "2026-12-15" });
