@@ -23,6 +23,9 @@
 // 10. Apres « Livre », le tableau de bord gardait le CA et les comptes d'avant.
 // 11. Clients au telephone : le repli des pilules forcait une mise en page par
 //     pilule cachee (766 ms a l'arrivee, CPU x 4, jeu « production »).
+// 12. Stock au telephone (485 ms a l'arrivee en production, v1.46.1) : chaque
+//     changement d'ecran mesurait les rangees de pilules des ecrans CACHES --
+//     deux mises en page forcees de tout le document, pour rien.
 const { test, expect } = require("./tuiles");
 const { demarrer, jeuDeDonnees } = require("./serveur-seme");
 
@@ -444,7 +447,7 @@ const replierPiluleParPilule = page => page.evaluate(() => {
 async function misesEnPageForcees(page, geste) {
   await page.evaluate(() => {
     if (window.__misesEnPage) return;
-    const m = window.__misesEnPage = { actif: false, sale: false, forcees: 0 };
+    const m = window.__misesEnPage = { actif: false, sale: false, forcees: 0, ou: [] };
     const salir = () => { if (m.actif) m.sale = true; };
     for (const [proto, noms] of [[DOMTokenList.prototype, ["add", "remove", "toggle"]],
       [Element.prototype, ["setAttribute", "removeAttribute", "append", "remove", "before", "after"]],
@@ -458,11 +461,19 @@ async function misesEnPageForcees(page, geste) {
     }
     for (const nom of ["getBoundingClientRect", "getClientRects"]) {
       const f = Element.prototype[nom];
-      Element.prototype[nom] = function () { if (m.actif && m.sale) { m.forcees++; m.sale = false; } return f.call(this); };
+      Element.prototype[nom] = function () {
+        // Ou : les fonctions de la page qui ont lu (la pile, sans l'instrument).
+        if (m.actif && m.sale) {
+          m.forcees++;
+          m.sale = false;
+          m.ou.push((new Error().stack || "").split("\n").slice(2, 4).map(l => l.trim().replace(/\(.*\/js\//, "(")).join(" < "));
+        }
+        return f.call(this);
+      };
     }
   });
   // Le geste commence par une ecriture (la rangee depliee ou repliee).
-  await page.evaluate(() => Object.assign(window.__misesEnPage, { actif: true, sale: true, forcees: 0 }));
+  await page.evaluate(() => Object.assign(window.__misesEnPage, { actif: true, sale: true, forcees: 0, ou: [] }));
   await geste();
   return page.evaluate(() => { const m = window.__misesEnPage; m.actif = false; return m.forcees; });
 }
@@ -515,6 +526,34 @@ test("Clients au téléphone : le repli des pilules force UNE mise en page (et c
   await page.locator("#crmStatusFilter").selectOption("prospect");
   await page.locator("#crm .cli-filtres > .pilules-plus").click();
   await balayer("« Abonnés » et un statut choisis", largeurs(4));
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+// --- 12. Arriver sur le Stock au telephone : aucune mise en page forcee -------
+
+/** Change d'ecran par l'adresse ; le comptage s'arrete a la fin de l'arrivee (showTab). */
+const arriverSur = (page, ecran) => page.evaluate(e => new Promise(r => {
+  addEventListener("hashchange", () => { window.__misesEnPage.actif = false; r(); }, { once: true });
+  location.hash = `#${e}`;
+}), ecran);
+
+test("Stock au téléphone : l'arrivée ne force aucune mise en page (les pilules des écrans cachés ne se mesurent pas) ; témoin : Commandes mesure les siennes", async ({ browser }) => {
+  const { ctx, page, erreurs } = await ouvrir(browser, "journee", { vue: TELEPHONE });
+  // Prealable : les deux rangees de pilules sont dans la page (cachees avec
+  // leur ecran, vides tant qu'il n'a pas ete dessine : rendreOuDifferer).
+  expect(await page.locator("#cmdPilules, #crm .cli-filtres").count(), "prealable : les rangees de Commandes et de Clients").toBe(2);
+  const auStock = await misesEnPageForcees(page, () => arriverSur(page, "stock"));
+  await expect(page.locator("#stockList .stk-ligne").first()).toBeVisible();
+  const ou = await page.evaluate(() => window.__misesEnPage.ou);
+  expect(auStock, `mises en page forcees en arrivant sur le Stock : ${ou.join(" | ")}`).toBe(0);
+  // Temoin : sur le meme chemin, l'instrument voit la mesure de la rangee de
+  // l'ecran AFFICHE -- Commandes mesure toujours ses pilules en arrivant (le
+  // repli lui-meme : bancs 11 et telephone-utilisable.spec.js).
+  const auxCommandes = await misesEnPageForcees(page, () => arriverSur(page, "commandes"));
+  const ouCommandes = await page.evaluate(() => window.__misesEnPage.ou);
+  expect(auxCommandes, "temoin : aucune mesure en arrivant sur Commandes").toBeGreaterThanOrEqual(1);
+  expect(ouCommandes.join(" | "), "temoin : ce n'est pas le repli qui mesure").toContain("replierPilules");
   expect(erreurs).toEqual([]);
   await ctx.close();
 });

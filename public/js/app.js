@@ -2962,8 +2962,9 @@ function placerExportCommandes() {
  * Abonnes et statut sur 4 rangs a 360 px.
  */
 const REPLIS_DE_PILULES = new Map();
-function declarerRepliDePilules(nom, { conteneur, pilules, choisie }) {
-  REPLIS_DE_PILULES.set(nom, { conteneur, pilules, choisie });
+// `ecran` : l'ecran (l'id de sa page) avec lequel la rangee se montre.
+function declarerRepliDePilules(nom, { ecran, conteneur, pilules, choisie }) {
+  REPLIS_DE_PILULES.set(nom, { ecran, conteneur, pilules, choisie });
 }
 
 /*
@@ -3008,6 +3009,15 @@ function replierPilules(nom) {
   const repli = REPLIS_DE_PILULES.get(nom);
   const conteneur = repli?.conteneur();
   if (!conteneur) return;
+  // Ecran cache : rien ne s'y mesure, et le demander (getClientRects) forcait
+  // la mise en page de TOUT le document, a chaque changement d'ecran, une fois
+  // par rangee cachee. Arriver sur le Stock au telephone : environ 180 ms
+  // (CPU x 4, jeu « production », 25/09) pour ne rien replier. Le savoir ne
+  // demande aucune mesure : une rangee ne se montre qu'avec SON ecran (dans
+  // sa page, ou dans la fente d'en-tete au telephone, que showTab cache hors
+  // de lui). Le repli se refait en arrivant sur l'ecran (showTab).
+  // (Une rangee declaree sans ecran se mesure toujours, comme avant.)
+  if (repli.ecran && !document.getElementById(repli.ecran)?.classList.contains("active")) return;
   let bouton = conteneur.querySelector(":scope > .pilules-plus");
   const pilules = repli.pilules(conteneur);
   pilules.forEach(p => p.classList.remove("pilule-repliee"));
@@ -3127,11 +3137,13 @@ window.addEventListener("resize", planifierReplis);
 document.fonts?.addEventListener?.("loadingdone", planifierReplis);
 
 declarerRepliDePilules("commandes", {
+  ecran: "commandes",
   conteneur: () => document.getElementById("cmdPilules"),
   pilules: c => [...c.querySelectorAll(":scope > .filtre-pilule")],
   choisie: p => p.classList.contains("active-filter")
 });
 declarerRepliDePilules("clients", {
+  ecran: "crm",
   conteneur: () => document.querySelector("#crm .cli-filtres"),
   pilules: c => [...c.querySelectorAll(":scope > .cli-pilules > .cli-pilule, :scope > .cli-statut-filtre")],
   // Le statut commercial est un filtre choisi des qu'il n'est plus « Tous ».
