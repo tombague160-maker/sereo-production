@@ -3921,18 +3921,39 @@ async function sauvegardeSeule(ecrire) {
   return enVol;
 }
 
-// Une sauvegarde interrompue (arret du processus pendant la copie) laisse ses
-// fichiers de travail : rien d'autre ne les supprime. Au demarrage.
+// Une sauvegarde interrompue (arret du processus pendant la copie, la
+// compression ou la relecture) laisse ses fichiers de travail : ni la rotation
+// ni la restauration ne les voient (BACKUP_FILENAME_PATTERN), rien d'autre ne
+// les supprime. Au demarrage, avant toute sauvegarde de CE processus, dans le
+// dossier des sauvegardes et dans le second dossier.
+//
+// Integration du 26/09 : un seul nettoyage pour les deux lots qui en avaient
+// ecrit un -- garde-fous (MOTIF_TRAVAIL : le .gz.tmp et les copies de travail
+// de la sauvegarde relue, second dossier compris) et robustesse (tout db-*.tmp,
+// chaque suppression journalisee). Une vraie sauvegarde (.gz fini) ne
+// correspond a aucun des deux motifs.
+const MOTIF_TEMPORAIRE_DE_SAUVEGARDE = /^db-.*\.tmp$/;
+
 function nettoyerSauvegardesInterrompues(dossier = BACKUP_DIR) {
+  const supprimes = [];
   try {
-    if (!fs.existsSync(dossier)) return;
+    if (!fs.existsSync(dossier)) return supprimes;
     for (const nom of fs.readdirSync(dossier)) {
-      if (!sauvegardeBase.MOTIF_TRAVAIL.test(nom)) continue;
-      try { fs.unlinkSync(path.join(dossier, nom)); } catch { /* best-effort */ }
+      if (!sauvegardeBase.MOTIF_TRAVAIL.test(nom) && !MOTIF_TEMPORAIRE_DE_SAUVEGARDE.test(nom)) continue;
+      try {
+        fs.unlinkSync(path.join(dossier, nom));
+        supprimes.push(nom);
+      } catch (error) {
+        console.error(`[sauvegarde] fichier de travail ${nom} non supprime : ${error.message || error}`);
+      }
     }
   } catch (error) {
     console.warn(`[storage] nettoyage des sauvegardes interrompues : ${error.message || error}`);
   }
+  if (supprimes.length) {
+    console.log(`[sauvegarde] ${supprimes.length} fichier(s) de travail d'une sauvegarde interrompue supprime(s) (${dossier}) : ${supprimes.join(", ")}`);
+  }
+  return supprimes;
 }
 
 function safeTimestamp(date = new Date()) {
@@ -11759,39 +11780,16 @@ function installerArretPropre(serveur) {
   }
 }
 
-// Les fichiers temporaires d'une sauvegarde interrompue (processus tue pendant
-// la compression) : ni la rotation ni la restauration ne les voient
-// (BACKUP_FILENAME_PATTERN), ils restaient pour toujours. Supprimes au
-// demarrage : aucune sauvegarde de CE processus n'a encore commence.
-function nettoyerSauvegardesInachevees() {
-  let noms = [];
-  try {
-    noms = fs.readdirSync(BACKUP_DIR);
-  } catch {
-    return [];
-  }
-  const supprimes = [];
-  for (const nom of noms.filter(n => /^db-.*\.tmp$/.test(n))) {
-    try {
-      fs.unlinkSync(path.join(BACKUP_DIR, nom));
-      supprimes.push(nom);
-    } catch (error) {
-      console.error(`[sauvegarde] fichier temporaire ${nom} non supprime : ${error.message || error}`);
-    }
-  }
-  if (supprimes.length) console.log(`[sauvegarde] ${supprimes.length} fichier(s) temporaire(s) d'une sauvegarde interrompue supprime(s) : ${supprimes.join(", ")}`);
-  return supprimes;
-}
-
 function startServer(port = PORT, host = HOST) {
-  nettoyerSauvegardesInachevees();
+  // Les fichiers de travail d'une sauvegarde interrompue : avant toute
+  // sauvegarde de ce processus (nettoyerSauvegardesInterrompues).
+  nettoyerSauvegardesInterrompues();
+  if (BACKUP_COPY_DIR) nettoyerSauvegardesInterrompues(BACKUP_COPY_DIR);
   // P1 v1.14.0 : healing initial pour garantir la coherence apres restart
   // (notamment apres restauration d'un backup ou montee de version)
   healDatabaseAtBoot();
   avertirMotDePasseCourt();
-  nettoyerSauvegardesInterrompues();
   if (BACKUP_COPY_DIR) {
-    nettoyerSauvegardesInterrompues(BACKUP_COPY_DIR);
     // Relecture du 26/09 : un disque qui n'est pas revenu apres un redemarrage
     // se dit des l'ouverture de la carte, pas a la premiere sauvegarde.
     verifierTemoinSecondDossier().catch(error => {
