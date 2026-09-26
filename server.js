@@ -741,8 +741,16 @@ function clearAuthFailures(ip) {
 // qu'il existe ou non (rien a enumerer). Le compteur n'est PAS remis a zero a
 // la fin du blocage : une attaque qui continue est rebloquee au premier echec
 // suivant ; une connexion reussie l'efface.
-// Contrepartie assumee : quelqu'un qui connait un identifiant peut le bloquer
-// 15 minutes (en y echouant 20 fois dans l'heure). La page le dit.
+// Relecture adverse du 26/09 : ce blocage refusait AUSSI le bon mot de passe,
+// sur tous les appareils. Un tiers qui connait l'identifiant de Thomas le
+// tenait dehors aussi longtemps qu'il le voulait (un echec toutes les 15 min) ;
+// un navigateur qui rejoue un vieux mot de passe Basic apres un changement de
+// SEREO_AUTH_PASSWORD faisait de meme, sans attaquant. D'ou l'« appareil
+// connu » (ci-dessous) : un appareil qui a deja ouvert CE compte n'est ni
+// bloque ni compte par sa limite -- il garde la seule limite par adresse,
+// celle d'avant le 25/09. La limite du compte ne vise plus que les appareils
+// inconnus, ceux d'une attaque repartie. Reste : un appareil NEUF de Thomas
+// attend la fin du blocage pendant une attaque (la page le dit).
 const AUTH_COMPTE_MAX_ATTEMPTS = Math.max(1, Number(process.env.SEREO_AUTH_MAX_ATTEMPTS_COMPTE) || 20);
 const AUTH_COMPTE_WINDOW_MS = Math.max(1000, Number(process.env.SEREO_AUTH_RATE_WINDOW_COMPTE_MS) || 60 * 60 * 1000);
 const AUTH_COMPTE_LOCKOUT_MS = Math.max(1000, Number(process.env.SEREO_AUTH_LOCKOUT_COMPTE_MS) || 15 * 60 * 1000);
@@ -777,6 +785,60 @@ function echecDuCompte(identifiant, now = Date.now()) {
 
 function effacerEchecsDuCompte(identifiant) {
   authCompteState.delete(cleDeCompte(identifiant));
+}
+
+// L'« appareil connu » (relecture du 26/09 ; le « device cookie » de l'OWASP).
+// Une connexion reussie laisse au navigateur un cookie signe : « cet appareil a
+// su le mot de passe de ce compte ». Il porte l'empreinte des comptes ouverts
+// (au plus 8 : un poste partage), jamais leur nom, et sa date ; il vaut 180
+// jours apres la derniere connexion reussie. Signe avec la base du secret de
+// session SANS le mot de passe d'environnement : apres un changement de
+// SEREO_AUTH_PASSWORD, les appareils de Thomas restent connus -- c'est
+// justement quand un vieux mot de passe rejoue ferait bloquer le compte.
+// « Se deconnecter » ne l'efface pas : ce n'est pas une session, il n'ouvre
+// rien ; il n'exempte que de la limite par compte.
+const APPAREIL_COOKIE_NAME = "sereo_appareil";
+const APPAREIL_MAX_AGE_SECONDS = 180 * 24 * 60 * 60;
+const APPAREIL_COMPTES_MAX = 8;
+
+function signerAppareil(charge) {
+  return crypto.createHmac("sha256", `${AUTH_SESSION_SECRET_BASE}|appareil`).update(charge).digest("base64url");
+}
+
+function empreinteDeCompte(identifiant) {
+  return crypto.createHash("sha256").update(cleDeCompte(identifiant)).digest("base64url").slice(0, 16);
+}
+
+// Les empreintes des comptes que CET appareil a ouverts ; [] si le cookie
+// manque, est altere ou trop vieux.
+function comptesDeLAppareil(req, now = Date.now()) {
+  const valeur = String(parseCookies(req.get("cookie"))[APPAREIL_COOKIE_NAME] || "");
+  const point = valeur.lastIndexOf(".");
+  if (point <= 0) return [];
+  const charge = valeur.slice(0, point);
+  if (!constantTimeEqual(valeur.slice(point + 1), signerAppareil(charge))) return [];
+  try {
+    const { c, t } = JSON.parse(Buffer.from(charge, "base64url").toString("utf8"));
+    if (!Array.isArray(c) || !(Number(t) > now - APPAREIL_MAX_AGE_SECONDS * 1000)) return [];
+    return c.map(String);
+  } catch {
+    return [];
+  }
+}
+
+function appareilConnuDuCompte(req, identifiant) {
+  return Boolean(cleDeCompte(identifiant)) && comptesDeLAppareil(req).includes(empreinteDeCompte(identifiant));
+}
+
+// Le cookie a poser apres une connexion reussie : ce compte en tete, puis ceux
+// que l'appareil connaissait deja.
+function cookieAppareil(req, identifiant) {
+  const empreinte = empreinteDeCompte(identifiant);
+  const comptes = [empreinte, ...comptesDeLAppareil(req).filter(c => c !== empreinte)].slice(0, APPAREIL_COMPTES_MAX);
+  const charge = Buffer.from(JSON.stringify({ c: comptes, t: Date.now() })).toString("base64url");
+  const parts = [`${APPAREIL_COOKIE_NAME}=${charge}.${signerAppareil(charge)}`, "HttpOnly", "SameSite=Lax", "Path=/", `Max-Age=${APPAREIL_MAX_AGE_SECONDS}`];
+  if (req.secure || req.get("x-forwarded-proto") === "https") parts.push("Secure");
+  return parts.join("; ");
 }
 
 function getClientIp(req) {
@@ -2151,8 +2213,10 @@ function requireAccessAuth(req, res, next) {
       denyAccessAttempt(req, res, 429, "Trop de tentatives de connexion. Reessayez plus tard.", status.remainingMs);
       return;
     }
-    // Garde-fous (25/09) : la limite par compte, comme au formulaire.
-    const compte = statutDuCompte(basicCredentials.username);
+    // Garde-fous (25/09) : la limite par compte, comme au formulaire -- sauf
+    // pour un appareil qui a deja ouvert ce compte (relecture du 26/09).
+    const connu = appareilConnuDuCompte(req, basicCredentials.username);
+    const compte = connu ? { locked: false } : statutDuCompte(basicCredentials.username);
     if (compte.locked) {
       denyAccessAttempt(req, res, 429, "Trop de tentatives de connexion sur ce compte. Reessayez plus tard.", compte.remainingMs);
       return;
@@ -2164,12 +2228,13 @@ function requireAccessAuth(req, res, next) {
     if (valid) {
       clearAuthFailures(ip);
       effacerEchecsDuCompte(basicCredentials.username);
+      if (!connu) res.append("Set-Cookie", cookieAppareil(req, basicCredentials.username));
       next();
       return;
     }
 
     const updated = recordAuthFailure(ip);
-    const compteApres = echecDuCompte(basicCredentials.username);
+    const compteApres = connu ? { locked: false, remainingMs: 0 } : echecDuCompte(basicCredentials.username);
     if (updated.locked || compteApres.locked) {
       denyAccessAttempt(req, res, 429, "Trop de tentatives de connexion. Reessayez plus tard.", Math.max(updated.remainingMs, compteApres.remainingMs));
       return;
@@ -2261,7 +2326,10 @@ function renderLoginPage(req, res) {
     const plural = lockedSeconds > 1 ? "s" : "";
     // Le mot "seconde(s)" est dans un span separe pour que login.js puisse
     // basculer entre singulier et pluriel quand le compteur descend a 1.
-    errorMarkup = `<p class="login-error" role="alert" aria-live="polite">Trop de tentatives${parCompte ? " sur ce compte" : ""}. R&eacute;essaie dans <span id="lockout-countdown">${lockedSeconds}</span> <span id="lockout-unit">seconde${plural}</span>.</p>`;
+    // Le blocage d'un compte ne vise que les appareils qui ne l'ont jamais
+    // ouvert (relecture du 26/09) : la page le dit, c'est la voie de secours.
+    const secours = parCompte ? " Un appareil d&eacute;j&agrave; connect&eacute; &agrave; ce compte peut toujours se connecter." : "";
+    errorMarkup = `<p class="login-error" role="alert" aria-live="polite">Trop de tentatives${parCompte ? " sur ce compte" : ""}. R&eacute;essaie dans <span id="lockout-countdown">${lockedSeconds}</span> <span id="lockout-unit">seconde${plural}</span>.${secours}</p>`;
   } else if (hasError) {
     // UNE phrase (planche 9c) : « Identifiant ou mot de passe incorrect. Il te
     // reste 2 tentatives avant un blocage de 15 secondes. » Les essais restants
@@ -2454,8 +2522,11 @@ async function handleLogin(req, res) {
     res.redirect(303, `/login?locked=1&until=${status.lockedUntil}&next=${encodeURIComponent(next)}`);
     return;
   }
-  // Garde-fous (25/09) : le compte vise, lui aussi, avant toute comparaison.
-  const compte = statutDuCompte(username);
+  // Garde-fous (25/09) : le compte vise, lui aussi, avant toute comparaison --
+  // sauf depuis un appareil qui l'a deja ouvert (relecture du 26/09) : ses
+  // echecs ne comptent pas non plus pour le compte.
+  const connu = appareilConnuDuCompte(req, username);
+  const compte = connu ? { locked: false } : statutDuCompte(username);
   if (compte.locked) {
     res.setHeader("Retry-After", String(Math.ceil(compte.remainingMs / 1000)));
     res.redirect(303, `/login?locked=1&compte=1&until=${compte.lockedUntil}&next=${encodeURIComponent(next)}`);
@@ -2466,7 +2537,7 @@ async function handleLogin(req, res) {
 
   if (!identity) {
     const updated = recordAuthFailure(ip);
-    const compteApres = echecDuCompte(username);
+    const compteApres = connu ? { locked: false } : echecDuCompte(username);
     if (updated.locked) {
       res.setHeader("Retry-After", String(Math.ceil(updated.remainingMs / 1000)));
       res.redirect(303, `/login?locked=1&until=${updated.lockedUntil}&next=${encodeURIComponent(next)}`);
@@ -2492,10 +2563,11 @@ async function handleLogin(req, res) {
     }
   }
 
-  res.setHeader(
-    "Set-Cookie",
-    buildAuthCookie(createAccessSessionValue(Date.now(), identity), AUTH_COOKIE_MAX_AGE_SECONDS, req)
-  );
+  res.setHeader("Set-Cookie", [
+    buildAuthCookie(createAccessSessionValue(Date.now(), identity), AUTH_COOKIE_MAX_AGE_SECONDS, req),
+    // L'appareil est desormais connu de ce compte (relecture du 26/09).
+    cookieAppareil(req, username)
+  ]);
   res.redirect(303, next);
 }
 

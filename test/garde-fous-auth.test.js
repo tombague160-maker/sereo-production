@@ -61,16 +61,27 @@ after(async () => {
 });
 
 // POST /login depuis une adresse donnee ; rend le cookie de session, ou null,
-// et l'adresse de redirection.
-async function connexion(identifiant, motDePasse, ip = nouvelleAdresse()) {
+// l'adresse de redirection et le cookie « appareil connu » recu (ou null).
+// `appareil` : le cookie « appareil connu » que ce navigateur presente.
+async function connexion(identifiant, motDePasse, ip = nouvelleAdresse(), appareil = null) {
   const reponse = await fetch(`${baseUrl}/login`, {
     method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded", "x-forwarded-for": ip },
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      "x-forwarded-for": ip,
+      ...(appareil ? { cookie: appareil } : {})
+    },
     body: new URLSearchParams({ username: identifiant, password: motDePasse }),
     redirect: "manual"
   });
-  const cookie = (reponse.headers.getSetCookie?.() || []).find(v => v.startsWith("sereo_access=") && !/Max-Age=0/.test(v));
-  return { cookie: cookie ? cookie.split(";")[0] : null, location: reponse.headers.get("location") || "" };
+  const recus = reponse.headers.getSetCookie?.() || [];
+  const cookie = recus.find(v => v.startsWith("sereo_access=") && !/Max-Age=0/.test(v));
+  const connu = recus.find(v => v.startsWith("sereo_appareil="));
+  return {
+    cookie: cookie ? cookie.split(";")[0] : null,
+    location: reponse.headers.get("location") || "",
+    appareil: connu ? connu.split(";")[0] : null
+  };
 }
 
 async function moi(cookie) {
@@ -81,7 +92,7 @@ async function moi(cookie) {
 
 // --- 1. Limite par compte -----------------------------------------------------
 
-test("connexion : 20 échecs sur un compte, depuis 20 adresses, le bloquent — même avec le bon mot de passe", async () => {
+test("connexion : 20 échecs sur un compte, depuis 20 adresses, le bloquent pour un appareil inconnu — même avec le bon mot de passe", async () => {
   _resetAuthRateLimitForTest();
   for (let i = 0; i < 20; i++) {
     const essai = await connexion("julie", `mauvais-${i}`);
@@ -128,6 +139,102 @@ test("connexion : la limite par compte vaut aussi pour l'authentification Basic 
   const apres = await basic("admin-env", "mot-de-passe-environnement");
   await apres.arrayBuffer();
   assert.equal(apres.status, 200, "temoin : le blocage ne se leve pas");
+});
+
+// --- 1 bis. L'appareil connu (relecture adverse du 26/09) ------------------------
+//
+// Le blocage d'un compte refusait le bon mot de passe a TOUS les appareils : un
+// tiers qui connait l'identifiant de Thomas le tenait dehors aussi longtemps
+// qu'il le voulait, et un navigateur qui rejouait un vieux mot de passe Basic
+// faisait de meme sans attaquant. Un appareil qui a deja ouvert le compte n'est
+// plus ni bloque ni compte par cette limite (il garde celle par adresse).
+
+test("appareil connu : pendant une attaque sur son compte, il se connecte encore avec le bon mot de passe", async () => {
+  _resetAuthRateLimitForTest();
+  // Le telephone de julie s'est deja connecte : il garde le cookie « appareil connu ».
+  const telephone = await connexion("julie", "tournee-du-matin-2026");
+  assert.ok(telephone.cookie, "prealable : julie ne se connecte pas");
+  assert.ok(telephone.appareil, "une connexion reussie ne laisse pas de cookie « appareil connu »");
+  // L'attaque : 20 echecs depuis 20 adresses, sans cookie.
+  for (let i = 0; i < 20; i++) await connexion("julie", `mauvais-${i}`);
+  // Temoin : un appareil inconnu reste bloque, meme avec le bon mot de passe.
+  const inconnu = await connexion("julie", "tournee-du-matin-2026");
+  assert.equal(inconnu.cookie, null, "temoin : le compte n'est pas bloque");
+  assert.match(inconnu.location, /locked=1&compte=1/);
+  // Le telephone, depuis une adresse neuve (reseau mobile), passe.
+  const retour = await connexion("julie", "tournee-du-matin-2026", nouvelleAdresse(), telephone.appareil);
+  assert.ok(retour.cookie, `l'appareil connu est bloque par l'attaque sur son compte (${retour.location})`);
+  assert.equal(await moi(retour.cookie), 200);
+  // La page du blocage dit la voie de secours.
+  const page = await fetch(`${baseUrl}${inconnu.location}`, { redirect: "manual" });
+  assert.match(await page.text(), /appareil d&eacute;j&agrave; connect&eacute; &agrave; ce compte/);
+});
+
+test("appareil connu : le cookie vaut pour SON compte seulement, et altéré il ne vaut rien", async () => {
+  _resetAuthRateLimitForTest();
+  const poste = await connexion("julie", "tournee-du-matin-2026");
+  assert.ok(poste.appareil);
+  for (let i = 0; i < 20; i++) await connexion("marc", `mauvais-${i}`);
+  // Connu de julie, pas de marc : l'attaque sur marc le bloque.
+  const marc = await connexion("marc", "bureau-du-matin-2026", nouvelleAdresse(), poste.appareil);
+  assert.equal(marc.cookie, null, "le cookie de julie exempte aussi un autre compte");
+  // Un cookie altere (signature d'un autre contenu) n'est pas un appareil connu.
+  for (let i = 0; i < 20; i++) await connexion("julie", `mauvais-${i}`);
+  const [charge, signature] = poste.appareil.slice("sereo_appareil=".length).split(".");
+  const faux = `sereo_appareil=${Buffer.from(JSON.stringify({ c: ["x"], t: Date.now() })).toString("base64url")}.${signature}`;
+  assert.ok(charge);
+  assert.equal((await connexion("julie", "tournee-du-matin-2026", nouvelleAdresse(), faux)).cookie, null, "un cookie altere exempte de la limite");
+  // Temoin : le vrai cookie passe.
+  assert.ok((await connexion("julie", "tournee-du-matin-2026", nouvelleAdresse(), poste.appareil)).cookie);
+});
+
+test("appareil connu : un vieux mot de passe qu'il rejoue (Basic ou formulaire) ne bloque pas le compte pour les autres", async () => {
+  _resetAuthRateLimitForTest();
+  const navigateur = await connexion("admin-env", "mot-de-passe-environnement");
+  assert.ok(navigateur.appareil);
+  // Le navigateur rejoue un ancien mot de passe, 25 fois (Basic), puis 5 au formulaire.
+  for (let i = 0; i < 25; i++) {
+    const r = await fetch(`${baseUrl}/api/me`, {
+      headers: {
+        authorization: `Basic ${Buffer.from("admin-env:ancien-mot-de-passe").toString("base64")}`,
+        cookie: navigateur.appareil,
+        "x-forwarded-for": nouvelleAdresse()
+      },
+      redirect: "manual"
+    });
+    await r.arrayBuffer();
+    assert.equal(r.status, 401, `essai ${i + 1} : ${r.status}`);
+  }
+  for (let i = 0; i < 5; i++) await connexion("admin-env", "ancien-mot-de-passe", nouvelleAdresse(), navigateur.appareil);
+  // Un autre appareil, jamais connecte, entre avec le bon mot de passe.
+  const autre = await connexion("admin-env", "mot-de-passe-environnement");
+  assert.ok(autre.cookie, `les echecs d'un appareil connu ont bloque le compte pour tous (${autre.location})`);
+});
+
+test("appareil connu : en Basic aussi, il passe pendant une attaque sur son compte", async () => {
+  _resetAuthRateLimitForTest();
+  const basic = (p, cookie = null) => fetch(`${baseUrl}/api/me`, {
+    headers: {
+      authorization: `Basic ${Buffer.from(`admin-env:${p}`).toString("base64")}`,
+      "x-forwarded-for": nouvelleAdresse(),
+      ...(cookie ? { cookie } : {})
+    },
+    redirect: "manual"
+  });
+  // Une premiere requete Basic reussie fait connaitre l'appareil.
+  const premiere = await basic("mot-de-passe-environnement");
+  await premiere.arrayBuffer();
+  assert.equal(premiere.status, 200);
+  const recu = (premiere.headers.getSetCookie?.() || []).find(v => v.startsWith("sereo_appareil="));
+  assert.ok(recu, "une authentification Basic reussie ne fait pas connaitre l'appareil");
+  const appareil = recu.split(";")[0];
+  for (let i = 0; i < 20; i++) await (await basic(`mauvais-${i}`)).arrayBuffer();
+  const inconnu = await basic("mot-de-passe-environnement");
+  await inconnu.arrayBuffer();
+  assert.equal(inconnu.status, 429, "temoin : le compte n'est pas bloque");
+  const connu = await basic("mot-de-passe-environnement", appareil);
+  await connu.arrayBuffer();
+  assert.equal(connu.status, 200, `l'appareil connu est bloque en Basic (${connu.status})`);
 });
 
 // --- 2. Deconnexion et changement de mot de passe -----------------------------
