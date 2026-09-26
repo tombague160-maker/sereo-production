@@ -8348,12 +8348,30 @@ empreinte de toutes les lignes, identifiants) :
 - **Unitaires** : `garde-fous-routes`, `garde-fous-droits`, `garde-fous-sauvegardes`,
   `garde-fous-copie`, `garde-fous-auth` et `garde-fous-mot-de-passe` (`.test.js`). Quatre bancs
   voisins suivent la nouvelle règle : `sauvegardes` (l'oracle compte les hebdomadaires),
-  `chantier1-concurrence`, `lot5-rapidite` et `journal-auteur`. `npm test` : **809/809**.
+  `chantier1-concurrence`, `lot5-rapidite` et `journal-auteur`. `npm test` : **810/811**. Le
+  rouge restant est `lot5-rapidite.test.js:345` (`ECONNRESET`), le banc intermittent que la
+  chasse a relevé et confié au lot « robustesse » ; il passe 5 fois sur 5 seul.
+- **Rouges sur le code de la base (`5b52268`).** Les six bancs unitaires du lot y sont rouges.
+  Pour la plupart, la cause est la bonne (assertion sur le défaut). Sept rouges sont en revanche
+  des plantages, faute de fonction ou de module nouveaux : pour eux, la preuve est un **mutant du
+  code du lot**, qui retire la chose gardée. Sept mutants sont tués, chacun pour sa cause : copie
+  jamais faite ; copie en échec et silencieuse ; écart de la sauvegarde d'avant purge ignoré ;
+  relecture sans `integrity_check` ; nettoyage vide ; nettoyage non appelé au démarrage ; purge
+  des tournées sans `integrity_check`. Deux d'entre eux survivaient aux bancs d'origine :
+  - la relecture sans `integrity_check` : le banc abîmait la SOURCE, et `VACUUM INTO` échouait
+    avant toute relecture ;
+  - le nettoyage non appelé : le banc appelait la fonction elle-même.
+
+  D'où deux cas ajoutés, et `relireSauvegarde` sortie du thread pour être éprouvée :
+  - une copie abîmée APRÈS son écriture, dont seules des pages de l'historique sont touchées ;
+  - des fichiers de travail posés avant le vrai `startServer`.
 - **e2e** : `garde-fous.spec.js`, sur les ports 3600 (sans connexion) et 3601 (avec). L'adresse du
   serveur authentifié de `connexion`, `contraste-login` et `numerotation-admin` se règle
   (`SEREO_E2E_AUTH_BASE_URL`, 3101 par défaut). La liste ciblée — les bancs du lot, Paramètres,
   connexion, hors ligne, chargement instantané, poids du réseau, rendu à l'affichage, barre
-  latérale, tournée, stock, imports, tableau de bord — donne **242/242**.
+  latérale, tournée, stock, imports, tableau de bord — donne **242/242**. Après la sortie de
+  `relireSauvegarde`, `garde-fous`, `sauvegardes`, `parametres` et `connexion` ont été rejoués :
+  **46/46**.
 
 ### Ce qui reste
 
