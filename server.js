@@ -2911,7 +2911,7 @@ function ensureOrderNumbers(db) {
   // incremente localement a chaque allocation. O(N+M).
   const settings = normalizeSettings(db.settings || {});
   const { prefix, resetAnnually } = settings.orderNumbering;
-  const existingNumeros = db.commandes.map(o => o.numero).filter(Boolean);
+  const existingNumeros = numerosDejaAttribues(db);
 
   let continuousCounter = 0;
   const counterByYear = new Map();
@@ -4577,12 +4577,20 @@ function extractYear(dateString) {
 //
 // Format reset annuel    : CMD-2026-001, CMD-2026-002, ..., CMD-2027-001
 // Format continu (jamais) : CMD-00001, CMD-00002, ..., CMD-12847
+// Les numeros deja attribues : ceux des commandes, et ceux des commandes mises
+// de cote (relecture adverse du 26/09). Sans ces derniers, le numero de la
+// derniere commande, illisible, etait redonne a la suivante -- et avec lui
+// son identifiant cmd-<numero>, que ses arrets de tournee nomment encore.
+function numerosDejaAttribues(db) {
+  const numeros = (db.commandes || []).map(order => order.numero).filter(Boolean);
+  for (const { numero } of commandesMisesDeCote().values()) if (numero) numeros.push(numero);
+  return numeros;
+}
+
 function generateOrderNumber(db, dateCommande) {
   const settings = normalizeSettings(db.settings || {});
   const { prefix, resetAnnually } = settings.orderNumbering;
-  const existingNumeros = (db.commandes || [])
-    .map(order => order.numero)
-    .filter(Boolean);
+  const existingNumeros = numerosDejaAttribues(db);
 
   if (!resetAnnually) {
     // Compteur continu : extraire le plus grand suffixe numerique tout prefixe confondu

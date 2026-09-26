@@ -294,6 +294,32 @@ test("temoin : une commande absente SANS etre mise de cote reste une erreur (404
   assert.match(depart.body.error, /Commande introuvable/);
 });
 
+test("le numero (et l'identifiant) d'une commande mise de cote ne sont pas redonnes a la commande suivante", async () => {
+  // Relecture adverse du 26/09 : le compteur prenait le plus grand numero des
+  // seules commandes lisibles ; la derniere commande, mise de cote, voyait son
+  // numero -- et son identifiant cmd-<numero>, que ses arrets nomment
+  // encore -- redonnes a la commande suivante.
+  repartirDeZero();
+  const commande = (numero, jour) => ({ id: `cmd-${numero.toLowerCase()}`, numero, clientId: "c1", clientName: "Client 1", status: "livre",
+    dateCommande: `2026-09-${jour}`, deliveryDate: `2026-09-${jour}`, products: [{ code: "P1", nom: "Produit", quantite: 1 }] });
+  writeDb({
+    ...defaultDb(),
+    clients: [{ id: "c1", nom: "Client 1", rue: "1 rue du Test", codePostal: "39300", ville: "Champagnole" }],
+    stock: [{ id: "p1", code: "P1", nom: "Produit", quantite: 50 }],
+    commandes: [commande("BON-2026-163", "20"), commande("BON-2026-164", "21")],
+    settings: { orderNumbering: { prefix: "BON", dateFormat: "dmy", resetAnnually: true } }
+  }, { backup: false });
+  closeStorage();
+  abimer("commandes", "payload", "id", "cmd-bon-2026-164");
+  closeStorage();
+  writeDb(readDb(), { backup: false });
+  assert.deepEqual(readDb().commandes.map(o => o.numero), ["BON-2026-163"], "prealable : la commande n'a pas ete mise de cote");
+  const r = await api("/api/customer-orders", { method: "POST", body: JSON.stringify({ clientId: "c1", dateCommande: "2026-09-26", products: [{ productId: "p1", quantite: 1 }] }) });
+  assert.equal(r.status, 201, JSON.stringify(r.body));
+  assert.equal(r.body.numero, "BON-2026-165", "le numero de la commande mise de cote est redonne");
+  assert.equal(r.body.id, "cmd-bon-2026-165");
+});
+
 test("un trace de tournee abime : la tournee se lit sans sa ligne, le trace est mis de cote", async () => {
   semer();
   const abime = abimer("traces_tournees", "trace", "route_id", "t1");
