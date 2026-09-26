@@ -71,7 +71,8 @@ test("dockerignore — temoin : le code de l'application, lui, est copie", () =>
 test("dockerignore — le design et la documentation ne partent pas en production", () => {
   for (const f of ["design/DESIGN.md", "design/export-v8/planche.html", "docs/internal/AUDIT_2026_05_20.md",
     "CHANGELOG.md", "CLAUDE.md", "CONTRIBUTING.md", "DEPLOYMENT.md", "README.md", "playwright.config.js",
-    ".release-please-manifest.json", ".claude/worktrees/ch-x/server.js"]) {
+    ".release-please-manifest.json", ".claude/worktrees/ch-x/server.js",
+    "test-results/banc-chromium/trace.zip", "playwright-report/index.html", "pw-lot.config.js"]) {
     assert.equal(exclu(f), true, `${f} entrerait dans l'image`);
   }
   for (const f of ["server.js", "lib/jour-paris.js", "storage/sqliteStore.js", "public/index.html", "public/css/style.css",

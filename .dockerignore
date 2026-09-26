@@ -67,8 +67,12 @@ playwright.config.js
 .release-please-config.json
 .release-please-manifest.json
 # Les worktrees des sessions (copies entieres du depot, node_modules compris)
-# quand l'image est construite depuis un poste de developpement.
+# quand l'image est construite depuis un poste de developpement, et ce que
+# les bancs e2e y laissent (rapports, configurations locales).
 .claude/
+test-results/
+playwright-report/
+pw-*.config.js
 
 # Outils dev / IDE
 .vscode/
