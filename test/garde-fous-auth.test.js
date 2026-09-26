@@ -178,12 +178,16 @@ test("appareil connu : le cookie vaut pour SON compte seulement, et altéré il 
   // Connu de julie, pas de marc : l'attaque sur marc le bloque.
   const marc = await connexion("marc", "bureau-du-matin-2026", nouvelleAdresse(), poste.appareil);
   assert.equal(marc.cookie, null, "le cookie de julie exempte aussi un autre compte");
-  // Un cookie altere (signature d'un autre contenu) n'est pas un appareil connu.
+  // Un cookie forge -- l'empreinte de julie se calcule, pas la signature -- n'est
+  // pas un appareil connu : celui du poste, recopie pour julie ET marc, sous la
+  // signature d'origine.
   for (let i = 0; i < 20; i++) await connexion("julie", `mauvais-${i}`);
   const [charge, signature] = poste.appareil.slice("sereo_appareil=".length).split(".");
-  const faux = `sereo_appareil=${Buffer.from(JSON.stringify({ c: ["x"], t: Date.now() })).toString("base64url")}.${signature}`;
-  assert.ok(charge);
-  assert.equal((await connexion("julie", "tournee-du-matin-2026", nouvelleAdresse(), faux)).cookie, null, "un cookie altere exempte de la limite");
+  const { c } = JSON.parse(Buffer.from(charge, "base64url").toString("utf8"));
+  const empreinte = id => require("node:crypto").createHash("sha256").update(id).digest("base64url").slice(0, 16);
+  assert.deepEqual(c, [empreinte("julie")], "prealable : le cookie ne porte pas l'empreinte attendue");
+  const faux = `sereo_appareil=${Buffer.from(JSON.stringify({ c: [empreinte("julie"), empreinte("marc")], t: Date.now() })).toString("base64url")}.${signature}`;
+  assert.equal((await connexion("julie", "tournee-du-matin-2026", nouvelleAdresse(), faux)).cookie, null, "un cookie forge exempte de la limite");
   // Temoin : le vrai cookie passe.
   assert.ok((await connexion("julie", "tournee-du-matin-2026", nouvelleAdresse(), poste.appareil)).cookie);
 });
