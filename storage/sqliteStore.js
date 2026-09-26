@@ -11,6 +11,10 @@ function createSqliteStore(options) {
     defaultDb,
     normalizeDb,
     normaliserTable,
+    // Les tables que l'ecriture normalise et recrit meme sans les avoir lues
+    // (lecture paresseuse) : celles dont la normalisation n'est pas l'identite
+    // (defauts poses a la lecture). Voir writeDb.
+    tablesToujoursEcrites = [],
     ensureDir
   } = options;
 
@@ -69,6 +73,12 @@ function createSqliteStore(options) {
   // Lot 5 : l'etat connu de la base, pour n'ecrire que ce qui change (voir
   // persistDatabase). null = inconnu, relu a la prochaine ecriture.
   let writeCache = null;
+  // La premiere ecriture apres l'ouverture lit et recrit TOUT (25/09), comme
+  // avant : une base ecrite par une version d'avant, ou restauree, sort
+  // normalisee par le code d'aujourd'hui, table par table. Ensuite, une table
+  // qu'une ecriture n'a pas lue n'a pas pu changer (voir persistDatabase).
+  let premiereEcriture = true;
+  const toujoursEcrites = new Set(tablesToujoursEcrites);
 
   return {
     readDb() {
@@ -83,7 +93,16 @@ function createSqliteStore(options) {
 
     writeDb(db) {
       try {
-        writeCache = persistDatabase(database, normalizeDb(db), writeCache);
+        // Un objet rendu par la lecture paresseuse dit ce qui a ete lu. La
+        // premiere ecriture, et les tables toujours ecrites, lisent le reste.
+        const etat = db ? db[ETAT_DE_LECTURE] : null;
+        if (etat) {
+          for (const [cle] of LECTURES_DES_TABLES) {
+            if (premiereEcriture || toujoursEcrites.has(cle)) void db[cle];
+          }
+        }
+        writeCache = persistDatabase(database, normalizeDb(db), writeCache, etat);
+        premiereEcriture = false;
       } catch (error) {
         writeCache = null;
         throw error;
@@ -132,7 +151,13 @@ function createSqliteStore(options) {
       return { comptes, empreintes };
     },
 
+    /** Les bancs qui comptent les lectures de table : repartir sans memoire. */
+    oublierLecturesMemorisees() {
+      oublierLectures(database);
+    },
+
     close() {
+      oublierLectures(database);
       database.close();
     },
 
@@ -670,6 +695,7 @@ function tableSpecs() {
   return [
     {
       table: "produits",
+      sources: ["stock"],
       columns: ["id", "reference", "nom", "stock_actuel", "stock_minimum", "stock_bloque", "unite", "updated_at", "payload"],
       rows: db => (db.stock || []).map((product, index) => ({
         id: stableId(product, "produit", index),
@@ -687,6 +713,7 @@ function tableSpecs() {
     },
     {
       table: "clients",
+      sources: ["clients"],
       columns: ["id", "nom", "adresse", "ville", "code_postal", "telephone", "secteur", "updated_at", "payload"],
       rows: db => (db.clients || []).map((client, index) => ({
         id: stableId(client, "client", index),
@@ -704,6 +731,7 @@ function tableSpecs() {
     },
     {
       table: "commandes",
+      sources: ["commandes"],
       columns: ["id", "numero", "date_commande", "excel_row_hash", "client_id", "date_import", "date_preparation", "date_livraison", "statut", "source_excel", "updated_at", "payload"],
       rows: db => (db.commandes || []).map((order, index) => ({
         id: stableId(order, "commande", index),
@@ -724,6 +752,7 @@ function tableSpecs() {
     },
     {
       table: "lignes_commande",
+      sources: ["commandes"],
       columns: ["id", "commande_id", "produit_id", "quantite", "quantite_preparee", "statut", "stock_suffisant", "payload"],
       rows: db => {
         const rows = [];
@@ -753,6 +782,7 @@ function tableSpecs() {
     },
     {
       table: "routes",
+      sources: ["routes"],
       columns: ["id", "statut", "secteur", "date_livraison", "payload"],
       // Le trace vit dans traces_tournees, hors du payload : voir ecrireTraces.
       rows: db => (db.routes || []).map((route, index) => {
@@ -770,11 +800,13 @@ function tableSpecs() {
     },
     {
       table: "abonnements",
+      sources: ["subscriptions"],
       columns: ["id", "payload"],
       rows: db => simplePayloadRows("abonnements", db.subscriptions || [])
     },
     {
       table: "relances_crm",
+      sources: ["relances"],
       columns: ["id", "client_id", "commande_id", "date_prevue", "statut", "payload"],
       rows: db => (db.relances || []).map((reminder, index) => ({
         id: stableId(reminder, "relance", index),
@@ -789,6 +821,7 @@ function tableSpecs() {
     },
     {
       table: "secteurs_livraison",
+      sources: ["deliverySectors"],
       columns: ["id", "nom", "ville", "jour_mois", "frequence", "point_depart", "payload"],
       rows: db => (db.deliverySectors || []).map((sector, index) => ({
         id: stableId(sector, "secteur", index),
@@ -804,11 +837,13 @@ function tableSpecs() {
     },
     {
       table: "livraisons",
+      sources: ["routes", "commandes"],
       columns: ["id", "commande_id", "client_id", "date_livraison", "secteur", "statut", "note_probleme", "date_mise_a_jour", "payload"],
       rows: deliveryRows
     },
     {
       table: "mouvements_stock",
+      sources: ["stockMovements"],
       columns: ["id", "produit_id", "type", "quantite", "raison", "reference_commande", "date", "utilisateur", "payload"],
       rows: db => (db.stockMovements || []).map((movement, index) => ({
         id: stableId(movement, "mouvement", index),
@@ -826,11 +861,13 @@ function tableSpecs() {
     },
     {
       table: "ventes",
+      sources: ["ventes"],
       columns: ["id", "payload"],
       rows: db => simplePayloadRows("ventes", db.ventes || [])
     },
     {
       table: "historique",
+      sources: ["historique"],
       columns: ["id", "type", "message", "date", "payload"],
       rows: db => (db.historique || []).map((item, index) => ({
         id: stableId(item, "historique", index),
@@ -841,6 +878,7 @@ function tableSpecs() {
       // v1.12.0 : archives des imports Excel. Le payload contient les metadata
       // completes ; quelques colonnes indexables servent au tri et au filtre.
       table: "imports_archives",
+      sources: ["importsArchives"],
       columns: ["id", "type", "filename", "archived_path", "imported_at", "rows_count", "file_size", "sha256", "stats_json", "payload"],
       rows: db => (db.importsArchives || []).map((archive, index) => ({
         id: stableId(archive, "import", index),
@@ -992,12 +1030,49 @@ function planSortOrders(ids, cached) {
 }
 
 /**
+ * Les lignes ajoutees en tete d'une table jamais lue (AJOUT_EN_TETE), pretes
+ * a ecrire : { wanted, sorts }. Les rangs sont ceux que planSortOrders
+ * donnerait a la table entiere -- juste avant le premier, ou 0 dans une table
+ * vide. null quand les rangs en base ne sont pas distincts (l'ecriture
+ * complete renumeroterait alors toute la table : l'appelant la lit).
+ */
+function lignesAjouteesEnTete(spec, etat, cached) {
+  const cle = spec.sources.length === 1 ? spec.sources[0] : null;
+  const ajouts = cle ? etat.enTete(cle) : [];
+  if (!ajouts.length) return { wanted: [], sorts: [] };
+  // En tete de table, le dernier ajoute d'abord (comme unshift).
+  const wanted = spec.rows({ [cle]: [...ajouts].reverse() });
+  const seen = new Set();
+  for (const row of wanted) {
+    // Meme refus que l'ecriture complete (cle primaire).
+    if (seen.has(row.id) || cached.has(row.id)) throw new Error(`UNIQUE constraint failed: ${spec.table}.id (${row.id})`);
+    seen.add(row.id);
+  }
+  let premier = Infinity;
+  const rangs = new Set();
+  for (const { s } of cached.values()) {
+    rangs.add(s);
+    if (s < premier) premier = s;
+  }
+  if (rangs.size !== cached.size) return null;
+  const debut = cached.size ? premier - wanted.length : 0;
+  return { wanted, sorts: wanted.map((_, index) => debut + index) };
+}
+
+/**
  * Ecrit `db` en n'ecrivant que ce qui change. `cache` : l'etat connu de la
  * base (ou null, alors relu). Rend le nouvel etat, a garder par l'appelant ;
  * en cas d'echec, la transaction est annulee et l'erreur remonte (l'appelant
  * doit alors oublier son cache).
+ *
+ * `etat` (25/09) : ce que la lecture paresseuse a lu de `db` (null : tout).
+ * Une table dont aucune source n'a ete lue n'a pas pu changer : ni relue, ni
+ * resérialisee, ni hachee -- sauf les lignes ajoutees en tete sans la lire
+ * (addHistory, un mouvement de stock), seules ecrites. Avant, chaque ecriture
+ * resérialisait et hachait chaque ligne de chaque table (historique,
+ * mouvements, ventes compris) pour n'en ecrire que deux ou trois.
  */
-function persistDatabase(database, db, cache) {
+function persistDatabase(database, db, cache, etat = null) {
   const now = new Date().toISOString();
   const specs = tableSpecs();
 
@@ -1009,6 +1084,14 @@ function persistDatabase(database, db, cache) {
     const next = { tables: new Map(), traces: new Map(known.traces) };
 
     const plans = specs.map(spec => {
+      if (etat && !spec.sources.some(cle => etat.lue(cle))) {
+        const cached = known.tables.get(spec.table) || new Map();
+        const enTete = lignesAjouteesEnTete(spec, etat, cached);
+        if (enTete) return { spec, cached, partiel: true, ...enTete };
+        // Rangs en base non distincts : l'ecriture complete renumeroterait
+        // toute la table ; on la lit (la lecture place les lignes ajoutees).
+        void db[spec.sources[0]];
+      }
       const wanted = spec.rows(db);
       const ids = wanted.map(row => row.id);
       const seen = new Set();
@@ -1028,6 +1111,8 @@ function persistDatabase(database, db, cache) {
     const deletionOrder = [...plans].sort((a, b) => (a.spec.table === "lignes_commande" ? -1 : b.spec.table === "lignes_commande" ? 1 : 0));
     const delTrace = database.prepare("DELETE FROM traces_tournees WHERE route_id = ?");
     for (const plan of deletionOrder) {
+      // Une table non lue ne perd aucune ligne.
+      if (plan.partiel) continue;
       const del = database.prepare(`DELETE FROM ${plan.spec.table} WHERE id = ?`);
       for (const id of plan.cached.keys()) {
         if (plan.seen.has(id)) continue;
@@ -1053,7 +1138,8 @@ function persistDatabase(database, db, cache) {
          ON CONFLICT(id) DO UPDATE SET ${cols.slice(1).map(c => `${c} = excluded.${c}`).join(", ")}, sort_order = excluded.sort_order`
       );
       const reorder = database.prepare(`UPDATE ${spec.table} SET sort_order = ? WHERE id = ?`);
-      const map = new Map();
+      // Une table non lue garde son etat connu, plus ses lignes ajoutees en tete.
+      const map = plan.partiel ? cached : new Map();
       wanted.forEach((row, index) => {
         const h = rowHash(row.values);
         const s = sorts[index];
@@ -1065,7 +1151,8 @@ function persistDatabase(database, db, cache) {
       next.tables.set(spec.table, map);
     }
 
-    ecrireTraces(database, db.routes || [], next);
+    // Tournees non lues : leurs traces n'ont pas change (next.traces les garde).
+    if (!etat || etat.lue("routes")) ecrireTraces(database, db.routes || [], next);
 
     database.prepare(`
       INSERT INTO app_meta (key, value, updated_at)
@@ -1086,10 +1173,19 @@ function persistDatabase(database, db, cache) {
     `).run(stringify(db.settings || {}), now);
 
     database.exec("COMMIT");
+    // La base a change : les lectures memorisees ne valent plus (readPayloads).
+    oublierLectures(database);
+    // Les lignes ajoutees en tete sont en base (26/09) : `db` ne les garde plus
+    // en attente -- relue, la table les a une fois ; recrit, l'objet ne les
+    // recrit pas. Seulement celles-ci : une table lue a deja place les siennes.
+    for (const plan of plans) {
+      if (plan.partiel && plan.wanted.length) etat.enTeteEcrites(plan.spec.sources[0]);
+    }
     next.dataVersion = dataVersion(database);
     return next;
   } catch (error) {
     database.exec("ROLLBACK");
+    oublierLectures(database);
     throw error;
   }
 }
@@ -1163,8 +1259,10 @@ function migrateTraces(database) {
       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
     `).run(new Date().toISOString());
     database.exec("COMMIT");
+    oublierLectures(database);
   } catch (error) {
     database.exec("ROLLBACK");
+    oublierLectures(database);
     throw error;
   }
 }
@@ -1188,6 +1286,15 @@ const LECTURES_DES_TABLES = [
   ["settings", database => readSettings(database)]
 ];
 
+// Ce que la lecture paresseuse dit de ce qu'elle a lu, et comment ajouter une
+// ligne en tete sans lire la table (25/09). Des symboles : invisibles pour
+// `{ ...db }`, JSON.stringify et Object.keys.
+const ETAT_DE_LECTURE = Symbol("sereo.etatDeLecture");
+const AJOUT_EN_TETE = Symbol("sereo.ajoutEnTete");
+// Les tables ou une ligne s'ajoute en tete sans lecture : chacune est la seule
+// source de SA table en base (tableSpecs), qui s'ecrit donc ligne a ligne.
+const TABLES_AJOUT_EN_TETE = new Set(["historique", "stockMovements"]);
+
 /**
  * LECTURE PARESSEUSE (24/09, mesure en production). readDb relisait et
  * decodait TOUTES les tables a chaque requete. L'ouverture lance ~20 routes
@@ -1199,8 +1306,16 @@ const LECTURES_DES_TABLES = [
  * son PREMIER acces ; une requete ne paie que ce qu'elle lit. L'objet rendu a
  * les memes cles et les memes valeurs : `{ ...db }`, JSON.stringify et
  * Object.keys lisent tout. Une table remplacee (`db.x = ...`) garde la valeur
- * posee. writeDb normalise tout, donc lit ce qui ne l'a pas ete : l'etat de la
- * base au moment de l'ecriture (sous le verrou), jamais un etat plus ancien.
+ * posee.
+ *
+ * L'ECRITURE (25/09) ne relit plus ce qui ne l'a pas ete : une table jamais
+ * lue n'a pas pu etre modifiee (on n'y accede que par ces accesseurs), elle
+ * reste en base telle quelle (ETAT_DE_LECTURE, persistDatabase). Et une ligne
+ * ajoutee en tete (AJOUT_EN_TETE : historique, mouvements de stock) ne force
+ * pas la lecture de sa table : elle attend, et prend sa place si la table est
+ * lue ensuite -- comme si elle avait ete ajoutee par unshift. Ecrite, elle
+ * n'attend plus (26/09) : la table lue apres l'ecriture la trouve en base, une
+ * fois, et une seconde ecriture du meme objet ne la recrit pas.
  *
  * A savoir pour le code asynchrone : une table lue APRES un `await` l'est plus
  * tard que les autres -- et sur un magasin ferme si une restauration a eu lieu
@@ -1210,25 +1325,56 @@ const LECTURES_DES_TABLES = [
  * routier (test/lecture-paresseuse.test.js ferme le magasin pendant ce calcul).
  */
 function lectureParesseuse(database, db, normaliserTable) {
+  const lues = new Set();
+  // Les lignes ajoutees en tete d'une table pas encore lue, dans l'ordre des ajouts.
+  const enAttente = new Map();
   for (const [cle, lire] of LECTURES_DES_TABLES) {
     let valeur;
-    let lue = false;
     Object.defineProperty(db, cle, {
       configurable: true,
       enumerable: true,
       get() {
-        if (!lue) {
+        if (!lues.has(cle)) {
           valeur = normaliserTable(cle, lire(database), db);
-          lue = true;
+          lues.add(cle);
+          for (const ligne of enAttente.get(cle) || []) valeur.unshift(ligne);
+          enAttente.delete(cle);
         }
         return valeur;
       },
       set(nouvelle) {
+        // Une table remplacee l'est en entier, lignes en attente comprises.
         valeur = nouvelle;
-        lue = true;
+        lues.add(cle);
+        enAttente.delete(cle);
       }
     });
   }
+  Object.defineProperty(db, ETAT_DE_LECTURE, {
+    enumerable: false,
+    value: {
+      lue: cle => lues.has(cle),
+      enTete: cle => enAttente.get(cle) || [],
+      // Apres le COMMIT qui les a ecrites (persistDatabase) : elles sont en
+      // base, l'objet ne les garde plus. Sinon, la table lue ensuite les
+      // montrerait deux fois (relue, puis unshift) et une seconde ecriture du
+      // meme objet les recrirait (« UNIQUE constraint failed »).
+      enTeteEcrites: cle => { enAttente.delete(cle); }
+    }
+  });
+  Object.defineProperty(db, AJOUT_EN_TETE, {
+    enumerable: false,
+    // Sans id, la ligne ne se reconnaitrait pas a l'ecriture : la table est lue.
+    // De meme pour une table hors de TABLES_AJOUT_EN_TETE.
+    value(cle, ligne) {
+      if (lues.has(cle) || !TABLES_AJOUT_EN_TETE.has(cle) || !text(ligne && ligne.id)) {
+        db[cle].unshift(ligne);
+        return;
+      }
+      if (!enAttente.has(cle)) enAttente.set(cle, []);
+      enAttente.get(cle).push(ligne);
+    }
+  });
   return db;
 }
 
@@ -1245,11 +1391,55 @@ function readRoutes(database) {
   });
 }
 
+/*
+ * LECTURE MEMORISEE (25/09). L'ouverture lance une vingtaine de routes
+ * ensemble ; huit lisent les commandes, trois les ventes, quatre les clients :
+ * chacune relisait la table en base. Le TEXTE des lignes (payload) est garde,
+ * par table, tant que la base n'a pas change -- ni par ce magasin (generation,
+ * avancee a chaque COMMIT), ni par une autre connexion (PRAGMA data_version).
+ * Chaque lecture decode ce texte a neuf : chaque requete a ses objets, qu'elle
+ * peut modifier sans rien changer pour les autres (seul le texte est partage).
+ * La memoire s'oublie DUREE_MEMOIRE_MS apres la derniere lecture en base : elle
+ * sert une vague, elle ne double pas la base en memoire entre deux vagues.
+ */
+const lecturesMemorisees = new WeakMap();
+const DUREE_MEMOIRE_MS = 5000;
+
+function memoireDe(database) {
+  let memoire = lecturesMemorisees.get(database);
+  if (!memoire) {
+    memoire = { generation: 0, tables: new Map(), oubli: null };
+    lecturesMemorisees.set(database, memoire);
+  }
+  return memoire;
+}
+
+/** La base a change (COMMIT de ce magasin) ou se ferme : plus rien de memorise. */
+function oublierLectures(database) {
+  const memoire = lecturesMemorisees.get(database);
+  if (!memoire) return;
+  memoire.generation += 1;
+  memoire.tables.clear();
+  clearTimeout(memoire.oubli);
+  memoire.oubli = null;
+}
+
 function readPayloads(database, table) {
-  return database
-    .prepare(`SELECT payload FROM ${table} ORDER BY sort_order ASC`)
-    .all()
-    .map(row => JSON.parse(row.payload));
+  const memoire = memoireDe(database);
+  const cle = `${memoire.generation}:${dataVersion(database)}`;
+  let lu = memoire.tables.get(table);
+  if (!lu || lu.cle !== cle) {
+    const lignes = database
+      .prepare(`SELECT payload FROM ${table} ORDER BY sort_order ASC`)
+      .all()
+      .map(row => row.payload);
+    lu = { cle, lignes };
+    memoire.tables.set(table, lu);
+    clearTimeout(memoire.oubli);
+    memoire.oubli = setTimeout(() => memoire.tables.clear(), DUREE_MEMOIRE_MS);
+    if (memoire.oubli.unref) memoire.oubli.unref();
+  }
+  return lu.lignes.map(payload => JSON.parse(payload));
 }
 
 function readSettings(database) {
@@ -1319,7 +1509,9 @@ function lireTourneesDuFichier(chemin) {
 
 module.exports = {
   createSqliteStore,
-  lireTourneesDuFichier
+  lireTourneesDuFichier,
+  ETAT_DE_LECTURE,
+  AJOUT_EN_TETE
 };
 
 /**

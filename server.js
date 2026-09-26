@@ -9,7 +9,7 @@ const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
 const { zipSync, strToU8 } = require("fflate");
-const { createSqliteStore, lireTourneesDuFichier } = require("./storage/sqliteStore");
+const { createSqliteStore, lireTourneesDuFichier, ETAT_DE_LECTURE, AJOUT_EN_TETE } = require("./storage/sqliteStore");
 const sauvegardeBase = require("./lib/sauvegarde-base");
 const { empreinteDesSources, shellEmpreinte } = require("./lib/empreinte-shell");
 const { fondDeCarte } = require("./lib/fond-de-carte");
@@ -2771,6 +2771,9 @@ function openSqliteStore(options = {}) {
     defaultDb,
     normalizeDb,
     normaliserTable,
+    // Leur normalisation pose des defauts a la lecture (date, id, secteurs par
+    // defaut) : toujours ecrites, comme avant, meme sans avoir ete lues.
+    tablesToujoursEcrites: ["relances", "deliverySectors", "settings"],
     ensureDir
   });
 }
@@ -3060,7 +3063,16 @@ function normaliserTable(cle, valeur, db) {
 }
 
 function normalizeDb(db) {
-  for (const cle of TABLES_DE_LA_BASE) db[cle] = normaliserTable(cle, db[cle], db);
+  // Lecture paresseuse (25/09) : une table qu'une ecriture n'a pas lue n'a pas
+  // change ; la normaliser la lirait pour rien, et l'ecriture la saute
+  // (storage/sqliteStore.js, persistDatabase). `lue` est relu a chaque tour :
+  // une table lue en normalisant une autre (les reglages, pour les numeros de
+  // commande) est normalisee a son tour, comme avant.
+  const etat = db[ETAT_DE_LECTURE];
+  for (const cle of TABLES_DE_LA_BASE) {
+    if (etat && !etat.lue(cle)) continue;
+    db[cle] = normaliserTable(cle, db[cle], db);
+  }
 
   // P1 v1.14.0 : syncWorkflow N'EST PLUS appele ici (avant : a chaque readDb,
   // ce qui ajoutait 50-100ms a chaque requete GET). Il est maintenant appele
@@ -3080,7 +3092,11 @@ function healDatabaseAtBoot() {
     // Migration unique et idempotente (25/09) : le montant TTC des commandes
     // dont le CA venait des ventes est fige sur elles (figerMontantsImportes).
     figerMontantsImportes(db, "demarrage");
-    syncWorkflow(db);
+    // La mise en coherence (syncWorkflow) est faite par writeDb, plus bas : la
+    // refaire ici doublait le demarrage (25/09 : 35 s -> 19 s a cinquante fois
+    // la base). Rien entre les deux ne lit ce qu'elle calcule : le journal de
+    // recuperation ne fait qu'ajouter une ligne, et le rognage des traces
+    // arrondit lui-meme la position (positionGpsArrondie).
     // B3 v1.16.0 : si une recovery de corruption a eu lieu pendant le readDb
     // ci-dessus, on la journalise dans l'historique pour que l'operateur la voie
     // (sinon une base vierge ressemble a une install neuve).
@@ -3815,7 +3831,7 @@ function auteurCourant() {
 }
 
 function addHistory(db, type, message, details = {}) {
-  db.historique.unshift({
+  ajouterEnTete(db, "historique", {
     id: crypto.randomUUID(),
     date: new Date().toISOString(),
     type,
@@ -3823,6 +3839,16 @@ function addHistory(db, type, message, details = {}) {
     details,
     auteur: auteurCourant()
   });
+}
+
+// Une ligne en tete de l'historique ou des mouvements de stock, SANS lire la
+// table quand la base sait l'ecrire seule (25/09) : chaque geste ajoute une
+// ligne a l'historique, et le lire en entier pour l'ecrire en entier coutait
+// plus que le geste. La table lue plus tard dans la meme requete a la ligne
+// en tete, comme avant (storage/sqliteStore.js, AJOUT_EN_TETE).
+function ajouterEnTete(db, cle, ligne) {
+  if (typeof db[AJOUT_EN_TETE] === "function") db[AJOUT_EN_TETE](cle, ligne);
+  else db[cle].unshift(ligne);
 }
 
 function clean(value) {
@@ -4822,7 +4848,7 @@ function recordStockMovement(db, product, oldQuantity, newQuantity, reason = "Aj
   const ancienne = Number(oldQuantity) || 0;
   const nouvelle = Number(newQuantity) || 0;
 
-  db.stockMovements.unshift({
+  ajouterEnTete(db, "stockMovements", {
     id: `stock-${crypto.randomUUID()}`,
     productId: product.id,
     productName: getProductName(product),
@@ -5110,8 +5136,11 @@ function normalizeProducts(products) {
 // (une ligne seule : le rayon, comme avant). Le manque de la commande est la
 // somme des manques, et `quantitesParProduit` donne a la reservation et a la
 // liberation la quantite de chaque produit, lignes additionnees.
-function analyzeOrderStock(order, stock) {
-  const lookup = stockLookup(stock);
+//
+// `lookup` : la table de recherche du catalogue, deja construite par
+// l'appelant (syncWorkflow la construit UNE fois pour toutes les commandes).
+// Un appel isole (un geste sur une commande) la construit lui-meme.
+function analyzeOrderStock(order, stock, lookup = stockLookup(stock)) {
   const restantParProduit = new Map(); // produit du stock -> ce que le rayon laisse aux lignes suivantes
   const lines = normalizeProducts(order.products).map(product => {
     const stockItem = lookup.get(productKeyFromLine(product)) || lookup.get(`name:${normalizeTextKey(product.nom)}`);
@@ -5169,7 +5198,12 @@ function quantitesParProduit(lines, garder = () => true) {
 // Compatibilite legacy : si un client existe SANS aucune commande (seed test,
 // import historique), on en cree une "fallback" pour preserver le comportement
 // des anciennes UIs qui supposent qu'un client a toujours une commande.
+// Compte des synchronisations, pour les bancs (test/rapidite-serveur.test.js) :
+// une ecriture = une synchronisation.
+let synchronisations = 0;
+
 function syncWorkflow(db) {
+  synchronisations += 1;
   db.clients = db.clients.map(client => normalizeClient(client));
 
   // Bucket des commandes par clientId (1->N relation)
@@ -5215,10 +5249,16 @@ function syncWorkflow(db) {
     ordersByClientId.set(String(client.id), [fallback]);
   });
 
-  // Re-normalisation + enrichissement (analyse stock) de TOUTES les commandes
+  // Re-normalisation + enrichissement (analyse stock) de TOUTES les commandes.
+  // La table de recherche du catalogue se construit UNE fois (25/09) : chaque
+  // commande la reconstruisait -- deux normalisations de texte par produit et
+  // par commande, la moitie d'une ecriture en production, 1,3 s a dix fois la
+  // base. Rien ne touche au stock pendant l'enrichissement : la table vaut
+  // pour toutes les commandes.
+  const catalogue = stockLookup(db.stock);
   db.commandes = db.commandes
     .map(order => normalizeOrder(order))
-    .map(order => enrichOrder(order, db.stock));
+    .map(order => enrichOrder(order, db.stock, catalogue));
 
   // Statut du client = statut de sa commande la plus recente (par dateCommande)
   const latestOrderByClient = new Map();
@@ -5403,8 +5443,8 @@ function normalizeOrder(order) {
   };
 }
 
-function enrichOrder(order, stock) {
-  const stockCheck = analyzeOrderStock(order, stock);
+function enrichOrder(order, stock, lookup = stockLookup(stock)) {
+  const stockCheck = analyzeOrderStock(order, stock, lookup);
   // Chantier 1 : probleme/a_reprogrammer gardent leur reservation. Lot
   // « stock » (24/09) : une commande a verifier au stock deja sorti aussi --
   // jamais comparee au rayon qu'elle a elle-meme reduit (stockReserveActif).
@@ -5668,13 +5708,40 @@ function inferCrmStatus(client, orders) {
   return "prospect";
 }
 
+// Les commandes, les rappels et les abonnes actifs, par client, construits
+// UNE fois pour la liste des clients (25/09). crmClientView parcourait toutes
+// les commandes et tous les rappels pour chaque client : O(clients x
+// commandes), 170 ms a dix fois la base, plusieurs secondes a cinquante. Memes
+// listes, dans le meme ordre (meme tri, stable, sur les commandes prises dans
+// l'ordre de la table).
+function indexCrmParClient(db) {
+  const parClient = (liste, champ) => {
+    const index = new Map();
+    for (const item of liste) {
+      const cle = String(item.clientId);
+      if (!index.has(cle)) index.set(cle, []);
+      index.get(cle).push(item);
+    }
+    for (const items of index.values()) items.sort((a, b) => String(b[champ] || "").localeCompare(String(a[champ] || "")));
+    return index;
+  };
+  return {
+    commandes: parClient(db.commandes, "dateCommande"),
+    relances: parClient(db.relances, "datePrevue"),
+    abonnes: new Set((db.subscriptions || []).filter(sub => sub.status === "active").map(sub => String(sub.clientId)))
+  };
+}
+
 // `ventesImportees` : l'index des ventes importees (buildImportedSalesIndex),
 // construit UNE fois par la liste des clients plutot qu'une fois par client.
-function crmClientView(db, client, ventesImportees = null) {
-  const orders = getClientOrderHistory(db, client.id);
-  const reminders = db.relances
-    .filter(reminder => String(reminder.clientId) === String(client.id))
-    .sort((a, b) => String(b.datePrevue || "").localeCompare(String(a.datePrevue || "")));
+// `parClient` : indexCrmParClient, de meme (la fiche seule s'en passe).
+function crmClientView(db, client, ventesImportees = null, parClient = null) {
+  const orders = parClient ? parClient.commandes.get(String(client.id)) || [] : getClientOrderHistory(db, client.id);
+  const reminders = parClient
+    ? parClient.relances.get(String(client.id)) || []
+    : db.relances
+      .filter(reminder => String(reminder.clientId) === String(client.id))
+      .sort((a, b) => String(b.datePrevue || "").localeCompare(String(a.datePrevue || "")));
   const latestOrder = orders[0];
   const firstOrder = orders[orders.length - 1];
   // Le chiffre d'affaires de la fiche (parcours simplifies, 24/09) : les
@@ -5702,7 +5769,9 @@ function crmClientView(db, client, ventesImportees = null) {
     // le signal ne s'y fie donc pas.
     relanceSuggeree: relanceSuggeree({
       commandes: orders,
-      abonne: (db.subscriptions || []).some(sub => String(sub.clientId) === String(client.id) && sub.status === "active"),
+      abonne: parClient
+        ? parClient.abonnes.has(String(client.id))
+        : (db.subscriptions || []).some(sub => String(sub.clientId) === String(client.id) && sub.status === "active"),
       statutCrm: crmStatus,
       archive: Boolean(client.crmArchived),
       aujourdhui: jourParis()
@@ -5722,10 +5791,19 @@ function crmClientView(db, client, ventesImportees = null) {
 function getReminderViews(db, query = {}) {
   const today = jourParis();
   const range = clean(query.range || "");
+  // Le client et la commande de chaque rappel, par index (25/09) : un find sur
+  // toute la table pour chaque rappel. Le premier trouve, comme find.
+  const premierParId = liste => {
+    const index = new Map();
+    for (const item of liste) if (!index.has(String(item.id))) index.set(String(item.id), item);
+    return index;
+  };
+  const clients = db.relances.length ? premierParId(db.clients) : new Map();
+  const commandes = db.relances.length ? premierParId(db.commandes) : new Map();
   let list = db.relances.map(reminder => ({
     ...reminder,
-    client: db.clients.find(client => String(client.id) === String(reminder.clientId)) || null,
-    order: db.commandes.find(order => String(order.id) === String(reminder.commandeId)) || null
+    client: clients.get(String(reminder.clientId)) || null,
+    order: commandes.get(String(reminder.commandeId)) || null
   }));
 
   if (query.clientId) {
@@ -8785,6 +8863,7 @@ app.get("/api/crm/clients", (req, res) => {
   const today = jourParis();
 
   const ventesImportees = buildImportedSalesIndex(db.ventes);
+  const parClient = indexCrmParClient(db);
   // La LISTE ne porte plus l'historique des commandes de chaque client (24/09) :
   // `orderHistory` recopiait /api/orders, client par client (66 % des 552 ko
   // mesures en production), et la page ne le lit pas -- elle a deja toutes les
@@ -8793,7 +8872,7 @@ app.get("/api/crm/clients", (req, res) => {
   let list = db.clients
     .filter(client => !client.crmArchived)
     .map(client => {
-      const { orderHistory, ...vue } = crmClientView(db, client, ventesImportees);
+      const { orderHistory, ...vue } = crmClientView(db, client, ventesImportees, parClient);
       return sansReleveDImport(vue);
     });
 
@@ -9366,7 +9445,8 @@ app.post("/api/import/stock", requireAdministration, uploadExcel, async (req, re
 
     db.stock = [...importedProducts, ...preservedProducts];
 
-    syncWorkflow(db);
+    // Pas de syncWorkflow ici (25/09) : writeDb le fait, et rien d'ici la ne
+    // lit ce qu'il calcule (les comptes du message sont deja faits).
     const dedupNote = duplicatesSkipped > 0
       ? `, ${duplicatesSkipped} doublon(s) ignore(s)`
       : "";
@@ -9964,7 +10044,8 @@ app.post("/api/import/ventes", requireAdministration, uploadExcel, async (req, r
     const fusionVentes = fusionnerVentes(db.ventes, ventes, bonsFiges, cleDeLAncienne);
     db.ventes = fusionVentes.ventes;
 
-    syncWorkflow(db);
+    // Pas de syncWorkflow ici (25/09) : writeDb le fait, et rien d'ici la ne
+    // lit ce qu'il calcule (les comptes du message sont deja faits).
     // Les comptes de la fusion des fiches (regle de Thomas : created / updated / preserved).
     const clientsImport = { created: mergedImport.created, updated: mergedImport.updated, preserved: mergedImport.preserved };
     const fichesMessage = `, fiches clients : ${clientsImport.created} creee(s), ${clientsImport.updated} mise(s) a jour, ${clientsImport.preserved} absente(s) du fichier conservee(s)`;
@@ -10330,7 +10411,8 @@ app.patch("/api/stock/:id", refuserAuLivreur, async (req, res) => {
         thresholdChanged = nextThreshold !== oldThreshold;
       }
 
-      syncWorkflow(db);
+      // Pas de syncWorkflow ici (25/09) : writeDb le fait. Le refaire doublait
+      // l'ajustement de stock (2,3 s -> 0,5 s a dix fois la base).
       if (quantityChanged) {
         addHistory(db, "Stock", `${product.nom} : stock ${oldQuantity} -> ${product.quantite}`, {
           produitId: product.id,
@@ -11510,6 +11592,7 @@ module.exports = {
   _oublierRevocationsPourTest: () => { etatDesSessions = null; },
   _createAccessSessionValueForTest: createAccessSessionValue,
   _withWriteLockForTest: withWriteLock,
+  _synchronisationsPourTest: () => synchronisations,
   _normalizeOrder: normalizeOrder,
   _getLastStorageRecovery: () => lastStorageRecovery,
   // Chantier 2 : permet aux tests d'attendre que le backup async finisse

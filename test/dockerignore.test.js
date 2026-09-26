@@ -63,3 +63,20 @@ test("dockerignore — temoin : le code de l'application, lui, est copie", () =>
   assert.equal(exclu(".env"), true);
   assert.equal(exclu("node_modules/express/index.js"), true);
 });
+
+// Le design et la documentation n'entrent pas dans l'image (25/09, chasse aux
+// defauts : 7,8 Mo de design/ envoyes en production). Temoin : ce que le
+// serveur lit du depot a l'execution reste (server.js, lib/, storage/,
+// public/, package.json, VERSION ; scripts/ pour `npm run migrate:sqlite`).
+test("dockerignore — le design et la documentation ne partent pas en production", () => {
+  for (const f of ["design/DESIGN.md", "design/export-v8/planche.html", "docs/internal/AUDIT_2026_05_20.md",
+    "CHANGELOG.md", "CLAUDE.md", "CONTRIBUTING.md", "DEPLOYMENT.md", "README.md", "playwright.config.js",
+    ".release-please-manifest.json", ".claude/worktrees/ch-x/server.js",
+    "test-results/banc-chromium/trace.zip", "playwright-report/index.html", "pw-lot.config.js"]) {
+    assert.equal(exclu(f), true, `${f} entrerait dans l'image`);
+  }
+  for (const f of ["server.js", "lib/jour-paris.js", "storage/sqliteStore.js", "public/index.html", "public/css/style.css",
+    "public/brand/sereo-logo.svg", "package.json", "package-lock.json", "VERSION", "scripts/migrate-json-to-sqlite.js"]) {
+    assert.equal(exclu(f), false, `${f} manquerait a l'image`);
+  }
+});
