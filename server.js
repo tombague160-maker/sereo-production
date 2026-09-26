@@ -7518,7 +7518,9 @@ app.get("/api/historique", requireAdministration, (req, res) => {
   res.json(readDb().historique);
 });
 
-const JOURNAL_PAGE_DEFAUT = 50;
+// Decision 10 de Thomas (24/09) : les 200 dernieres lignes, puis « voir plus »
+// (relecture adverse du 26/09 : la page etait restee a 50).
+const JOURNAL_PAGE_DEFAUT = 200;
 const JOURNAL_PAGE_MAX = 200;
 
 /** « Alèses : −2 · 10 → 8 · Inventaire » : un mouvement de stock en une ligne. */
