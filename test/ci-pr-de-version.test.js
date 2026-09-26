@@ -40,9 +40,21 @@ test("release-please.yml lance ci.yml sur la branche de sa PR, quand une PR a bo
   const lancement = etapes.find(e => /gh workflow run ci\.yml\b/.test(e));
   assert.ok(lancement, "aucune etape ne lance ci.yml");
   assert.match(lancement, /if:\s*\$\{\{\s*steps\.release\.outputs\.prs_created\s*==\s*'true'\s*\}\}/, "le lancement ne suit pas « une PR a ete creee ou mise a jour »");
-  assert.match(lancement, /fromJSON\(steps\.release\.outputs\.pr\)\.headBranchName/, "le lancement ne vise pas la branche de la PR de version");
+  assert.match(lancement, /PR_JSON:\s*\$\{\{\s*steps\.release\.outputs\.pr\s*\}\}/, "la PR de version n'arrive pas, brute, au script");
+  assert.match(lancement, /jq -r '\.headBranchName \/\/ empty'/, "le lancement ne vise pas la branche de la PR de version");
+  assert.match(lancement, /if \[ -z "\$BRANCHE" \]; then[\s\S]*?exit 1/, "sans branche, le lancement ne dit pas rouge");
   assert.match(lancement, /--ref\s+"\$BRANCHE"/, "le lancement ne passe pas la branche a --ref");
   assert.match(lancement, /GH_TOKEN:\s*\$\{\{\s*github\.token\s*\}\}/, "gh n'a pas de jeton");
+});
+
+test("le bloc env du lancement n'appelle aucune fonction sur la sortie de release-please", () => {
+  // `env` est evalue AVANT `if` : `fromJSON('')` y fait echouer l'etape a
+  // chaque poussee sans PR de version (run 36249462589, 26/09), alors qu'elle
+  // devait etre sautee. La sortie y passe brute ; le script la lit.
+  const lancement = rp.split(/\n(?= {6}- )/).find(e => /gh workflow run ci\.yml\b/.test(e)) || "";
+  const env = (/^ {8}env:\n((?: {10}.*\n)*)/m.exec(lancement + "\n") || [])[1] || "";
+  assert.ok(env, "le lancement n'a pas de bloc env");
+  assert.doesNotMatch(env, /\$\{\{[^}]*\w+\(/, `env evalue avant le if appelle une fonction : ${env.trim()}`);
 });
 
 test("les deux verdicts exiges par la protection de main existent sous leur nom", () => {

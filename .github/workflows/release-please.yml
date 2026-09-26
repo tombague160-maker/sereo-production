@@ -28,9 +28,18 @@ jobs:
       # tourne sur la tete de la branche de version, et ses verdicts s'y
       # attachent. Sans `pr` alors qu'une PR a bouge, l'etape echoue -- rouge
       # visible plutot qu'une PR de version bloquee en silence.
+      # `env` est evalue AVANT `if` (le `if` peut le lire) : `pr` y passe BRUT.
+      # Un `fromJSON` ici echouait sur `pr` vide, donc a chaque poussee sans
+      # PR de version (run 36249462589, 26/09) ; le JSON se lit dans le script.
       - name: Lancer la CI sur la PR de version
         if: ${{ steps.release.outputs.prs_created == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
-          BRANCHE: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
-        run: gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCHE"
+          PR_JSON: ${{ steps.release.outputs.pr }}
+        run: |
+          BRANCHE=$(printf '%s' "$PR_JSON" | jq -r '.headBranchName // empty')
+          if [ -z "$BRANCHE" ]; then
+            echo "::error::une PR de version a bouge, mais release-please ne dit pas sa branche : CI non lancee"
+            exit 1
+          fi
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCHE"
