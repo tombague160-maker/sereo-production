@@ -67,7 +67,22 @@ Important :
 - Configurer `SEREO_AUTH_USER` et `SEREO_AUTH_PASSWORD` ensemble. Si une seule valeur est
   renseignee, l'application refuse les requetes avec une erreur de configuration.
 - Ne jamais commiter le fichier `.env`.
-- Utiliser un mot de passe long, unique et non partage ailleurs.
+- Utiliser un mot de passe long, unique et non partage ailleurs : **au moins 12 caracteres**.
+  Plus court, l'application demarre quand meme (un refus verrouillerait l'administrateur
+  dehors apres une mise a jour), mais le journal le signale au demarrage et l'administration
+  voit un bandeau d'alerte a chaque ouverture.
+- Tentatives de connexion : 5 echecs par adresse bloquent cette adresse 15 secondes
+  (`SEREO_AUTH_MAX_ATTEMPTS`, `SEREO_AUTH_RATE_WINDOW_MS`, `SEREO_AUTH_LOCKOUT_MS`) ; et
+  20 echecs sur un meme identifiant dans l'heure, d'ou qu'ils viennent, bloquent cet
+  identifiant 15 minutes (`SEREO_AUTH_MAX_ATTEMPTS_COMPTE`, `SEREO_AUTH_RATE_WINDOW_COMPTE_MS`,
+  `SEREO_AUTH_LOCKOUT_COMPTE_MS`). Contrepartie : un identifiant connu peut etre bloque
+  15 minutes par quelqu'un qui le connait.
+- « Se deconnecter » ferme la session cote serveur ; changer le mot de passe d'un compte ferme
+  toutes ses sessions ouvertes. Changer `SEREO_AUTH_PASSWORD` ferme TOUTES les sessions, de
+  tous les comptes (ce mot de passe entre dans le secret qui signe les cookies).
+- Import, purge, reglages, sauvegardes, comptes et export de la base sont reserves a
+  l'administration, cote serveur (voir `design/DESIGN.md`, garde-fous du 25/09, pour la liste
+  des routes et de leur garde).
 - Sur Internet, utiliser HTTPS. HTTP Basic protege l'acces applicatif, mais le mot de passe
   doit transiter dans un tunnel chiffre.
 
