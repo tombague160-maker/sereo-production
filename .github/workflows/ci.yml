@@ -2,7 +2,10 @@
 #
 # Sans ce workflow, un commit cassé pouvait passer en main, etre tagge par
 # release-please et auto-deploye par sereo-updater 15 min plus tard.
-# Maintenant, GitHub bloque le merge si l'un des jobs echoue.
+# Le blocage du merge n'est PAS dans ce fichier : c'est la protection de main
+# (reglages du depot, compte proprietaire), qui exige les verdicts
+# « Tests + syntax check » et « Tests e2e (Playwright) ». Renommer l'un de ces
+# jobs sans changer la protection bloque toutes les PR.
 
 name: CI
 
@@ -11,6 +14,12 @@ on:
     branches: [main]
   push:
     branches: [main]
+  # Lancement a la demande, utilise par release-please.yml sur sa PR de
+  # version : une PR ouverte ou mise a jour avec le jeton par defaut ne
+  # declenche pas `pull_request` (regle de GitHub contre les boucles) -- 0
+  # execution sur les PR de version #179 a #187. Sans ce lancement, la
+  # protection de main les bloquerait pour toujours.
+  workflow_dispatch:
 
 # Une PR poussee de nouveau rend son execution en cours inutile : elle est
 # annulee (25/09 ; mesure de la chasse aux defauts : 31 executions devenues
