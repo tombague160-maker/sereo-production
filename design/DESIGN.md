@@ -8272,9 +8272,11 @@ avec la même raison en titre. La carte « Sauvegardes » l'était déjà (v1.46
   30 appels remplaçait toutes les sauvegardes par une base vide.
 - **Second dossier (décision 3).** `SEREO_BACKUP_COPY_DIR` désigne un second dossier, idéalement
   sur un autre disque. Chaque sauvegarde y est aussi copiée : fichier provisoire, relecture (même
-  empreinte sha256), même date, puis même conservation. Sans la variable, rien ne change. Une copie
-  qui échoue ne fait pas échouer la sauvegarde : la carte le dit, en mots et dans la couleur
-  d'alerte. La variable est documentée dans `.env.example` et `DEPLOYMENT.md` (« Sauvegardes » :
+  empreinte sha256), même date, puis même conservation. Sans la variable, rien ne change. Le
+  dossier doit porter le fichier témoin `sereo-second-dossier`, posé une fois par Thomas sur
+  l'autre disque ; sans lui (disque démonté), rien n'est copié et le dossier n'est jamais créé
+  (relecture du 26/09). Une copie qui échoue ne fait pas échouer la sauvegarde : la carte le dit,
+  en mots et dans la couleur d'alerte. La variable est documentée dans `.env.example` et `DEPLOYMENT.md` (« Sauvegardes » :
   montage, conservation, restauration à la main).
 - **La purge des tournées relit sa sauvegarde.** Elle décompresse le fichier, l'ouvre en lecture
   seule et lance `integrity_check`. Elle ne supprime qu'une tournée que ce fichier contient sous sa
@@ -8296,8 +8298,9 @@ l'écran nomment la sauvegarde. Ce que la purge efface n'a pas changé.
   formulaire comme en authentification Basic, et s'ajoute à celle par adresse. Le compteur n'est
   pas remis à zéro à la fin du blocage ; une connexion réussie l'efface. Réglages :
   `SEREO_AUTH_MAX_ATTEMPTS_COMPTE`, `SEREO_AUTH_RATE_WINDOW_COMPTE_MS`,
-  `SEREO_AUTH_LOCKOUT_COMPTE_MS`. Contrepartie : quelqu'un qui connaît un identifiant peut le
-  bloquer 15 minutes.
+  `SEREO_AUTH_LOCKOUT_COMPTE_MS`. Depuis la relecture du 26/09, ce blocage ne vise que les
+  **appareils inconnus** : un appareil qui a déjà ouvert le compte n'est ni bloqué ni compté (voir
+  « Relecture adverse du 26/09 » ci-dessous).
 - **Les sessions fermées le sont côté serveur.** « Se déconnecter » ferme la session : l'empreinte
   sha256 du cookie est gardée jusqu'à l'expiration qu'il aurait eue, et les autres appareils du
   compte restent connectés. Changer le mot de passe d'un compte en base ferme toutes ses sessions
@@ -8388,3 +8391,94 @@ empreinte de toutes les lignes, identifiants) :
   - Deux connexions d'un même compte dans la même milliseconde auraient le même cookie : fermer
     l'une fermerait l'autre. C'est négligeable, et laissé tel quel.
   - Hors SQLite (stockage JSON), les sessions fermées ne survivent pas à un redémarrage.
+
+### Relecture adverse du 26/09 : six défauts, leur sort
+
+Relecture de `636b3c1`. Les six défauts sont vrais : chacun a été vérifié dans le code, et trois
+l'ont aussi été par une mesure (`node`, motifs de nom). Tous sont corrigés. Chaque correctif a
+son banc, rouge sur `636b3c1` ou tué par un mutant du correctif ; les mutants du 26/09 meurent
+tous (17 sur 17), chacun sur l'assertion qui nomme sa cause.
+
+1. **Important — la limite par compte refusait le bon mot de passe, à tous les appareils.** Un
+   tiers qui connaît l'identifiant de Thomas le tenait dehors aussi longtemps qu'il le voulait :
+   environ 23 requêtes par heure suffisaient. Un navigateur qui rejoue un vieux mot de passe
+   Basic, après un changement de `SEREO_AUTH_PASSWORD`, faisait de même sans attaquant. Seul un
+   redémarrage en sortait.
+   **Correctif : l'« appareil connu »** (le « device cookie » de l'OWASP). Une connexion réussie,
+   au formulaire ou en Basic, laisse le cookie signé `sereo_appareil`. Il est `HttpOnly`, vaut 180
+   jours après la dernière connexion réussie, et porte l'empreinte (sha256 tronqué) des comptes
+   ouverts, au plus 8, jamais leur nom. Il est signé avec la base du secret de session **sans**
+   le mot de passe d'environnement : après un changement de ce mot de passe, les appareils de
+   Thomas restent connus, et c'est justement là qu'un vieux mot de passe rejoué ferait bloquer le
+   compte. Un appareil connu du compte n'est ni bloqué ni compté par la limite de ce compte : il
+   garde la seule limite par adresse, celle d'avant le 25/09. « Se déconnecter » ne l'efface pas,
+   car il n'ouvre rien. La page du blocage le dit : « Un appareil déjà connecté à ce compte peut
+   toujours se connecter. »
+   **Ce qui reste :** pendant une attaque, un appareil **neuf** de Thomas attend la fin du blocage
+   (15 min après le dernier échec). Un cookie « appareil connu » volé ne donne que la limite par
+   adresse ; c'était la règle de tous avant le 25/09. Le rapport à Thomas doit le dire.
+   Banc : `garde-fous-auth.test.js`, 4 cas. Sur `636b3c1`, les 4 rougissent faute de cookie. Six
+   mutants du correctif sont tués, un par cause : l'appareil jamais reconnu (formulaire, puis
+   Basic) ; la signature non vérifiée ; les échecs d'un appareil connu comptés (formulaire, puis
+   Basic) ; la voie de secours retirée de la page. Le quatrième survivait d'abord : 5 échecs au
+   formulaire ne passaient pas le seuil de 20. Le cas en rejoue désormais 20.
+2. **Important — disque démonté, les copies atterrissaient sur le disque système.** Docker lie
+   alors un dossier vide à la place du montage ; `copierVersSecondDossier` le recréait au besoin.
+   La carte disait « dans le second dossier », alors que `DEPLOYMENT.md` promettait une alerte.
+   Comparer les périphériques (`stat().dev`) ne suffit pas : base sur un disque de données, repli
+   sur le disque système, deux numéros différents, rien à signaler.
+   **Correctif : un fichier témoin.** `sereo-second-dossier` est posé une fois par Thomas sur
+   l'autre disque (`DEPLOYMENT.md` donne la commande). Sans lui, rien n'est copié, le dossier n'est
+   jamais créé, et l'alerte « copie » donne la raison. Le démarrage le vérifie aussi : un disque
+   non revenu après un redémarrage se voit dès l'ouverture de la carte. La vérification est
+   asynchrone, pour qu'un partage bloqué ne gèle pas le serveur.
+   Banc : `garde-fous-copie.test.js`, 2 cas. Sur `636b3c1`, ils rougissent : une copie a atterri
+   dans le dossier vide, et le démarrage ne dit rien (`{"type":"aucune"}`). Trois mutants tués :
+   le témoin non vérifié ; le dossier recréé ; pas de vérification au démarrage.
+3. **Mineur — les fichiers de travail d'une sauvegarde en cours passaient pour « la dernière ».**
+   `…sqlite.gz.travail-copie.sqlite` et `…travail-verif.sqlite` passaient le motif des sauvegardes.
+   La copie de relecture de la purge des tournées (`tourneesDeLaSauvegarde`) avait la même forme,
+   hors du relevé du relecteur. **Correctif :** `listBackupEntries` écarte `MOTIF_TRAVAIL`, le
+   motif du nettoyage au démarrage ; la copie des tournées prend son nom de `fichiersDeTravail`.
+   Banc : `sauvegardes.test.js`. Sur `636b3c1`, la carte donnait `….travail-verif.sqlite` pour
+   la dernière sauvegarde.
+4. **Mineur — le genre réservé se prenait en suffixe.** `{"tag":"x-avant-purge-commandes"}`
+   donnait une sauvegarde hors rotation, jamais supprimée. **Correctif :** une étiquette qui
+   contient « avant-purge », où que ce soit, devient « manuelle ». Banc : `garde-fous-droits.test.js`,
+   4 étiquettes, plus un témoin (« avant-inventaire », gardée). Rouge sur `636b3c1`.
+5. **Mineur — la purge des bons attendait la copie vers le second dossier sous le verrou
+   d'écriture.** **Correctif :** la sauvegarde reste faite et relue sous le verrou. Sa copie part
+   une fois le verrou rendu, une sauvegarde à la fois, et la réponse ne l'attend pas.
+   Banc : `garde-fous-copie.test.js`. Le partage est simulé bloqué, et un ajustement du stock doit
+   répondre pendant la copie. Sur `636b3c1`, il attendait (`'bloquee' !== 200`). Deux mutants
+   tués : la copie remise sous le verrou ; la copie oubliée. Ce second mutant faisait d'abord
+   **pendre** le banc au lieu de le faire rougir : l'attente de la copie est désormais bornée.
+6. **Mineur — l'écran laissait au livreur les commandes du stock.** **Correctif :** dans
+   l'écran Stock, pour le livreur, la quantité, le seuil, − et + sont fermés. Une note dit
+   « Réservé au bureau et à la préparation. », la phrase du refus du serveur. `setStock` et
+   `setStockThreshold` ne partent pas : rien ne va non plus dans la file hors ligne. Si
+   `/api/me` répond après le premier rendu, l'écran se redessine ; pour les autres comptes,
+   aucun second rendu. L'écran « Produits » a les mêmes commandes, mais il est hors `mainTabs`,
+   donc inatteignable : il n'est pas touché.
+   Banc : `e2e/garde-fous.spec.js`, 5 cas : fermé ; `/api/me` tardif ; téléphone clair et
+   sombre, à 4,5:1 et sans débordement ; témoin bureau et administrateur. Sur `636b3c1`, rouge :
+   la note n'existe pas. Cinq mutants tués : les lignes jamais fermées ; `setStock` sans garde ;
+   pas de second rendu ; la note jamais montrée ; le stock fermé à tous (témoin inverse).
+
+Au passage, le banc e2e « seconde copie posée » pose désormais le fichier témoin : sans lui, il
+aurait rougi, et pour la bonne cause.
+
+**Bancs du 26/09.** `npm test` : **820/820**, soit les 811 d'avant et 9 cas neufs ; le banc
+intermittent `lot5-rapidite` est passé cette fois. e2e :
+- `garde-fous` : 22/22 ;
+- sur le serveur sans connexion, 165/165 : stock (4 fichiers), À recommander, sauvegardes,
+  paramètres (bureau et téléphone), hors ligne, `livreur-ne-perd-rien`, tournée hors ligne,
+  chargement instantané, poids du réseau, rendu à l'affichage, un seul dessin, garde-fous ;
+- sur le serveur avec connexion (3621), 13/13 : `connexion`, `contraste-login`,
+  `numerotation-admin`.
+
+**Ce qui reste, nommé.**
+- Le repli sur un appareil neuf pendant une attaque (point 1).
+- `pruneOldBackups` et le nettoyage du démarrage lisent le second dossier en synchrone. Sur un
+  partage bloqué pile à ce moment, le fil principal attendrait. La vérification du témoin, qui
+  vient avant, est asynchrone ; ce reste est hors du relevé du relecteur.

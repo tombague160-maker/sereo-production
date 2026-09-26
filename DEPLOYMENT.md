@@ -75,8 +75,11 @@ Important :
   (`SEREO_AUTH_MAX_ATTEMPTS`, `SEREO_AUTH_RATE_WINDOW_MS`, `SEREO_AUTH_LOCKOUT_MS`) ; et
   20 echecs sur un meme identifiant dans l'heure, d'ou qu'ils viennent, bloquent cet
   identifiant 15 minutes (`SEREO_AUTH_MAX_ATTEMPTS_COMPTE`, `SEREO_AUTH_RATE_WINDOW_COMPTE_MS`,
-  `SEREO_AUTH_LOCKOUT_COMPTE_MS`). Contrepartie : un identifiant connu peut etre bloque
-  15 minutes par quelqu'un qui le connait.
+  `SEREO_AUTH_LOCKOUT_COMPTE_MS`). Ce blocage ne vise que les appareils qui n'ont jamais
+  ouvert ce compte : un appareil deja connecte (cookie « appareil connu », 180 jours apres la
+  derniere connexion reussie) n'est ni bloque ni compte, et garde la seule limite par adresse.
+  Pendant une attaque, un appareil NEUF attend la fin du blocage ; les blocages ne vivent qu'en
+  memoire, redemarrer le conteneur les leve tous.
 - « Se deconnecter » ferme la session cote serveur ; changer le mot de passe d'un compte ferme
   toutes ses sessions ouvertes. Changer `SEREO_AUTH_PASSWORD` ferme TOUTES les sessions, de
   tous les comptes (ce mot de passe entre dans le secret qui signe les cookies).
