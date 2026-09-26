@@ -8,13 +8,29 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  # Lancer la CI sur la PR de version (etape ci-dessous).
+  actions: write
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
       - name: Run release-please
+        id: release
         uses: googleapis/release-please-action@v4
         with:
           config-file: .release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # La PR de version est ouverte avec le jeton par defaut : GitHub n'y
+      # lance pas la CI (0 execution sur #179 a #187), et la protection de main
+      # exige ses verdicts. `workflow_dispatch` est permis a ce jeton : la CI
+      # tourne sur la tete de la branche de version, et ses verdicts s'y
+      # attachent. Sans `pr` alors qu'une PR a bouge, l'etape echoue -- rouge
+      # visible plutot qu'une PR de version bloquee en silence.
+      - name: Lancer la CI sur la PR de version
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCHE: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+        run: gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCHE"
