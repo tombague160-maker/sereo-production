@@ -193,6 +193,59 @@ test("commande terrain : Annuler au dialogue n'envoie rien ; une fiche que la li
   await ctx.close();
 });
 
+// La file d'attente : une commande qui part SANS choix (la liste ne connait pas
+// de doublon, le telephone se croit en ligne), puis reste en file (reseau muet).
+// Au rejeu, le serveur trouve la fiche archivee : un 409 retirerait la commande
+// de la file -- perdue, sous « refusee et abandonnee ». La file porte donc la
+// version « nouvelle fiche » ; la fiche archivee ne bouge pas.
+const lireFile = page => page.evaluate(() => new Promise(resolve => {
+  const d = indexedDB.open("sereo-file-attente", 1);
+  d.onerror = () => resolve([]);
+  d.onsuccess = () => {
+    const db = d.result;
+    if (!db.objectStoreNames.contains("ecritures")) { db.close(); resolve([]); return; }
+    const r = db.transaction("ecritures", "readonly").objectStore("ecritures").getAll();
+    r.onsuccess = () => { const v = r.result; db.close(); resolve(v); };
+    r.onerror = () => { db.close(); resolve([]); };
+  };
+}));
+
+test("commande terrain mise en file (reseau muet), doublon que seul le serveur connait (archive) : au rejeu, elle n'est pas perdue", async ({ browser }) => {
+  test.setTimeout(120000);
+  await semer(semeAvecTelephone({ archive: true }));
+  const avant = champsFiche(await ficheTilleuls());
+  const { ctx, page, erreurs } = await ouvrir(browser, "commande-client");
+  await page.evaluate(() => {
+    window.__toasts = [];
+    new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => {
+      if (n.classList && n.classList.contains("toast")) window.__toasts.push(n.textContent);
+    }))).observe(document, { childList: true, subtree: true });
+  });
+  await page.route("**/api/customer-orders", route =>
+    route.request().method() === "POST" ? route.abort("connectionrefused") : route.continue());
+  expect(await page.evaluate(() => navigator.onLine), "prealable : le navigateur doit se croire EN LIGNE").toBe(true);
+  await commandePourMmeRoux(page);
+  await expect.poll(async () => (await lireFile(page)).length, { timeout: 15000, message: "la commande n'a pas ete mise en file" }).toBe(1);
+
+  await page.unroute("**/api/customer-orders");
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  const roux = async () => {
+    const liste = await (await fetch(srv.base + "/api/orders")).json();
+    return (Array.isArray(liste) ? liste : liste.orders || []).filter(o => o.clientName.includes("Roux"));
+  };
+  await expect.poll(async () => (await lireFile(page)).length, { timeout: 40000, message: "la file ne s'est pas videe" }).toBe(0);
+  const toasts = await page.evaluate(() => window.__toasts);
+  expect(toasts.join(" | "), "la commande a ete refusee au rejeu et abandonnee").not.toMatch(/refus/i);
+  const commandes = await roux();
+  expect(commandes.length, "la commande en file est perdue").toBe(1);
+  expect(commandes[0].clientId, "la commande est partie sur la fiche archivee").not.toBe("c-tilleuls");
+  const fiche = await ficheTilleuls();
+  expect(champsFiche(fiche), "la fiche archivee a ete renommee ou videe").toEqual(avant);
+  expect(fiche.crmArchived).toBe(true);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
 // 4. Decision 7 de Thomas (24/09) : le chiffre d'affaires est TTC, et l'ecran
 //    le dit -- tableau de bord, Analyse, fiche client. Un avoir ajoute a un bon
 //    deja importe se soustrait ; le resume le dit.

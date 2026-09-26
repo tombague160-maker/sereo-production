@@ -12,6 +12,12 @@
 // trouvee ; l'ecran propose « rattacher a <fiche> » (clientId : la fiche est
 // prise telle quelle) ou « creer une nouvelle fiche » (nouvelleFiche). Les
 // numeros se comparent normalises (espaces, points, +33).
+//
+// Le 409 ne va qu'a une page qui sait poser la question : elle le demande
+// (`demanderSiDoublon`). Sans demande ni choix -- une page d'avant la mise a
+// jour, ou sa file d'attente rejouee par la nouvelle --, un refus retirerait
+// la commande de la file : le serveur cree une nouvelle fiche, sans toucher a
+// l'existante (une fiche en double se fusionne ; une commande perdue non).
 
 const { after, before, test } = require("node:test");
 const assert = require("node:assert/strict");
@@ -71,11 +77,13 @@ function semer({ telephoneEnBase = EHPAD.telephone } = {}) {
 // Le formulaire « Nouveau client » tel que l'ecran l'envoie : tous ses champs, vides compris.
 const ROUX = { nom: "Roux", prenom: "Mme", telephone: "0381000000", email: "", adresse: "", rue: "", codePostal: "25000", ville: "Besancon", notes: "" };
 const commande = (client, extra = {}) => ({ client, products: [{ productId: "p1", quantite: 2 }], ...extra });
+// Ce que l'ecran envoie en ligne sans choix : il sait poser la question.
+const DEMANDE = { demanderSiDoublon: true };
 
 test("doublon par telephone, sans choix : 409 avec la fiche trouvee ; la fiche n'est pas touchee, rien n'est cree", async () => {
   semer();
   const avant = extraire(ficheEhpad());
-  const r = await poster("/api/customer-orders", commande(ROUX));
+  const r = await poster("/api/customer-orders", commande(ROUX, DEMANDE));
   assert.equal(r.status, 409, `attendu un refus, recu ${r.status} : la fiche existante a ete reprise sans demander`);
   assert.equal(r.body.details?.doublon?.id, "c-ehpad");
   assert.equal(r.body.details.doublon.nom, EHPAD.nom);
@@ -87,11 +95,11 @@ test("doublon par telephone, sans choix : 409 avec la fiche trouvee ; la fiche n
 test("doublon : les numeros se comparent normalises (espaces, points, +33), dans les deux sens", async () => {
   for (const saisi of ["03 81 00 00 00", "03.81.00.00.00", "+33 3 81 00 00 00", "+33381000000"]) {
     semer();
-    const r = await poster("/api/customer-orders", commande({ ...ROUX, telephone: saisi }));
+    const r = await poster("/api/customer-orders", commande({ ...ROUX, telephone: saisi }, DEMANDE));
     assert.equal(r.status, 409, `« ${saisi} » n'est pas reconnu comme le meme numero`);
   }
   semer({ telephoneEnBase: "03 81 00 00 00" });
-  const r = await poster("/api/customer-orders", commande(ROUX));
+  const r = await poster("/api/customer-orders", commande(ROUX, DEMANDE));
   assert.equal(r.status, 409, "un numero en base avec des espaces n'est pas reconnu");
 });
 
@@ -99,7 +107,7 @@ test("« Rattacher a la fiche » (clientId) : la commande part sur la fiche, pri
   semer();
   const avant = extraire(ficheEhpad());
   // Le formulaire porte son propre clientId, VIDE (nouveau client) : le choix l'emporte.
-  const r = await poster("/api/customer-orders", commande({ ...ROUX, clientId: "" }, { clientId: "c-ehpad" }));
+  const r = await poster("/api/customer-orders", commande({ ...ROUX, clientId: "" }, { ...DEMANDE, clientId: "c-ehpad" }));
   assert.equal(r.status, 201, r.body?.error);
   assert.equal(r.body.clientId, "c-ehpad");
   assert.deepEqual(extraire(ficheEhpad()), avant, "rattacher a modifie la fiche");
@@ -109,7 +117,7 @@ test("« Rattacher a la fiche » (clientId) : la commande part sur la fiche, pri
 test("« Creer une nouvelle fiche » (nouvelleFiche) : une fiche Roux est creee, celle de l'EHPAD ne bouge pas", async () => {
   semer();
   const avant = extraire(ficheEhpad());
-  const r = await poster("/api/customer-orders", commande(ROUX, { nouvelleFiche: true }));
+  const r = await poster("/api/customer-orders", commande(ROUX, { ...DEMANDE, nouvelleFiche: true }));
   assert.equal(r.status, 201, r.body?.error);
   const db = readDb();
   assert.equal(db.clients.length, 2);
@@ -122,14 +130,14 @@ test("« Creer une nouvelle fiche » (nouvelleFiche) : une fiche Roux est creee,
 test("doublon par nom + code postal : meme regle (le formulaire vide ne vide plus la fiche)", async () => {
   semer();
   const avant = extraire(ficheEhpad());
-  const r = await poster("/api/customer-orders", commande({ ...ROUX, nom: EHPAD.nom, prenom: "", telephone: "" }));
+  const r = await poster("/api/customer-orders", commande({ ...ROUX, nom: EHPAD.nom, prenom: "", telephone: "" }, DEMANDE));
   assert.equal(r.status, 409);
   assert.deepEqual(extraire(ficheEhpad()), avant, "l'email, la rue ou les notes ont ete effaces");
 });
 
 test("commande PLANIFIEE : meme regle", async () => {
   semer();
-  const r = await poster("/api/planned-orders", commande(ROUX, { deliveryDate: "2026-12-01" }));
+  const r = await poster("/api/planned-orders", commande(ROUX, { ...DEMANDE, deliveryDate: "2026-12-01" }));
   assert.equal(r.status, 409);
   assert.equal(r.body.details?.doublon?.id, "c-ehpad");
   assert.equal(ficheEhpad().nom, EHPAD.nom);
@@ -140,4 +148,20 @@ test("temoin : un nouveau client sans doublon est cree sans question", async () 
   const r = await poster("/api/customer-orders", commande({ ...ROUX, nom: "Cabinet Lemoine", telephone: "0612345678", codePostal: "39100", ville: "Dole" }));
   assert.equal(r.status, 201, r.body?.error);
   assert.equal(readDb().clients.length, 2);
+});
+
+test("sans demande ni choix (page d'avant, file rejouee) : jamais refusee ni reprise -- une nouvelle fiche, l'existante ne bouge pas", async () => {
+  for (const chemin of ["/api/customer-orders", "/api/planned-orders"]) {
+    semer();
+    const avant = extraire(ficheEhpad());
+    const r = await poster(chemin, commande(ROUX, chemin === "/api/planned-orders" ? { deliveryDate: "2026-12-01" } : {}));
+    assert.equal(r.status, 201, `${chemin} : refusee (${r.status}) -- rejouee par la file, elle en serait retiree et perdue`);
+    const db = readDb();
+    assert.equal(db.clients.length, 2, `${chemin} : pas de nouvelle fiche`);
+    const roux = db.clients.find(c => c.id !== "c-ehpad");
+    assert.equal(roux.nom, "Roux");
+    assert.equal(db.commandes.length, 1);
+    assert.equal(db.commandes[0].clientId, roux.id, `${chemin} : la commande est partie sur la fiche existante`);
+    assert.deepEqual(extraire(ficheEhpad()), avant, `${chemin} : la fiche existante a ete renommee ou videe`);
+  }
 });

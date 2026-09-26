@@ -4820,12 +4820,20 @@ async function choisirFicheSiDoublon(doublon, data) {
   return demanderChoixDeFiche(doublon, data);
 }
 
-/** Envoie la commande ; sur un doublon que la liste n'avait pas (409), demande, puis renvoie. */
+/**
+ * Envoie la commande ; sur un doublon que la liste n'avait pas (409), demande,
+ * puis renvoie. `demanderSiDoublon` : cette page sait poser la question (sans
+ * lui, le serveur cree une nouvelle fiche). Si l'envoi part en FILE (reseau
+ * muet, session expiree), la commande attend en « nouvelle fiche » : rejouee
+ * plus tard, un 409 la ferait retirer de la file -- perdue (a moins d'un
+ * choix deja fait : `clientId` l'emporte au serveur).
+ */
 async function envoyerCommandeClient(endpoint, corps, data) {
   const envoyer = contenu => apiFetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(contenu)
+    body: JSON.stringify({ ...contenu, demanderSiDoublon: true }),
+    corpsEnFile: JSON.stringify({ ...contenu, nouvelleFiche: true })
   });
   try {
     return await envoyer(corps);
@@ -10259,7 +10267,11 @@ async function tenterMiseEnFile(url, options) {
   // refuser tout de suite.
   if (options.body instanceof FormData) return false;
   try {
-    await mettreEnAttente(url, { ...options, method: methode });
+    // `corpsEnFile` (facultatif) : ce que l'ecriture doit dire si elle attend
+    // -- rejouee plus tard, elle ne pourra plus poser de question (commande
+    // pour un nouveau client : envoyerCommandeClient).
+    const corps = typeof options.corpsEnFile === "string" ? options.corpsEnFile : options.body;
+    await mettreEnAttente(url, { ...options, method: methode, body: corps });
     await rafraichirEtatFile();
     return true;
   } catch {

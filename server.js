@@ -5246,13 +5246,20 @@ function doublonDeFiche(fiche) {
   return erreur;
 }
 
-function findOrCreateCustomerClient(db, payload = {}, { nouvelleFiche = false } = {}) {
+//
+// Le 409 ne va qu'a une page qui sait poser la question : elle le demande
+// (`demander`, champ `demanderSiDoublon` de la commande). Sans demande ni
+// choix -- une page d'avant la mise a jour, ou une commande rejouee par la
+// file d'attente --, un refus retirerait la commande de la file (4xx :
+// abandonnee) : elle part sur une NOUVELLE fiche, l'existante ne bouge pas.
+// Une fiche en double se fusionne ; une commande perdue ne se retrouve pas.
+function findOrCreateCustomerClient(db, payload = {}, { nouvelleFiche = false, demander = false } = {}) {
   if (payload.clientId) {
     const existing = findClient(db, payload.clientId);
     if (existing) return existing;
   }
 
-  if (!nouvelleFiche) {
+  if (!nouvelleFiche && demander) {
     const duplicate = findDuplicateClient(db, payload);
     if (duplicate) throw doublonDeFiche(duplicate);
   }
@@ -5343,7 +5350,7 @@ function createCustomerOrder(db, payload = {}) {
   const client = findOrCreateCustomerClient(db, {
     ...(payload.client || {}),
     clientId: payload.clientId || payload.client?.clientId
-  }, { nouvelleFiche: payload.nouvelleFiche === true });
+  }, { nouvelleFiche: payload.nouvelleFiche === true, demander: payload.demanderSiDoublon === true });
   const dateCommande = normalizeDateInput(payload.dateCommande) || jourParis();
   // Decision 11 de Thomas (24/09) : un produit en rupture (ou au stock non
   // renseigne) ne fait plus REFUSER la commande prise chez le client. Elle est
@@ -5598,7 +5605,7 @@ function createPlannedOrder(db, payload = {}) {
   const client = findOrCreateCustomerClient(db, {
     ...(payload.client || {}),
     clientId: payload.clientId || payload.client?.clientId
-  }, { nouvelleFiche: payload.nouvelleFiche === true });
+  }, { nouvelleFiche: payload.nouvelleFiche === true, demander: payload.demanderSiDoublon === true });
   const dateCommande = normalizeDateInput(payload.dateCommande) || jourParis();
   const deliveryDate = resolvePlannedDeliveryDate(db, client, payload);
   if (!deliveryDate) throw badRequest("Date de livraison obligatoire pour une commande planifiee");
