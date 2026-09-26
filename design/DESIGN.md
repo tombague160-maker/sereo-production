@@ -8225,8 +8225,9 @@ recommander » compte déjà le besoin non déduit ; `/api/recommendations` non)
 - **7.12 — `PATCH /api/orders/:id` sort le stock.** Une commande importée, à vérifier ou validée
   qu'une transition fait entrer en préparation (ou au-delà) réserve comme « Passer en
   préparation » ; 400 « Stock insuffisant » si le rayon ne couvre pas. Avant : en préparation puis
-  livrée, rayon inchangé. Une commande « à reprogrammer » libérée à la main n'est pas concernée
-  (sa livraison reprend le stock, `reprendreStockLibere`).
+  livrée, rayon inchangé. Une commande « à reprogrammer » libérée à la main l'est aussi quand elle
+  revient **en préparation** (relecture adverse, voir plus bas) ; vers « en livraison » ou
+  « livré », sa livraison reprend le stock (`reprendreStockLibere`).
 - **7.14 — `/api/recommendations`** compte le besoin non encore sorti du rayon
   (`quantityNeededNotDeducted`, celui de l'écran depuis le 24/09) : 7 sortis, rayon 3, seuil 5 →
   **2** (avant : 4). Sa règle « sous le seuil seulement » ne change pas (écart du 24/09).
@@ -8378,3 +8379,74 @@ le nouveau banc : **3/3** ; tabs,
 livreur-ne-perd-rien, hors-ligne, chargement-instantane, poids-reseau, rendu-a-l-affichage,
 un-seul-dessin, tournee, tournees-debloquees, tournee-hors-ligne, barre-laterale-finitions,
 parcours-simplifies, integration-lots-1-5, pieges-tournee, etats-limites, smoke : **142/142**.
+
+### Relecture adverse (25/09) : le sort de chaque défaut
+
+Six défauts relevés sur `d54298a` (deux importants, quatre mineurs), chacun vérifié sur ce code.
+
+- **Important — au bureau, le détail d'une commande réservée disait un faux manque. Vrai,
+  corrigé.** La carte de préparation du bureau (`renderStockLines`) comparait chaque ligne au
+  rayon que la commande avait elle-même réduit : commande terrain de 60 sur 100, « Besoin 60 ·
+  Dispo 40 » en rouge. Une commande « réservé » dit désormais « Besoin 60 · Réservé » (`line-ok`),
+  comme le téléphone (`ligneDeProduitPreparation`) ; un produit introuvable au stock, qui n'a rien
+  pu réserver, garde « Dispo ? » en rouge. Banc : `stock-et-abonnements.spec.js` (rouge sur
+  `d54298a` : `line-danger`, « Besoin 60 · Dispo 40 ») et un témoin, la commande bloquée qui garde
+  « Besoin 50 · Dispo 40 » en rouge (il tue le mutant « toujours réservée »).
+- **Important — rien ne répare les données d'avant la mise à jour. Vrai dans le code, sans objet
+  dans les données mesurées : non codé.** Un abonnement déjà en pause garde sa commande générée et
+  son rappel ; une planifiée déjà annulée garde son rappel « à faire » ; une fréquence changée
+  avant n'a pas de date d'effet (prouvé hors dépôt : rien ne bouge au démarrage). Observation de
+  la production du 24/09 (v1.45.0, lecture seule, script de la chasse `prod-compte.js`) :
+  0 abonnement, 0 relance, 0 planifiée d'un abonnement en pause ou arrêté, 0 rappel à faire sur
+  une commande annulée ; 224 commandes, toutes livrées. Réparer les commandes serait
+  **irréversible** (`annulee` n'a aucune sortie) sur une intention ambiguë (sous l'ancien code, une
+  commande gardée après une pause a pu l'être exprès) ; réparer les rappels à chaque démarrage
+  réannulerait un rappel rouvert à la main ; la date d'un ancien changement de fréquence n'est
+  écrite nulle part. Chemin à la main, prouvé : réactiver puis remettre en pause annule la
+  commande générée et son rappel ; un rappel isolé se clôt depuis les relances. À refaire
+  compter avant le déploiement ; si le compte n'est plus nul, à faire trancher par Thomas.
+- **Mineur — `PATCH` vers la préparation d'une « à reprogrammer » au stock libéré ne sortait pas
+  le stock. Vrai, corrigé.** « Passer en préparation » le sortait ; `PATCH` non : préparée, en
+  carton, pendant que le rayon comptait encore ses articles. `commandeQuiPartEnPreparation` couvre
+  désormais une commande libérée à la main (`stockReleaseReason`) qui va **en préparation,
+  terminée ou prête** ; rayon insuffisant : 400, comme le geste. Pas vers « en livraison » ni
+  « livré » : la livraison reprend le stock, même sur un rayon insuffisant (décision du 23/09), et
+  la tournée relivre une commande libérée sans le reprendre au départ. Une première version
+  étendue à « en livraison » refusait ce que `stock-journal-mouvements.test.js` garde : ramenée.
+  Bancs : trois cas et deux témoins dans `stock-reservation-juste.test.js`, une étape de
+  l'invariant (rouge sur `d54298a` : « CMD-2026-006 en_preparation sans stock sorti du rayon »).
+- **Mineur — une commande générée hors de la nouvelle cadence n'est pas annulée. Vrai, gardé.**
+  La décision 8 porte sur les échéances **passées** ; cette commande est à venir, et le calendrier
+  la montre à sa date (avant le lot, elle en disparaissait). L'annuler d'office serait
+  irréversible et hors de la décision. Question pour Thomas : l'annuler automatiquement ?
+- **Mineur — pause ou arrêt n'annulent pas une commande déjà en préparation, prête, en livraison
+  ou à reprogrammer. Vrai, gardé** (décision prise dans le lot, plus haut). La machine d'état n'a
+  pas « annulée » depuis ces statuts ; en livraison, la commande est dans une tournée (gardes de
+  tournée) ; en préparation, le carton est fait. L'écran la nomme (« … suit son cours
+  (CMD-…) »). Question pour Thomas, si « non livrée » doit aller plus loin.
+- **Mineur — « Prospects convertis » compte une fiche créée « client actif » sans commande.
+  Vrai, non corrigé.** Lire le statut de la fiche déplace l'erreur : la fiche créée par le
+  formulaire d'abonnement (`operations.js`, `crmStatus: "client_actif"`) ne compterait plus, celle
+  créée par une commande terrain (« prospect » par défaut) si ; un prospect passé « client actif »
+  à la main avant sa première commande ne compterait jamais. Il faut d'abord une définition ;
+  défaut proposé : « converti = la fiche quitte prospect pour client, à la main ou par sa première
+  commande ; une fiche créée client n'est pas une conversion ».
+
+**Mutants** (code commité, un à la fois, restauré par copie) : l'affichage « toujours réservée »
+(tué par le témoin bloqué) ; la reprise jamais faite (3 cas et l'invariant) ; étendue à « en
+livraison » (`stock-journal-mouvements`) ; étendue à « livré » (le témoin « en livraison →
+livré »). Ce témoin est né d'un mutant qui survivait à la première version (la restriction au
+statut d'origine, que rien ne distinguait).
+La clause `consumed_by_delivery` n'est atteignable par aucun chemin (la correction de statut
+l'efface avant tout retour en livraison) : gardée par symétrie avec `reprendreStockLibere`.
+
+**Exécutions** (arbre final de la correction) : `npm run check` ; `npm test` 809/811, deux fois,
+avec des rouges différents d'un lancement à l'autre, tous verts seuls (fichier relancé seul) et
+sur des chemins que la correction ne touche pas : `C2.stock.a` (306,7 ms pour 250), puis
+`meilleur-trajet` (114,3 ms pour 100) et `lot5-rapidite` (`ECONNRESET`), sous la charge d'une
+machine partagée (86 processus Node). e2e, port 3624 : stock-et-abonnements (4),
+preparation-lignes, preparation-mobile, commandes, parcours-simplifies,
+parcours-simplifies-telephone, interface-finitions, tabs, smoke, un-seul-dessin,
+rendu-a-l-affichage, tournees-debloquees, stock, stock-negatif, operations : **195/195**
+(`parcours-simplifies` relancé seul : son port semé 3528 était pris par un autre processus au
+premier lancement, 23/23 ensuite).
