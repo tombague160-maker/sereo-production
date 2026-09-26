@@ -249,6 +249,45 @@ test("une ligne ajoutee en tete puis la table lue dans la meme requete : a sa pl
   assert.deepEqual(apres.slice(3), avant);
 });
 
+// Relecture adverse du 26/09 : une ligne ajoutee en tete restait en attente
+// APRES l'ecriture qui l'avait mise en base. Le meme objet, lu ensuite, la
+// montrait deux fois ; ecrit une seconde fois, il echouait (« UNIQUE
+// constraint failed ») apres avoir deja ecrit. Aucune route ne le fait
+// aujourd'hui (une ecriture par lecture) : un piege pour le prochain geste.
+const LIGNES_EN_TETE = [
+  ["historique", id => ({ id, date: "2026-09-26T08:00:00.000Z", type: "Banc", message: `ligne ${id}` })],
+  ["stockMovements", id => ({ id, productId: "stk-003", type: "entree", quantity: 1, createdAt: "2026-09-26T08:00:00.000Z" })]
+];
+
+test("une ligne ajoutee en tete, ecrite, puis la table lue sur le meme objet : une fois", () => {
+  const { AJOUT_EN_TETE, ETAT_DE_LECTURE } = require("../storage/sqliteStore");
+  writeDb(readDb(), { backup: false });
+  for (const [cle, ligne] of LIGNES_EN_TETE) {
+    const avant = lectureComplete()[cle].map(l => l.id);
+    const db = readDb();
+    db[AJOUT_EN_TETE](cle, ligne(`${cle}-relue`));
+    writeDb(db, { backup: false });
+    // Temoin : l'ecriture n'a pas lu la table (sinon la ligne n'attendait plus
+    // et ce banc ne distinguerait rien).
+    assert.equal(db[ETAT_DE_LECTURE].lue(cle), false, `${cle} : l'ecriture a lu la table`);
+    assert.deepEqual(db[cle].map(l => l.id), [`${cle}-relue`, ...avant], `${cle} relue apres l'ecriture`);
+  }
+});
+
+test("une ligne ajoutee en tete, ecrite, puis le meme objet ecrit une seconde fois : ni erreur ni doublon", () => {
+  const { AJOUT_EN_TETE, ETAT_DE_LECTURE } = require("../storage/sqliteStore");
+  writeDb(readDb(), { backup: false });
+  for (const [cle, ligne] of LIGNES_EN_TETE) {
+    const avant = lectureComplete()[cle].map(l => l.id);
+    const db = readDb();
+    db[AJOUT_EN_TETE](cle, ligne(`${cle}-recrite`));
+    writeDb(db, { backup: false });
+    assert.equal(db[ETAT_DE_LECTURE].lue(cle), false, `${cle} : l'ecriture a lu la table`);
+    writeDb(db, { backup: false });
+    assert.deepEqual(lectureComplete()[cle].map(l => l.id), [`${cle}-recrite`, ...avant], `${cle} en base apres deux ecritures`);
+  }
+});
+
 test("la premiere ecriture apres l'ouverture recrit tout, comme avant (base d'une version d'avant)", () => {
   writeDb(readDb(), { backup: false });
   closeStorage();
@@ -577,6 +616,12 @@ test("120 pas au hasard : la base ecrite sans relire egale une base reecrite d'u
       fs.rmSync(fichierB, { force: true });
       const obtenu = contenu(path.join(dossier, "a.sqlite"));
       assert.deepEqual(obtenu, attendu, `pas ${pas} (${tirees.map(([nom]) => nom).join(" + ")}) : la base ecrite sans relire a diverge`);
+      // Le meme objet APRES son ecriture (relecture adverse du 26/09) : lu, il
+      // est le modele (aucune ligne en tete deux fois) ; recrit, la base ne
+      // change pas (aucune ligne recrite).
+      for (const cle of CLES) assert.deepEqual(lu[cle], modele[cle], `pas ${pas} : ${cle}, lue sur l'objet deja ecrit, differe du modele`);
+      A.writeDb(lu);
+      assert.deepEqual(contenu(path.join(dossier, "a.sqlite")), attendu, `pas ${pas} : recrire l'objet deja ecrit a change la base`);
     }
     // Et ce que relit le magasin paresseux est le modele, table pour table.
     const relu = A.readDb();

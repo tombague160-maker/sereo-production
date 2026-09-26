@@ -1132,6 +1132,12 @@ function persistDatabase(database, db, cache, etat = null) {
     database.exec("COMMIT");
     // La base a change : les lectures memorisees ne valent plus (readPayloads).
     oublierLectures(database);
+    // Les lignes ajoutees en tete sont en base (26/09) : `db` ne les garde plus
+    // en attente -- relue, la table les a une fois ; recrit, l'objet ne les
+    // recrit pas. Seulement celles-ci : une table lue a deja place les siennes.
+    for (const plan of plans) {
+      if (plan.partiel && plan.wanted.length) etat.enTeteEcrites(plan.spec.sources[0]);
+    }
     next.dataVersion = dataVersion(database);
     return next;
   } catch (error) {
@@ -1264,7 +1270,9 @@ const TABLES_AJOUT_EN_TETE = new Set(["historique", "stockMovements"]);
  * reste en base telle quelle (ETAT_DE_LECTURE, persistDatabase). Et une ligne
  * ajoutee en tete (AJOUT_EN_TETE : historique, mouvements de stock) ne force
  * pas la lecture de sa table : elle attend, et prend sa place si la table est
- * lue ensuite -- comme si elle avait ete ajoutee par unshift.
+ * lue ensuite -- comme si elle avait ete ajoutee par unshift. Ecrite, elle
+ * n'attend plus (26/09) : la table lue apres l'ecriture la trouve en base, une
+ * fois, et une seconde ecriture du meme objet ne la recrit pas.
  *
  * A savoir pour le code asynchrone : une table lue APRES un `await` l'est plus
  * tard que les autres -- et sur un magasin ferme si une restauration a eu lieu
@@ -1303,7 +1311,12 @@ function lectureParesseuse(database, db, normaliserTable) {
     enumerable: false,
     value: {
       lue: cle => lues.has(cle),
-      enTete: cle => enAttente.get(cle) || []
+      enTete: cle => enAttente.get(cle) || [],
+      // Apres le COMMIT qui les a ecrites (persistDatabase) : elles sont en
+      // base, l'objet ne les garde plus. Sinon, la table lue ensuite les
+      // montrerait deux fois (relue, puis unshift) et une seconde ecriture du
+      // meme objet les recrirait (« UNIQUE constraint failed »).
+      enTeteEcrites: cle => { enAttente.delete(cle); }
     }
   });
   Object.defineProperty(db, AJOUT_EN_TETE, {
