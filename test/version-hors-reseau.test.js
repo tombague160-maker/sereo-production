@@ -61,28 +61,36 @@ after(async () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+// Une reponse qui n'arrive pas en 8 s est rendue comme telle, pour que le
+// rouge nomme sa cause au lieu d'un TimeoutError du banc.
 async function version() {
   const t0 = Date.now();
-  const res = await fetchLocal(`${base}/api/version`, { headers: { connection: "close" }, signal: AbortSignal.timeout(10000) });
-  return { status: res.status, body: await res.json(), ms: Date.now() - t0 };
+  try {
+    const res = await fetchLocal(`${base}/api/version`, { headers: { connection: "close" }, signal: AbortSignal.timeout(8000) });
+    return { status: res.status, body: await res.json(), ms: Date.now() - t0 };
+  } catch (error) {
+    if (error?.name !== "TimeoutError") throw error;
+    return { status: "toujours pendante apres 8 s", body: {}, ms: Date.now() - t0 };
+  }
 }
 
 test("SEREO_SKIP_RELEASE_FETCH=1 : /api/version repond sans aucun appel sortant", async () => {
   const r = await version();
+  assert.deepEqual(sortants, [], "appel sortant malgre SEREO_SKIP_RELEASE_FETCH=1");
   assert.equal(r.status, 200);
   assert.equal(r.body.version, require("../package.json").version);
   assert.match(r.body.releaseUrl, /github\.com\/.*\/releases\/tag\/v/);
   assert.equal(r.body.available, false);
-  assert.deepEqual(sortants, [], "appel sortant malgre SEREO_SKIP_RELEASE_FETCH=1");
 });
 
 test("sans la variable, un GitHub muet ne bloque pas /api/version plus de 3 s (temoin : l'appel sortant est vu)", { timeout: 15000 }, async () => {
   delete process.env.SEREO_SKIP_RELEASE_FETCH;
+  sortants.length = 0;
   try {
     const r = await version();
+    assert.equal(r.status, 200, `/api/version : ${r.status}`);
     assert.equal(sortants.length, 1, `appels sortants : ${JSON.stringify(sortants)}`);
     assert.match(sortants[0], /^https:\/\/api\.github\.com\/repos\/.+\/releases\/tags\/v/);
-    assert.equal(r.status, 200);
     assert.equal(r.body.available, false);
     assert.ok(r.ms >= 2500 && r.ms < 6000, `reponse en ${r.ms} ms`);
   } finally {
