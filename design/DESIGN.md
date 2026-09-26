@@ -8241,7 +8241,8 @@ mouvements de stock (`limite`), `test/` et `agents/` hors de l'image.
   changer — et garde son état connu, **sans aucune suppression**. `addHistory` et
   `recordStockMovement` passent par `ajouterEnTete` (`AJOUT_EN_TETE`) : la ligne attend, seule
   écrite, au rang que `planSortOrders` lui donnerait (juste avant la première) ; lue ensuite dans
-  la même requête, la table l'a en tête, comme par `unshift`. Réservé à `historique` et
+  la même requête, la table l'a en tête, comme par `unshift`. Une fois écrite, elle n'attend plus
+  (correction du 26/09, ci-dessous). Réservé à `historique` et
   `stockMovements` (seules sources de leur table), à une ligne qui a un `id` ; sinon, ou si les
   rangs en base ne sont pas distincts, la table est lue comme avant. **La première écriture après
   l'ouverture lit et récrit tout** : une base écrite par une version d'avant, ou restaurée (la
@@ -8269,7 +8270,8 @@ mouvements de stock (`limite`), `test/` et `agents/` hors de l'image.
   --shard=<lot>/4`, un ouvrier par machine comme avant (même charge, même garantie contre
   l'instabilité née de la charge), `fail-fast: false`, un rapport par lot. Le verdict `e2e` garde
   le nom **« Tests e2e (Playwright) »** (une protection de branche qui l'exige exige les quatre
-  lots), `needs: e2e-lots`, `if: ${{ !cancelled() }}` (rouge, pas « sauté », quand un lot échoue),
+  lots), `needs: e2e-lots`, `if: ${{ always() }}` (rouge, pas « sauté », quand un lot échoue **ou
+  que l'exécution est annulée** — `!cancelled()` jusqu'à la correction du 26/09, ci-dessous),
   vert seulement si `needs.e2e-lots.result == success`. `concurrency` : un groupe par PR, annulé
   par une nouvelle poussée ; hors PR un groupe **par exécution** (`run_id`) — `main` n'est jamais
   mis en file ni annulé, chaque commit garde son verdict.
@@ -8384,7 +8386,8 @@ Conteneur lancé (26/09) : `/healthz` 200 en 2 s, la base créée par `node` dan
   queue, ajouts ignorés, rang décalé, ajouts non écrits) pris par les 120 pas ; index CRM ignoré
   (23 487 éléments parcourus) ou tri inversé ; `find` des rappels (44 appels pour 22 rappels) ;
   mémoire jamais servie, jamais oubliée au COMMIT, sans `data_version`, objets partagés ;
-  `ci.yml` d'avant (3 rouges), `if: always()`, un lot retiré, groupe par branche ; Dockerfile
+  `ci.yml` d'avant (3 rouges), `if: always()` (ce rouge-là défendait l'erreur : c'est la forme
+  sûre, voir la correction du 26/09), un lot retiré, groupe par branche ; Dockerfile
   d'avant ; `.dockerignore` d'avant et celui de `87fb5c8` (sans les restes des bancs e2e).
 - e2e (26/09, `4f28c94`, configuration locale sur 3628/3629, deux ouvriers) : les bancs des
   écrans voisins et des garanties — `chargement-instantane`, `clients`, `commandes`,
@@ -8415,3 +8418,47 @@ Conteneur lancé (26/09) : `/healthz` 200 en 2 s, la base créée par `node` dan
 - À cinquante fois la base, un import de stock prend encore ~4 s et le démarrage ~3,6 s. Non
   profilé ici ; candidat : `syncWorkflow` lui-même, qui renormalise toutes les commandes à
   chaque écriture (non touché par ce lot).
+
+### Corrections après la relecture adverse (26/09)
+
+- **Le verdict e2e sautait quand on annulait l'exécution** (important, `86996cb`). Avec
+  `if: ${{ !cancelled() }}`, annuler l'exécution à la main pendant les lots (par exemple pour
+  économiser des minutes) faisait **sauter** « Tests e2e (Playwright) ». Or un job que sa condition
+  fait sauter rapporte « Success » et ne bloque pas une PR, même exigé (doc GitHub, « Using
+  conditions to control job execution », relue le 26/09). La PR devenait fusionnable sans
+  qu'aucun e2e ait jugé son dernier commit ; de même si un lot était rouge **puis** l'exécution
+  annulée (cas trouvé par le banc, pas par la relecture). Avant les lots, le job unique annulé
+  rapportait « cancelled », qui bloque. Désormais `if: ${{ always() }}` : annulé, il tourne et
+  dit rouge (lots « cancelled ») — il faut relancer. Une exécution périmée (nouvelle poussée)
+  rend ce rouge sur un commit qui n'est plus la tête de la PR : sans effet. La mise en garde de
+  GitHub contre `always()` vise les étapes qui peuvent rester bloquées (checkout…) ; ce job n'a
+  qu'un `test`. Coût (non mesuré) : un job court par exécution annulée, qui peut retarder d'autant
+  le départ de l'exécution suivante de la même PR (même groupe `concurrency`).
+  Le banc (`test/ci-lots.test.js`) ne verrouille plus une forme : un petit modèle des règles de
+  GitHub (sauté = succès ; sans condition = `success()` ; `always()`, `success()`, `failure()`,
+  `cancelled()` pour un job qui attend) joue cinq issues (lots verts, rouges, annulés, rouges puis
+  annulés, verts puis annulés) et exige que la protection lise un succès **si et seulement si**
+  les lots sont verts. Une expression qu'il ne sait pas évaluer le fait échouer. Témoin : il
+  refuse `!cancelled()` (2 issues) et l'absence de condition (3 issues). **Non mesuré sur une
+  vraie exécution annulée** (pas de poussée depuis ce lot) : si GitHub marquait le verdict
+  « cancelled » plutôt que « sauté », `!cancelled()` aurait bloqué ; `always()` bloque dans les
+  deux cas.
+- **Une ligne ajoutée en tête restait en attente après son écriture** (mineur, `f1115e5`). Le
+  même objet, lu ensuite, la montrait deux fois ; écrit une seconde fois, il échouait
+  (« UNIQUE constraint failed ») après avoir déjà écrit. Aucune route ne le faisait (un seul
+  `writeDb` par `readDb`, handler par handler, grep du 26/09) : un piège pour le prochain geste.
+  Après le COMMIT, `persistDatabase` dit à l'objet quelles lignes en attente sont écrites
+  (`ETAT_DE_LECTURE.enTeteEcrites`), et seulement celles-là. Bancs : relire puis récrire le même
+  objet, pour l'historique et les mouvements, avec un témoin que l'écriture n'a pas lu la table ;
+  les 120 pas au hasard vérifient aussi, après chaque écriture, que le même objet relu est le
+  modèle et que le récrire ne change pas la base.
+- **Preuves rouges** (fichier de `87f1247` remis, banc neuf gardé ; restauration par copie,
+  empreinte vérifiée) : `ci.yml` d'avant → « lots cancelled, exécution annulée : la protection
+  lit « success (sauté) » » et « lots failure, exécution annulée » ; `if` retiré → 3 issues ;
+  `sqliteStore.js` d'avant → `historique-relue` deux fois, « UNIQUE constraint failed:
+  historique.id (historique-recrite) », et au pas 4 des 120 pas `m-71`, `m-70` en double.
+- **Bancs** (26/09, sur `f1115e5`) : `npm run check` ; `npm test` **796/796** (793 + le témoin du
+  modèle de la protection + les deux suites « relire / récrire ») ; e2e voisins du magasin
+  (configuration locale sur 3628/3629, deux ouvriers) — `smoke`, `stock`, `historique-lent`,
+  `hors-ligne`, `chargement-instantane`, `livreur-ne-perd-rien`, `sauvegardes` — **71/71**, sans
+  réessai.
