@@ -10660,15 +10660,26 @@ function formatJourDeTournee(value) {
 function renderStockLines(order) {
   const lines = order.stockLines || [];
   if (!lines.length) return `<div class="stock-lines muted">Aucun produit identifié.</div>`;
+  // Relecture adverse (25/09) : une commande au stock deja sorti du rayon
+  // (stockStatus « reserve » : saisie chez le client, planifiee confirmee, en
+  // preparation) ne se compare plus au rayon qu'elle a elle-meme reduit. Au
+  // bureau, sa ligne disait « Besoin 6 · Dispo 4 » en rouge, comme un manque,
+  // alors que ses 6 articles sont mis de cote ; le telephone ne l'alertait
+  // deja plus (ligneDeProduitPreparation). Un produit introuvable au stock n'a
+  // rien pu reserver : sa ligne reste dite telle quelle.
+  const reservee = order.stockStatus === "reserve";
 
   return `
     <div class="stock-lines">
-      ${lines.map(line => `
-        <div class="stock-line ${line.status === "ok" ? "line-ok" : "line-danger"}">
+      ${lines.map(line => {
+        const miseDeCote = reservee && line.status !== "unknown";
+        return `
+        <div class="stock-line ${line.status === "ok" || miseDeCote ? "line-ok" : "line-danger"}">
           <span>${escapeHtml(line.nom || line.code || "Produit")}</span>
-          <span>Besoin ${escapeHtml(line.required)} · Dispo ${line.available === null ? "?" : escapeHtml(line.available)}</span>
+          <span>Besoin ${escapeHtml(line.required)} · ${miseDeCote ? "Réservé" : `Dispo ${line.available === null ? "?" : escapeHtml(line.available)}`}</span>
         </div>
-      `).join("")}
+      `;
+      }).join("")}
     </div>
   `;
 }

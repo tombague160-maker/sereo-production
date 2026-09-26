@@ -61,11 +61,39 @@ test("commande terrain de 60 sur 100 : « À préparer », geste actif, et sa so
   const geste = page.locator(`[data-action="start-preparation"][data-order-id="${terrain.id}"]`).first();
   await expect(geste).toBeVisible();
   await expect(geste).toBeEnabled();
+  // Relecture adverse (25/09) : au bureau, le detail (la carte de preparation)
+  // ne compare plus la ligne au rayon que la commande a elle-meme reduit --
+  // avant : « Besoin 60 · Dispo 40 » en rouge, comme un manque de 20, alors
+  // que ses 60 articles sont mis de cote.
+  const ligneStock = page.locator("#commandeDetailCorps .stock-line");
+  await expect(ligneStock, "prealable : le detail du bureau montre la ligne du produit").toHaveCount(1);
+  await expect(ligneStock).toContainText("Besoin 60 · Réservé");
+  await expect(ligneStock).toHaveClass(/\bline-ok\b/);
   expect(erreurs).toEqual([]);
 
   await page.goto(`${srv.base}/#stock`, { waitUntil: "networkidle" });
   await expect(page.locator("#stockMovementList")).toContainText(`Sortie pour la commande ${terrain.numero}`);
   await ctx.close();
+});
+
+// Temoin (vert avant et apres) : une commande qui n'a RIEN reserve (acceptee
+// en « Bloquée », decision 11) garde au bureau sa ligne rouge et le rayon dit.
+test("temoin : commande terrain de 50 sur 40 restants, bloquée : au bureau, « Besoin 50 · Dispo 40 » en rouge", async ({ browser, request }) => {
+  const bloquee = await poster(request, "/api/customer-orders", { clientId: "c-dupont", products: [{ productId: "st-ALE", quantite: 50 }] });
+  expect(bloquee.bloquee, "prealable : rien n'est reserve").toBe(true);
+
+  const { ctx, page, erreurs } = await ouvrir(browser, "preparation");
+  const ligne = page.locator("#preparationList .commande-ligne", { has: page.locator(`.commande-ligne-main[data-order-id="${bloquee.id}"]`) });
+  await expect(ligne).toHaveCount(1);
+  await ligne.locator(".commande-ligne-main").click();
+  const ligneStock = page.locator("#commandeDetailCorps .stock-line");
+  await expect(ligneStock).toHaveCount(1);
+  await expect(ligneStock).toContainText("Besoin 50 · Dispo 40");
+  await expect(ligneStock).toHaveClass(/\bline-danger\b/);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+  // Rendue au rayon : la suite du fichier ne la voit plus.
+  expect((await request.patch(`${srv.base}/api/orders/${bloquee.id}`, { data: { status: "annulee" } })).status()).toBe(200);
 });
 
 test("mettre en pause un abonnement : l'écran dit la commande déjà créée annulée, et elle l'est", async ({ browser, request }) => {
