@@ -600,17 +600,33 @@ for (const theme of ["light", "dark"]) {
     await page.addStyleTag({ content: "*, *::before, *::after { transition: none !important; animation: none !important; }" });
     const lignes = await page.locator("#stockList .stk-ligne").count();
     expect(await page.locator("#stockList .stk-ligne svg").count(), `des <svg> dans les ${lignes} lignes du Stock`).toBe(0);
-    for (const [nom, selecteur] of [["moins", ".stk-pas:not(.stk-pas--plus)"], ["plus", ".stk-pas--plus"]]) {
-      const bouton = page.locator(`#stockList .stk-ligne ${selecteur}`).first();
-      const nouveau = await bouton.screenshot();
-      // L'ancien : le <svg> d'avant dans le bouton, le pseudo-element eteint.
-      await bouton.evaluate((b, svg) => { b.innerHTML = svg; }, ANCIEN[nom]);
-      const eteindre = await page.addStyleTag({ content: "#stock .stk-pas::before { display: none !important; } #stock .stk-pas svg { width: 16px; height: 16px; }" });
-      const ancien = await bouton.screenshot();
-      // Temoin : sans rien dedans, le bouton differe bien de l'ancien.
-      await bouton.evaluate(b => { b.innerHTML = ""; });
-      const vide = await bouton.screenshot();
-      await eteindre.evaluate(s => s.remove());
+    // Les boutons des lignes portent bien le trace (le masque du pseudo-element).
+    const masques = await page.evaluate(() => [...document.querySelectorAll("#stockList .stk-ligne .stk-pas")]
+      .filter(b => /data:image\/svg\+xml/.test(getComputedStyle(b, "::before").maskImage || getComputedStyle(b, "::before").webkitMaskImage || "")).length);
+    expect(masques, "des boutons des lignes sans leur trace").toBe(lignes * 2);
+    // La comparaison se fait sur un banc FIGE, dans l'ecran (memes regles
+    // `#stock .stk-pas`), hors de la liste : un rendu de la liste entre deux
+    // captures (sous charge) ne peut rien y changer. Trois boutons par trace :
+    // celui d'aujourd'hui, l'ancien (<svg> d'avant, pseudo-element eteint) et
+    // un vide (temoin : la comparaison distingue).
+    await page.evaluate(anciens => {
+      const banc = document.createElement("div");
+      banc.id = "bancTraces";
+      banc.style.cssText = "position:fixed;left:8px;top:140px;z-index:2147483647;display:flex;gap:12px;padding:12px;background:var(--v8-surface, #fff)";
+      banc.innerHTML = Object.entries(anciens).map(([nom, svg]) => {
+        const classe = `stk-pas${nom === "plus" ? " stk-pas--plus" : ""}`;
+        return `<button type="button" class="${classe}" data-trace="${nom}-nouveau"></button>`
+          + `<button type="button" class="${classe} trace-eteinte" data-trace="${nom}-ancien">${svg}</button>`
+          + `<button type="button" class="${classe} trace-eteinte" data-trace="${nom}-vide"></button>`;
+      }).join("");
+      document.getElementById("stock").append(banc);
+    }, ANCIEN);
+    await page.addStyleTag({ content: "#stock .stk-pas.trace-eteinte::before { display: none !important; } #stock .stk-pas.trace-eteinte svg { width: 16px; height: 16px; }" });
+    for (const nom of ["moins", "plus"]) {
+      const capture = quoi => page.locator(`#bancTraces [data-trace="${nom}-${quoi}"]`).screenshot();
+      const nouveau = await capture("nouveau");
+      const ancien = await capture("ancien");
+      const vide = await capture("vide");
       const ecart = await pixelsDifferents(page, nouveau, ancien);
       const temoin = await pixelsDifferents(page, vide, ancien);
       console.log(`[stock ${theme}] « ${nom} » : ${ecart} pixel(s) differents du <svg> d'avant (bouton vide : ${temoin})`);
