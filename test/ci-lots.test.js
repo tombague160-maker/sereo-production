@@ -12,7 +12,8 @@
 //     aucun autre job ne lance la suite ;
 //   - le verdict garde son nom, « Tests e2e (Playwright) » (une protection de
 //     branche qui l'exige exige les N lots), rouge si un lot l'est, et il
-//     tourne meme quand un lot echoue (sinon il serait « saute », pas rouge) ;
+//     tourne meme quand un lot echoue ou que l'execution est annulee (sinon il
+//     serait « saute », qu'une protection prend pour un succes) ;
 //   - une PR annule son execution perimee ; main jamais.
 
 const { test } = require("node:test");
@@ -37,6 +38,52 @@ function jobs() {
   return blocs;
 }
 const nomDe = bloc => (/^ {4}name:\s*(.+)$/m.exec(bloc) || [])[1]?.trim();
+
+// Ce que la protection de branche LIT pour le verdict, selon l'issue des lots
+// et l'annulation de l'execution (26/09, apres relecture adverse). Regles de
+// GitHub (doc « Using conditions to control job execution », « Status check
+// functions ») :
+//   - un job que sa condition fait sauter rapporte « Success » et ne bloque pas
+//     une PR, meme exige ;
+//   - sans `if`, la condition est `success()` ;
+//   - pour un job qui attend (`needs`) : success() = rien d'echoue ni d'annule
+//     en amont ; failure() = un job attendu a echoue ; cancelled() = l'execution
+//     est annulee ; always() = vrai, meme annulee.
+// L'expression est reduite a ces quatre fonctions, `!`, `&&`, `||` et
+// parentheses ; toute autre forme fait echouer le banc (a completer ici, pas a
+// deviner).
+function verdictTourne(condition, { annulee, lots }) {
+  const valeurs = {
+    "always()": true,
+    "success()": !annulee && lots === "success",
+    "failure()": lots === "failure",
+    "cancelled()": annulee
+  };
+  const nue = String(condition ?? "success()").trim().replace(/^(["'])([\s\S]*)\1$/, "$2")
+    .replace(/^\$\{\{\s*([\s\S]*?)\s*\}\}$/, "$1");
+  const reduite = nue.replace(/\b(?:always|success|failure|cancelled)\(\)/g, f => String(valeurs[f]));
+  assert.match(reduite, /^(?:true|false|[\s!&|()])+$/, `condition « ${condition} » : forme que ce banc ne sait pas evaluer`);
+  return Function(`"use strict"; return (${reduite});`)();
+}
+
+// Les issues ou la protection ne suit pas les lots : elle lit un succes alors
+// qu'ils ne sont pas tous verts, ou l'inverse. Le job, quand il tourne, dit
+// vert si et seulement si les lots le sont (son `test`, verifie a part).
+const ISSUES = [
+  { annulee: false, lots: "success" },
+  { annulee: false, lots: "failure" },
+  { annulee: true, lots: "cancelled" }, // annulee a la main pendant les lots
+  { annulee: true, lots: "failure" }, // un lot rouge, puis annulee
+  { annulee: true, lots: "success" } // annulee apres les lots
+];
+function protectionTrompee(condition) {
+  return ISSUES.flatMap(issue => {
+    const tourne = verdictTourne(condition, issue);
+    const lu = tourne ? (issue.lots === "success" ? "success" : "failure") : "success (saute)";
+    const passe = lu.startsWith("success");
+    return passe === (issue.lots === "success") ? [] : [`lots ${issue.lots}${issue.annulee ? ", execution annulee" : ""} : la protection lit « ${lu} »`];
+  });
+}
 
 test("ci — les lots e2e couvrent la suite entiere, chacun une fois", () => {
   const tous = jobs();
@@ -64,10 +111,29 @@ test("ci — le verdict « Tests e2e (Playwright) » exige tous les lots, et dit
   assert.ok(lanceur, "aucun job ne lance la suite");
   const [cleLots] = lanceur;
   assert.match(bloc, new RegExp(`^ {4}needs:\\s*\\[?\\s*${cleLots}\\b`, "m"), `le verdict n'attend pas ${cleLots}`);
-  // Tourne quand un lot echoue (sinon « saute », qu'une protection prend pour
-  // un succes), pas quand l'execution est annulee.
-  assert.match(bloc, /^ {4}if:\s*\$\{\{\s*!cancelled\(\)\s*\}\}/m, "le verdict ne tourne pas quand un lot echoue");
   assert.match(bloc, new RegExp(`needs\\.${cleLots}\\.result\\s*\\}\\}"?\\s*=\\s*"success"`), "le verdict ne teste pas que les lots sont verts");
+  // Tourne quand un lot echoue ET quand l'execution est annulee : sinon
+  // « saute », qu'une protection prend pour un succes.
+  const condition = (/^ {4}if:\s*(.+)$/m.exec(bloc) || [])[1];
+  assert.deepEqual(protectionTrompee(condition), [], `condition du verdict : ${condition ?? "aucune (success())"}`);
+});
+
+test("ci — temoin : le modele de la protection refuse les conditions qui font sauter le verdict", () => {
+  // La forme d'avant la relecture (26/09) : sautee des qu'on annule avant la
+  // fin des lots, meme apres un lot rouge.
+  assert.deepEqual(protectionTrompee("${{ !cancelled() }}"), [
+    "lots cancelled, execution annulee : la protection lit « success (saute) »",
+    "lots failure, execution annulee : la protection lit « success (saute) »"
+  ]);
+  // Sans condition (success()) : sautee des qu'un lot echoue.
+  assert.deepEqual(protectionTrompee(undefined), [
+    "lots failure : la protection lit « success (saute) »",
+    "lots cancelled, execution annulee : la protection lit « success (saute) »",
+    "lots failure, execution annulee : la protection lit « success (saute) »"
+  ]);
+  assert.deepEqual(protectionTrompee("${{ always() }}"), []);
+  assert.deepEqual(protectionTrompee("always()"), []);
+  assert.throws(() => protectionTrompee("${{ always() && needs.e2e-lots.result != 'skipped' }}"), /ne sait pas evaluer/);
 });
 
 test("ci — une PR poussee de nouveau annule son execution perimee ; main jamais", () => {

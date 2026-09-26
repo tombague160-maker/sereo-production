@@ -109,13 +109,24 @@ jobs:
           retention-days: 7
 
   # Le verdict des e2e, sous le NOM d'avant : une protection de branche qui
-  # exige « Tests e2e (Playwright) » exige les quatre lots verts. Il tourne
-  # aussi quand un lot a echoue (pour dire rouge), pas quand l'execution est
-  # annulee (une nouvelle poussee sur la PR rendra son propre verdict).
+  # exige « Tests e2e (Playwright) » exige les quatre lots verts.
+  #
+  # Il tourne TOUJOURS, y compris quand l'execution est annulee (26/09, apres
+  # relecture adverse). Un job que sa condition fait sauter rapporte
+  # « Success » et ne bloque pas une PR, meme exige (doc GitHub, « Using
+  # conditions to control job execution »). Avec `!cancelled()`, annuler
+  # l'execution a la main pendant les lots faisait sauter ce verdict : la PR
+  # devenait fusionnable sans qu'aucun e2e ait juge son dernier commit. Avant
+  # les lots, le job unique annule rapportait « cancelled », qui bloque. Ici,
+  # annule, il tourne et dit rouge (lots « cancelled ») : il faut relancer.
+  # Une execution perimee (nouvelle poussee sur la PR) rend ce rouge sur un
+  # commit qui n'est plus la tete de la PR : sans effet. La mise en garde de
+  # GitHub contre `always()` vise les etapes qui peuvent rester bloquees
+  # (checkout...) ; ce job n'a qu'un `test`, sans rien telecharger.
   e2e:
     name: Tests e2e (Playwright)
     needs: e2e-lots
-    if: ${{ !cancelled() }}
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
       - name: Les quatre lots sont verts
