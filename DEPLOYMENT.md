@@ -75,7 +75,7 @@ absente de ce tableau ou de `.env.example`. « Image » : valeur posee par le `D
 | `SEREO_OSRM_DIR` | `osrm/` a cote de la base | Cartes du calcul routier local. |
 | `SEREO_ENABLE_DB_EXPORT` | `0` | `1` : export complet de la base (administration locale), reserve aux comptes administrateurs. |
 | `SEREO_AUTH_USER` | vide | Identifiant ; avec le mot de passe, protege tout l'acces. |
-| `SEREO_AUTH_PASSWORD` | vide | Mot de passe du compte ci-dessus ; au moins 12 caracteres (plus court : le serveur demarre, le journal et l'administration le signalent). |
+| `SEREO_AUTH_PASSWORD` | vide | Mot de passe du compte ci-dessus ; au moins 12 caracteres (plus court : le serveur demarre, et seul son journal le signale). |
 | `SEREO_AUTH_REALM` | `Sereo` | Nom du domaine d'authentification. |
 | `SEREO_AUTH_SESSION_SECRET` | fichier `session-secret` a cote de la base | Secret des cookies de session. |
 | `SEREO_AUTH_MAX_ATTEMPTS` | `5` | Essais de connexion rates avant blocage. |
@@ -130,8 +130,8 @@ Important :
 - Ne jamais commiter le fichier `.env`.
 - Utiliser un mot de passe long, unique et non partage ailleurs : **au moins 12 caracteres**.
   Plus court, l'application demarre quand meme (un refus verrouillerait l'administrateur
-  dehors apres une mise a jour), mais le journal le signale au demarrage et l'administration
-  voit un bandeau d'alerte a chaque ouverture.
+  dehors apres une mise a jour), mais le journal le signale au demarrage. (Le bandeau
+  d'alerte montre a l'administration du 25/09 au 26/09 est retire : l'ecran ne le dit plus.)
 - Tentatives de connexion : 5 echecs par adresse bloquent cette adresse 15 secondes
   (`SEREO_AUTH_MAX_ATTEMPTS`, `SEREO_AUTH_RATE_WINDOW_MS`, `SEREO_AUTH_LOCKOUT_MS`) ; et
   20 echecs sur un meme identifiant dans l'heure, d'ou qu'ils viennent, bloquent cet
