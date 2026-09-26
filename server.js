@@ -3460,10 +3460,16 @@ const GENRE_AVANT_PURGE_COMMANDES = "avant-purge-commandes";
 const MOTIF_HORS_ROTATION = /-avant-purge-commandes\.(sqlite|json)\.gz$/;
 const BACKUP_FILENAME_PATTERN = /^db-.*\.(sqlite|json)(\.gz)?$/;
 
+// Relecture adverse du 26/09 : les fichiers de travail d'une sauvegarde en
+// cours (`…sqlite.gz.travail-copie.sqlite`, `…travail-verif.sqlite`) passaient
+// le motif. Plus recents que tout, ils devenaient « la derniere » le temps de
+// la copie : servis au telechargement (une base brute en cours d'ecriture),
+// affiches sur la carte, comptes par la rotation. Ils ne sont jamais une
+// sauvegarde (MOTIF_TRAVAIL, le meme que le nettoyage du demarrage).
 function listBackupEntries(dossier = BACKUP_DIR) {
   if (!fs.existsSync(dossier)) return [];
   return fs.readdirSync(dossier)
-    .filter(name => BACKUP_FILENAME_PATTERN.test(name))
+    .filter(name => BACKUP_FILENAME_PATTERN.test(name) && !sauvegardeBase.MOTIF_TRAVAIL.test(name))
     .map(name => {
       const fullPath = path.join(dossier, name);
       try {
@@ -10645,7 +10651,9 @@ async function tourneesDeLaSauvegarde(chemin) {
   const brut = await new Promise((resolve, reject) => {
     zlib.gunzip(compresse, { maxOutputLength: MAX_BACKUP_DECOMPRESSED_BYTES }, (error, sortie) => (error ? reject(error) : resolve(sortie)));
   });
-  const copie = `${chemin}.travail-verif.sqlite`;
+  // Nommee comme celles du thread de sauvegarde : jamais prise pour une
+  // sauvegarde (listBackupEntries), effacee au demarrage si elle reste.
+  const copie = sauvegardeBase.fichiersDeTravail(chemin).verification;
   await fs.promises.writeFile(copie, brut);
   try {
     const routes = lireTourneesDuFichier(copie);
