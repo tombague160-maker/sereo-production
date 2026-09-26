@@ -3619,9 +3619,15 @@ Quatre défauts relevés sur `73cc8de`, tous vérifiés vrais, tous corrigés :
   17 `readDb` (≈ 130 ms chacun, surtout les commandes). Il n'a plus lieu après
   chaque geste, mais à l'ouverture et au sondage. Levier suivant : un seul
   `readDb` par vague (point d'entrée agrégé, ou lecture mémorisée par
-  `data_version`).
+  `data_version`). *Fait le 25/09 : lecture mémorisée par génération et `data_version`, voir
+  « 25/09 — Rapidité du serveur, CI et image ».*
 - `syncWorkflow` renormalise **toutes** les commandes à chaque écriture
   (≈ 150-250 ms à 6 000 commandes) : c'est le gros du « Livré » restant.
+  *Corrigé le 25/09 : ce chiffre était trop bas d'un ordre de grandeur (probablement mesuré
+  sur un stock vide, selon la chasse aux défauts du 24/09). Le coût venait de la table de recherche du catalogue,
+  reconstruite pour CHAQUE commande : 717 ms à 2 627 commandes et 218 produits pour ce
+  seul calcul, la moitié d'une écriture en production. Réglé : voir « 25/09 — Rapidité
+  du serveur, CI et image ».*
 - L'**historique texte** n'est jamais purgé (§4, réserve †).
 - Hors lot : tracés OSRM compacts (`polyline6` / `overview=simplified`, avec le
   serveur OSRM hébergé) ; marqueurs recréés à chaque rendu de carte (lot 4).
@@ -7717,7 +7723,9 @@ c'est le travail du serveur (la rafale) et le JSON que la page relit.
   ventes par un `COUNT` (`compterVentes`), plus en décodant les 429 lignes (249 Ko en
   production). Mêmes clés, mêmes valeurs (`{ ...db }`, `JSON.stringify` lisent tout) ;
   `writeDb` normalise tout, donc lit ce qui ne l'a pas été — l'état de la base au moment de
-  l'écriture, sous le verrou. Sans `normaliserTable` (bancs qui ouvrent le magasin seul), tout,
+  l'écriture, sous le verrou (*plus vrai depuis le 25/09 : une table non lue n'est plus ni
+  relue ni récrite, elle n'a pas pu changer — voir « 25/09 — Rapidité du serveur, CI et
+  image »*). Sans `normaliserTable` (bancs qui ouvrent le magasin seul), tout,
   comme avant. **Ce qui changerait** : une table lue APRÈS un `await` le serait plus tard que
   les autres (état plus récent), ou sur une base fermée entre-temps par une restauration
   (erreur au lieu de l'état d'avant). Relevé du 24/09, refait après la relecture adverse
@@ -8194,3 +8202,216 @@ liste ciblée — les bancs des deux lots, `chargement-instantane`, `hors-ligne`
 `stock*`, `tabs`, `smoke` — **312/312** ; suite complète, deux passages : **723/723** et
 **723/723**. Un passage complet préalable (avant `4d8f513` et le banc de la carte) : 721 verts,
 le rouge de `carte-telephone` réglé ci-dessus.
+
+## 25/09 — Rapidité du serveur, CI et image
+
+**Le constat (chasse aux défauts du 24/09, section 2).** Une écriture coûtait ~90 ms en
+production, dont la moitié à reconstruire la table de recherche du catalogue (code et nom
+normalisés de chaque produit) **pour chaque commande** : sonde de la chasse, 46,7 ms sur 89 ; à
+dix fois la base, 717 ms sur 1 061. Quatre chemins recalculaient tout deux fois (`syncWorkflow`
+juste avant `writeDb`, qui le refait) : l'ajustement de stock, l'import de stock, l'import de
+ventes, le démarrage. Chaque écriture relisait, décodait, resérialisait et hachait **toutes** les
+tables — historique, mouvements, ventes, archives — pour n'en écrire que deux ou trois lignes.
+Les routes de l'ouverture relisaient chacune en base la table que la voisine venait de lire (huit
+les commandes, trois les ventes, quatre les clients). La CI e2e : 723 tests, un ouvrier, 37 min
+sur une machine, et 31 exécutions devenues inutiles en 7 jours. L'image : une couche de 24,8 Mo
+qui recopiait `node_modules` et le code (`chown -R /app` placé après la copie) et 7,8 Mo de
+`design/` envoyés en production.
+
+**Déjà fait avant ce lot** (vérifié sur `5b52268`, lots du 24/09) : la lecture paresseuse (une
+requête ne lit que ses tables), la liste CRM sans `orderHistory` ni `ordersByDate`, les 12
+mouvements de stock (`limite`), `test/` et `agents/` hors de l'image.
+
+### Ce qui est posé
+
+- **Le catalogue une fois par écriture** (`b0040af`). `syncWorkflow` construit
+  `stockLookup(db.stock)` une fois et la passe à `enrichOrder` puis `analyzeOrderStock(order,
+  stock, lookup)`. Un appel isolé (un geste sur une commande) la construit encore lui-même
+  (paramètre par défaut). Rien ne touche au stock pendant l'enrichissement : la table vaut pour
+  toutes les commandes (doublons : le dernier l'emporte, comme avant).
+- **Le recalcul une fois** (`b0040af`). Les quatre `syncWorkflow` d'avant `writeDb` sont retirés.
+  Entre les deux, rien ne lit ce qu'il calcule : les comptes des messages d'import sont faits
+  avant ; le journal de récupération du démarrage ajoute une ligne ; le rognage des traces
+  arrondit lui-même la position.
+- **Une écriture n'écrit que ce qu'elle a lu** (`7a1adaa`). L'objet de la lecture paresseuse
+  porte `ETAT_DE_LECTURE` (un symbole non énumérable : invisible pour `{ ...db }`,
+  `JSON.stringify`, `Object.keys` — une copie par étalement n'en a pas, elle s'écrit donc en
+  entier, comme avant). `normalizeDb` ne normalise que les tables lues ; `persistDatabase` saute
+  une table dont aucune source n'a été lue — on n'y accède que par ses accesseurs, elle n'a pas pu
+  changer — et garde son état connu, **sans aucune suppression**. `addHistory` et
+  `recordStockMovement` passent par `ajouterEnTete` (`AJOUT_EN_TETE`) : la ligne attend, seule
+  écrite, au rang que `planSortOrders` lui donnerait (juste avant la première) ; lue ensuite dans
+  la même requête, la table l'a en tête, comme par `unshift`. Réservé à `historique` et
+  `stockMovements` (seules sources de leur table), à une ligne qui a un `id` ; sinon, ou si les
+  rangs en base ne sont pas distincts, la table est lue comme avant. **La première écriture après
+  l'ouverture lit et récrit tout** : une base écrite par une version d'avant, ou restaurée (la
+  restauration rouvre un magasin neuf), sort normalisée par le code d'aujourd'hui. `relances`,
+  `deliverySectors` et `settings` sont toujours écrites : leur normalisation pose des défauts à
+  la lecture.
+- **La liste des clients et celle des rappels indexent leurs tables une fois** (`6b85064`).
+  `indexCrmParClient` : commandes, rappels et abonnés actifs par client, construits une fois pour
+  `GET /api/crm/clients` (avant : O(clients × commandes), la route la plus lente de l'ouverture) ;
+  même tri, stable, dans l'ordre de la table. La fiche seule garde le calcul direct.
+  `getReminderViews` : client et commande de chaque rappel par index, le premier trouvé comme
+  `find`.
+- **La vague de l'ouverture lit chaque table une fois en base** (`5d5c114`). `readPayloads` garde
+  le **texte** des lignes, par table, tant que la base n'a pas changé : génération avancée à
+  chaque COMMIT (et ROLLBACK) de ce magasin (`persistDatabase`, `migrateTraces`), `PRAGMA
+  data_version` pour les autres connexions. Chaque lecture décode ce texte à neuf : chaque requête
+  a ses objets. La mémoire s'oublie 5 s après la dernière lecture en base.
+  **Invariant à tenir** : une écriture future, par la connexion du magasin, sur une table que
+  `readPayloads` lit, hors `persistDatabase` et `migrateTraces`, doit appeler
+  `oublierLectures(database)` — sinon les lectures suivantes rendent l'état d'avant jusqu'au
+  prochain COMMIT ou 5 s de calme. Aujourd'hui il n'y en a aucune : les écritures directes du
+  magasin portent sur `utilisateurs`, `geocodages` et `gestes_recus`, que `readPayloads` ne lit
+  pas (grep du 26/09).
+- **La CI en quatre lots** (`4b23e16`). Matrice `e2e-lots` : `npm run test:e2e --
+  --shard=<lot>/4`, un ouvrier par machine comme avant (même charge, même garantie contre
+  l'instabilité née de la charge), `fail-fast: false`, un rapport par lot. Le verdict `e2e` garde
+  le nom **« Tests e2e (Playwright) »** (une protection de branche qui l'exige exige les quatre
+  lots), `needs: e2e-lots`, `if: ${{ !cancelled() }}` (rouge, pas « sauté », quand un lot échoue),
+  vert seulement si `needs.e2e-lots.result == success`. `concurrency` : un groupe par PR, annulé
+  par une nouvelle poussée ; hors PR un groupe **par exécution** (`run_id`) — `main` n'est jamais
+  mis en file ni annulé, chaque commit garde son verdict.
+- **L'image** (`87fb5c8`, `46ef07d`). Les dossiers de runtime sont créés et donnés à `node`
+  **avant** les copies ; `USER node` avant `npm ci` ; `COPY --chown=node:node`. Mêmes
+  propriétaires qu'avant, sans la couche qui recopiait tout. `.dockerignore` : `design/`, `docs/`,
+  la documentation de la racine, `playwright.config.js`, les fichiers de release-please,
+  `.claude/`, et ce que laissent les bancs e2e (`test-results/` — traces et captures de données
+  semées —, `playwright-report/`, `pw-*.config.js`). Le serveur ne lit du dépôt que `server.js`,
+  `lib/`, `storage/`, `public/`, `package.json` et un éventuel `VERSION` (grep) ; `scripts/`
+  reste (`npm run migrate:sqlite`).
+
+### Mesures avant / après
+
+Avant = `5b52268` ; après = `5d5c114` (code serveur identique au dernier commit du lot). Jeu de
+forme production (`jeu-production.js`) multiplié : même catalogue de 218 produits, N fois les
+clients, commandes, tournées, ventes, historique, mouvements et archives (×50 : 11 200
+commandes, 51 800 lignes d'historique, base de 124 Mo). Chaque mesure sur une copie de la base,
+après une écriture d'échauffement ; deux tours alternés avant / après, médiane de toutes les
+valeurs (7 écritures et 3 imports par tour, ×50 : 3 et 1). Millisecondes, même machine, 25/09
+00:18–00:29.
+
+| Mesure | ×1 avant → après | ×10 | ×50 |
+|---|---|---|---|
+| Écriture sans changement (`readDb` + `writeDb`) | 130 → **17** | 1 146 → **208** | 6 241 → **987** |
+| Ajustement de stock (`PATCH /api/stock/:id`) | 194 → **29** | 1 925 → **158** | 10 774 → **1 258** |
+| Note CRM (`PATCH /api/crm/clients/:id`) | 133 → **44** | 1 050 → **275** | 6 234 → **1 385** |
+| Import de ventes, 429 lignes | 477 → **253** | 2 248 → **661** | 11 274 → **2 464** |
+| Import de stock, 218 lignes | 348 → **110** | 2 212 → **548** | 14 012 → **3 941** |
+| Mise en cohérence du démarrage | 195 → **83** | 1 590 → **559** | 10 852 → **2 895** |
+| Démarrage, jusqu'au premier `/healthz` 200 | 852 → **652** | 1 805 → **1 066** | 11 805 → **3 631** |
+| Rafale des 18 routes de l'ouverture | 160 → **100** | 975 → **640** | 6 517 → **2 724** |
+| Boucle bloquée pendant la rafale (max) | 106 → **66** | 887 → **559** | 6 229 → **2 489** |
+| `GET /api/orders` en 304 | 7 → 6 | 57 → **42** | 277 → **131** |
+
+Remesuré le 26/09 à ×10 (même méthode, machine chargée par d'autres bancs : temps absolus ~1,4 ×
+plus hauts) : écriture 1 599 → 280, ajustement de stock 2 376 → 274, note CRM 1 557 → 351, import
+de ventes 3 176 → 908, import de stock 3 562 → 912, démarrage 3 646 → 1 491, rafale 1 175 → 822,
+304 68 → 42 — mêmes rapports. Des temps : un ordre de grandeur, pas une promesse au pour cent.
+
+### Résultat identique à l'octet près
+
+Banc A/B, hors dépôt (il lui faut deux arbres de code) : chaque arbre joue le **même scénario**
+sur une **copie de la même base**, horloge figée et identifiants tirés d'un compteur — lecture
+des 23 routes de l'ouverture et des écrans, puis commande terrain, préparation, tournée, départ,
+« Livré », ajustement de stock, seuil, note CRM, relance, import de ventes de 429 lignes, import
+de stock, chaque geste suivi de la relecture des 23 routes : **311 réponses d'API**, puis le
+contenu entier de la base (toutes les tables, toutes les colonnes). Arbre `5b52268` contre le
+lot, rejoué le 26/09 sur `4f28c94` :
+
+| Base de départ | Réponses | Lignes en base | Résultat |
+|---|---|---|---|
+| Forme production ×1 | 311 | 3 515 | **identiques** (empreinte `b9a5a7e77bfbc4ba`) |
+| ×10 | 311 | 29 030 | **identiques** (`340a6f5fdb521941`) |
+| ×50 (empreintes par corps et par ligne) | 311 | 142 430 | **identiques** (`545572666e662b6f`) |
+| Écrite par v1.45.1 (construite puis « vieillie » par le même scénario joué par v1.45.1) | 311 | 3 569 | **identiques** (`9ef8fd3d9eff056d`) |
+
+Aucune ligne ne disparaît dans un arbre sans disparaître dans l'autre, table par table. Les
+ventes remplacées par l'import de ventes le sont **dans les deux arbres** : c'est le comportement
+d'avant (l'import de ventes remplace sa table), hors de ce lot. **Contre-témoin** : le lot muté
+pour perdre les lignes ajoutées en tête sans lecture (mutant W6 ci-dessous) donne **26 écarts**
+au même banc (12 lignes d'historique et 1 mouvement manquants, les réponses de
+`/api/historique` qui diffèrent) : l'égalité n'est pas celle d'un instrument aveugle.
+
+### CI : la durée attendue
+
+Lue dans une exécution réelle non coupée (run `36062309134`, 24/09, 723 tests, 36,9 min de tests,
+40 s de mise en place) : le reporter `github` écrit un caractère par test terminé sur des lignes
+horodatées, et un lot `--shard=i/4` est une tranche contiguë de la liste (`fullyParallel`). Lots
+de 209, 158, 183 et 173 tests (l'union des quatre `--list --shard=i/4` est la liste entière,
+723/723, aucun doublon — remesuré le 26/09) : **lot 1 entre 9,7 et 12,9 min**, lot 2 entre 7,2 et
+12,5, lot 3 entre 5,3 et 8,1, lot 4 entre 8,1 et 9,4 (dont le réessai d'un test instable) — les
+frontières ne sont horodatées qu'à ±3 min. Le verdict arrive donc en **~11 à 14 min au lieu de
+37,5**. Chaque lot refait la mise en place (~40 s de plus par lot et par exécution) ; le dépôt
+est public, les minutes ne sont pas facturées.
+
+### L'image, mesurée
+
+Construite avec le builder legacy (`DOCKER_BUILDKIT=0`, Docker 29.7.2) : avant `5b52268`, après
+`4f28c94` (image `1b3489f61f5d`, identique à celle construite le 25/09 — tout en cache).
+
+| | Avant | Après |
+|---|---|---|
+| Couche `mkdir … && chown -R node:node /app` | 25,2 Mo | 28,7 ko |
+| Couche du code (`COPY . .`) | 11 Mo | 2,45 Mo |
+| `/app` dans l'image | 25 Mo (dont `design/`, `docs/`, CHANGELOG…) | 16 Mo |
+| Image | 466 Mo | **424 Mo** |
+| Contexte envoyé au démon | 10,8 Mo | 2,4 Mo |
+
+Conteneur lancé (26/09) : `/healthz` 200 en 2 s, la base créée par `node` dans `/app/data` ;
+`/app`, `server.js`, `node_modules` et `data/backups` à `node:node`.
+
+### Bancs et preuves rouges
+
+- `test/rapidite-serveur.test.js` (18) : synchronisations comptées par chemin ; normalisations de
+  texte pendant une écriture ; tables relues par une écriture et par un geste (SQL compté) ; ligne
+  en tête puis table lue ; première écriture après réouverture ; éléments parcourus par `filter`
+  (liste des clients) et appels à `find` (rappels) ; relectures en base pendant la vague ;
+  témoins (la liste égale la fiche, l'analyse écrite égale l'appel isolé, écriture d'une autre
+  connexion vue, objets propres à chaque lecture) ; **120 pas au hasard** comparés après chaque
+  pas à une base réécrite d'un coup depuis un modèle.
+- `test/ci-lots.test.js` (3), `test/dockerfile-couches.test.js` (2), `test/dockerignore.test.js`
+  (le design, la documentation et les restes des bancs e2e exclus ; témoin : ce que le serveur lit
+  reste).
+- **Preuves rouges, rejouées le 26/09** (28 mutations : le correctif retiré, l'instrument gardé ;
+  restauration par copie, empreinte vérifiée ; chaque rouge est une assertion du banc attendu,
+  aucun plantage) : catalogue par commande (99 993 normalisations pour 225 commandes et 218
+  produits) ; `syncWorkflow` rajouté dans chacun des quatre chemins (« 2 synchronisations ») ;
+  écriture complète (`persistDatabase` ou `normalizeDb` qui lisent tout : « a relu abonnements,
+  mouvements_stock, ventes, historique, imports_archives ») ; historique par `unshift` ; première
+  écriture qui ne récrit pas ; **quatre mutants qui perdent ou déplacent des lignes** (ajouts en
+  queue, ajouts ignorés, rang décalé, ajouts non écrits) pris par les 120 pas ; index CRM ignoré
+  (23 487 éléments parcourus) ou tri inversé ; `find` des rappels (44 appels pour 22 rappels) ;
+  mémoire jamais servie, jamais oubliée au COMMIT, sans `data_version`, objets partagés ;
+  `ci.yml` d'avant (3 rouges), `if: always()`, un lot retiré, groupe par branche ; Dockerfile
+  d'avant ; `.dockerignore` d'avant et celui de `87fb5c8` (sans les restes des bancs e2e).
+- e2e (26/09, `4f28c94`, configuration locale sur 3628/3629, deux ouvriers) : les bancs des
+  écrans voisins et des garanties — `chargement-instantane`, `clients`, `commandes`,
+  `donnees-utiles`, `historique-lent`, `hors-ligne`, `integration-lots-1-5`,
+  `livreur-ne-perd-rien`, `numerotation-admin` (serveur authentifié par
+  `SEREO_E2E_AUTH_URL`), `operations`, `parametres`, `parcours-simplifies`, `performance`,
+  `pieges-import-validation`, `poids-reseau`, `rapidite-tournee`, `rendu-a-l-affichage`,
+  `sauvegardes`, `smoke`, `stock` — **240/240** ; le **lot 4/4 seul, sur une base neuve**
+  (comme une machine de la CI) : **173/173** (124, puis les 49 de `telephone-utilisable`
+  rejoués : son serveur semé n'avait pas démarré, le port 3524 était pris par un autre
+  processus pendant que d'autres lots jouaient leurs bancs, et le garde de `serveur-seme.js`
+  a refusé — un refus, pas un rouge du code).
+  `npm test` **793/793**.
+
+### Ce qui reste
+
+- **Les lots 1 à 3 n'ont pas été joués seuls** en local (consigne : pas de suite complète). Le
+  lot 1 est le début de la suite, comme une exécution non coupée ; le lot 4, la fin, joué seul
+  sur base neuve, passe. Le premier passage de la CI sur la PR montrera les quatre.
+- **Protection de branche** (à poser par l'intégrateur) : exiger « Tests e2e (Playwright) », le
+  verdict ; les lots s'appellent « Tests e2e (lot i/4) » et changeraient de nom avec leur nombre.
+- Le **premier** enregistrement après chaque démarrage lit et récrit tout, comme avant : c'est
+  voulu (base d'une version d'avant, ou restaurée) ; il est compris dans « démarrage ».
+- L'**import de ventes remplace** la table des ventes, avant comme après (banc A/B) : le lot
+  « données clients » traite les imports ; rien n'y change ici.
+- L'invariant de la lecture mémorisée (ci-dessus) : toute écriture directe future sur une table
+  lue par `readPayloads` doit oublier la mémoire.
+- À cinquante fois la base, un import de stock prend encore ~4 s et le démarrage ~3,6 s. Non
+  profilé ici ; candidat : `syncWorkflow` lui-même, qui renormalise toutes les commandes à
+  chaque écriture (non touché par ce lot).
