@@ -192,11 +192,11 @@ test("appareil connu : le cookie vaut pour SON compte seulement, et altéré il 
   assert.ok((await connexion("julie", "tournee-du-matin-2026", nouvelleAdresse(), poste.appareil)).cookie);
 });
 
-test("appareil connu : un vieux mot de passe qu'il rejoue (Basic ou formulaire) ne bloque pas le compte pour les autres", async () => {
+test("appareil connu : un vieux mot de passe qu'il rejoue (Basic, puis formulaire) ne bloque pas le compte pour les autres", async () => {
   _resetAuthRateLimitForTest();
   const navigateur = await connexion("admin-env", "mot-de-passe-environnement");
   assert.ok(navigateur.appareil);
-  // Le navigateur rejoue un ancien mot de passe, 25 fois (Basic), puis 5 au formulaire.
+  // Le navigateur rejoue un ancien mot de passe, 25 fois en Basic.
   for (let i = 0; i < 25; i++) {
     const r = await fetch(`${baseUrl}/api/me`, {
       headers: {
@@ -209,10 +209,16 @@ test("appareil connu : un vieux mot de passe qu'il rejoue (Basic ou formulaire) 
     await r.arrayBuffer();
     assert.equal(r.status, 401, `essai ${i + 1} : ${r.status}`);
   }
-  for (let i = 0; i < 5; i++) await connexion("admin-env", "ancien-mot-de-passe", nouvelleAdresse(), navigateur.appareil);
   // Un autre appareil, jamais connecte, entre avec le bon mot de passe.
   const autre = await connexion("admin-env", "mot-de-passe-environnement");
-  assert.ok(autre.cookie, `les echecs d'un appareil connu ont bloque le compte pour tous (${autre.location})`);
+  assert.ok(autre.cookie, `les echecs Basic d'un appareil connu ont bloque le compte pour tous (${autre.location})`);
+  // Au formulaire, 20 fois : chaque essai reste un simple echec.
+  for (let i = 0; i < 20; i++) {
+    const essai = await connexion("admin-env", "ancien-mot-de-passe", nouvelleAdresse(), navigateur.appareil);
+    assert.match(essai.location, /error=1/, `essai ${i + 1} au formulaire : ${essai.location}`);
+  }
+  const encore = await connexion("admin-env", "mot-de-passe-environnement");
+  assert.ok(encore.cookie, `les echecs au formulaire d'un appareil connu ont bloque le compte pour tous (${encore.location})`);
 });
 
 test("appareil connu : en Basic aussi, il passe pendant une attaque sur son compte", async () => {
