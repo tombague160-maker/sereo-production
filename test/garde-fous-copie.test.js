@@ -42,10 +42,18 @@ after(async () => {
 const empreinte = chemin => crypto.createHash("sha256").update(fs.readFileSync(chemin)).digest("hex");
 const liste = dossier => (fs.existsSync(dossier) ? fs.readdirSync(dossier).sort() : []);
 
-function vider(dossier) {
+// Le fichier temoin que Thomas pose sur l'autre disque (relecture du 26/09) :
+// sans lui, rien n'est copie (un disque demonte laisse un dossier vide).
+const TEMOIN = "sereo-second-dossier";
+
+function vider(dossier, { temoin = dossier === SECOND } = {}) {
   fs.rmSync(dossier, { recursive: true, force: true });
   fs.mkdirSync(dossier, { recursive: true });
+  if (temoin) fs.writeFileSync(path.join(dossier, TEMOIN), "");
 }
+
+// Les sauvegardes d'un dossier, sans le temoin.
+const sauvegardes = dossier => liste(dossier).filter(nom => nom !== TEMOIN);
 
 async function etat() {
   const { once } = require("node:events");
@@ -65,6 +73,37 @@ function saisie() {
   writeDb(db, { backup: false });
 }
 
+// Relecture adverse du 26/09 : apres un redemarrage, un disque qui n'est pas
+// revenu laisse un dossier vide. Le vrai demarrage le dit avant toute sauvegarde
+// (une sauvegarde n'arrive qu'apres une ecriture).
+test("au démarrage, un second dossier sans témoin se dit tout de suite, sans attendre une sauvegarde", async () => {
+  vider(PREMIER);
+  vider(SECOND, { temoin: false });
+  const { mock } = require("node:test");
+  const { once } = require("node:events");
+  const warn = mock.method(console, "warn", () => {});
+  const log = mock.method(console, "log", () => {});
+  let serveur;
+  try {
+    serveur = S.startServer(0, "127.0.0.1");
+    await once(serveur, "listening");
+    const url = `http://127.0.0.1:${serveur.address().port}/api/storage/status`;
+    let s = null;
+    for (let i = 0; i < 40; i++) {
+      s = (await (await fetch(url)).json()).sauvegardes;
+      if (s.alerte?.type === "copie") break;
+      await new Promise(r => setTimeout(r, 50));
+    }
+    assert.equal(s.alerte?.type, "copie", `au demarrage, rien ne dit que le second dossier n'est pas le bon : ${JSON.stringify(s.alerte)}`);
+    assert.match(s.alerte.message, /témoin/);
+    assert.ok(warn.mock.calls.some(c => /second dossier/.test(c.arguments.join(" "))), "le journal du demarrage ne le dit pas");
+  } finally {
+    warn.mock.restore();
+    log.mock.restore();
+    if (serveur) await new Promise(r => serveur.close(r));
+  }
+});
+
 test("chaque sauvegarde est aussi copiée dans le second dossier : mêmes octets, même date", async () => {
   vider(PREMIER);
   vider(SECOND);
@@ -72,7 +111,7 @@ test("chaque sauvegarde est aussi copiée dans le second dossier : mêmes octets
   const chemin = await S._sauvegarderPourTest("");
   assert.ok(chemin, "prealable : aucune sauvegarde");
   const nom = path.basename(chemin);
-  assert.deepEqual(liste(SECOND), [nom], "la sauvegarde n'est pas dans le second dossier");
+  assert.deepEqual(sauvegardes(SECOND), [nom], "la sauvegarde n'est pas dans le second dossier");
   assert.equal(empreinte(path.join(SECOND, nom)), empreinte(chemin), "la copie n'a pas les memes octets");
   assert.equal(Math.floor(fs.statSync(path.join(SECOND, nom)).mtimeMs / 1000), Math.floor(fs.statSync(chemin).mtimeMs / 1000), "la copie n'a pas la date de l'originale");
   const s = await etat();
@@ -97,7 +136,7 @@ test("le second dossier suit la même rétention que le premier", async () => {
   saisie();
   await S._sauvegarderPourTest("");
   assert.ok(liste(PREMIER).length < 46, "prealable : la rotation n'a rien supprime dans le premier dossier");
-  assert.deepEqual(liste(SECOND), liste(PREMIER), "le second dossier ne garde pas les memes sauvegardes");
+  assert.deepEqual(sauvegardes(SECOND), liste(PREMIER), "le second dossier ne garde pas les memes sauvegardes");
 });
 
 test("une copie qui échoue ne fait pas échouer la sauvegarde, et se dit", async () => {
@@ -117,9 +156,38 @@ test("une copie qui échoue ne fait pas échouer la sauvegarde, et se dit", asyn
     fs.rmSync(SECOND, { force: true });
   }
   // Le dossier revenu, la copie suivante reussit et l'alerte part.
-  fs.mkdirSync(SECOND, { recursive: true });
+  vider(SECOND);
   saisie();
   await S._sauvegarderPourTest("");
+  assert.equal((await etat()).alerte, null);
+});
+
+// Relecture adverse du 26/09 : le disque demonte, Docker lie (ou cree) un
+// dossier VIDE du disque systeme a la place du montage. Avant, la copie y
+// atterrissait sans bruit (le dossier etait meme recree s'il manquait) et la
+// carte disait « dans le second dossier ».
+test("disque démonté : un second dossier sans témoin ne reçoit rien, n'est pas créé, et la carte le dit", async () => {
+  vider(PREMIER);
+  vider(SECOND, { temoin: false });
+  saisie();
+  const chemin = await S._sauvegarderPourTest("");
+  assert.ok(chemin && fs.existsSync(chemin), "la sauvegarde elle-meme a echoue");
+  assert.deepEqual(liste(SECOND), [], "une copie a atterri dans le dossier vide d'un disque demonte");
+  const s = await etat();
+  assert.equal(s.alerte?.type, "copie", `alerte : ${JSON.stringify(s.alerte)}`);
+  assert.match(s.alerte.message, /témoin/);
+  assert.notEqual(s.copie?.derniere?.nom, path.basename(chemin), "la carte donne pour copiee une sauvegarde qui ne l'est pas");
+  // Le dossier absent : il n'est pas cree (il le serait sur le disque systeme).
+  fs.rmSync(SECOND, { recursive: true, force: true });
+  saisie();
+  await S._sauvegarderPourTest("");
+  assert.equal(fs.existsSync(SECOND), false, "le second dossier absent a ete cree");
+  assert.equal((await etat()).alerte?.type, "copie");
+  // Temoin : le disque revenu (son temoin avec lui), la copie reprend et l'alerte part.
+  vider(SECOND);
+  saisie();
+  const suivante = await S._sauvegarderPourTest("");
+  assert.deepEqual(sauvegardes(SECOND), [path.basename(suivante)]);
   assert.equal((await etat()).alerte, null);
 });
 
@@ -138,7 +206,7 @@ test("une copie abîmée en route n'est pas gardée : la relecture la refuse, et
     saisie();
     const chemin = await S._sauvegarderPourTest("");
     assert.ok(chemin && fs.existsSync(chemin), "la sauvegarde elle-meme a echoue");
-    assert.deepEqual(liste(SECOND), [], "une copie abimee est gardee dans le second dossier");
+    assert.deepEqual(sauvegardes(SECOND), [], "une copie abimee est gardee dans le second dossier");
     const s = await etat();
     assert.equal(s.alerte?.type, "copie");
     assert.match(s.alerte.message, /empreinte/);

@@ -166,8 +166,19 @@ gardee selon la meme regle. Exemple de montage dans le compose :
       SEREO_BACKUP_COPY_DIR: /sauvegardes-copie
 ```
 
-Variable absente : rien ne change. Une copie qui echoue (disque demonte, plein) ne fait pas
-echouer la sauvegarde ; la carte « Sauvegardes » l'affiche en alerte jusqu'a la prochaine
+**Une fois, sur l'autre disque, poser le fichier temoin** (vide) a la racine de ce dossier :
+
+```sh
+touch /srv/dev-disk-by-uuid-YYYY/sereo-sauvegardes/sereo-second-dossier
+```
+
+C'est a lui que Sereo reconnait le bon disque. Si le disque n'est pas monte (panne, redemarrage
+sans montage), Docker lie a sa place un dossier vide du disque systeme : le temoin y manque,
+rien n'y est copie, et la carte « Sauvegardes » le dit des le demarrage. Sereo ne cree jamais
+ce dossier lui-meme.
+
+Variable absente : rien ne change. Une copie qui echoue (temoin absent, disque plein) ne fait
+pas echouer la sauvegarde ; la carte « Sauvegardes » l'affiche en alerte jusqu'a la prochaine
 copie reussie. Ce dossier ne doit contenir que les sauvegardes de Sereo : les fichiers
 `db-*.sqlite.gz` y suivent la rotation.
 

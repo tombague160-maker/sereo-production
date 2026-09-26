@@ -3664,17 +3664,38 @@ function empreinteDuFichier(chemin) {
   });
 }
 
-// Copie une sauvegarde deja relue dans le second dossier : fichier provisoire,
-// relecture (meme empreinte sha256 que l'originale), meme date, renommage ;
-// puis la meme retention que le premier dossier. N'echoue jamais : la
-// sauvegarde est faite, seule la copie manque -- et l'alerte « copie » le dit.
+// Relecture adverse du 26/09 : un disque demonte ne se voyait pas. Docker lie
+// alors un dossier VIDE du disque systeme a la place du montage (ou le cree),
+// et cette fonction recreait le dossier au besoin : les copies y atterrissaient
+// sans bruit, « dans le second dossier » a l'ecran. Comparer les disques ne
+// suffit pas : la base est souvent sur un disque de donnees, le repli sur le
+// disque systeme -- deux numeros differents, rien a signaler. Le second
+// dossier porte donc un fichier TEMOIN, pose une fois par Thomas sur l'autre
+// disque (DEPLOYMENT.md) : disque demonte, temoin absent, rien n'est copie et
+// la carte le dit. Le dossier n'est plus jamais cree ici.
+const TEMOIN_SECOND_DOSSIER = "sereo-second-dossier";
+
+// Asynchrone expres : un partage reseau bloque ne gele pas le serveur.
+async function verifierTemoinSecondDossier() {
+  try {
+    await fs.promises.access(path.join(BACKUP_COPY_DIR, TEMOIN_SECOND_DOSSIER));
+  } catch {
+    throw new Error(`le fichier témoin « ${TEMOIN_SECOND_DOSSIER} » manque dans le second dossier (disque démonté ?) : rien n'y est copié. Si c'est bien l'autre disque, crée ce fichier vide (DEPLOYMENT.md, « Sauvegardes »)`);
+  }
+}
+
+// Copie une sauvegarde deja relue dans le second dossier : temoin present,
+// fichier provisoire, relecture (meme empreinte sha256 que l'originale), meme
+// date, renommage ; puis la meme retention que le premier dossier. N'echoue
+// jamais : la sauvegarde est faite, seule la copie manque -- et l'alerte
+// « copie » le dit.
 async function copierVersSecondDossier(chemin, sha256) {
   if (!BACKUP_COPY_DIR) return null;
   const nom = path.basename(chemin);
   const cible = path.join(BACKUP_COPY_DIR, nom);
   const provisoire = `${cible}.tmp`;
   try {
-    await fs.promises.mkdir(BACKUP_COPY_DIR, { recursive: true });
+    await verifierTemoinSecondDossier();
     await fs.promises.copyFile(chemin, provisoire);
     const relue = await empreinteDuFichier(provisoire);
     if (relue !== sha256) {
@@ -10723,7 +10744,15 @@ function startServer(port = PORT, host = HOST) {
   healDatabaseAtBoot();
   avertirMotDePasseCourt();
   nettoyerSauvegardesInterrompues();
-  if (BACKUP_COPY_DIR) nettoyerSauvegardesInterrompues(BACKUP_COPY_DIR);
+  if (BACKUP_COPY_DIR) {
+    nettoyerSauvegardesInterrompues(BACKUP_COPY_DIR);
+    // Relecture du 26/09 : un disque qui n'est pas revenu apres un redemarrage
+    // se dit des l'ouverture de la carte, pas a la premiere sauvegarde.
+    verifierTemoinSecondDossier().catch(error => {
+      if (!derniereCopie) derniereErreurCopie = { at: new Date().toISOString(), message: String(error.message || error) };
+      console.warn(`[storage] second dossier : ${error.message || error}`);
+    });
+  }
   planifierPurgeDesTournees();
   const serveur = app.listen(port, host, () => {
     console.log(`Sereo lance sur http://${host}:${port}`);
