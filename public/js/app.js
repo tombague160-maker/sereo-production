@@ -203,7 +203,7 @@ document.addEventListener("DOMContentLoaded", () => {
   updateMetaThemeColor();
   watchSystemColorScheme();
   bindUi();
-  initOperations({apiFetch, loadData, notify, recalculateRoute, formatSectorLabel});
+  initOperations({apiFetch, loadData, notify, recalculateRoute, formatSectorLabel, nouvelleCleDeGeste});
   initAdresses({ apiFetch, loadData, notify, getCurrentTarget: () => getCurrentDeliveryTarget() });
   initTourneePratique();
   bindVersionModal();
@@ -1855,7 +1855,8 @@ function noterEcriture() {
 async function viderCacheDeDonnees() {
   // Le brouillon de commande (25/09) n'est PAS un cache : comme la file, il
   // reste a la fin de session (reconnexion dans le meme onglet, la saisie
-  // revient). Il part a la deconnexion volontaire (formDeconnexion).
+  // revient) -- au MEME compte seulement (reprendreBrouillonCommande, 26/09).
+  // Il part a la deconnexion volontaire (formDeconnexion).
   try {
     if (typeof caches === "undefined") return;
     const noms = (await caches.keys()).filter(nom => nom.startsWith(PREFIXE_CACHE_DONNEES));
@@ -4981,7 +4982,9 @@ function viderCommandeClient(form) {
 // rien. Le brouillon (champs, client choisi, panier, cle d'envoi) est garde
 // dans sessionStorage a chaque saisie, et rendu a l'ouverture de la commande
 // client si l'ecran est vide. Il part avec la commande (creee ou mise en
-// file), a la deconnexion et a la fin de session. sessionStorage : l'onglet
+// file, y compris par une fin de session : apiFetch, `gardeeEnFile`) et a la
+// deconnexion ; a la fin de session, il ne revient qu'au meme compte (relecture
+// adverse du 26/09). sessionStorage : l'onglet
 // seulement, jamais un autre appareil ni une autre session de navigation ;
 // sans stockage (navigation privee stricte), rien n'est garde, comme avant.
 const CLE_BROUILLON_COMMANDE = "sereo-brouillon-commande";
@@ -4996,6 +4999,8 @@ function garderBrouillonCommande() {
   try {
     if (vide) sessionStorage.removeItem(CLE_BROUILLON_COMMANDE);
     else sessionStorage.setItem(CLE_BROUILLON_COMMANDE, JSON.stringify({
+      // Le compte qui saisit : le brouillon ne revient qu'a lui (reprendreBrouillonCommande).
+      compte: String(moi?.identifiant || ""),
       champs, lignes, cleEnvoi: form.dataset.cleEnvoi || "", saisieEnvoyee: form.dataset.saisieEnvoyee || "",
       // Ce que la fiche du client choisi avait mis dans les champs : seul ce que
       // la saisie y a change repartira sur la fiche (reporterCoordonneesSurLaFiche).
@@ -5008,9 +5013,17 @@ function oublierBrouillonCommande() {
   try { sessionStorage.removeItem(CLE_BROUILLON_COMMANDE); } catch { /* rien a oublier */ }
 }
 
+// La reprise attend de savoir qui est connecte (/api/me, loadMoi).
+let repriseBrouillonEnAttente = false;
+
 /**
  * A l'ouverture de la commande client : l'ecran vide reprend le brouillon.
  * Un panier deja rempli (la meme page) n'est jamais remplace.
+ * Le brouillon d'un AUTRE compte ne se reprend pas (relecture adverse du
+ * 26/09) : sur un telephone partage, la session de A expire, B se connecte
+ * dans le meme onglet -- il retrouvait la saisie de A (coordonnees du client,
+ * panier, cle d'envoi). Il part. Tant que /api/me n'a pas repondu, on ne sait
+ * pas qui est la : la reprise attend (loadMoi).
  */
 function reprendreBrouillonCommande() {
   const form = document.getElementById("customerOrderForm");
@@ -5018,6 +5031,10 @@ function reprendreBrouillonCommande() {
   let brouillon = null;
   try { brouillon = JSON.parse(sessionStorage.getItem(CLE_BROUILLON_COMMANDE) || "null"); } catch { brouillon = null; }
   if (!brouillon || typeof brouillon !== "object") return;
+  if (typeof brouillon.compte === "string" && brouillon.compte) {
+    if (!moi) { repriseBrouillonEnAttente = true; return; }
+    if (String(moi.identifiant || "") !== brouillon.compte) { oublierBrouillonCommande(); return; }
+  }
   const lignes = Array.isArray(brouillon.lignes) ? brouillon.lignes.filter(l => l && l.productId !== undefined && Number(l.quantite) > 0) : [];
   const champs = brouillon.champs && typeof brouillon.champs === "object" ? brouillon.champs : {};
   for (const nom of CHAMPS_BROUILLON) {
@@ -5070,7 +5087,9 @@ async function submitCustomerOrder(form) {
       })
     });
   } catch (error) {
-    if (error?.enFile) {
+    // `gardeeEnFile` : la session a expire, la commande attend dans la file
+    // (apiFetch) ; son brouillon ne doit pas revenir apres la reconnexion.
+    if (error?.enFile || error?.gardeeEnFile) {
       // Hors ligne (chasse aux defauts, 25/09) : la commande attend dans la
       // file, avec sa cle -- c'est un envoi DIFFERE, pas un echec. Le
       // formulaire restait rempli et le bouton se rallumait : on revalidait,
@@ -5093,6 +5112,16 @@ async function submitCustomerOrder(form) {
   // correspond à ce filtre » juste apres l'avoir validee. On arrive
   // maintenant sur la liste qui la CONTIENT, la ligne mise en avant.
   const planifiee = data.orderType === "planifiee";
+  if (reponse?.rejoue) {
+    // La MEME saisie revalidee apres une issue inconnue (relecture adverse du
+    // 26/09) : le serveur rend « deja fait » (gesteIdempotent), avec le seul
+    // statut de la premiere reponse -- ni la commande, ni son numero, ni si
+    // elle est bloquee faute de stock. L'ecran annoncait « validée : elle est
+    // à préparer ». On dit ce qui est sur, et on montre la liste.
+    notify(`${planifiee ? "Cette commande planifiée" : "Cette commande"} avait déjà été reçue au premier envoi : elle n’a pas été créée une seconde fois. Son état est dans Commandes.${fiche}`, "info");
+    montrerCommandeCreee(null, planifiee ? "planifiees" : "toutes");
+    return;
+  }
   const creee = planifiee ? reponse?.order : reponse;
   const numero = creee?.numero ? ` ${creee.numero}` : "";
   if (!planifiee && reponse?.bloquee) {
@@ -8093,6 +8122,12 @@ async function loadMoi() {
     // laisse `moi` a null, et renderComptes n'affiche simplement rien.
     moi = null;
   }
+  // Le brouillon de commande attendait de savoir qui est connecte
+  // (reprendreBrouillonCommande) ; sans reponse, il reste en attente.
+  if (moi && repriseBrouillonEnAttente) {
+    repriseBrouillonEnAttente = false;
+    if (ongletAffiche === "commande-client") reprendreBrouillonCommande();
+  }
   renderCompteBarreLaterale();
   // Le titre « Bonjour <identifiant> » depend de /api/me : s'il repond apres
   // le premier rendu, le titre doit suivre.
@@ -10326,15 +10361,20 @@ async function apiFetch(url, options = {}) {
     const next = window.location.pathname + window.location.search + window.location.hash;
     // Le geste qui a rencontre la session expiree n'est pas perdu : il attend
     // dans la file, qui repartira apres la reconnexion (H2, lot 1 de l'audit).
-    if (ecriture && !options.sansFile) await tenterMiseEnFile(url, options);
+    const gardeeEnFile = Boolean(ecriture && !options.sansFile && await tenterMiseEnFile(url, options));
     // La session est finie : ses donnees ne doivent pas s'afficher a la
     // prochaine ouverture, avant que le serveur ait reconnu quelqu'un.
     // (Un 429 n'est pas une fin de session : on ne vide que sur 401.)
     // La FILE, elle, n'est pas un cache : elle reste.
     if (res.status === 401) await viderCacheDeDonnees();
     window.location.href = `/login?next=${encodeURIComponent(next)}`;
-    // On throw quand meme pour interrompre proprement le code appelant.
-    throw new Error("Session expiree, redirection vers /login");
+    // On throw quand meme pour interrompre proprement le code appelant. Il
+    // sait si son ecriture attend dans la file (relecture adverse du 26/09) :
+    // la commande client oublie alors son brouillon, qui revenait apres la
+    // reconnexion comme une saisie a terminer -- la retoucher creait une
+    // seconde commande. Pas `enFile` : chaque appelant en tire son chemin
+    // « hors ligne », qui n'a pas ete relu pour une fin de session.
+    throw Object.assign(new Error("Session expiree, redirection vers /login"), { gardeeEnFile });
   }
 
   // Le CORPS a son propre delai (relecture adverse du lot 1). Premier jet :

@@ -222,9 +222,11 @@ test("hors ligne, abonnement + NOUVELLE fiche : refus clair, rien en file ; en l
   expect(await compter(), "hors ligne, quelque chose est parti").toEqual(avant);
   // 4G sans debit : le telephone se croit en ligne, la requete echoue. Meme
   // refus, rien en file (la page met en file sans consulter navigator.onLine).
+  // La page ne sait pas si le serveur a recu : elle ne dit plus « Pas de
+  // réseau » (relecture du 26/09, banc 17).
   await page.route("**/api/crm/clients", route => route.abort("internetdisconnected"));
   await page.locator("#subSave").click();
-  await expect(page.locator("#subError")).toContainText("Pas de réseau");
+  await expect(page.locator("#subError")).toContainText("Pas de réponse du serveur");
   expect(await lireFile(page), "4G sans debit : une fiche seule est partie en file").toEqual([]);
   await page.unroute("**/api/crm/clients");
   // Temoin : en ligne, le meme geste cree la fiche ET l'abonnement.
@@ -663,6 +665,231 @@ test("Stock au téléphone : l'arrivée trie « À recommander » et la liste sa
   await expect(page.locator("#stkRecoListe .stk-reco-ligne"), "prealable : trois produits a recommander").toHaveCount(3);
   expect(await page.locator("#stockList .stk-ligne").count(), "prealable : la liste").toBeGreaterThan(2);
   expect(await page.evaluate(() => window.__comparaisons.n), "localeCompare pendant l'arrivee sur le Stock").toBe(0);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+// --- 15 a 18. Relecture adverse du 26/09 -------------------------------------
+
+/** Rouvre l'application sur `ecran` dans le MEME onglet (sessionStorage garde). */
+async function rouvrir(page, ecran) {
+  await page.goto(srv.base + "/healthz");
+  await page.goto(`${srv.base}/#${ecran}`);
+  await aJour(page);
+}
+
+// 15. Session expiree pendant « Valider » : la commande part en file (H2),
+// mais son brouillon revenait apres la reconnexion, presente comme une saisie
+// a terminer ; la moindre retouche changeait la saisie, donc la cle, et une
+// seconde commande partait.
+test("session expirée pendant « Valider » : la commande attend dans la file, son brouillon part ; après la reconnexion, UNE commande et un écran vide", async ({ browser }) => {
+  const { ctx, page, erreurs } = await ouvrir(browser, "journee");
+  const cles = [];
+  let refuser = true;
+  await page.route("**/api/customer-orders", async route => {
+    cles.push(route.request().headers()["x-sereo-geste"]);
+    if (refuser) {
+      refuser = false;
+      // Session expiree : le serveur refuse AVANT d'appliquer (requireAccessAuth
+      // passe avant gesteIdempotent, server.js).
+      await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ error: "Connexion requise" }) });
+      return;
+    }
+    await route.continue();
+  });
+  const avant = await nbCommandes();
+  await preparerCommande(page, "Essai Session Expiree");
+  // Le serveur seme n'a pas d'authentification : /login renvoie aussitot vers
+  // `next` -- la reconnexion, sans formulaire. On guette donc la REQUETE.
+  await Promise.all([
+    page.waitForRequest(r => new URL(r.url()).pathname === "/login", { timeout: 15000 }),
+    page.locator("#customerValider").click()
+  ]);
+  await rouvrir(page, "commande-client");
+  await expect.poll(async () => (await nbCommandes()) - avant, { timeout: 30000 }).toBe(1);
+  await expect.poll(() => lireFile(page), { timeout: 15000 }).toEqual([]);
+  expect(new Set(cles).size, "le renvoi de la file porte la cle du premier envoi").toBe(1);
+  await expect(page.locator("#commande-client")).toHaveClass(/active/);
+  const vus = await toasts(page);
+  await expect(page.locator("#customerCartCount"), `la commande deja partie revient comme une saisie a terminer (${vus.join(" / ")})`).toHaveText("0 produit");
+  await expect(page.locator(NOM)).toHaveValue("");
+  expect(vus.some(t => /reprise/.test(t)), vus.join(" / ")).toBe(false);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+// 16. Le brouillon d'un compte ne revient pas a un autre, sur le meme onglet
+// (telephone partage : fin de session, puis un autre se connecte).
+test("fin de session, puis un AUTRE compte sur le même onglet : le brouillon de commande ne lui revient pas ; le MÊME compte le retrouve (témoin)", async ({ browser }) => {
+  const { ctx, page, erreurs } = await ouvrir(browser, "journee");
+  await preparerCommande(page, "Saisie du compte A");
+  await expect(page.locator("#customerCartCount")).toHaveText("1 produit");
+  // Temoin : le meme compte (« dev », serveur sans authentification) la retrouve.
+  await rouvrir(page, "commande-client");
+  await expect(page.locator("#customerCartCount"), "temoin : le meme compte ne retrouve pas sa saisie").toHaveText("1 produit");
+  await expect(page.locator(NOM)).toHaveValue("Saisie du compte A");
+  // Un AUTRE compte ouvre l'application dans cet onglet.
+  await page.route("**/api/me", async route => {
+    const reponse = await route.fetch();
+    const moi = await reponse.json();
+    await route.fulfill({ response: reponse, json: { ...moi, identifiant: "compte-b" } });
+  });
+  await rouvrir(page, "commande-client");
+  await expect(page.locator("#sidebarIdentifiant"), "prealable : c'est bien un autre compte").toHaveText("compte-b");
+  await page.waitForTimeout(500);
+  await expect(page.locator("#customerCartCount"), "le compte B herite de la saisie du compte A").toHaveText("0 produit");
+  await expect(page.locator(NOM)).toHaveValue("");
+  expect(await page.evaluate(() => sessionStorage.getItem("sereo-brouillon-commande")), "le brouillon de A reste dans l'onglet").toBeNull();
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+// 17. Abonnement + nouvelle fiche, issue inconnue : le serveur a cree la fiche,
+// la reponse s'est perdue. L'ecran disait « Pas de reseau », et le nouvel
+// essai, sous une cle neuve, creait une seconde fiche (sans telephone ni code
+// postal, findDuplicateClient ne la reconnait pas).
+async function saisirNouvelleFiche(page, fiche) {
+  await ouvrirCreationAbonnement(page);
+  await page.locator('[data-op="sub-nouveau-client"]').click();
+  await page.fill("#subLastName", fiche.nom);
+  await page.fill("#subAddress", fiche.rue);
+  await page.fill("#subCity", fiche.ville);
+  await ajouterProduitAbonnement(page);
+}
+
+async function fichesEtAbonnements(nom) {
+  const fiches = (await lire("/api/crm/clients")).filter(c => c.nom === nom);
+  const abonnements = (await lire("/api/subscriptions")).items;
+  return { fiches: fiches.length, abonnements: abonnements.filter(a => fiches.some(f => String(f.id) === String(a.clientId))).length };
+}
+
+test("abonnement + nouvelle fiche, la réponse se perd (la fiche EST créée) : l'écran ne dit pas « Pas de réseau » ; réessayer ne crée pas de seconde fiche, l'abonnement va sur celle qui existe", async ({ browser }) => {
+  const FICHE = { nom: "Reponseperdue", rue: "2 rue de l'Essai", ville: "Besançon" };
+  const { ctx, page, erreurs } = await ouvrir(browser, "abonnements");
+  const cles = [];
+  let perdre = true;
+  await page.route("**/api/crm/clients", async route => {
+    if (route.request().method() !== "POST") return route.continue();
+    cles.push(route.request().headers()["x-sereo-geste"]);
+    if (perdre) {
+      perdre = false;
+      await route.fetch();
+      await route.abort("connectionreset");
+      return;
+    }
+    await route.continue();
+  });
+  await saisirNouvelleFiche(page, FICHE);
+  await page.locator("#subSave").click();
+  await expect(page.locator("#subError")).not.toHaveText("");
+  expect(await fichesEtAbonnements(FICHE.nom), "prealable : la fiche est creee, sans abonnement").toEqual({ fiches: 1, abonnements: 0 });
+  await expect(page.locator("#subError"), "le serveur a pu creer la fiche : « Pas de réseau » est faux").not.toContainText("Pas de réseau");
+  // Le geste naturel : reessayer.
+  await page.locator("#subSave").click();
+  await expect(page.locator("#subscriptionDialog")).toBeHidden();
+  expect(cles.length, "prealable : deux envois").toBe(2);
+  expect(cles[1], "le nouvel essai a tire une autre cle").toBe(cles[0]);
+  expect(await fichesEtAbonnements(FICHE.nom), "une seconde fiche, ou l'abonnement ailleurs").toEqual({ fiches: 1, abonnements: 1 });
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+test("abonnement + nouvelle fiche, en-têtes reçus mais corps coupé (la fiche EST créée) : l'abonnement va sur cette fiche, sans seconde fiche", async ({ browser }) => {
+  const FICHE = { nom: "Corpscoupe", rue: "3 rue de l'Essai", ville: "Besançon" };
+  const { ctx, page, erreurs } = await ouvrir(browser, "abonnements", {
+    avant: () => {
+      const vrai = window.fetch;
+      let coupe = false;
+      window.fetch = async (url, options = {}) => {
+        const reponse = await vrai(url, options);
+        if (!coupe && /\/api\/crm\/clients$/.test(String(url)) && String(options.method || "").toUpperCase() === "POST") {
+          coupe = true;
+          // Les en-tetes (201) sont arrives ; le corps casse en route.
+          return new Response(new ReadableStream({ start(c) { c.error(new TypeError("network error")); } }), { status: reponse.status, headers: reponse.headers });
+        }
+        return reponse;
+      };
+    }
+  });
+  await saisirNouvelleFiche(page, FICHE);
+  await page.locator("#subSave").click();
+  await expect.poll(async () => (await fichesEtAbonnements(FICHE.nom)).fiches, { timeout: 10000 }).toBe(1);
+  await page.waitForTimeout(1500);
+  // Le geste naturel si la fenetre est encore ouverte : reessayer.
+  if (await page.locator("#subscriptionDialog").isVisible()) await page.locator("#subSave").click();
+  await expect(page.locator("#subscriptionDialog")).toBeHidden();
+  expect(await fichesEtAbonnements(FICHE.nom), "une seconde fiche, ou l'abonnement ailleurs").toEqual({ fiches: 1, abonnements: 1 });
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+// La cle stable a un revers : un REFUS dont la reponse s'est perdue revient,
+// au nouvel essai, en « deja fait » ({ rejoue: true }, 409, sans message).
+test("abonnement + nouvelle fiche qui existe déjà, le refus (409) se perd : au nouvel essai, le refus rejoué nomme le doublon (pas « Erreur HTTP 409 »)", async ({ browser }) => {
+  const { ctx, page, erreurs } = await ouvrir(browser, "abonnements");
+  const statuts = [];
+  const rejoues = [];
+  let perdre = true;
+  await page.route("**/api/crm/clients", async route => {
+    if (route.request().method() !== "POST") return route.continue();
+    const reponse = await route.fetch();
+    statuts.push(reponse.status());
+    rejoues.push(reponse.headers()["x-sereo-geste-rejoue"] || "");
+    if (perdre) {
+      perdre = false;
+      await route.abort("connectionreset");
+      return;
+    }
+    await route.fulfill({ response: reponse });
+  });
+  // Meme nom et meme code postal qu'une fiche du jeu seme : findDuplicateClient refuse.
+  await saisirNouvelleFiche(page, { nom: "Clinique Vétérinaire du Doubs", rue: "1 place du Marché", ville: "Besançon" });
+  await page.fill("#subPostal", "25000");
+  await page.locator("#subSave").click();
+  await expect(page.locator("#subError")).toContainText("Pas de réponse du serveur");
+  await page.locator("#subSave").click();
+  await expect.poll(() => statuts.length, { timeout: 10000 }).toBe(2);
+  expect(statuts, "prealable : le serveur refuse le doublon").toEqual([409, 409]);
+  expect(rejoues[1], "prealable : le second refus est rejoue (meme cle)").toBe("1");
+  await expect(page.locator("#subError")).toContainText("Une fiche existe déjà");
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+// 18. Revalider apres une issue inconnue : le serveur rend « deja fait »
+// ({ rejoue: true }, sans la commande). L'ecran annoncait « validée : elle est
+// à préparer », sans numero -- meme pour une commande bloquee faute de stock.
+test("revalider après une issue inconnue : le rejeu ne promet pas « à préparer » ; l'écran dit que la commande avait déjà été reçue", async ({ browser }) => {
+  const { ctx, page, erreurs } = await ouvrir(browser, "journee", {
+    avant: () => { Object.defineProperty(window, "indexedDB", { get() { return undefined; }, configurable: true }); }
+  });
+  let premier = true;
+  const rejoues = [];
+  await page.route("**/api/customer-orders", async route => {
+    if (premier) {
+      premier = false;
+      await route.fetch();
+      await route.abort("connectionreset");
+      return;
+    }
+    const reponse = await route.fetch();
+    rejoues.push(reponse.headers()["x-sereo-geste-rejoue"] || "");
+    await route.fulfill({ response: reponse });
+  });
+  const avant = await nbCommandes();
+  await preparerCommande(page, "Essai Rejeu");
+  await page.locator("#customerValider").click();
+  await expect.poll(async () => (await nbCommandes()) - avant, { timeout: 10000 }).toBe(1);
+  await expect(page.locator("#customerValider")).toBeEnabled();
+  await page.evaluate(() => document.querySelectorAll("#toastRegion .toast").forEach(t => t.remove()));
+  await page.locator("#customerValider").click();
+  await expect.poll(() => rejoues.length, { timeout: 10000 }).toBe(1);
+  expect(rejoues[0], "prealable : le serveur a rendu « deja fait »").toBe("1");
+  await expect.poll(async () => (await toasts(page)).length, { timeout: 10000 }).toBeGreaterThan(0);
+  const vus = await toasts(page);
+  expect(vus.some(t => /à préparer/.test(t)), vus.join(" / ")).toBe(false);
+  expect(vus.some(t => /déjà été reçue/.test(t)), vus.join(" / ")).toBe(true);
+  expect((await nbCommandes()) - avant).toBe(1);
   expect(erreurs).toEqual([]);
   await ctx.close();
 });

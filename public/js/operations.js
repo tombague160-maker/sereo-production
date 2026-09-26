@@ -1244,6 +1244,48 @@ function openEditor(id) {
 }
 const ABONNEMENT_NOUVEAU_CLIENT_HORS_LIGNE =
   "Pas de réseau : la fiche d’un nouveau client et son abonnement se créent ensemble, en ligne. Réessaie quand le réseau revient, ou choisis un client existant.";
+// Pas de reponse (relecture adverse du 26/09) : un delai depasse, une
+// connexion coupee. Le serveur a pu creer la fiche -- « Pas de reseau » etait
+// faux, et le nouvel essai, sous une cle neuve, en creait une seconde.
+const ABONNEMENT_NOUVEAU_CLIENT_SANS_REPONSE =
+  "Pas de réponse du serveur (réseau absent ou trop lent) : la fiche a peut-être été créée. Réessaie sans rien changer : elle ne sera pas créée deux fois.";
+const FICHE_EXISTE_DEJA =
+  "Une fiche existe déjà pour ce client (même téléphone, ou même nom et code postal) : cherche-la dans « Chercher un client ».";
+
+/**
+ * UNE cle de geste par SAISIE de la fiche nouvelle (relecture adverse du
+ * 26/09), comme la commande client (cleDEnvoiDeLaSaisie, app.js). Chaque
+ * appui tirait une cle neuve : apres une issue inconnue, le serveur ne
+ * reconnaissait pas le nouvel essai et creait une seconde fiche. Tant que la
+ * fiche saisie ne change pas, la cle reste ; elle part quand l'issue est
+ * connue (la fiche obtenue, ou un refus du serveur). `connues` : les fiches
+ * de l'ecran au premier envoi -- celle que ce geste a creee n'en est pas.
+ */
+let envoiFiche = null;
+function cleDeLaFiche(fiche) {
+  const empreinte = JSON.stringify(fiche);
+  if (!envoiFiche || envoiFiche.empreinte !== empreinte) {
+    envoiFiche = { empreinte, cle: context.nouvelleCleDeGeste(), connues: new Set((data.crmClients || []).map((c) => String(c.id))) };
+  }
+  return envoiFiche.cle;
+}
+
+/**
+ * La fiche que le premier envoi a creee, quand on ne l'a pas recue : sa
+ * reponse coupee en route, ou le « deja fait » du serveur (gesteIdempotent ne
+ * rend que le statut). Une fiche que l'ecran ne connaissait pas au premier
+ * envoi, au meme nom et a la meme adresse : s'il n'y en a qu'une, c'est
+ * elle. Sinon, on ne devine pas.
+ */
+async function retrouverFicheCreee(fiche) {
+  const liste = await context.apiFetch(`/api/crm/clients?q=${encodeURIComponent(fiche.nom)}`);
+  const meme = (a, b) => normalizeTextKey(a || "") === normalizeTextKey(b || "");
+  const trouvees = (Array.isArray(liste) ? liste : []).filter((c) =>
+    !envoiFiche?.connues.has(String(c.id)) && meme(c.nom, fiche.nom) && meme(c.prenom, fiche.prenom) && meme(c.rue, fiche.rue));
+  if (trouvees.length === 1) return trouvees[0];
+  throw new Error(`La fiche de ${fiche.nom} a déjà été créée au premier envoi : cherche-la dans « Chercher un client » pour son abonnement.`);
+}
+
 async function saveSubscription(event) {
   event.preventDefault();
   const save = document.getElementById("subSave");
@@ -1266,28 +1308,35 @@ async function saveSubscription(event) {
       // une seconde fiche en file -- deux clients, aucun abonnement. Ce geste
       // ne se coupe pas en morceaux : sans reseau, il est refuse, et le dit.
       if (navigator.onLine === false) throw new Error(ABONNEMENT_NOUVEAU_CLIENT_HORS_LIGNE);
-      let client;
+      const fiche = {
+        nom: document.getElementById("subLastName").value,
+        prenom: document.getElementById("subFirstName").value,
+        rue: document.getElementById("subAddress").value,
+        codePostal: document.getElementById("subPostal").value,
+        ville: document.getElementById("subCity").value,
+        telephone: document.getElementById("subPhone").value,
+        crmStatus: "client_actif",
+      };
+      let client = null;
       try {
         client = await context.apiFetch("/api/crm/clients", {
           method: "POST",
           sansFile: true,
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            nom: document.getElementById("subLastName").value,
-            prenom: document.getElementById("subFirstName").value,
-            rue: document.getElementById("subAddress").value,
-            codePostal: document.getElementById("subPostal").value,
-            ville: document.getElementById("subCity").value,
-            telephone: document.getElementById("subPhone").value,
-            crmStatus: "client_actif",
-          }),
+          headers: { "Content-Type": "application/json", "X-Sereo-Geste": cleDeLaFiche(fiche) },
+          body: JSON.stringify(fiche),
         });
       } catch (e) {
-        if (e?.injoignable) throw new Error(ABONNEMENT_NOUVEAU_CLIENT_HORS_LIGNE);
-        throw e;
+        // Le serveur a repondu (un refus) : le prochain appui est un nouveau geste.
+        if (Number.isInteger(e?.statut)) envoiFiche = null;
+        if (e?.statut === 409) throw new Error(FICHE_EXISTE_DEJA);
+        if (e?.injoignable) throw new Error(ABONNEMENT_NOUVEAU_CLIENT_SANS_REPONSE);
+        // En-tetes 2xx, corps coupe : la fiche EST creee, on la retrouve.
+        if (!e?.recuParLeServeur) throw e;
       }
+      if (!client?.id) client = await retrouverFicheCreee(fiche);
+      envoiFiche = null;
       clientId = client.id;
-      data.crmClients.push(client);
+      if (!data.crmClients.some((c) => String(c.id) === String(clientId))) data.crmClients.push(client);
       // La fiche existe : un second envoi (apres une erreur) ne la recree pas.
       document.getElementById("subClient").value = String(clientId);
       ficheNouvelle = false;
