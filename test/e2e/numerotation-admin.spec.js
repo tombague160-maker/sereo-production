@@ -4,7 +4,9 @@
 
 const { test, expect } = require("./tuiles");
 
-const BASE = "http://127.0.0.1:3101";
+// SEREO_E2E_AUTH_URL : un autre serveur authentifie (un worktree qui ne peut pas
+// prendre le 3101 d'un autre) ; par defaut celui de playwright.config.js.
+const BASE = process.env.SEREO_E2E_AUTH_URL || "http://127.0.0.1:3101";
 // Un identifiant par passage : la base de ce serveur survit entre deux lancements
 // locaux (reuseExistingServer), et un identifiant deja pris serait refuse.
 const LIVREUR = { identifiant: `livreur-numero-${Date.now()}`, motDePasse: "livreur-e2e-sans-valeur-2026" };
