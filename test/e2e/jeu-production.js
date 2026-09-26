@@ -15,9 +15,15 @@
 //   ~120 archives d'import, une image de marque de ~116 Ko.
 const zlib = require("node:zlib");
 
-const AUJOURDHUI = new Intl.DateTimeFormat("en-CA", {
-  timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit"
-}).format(new Date());
+// Le jour du SEME : pose par jeuProduction(), jamais fige au chargement du
+// module (un ouvrier Playwright charge avant minuit semait apres minuit des
+// dates de la veille -- test/seme-jour-de-paris.test.js, 25/09).
+let AUJOURDHUI = jourDeParis();
+function jourDeParis() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit"
+  }).format(new Date());
+}
 
 /** mulberry32 : un tirage reproductible a graine fixe. */
 function tirage(graine) {
@@ -91,6 +97,7 @@ function imageDeMarque(r) {
 }
 
 function jeuProduction() {
+  AUJOURDHUI = jourDeParis();
   const r = tirage(20260924);
   const choisir = liste => liste[Math.floor(r() * liste.length)];
   const entre = (a, b) => a + Math.floor(r() * (b - a + 1));
