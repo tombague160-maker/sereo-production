@@ -1,5 +1,126 @@
 # Changelog
 
+## [2.0.0](https://github.com/tombague160-maker/sereo-production/compare/v1.46.1...v2.0.0) (2026-09-26)
+
+
+### 🐛 Corrections de bugs
+
+* « Planifier la suite » d'une commande orpheline ne cree plus une fiche client en double ([14e2b28](https://github.com/tombague160-maker/sereo-production/commit/14e2b28a1490ad3ac4a9789deb97963b25a9b759))
+* **auth:** limite de tentatives de connexion par compte, en plus de celle par adresse ([42cae9d](https://github.com/tombague160-maker/sereo-production/commit/42cae9de9c7417fbdd0d0d0a328200aa0e225b12))
+* **auth:** se deconnecter et changer de mot de passe ferment l'ancienne session ([bee67b4](https://github.com/tombague160-maker/sereo-production/commit/bee67b46487655c686fe4ef3c8d56d253b9fee9b))
+* **auth:** un appareil qui a deja ouvert un compte n'est plus bloque par la limite de ce compte ([a822148](https://github.com/tombague160-maker/sereo-production/commit/a82214854a1843db52e181d8a294d73698e49f16))
+* **auth:** un mot de passe d'environnement de moins de 12 caracteres se dit, sans refuser de demarrer ([25f72c4](https://github.com/tombague160-maker/sereo-production/commit/25f72c40ce0d9178dedf795f1ef97a84d9cc019c))
+* **auth:** une lecture en vol ne detourne plus « Se deconnecter » ([e407e10](https://github.com/tombague160-maker/sereo-production/commit/e407e102add09893b1e2aed5752e610565a0394a))
+* **commandes:** le numéro d'une commande mise de côté n'est pas redonné à la suivante ([da843c6](https://github.com/tombague160-maker/sereo-production/commit/da843c61d6d8cc439a0f78a681ff6e3a0e6e1174))
+* corrections de la chasse aux défauts — import des clients, garde-fous, stock, hors ligne, serveur, robustesse ([#186](https://github.com/tombague160-maker/sereo-production/issues/186)) ([0aaf46e](https://github.com/tombague160-maker/sereo-production/commit/0aaf46e224e670bbd9d42cbbd5c433844051b59c))
+* **droits:** import, purge, reglages et sauvegardes reserves a l'administration ; le livreur ne modifie plus le stock ([0ad94a4](https://github.com/tombague160-maker/sereo-production/commit/0ad94a45c8b9c6ae2b547647f5aefd60d9bd2ddc))
+* **droits:** l'export complet de la base (GET /api/db) reserve a l'administration ([09ce4b6](https://github.com/tombague160-maker/sereo-production/commit/09ce4b6ec711f01050b9169c4626ec6ad14b9b25))
+* **droits:** le livreur voit le stock ferme, et sait pourquoi ([c943da5](https://github.com/tombague160-maker/sereo-production/commit/c943da56d547fa03ac1c894ad2cb8ccb8b7aec10))
+* **droits:** un compte non administrateur voit import, purge et reglages fermes, et sait pourquoi ([3745b3b](https://github.com/tombague160-maker/sereo-production/commit/3745b3b1be8cfba64fbfba9c0b5d3b6edd3b1f1a))
+* **exploitation:** /healthz relit chaque page de la base, et voit une ligne illisible non mise de côté ([2c94ca2](https://github.com/tombague160-maker/sereo-production/commit/2c94ca26126940b3e4933aac18be0262ca3b36c6))
+* **exploitation:** /healthz vérifie que la base se lit ([f3a0295](https://github.com/tombague160-maker/sereo-production/commit/f3a029589866711e54495077cfcffa1bc4e6e28f))
+* **exploitation:** arrêt propre au redéploiement et fichiers temporaires de sauvegarde nettoyés ([2abe49a](https://github.com/tombague160-maker/sereo-production/commit/2abe49a90eda6796aa011580846cc33c45da41d2))
+* **exploitation:** SEREO_SKIP_RELEASE_FETCH est lue, et l'appel à GitHub a un délai maximal ([45e8d40](https://github.com/tombague160-maker/sereo-production/commit/45e8d40886b39772685831e62d740c14bd7cf000))
+* **hors-ligne:** la page gardee pour la tournee et ses fichiers restent de la meme version ([7be24fc](https://github.com/tombague160-maker/sereo-production/commit/7be24fce0e632fc692d6b82e31f82ce57b36a713))
+* import des ventes -- date avec heure, colonne « Date facture », quantite vide, ligne sans client ([85663d3](https://github.com/tombague160-maker/sereo-production/commit/85663d3dd6334dc397edf409d31c804cde32af4e))
+* **import:** la garde Excel laisse passer les 5 000 lignes garanties depuis v1.14.0 ([849aed2](https://github.com/tombague160-maker/sereo-production/commit/849aed2c0d8e878920bf9119d4d7d0b6b7cc4daa))
+* **import:** la lecture Excel ne voit que les parties que la garde a comptées ([e33044e](https://github.com/tombague160-maker/sereo-production/commit/e33044e78afaf84e816d35c06a17f6d9b8b8438f))
+* **import:** un petit fichier Excel piégé est refusé avant d'être lu ([4a70ca3](https://github.com/tombague160-maker/sereo-production/commit/4a70ca3fa4fc35ec4c21d4d2b2366d733ebe8f72))
+* **integration:** un seul nettoyage des sauvegardes interrompues au démarrage ([f919d57](https://github.com/tombague160-maker/sereo-production/commit/f919d5733a71b26d8be94bdae24ceeaa660bf3d3))
+* **journal:** 200 lignes par page, comme la décision 10 ([bf4c307](https://github.com/tombague160-maker/sereo-production/commit/bf4c307909e0b3aa084bfbb995780a9ec589d8bc))
+* le chiffre d'affaires des commandes importees est fige en TTC, avoirs soustraits ([fbc4fa1](https://github.com/tombague160-maker/sereo-production/commit/fbc4fa1c73a5ade3b9ea7ac70008d1f674cba26b))
+* **preparation:** au bureau, le detail d'une commande reservee ne dit plus un faux manque ([842cf87](https://github.com/tombague160-maker/sereo-production/commit/842cf8782c6750883fa5f9f606a171461b34d483))
+* **purge:** la copie vers le second dossier se fait apres le verrou d'ecriture ([1e5b53b](https://github.com/tombague160-maker/sereo-production/commit/1e5b53ba0eee87db88164850a05f26ee1801c354))
+* reimporter un bon dont une ligne est en erreur ne fait plus sortir un produit de sa commande ([a8247ea](https://github.com/tombague160-maker/sereo-production/commit/a8247ea2d216ab99cbb2957d573626da5b89217f))
+* **saisie:** apres une fin de session ou une issue inconnue, ni doublon ni etat invente ([18620ef](https://github.com/tombague160-maker/sereo-production/commit/18620ef05cfb8461809305c60d114ec83a953428))
+* **saisie:** hors ligne et au telephone, une saisie ne part qu'une fois et ne se perd plus ([0b7a4ad](https://github.com/tombague160-maker/sereo-production/commit/0b7a4ad3b936b8dcc928bacf75a7968b1ccb66bf))
+* **sauvegardes:** le genre « avant-purge » est reserve aussi en suffixe de l'etiquette ([7556811](https://github.com/tombague160-maker/sereo-production/commit/7556811b21645887d8edc865f93cce29d6a0ea8d))
+* **sauvegardes:** les fichiers de travail d'une sauvegarde en cours ne sont plus « la derniere » ([eddbe77](https://github.com/tombague160-maker/sereo-production/commit/eddbe77ee6b97e105136fd57e181728caf934cf2))
+* **sauvegardes:** un second dossier sans son fichier temoin ne recoit rien, et le dit ([bfdba93](https://github.com/tombague160-maker/sereo-production/commit/bfdba9331107fe3e67331073e8c483a9b592e5af))
+* **serveur:** une ligne ajoutee en tete n'attend plus apres son ecriture ([f1115e5](https://github.com/tombague160-maker/sereo-production/commit/f1115e576587520a8a8c8b9ab74c7f62ca19e2d9))
+* **stockage:** écriture disque en mode sûr (PRAGMA synchronous = FULL) ([e81b42d](https://github.com/tombague160-maker/sereo-production/commit/e81b42d4751b4407768ecdcfd4820e738f549d99))
+* **stockage:** la commande mise de côté ne revient pas en commande neuve du jour ([6a9765a](https://github.com/tombague160-maker/sereo-production/commit/6a9765afd7a92e6eff881fc77ffc01de9751b5da))
+* **stockage:** une ligne mise de côté dans une écriture qui échoue est recopiée à l'essai suivant ([5bef6f8](https://github.com/tombague160-maker/sereo-production/commit/5bef6f829de0cd2ca319b56ff925b5d687296f82))
+* **stockage:** une tournée mise de côté emporte les livraisons de ses arrêts ([6b585a7](https://github.com/tombague160-maker/sereo-production/commit/6b585a707e86b89f08250f65e6fbab1bdd0ebd36))
+* **stockage:** une tournée mise de côté ne copie que les livraisons de ses arrêts ([2c0c835](https://github.com/tombague160-maker/sereo-production/commit/2c0c835dd9eddf56f17162cc74ae16b18c8aff9d))
+* **stock:** l'etat vide des mouvements recents dit les entrees et sorties du stock ([3522e05](https://github.com/tombague160-maker/sereo-production/commit/3522e05d0eaaed1d9362cbfbe4849db33a68b9f9))
+* **stock:** la reprise du stock libere par PATCH ne vaut que vers la preparation ([5c120a4](https://github.com/tombague160-maker/sereo-production/commit/5c120a4e944163d7f898a60a746335d9fb583a80))
+* **stock:** une commande a reprogrammer au stock libere que PATCH remet en preparation ressort son stock ([58da202](https://github.com/tombague160-maker/sereo-production/commit/58da202ebb1fcc934d3a8f255387d72bbf2618ab))
+* **tournee:** la ligne « Calcul routier » dit « service public » et ce qui activerait la carte locale ([97c3ad4](https://github.com/tombague160-maker/sereo-production/commit/97c3ad49e1900da4f92a1a6b1d9f2a614b44f8de))
+* **tournee:** une commande mise de côté ne bloque plus le départ ni les gestes de sa tournée ([7350872](https://github.com/tombague160-maker/sereo-production/commit/7350872ea762510ccb4a9739cd5845230f823397))
+* une adresse changee dans Ximi ne double plus les lignes de vente de ses bons ([8b1313b](https://github.com/tombague160-maker/sereo-production/commit/8b1313b024411ac0ae9ebc52d127d31ec148e32b))
+* une commande pour un nouveau client rejouee par la file n'est plus perdue sur un doublon de fiche ([b35009d](https://github.com/tombague160-maker/sereo-production/commit/b35009d81a456adfe78d1327129b8c5c88641705))
+* une commande terrain dont la reponse 409 « doublon » s'est perdue n'est plus abandonnee au rejeu ([48c7704](https://github.com/tombague160-maker/sereo-production/commit/48c770449e94dfef06e4b08ad450b99a3dcb7763))
+* une fiche recreee par l'import reprend l'identifiant de ses commandes orphelines ([8a49186](https://github.com/tombague160-maker/sereo-production/commit/8a49186a4c452dffda32bee3aaf42341c2148849))
+
+
+### ⚡ Optimisations
+
+* **clients:** le repli des pilules mesure une fois au lieu d'une fois par pilule ([ae344c2](https://github.com/tombague160-maker/sereo-production/commit/ae344c24e08e9e2dea91b00ebd8bc00bc62972d8))
+* **stock:** au telephone, la liste s'analyse deux fois plus vite et se trie sans un comparateur par paire ([647b02b](https://github.com/tombague160-maker/sereo-production/commit/647b02b1847dc8b13bb7643e990e89f9ac0bf9c9))
+* **telephone:** un changement d'ecran ne mesure plus les pilules des ecrans caches ([a968221](https://github.com/tombague160-maker/sereo-production/commit/a968221babd882f5958ffc9922cea9ea6b2d8a83))
+
+
+### ♻️ Refactorisation
+
+* **sauvegardes:** la relecture d'une sauvegarde, fonction a part ([c1aace1](https://github.com/tombague160-maker/sereo-production/commit/c1aace13244933e282e8a0a2b05aa29518c1fe06))
+
+
+### 📚 Documentation
+
+* DESIGN.md -- donnees clients, l'import fusionne au lieu de remplacer (25/09) ([a7554de](https://github.com/tombague160-maker/sereo-production/commit/a7554deb14ba04a3670e3f4aaab10ddcf5ded73c))
+* DESIGN.md -- donnees clients, le sort de chaque defaut de la relecture adverse du 26/09 ([f0b5818](https://github.com/tombague160-maker/sereo-production/commit/f0b58183d4f3220deda193d2e39fd58687ed6ce7))
+* **design:** corrections apres la relecture adverse du lot serveur et CI ([ef51a2f](https://github.com/tombague160-maker/sereo-production/commit/ef51a2fed4d39fb9f19f25671cb3cc472ff5a2ab))
+* **design:** garde-fous du 25/09 -- droits, sauvegardes, purge ([66c25f6](https://github.com/tombague160-maker/sereo-production/commit/66c25f63a931d68e053c42e7d54f6f8f72d31b59))
+* **design:** garde-fous du 25/09 -- les bancs, leurs rouges et les mutants ([636b3c1](https://github.com/tombague160-maker/sereo-production/commit/636b3c1d6839b945e02bcd376c65424f9a621cb7))
+* **design:** intégration des corrections du 26/09 ([b50c944](https://github.com/tombague160-maker/sereo-production/commit/b50c944841f8ceeefa44cb76f0dc74653e3f0772))
+* **design:** rapidite du serveur, CI et image -- mesures, egalite a l'octet, preuves ([87f1247](https://github.com/tombague160-maker/sereo-production/commit/87f1247abbebbcad0f88250957214229587e3ad2))
+* **design:** relecture adverse du 26/09 -- six defauts, leur sort, leurs bancs ([9e77349](https://github.com/tombague160-maker/sereo-production/commit/9e773498d5a45a1759a9cec40f8ddf41401f904a))
+* **design:** relecture adverse du lot telephone, hors ligne et saisie (26/09) ([6beaf65](https://github.com/tombague160-maker/sereo-production/commit/6beaf653123e39553c5a0ebb2bc5edaf7646e9c2))
+* **design:** robustesse -- le sort de chaque défaut de la relecture adverse du 26/09 ([1b97973](https://github.com/tombague160-maker/sereo-production/commit/1b979731f08f0c19c1f21948a7c011ee27c668bd))
+* **design:** section du 25/09 « Robustesse et exploitation » ([03477f8](https://github.com/tombague160-maker/sereo-production/commit/03477f8e60cb0e2ec69d28eb119c5d9e2449bafc))
+* **design:** stock et abonnements -- le sort de chaque defaut de la relecture adverse ([c586f0b](https://github.com/tombague160-maker/sereo-production/commit/c586f0bbeb82b2976a18086e2f5eaf3bdabd7655))
+* **design:** stock et abonnements du 25/09 -- ce qui est fait, decide, ecarte, et prouve ([d54298a](https://github.com/tombague160-maker/sereo-production/commit/d54298af61969f10b9e1f2080e23fb6f6d942c52))
+* **design:** telephone, hors ligne et saisie (25/09) ([420eb47](https://github.com/tombague160-maker/sereo-production/commit/420eb47188fb491c561a5fd5817e879b1ff60f84))
+* **exploitation:** toutes les variables d'environnement documentées, l'heure du conteneur et le service public à 512 Mo ([1dd76d9](https://github.com/tombague160-maker/sereo-production/commit/1dd76d922627276ecfc8f0bb0077e2c03eceeaa4))
+* **integration:** le tableau des variables nomme celles du lot garde-fous ([877e3ef](https://github.com/tombague160-maker/sereo-production/commit/877e3ef72248e3fedc7be2b0f5436db0a5d42439))
+* limite de connexion par compte, mot de passe de 12 caracteres et export reserve ([faee225](https://github.com/tombague160-maker/sereo-production/commit/faee22540321380b9ebf8a31ae7be3ad189fdff6))
+
+
+### 🧪 Tests
+
+* aucune donnee perdue par l'import sur une base de la forme de la production ([1c47b2d](https://github.com/tombague160-maker/sereo-production/commit/1c47b2df06320d5648cb20e61cc0c53551f8db28))
+* **auth:** le cookie « appareil connu » forge porte l'empreinte du compte ([ff8b5a9](https://github.com/tombague160-maker/sereo-production/commit/ff8b5a91dd548807bd4a47d4ccfec26c5dc4d65b))
+* **auth:** les echecs au formulaire d'un appareil connu ne bloquent pas le compte ([1a9c923](https://github.com/tombague160-maker/sereo-production/commit/1a9c923f53db884968e00fcd9296d86c54e9fa98))
+* **e2e:** adresse du serveur authentifie reglable (SEREO_E2E_AUTH_BASE_URL) ([c6046e5](https://github.com/tombague160-maker/sereo-production/commit/c6046e57a575931538427c1d3b1633438c657271))
+* **e2e:** deux bancs mesurent l'état réel au lieu d'un instant de course ([72ffa22](https://github.com/tombague160-maker/sereo-production/commit/72ffa225e8c460008354c56e79bbe59b66929c13))
+* **e2e:** le jour des donnees semees est celui du seme, pas du chargement du module ([133c502](https://github.com/tombague160-maker/sereo-production/commit/133c5023d8efe7847d2c3fa3c1e2846e020ff490))
+* **e2e:** numerotation-admin accepte un autre serveur authentifie ([4f28c94](https://github.com/tombague160-maker/sereo-production/commit/4f28c94d519846f3816bc4f55b122b1d7d35f806))
+* **integration:** jour-paris attend la sauvegarde en vol avant d'effacer son dossier ([1d34641](https://github.com/tombague160-maker/sereo-production/commit/1d34641cc0464ed2822da5751bf6eeaeb8786d9e))
+* le banc « aucune donnee perdue » compare le montant de chaque commande et le CA affiche par l'autre version ([6d21c44](https://github.com/tombague160-maker/sereo-production/commit/6d21c44a3cfaaabe647824564ba24cee289b3a8e))
+* **lot5:** le banc qui rougissait parfois (ECONNRESET) ouvre une connexion par requête ([78b41f6](https://github.com/tombague160-maker/sereo-production/commit/78b41f6c24d23dd3dba6ca82d813e35bf7722a9d))
+* **parcours:** la commande mise en file hors ligne se dit « enregistree sur ce telephone » ([2b72612](https://github.com/tombague160-maker/sereo-production/commit/2b726127e261b7cfd8044a64f904824b2d51a252))
+* **purge:** une copie d'avant purge qui ne part jamais fait rougir le banc, sans l'attendre ([eb1b742](https://github.com/tombague160-maker/sereo-production/commit/eb1b742744b6f8a2680975eff1ad6f4290f7cca2))
+* **saisie:** l'abonnement d'un nouveau client refuse aussi en 4G sans debit ([175458d](https://github.com/tombague160-maker/sereo-production/commit/175458d90451942bda2eddb580dce75338cb93ca))
+* **saisie:** le corps coupe d'une fiche nouvelle se tient en UN appui ([6a7f3c3](https://github.com/tombague160-maker/sereo-production/commit/6a7f3c3d33ceda61e4b25b0fe8a1445e32495a29))
+* **saisie:** une fiche refusee par le serveur, revalidee, est un nouveau geste ([950d52e](https://github.com/tombague160-maker/sereo-production/commit/950d52e24e953a152581cecad152abcedbd4bf7f))
+* **sauvegardes:** C1.R2.a ecrit avant « Sauvegarder maintenant » ([753b841](https://github.com/tombague160-maker/sereo-production/commit/753b841ba55714bcef5463e53b6ca0a40ea4dd03))
+* **sauvegardes:** la relecture d'une copie abimee et le nettoyage au vrai demarrage ([3effcaa](https://github.com/tombague160-maker/sereo-production/commit/3effcaae48ff1a84264d350e05826e21cf75be48))
+* **stock:** la reprise du stock libere ne refuse pas une livraison acceptee sur rayon insuffisant ([a2d6f10](https://github.com/tombague160-maker/sereo-production/commit/a2d6f10dbb81a0cdca8e70ab7423c1b074020510))
+* **stock:** le trace du « − » et du « + » se compare sur un banc fige, hors de la liste ([2005e3a](https://github.com/tombague160-maker/sereo-production/commit/2005e3ab00d5eb2629d2893e4d5b6760b75160f2))
+* **version:** le rouge du banc hors réseau nomme sa cause ([f7a8ab0](https://github.com/tombague160-maker/sereo-production/commit/f7a8ab090736c5e557a155bcabab0b5e54070f62))
+
+
+### 🏗️ Build / Dependances
+
+* **docker:** ni rapports ni configurations des bancs e2e dans le contexte ([46ef07d](https://github.com/tombague160-maker/sereo-production/commit/46ef07d3ae94e50b2213bb3e499cd74bd6351543))
+* **docker:** plus de couche en double, ni design ni documentation dans l'image ([87fb5c8](https://github.com/tombague160-maker/sereo-production/commit/87fb5c8bb3ffdd5f5ad39230817fd1f8e274362b))
+
+
+### 🧹 Maintenance
+
+* passage en v2.0.0 ([0054e8d](https://github.com/tombague160-maker/sereo-production/commit/0054e8d3be4af1bf1cd7e22707f6b1a339a89111))
+
 ## [1.46.1](https://github.com/tombague160-maker/sereo-production/compare/v1.46.0...v1.46.1) (2026-09-24)
 
 
