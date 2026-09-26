@@ -121,15 +121,18 @@ function createSqliteStore(options) {
       ).all().map(ligne => ({ ...ligne }));
     },
 
+    /**
+     * Les commandes mises de cote : id -> { clientId, numero }, lus dans les
+     * colonnes lisibles de la ligne (client_id, numero ; null si vides).
+     */
+    commandesMisesDeCote() {
+      return lireCommandesMisesDeCote(database);
+    },
+
     /** Les clients (client_id) des commandes mises de cote. */
     clientsDesCommandesMisesDeCote() {
       const clients = new Set();
-      for (const { colonnes } of database.prepare("SELECT colonnes FROM lignes_en_quarantaine WHERE table_source = 'commandes'").all()) {
-        try {
-          const clientId = JSON.parse(colonnes).client_id;
-          if (clientId !== undefined && clientId !== null && clientId !== "") clients.add(String(clientId));
-        } catch { /* colonnes ecrites par nous : toujours lisibles */ }
-      }
+      for (const { clientId } of lireCommandesMisesDeCote(database).values()) if (clientId !== null) clients.add(clientId);
       return clients;
     },
 
@@ -1403,6 +1406,17 @@ const DEPENDANCES_MISES_DE_COTE = {
   commandes: [["lignes_commande", "commande_id", "payload"], ["livraisons", "commande_id", "payload"]],
   routes: [["traces_tournees", "route_id", "trace"]]
 };
+
+function lireCommandesMisesDeCote(database) {
+  const commandes = new Map();
+  const valeur = v => (v === undefined || v === null || v === "" ? null : String(v));
+  for (const { ligne_id: id, colonnes } of database.prepare("SELECT ligne_id, colonnes FROM lignes_en_quarantaine WHERE table_source = 'commandes'").all()) {
+    let lues = {};
+    try { lues = JSON.parse(colonnes) || {}; } catch { /* colonnes ecrites par nous : toujours lisibles */ }
+    commandes.set(String(id), { clientId: valeur(lues.client_id), numero: valeur(lues.numero) });
+  }
+  return commandes;
+}
 
 /**
  * Copie la ligne illisible (et ce qui en depend) dans lignes_en_quarantaine.

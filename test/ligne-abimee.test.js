@@ -253,6 +253,47 @@ test("la SEULE commande d'un client, abimee, ne « revient » pas en commande ne
   assert.deepEqual(readDb().commandes.map(o => o.clientId), ["c4"], "temoin : la commande de repli ne se cree plus du tout");
 });
 
+test("une commande mise de cote ne bloque pas sa tournee : « Démarrer », le geste et la correction de son arret passent", async () => {
+  // Relecture adverse du 26/09 : l'arret nommait encore la commande ecartee ;
+  // « Démarrer » repondait 404 (Commande introuvable) pour TOUTE la tournee,
+  // et l'arret ne se marquait plus (la file hors ligne prend un 404 pour un
+  // refus definitif).
+  semer();
+  abimer("commandes", "payload", "id", "o1");
+  closeStorage();
+  writeDb(readDb(), { backup: false }); // l'ecriture qui la retire de sa table
+  assert.ok(!brut(cnx => cnx.prepare("SELECT 1 FROM commandes WHERE id = 'o1'").get()), "prealable : la commande est encore dans sa table");
+
+  const depart = await api("/api/routes/t1/start", { method: "POST" });
+  assert.equal(depart.status, 200, `« Démarrer » : ${JSON.stringify(depart.body)}`);
+  assert.equal(depart.body.stops.find(s => s.id === "s1").status, "en_livraison");
+  const geste = await api("/api/routes/t1/stops/s1", { method: "PATCH", body: JSON.stringify({ status: "livre" }) });
+  assert.equal(geste.status, 200, `le geste sur l'arret : ${JSON.stringify(geste.body)}`);
+  assert.equal(geste.body.stop.status, "livre");
+  assert.equal(geste.body.order, null);
+  assert.equal((await api("/api/routes/t1")).body.status, "terminee");
+  const livraison = readDb().historique.find(h => h.type === "Livraison");
+  assert.match(livraison.message, /Client 1 : livre — commande mise de côté/, "le journal ne dit pas que la commande n'a pas suivi");
+  const correction = await api("/api/routes/t1/stops/s1/correction", { method: "POST", body: JSON.stringify({ status: "absent", cause: "erreur de geste" }) });
+  assert.equal(correction.status, 200, `la correction de l'arret : ${JSON.stringify(correction.body)}`);
+  assert.equal(correction.body.stop.status, "absent");
+  // La commande mise de cote ne revient pas ; les autres n'ont pas suivi le geste.
+  const commandes = readDb().commandes;
+  assert.deepEqual(commandes.map(o => o.id).sort(), ["o2", "o3"]);
+  assert.deepEqual(commandes.map(o => o.status), ["pret_livraison", "pret_livraison"]);
+});
+
+test("temoin : une commande absente SANS etre mise de cote reste une erreur (404), comme avant", async () => {
+  semer();
+  const db = readDb();
+  db.routes.push({ id: "t2", sector: "Champagnole", status: "prete", deliveryDate: "2026-09-25", geometry: null,
+    stops: [{ id: "s9", routeId: "t2", orderId: "o-inconnue", clientId: "c1", orderIndex: 1, clientName: "Client 1", status: "pret_livraison", products: [] }] });
+  writeDb(db, { backup: false });
+  const depart = await api("/api/routes/t2/start", { method: "POST" });
+  assert.equal(depart.status, 404, JSON.stringify(depart.body));
+  assert.match(depart.body.error, /Commande introuvable/);
+});
+
 test("un trace de tournee abime : la tournee se lit sans sa ligne, le trace est mis de cote", async () => {
   semer();
   const abime = abimer("traces_tournees", "trace", "route_id", "t1");

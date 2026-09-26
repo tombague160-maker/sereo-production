@@ -3155,6 +3155,17 @@ function clientsDesCommandesMisesDeCote() {
   }
 }
 
+// Les commandes en quarantaine : id -> { clientId, numero }. Vide hors
+// SQLite, ou si l'etat ne se lit pas.
+function commandesMisesDeCote() {
+  if (!useSqliteStorage() || !sqliteStore) return new Map();
+  try {
+    return sqliteStore.commandesMisesDeCote();
+  } catch {
+    return new Map();
+  }
+}
+
 // Promise du dernier backup async en vol. Utilise par les tests pour
 // `await flushPendingBackup()` avant d'assertioner sur le filesystem.
 let pendingBackup = null;
@@ -5085,6 +5096,22 @@ function findOrder(db, orderId) {
   return order;
 }
 
+/**
+ * La commande d'un arret de tournee ; null si elle est MISE DE COTE (texte
+ * illisible, lignes_en_quarantaine). Relecture adverse du 26/09 : l'arret la
+ * nommait encore, et findOrder levait « Commande introuvable » -- toute la
+ * tournee ne demarrait plus, l'arret ne se marquait plus. L'arret porte de
+ * quoi etre fait (client, adresse, produits) : il vit sans sa commande, qui
+ * attend d'etre reparee a la main (ni son statut ni le stock ne suivent).
+ * Une commande absente pour une autre raison reste une erreur, comme avant.
+ */
+function commandeDeLArret(db, stop) {
+  const order = db.commandes.find(item => String(item.id) === String(stop.orderId));
+  if (order) return order;
+  if (commandesMisesDeCote().has(String(stop.orderId))) return null;
+  throw notFound("Commande introuvable");
+}
+
 function findClient(db, clientId) {
   return db.clients.find(item => String(item.id) === String(clientId));
 }
@@ -6735,10 +6762,10 @@ function startRoute(db, routeId) {
   route.stops.forEach(stop => {
     if (["livre", "absent", "probleme", "a_reprogrammer"].includes(stop.status)) return;
     stop.status = "en_livraison";
-    const order = findOrder(db, stop.orderId);
-    setOrderStatus(order, "en_livraison");
+    const order = commandeDeLArret(db, stop);
+    if (order) setOrderStatus(order, "en_livraison");
 
-    const client = findClient(db, order.clientId);
+    const client = findClient(db, order ? order.clientId : stop.clientId);
     if (client) client.statut = "en_cours";
   });
 
@@ -6828,7 +6855,7 @@ function updateRouteStop(db, routeId, stopId, status, notes = "", motif = null, 
     if (STATUTS_ARRET_SOLDE.has(stop.status)) {
       // Le meme geste deux fois (un renvoi sans cle d'idempotence) : rien a
       // faire, et ce n'est pas une erreur.
-      if (stop.status === status) return { route, stop, order: findOrder(db, stop.orderId), inchange: true };
+      if (stop.status === status) return { route, stop, order: commandeDeLArret(db, stop), inchange: true };
       throw conflit(`${stop.clientName || "Cet arrêt"} est déjà « ${libelleStatutArret(stop.status)} » : utilise « Corriger le statut ».`);
     }
   }
@@ -6840,7 +6867,9 @@ function updateRouteStop(db, routeId, stopId, status, notes = "", motif = null, 
   // stock a ete libere (release-stock) reste « a reprogrammer », donc
   // livrable : elle repart dans une nouvelle tournee, qui ne reserve rien.
   // Son « Livre » la faisait sortir sans deduire le rayon, en silence.
-  if (status === "livre") reprendreStockLibere(db, findOrder(db, stop.orderId), retard ? "geste arrivé après la clôture" : "livrée en tournée");
+  // null : commande mise de cote (commandeDeLArret) -- l'arret seul change.
+  const order = commandeDeLArret(db, stop);
+  if (status === "livre" && order) reprendreStockLibere(db, order, retard ? "geste arrivé après la clôture" : "livrée en tournée");
   if (retard) {
     // Le livreur l'a fait AVANT la cloture : c'est la verite du terrain, la
     // cloture avait devine « a reprogrammer ». L'arret n'est plus une
@@ -6856,8 +6885,7 @@ function updateRouteStop(db, routeId, stopId, status, notes = "", motif = null, 
   // copie plus ancienne (refreshActiveRoute, H4).
   route.updatedAt = new Date().toISOString();
 
-  const order = findOrder(db, stop.orderId);
-  const client = findClient(db, order.clientId);
+  const client = findClient(db, order ? order.clientId : stop.clientId);
 
   // C1 (lot 1 de l'audit geo) : un absent ou un probleme n'est plus une
   // impasse. La commande passait en `probleme_livraison`, qu'aucune liste ne
@@ -6868,30 +6896,37 @@ function updateRouteStop(db, routeId, stopId, status, notes = "", motif = null, 
   // Le stock, lui, reste reserve pour la relivraison (RESERVED_ORDER_STATUSES
   // compte a_reprogrammer) : ni libere, ni reserve une seconde fois -- la
   // tournee suivante ne reserve rien, et la livraison consomme la reservation.
+  // Sans commande (mise de cote) : seuls l'arret et le client changent.
   if (status === "livre") {
     // Un « Livre » arrive apres la cloture : la commande est « a reprogrammer »,
     // qui n'a pas de sortie directe vers « livre ».
-    if (retard && STATUTS_A_RELIVRER.includes(order.status)) setOrderStatus(order, "en_livraison");
-    setOrderStatus(order, "livre", now);
+    if (order) {
+      if (retard && STATUTS_A_RELIVRER.includes(order.status)) setOrderStatus(order, "en_livraison");
+      setOrderStatus(order, "livre", now);
+    }
     if (client) client.statut = "livree";
     // Decision 10 de Thomas (23/09) : « remis a… », facultatif. Sur l'arret ET
     // la commande : le detail de la commande le montre, l'historique aussi.
     const remis = clean(remisA).slice(0, REMIS_A_MAX);
     stop.remisA = remis;
-    order.remisA = remis;
+    if (order) order.remisA = remis;
   } else if (status === "absent") {
-    setOrderStatus(order, "a_reprogrammer");
-    order.deliveryStatus = "absent";
+    if (order) {
+      setOrderStatus(order, "a_reprogrammer");
+      order.deliveryStatus = "absent";
+    }
     if (client) client.statut = "absent";
   } else if (status === "probleme") {
-    setOrderStatus(order, "a_reprogrammer");
-    order.deliveryStatus = "probleme";
+    if (order) {
+      setOrderStatus(order, "a_reprogrammer");
+      order.deliveryStatus = "probleme";
+    }
     if (client) client.statut = "probleme";
   } else if (status === "a_reprogrammer") {
-    setOrderStatus(order, "a_reprogrammer");
+    if (order) setOrderStatus(order, "a_reprogrammer");
     if (client) client.statut = "non_livre";
   } else if (status === "en_livraison") {
-    setOrderStatus(order, "en_livraison");
+    if (order) setOrderStatus(order, "en_livraison");
     if (client) client.statut = "en_cours";
   }
 
@@ -7048,32 +7083,37 @@ function corrigerArret(db, routeId, stopId, { status, cause } = {}, par = "") {
     throw conflit(`${nomDeTournee(route)} est clôturée : un arrêt n'y redevient pas « à faire ». La commande est dans les commandes prêtes.`);
   }
 
-  const order = findOrder(db, stop.orderId);
-  const nom = nomDeCommande(order);
-  // Sans `routeId` (donnee d'avant createRoute, ou semee a la main), seule la
-  // presence dans une autre tournee active compte.
-  if ((order.routeId && String(order.routeId) !== String(route.id)) || tourneeActiveDeLaCommande(db, order.id, route.id)) {
-    throw conflit(`La commande ${nom} est repartie dans une autre tournée : corrige-la là-bas.`);
+  // null : commande mise de cote (commandeDeLArret) -- l'arret seul se corrige.
+  const order = commandeDeLArret(db, stop);
+  if (order) {
+    const nom = nomDeCommande(order);
+    // Sans `routeId` (donnee d'avant createRoute, ou semee a la main), seule la
+    // presence dans une autre tournee active compte.
+    if ((order.routeId && String(order.routeId) !== String(route.id)) || tourneeActiveDeLaCommande(db, order.id, route.id)) {
+      throw conflit(`La commande ${nom} est repartie dans une autre tournée : corrige-la là-bas.`);
+    }
+    // Un arret en echec dont la commande est restee « en livraison » (donnee
+    // d'avant le lot 1, ou semee ainsi) se corrige aussi : rien n'est reparti.
+    const attendus = stop.status === "livre" ? ["livre"] : [...STATUTS_A_RELIVRER, "en_livraison"];
+    if (!attendus.includes(order.status)) {
+      throw conflit(`La commande ${nom} a changé depuis ce geste : corrige-la depuis l'écran Commandes.`);
+    }
+    // Une reservation liberee a la main (release-stock) a rendu le stock au
+    // rayon : dire la commande livree la ferait sortir du stock sans la deduire.
+    // Avant, la correction etait refusee ; depuis la decision de Thomas (23/09),
+    // la reservation est reprise, meme sur un rayon insuffisant, comme pour le
+    // geste arrive apres la cloture (reprendreStockLibere, qui le journalise).
+    if (status === "livre") reprendreStockLibere(db, order, "correction du statut");
   }
-  // Un arret en echec dont la commande est restee « en livraison » (donnee
-  // d'avant le lot 1, ou semee ainsi) se corrige aussi : rien n'est reparti.
-  const attendus = stop.status === "livre" ? ["livre"] : [...STATUTS_A_RELIVRER, "en_livraison"];
-  if (!attendus.includes(order.status)) {
-    throw conflit(`La commande ${nom} a changé depuis ce geste : corrige-la depuis l'écran Commandes.`);
-  }
-  // Une reservation liberee a la main (release-stock) a rendu le stock au
-  // rayon : dire la commande livree la ferait sortir du stock sans la deduire.
-  // Avant, la correction etait refusee ; depuis la decision de Thomas (23/09),
-  // la reservation est reprise, meme sur un rayon insuffisant, comme pour le
-  // geste arrive apres la cloture (reprendreStockLibere, qui le journalise).
-  if (status === "livre") reprendreStockLibere(db, order, "correction du statut");
 
   const avant = stop.status;
   const now = new Date().toISOString();
-  const client = findClient(db, order.clientId);
+  const client = findClient(db, order ? order.clientId : stop.clientId);
 
   // 1. La commande quitte son etat, vers « en livraison ».
-  if (order.status === "livre") {
+  if (!order) {
+    // Mise de cote : rien a faire suivre.
+  } else if (order.status === "livre") {
     // Hors de la machine d'etat, deliberement : `livre` n'a aucune sortie pour
     // les gestes ordinaires (ni le livreur ni un import ne defont une
     // livraison). Seule cette correction, journalisee, le fait.
@@ -7096,14 +7136,16 @@ function corrigerArret(db, routeId, stopId, { status, cause } = {}, par = "") {
   if (status === "livre") {
     // L'heure du geste d'origine : c'est la que le livreur etait sur place.
     const quand = Number.isFinite(Date.parse(stop.deliveredAt || "")) ? stop.deliveredAt : now;
-    setOrderStatus(order, "livre", quand);
+    if (order) setOrderStatus(order, "livre", quand);
     stop.deliveredAt = quand;
     stop.problemReason = "";
     stop.problemReasonKey = "";
     if (client) client.statut = "livree";
   } else if (status === "absent" || status === "probleme") {
-    setOrderStatus(order, "a_reprogrammer");
-    order.deliveryStatus = status;
+    if (order) {
+      setOrderStatus(order, "a_reprogrammer");
+      order.deliveryStatus = status;
+    }
     stop.deliveredAt = stop.deliveredAt || now;
     stop.problemReason = `${libelleStatutArret(status)} (correction : ${pourquoi})`;
     stop.problemReasonKey = "";
@@ -7273,11 +7315,16 @@ function reprendreStockLibere(db, order, origine) {
  * A appeler APRES writeDb : syncWorkflow a remplace les objets par leur forme
  * normalisee.
  */
+// Le geste sur un arret dont la commande est mise de cote (commandeDeLArret),
+// dit dans l'historique : la commande n'a pas suivi.
+const SANS_COMMANDE_MISE_DE_COTE = " — commande mise de côté (texte illisible) : ni son statut ni le stock n'ont suivi";
+
 function etatApresGesteArret(db, geste) {
   const route = routeAvecTrace(db, geste.route.id) || geste.route;
   const stop = route.stops.find(item => String(item.id) === String(geste.stop.id)) || geste.stop;
-  const order = db.commandes.find(item => String(item.id) === String(geste.order.id)) || geste.order;
-  const trouve = db.clients.find(item => String(item.id) === String(order.clientId));
+  // null : commande mise de cote (commandeDeLArret).
+  const order = geste.order ? db.commandes.find(item => String(item.id) === String(geste.order.id)) || geste.order : null;
+  const trouve = db.clients.find(item => String(item.id) === String(order ? order.clientId : stop.clientId));
   // Le client tel que /api/clients le rend (sans releve d'import, 24/09).
   const client = trouve ? sansReleveDImport(trouve) : null;
   return { route, stop, order, client };
@@ -9808,10 +9855,10 @@ app.post("/api/routes/:routeId/stops/:stopId/correction", async (req, res) => {
       const db = readDb();
       const par = getRequestIdentity(req)?.identifiant || "";
       const r = corrigerArret(db, req.params.routeId, req.params.stopId, req.body || {}, par);
-      addHistory(db, "Correction", `${r.stop.clientName} : ${libelleStatutArret(r.avant)} → ${libelleStatutArret(r.stop.status)} — ${r.cause}`, {
+      addHistory(db, "Correction", `${r.stop.clientName} : ${libelleStatutArret(r.avant)} → ${libelleStatutArret(r.stop.status)} — ${r.cause}${r.order ? "" : SANS_COMMANDE_MISE_DE_COTE}`, {
         routeId: r.route.id,
         stopId: r.stop.id,
-        orderId: r.order.id,
+        orderId: r.order ? r.order.id : r.stop.orderId,
         de: r.avant,
         vers: r.stop.status,
         par
@@ -9853,10 +9900,11 @@ app.patch("/api/routes/:routeId/stops/:stopId", async (req, res) => {
       // Decision 10 : « remis a… » s'y lit aussi.
       const remis = r.stop.status === "livre" && r.stop.remisA ? ` — remis à ${r.stop.remisA}` : "";
       const tard = r.retard ? " (geste fait avant la clôture de la tournée)" : "";
-      addHistory(db, "Livraison", `${r.stop.clientName} : ${r.stop.status}${cause}${remis}${tard}`, {
+      const sansCommande = r.order ? "" : SANS_COMMANDE_MISE_DE_COTE;
+      addHistory(db, "Livraison", `${r.stop.clientName} : ${r.stop.status}${sansCommande}${cause}${remis}${tard}`, {
         routeId: r.route.id,
         stopId: r.stop.id,
-        orderId: r.order.id,
+        orderId: r.order ? r.order.id : r.stop.orderId,
         ...(r.stop.status === "livre" && r.stop.remisA ? { remisA: r.stop.remisA } : {})
       });
 
