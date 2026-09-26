@@ -70,16 +70,20 @@ absente de ce tableau ou de `.env.example`. « Image » : valeur posee par le `D
 | `SEREO_DB_PATH` | `data/db.json` | Ancien JSON, source de la migration initiale. |
 | `SEREO_UPLOAD_DIR` | `imports/` ; `/app/uploads` (image) | Fichiers Excel en cours d'import (temporaires). |
 | `SEREO_BACKUP_DIR` | `backups/` a cote de la base | Sauvegardes automatiques. |
+| `SEREO_BACKUP_COPY_DIR` | vide (pas de seconde copie) | Second dossier de sauvegarde, sur un autre disque : chaque sauvegarde y est copiee et relue, s'il porte le fichier temoin `sereo-second-dossier` (voir « Sauvegardes »). |
 | `SEREO_IMPORTS_ARCHIVES_DIR` | `imports-archives/` a cote de la base | Copie brute de chaque Excel importe. |
 | `SEREO_OSRM_DIR` | `osrm/` a cote de la base | Cartes du calcul routier local. |
-| `SEREO_ENABLE_DB_EXPORT` | `0` | `1` : export complet de la base (administration locale). |
+| `SEREO_ENABLE_DB_EXPORT` | `0` | `1` : export complet de la base (administration locale), reserve aux comptes administrateurs. |
 | `SEREO_AUTH_USER` | vide | Identifiant ; avec le mot de passe, protege tout l'acces. |
-| `SEREO_AUTH_PASSWORD` | vide | Mot de passe du compte ci-dessus. |
+| `SEREO_AUTH_PASSWORD` | vide | Mot de passe du compte ci-dessus ; au moins 12 caracteres (plus court : le serveur demarre, le journal et l'administration le signalent). |
 | `SEREO_AUTH_REALM` | `Sereo` | Nom du domaine d'authentification. |
 | `SEREO_AUTH_SESSION_SECRET` | fichier `session-secret` a cote de la base | Secret des cookies de session. |
 | `SEREO_AUTH_MAX_ATTEMPTS` | `5` | Essais de connexion rates avant blocage. |
 | `SEREO_AUTH_RATE_WINDOW_MS` | `900000` (15 min) | Fenetre de comptage des essais. |
 | `SEREO_AUTH_LOCKOUT_MS` | `15000` (15 s) | Duree du blocage. |
+| `SEREO_AUTH_MAX_ATTEMPTS_COMPTE` | `20` | Essais rates sur un meme identifiant, quelle que soit l'adresse, avant de bloquer cet identifiant (appareils inconnus seulement). |
+| `SEREO_AUTH_RATE_WINDOW_COMPTE_MS` | `3600000` (1 h) | Fenetre de comptage par identifiant. |
+| `SEREO_AUTH_LOCKOUT_COMPTE_MS` | `900000` (15 min) | Duree du blocage d'un identifiant. |
 | `SEREO_SEPARATION_ROLES` | vide (desactivee, decision du 26/08) | `1` : onglets selon le role. Navigation seulement ; les droits sont appliques par le serveur. |
 | `SEREO_PURGE_TOURNEES_MOIS` | `12` | Conservation des tournees terminees, en mois ; `0` coupe la purge. |
 | `SEREO_GEOCODAGE_AUTO` | `1` | `0` : geocodage sur demande seulement. |
