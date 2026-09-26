@@ -3621,7 +3621,10 @@ let derniereSauvegardeEcrite = null;
 //
 // Le mode JSON (legacy, migration) garde la copie en flux : le fichier JSON est
 // remplace par renommage, jamais reecrit en place. Il est relu (JSON.parse).
-async function ecrireSauvegardeVerifiee(tag = "", { tables = [] } = {}) {
+//
+// `copie: false` : la copie vers le second dossier est laissee a l'appelant
+// (la purge des bons, qui la fait apres avoir rendu le verrou d'ecriture).
+async function ecrireSauvegardeVerifiee(tag = "", { tables = [], copie = true } = {}) {
   const sourcePath = useSqliteStorage() ? SQLITE_PATH : DB_PATH;
   if (!fs.existsSync(sourcePath)) return null;
 
@@ -3651,7 +3654,7 @@ async function ecrireSauvegardeVerifiee(tag = "", { tables = [] } = {}) {
   lastBackupAt = new Date().toISOString();
   lastBackupError = null;
   derniereSauvegardeEcrite = { nom: path.basename(backupPath), couvre };
-  await copierVersSecondDossier(backupPath, resultat.sha256);
+  if (copie) await copierVersSecondDossier(backupPath, resultat.sha256);
   return { chemin: backupPath, nom: path.basename(backupPath), ...resultat };
 }
 
@@ -9587,7 +9590,10 @@ app.post("/api/orders/purge", requireAdministration, async (req, res) => {
 
       let sauvegarde;
       try {
-        sauvegarde = await sauvegardeSeule(() => ecrireSauvegardeVerifiee(GENRE_AVANT_PURGE_COMMANDES, { tables: TABLES_PURGEES }));
+        // Sans la copie vers le second dossier : elle se fait apres le verrou
+        // (plus bas). Relecture du 26/09 : un partage reseau lent ou bloque
+        // suspendait, sous ce verrou, toutes les ecritures des autres comptes.
+        sauvegarde = await sauvegardeSeule(() => ecrireSauvegardeVerifiee(GENRE_AVANT_PURGE_COMMANDES, { tables: TABLES_PURGEES, copie: false }));
       } catch (error) {
         lastBackupError = { at: new Date().toISOString(), message: String(error.message || error) };
         throw refusDePurge(`la sauvegarde d'avant purge a échoué (${error.message || error}).`);
@@ -9640,8 +9646,13 @@ app.post("/api/orders/purge", requireAdministration, async (req, res) => {
       );
 
       writeDb(db);
-      return { purgedCounts, sauvegarde: sauvegarde.nom };
+      return { purgedCounts, sauvegarde: sauvegarde.nom, chemin: sauvegarde.chemin, sha256: sauvegarde.sha256 };
     });
+    // La copie vers le second dossier, verrou rendu : la decision de purger ne
+    // l'attend pas (une copie qui echoue ne fait jamais echouer une
+    // sauvegarde), et les ecritures des autres non plus. Une sauvegarde a la
+    // fois (sauvegardeSeule) ; la reponse ne l'attend pas.
+    sauvegardeSeule(() => copierVersSecondDossier(result.chemin, result.sha256)).catch(() => {});
     res.json({
       success: true,
       purged: result.purgedCounts,

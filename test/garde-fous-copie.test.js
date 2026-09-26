@@ -214,3 +214,62 @@ test("une copie abîmée en route n'est pas gardée : la relecture la refuse, et
     fs.promises.copyFile = copyFile;
   }
 });
+
+// Relecture adverse du 26/09 : « Purger les bons » attendait la copie vers le
+// second dossier (copie puis relecture complete) SOUS le verrou d'ecriture. Un
+// partage reseau lent -- ou bloque, sur un montage « hard » -- suspendait les
+// « Livre » et les saisies des autres comptes. La copie se fait verrou rendu.
+test("purge des bons : la copie vers un second dossier bloqué ne retient pas les écritures des autres", async () => {
+  const { once } = require("node:events");
+  vider(PREMIER);
+  vider(SECOND);
+  saisie();
+  // Le partage ne repond plus : la copie vers le second dossier attend.
+  const copyFile = fs.promises.copyFile;
+  let liberer;
+  const partage = new Promise(r => { liberer = r; });
+  let signaler;
+  const copieCommencee = new Promise(r => { signaler = r; });
+  fs.promises.copyFile = async (source, cible, ...reste) => {
+    if (path.resolve(String(cible)).startsWith(path.resolve(SECOND))) {
+      signaler();
+      await partage;
+    }
+    return copyFile.call(fs.promises, source, cible, ...reste);
+  };
+  const serveur = app.listen(0);
+  await once(serveur, "listening");
+  const base = `http://127.0.0.1:${serveur.address().port}`;
+  let purge = null;
+  let ecriture = null;
+  let statutPurge = null;
+  try {
+    purge = fetch(`${base}/api/orders/purge`, { method: "POST" });
+    await copieCommencee;
+    // Un autre compte ajuste le stock pendant ce temps.
+    ecriture = fetch(`${base}/api/stock/st-1`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ quantite: 3, reason: "banc" })
+    });
+    const verdict = await Promise.race([
+      ecriture.then(r => r.status),
+      new Promise(r => setTimeout(() => r("bloquee"), 3000))
+    ]);
+    assert.equal(verdict, 200, "une ecriture attend la copie de la purge vers le second dossier (verrou d'ecriture tenu)");
+  } finally {
+    liberer();
+    fs.promises.copyFile = copyFile;
+    const reponses = await Promise.all([purge, ecriture].filter(Boolean));
+    for (const r of reponses) await r.arrayBuffer();
+    statutPurge = reponses[0]?.status;
+    await _flushPendingBackup();
+    await new Promise(r => serveur.close(r));
+  }
+  assert.equal(statutPurge, 200, "temoin : la purge a echoue");
+  // Le partage revenu, la sauvegarde d'avant purge est bien copiee.
+  const avantPurge = liste(PREMIER).filter(n => /-avant-purge-commandes\.sqlite\.gz$/.test(n));
+  assert.equal(avantPurge.length, 1, `prealable : ${liste(PREMIER).join(", ")}`);
+  assert.ok(sauvegardes(SECOND).includes(avantPurge[0]), "la sauvegarde d'avant purge n'est pas copiee dans le second dossier");
+  assert.equal(empreinte(path.join(SECOND, avantPurge[0])), empreinte(path.join(PREMIER, avantPurge[0])));
+});
