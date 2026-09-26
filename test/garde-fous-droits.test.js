@@ -279,3 +279,27 @@ test("sauvegarder maintenant : le genre « avant-purge-commandes » est réserv�
   assert.equal(noms.length, 1);
   assert.doesNotMatch(noms[0], /avant-purge/, "une sauvegarde manuelle s'est donne le genre reserve");
 });
+
+// Relecture adverse du 26/09 : seul le DEBUT de l'etiquette etait controle.
+// « x-avant-purge-commandes » donnait `db-…-x-avant-purge-commandes.sqlite.gz`,
+// que la rotation reconnait comme hors rotation : 10 copies de la base par
+// heure, jamais supprimees.
+test("sauvegarder maintenant : le genre réservé ne se prend pas non plus en suffixe", async () => {
+  const HORS_ROTATION = /-avant-purge-commandes\.(sqlite|json)\.gz$/;
+  for (const tag of ["x-avant-purge-commandes", "manuelle-avant-purge-commandes", "_avant-purge-commandes", "Avant-Purge-commandes"]) {
+    viderLeDossier();
+    S._reinitialiserLimiteSauvegardesPourTest?.();
+    nouvelleSaisie();
+    const reponse = await appel("/api/backup/now", { cookie: cookies.admin, method: "POST", body: { tag } });
+    assert.equal(reponse.status, 200, tag);
+    const noms = sauvegardes();
+    assert.equal(noms.length, 1, `${tag} : ${noms.join(", ")}`);
+    assert.doesNotMatch(noms[0], HORS_ROTATION, `« ${tag} » : une sauvegarde manuelle sort de la rotation`);
+  }
+  // Temoin : une etiquette ordinaire est gardee telle quelle.
+  viderLeDossier();
+  S._reinitialiserLimiteSauvegardesPourTest?.();
+  nouvelleSaisie();
+  assert.equal((await appel("/api/backup/now", { cookie: cookies.admin, method: "POST", body: { tag: "avant-inventaire" } })).status, 200);
+  assert.match(sauvegardes()[0], /-avant-inventaire\.sqlite\.gz$/);
+});

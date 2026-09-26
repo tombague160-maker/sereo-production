@@ -8011,7 +8011,10 @@ const sauvegardesManuelles = [];
 app.post("/api/backup/now", requireAdministration, async (req, res) => {
   try {
     let tag = clean(req.body?.tag || "manual").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 32);
-    if (/^avant-purge/i.test(tag)) tag = "manuelle";
+    // Le genre « avant-purge » est reserve, ou qu'il soit dans l'etiquette :
+    // « x-avant-purge-commandes » sortait la sauvegarde de la rotation
+    // (MOTIF_HORS_ROTATION ne lit que la fin du nom ; relecture du 26/09).
+    if (/avant-purge/i.test(tag)) tag = "manuelle";
 
     const derniere = listBackupEntries()[0];
     if (derniere && derniereSauvegardeEcrite
