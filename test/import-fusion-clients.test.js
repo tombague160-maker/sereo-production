@@ -245,3 +245,68 @@ test("ventes — un import partiel garde les ventes des bons absents du fichier 
   await importerVentes(baseUrl, [ENTETE, ligne]);
   assert.equal(readDb().ventes.length, 2, "reimporter le meme fichier double les ventes");
 });
+
+// Relecture adverse du 26/09 : l'ADRESSE du client change dans Ximi (« 3 rue
+// du Pont » devient « 3 bis rue du Pont », ou la ville est ecrite autrement).
+// La fiche se retrouve (nom + code postal) et ses commandes aussi (fiche +
+// date). Mais le bon d'une ligne de vente se reconnaissait a l'adresse
+// COMPLETE : les anciennes lignes de chaque bon de Dupont n'etaient plus
+// « du fichier », elles restaient, et les nouvelles s'y ajoutaient -- pour
+// toujours (aucun import ne les cite plus). `db.ventes = ventes` (avant le
+// 25/09) remettait la table au fichier. Le bon d'une vente suit maintenant la
+// meme identite que sa commande : la fiche et la date.
+const AUTRE_BON_DUPONT = ["12/08/2026", DUPONT.nom, "ALE", "Aleses", "3", DUPONT.rue, DUPONT.codePostal, DUPONT.ville, "", "", "15"];
+
+for (const [changement, colonne, valeur] of [["la rue", 5, "3 bis rue du Pont"], ["la ville", 7, "Dole Centre"]]) {
+  test(`ventes — ${changement} du client change dans Ximi : reimporter le fichier cumulatif ne double pas les lignes de ses bons`, async () => {
+    semer();
+    const premier = await importerVentes(baseUrl, [ENTETE, LIGNE_DUPONT, AUTRE_BON_DUPONT]);
+    assert.equal(premier.status, 200, premier.body?.error);
+    assert.equal(readDb().ventes.length, 2);
+    const commandesAvant = readDb().commandes.map(o => o.id).sort();
+
+    const fichier = [LIGNE_DUPONT, AUTRE_BON_DUPONT].map(ligne => { const l = [...ligne]; l[colonne] = valeur; return l; });
+    const r = await importerVentes(baseUrl, [ENTETE, ...fichier]);
+    assert.equal(r.status, 200, r.body?.error);
+    const db = readDb();
+    assert.deepEqual(db.commandes.map(o => o.id).sort(), commandesAvant, "prealable : les commandes suivent la fiche (pas de doublon)");
+    assert.equal(fiche(db, "c-dupont")[colonne === 5 ? "rue" : "ville"], valeur, "prealable : la fiche prend l'adresse du fichier");
+    assert.equal(db.ventes.length, 2, `les lignes des bons de Dupont sont en double : ${db.ventes.map(v => `${v.dateCommandeIso} ${v.rue} ${v.ville}`).join(" | ")}`);
+    assert.ok(db.ventes.every(v => (colonne === 5 ? v.rue : v.ville) === valeur), "les anciennes lignes sont restees a la place des nouvelles");
+  });
+}
+
+test("ventes — temoin : un HOMONYME (meme nom, meme code postal, autre adresse, sa fiche) garde ses lignes quand le fichier ne cite que l'autre", async () => {
+  const HOMONYME = { ...DUPONT, id: "c-dupont-2", rue: "40 avenue de Lahr", telephone: "0384999999", email: "" };
+  const ventes = [
+    { id: "v-homonyme", client: HOMONYME.nom, rue: HOMONYME.rue, codePostal: HOMONYME.codePostal, ville: HOMONYME.ville,
+      codeProduit: "ALE", produit: "Aleses", quantite: 1, ttc: 5, date: "20/09/2026", dateCommandeIso: "2026-09-20" },
+    { id: "v-dupont", client: DUPONT.nom, rue: DUPONT.rue, codePostal: DUPONT.codePostal, ville: DUPONT.ville,
+      codeProduit: "CH-L", produit: "Changes taille L", quantite: 2, ttc: 24, date: "20/09/2026", dateCommandeIso: "2026-09-20" }
+  ];
+  semer({ clients: [DUPONT, HOMONYME, MARTIN], ventes });
+  const r = await importerVentes(baseUrl, [ENTETE, LIGNE_DUPONT]);
+  assert.equal(r.status, 200, r.body?.error);
+  const apres = readDb().ventes;
+  assert.ok(apres.some(v => v.id === "v-homonyme"), "la vente de l'homonyme (meme nom, meme code postal, meme date) a disparu");
+  assert.equal(apres.filter(v => v.rue === DUPONT.rue).length, 1, "le bon de Dupont est en double");
+  assert.equal(apres.length, 2);
+});
+
+test("ventes — temoin : adresse changee ET un homonyme au meme code postal (fiche incertaine) -- aucune vente ne disparait", async () => {
+  const HOMONYME = { ...DUPONT, id: "c-dupont-2", rue: "40 avenue de Lahr", telephone: "0384999999", email: "" };
+  const ventes = [
+    { id: "v-dupont", client: DUPONT.nom, rue: DUPONT.rue, codePostal: DUPONT.codePostal, ville: DUPONT.ville,
+      codeProduit: "CH-L", produit: "Changes taille L", quantite: 2, ttc: 24, date: "20/09/2026", dateCommandeIso: "2026-09-20" },
+    { id: "v-homonyme", client: HOMONYME.nom, rue: HOMONYME.rue, codePostal: HOMONYME.codePostal, ville: HOMONYME.ville,
+      codeProduit: "ALE", produit: "Aleses", quantite: 1, ttc: 5, date: "20/09/2026", dateCommandeIso: "2026-09-20" }
+  ];
+  semer({ clients: [DUPONT, HOMONYME, MARTIN], ventes });
+  const ligne = [...LIGNE_DUPONT];
+  ligne[5] = "3 bis rue du Pont";
+  const r = await importerVentes(baseUrl, [ENTETE, ligne]);
+  assert.equal(r.status, 200, r.body?.error);
+  const ids = readDb().ventes.map(v => v.id);
+  assert.ok(ids.includes("v-homonyme"), "la vente de l'homonyme a disparu : le nom + code postal ne designe pas une seule fiche");
+  assert.ok(ids.includes("v-dupont"), "une vente a disparu sur une fiche incertaine");
+});

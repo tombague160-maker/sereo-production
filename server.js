@@ -3807,12 +3807,13 @@ function cleDuBonDeLaVente(vente) {
  * table qu'avant ; un fichier partiel ou vide n'efface plus rien.
  * `figes` (26/09) : les bons laisses tels quels -- leurs anciennes lignes
  * restent, les lignes du fichier ne s'y ajoutent pas (bon incomplet, voir
- * l'import des ventes).
+ * l'import des ventes). `cleAncienne` (26/09) : le bon d'une ancienne vente,
+ * reconnu par sa fiche quand son adresse a change (voir l'import des ventes).
  */
-function fusionnerVentes(anciennes, nouvelles, figes = new Set()) {
+function fusionnerVentes(anciennes, nouvelles, figes = new Set(), cleAncienne = cleDuBonDeLaVente) {
   const retenues = nouvelles.filter(vente => !figes.has(cleDuBonDeLaVente(vente)));
   const bonsDuFichier = new Set(retenues.map(cleDuBonDeLaVente));
-  const gardees = (Array.isArray(anciennes) ? anciennes : []).filter(vente => !bonsDuFichier.has(cleDuBonDeLaVente(vente)));
+  const gardees = (Array.isArray(anciennes) ? anciennes : []).filter(vente => !bonsDuFichier.has(cleAncienne(vente)));
   return { ventes: [...gardees, ...retenues], gardees: gardees.length };
 }
 
@@ -8922,6 +8923,17 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     // cle complete, sinon nom + code postal -- et la complete sans rien effacer.
     const cleClientDeLaVente = vente => clientKey({ nom: vente.client, rue: vente.rue, codePostal: vente.codePostal, ville: vente.ville });
     const indexFiches = indexerClientsExistants(db.clients, new Set(ventes.map(cleClientDeLaVente)));
+    // Les fiches d'AVANT l'import, pour reconnaitre le bon d'une ancienne vente
+    // (fusion des ventes, plus bas) : par cle complete quand une seule fiche la
+    // porte ; et combien de fiches partagent un nom + code postal.
+    const ficheAvantParCle = new Map();
+    const fichesParSecondaire = new Map();
+    db.clients.forEach(fiche => {
+      const cle = clientKey(fiche);
+      ficheAvantParCle.set(cle, ficheAvantParCle.has(cle) ? null : fiche.id);
+      const secondaire = clientSecondaryKey(fiche);
+      if (secondaire) fichesParSecondaire.set(secondaire, (fichesParSecondaire.get(secondaire) || 0) + 1);
+    });
     // Les commandes ORPHELINES : leur fiche a disparu (un ancien import la
     // retirait ; la production en a une, du 03/06). Une fiche recreee par le
     // fichier reprend leur identifiant -- sinon la commande serait refaite en
@@ -9197,11 +9209,40 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       });
     });
 
-    // Les ventes, maintenant que les commandes sont decidees. Un bon incomplet
-    // qui a deja des lignes les garde (meme sans commande : purgee, par exemple).
-    const bonsDesVentes = new Set((Array.isArray(db.ventes) ? db.ventes : []).map(cleDuBonDeLaVente));
+    // Les ventes, maintenant que les commandes sont decidees.
+    //
+    // Le bon d'une ANCIENNE vente suit la meme identite que sa commande : la
+    // fiche et la date (relecture adverse du 26/09). Sa cle (adresse complete +
+    // date) ne suffit plus quand l'adresse change dans Ximi (« 3 rue X »
+    // devient « 3 bis rue X », la ville s'ecrit autrement) : la fiche et la
+    // commande se retrouvaient (nom + code postal), mais les anciennes lignes
+    // de chaque bon restaient et les nouvelles s'y ajoutaient, pour toujours.
+    // Une ancienne vente prend la cle du bon du fichier quand sa fiche est SURE
+    // des deux cotes : une seule fiche porte son adresse complete, et le
+    // fichier rattache son bon de meme date a cette fiche par la cle complete
+    // ou par un nom + code postal qu'aucune autre fiche ne partage. Sinon (un
+    // homonyme au meme code postal), sa cle reste la sienne, comme avant.
+    const ficheSureDuFichier = vente => {
+      const entree = clientsMap[cleClientDeLaVente(vente)];
+      const fiche = entree?._ficheExistante;
+      if (!fiche) return null;
+      if (!entree._parSecondaire) return fiche.id;
+      return fichesParSecondaire.get(clientSecondaryKey(fiche)) === 1 ? fiche.id : null;
+    };
+    const bonDuFichierParFiche = new Map();
+    ventes.forEach(vente => {
+      const id = ficheSureDuFichier(vente);
+      if (id) bonDuFichierParFiche.set(`${id}|${vente.dateCommandeIso || ""}`, cleDuBonDeLaVente(vente));
+    });
+    const cleDeLAncienne = vente => {
+      const id = ficheAvantParCle.get(cleClientDeLaVente(vente));
+      return (id && bonDuFichierParFiche.get(`${id}|${vente.dateCommandeIso || ""}`)) || cleDuBonDeLaVente(vente);
+    };
+    // Un bon incomplet qui a deja des lignes les garde (meme sans commande :
+    // purgee, par exemple).
+    const bonsDesVentes = new Set((Array.isArray(db.ventes) ? db.ventes : []).map(cleDeLAncienne));
     bonsIncomplets.forEach(cle => { if (bonsDesVentes.has(cle)) bonsFiges.add(cle); });
-    const fusionVentes = fusionnerVentes(db.ventes, ventes, bonsFiges);
+    const fusionVentes = fusionnerVentes(db.ventes, ventes, bonsFiges, cleDeLAncienne);
     db.ventes = fusionVentes.ventes;
 
     syncWorkflow(db);
