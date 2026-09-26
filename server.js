@@ -4006,29 +4006,28 @@ function stockReserveActif(order) {
 // au-dela : son stock doit sortir du rayon, comme par « Passer en
 // preparation ».
 //
-// Relecture adverse (25/09) : une commande « a reprogrammer » (ou en probleme
-// de livraison) dont le stock a ete libere a la main (release-stock, admis sur
-// ces deux statuts seulement) en est aussi, quand une transition la remet en
-// preparation ou en route. « Passer en preparation » sortait son stock ;
-// PATCH non : preparee, en carton, pendant que le rayon comptait encore ses
-// articles (une autre commande pouvait les prendre, et sa livraison mettait
-// le rayon en negatif). Seule la livraison le reprenait (reprendreStockLibere).
-// Une commande de ces statuts jamais liberee n'est pas concernee : elle garde
-// sa reservation, ou n'en a jamais eu (donnees anciennes).
+// Relecture adverse (25/09) : une commande dont le stock a ete libere a la
+// main (release-stock, sur « a reprogrammer » ou en probleme de livraison) et
+// qu'une transition remet en PREPARATION (en preparation, terminee, prete) en
+// est aussi. « Passer en preparation » sortait son stock ; PATCH non :
+// preparee, en carton, pendant que le rayon comptait encore ses articles (une
+// autre commande pouvait les prendre, et sa livraison mettait le rayon en
+// negatif). Vers « en livraison » ou « livre », rien ne change : la
+// livraison reprend le stock (reprendreStockLibere), meme sur un rayon
+// insuffisant (decision de Thomas du 23/09), comme la tournee qui la relivre.
 const STATUTS_AVANT_PREPARATION = new Set(["brouillon", "importe", "stock_a_verifier", "commande_client_validee"]);
 const STATUTS_STOCK_SORTI = new Set(["en_preparation", "preparation_terminee", "pret_livraison", "en_livraison", "livre"]);
-const STATUTS_AU_STOCK_LIBERABLE = new Set(["probleme_livraison", "a_reprogrammer"]);
+const STATUTS_DE_PREPARATION = new Set(["en_preparation", "preparation_terminee", "pret_livraison"]);
 
 function stockLibereALaMain(order) {
-  return STATUTS_AU_STOCK_LIBERABLE.has(order.status)
-    && Boolean(order.stockReleaseReason)
-    && order.stockReleaseReason !== "consumed_by_delivery";
+  return Boolean(order.stockReleaseReason) && order.stockReleaseReason !== "consumed_by_delivery";
 }
 
 function commandeQuiPartEnPreparation(order, statut) {
+  const avantPreparation = STATUTS_AVANT_PREPARATION.has(order.status) && STATUTS_STOCK_SORTI.has(statut);
+  const repreparee = stockLibereALaMain(order) && STATUTS_DE_PREPARATION.has(statut);
   return statut !== order.status
-    && (STATUTS_AVANT_PREPARATION.has(order.status) || stockLibereALaMain(order))
-    && STATUTS_STOCK_SORTI.has(statut)
+    && (avantPreparation || repreparee)
     && isValidOrderStatusTransition(order.status, statut)
     && !order.stockReservedAt;
 }

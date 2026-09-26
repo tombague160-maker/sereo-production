@@ -313,11 +313,13 @@ test("PATCH en preparation d'une « à reprogrammer » liberee, rayon insuffisan
   assert.equal((await produit("p1")).rayon, 3);
 });
 
-// Temoin (vert avant et apres) : la reprise ne vaut que pour les statuts ou la
-// liberation est admise. Une commande EN LIVRAISON au stock libere (hors de
-// toute tournee active : donnee d'avant le lot 1, ou semee ainsi) que PATCH
-// dit « livre » sur un rayon insuffisant reste ACCEPTEE (decision de Thomas du
-// 23/09, reprendreStockLibere) : la reprise ne doit pas la refuser.
+// Temoin (vert avant et apres) : la reprise ne vaut que vers la PREPARATION.
+// Une commande EN LIVRAISON au stock libere (hors de toute tournee active :
+// donnee d'avant le lot 1, ou semee ainsi) que PATCH dit « livre » sur un
+// rayon insuffisant reste ACCEPTEE (decision de Thomas du 23/09,
+// reprendreStockLibere) : la reprise ne doit pas la refuser. (Le passage
+// « a reprogrammer » -> « en livraison » sur rayon insuffisant, lui, est
+// garde par stock-journal-mouvements.test.js.)
 test("temoin : PATCH « livre » d'une commande en livraison au stock libere, rayon insuffisant : acceptee, rayon negatif", async () => {
   ensemencer({
     commandes: [{
