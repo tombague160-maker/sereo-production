@@ -260,7 +260,9 @@ test("2 — hors ligne, la fiche corrigee PUIS la commande attendent dans la fil
 
   await ctx.setOffline(true);
   await page.locator("#customerValider").click();
-  await expect(page.locator(".toast", { hasText: "sera envoyé à la reconnexion" }).first()).toBeVisible();
+  // La commande en file est une commande FAITE pour l'ecran (hors-ligne-et-saisie.spec.js,
+  // 25/09) : elle le dit, et l'ecran repart a vide.
+  await expect(page.locator(".toast", { hasText: "Commande enregistrée sur ce téléphone : elle partira à la reconnexion." }).first()).toBeVisible();
   const file = await lireFile(page);
   expect(file.map(e => `${e.methode} ${new URL(e.url, srv.base).pathname}`), "la fiche, puis la commande")
     .toEqual(["PATCH /api/clients/c-martin", "POST /api/customer-orders"]);
