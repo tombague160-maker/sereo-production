@@ -8310,3 +8310,35 @@ signalée « pas soldée » au-dessus de l'arrêt, même quand c'est elle qu'on 
 les 126 px du bandeau poussent le nom, l'adresse et les articles sous la barre des gestes — ce que
 le lot « téléphone utilisable » avait réglé. Un livreur qui finit après minuit le verrait.
 Défaut proposé : un bandeau d'une ligne quand la tournée signalée est celle affichée.
+
+### Relecture adverse (26/09) : la saisie après une fin de session ou une issue inconnue
+
+Quatre défauts relevés sur `2b72612`, tous vrais, tous corrigés. Bancs 15 à 18 de
+`hors-ligne-et-saisie.spec.js`, chacun d'abord lancé sur `2b72612`.
+
+- **Session expirée pendant « Valider »** : `apiFetch` mettait la commande en file (H2) mais
+  l'erreur ne le disait pas ; le brouillon restait, revenait après la reconnexion (« La commande
+  en cours a été reprise. ») alors que la file venait de créer la commande, et la moindre
+  retouche (autre saisie, donc autre clé) en créait une seconde (rouge : « 1 produit » repris ;
+  retouchée et revalidée, 2 commandes pour une saisie). L'erreur de fin de session porte
+  désormais `gardeeEnFile` ; la commande client s'en sert comme d'une mise en file : l'écran
+  repart à vide. Pas `enFile` : chaque appelant en tire son chemin « hors ligne », qui n'a pas
+  été relu pour une fin de session.
+- **Abonnement + nouvelle fiche, issue inconnue** (délai dépassé, réponse coupée) : le serveur a pu
+  créer la fiche ; l'écran disait « Pas de réseau », et le nouvel essai, sous une clé neuve,
+  créait une seconde fiche (sans téléphone ni code postal, `findDuplicateClient` ne la reconnaît
+  pas). Une clé par saisie de la fiche, comme la commande client ; au « déjà fait » (le serveur
+  ne rend que le statut) ou au corps coupé (en-têtes 2xx), la fiche est retrouvée au serveur :
+  inconnue de l'écran au premier envoi, même nom, même adresse — une seule, sinon on demande de
+  la choisir. Message sans réponse : « Pas de réponse du serveur (réseau absent ou trop lent) :
+  la fiche a peut-être été créée… ». Le banc 4 (4G sans débit) attend ce message : la page ne
+  sait pas si la requête est arrivée. Revers de la clé stable, tenu : un refus 409 perdu revient
+  rejoué sans message ; il est nommé (« Une fiche existe déjà… »).
+- **Revalider après une issue inconnue** : le rejeu `{ rejoue: true }` ne porte ni la commande ni
+  son numéro ; l'écran annonçait « validée : elle est à préparer », même bloquée faute de stock.
+  Il dit maintenant « avait déjà été reçue au premier envoi : elle n'a pas été créée une seconde
+  fois », et ouvre Commandes. (Rendre au rejeu le corps de la première réponse demanderait une
+  colonne dans `gestes_recus` : une migration, hors de ce lot.)
+- **Le brouillon d'un compte revenait au compte suivant** (même onglet, fin de session) : il porte
+  le compte qui l'a saisi ; un autre compte ne le reprend pas, il part. Tant que `/api/me` n'a pas
+  répondu, la reprise attend (`loadMoi`). Témoin : le même compte retrouve sa saisie.
