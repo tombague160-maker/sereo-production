@@ -10838,7 +10838,6 @@ textarea::placeholder {
 }
 :root[data-color-scheme] #stock .stk-pas.stk-pas--plus,
 :root:not([data-color-scheme]) #stock .stk-pas.stk-pas--plus { background: var(--v8-principal); color: var(--v8-texte-sur-principal); }
-#stock .stk-pas svg { width: 16px; height: 16px; }
 #stock .stk-pas:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
 #stock .stk-mouvements { grid-column: span 12; padding: 28px; }
@@ -15738,4 +15737,43 @@ button.button.danger .button-icon { width: 18px; height: 18px; flex: none; }
   #commandes .cmd-filtres > .cmd-tri:not(.cmd-filtre-second) { flex: 1 1 0; min-width: 0; margin-left: auto; max-width: max-content; }
   :root[data-color-scheme] #commandes .cmd-filtres > .cmd-tri:not(.cmd-filtre-second) select,
   :root:not([data-color-scheme]) #commandes .cmd-filtres > .cmd-tri:not(.cmd-filtre-second) select { width: 100%; min-width: 0; text-overflow: ellipsis; }
+}
+
+/* --- Garde-fous (25/09) : bandeau « mot de passe d'administration trop court »
+   Meme forme que le bandeau de restauration (couleur d'alerte, texte clair) ;
+   sa croix fait 44 px (celle du bandeau de restauration en fait 32) et montre
+   son focus au clavier. */
+#bandeauMotDePasseCourt .storage-recovery-dismiss { width: 44px; height: 44px; }
+#bandeauMotDePasseCourt .storage-recovery-dismiss:focus-visible { outline: 3px solid var(--v8-surface); outline-offset: 2px; }
+
+/* --- Garde-fous, relecture du 26/09 : le stock ferme au livreur
+   La note de l'ecran Stock (« Reserve au bureau et a la
+   preparation. ») : le texte d'aide de Parametres, avec la marge de la carte.
+   [hidden] gagne : la note n'existe que pour le livreur. */
+#stock .stk-reserve-note:not([hidden]) { padding: 8px 12px 0; }
+
+/* --- Stock : le « − » et le « + » de chaque ligne dessines par la feuille (25/09)
+   Deux <svg> en ligne par produit : 436 au jeu « production » (218 lignes),
+   plus de la moitie de l'analyse HTML de la liste a chaque arrivee sur le
+   Stock et a chaque recherche (CPU x 4 : 96 ms, 39 sans eux, au mieux de
+   neuf). Le MEME trace (viewBox 24, trait 2,5, bouts ronds, 16 px) sert de
+   masque a un pseudo-element peint de la couleur du bouton : meme rendu, clair
+   et sombre (banc : hors-ligne-et-saisie.spec.js, compare au <svg> d'avant). */
+#stock .stk-pas::before {
+  content: "";
+  flex: none;
+  width: 16px;
+  height: 16px;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M5 12h14' fill='none' stroke='%23000' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E") center / 16px 16px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M5 12h14' fill='none' stroke='%23000' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E") center / 16px 16px no-repeat;
+}
+#stock .stk-pas.stk-pas--plus::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 5v14M5 12h14' fill='none' stroke='%23000' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 5v14M5 12h14' fill='none' stroke='%23000' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+/* Couleurs forcees (contraste eleve de Windows) : un fond y est repeint de la
+   couleur du canevas ; le trait du <svg> suivait le texte du bouton. */
+@media (forced-colors: active) {
+  #stock .stk-pas::before { forced-color-adjust: none; background: ButtonText; }
 }

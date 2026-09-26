@@ -33,7 +33,7 @@ process.env.SEREO_AUTH_PASSWORD = "mot-de-passe-environnement";
 process.env.SEREO_AUTH_MAX_ATTEMPTS = "50";
 process.env.SEREO_AUTH_RATE_WINDOW_MS = "60000";
 // Le telechargement ne depend PAS de cette variable quand l'authentification
-// est active (elle garde /api/db, ouvert a tout compte connecte).
+// est active (elle garde /api/db, reserve a l'administration).
 delete process.env.SEREO_ENABLE_DB_EXPORT;
 
 const {
@@ -187,6 +187,34 @@ test("télécharger la dernière : l'administrateur reçoit CE fichier, les autr
   assert.notEqual(Buffer.from(await anonyme.arrayBuffer())[0], 0x1f, "sans session, des octets de la base sont partis");
 });
 
+// Relecture adverse du 26/09 : les fichiers de travail d'une sauvegarde en
+// cours (lib/sauvegarde-base.js, fichiersDeTravail) portaient un nom accepte
+// comme sauvegarde. Plus recents que tout, ils devenaient « la derniere » :
+// servis au telechargement (une base brute en cours d'ecriture, en gzip),
+// affiches sur la carte, comptes par la rotation.
+test("une sauvegarde en cours : ses fichiers de travail ne sont ni « la dernière », ni téléchargés, ni comptés", async () => {
+  viderLeDossier();
+  _resetStorageRecoveryForTest();
+  assert.equal((await appel("/api/backup/now", { cookie: cookies.admin, method: "POST", body: {} })).status, 200);
+  const vraie = plusRecente().nom;
+  // La sauvegarde suivante, en cours : ses fichiers de travail, plus recents.
+  const { fichiersDeTravail } = require("../lib/sauvegarde-base");
+  const suivante = path.join(DOSSIER, `db-${new Date(Date.now() + 60000).toISOString().replace(/[:.]/g, "-")}.sqlite.gz`);
+  const travail = fichiersDeTravail(suivante);
+  const poses = [travail.copie, `${travail.copie}-journal`, travail.verification, `${travail.verification}-wal`, travail.compresse]
+    .map(chemin => poser(path.basename(chemin), Date.now() + 5000));
+  const s = await etat();
+  assert.equal(s.derniere.nom, vraie, "la carte donne un fichier de travail pour la derniere sauvegarde");
+  assert.equal(s.nombre, 1, "des fichiers de travail sont comptes parmi les sauvegardes");
+  const reponse = await appel("/api/sauvegardes/derniere", { cookie: cookies.admin });
+  assert.equal(reponse.status, 200);
+  const nomServi = (reponse.headers.get("content-disposition") || "").match(/filename="([^"]+)"/)?.[1];
+  await reponse.arrayBuffer();
+  assert.equal(nomServi, vraie, "le telechargement sert un fichier de travail");
+  // Temoin : ils sont bien la, plus recents que la vraie.
+  assert.deepEqual(poses.filter(nom => !fichiers().includes(nom)), [], "temoin : les fichiers de travail n'ont pas ete poses");
+});
+
 test("l'état dit à chacun ce qu'il peut faire", async () => {
   // Une sauvegarde a telecharger : sans elle, « permis » est faux pour tous.
   assert.equal((await appel("/api/backup/now", { cookie: cookies.admin, method: "POST", body: {} })).status, 200);
@@ -224,6 +252,23 @@ test("rétention : la dernière de chaque jour survit à la rotation, 30 jours d
   const parRecence = [...poses].sort((x, y) => y.ms - x.ms);
   const attendu = new Set([nouvelle, ...parRecence.slice(0, 29).map(p => p.nom)]);
   for (let d = 1; d <= 29; d++) attendu.add(parRecence.find(p => p.d === d).nom);
+  // Garde-fous (25/09, decision 4) : et la derniere de chaque semaine de Paris
+  // (lundi-dimanche) sur 8 semaines. La semaine d'aujourd'hui a la nouvelle.
+  const lundi = ms => {
+    const [aa, mm, jj] = jourDeParis(ms).split("-").map(Number);
+    const js = new Date(Date.UTC(aa, mm - 1, jj)).getUTCDay() || 7;
+    return new Date(Date.UTC(aa, mm - 1, jj - (js - 1))).toISOString().slice(0, 10);
+  };
+  const semaineCourante = lundi(Date.now());
+  const semainesVues = new Set([semaineCourante]);
+  for (const p of parRecence) {
+    const s = lundi(p.ms);
+    const [la, lm, lj] = semaineCourante.split("-").map(Number);
+    const premiere = new Date(Date.UTC(la, lm - 1, lj - 49)).toISOString().slice(0, 10);
+    if (s < premiere || semainesVues.has(s)) continue;
+    semainesVues.add(s);
+    attendu.add(p.nom);
+  }
   const restants = new Set(fichiers());
 
   const joursSansSauvegarde = [];
@@ -233,8 +278,10 @@ test("rétention : la dernière de chaque jour survit à la rotation, 30 jours d
   }
   assert.deepEqual(joursSansSauvegarde, [], "jours (en arriere) qui n'ont plus aucune sauvegarde");
   assert.deepEqual([...restants].sort(), [...attendu].sort());
-  // Au-dela de 30 jours, plus de journaliere : la rotation reprend ses droits.
-  assert.equal(poses.filter(p => p.d >= 30 && restants.has(p.nom)).length, 0);
+  // Au-dela de 30 jours, plus de journaliere : ne restent que les
+  // hebdomadaires, une par semaine au plus (decision 4, 25/09).
+  const auDela = poses.filter(p => p.d >= 30 && restants.has(p.nom));
+  assert.equal(new Set(auDela.map(p => lundi(p.ms))).size, auDela.length, "plus d'une sauvegarde par semaine au-dela de 30 jours");
 });
 
 test("rétention : jamais plus agressive qu'avant (les 30 dernières restent, même vieilles)", async () => {

@@ -179,6 +179,9 @@ let activeColorScheme = "auto";
 // est volontairement vide.
 let moi = null;
 let comptes = [];
+// La note des blocs reserves a l'administration (garde-fous du 25/09, voir
+// majDroitsAdministration) ; en tete : majBandeauHorsLigne la lit des le debut.
+const NOTE_RESERVE_ADMIN = "Réservé aux administrateurs.";
 
 
 if ("scrollRestoration" in history) {
@@ -203,7 +206,7 @@ document.addEventListener("DOMContentLoaded", () => {
   updateMetaThemeColor();
   watchSystemColorScheme();
   bindUi();
-  initOperations({apiFetch, loadData, notify, recalculateRoute, formatSectorLabel});
+  initOperations({apiFetch, loadData, notify, recalculateRoute, formatSectorLabel, nouvelleCleDeGeste});
   initAdresses({ apiFetch, loadData, notify, getCurrentTarget: () => getCurrentDeliveryTarget() });
   initTourneePratique();
   bindVersionModal();
@@ -293,11 +296,27 @@ window.addEventListener("load", () => {
 // boutons (barre, menu « Plus ») visent le meme formulaire par `form=`.
 // `navigator.onLine === false` est sur ; `true` ne prouve rien (reseau qui
 // ment) : ce cas-la reste celui d'avant, hors de portee de cette garde.
+//
+// EN LIGNE (garde-fous du 25/09) : la page part vers /login. Une lecture
+// partie pendant ce temps revient en 401 (la session est fermee cote serveur
+// des le POST /logout) ; apiFetch ne lance pas alors SA navigation
+// (/login?next=...), qui interromprait celle du formulaire (net::ERR_ABORTED).
+// Remis a faux si la page revient du cache arriere du navigateur.
+let deconnexionEnCours = false;
 document.addEventListener("submit", event => {
-  if (event.target?.id !== "formDeconnexion" || navigator.onLine !== false) return;
-  event.preventDefault();
-  notify("Hors ligne : la déconnexion attend le retour du réseau. Rien n'a été effacé.", "error", { cle: "deconnexion-hors-ligne" });
+  if (event.target?.id !== "formDeconnexion") return;
+  if (navigator.onLine === false) {
+    event.preventDefault();
+    notify("Hors ligne : la déconnexion attend le retour du réseau. Rien n'a été effacé.", "error", { cle: "deconnexion-hors-ligne" });
+    return;
+  }
+  if (event.defaultPrevented) return;
+  deconnexionEnCours = true;
+  // Le brouillon de commande (25/09) part avec la session : le compte suivant,
+  // sur le meme onglet, n'en herite pas.
+  oublierBrouillonCommande();
 });
+window.addEventListener("pageshow", event => { if (event.persisted) deconnexionEnCours = false; });
 
 function setNavigationSearchValue(value, sourceInput = null) {
   // #globalNavigationSearch vivait dans la barre du haut, que les planches
@@ -752,7 +771,7 @@ function bindUi() {
     const champ = event.target;
     if (champ.dataset.depuisEntete !== "1") return;
     delete champ.dataset.depuisEntete;
-    if (champ.files?.length) document.getElementById("ventesForm")?.requestSubmit();
+    if (champ.files?.length) demanderEnvoi(document.getElementById("ventesForm"));
   });
 
   // Un selecteur ANNULE ne doit pas laisser l'envoi arme : le prochain fichier
@@ -765,7 +784,7 @@ function bindUi() {
     const champ = event.target;
     if (champ.dataset.depuisEntete !== "1") return;
     delete champ.dataset.depuisEntete;
-    if (champ.files?.length) document.getElementById("stockForm")?.requestSubmit();
+    if (champ.files?.length) demanderEnvoi(document.getElementById("stockForm"));
   });
 
   // Une tuile de categorie filtre le tableau ; la meme tuile, rappuyee, rend tout.
@@ -873,8 +892,13 @@ function bindUi() {
 
   document.getElementById("customerOrderForm")?.addEventListener("submit", event => {
     event.preventDefault();
-    runAction(event.submitter, "Validation...", () => submitCustomerOrder(event.currentTarget));
+    const form = event.currentTarget;
+    envoyerUneFois(form, event.submitter, "Validation...", () => submitCustomerOrder(form));
   });
+  // Le brouillon de la commande (25/09) : chaque saisie le garde.
+  for (const quoi of ["input", "change"]) {
+    document.getElementById("customerOrderForm")?.addEventListener(quoi, () => garderBrouillonCommande());
+  }
   // Un champ obligatoire dans les coordonnees REPLIEES (le nom d'une nouvelle
   // fiche) : le navigateur ne peut pas montrer son message sur un champ
   // cache, et l'envoi echouait sans rien dire. On deplie d'abord.
@@ -1309,6 +1333,10 @@ function showTab(tabName, options = {}) {
   // (rendreOuDifferer). Son rendu refait aussi l'ordre a plat du Stock.
   const stockEnAttente = nextTab === "stock" && Boolean(rendusEnAttente.get("stock")?.has(renderStock));
   if (stockEnAttente) ordreAPlat = null;
+  // La commande en cours, gardee avant un « retour » ou un rechargement (25/09).
+  if (nextTab === "commande-client") reprendreBrouillonCommande();
+  // Apres un geste d'arret, les chiffres du tableau de bord se relisent (25/09).
+  if (nextTab === "journee" && tableauDeBordPerime) relireTableauDeBord();
   rendreEnAttente(nextTab);
 
   setText("pageTitle", titles[nextTab].title);
@@ -1820,6 +1848,10 @@ let derniereEcritureA = 0;
 // Les cles dont l'ecran montre une COPIE (reseau trop lent), depuis le dernier
 // chargement : une reponse tardive les rafraichit (ecouterReponsesTardives).
 const clesEnCopie = new Set();
+// Les cles INDISPONIBLES au dernier chargement (« Partiel (N indispo) ») : une
+// reponse tardive les remplit, et le statut suit (chasse aux defauts, 25/09 :
+// il restait « Partiel » avec les commandes a l'ecran).
+const clesEnEchec = new Set();
 
 /**
  * Une ecriture part (ou vient d'etre renvoyee par la file). Integration des
@@ -1837,6 +1869,10 @@ function noterEcriture() {
 }
 
 async function viderCacheDeDonnees() {
+  // Le brouillon de commande (25/09) n'est PAS un cache : comme la file, il
+  // reste a la fin de session (reconnexion dans le meme onglet, la saisie
+  // revient) -- au MEME compte seulement (reprendreBrouillonCommande, 26/09).
+  // Il part a la deconnexion volontaire (formDeconnexion).
   try {
     if (typeof caches === "undefined") return;
     const noms = (await caches.keys()).filter(nom => nom.startsWith(PREFIXE_CACHE_DONNEES));
@@ -1941,11 +1977,18 @@ async function appliquerReponsesTardives() {
   // pose l'erreur, la reponse tardive l'efface.
   if (Object.prototype.hasOwnProperty.call(data, "orders")) commandesEnErreur = false;
   appliquerDonnees(data);
-  for (const cle of cles) clesEnCopie.delete(cle);
-  if (clesEnCopie.size === 0 && /^Données (de|du|en cache)/.test(dernierStatut)) {
+  const partiel = /^Partiel/.test(dernierStatut);
+  for (const cle of cles) {
+    clesEnCopie.delete(cle);
+    clesEnEchec.delete(cle);
+  }
+  if (clesEnCopie.size === 0 && clesEnEchec.size === 0 && (partiel || /^Données (de|du|en cache)/.test(dernierStatut))) {
     copieAffichee = null;
     setStatus("À jour");
     quitterOuvertureHorsLigne();
+  } else if (partiel) {
+    // Ce qui manque encore, ou, s'il ne manque plus rien, l'age des copies.
+    setStatus(clesEnEchec.size ? `Partiel (${clesEnEchec.size} indispo)` : libelleCopie(copieAffichee));
   }
 }
 
@@ -2166,6 +2209,8 @@ async function loadData() {
 
   clesEnCopie.clear();
   for (const cle of copiees) clesEnCopie.add(cle);
+  clesEnEchec.clear();
+  for (const cle of failed) clesEnEchec.add(cle);
   const ecritureCroisee = derniereEcritureA !== ecritureAuDepart;
   if (frais && gardees.length === 0 && failed.length === 0 && !ecritureCroisee) ecritureNonRelue = false;
 
@@ -2567,8 +2612,33 @@ async function appliquerGesteArret(resultat) {
     await loadData();
     return;
   }
+  // Le chiffre d'affaires et les comptes du tableau de bord viennent de
+  // /api/operations, que la mise a jour ciblee ne relit pas (lot 5 : aucune
+  // lecture ne suit un geste). Ils se relisent a l'arrivee sur le tableau de
+  // bord (chasse aux defauts, 25/09) : ils y montraient l'etat d'avant le geste.
+  tableauDeBordPerime = true;
   renderAll({ lectures: false });
   recopierApresGeste();
+}
+
+// Le tableau de bord montre des chiffres d'avant un geste d'arret.
+let tableauDeBordPerime = false;
+
+/**
+ * Relit ce que le tableau de bord tient du serveur (chiffre d'affaires,
+ * commandes livrees, « En livraison ») : deux lectures, a l'arrivee sur
+ * l'ecran, jamais sur le chemin du geste. Frais (X-Sereo-Frais) : la copie
+ * du service worker date d'avant le geste. Un echec (hors ligne) laisse
+ * l'ecran tel quel ; la prochaine arrivee reessaie.
+ */
+async function relireTableauDeBord() {
+  tableauDeBordPerime = false;
+  const endpoints = endpointsDeChargement().filter(e => e.key === "operations" || e.key === "dashboard");
+  const resultats = await Promise.allSettled(endpoints.map(e => apiFetch(e.path, { headers: { "X-Sereo-Frais": "1" } })));
+  const data = {};
+  resultats.forEach((r, i) => { if (r.status === "fulfilled" && r.value) data[endpoints[i].key] = r.value; });
+  if (Object.keys(data).length < endpoints.length) tableauDeBordPerime = true;
+  if (Object.keys(data).length) appliquerDonnees(data);
 }
 
 /**
@@ -2909,27 +2979,98 @@ function placerExportCommandes() {
  * Abonnes et statut sur 4 rangs a 360 px.
  */
 const REPLIS_DE_PILULES = new Map();
-function declarerRepliDePilules(nom, { conteneur, pilules, choisie }) {
-  REPLIS_DE_PILULES.set(nom, { conteneur, pilules, choisie });
+// `ecran` : l'ecran (l'id de sa page) avec lequel la rangee se montre.
+function declarerRepliDePilules(nom, { ecran, conteneur, pilules, choisie }) {
+  REPLIS_DE_PILULES.set(nom, { ecran, conteneur, pilules, choisie });
+}
+
+/*
+ * UNE mise en page par repli (performance, 25/09). Le premier jet cachait les
+ * pilules une par une et remesurait apres chacune : une mise en page forcee
+ * par pilule cachee -- Clients au telephone, 26 secteurs, 766 ms a l'arrivee
+ * (CPU x 4, jeu « production »). Meme resultat, calcule : on ECRIT tout
+ * (pilules depliees, sondes de « + N »), on LIT tout d'un coup, on CALCULE le
+ * repli, puis on ECRIT les classes.
+ *
+ * Le calcul tient parce que la rangee est un flot `flex-wrap` sans
+ * etirement : une pilule ne bouge pas quand on cache celles d'APRES elle. Ne
+ * se deplacent que ce qui suit la premiere pilule cachee -- les choisies,
+ * jamais cachees, et « + N » -- et on les place a la suite, comme le
+ * navigateur (retour a la ligne des qu'une largeur, ecart compris, deborde).
+ * La largeur de « + N » depend de N (« + 9 » tient dans les 56 px minimum,
+ * « + 12 » non) : une sonde par N, hors du flot, mesuree dans la meme mise en
+ * page. Les largeurs sont des multiples de 1/64 px (celles du moteur) : les
+ * sommes sont exactes. telephone-utilisable.spec.js et hors-ligne-et-saisie
+ * comparent le resultat a celui de la mesure pilule par pilule.
+ */
+function mesurerRangeeDePilules(conteneur, pilules, sondes) {
+  if (!conteneur.getClientRects().length) return null;
+  const boite = conteneur.getBoundingClientRect();
+  const style = getComputedStyle(conteneur);
+  const px = valeur => parseFloat(valeur) || 0;
+  const dispo = boite.width - px(style.paddingLeft) - px(style.paddingRight) - px(style.borderLeftWidth) - px(style.borderRightWidth);
+  const ecart = px(style.columnGap);
+  const mesures = new Map();
+  for (const p of pilules) {
+    if (!p.getClientRects().length) continue;
+    const r = p.getBoundingClientRect();
+    const s = getComputedStyle(p);
+    // Relatif au conteneur : un defilement qui s'ajuste ne deplace rien.
+    mesures.set(p, { haut: Math.round(r.top - boite.top), largeur: r.width + px(s.marginLeft) + px(s.marginRight) });
+  }
+  const largeursPlus = sondes.map(s => s.getBoundingClientRect().width);
+  return { dispo, ecart, mesures, largeursPlus };
 }
 
 function replierPilules(nom) {
   const repli = REPLIS_DE_PILULES.get(nom);
   const conteneur = repli?.conteneur();
   if (!conteneur) return;
+  // Ecran cache : rien ne s'y mesure, et le demander (getClientRects) forcait
+  // la mise en page de TOUT le document, a chaque changement d'ecran, une fois
+  // par rangee cachee. Arriver sur le Stock au telephone : environ 180 ms
+  // (CPU x 4, jeu « production », 25/09) pour ne rien replier. Le savoir ne
+  // demande aucune mesure : une rangee ne se montre qu'avec SON ecran (dans
+  // sa page, ou dans la fente d'en-tete au telephone, que showTab cache hors
+  // de lui). Le repli se refait en arrivant sur l'ecran (showTab).
+  // (Une rangee declaree sans ecran se mesure toujours, comme avant.)
+  if (repli.ecran && !document.getElementById(repli.ecran)?.classList.contains("active")) return;
   let bouton = conteneur.querySelector(":scope > .pilules-plus");
   const pilules = repli.pilules(conteneur);
   pilules.forEach(p => p.classList.remove("pilule-repliee"));
   if (bouton) bouton.hidden = true;
-  // Au bureau, ou ecran cache (rien ne se mesure) : tout reste deplie.
-  if (!ecranTelephone.matches || !conteneur.getClientRects().length) return;
+  // Au bureau : tout reste deplie.
+  if (!ecranTelephone.matches) return;
+  // Les sondes de « + 1 » a « + N » : hors du flot, invisibles, retirees
+  // avant de rendre la main (rien d'autre ne les voit).
+  const modele = bouton || Object.assign(document.createElement("button"), { type: "button", className: "pilules-plus" });
+  const sondes = pilules.map((_, i) => {
+    const sonde = modele.cloneNode(false);
+    sonde.removeAttribute("data-pilules-plus");
+    sonde.removeAttribute("id");
+    sonde.hidden = false;
+    sonde.tabIndex = -1;
+    sonde.setAttribute("aria-hidden", "true");
+    sonde.style.cssText = "position:absolute;visibility:hidden;left:0;top:0;";
+    sonde.textContent = `+ ${i + 1}`;
+    return sonde;
+  });
+  conteneur.append(...sondes);
+  let mesure;
+  try {
+    mesure = mesurerRangeeDePilules(conteneur, pilules, sondes);
+  } finally {
+    for (const sonde of sondes) sonde.remove();
+  }
+  // Ecran cache (rien ne se mesure) : tout reste deplie.
+  if (!mesure) return;
+  const { dispo, ecart, mesures, largeursPlus } = mesure;
+  const visibles = pilules.filter(p => mesures.has(p));
   const rangs = [];
-  // Relatif au conteneur : cacher une pilule change la hauteur de la page, et
-  // le defilement qui s'ajuste deplacait tout -- en coordonnees d'ecran, le
-  // deuxieme rang « glissait » et le repli cachait six pilules sur sept.
-  const haut = e => Math.round(e.getBoundingClientRect().top - conteneur.getBoundingClientRect().top);
-  const visibles = pilules.filter(p => p.getClientRects().length);
-  for (const p of visibles) if (!rangs.some(r => Math.abs(r - haut(p)) < 4)) rangs.push(haut(p));
+  for (const p of visibles) {
+    const haut = mesures.get(p).haut;
+    if (!rangs.some(r => Math.abs(r - haut) < 4)) rangs.push(haut);
+  }
   if (rangs.length <= 2) return;
   if (!bouton) {
     bouton = document.createElement("button");
@@ -2949,16 +3090,42 @@ function replierPilules(nom) {
   // On cache depuis le bout, jamais la pilule choisie, jusqu'a ce que tout --
   // « + N » compris -- tienne dans les deux premiers rangs.
   rangs.sort((a, b) => a - b);
-  const limite = rangs[1] + 4;
+  const rangDe = p => rangs.findIndex(r => Math.abs(r - mesures.get(p).haut) < 4);
   const cachables = visibles.filter(p => !repli.choisie(p)).reverse();
-  let caches = 0;
-  for (;;) {
-    bouton.textContent = `+ ${Math.max(caches, 1)}`;
-    const deborde = [...visibles, bouton].some(e => !e.classList.contains("pilule-repliee") && haut(e) > limite);
-    if (!deborde || caches >= cachables.length) break;
-    cachables[caches].classList.add("pilule-repliee");
-    caches++;
-  }
+  const rangVisible = new Map(visibles.map((p, i) => [p, i]));
+  const deborde = caches => {
+    const cachees = new Set(cachables.slice(0, caches));
+    const premiere = caches ? rangVisible.get(cachables[caches - 1]) : visibles.length;
+    // Avant la premiere pilule cachee, rien ne bouge : les rangs mesures.
+    const avant = visibles.slice(0, premiere);
+    if (avant.some(p => rangDe(p) > 1)) return true;
+    let rang = 0, occupe = 0, nombre = 0;
+    if (avant.length) {
+      rang = rangDe(avant[avant.length - 1]);
+      const memeRang = avant.filter(p => rangDe(p) === rang);
+      occupe = memeRang.reduce((somme, p) => somme + mesures.get(p).largeur, 0) + ecart * (memeRang.length - 1);
+      nombre = memeRang.length;
+    }
+    // Apres : les choisies qui restent, puis « + N », a la suite.
+    const suite = visibles.slice(premiere + 1).filter(p => !cachees.has(p)).map(p => mesures.get(p).largeur);
+    suite.push(largeursPlus[Math.max(caches, 1) - 1]);
+    for (const largeur of suite) {
+      if (nombre && occupe + ecart + largeur > dispo) {
+        rang += 1;
+        occupe = largeur;
+        nombre = 1;
+      } else {
+        occupe = nombre ? occupe + ecart + largeur : largeur;
+        nombre += 1;
+      }
+      if (rang > 1) return true;
+    }
+    return false;
+  };
+  let caches = 1;
+  while (caches < cachables.length && deborde(caches)) caches++;
+  caches = Math.min(caches, cachables.length);
+  for (const p of cachables.slice(0, caches)) p.classList.add("pilule-repliee");
   bouton.textContent = `+ ${caches}`;
   bouton.setAttribute("aria-label", `Afficher ${caches} filtre${caches > 1 ? "s" : ""} de plus`);
 }
@@ -2987,11 +3154,13 @@ window.addEventListener("resize", planifierReplis);
 document.fonts?.addEventListener?.("loadingdone", planifierReplis);
 
 declarerRepliDePilules("commandes", {
+  ecran: "commandes",
   conteneur: () => document.getElementById("cmdPilules"),
   pilules: c => [...c.querySelectorAll(":scope > .filtre-pilule")],
   choisie: p => p.classList.contains("active-filter")
 });
 declarerRepliDePilules("clients", {
+  ecran: "crm",
   conteneur: () => document.querySelector("#crm .cli-filtres"),
   pilules: c => [...c.querySelectorAll(":scope > .cli-pilules > .cli-pilule, :scope > .cli-statut-filtre")],
   // Le statut commercial est un filtre choisi des qu'il n'est plus « Tous ».
@@ -3668,7 +3837,14 @@ const RAISONS_IMPORT_IGNORE = {
   // Relecture du 24/09 : le stock reserve verrouille aussi (server.js,
   // raisonImportIgnore) -- preparation lancee, commande terrain, planifiee confirmee.
   en_preparation: "commande déjà en préparation",
-  stock_reserve: "stock déjà réservé pour cette commande"
+  stock_reserve: "stock déjà réservé pour cette commande",
+  // Donnees clients (25/09) : seul un bon IMPORTE a preparer suit le fichier.
+  annulee: "commande annulée",
+  saisie_terrain: "commande saisie au terrain",
+  planifiee: "commande planifiée",
+  // Relecture du 26/09 : un bon deja importe dont une ligne est en erreur
+  // (quantite vide, produit absent) ne perd plus ce produit.
+  ligne_en_erreur: "une ligne de ce bon est en erreur dans le fichier"
 };
 const IMPORT_IGNOREES_MONTREES = 5;
 
@@ -3703,7 +3879,21 @@ function bilanImportVentes(result) {
     details.push({ attention: true, html: `Et ${escapeHtml(accorder(ignorees.length - IMPORT_IGNOREES_MONTREES, "autre commande ignorée", "autres commandes ignorées"))} (déjà en préparation, prêtes, en tournée ou livrées), laissées telles quelles.` });
   }
   if (identiques) details.push({ html: `${escapeHtml(accorder(identiques, "commande identique, déjà importée", "commandes identiques, déjà importées"))} : rien à changer.` });
-  if (erreurs) details.push({ attention: true, html: `<strong>${escapeHtml(accorder(erreurs, "ligne sans client ni produit", "lignes sans client ni produit"))}</strong> : écartée${erreurs > 1 ? "s" : ""}, vérifie le fichier.` });
+  // Chaque cause d'erreur (25/09) : une quantite vide ne vaut plus 1, une ligne
+  // sans client ne cree plus « Client sans nom », une date illisible ne date
+  // plus le bon du jour -- elles sont ecartees, et le resume dit pourquoi. Un
+  // serveur plus ancien ne rend que le total : c'etait « sans client ni produit ».
+  const causes = result.lignesEnErreur || { sansClientNiProduit: erreurs };
+  [
+    ["sansClientNiProduit", "ligne sans client ni produit", "lignes sans client ni produit"],
+    ["sansClient", "ligne sans client", "lignes sans client"],
+    ["sansProduit", "ligne sans produit", "lignes sans produit"],
+    ["sansQuantite", "ligne sans quantité lisible", "lignes sans quantité lisible"],
+    ["dateIllisible", "ligne sans date lisible", "lignes sans date lisible"]
+  ].forEach(([cle, un, plusieurs]) => {
+    const n = nombre(causes[cle]);
+    if (n) details.push({ attention: true, html: `<strong>${escapeHtml(accorder(n, un, plusieurs))}</strong> : écartée${n > 1 ? "s" : ""}, vérifie le fichier.` });
+  });
   // Les avertissements du serveur, qui ne vivaient que dans l'historique.
   const negatives = nombre(result.clampedNegativeQuantities);
   if (negatives) details.push({ attention: true, html: `<strong>${escapeHtml(accorder(negatives, "quantité négative ramenée", "quantités négatives ramenées"))} à 0</strong> : vérifie les retours ou avoirs dans Ximi.` });
@@ -3713,6 +3903,21 @@ function bilanImportVentes(result) {
   if (livrees) details.push({ html: `${escapeHtml(accorder(livrees, "commande importée comme déjà livrée", "commandes importées comme déjà livrées"))} (facture « Envoyée »).` });
   const fusionnes = nombre(result.mergedBySecondary);
   if (fusionnes) details.push({ html: `${escapeHtml(accorder(fusionnes, "client en double fusionné", "clients en double fusionnés"))} avec sa fiche existante.` });
+  // Les fiches clients (fusion du 25/09) : l'import ne supprime plus une fiche
+  // absente du fichier et n'efface plus ce que le fichier ne porte pas. Le
+  // resume le dit, fiches gardees comprises.
+  // Decision 7 : un bon deja importe dont le montant TTC change dans le fichier
+  // (un avoir, une correction) prend ce montant ; le resume le dit.
+  const repris = nombre(result.montantsRepris);
+  if (repris) details.push({ html: `${escapeHtml(accorder(repris, "commande déjà importée : montant TTC repris du fichier", "commandes déjà importées : montant TTC repris du fichier"))} (avoir ou correction dans Ximi).` });
+  const fiches = result.clientsImport;
+  if (fiches) {
+    details.push({ html: `Fiches clients : ${escapeHtml([
+      accorder(nombre(fiches.created), "nouvelle", "nouvelles"),
+      accorder(nombre(fiches.updated), "complétée", "complétées"),
+      accorder(nombre(fiches.preserved), "absente du fichier, gardée telle quelle", "absentes du fichier, gardées telles quelles")
+    ].join(" · "))}.` });
+  }
   return { comptes, details, aPreparer: nombre(result.created) + nombre(result.updated) > 0 };
 }
 
@@ -4102,7 +4307,7 @@ function renderFicheClient() {
   }).join("");
   const resteRappels = rappelsAFaire.length - 3;
   const blocCa = `<section class="cli-ca" aria-label="Chiffre d'affaires et rappels">
-      <div class="cli-ca-montant"><p class="cli-libelle">Chiffre d'affaires livré</p><p class="cli-valeur cli-ca-valeur">${escapeHtml(formatMoney(client.totalRevenue || 0))}</p>`
+      <div class="cli-ca-montant"><p class="cli-libelle">Chiffre d'affaires livré TTC</p><p class="cli-valeur cli-ca-valeur">${escapeHtml(formatMoney(client.totalRevenue || 0))}</p>`
     + `<p class="cli-note">${livrees ? `${livrees} commande${livrees > 1 ? "s" : ""} livrée${livrees > 1 ? "s" : ""}` : "Aucune commande livrée"}</p></div>
       <div class="cli-ca-rappels"><p class="cli-libelle">Rappels à faire</p>`
     + (lignesRappels
@@ -4349,6 +4554,7 @@ function choisirClientCommande(clientId, { focus = false } = {}) {
   champ.value = String(clientId);
   fillCustomerFormFromClient(clientId);
   majClientCommande();
+  garderBrouillonCommande();
   if (focus) document.querySelector('[data-action="cc-client-changer"]')?.focus();
 }
 
@@ -4359,6 +4565,7 @@ function changerClientCommande() {
   champ.value = "";
   for (const nom of CHAMPS_COORDONNEES) if (form.elements[nom]) form.elements[nom].value = "";
   majClientCommande();
+  garderBrouillonCommande();
   document.getElementById("customerClientSearch")?.focus();
 }
 
@@ -4371,35 +4578,49 @@ const CHAMPS_IDENTITE = { nom: "nom", adresse: "rue", codePostal: "codePostal", 
  * formulaire: valeur }), par les routes de la fiche : l'identite par
  * /api/clients/:id (qui la recopie sur ses commandes a livrer), le reste par
  * /api/crm/clients/:id. `fileAdmise` : une ecriture mise en file hors ligne
- * n'arrete pas la suite (elle partira dans l'ordre).
+ * n'arrete pas la suite (elle partira dans l'ordre). Rend vrai si une partie
+ * attend dans la file.
  */
 async function enregistrerChangementsDeFiche(id, change, { fileAdmise = false } = {}) {
   const identite = {}, crm = {};
   for (const [cle, valeur] of Object.entries(change)) {
     if (cle in CHAMPS_IDENTITE) identite[CHAMPS_IDENTITE[cle]] = valeur; else crm[cle] = valeur;
   }
+  let enFile = false;
   const envoyer = async (chemin, corps) => {
     try {
       await apiFetch(chemin, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps) });
     } catch (error) {
       if (!(fileAdmise && error?.enFile)) throw error;
+      enFile = true;
     }
   };
   if (Object.keys(identite).length) await envoyer(`/api/clients/${encodeURIComponent(id)}`, identite);
   if (Object.keys(crm).length) await envoyer(`/api/crm/clients/${encodeURIComponent(id)}`, crm);
+  return enFile;
 }
 
 async function saveCrmClient(form) {
   const { id, ...data } = Object.fromEntries(new FormData(form).entries());
   const erreur = document.getElementById("cliErreur");
   if (erreur) { erreur.hidden = true; erreur.textContent = ""; }
+  // Hors ligne (chasse aux defauts, 25/09) : ce qui attend dans la file est
+  // FAIT pour l'ecran -- la fenetre se ferme et le dit. Elle restait ouverte
+  // sur « enregistre » : un second appui mettait une seconde fiche en file.
+  let enFile = false;
   try {
     if (!id) {
-      const cree = await apiFetch("/api/crm/clients", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data)
-      });
+      let cree = null;
+      try {
+        cree = await apiFetch("/api/crm/clients", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data)
+        });
+      } catch (error) {
+        if (!error?.enFile) throw error;
+        enFile = true;
+      }
       // La fiche creee s'ouvre -- y compris si un filtre l'aurait cachee.
       if (cree?.id) clientChoisi = String(cree.id);
       Object.assign(crmFilter, { query: "", status: "all", secteur: "" });
@@ -4412,7 +4633,12 @@ async function saveCrmClient(form) {
       // (prochaine relance, statut deduit) etaient figees dans la fiche.
       const avant = JSON.parse(form.dataset.initial || "{}");
       const change = Object.fromEntries(Object.entries(data).filter(([cle, valeur]) => String(avant[cle] ?? "") !== String(valeur)));
-      await enregistrerChangementsDeFiche(id, change);
+      // TOUT part, ou rien (25/09) : l'identite (/api/clients) et la fiche CRM
+      // (statut, rappel, notes : /api/crm/clients) sont deux ecritures. Hors
+      // ligne, la premiere partait en file et levait : la seconde n'etait ni
+      // envoyee ni gardee -- statut, rappel et notes perdus sous « enregistre ».
+      // Les deux attendent maintenant dans la file, dans cet ordre.
+      enFile = await enregistrerChangementsDeFiche(id, change, { fileAdmise: true });
     }
   } catch (error) {
     // Dans le dialogue : un toast serait sous sa couche, assombri et inerte.
@@ -4425,6 +4651,10 @@ async function saveCrmClient(form) {
   }
   form.reset();
   document.getElementById("cliDialogue")?.close();
+  if (enFile) {
+    notify(id ? "Fiche enregistrée sur ce téléphone : elle partira à la reconnexion." : "Client enregistré sur ce téléphone : il partira à la reconnexion.", "warning");
+    return;
+  }
   await loadData();
   notify(id ? "Fiche client mise à jour." : "Client enregistré.", "success");
   // Au telephone, la fiche creee s'ouvre (et pas seulement sa ligne).
@@ -4621,6 +4851,7 @@ function changeCustomerCart(productId, delta) {
   if (champ) champ.value = nextQuantity;
   else renderCustomerCatalog();
   renderCustomerCart();
+  garderBrouillonCommande();
 }
 
 // Audit UI 2026-07 : saisie directe de la quantite (valeur absolue) en plus
@@ -4659,6 +4890,7 @@ function setCustomerCart(productId, value, inputEl) {
   // Reflete la valeur retenue (utile si clampee) sans re-rendre le catalogue.
   if (inputEl) inputEl.value = nextQuantity;
   renderCustomerCart();
+  garderBrouillonCommande();
 }
 
 function renderCustomerCart() {
@@ -4745,6 +4977,247 @@ async function reporterCoordonneesSurLaFiche(form, data) {
   return true;
 }
 
+// --- Doublon de fiche (chasse aux defauts du 24/09, lot donnees clients, 25/09) ---
+//
+// Une commande pour un NOUVEAU client dont le telephone -- ou le nom et le code
+// postal -- est deja celui d'une fiche. Mesure du rapport : la fiche trouvee
+// prenait tout le formulaire (« EHPAD Les Tilleuls » devenait « Roux », sa
+// rue, son email et ses notes partaient). Le serveur refuse maintenant (409)
+// sans choix explicite ; l'ecran demande : « rattacher a cette fiche » (prise
+// telle quelle) ou « creer une nouvelle fiche ». Il demande AVANT d'envoyer --
+// la liste des clients est chargee, hors ligne aussi --, et encore si le
+// serveur trouve une fiche que la liste n'avait pas (archivee, ou creee depuis).
+
+/** La cle nom + code postal, comme clientSecondaryKey (server.js). */
+function cleNomCodePostal(nom, codePostal) {
+  const n = normalizeTextKey(nom);
+  const cp = normalizeTextKey(codePostal);
+  return n && cp ? `${n}|${cp}` : "";
+}
+
+/** La fiche chargee qui a le telephone (normalise) ou le nom et le code postal saisis ; null sinon. */
+function ficheEnDoublon(data) {
+  const cleTel = valeur => normaliserTelephone(valeur) || normalizeTextKey(valeur);
+  const telephone = cleTel(data.telephone);
+  const nomCp = cleNomCodePostal([data.prenom, data.nom].filter(Boolean).join(" ") || data.nom, data.codePostal);
+  return crmClients.find(client => {
+    const sien = cleTel(client.telephone);
+    if (telephone && sien && telephone === sien) return true;
+    return Boolean(nomCp) && cleNomCodePostal(client.nom, client.codePostal) === nomCp;
+  }) || null;
+}
+
+/**
+ * `{}` sans doublon connu ; sinon le choix : `{ clientId }` ou
+ * `{ nouvelleFiche: true }` -- ou null si l'on annule. Hors ligne, sans
+ * doublon dans la liste, la commande part en « nouvelle fiche » : rejouee
+ * plus tard, un refus 409 la retirerait de la file (une fiche en double se
+ * fusionne ; une commande perdue ne se retrouve pas).
+ */
+async function choisirFicheSiDoublon(doublon, data) {
+  if (!doublon) return navigator.onLine === false ? { nouvelleFiche: true } : {};
+  return demanderChoixDeFiche(doublon, data);
+}
+
+/**
+ * Envoie la commande ; sur un doublon que la liste n'avait pas (409), demande,
+ * puis renvoie. `demanderSiDoublon` : cette page sait poser la question (sans
+ * lui, le serveur cree une nouvelle fiche). Si l'envoi part en FILE (reseau
+ * muet, session expiree), la commande attend en « nouvelle fiche » : rejouee
+ * plus tard, un 409 la ferait retirer de la file -- perdue (a moins d'un
+ * choix deja fait : `clientId` l'emporte au serveur).
+ */
+async function envoyerCommandeClient(endpoint, corps, data, cle = "") {
+  const envoyer = contenu => apiFetch(endpoint, {
+    method: "POST",
+    // `cle` : la cle de geste de la SAISIE (cleDEnvoiDeLaSaisie). Le renvoi
+    // apres « rattacher ou creer » la garde : le 409 « doublon » est une
+    // question, que le serveur n'enregistre pas sous cette cle
+    // (gesteSansEffet) ; la version mise en file la garde aussi.
+    headers: { "Content-Type": "application/json", ...(cle ? { "X-Sereo-Geste": cle } : {}) },
+    body: JSON.stringify({ ...contenu, demanderSiDoublon: true }),
+    corpsEnFile: JSON.stringify({ ...contenu, nouvelleFiche: true })
+  });
+  try {
+    return await envoyer(corps);
+  } catch (erreur) {
+    const doublon = erreur?.details?.doublon;
+    if (!doublon) throw erreur;
+    const choix = await demanderChoixDeFiche(doublon, data);
+    return choix ? envoyer({ ...corps, ...choix }) : null;
+  }
+}
+
+/** Le dialogue « rattacher ou creer ». Rend `{ clientId }`, `{ nouvelleFiche: true }` ou null. */
+function demanderChoixDeFiche(doublon, data) {
+  const dialogue = document.getElementById("doublonFicheDialog");
+  const texte = document.getElementById("doublonFicheTexte");
+  const liste = document.getElementById("doublonFicheChoix");
+  if (!dialogue || !texte || !liste || typeof dialogue.showModal !== "function") return Promise.resolve(null);
+  const nomFiche = [doublon.prenom, doublon.nom].filter(Boolean).join(" ") || doublon.nom || "sans nom";
+  const reperes = [formaterTelephone(doublon.telephone), villeAffichee(doublon.ville)].filter(Boolean).join(", ");
+  const nomSaisi = [data.prenom, data.nom].filter(Boolean).join(" ").trim() || "ce client";
+  texte.textContent = `Une fiche existe déjà avec ce téléphone ou ce nom : « ${nomFiche} »${reperes ? ` (${reperes})` : ""}.`;
+  liste.innerHTML = `
+    <label class="reopt-choix"><input type="radio" name="doublonFiche" value="rattacher" checked><span>Rattacher la commande à « ${escapeHtml(nomFiche)} » : la fiche reste telle quelle, la commande part à son adresse.</span></label>
+    <label class="reopt-choix"><input type="radio" name="doublonFiche" value="nouvelle"><span>Créer une nouvelle fiche « ${escapeHtml(nomSaisi)} ».</span></label>`;
+
+  return new Promise(resolve => {
+    const surClic = evenement => {
+      const action = evenement.target.closest("[data-action]")?.dataset.action;
+      if (action === "doublon-annuler") terminer(null);
+      if (action === "doublon-valider") {
+        const choix = liste.querySelector('input[name="doublonFiche"]:checked')?.value;
+        terminer(choix === "nouvelle" ? { nouvelleFiche: true } : { clientId: doublon.id });
+      }
+    };
+    // Echap ferme le <dialog> : c'est une annulation (comme le motif d'un arret).
+    const surFermeture = () => terminer(null);
+    function terminer(valeur) {
+      dialogue.removeEventListener("click", surClic);
+      dialogue.removeEventListener("close", surFermeture);
+      if (dialogue.open) dialogue.close();
+      resolve(valeur);
+    }
+    dialogue.addEventListener("click", surClic);
+    dialogue.addEventListener("close", surFermeture);
+    dialogue.showModal();
+    liste.querySelector("input:checked")?.focus();
+  });
+}
+
+/**
+ * UNE cle de geste par SAISIE de commande (chasse aux defauts, 25/09).
+ * Chaque envoi tirait une cle neuve. Or une issue peut rester inconnue : la
+ * reponse coupee en route, un delai depasse sans file possible (indexedDB
+ * absent). Le serveur a pu creer la commande ; revalider -- le geste naturel
+ * -- en creait une seconde, meme EN LIGNE. Tant que la saisie ne change pas
+ * (memes champs, meme panier), la cle reste : le serveur rend « deja fait »
+ * (gesteIdempotent) au lieu de refaire. Elle part quand l'issue est connue :
+ * la commande est creee ou mise en file (viderCommandeClient), ou le serveur
+ * a repondu un refus (oublierCleDEnvoi). Le brouillon la garde avec la saisie.
+ */
+function cleDEnvoiDeLaSaisie(form, saisie) {
+  const empreinte = JSON.stringify(saisie);
+  if (form.dataset.saisieEnvoyee !== empreinte || !form.dataset.cleEnvoi) {
+    form.dataset.saisieEnvoyee = empreinte;
+    form.dataset.cleEnvoi = nouvelleCleDeGeste();
+    garderBrouillonCommande();
+  }
+  return form.dataset.cleEnvoi;
+}
+
+function oublierCleDEnvoi(form) {
+  delete form.dataset.saisieEnvoyee;
+  delete form.dataset.cleEnvoi;
+  garderBrouillonCommande();
+}
+
+/** La commande est partie (ou attend dans la file) : l'ecran repart a vide. */
+function viderCommandeClient(form) {
+  customerCart.clear();
+  form.reset();
+  // reset() ne vide PAS le client choisi (relecture adverse) : sur un champ
+  // cache, ecrire .value ecrit l'attribut value, et reset() revient a cet
+  // attribut. La commande suivante partait au nom du client d'avant. On le
+  // vide a la main : la recherche revient, les coordonnees se rouvrent.
+  form.elements.clientId.value = "";
+  delete form.dataset.saisieEnvoyee;
+  delete form.dataset.cleEnvoi;
+  oublierBrouillonCommande();
+  majClientCommande();
+  // Sans rechargement (mise en file) : le panier et les quantites du catalogue.
+  renderCustomerCart();
+  for (const champ of document.querySelectorAll("#customerCatalog [data-customer-qty-input]")) {
+    if (champ.value !== "0") champ.value = "0";
+  }
+}
+
+// --- LE BROUILLON DE LA COMMANDE (chasse aux defauts, 25/09) -----------------
+//
+// Le panier vivait dans une Map en memoire. Le geste « retour » du telephone
+// (qui quitte l'application : les onglets passent par replaceState), un
+// rechargement, « Recharger » apres une mise a jour, la reconnexion apres une
+// fin de session : au retour, le navigateur remettait le nom tape, mais le
+// panier etait VIDE -- une saisie a moitie rendue, qui ne correspondait plus a
+// rien. Le brouillon (champs, client choisi, panier, cle d'envoi) est garde
+// dans sessionStorage a chaque saisie, et rendu a l'ouverture de la commande
+// client si l'ecran est vide. Il part avec la commande (creee ou mise en
+// file, y compris par une fin de session : apiFetch, `gardeeEnFile`) et a la
+// deconnexion ; a la fin de session, il ne revient qu'au meme compte (relecture
+// adverse du 26/09). sessionStorage : l'onglet
+// seulement, jamais un autre appareil ni une autre session de navigation ;
+// sans stockage (navigation privee stricte), rien n'est garde, comme avant.
+const CLE_BROUILLON_COMMANDE = "sereo-brouillon-commande";
+const CHAMPS_BROUILLON = ["clientId", "orderType", "deliveryDate", ...CHAMPS_COORDONNEES, "notes"];
+
+function garderBrouillonCommande() {
+  const form = document.getElementById("customerOrderForm");
+  if (!form) return;
+  const lignes = [...customerCart.values()];
+  const champs = Object.fromEntries(CHAMPS_BROUILLON.map(nom => [nom, form.elements[nom]?.value ?? ""]));
+  const vide = !lignes.length && !CHAMPS_COORDONNEES.some(nom => String(champs[nom] || "").trim()) && !champs.clientId && !String(champs.notes || "").trim();
+  try {
+    if (vide) sessionStorage.removeItem(CLE_BROUILLON_COMMANDE);
+    else sessionStorage.setItem(CLE_BROUILLON_COMMANDE, JSON.stringify({
+      // Le compte qui saisit : le brouillon ne revient qu'a lui (reprendreBrouillonCommande).
+      compte: String(moi?.identifiant || ""),
+      champs, lignes, cleEnvoi: form.dataset.cleEnvoi || "", saisieEnvoyee: form.dataset.saisieEnvoyee || "",
+      // Ce que la fiche du client choisi avait mis dans les champs : seul ce que
+      // la saisie y a change repartira sur la fiche (reporterCoordonneesSurLaFiche).
+      coordonneesInitiales: form.dataset.coordonneesInitiales || ""
+    }));
+  } catch { /* stockage indisponible : rien n'est garde, comme avant */ }
+}
+
+function oublierBrouillonCommande() {
+  try { sessionStorage.removeItem(CLE_BROUILLON_COMMANDE); } catch { /* rien a oublier */ }
+}
+
+// La reprise attend de savoir qui est connecte (/api/me, loadMoi).
+let repriseBrouillonEnAttente = false;
+
+/**
+ * A l'ouverture de la commande client : l'ecran vide reprend le brouillon.
+ * Un panier deja rempli (la meme page) n'est jamais remplace.
+ * Le brouillon d'un AUTRE compte ne se reprend pas (relecture adverse du
+ * 26/09) : sur un telephone partage, la session de A expire, B se connecte
+ * dans le meme onglet -- il retrouvait la saisie de A (coordonnees du client,
+ * panier, cle d'envoi). Il part. Tant que /api/me n'a pas repondu, on ne sait
+ * pas qui est la : la reprise attend (loadMoi).
+ */
+function reprendreBrouillonCommande() {
+  const form = document.getElementById("customerOrderForm");
+  if (!form || customerCart.size || form.elements.clientId?.value) return;
+  let brouillon = null;
+  try { brouillon = JSON.parse(sessionStorage.getItem(CLE_BROUILLON_COMMANDE) || "null"); } catch { brouillon = null; }
+  if (!brouillon || typeof brouillon !== "object") return;
+  if (typeof brouillon.compte === "string" && brouillon.compte) {
+    if (!moi) { repriseBrouillonEnAttente = true; return; }
+    if (String(moi.identifiant || "") !== brouillon.compte) { oublierBrouillonCommande(); return; }
+  }
+  const lignes = Array.isArray(brouillon.lignes) ? brouillon.lignes.filter(l => l && l.productId !== undefined && Number(l.quantite) > 0) : [];
+  const champs = brouillon.champs && typeof brouillon.champs === "object" ? brouillon.champs : {};
+  for (const nom of CHAMPS_BROUILLON) {
+    if (form.elements[nom] && typeof champs[nom] === "string") form.elements[nom].value = champs[nom];
+  }
+  for (const ligne of lignes) customerCart.set(String(ligne.productId), { ...ligne, quantite: Number(ligne.quantite) });
+  if (typeof brouillon.cleEnvoi === "string" && brouillon.cleEnvoi && typeof brouillon.saisieEnvoyee === "string") {
+    form.dataset.cleEnvoi = brouillon.cleEnvoi;
+    form.dataset.saisieEnvoyee = brouillon.saisieEnvoyee;
+  }
+  if (typeof brouillon.coordonneesInitiales === "string" && brouillon.coordonneesInitiales) {
+    form.dataset.coordonneesInitiales = brouillon.coordonneesInitiales;
+  }
+  majClientCommande();
+  renderCustomerCart();
+  for (const champ of document.querySelectorAll("#customerCatalog [data-customer-qty-input]")) {
+    const ligne = customerCart.get(String(champ.dataset.productId));
+    champ.value = String(ligne ? ligne.quantite : 0);
+  }
+  if (lignes.length) notify("La commande en cours a été reprise.", "info");
+}
+
 async function submitCustomerOrder(form) {
   const lines = Array.from(customerCart.values());
   if (!lines.length) {
@@ -4757,28 +5230,48 @@ async function submitCustomerOrder(form) {
     return;
   }
   const endpoint = data.orderType === "planifiee" ? "/api/planned-orders" : "/api/customer-orders";
+  // Un nouveau client dont le telephone (ou le nom et le code postal) a deja
+  // une fiche : on choisit AVANT d'envoyer (25/09). Annuler : rien ne part.
+  const choixDeFiche = data.clientId ? {} : await choisirFicheSiDoublon(ficheEnDoublon(data), data);
+  if (!choixDeFiche) return;
+  // La cle de la SAISIE (lot « hors ligne et saisie »), pas du choix de fiche :
+  // revalider la meme saisie apres une issue inconnue est le meme geste.
+  const cle = cleDEnvoiDeLaSaisie(form, [data, lines]);
   const ficheModifiee = await reporterCoordonneesSurLaFiche(form, data);
   const fiche = ficheModifiee ? " Coordonnées enregistrées sur la fiche du client." : "";
-  const reponse = await apiFetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+  let reponse;
+  try {
+    reponse = await envoyerCommandeClient(endpoint, {
       clientId: data.clientId,
       client: data,
       products: lines,
       notes: data.notes,
       orderType: data.orderType,
-      deliveryDate: data.deliveryDate
-    })
-  });
-  customerCart.clear();
-  form.reset();
-  // reset() ne vide PAS le client choisi (relecture adverse) : sur un champ
-  // cache, ecrire .value ecrit l'attribut value, et reset() revient a cet
-  // attribut. La commande suivante partait au nom du client d'avant. On le
-  // vide a la main : la recherche revient, les coordonnees se rouvrent.
-  form.elements.clientId.value = "";
-  majClientCommande();
+      deliveryDate: data.deliveryDate,
+      ...choixDeFiche
+    }, data, cle);
+  } catch (error) {
+    // `gardeeEnFile` : la session a expire, la commande attend dans la file
+    // (apiFetch) ; son brouillon ne doit pas revenir apres la reconnexion.
+    if (error?.enFile || error?.gardeeEnFile) {
+      // Hors ligne (chasse aux defauts, 25/09) : la commande attend dans la
+      // file, avec sa cle -- c'est un envoi DIFFERE, pas un echec. Le
+      // formulaire restait rempli et le bouton se rallumait : on revalidait,
+      // et une seconde commande, sous une autre cle, partait au retour du
+      // reseau. La commande est faite : l'ecran repart a vide.
+      viderCommandeClient(form);
+      notify(`${data.orderType === "planifiee" ? "Commande planifiée" : "Commande"} enregistrée sur ce téléphone : elle partira à la reconnexion.${fiche}`, "warning");
+      return;
+    }
+    // Le serveur a repondu (un refus) : l'issue est connue, le prochain appui
+    // est un nouveau geste. Sans reponse, la cle reste (cleDEnvoiDeLaSaisie).
+    if (Number.isInteger(error?.statut)) oublierCleDEnvoi(form);
+    throw error;
+  }
+  // Annule au dialogue « rattacher ou creer » (409) : rien n'est parti, la
+  // saisie reste telle quelle.
+  if (!reponse) return;
+  viderCommandeClient(form);
   await loadData();
   // Audit du 24/09 : l'ecran renvoyait vers « À envoyer » (#commandes-jour),
   // un filtre vide par construction -- le serveur passe la commande terrain
@@ -4786,6 +5279,16 @@ async function submitCustomerOrder(form) {
   // correspond à ce filtre » juste apres l'avoir validee. On arrive
   // maintenant sur la liste qui la CONTIENT, la ligne mise en avant.
   const planifiee = data.orderType === "planifiee";
+  if (reponse?.rejoue) {
+    // La MEME saisie revalidee apres une issue inconnue (relecture adverse du
+    // 26/09) : le serveur rend « deja fait » (gesteIdempotent), avec le seul
+    // statut de la premiere reponse -- ni la commande, ni son numero, ni si
+    // elle est bloquee faute de stock. L'ecran annoncait « validée : elle est
+    // à préparer ». On dit ce qui est sur, et on montre la liste.
+    notify(`${planifiee ? "Cette commande planifiée" : "Cette commande"} avait déjà été reçue au premier envoi : elle n’a pas été créée une seconde fois. Son état est dans Commandes.${fiche}`, "info");
+    montrerCommandeCreee(null, planifiee ? "planifiees" : "toutes");
+    return;
+  }
   const creee = planifiee ? reponse?.order : reponse;
   const numero = creee?.numero ? ` ${creee.numero}` : "";
   if (!planifiee && reponse?.bloquee) {
@@ -4858,11 +5361,13 @@ async function cancelPlannedOrder(orderId) {
 function renderStatistics() {
   const kpis = document.getElementById("statsKpis");
   if (!kpis || !statistics) return;
+  // Decision 7 de Thomas (24/09) : le chiffre d'affaires est TTC, avoirs
+  // soustraits, et l'ecran le dit (le serveur n'additionne plus HT et TTC).
   const items = [
-    { label: "CA livré du jour", value: formatMoney(statistics.today?.revenue), hint: accorder(statistics.today?.orders, "commande"), tone: "success" },
-    { label: "CA livré de la semaine", value: formatMoney(statistics.week?.revenue), hint: formatEvolution(statistics.week?.evolution), tone: getEvolutionTone(statistics.week?.evolution) },
-    { label: "CA livré du mois", value: formatMoney(statistics.month?.revenue), hint: `${accorder(statistics.month?.orders, "commande")} · ${formatEvolution(statistics.month?.evolution)}`, tone: getEvolutionTone(statistics.month?.evolution) },
-    { label: "Panier moyen", value: formatMoney(statistics.averageBasket), hint: "Commandes livrées, toutes périodes", tone: "info" },
+    { label: "CA livré TTC du jour", value: formatMoney(statistics.today?.revenue), hint: accorder(statistics.today?.orders, "commande"), tone: "success" },
+    { label: "CA livré TTC de la semaine", value: formatMoney(statistics.week?.revenue), hint: formatEvolution(statistics.week?.evolution), tone: getEvolutionTone(statistics.week?.evolution) },
+    { label: "CA livré TTC du mois", value: formatMoney(statistics.month?.revenue), hint: `${accorder(statistics.month?.orders, "commande")} · ${formatEvolution(statistics.month?.evolution)}`, tone: getEvolutionTone(statistics.month?.evolution) },
+    { label: "Panier moyen", value: formatMoney(statistics.averageBasket), hint: "TTC, commandes livrées, toutes périodes", tone: "info" },
     { label: "Nouveaux clients", value: statistics.newClientsMonth || 0, hint: "Ce mois-ci", tone: "warning" },
     { label: "Prospects convertis", value: statistics.convertedProspectsMonth || 0, hint: "Ce mois-ci", tone: "success" }
   ];
@@ -4950,6 +5455,7 @@ function renderStock() {
   if (!container) return;
 
   container.innerHTML = "";
+  majNoteStock();
   renderStockRecommande();
   renderStockCategories();
   majSousTitreStock();
@@ -4989,6 +5495,15 @@ function stockAPlat() {
   return stock.length > 0 && new Set(stock.map(categorieDuProduit)).size <= 1;
 }
 
+// Les tris de l'arrivee sur le Stock comparent des centaines de noms : UN
+// comparateur, construit une fois (25/09). localeCompare(b, "fr") en
+// construisait un par comparaison -- 31 ms au telephone (CPU x 4, jeu
+// « production ») pour trier « A recommander ». Meme ordre : c'est la meme
+// comparaison (Intl.Collator, memes options).
+const comparerNoms = new Intl.Collator("fr").compare;
+// Sans langue, comme localeCompare(b) sans argument (des dates ISO).
+const comparerTextes = new Intl.Collator().compare;
+
 // A plat, « du plus bas au plus haut » (planche 10a) : ce qui est sous le seuil
 // d'abord, puis ce qui est a renseigner (une quantite inconnue appelle aussi
 // un geste), puis le reste ; dans chaque groupe, la plus petite quantite en tete.
@@ -4996,7 +5511,7 @@ function trierAPlat(produits) {
   const groupe = p => (sousLeSeuil(p) ? 0 : getStockLevel(p).status === "a_renseigner" ? 1 : 2);
   const quantite = p => Number(p.quantityAvailable ?? getProductQuantity(p) ?? 0) || 0;
   return [...produits].sort((a, b) => groupe(a) - groupe(b) || quantite(a) - quantite(b)
-    || String(getProductName(a)).localeCompare(getProductName(b), "fr"));
+    || comparerNoms(String(getProductName(a)), String(getProductName(b))));
 }
 
 // L'ordre a plat est FIGE tant qu'on reste sur l'ecran. Chaque −/+ et chaque
@@ -5049,9 +5564,9 @@ function renderStockRecommande() {
   if (!liste) return;
   const bas = aRecommander()
     .sort((a, b) => (a.level === "urgent" ? 0 : 1) - (b.level === "urgent" ? 0 : 1)
-      || String(a.manqueLe || "9999").localeCompare(String(b.manqueLe || "9999"))
+      || comparerTextes(String(a.manqueLe || "9999"), String(b.manqueLe || "9999"))
       || (a.available - a.threshold) - (b.available - b.threshold)
-      || String(getProductName(a.product)).localeCompare(getProductName(b.product), "fr"));
+      || comparerNoms(String(getProductName(a.product)), String(getProductName(b.product))));
   setText("stkRecoCompte", String(bas.length));
   const compte = document.getElementById("stkRecoCompte");
   if (compte) compte.setAttribute("aria-label", `${bas.length} produit${bas.length > 1 ? "s" : ""} à recommander`);
@@ -5082,7 +5597,7 @@ function renderStockCategories() {
     parCategorie.set(cle, c);
   });
   const categories = [...parCategorie.values()]
-    .sort((a, b) => (a.cle ? 0 : 1) - (b.cle ? 0 : 1) || a.cle.localeCompare(b.cle, "fr"));
+    .sort((a, b) => (a.cle ? 0 : 1) - (b.cle ? 0 : 1) || comparerNoms(a.cle, b.cle));
   if (stockFilter.category !== "all" && !parCategorie.has(stockFilter.category)) stockFilter.category = "all";
   bloc.classList.toggle("stk-categories--liste", categories.length > 12);
   // A PLAT (planche 10a) : sans categorie, ou avec une seule, une tuile ne
@@ -5132,6 +5647,9 @@ const ICONE_CATEGORIE = "M12 3 3 8v8l9 5 9-5V8z";
 // les seuls chemins de l'application pour les poser. Les identifiants sont
 // propres a l'ecran : l'ecran « produits » rend les memes produits.
 // Rend le HTML de la ligne : renderStock les ecrit toutes en une fois (24/09).
+// Les « − » et « + » sont dessines par la feuille (#stock .stk-pas::before,
+// 25/09) : deux <svg> par ligne, c'etait plus de la moitie de l'analyse HTML
+// de la liste a chaque arrivee sur le Stock et a chaque recherche.
 function creerLigneStock(product) {
   const level = getStockLevel(product);
   const quantite = product.quantityAvailable ?? getProductQuantity(product);
@@ -5144,15 +5662,17 @@ function creerLigneStock(product) {
   // n'en a plus assez ; le rayon passe alors en negatif. Ce negatif se DIT ici
   // (et dans « A regler ») : il appelle un recomptage, pas une rupture de plus.
   const negatif = quantite !== null && Number(quantite) < 0;
+  // Ferme au livreur (relecture du 26/09) : la note de l'ecran dit pourquoi.
+  const ferme = stockReserve() ? " disabled" : "";
   return `<div class="stk-ligne${enAlerte ? " stk-ligne--alerte" : ""}">
     <span class="stk-nom">${escapeHtml(nom)}${level.status === "a_renseigner" ? ` <span class="stk-a-renseigner">À renseigner</span>` : ""}${negatif ? ` <span class="stk-negatif">Stock négatif · à recompter</span>` : ""}</span>
     <span class="stk-code">${escapeHtml(product.code || product.sku || "-")}</span>
     <span class="stk-reserve">${escapeHtml(reserve)} sur commandes</span>
-    <span class="stk-droite"><label class="sr-only" for="stk-seuil-${id}">Seuil de ${escapeHtml(nom)}</label><input class="stk-saisie stk-saisie--seuil" id="stk-seuil-${id}" data-stock-threshold-input data-product-id="${id}" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttribute(seuil)}"></span>
-    <span class="stk-droite"><label class="sr-only" for="stk-qte-${id}">Stock de ${escapeHtml(nom)}${negatif ? ", négatif, à recompter" : enAlerte ? ", sous le seuil" : ""}</label><input class="stk-saisie stk-saisie--stock" id="stk-qte-${id}" data-stock-input data-product-id="${id}" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttribute(quantite === null ? "" : quantite)}" placeholder="—"></span>
+    <span class="stk-droite"><label class="sr-only" for="stk-seuil-${id}">Seuil de ${escapeHtml(nom)}</label><input class="stk-saisie stk-saisie--seuil" id="stk-seuil-${id}" data-stock-threshold-input data-product-id="${id}" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttribute(seuil)}"${ferme}></span>
+    <span class="stk-droite"><label class="sr-only" for="stk-qte-${id}">Stock de ${escapeHtml(nom)}${negatif ? ", négatif, à recompter" : enAlerte ? ", sous le seuil" : ""}</label><input class="stk-saisie stk-saisie--stock" id="stk-qte-${id}" data-stock-input data-product-id="${id}" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttribute(quantite === null ? "" : quantite)}" placeholder="—"${ferme}></span>
     <span class="stk-ajuster">
-      <button class="stk-pas" type="button" data-product-id="${id}" data-stock-delta="-1" aria-label="Retirer 1 unité de ${escapeAttribute(nom)}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button>
-      <button class="stk-pas stk-pas--plus" type="button" data-product-id="${id}" data-stock-delta="1" aria-label="Ajouter 1 unité à ${escapeAttribute(nom)}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button>
+      <button class="stk-pas" type="button" data-product-id="${id}" data-stock-delta="-1" aria-label="Retirer 1 unité de ${escapeAttribute(nom)}"${ferme}></button>
+      <button class="stk-pas stk-pas--plus" type="button" data-product-id="${id}" data-stock-delta="1" aria-label="Ajouter 1 unité à ${escapeAttribute(nom)}"${ferme}></button>
     </span></div>`;
 }
 
@@ -5233,7 +5753,9 @@ function renderStockMovements() {
 
   const movements = stockMovements.slice(0, MOUVEMENTS_AFFICHES);
   if (!movements.length) {
-    container.innerHTML = emptyState("Aucun mouvement", "Les ajustements manuels apparaîtront ici.");
+    // Depuis le 25/09, le journal recoit aussi les sorties des commandes, les
+    // retours au rayon et les imports : plus seulement la saisie a la main.
+    container.innerHTML = emptyState("Aucun mouvement", "Les entrées et sorties du stock apparaîtront ici.");
     return;
   }
 
@@ -5275,6 +5797,12 @@ async function changeStock(productId, delta) {
 }
 
 async function setStock(productId, value) {
+  // Le livreur ne modifie pas le stock (le serveur le refuse) : rien ne part,
+  // ni vers la file hors ligne (relecture du 26/09).
+  if (stockReserve()) {
+    notify(NOTE_STOCK_RESERVE, "warning");
+    return;
+  }
   // Un champ VIDE n'est pas un zero : le vider mettait le produit en rupture.
   if (String(value ?? "").trim() === "") {
     notify("Quantité vide : rien n'a été changé.", "warning");
@@ -5307,6 +5835,12 @@ async function setStock(productId, value) {
 }
 
 async function setStockThreshold(productId, value) {
+  // Le livreur ne modifie pas le stock (le serveur le refuse) : rien ne part,
+  // ni vers la file hors ligne (relecture du 26/09).
+  if (stockReserve()) {
+    notify(NOTE_STOCK_RESERVE, "warning");
+    return;
+  }
   const raw = String(value ?? "").trim();
   const threshold = Number(raw);
 
@@ -6368,10 +6902,11 @@ function getAlertItems() {
 // Une carte de Parametres, reservee a l'administration (GET /api/journal
 // repond 403 aux autres : on ne l'appelle pas pour eux, une erreur console
 // ferait echouer le parcours des onglets). Chargee a la premiere ouverture de
-// Parametres, par pages de 50 ; jamais a l'ouverture de l'application.
-// Deux vues : les actions (l'historique) et les mouvements de stock.
+// Parametres, par pages de 200 (decision 10 de Thomas, 24/09 : les 200
+// dernieres lignes, puis « voir plus ») ; jamais a l'ouverture de
+// l'application. Deux vues : les actions (l'historique) et les mouvements de stock.
 
-const JOURNAL_PAGE = 50;
+const JOURNAL_PAGE = 200;
 const journal = { genre: "actions", entrees: [], suivant: null, charge: false, enCours: false };
 
 function carteJournalOuverte() {
@@ -6382,7 +6917,7 @@ function carteJournalOuverte() {
 /**
  * Montre la carte a l'administration ; la charge si Parametres est a l'ecran.
  * `rafraichir` : Parametres vient de s'ouvrir, la premiere page se relit (une
- * requete de 50 lignes, pas le journal entier).
+ * requete de 200 lignes, pas le journal entier).
  */
 function majCarteJournal({ rafraichir = false } = {}) {
   const carte = document.getElementById("parJournal");
@@ -7559,6 +8094,8 @@ function phraseAlerteSauvegardes(alerte) {
       return `La dernière sauvegarde a échoué${alerte.at ? ` (${formatDateLongue(alerte.at)})` : ""} : ${alerte.message || "erreur inconnue"}. Les données sont enregistrées, mais pas sauvegardées.`;
     case "lecture":
       return `Le dossier des sauvegardes est illisible : ${alerte.message || "erreur inconnue"}.`;
+    case "copie":
+      return `La copie dans le second dossier a échoué${alerte.at ? ` (${formatDateLongue(alerte.at)})` : ""} : ${alerte.message || "erreur inconnue"}. La sauvegarde est faite, mais seulement sur ce disque.`;
     case "suspendues":
       return "Sauvegardes suspendues : la base a été réinitialisée à vide. Elles reprennent à la première saisie.";
     case "aucune":
@@ -7593,6 +8130,16 @@ function renderSauvegardes(etat, erreur = "") {
   setText("parSauvegardesGardees", etat && etat.nombre
     ? `${etat.nombre} sauvegarde${etat.nombre > 1 ? "s" : ""} sur ${etat.jours} jour${etat.jours > 1 ? "s" : ""}, depuis le ${formatJourLong(etat.plusAncienne)}`
     : "—");
+  // Le second dossier (SEREO_BACKUP_COPY_DIR, garde-fous du 25/09) : la
+  // derniere copie reussie depuis le demarrage, ou pourquoi il n'y en a pas.
+  const copie = etat?.copie;
+  setText("parSauvegardesCopie", !etat || !copie
+    ? "—"
+    : !copie.active
+      ? "Non configurée : les sauvegardes ne sont que sur ce disque."
+      : copie.derniere
+        ? `${formatDateLongue(copie.derniere.date)} · dans le second dossier`
+        : "Aucune depuis le démarrage (à la prochaine sauvegarde).");
 
   // Les gestes : a l'administration seulement (le serveur les refuse aux
   // autres, requireAdministration). Un autre compte lit la carte et sait
@@ -7621,7 +8168,10 @@ async function sauvegarderMaintenant() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tag: "manuelle" })
     });
-    notify(resultat?.ok === false ? (resultat.error || "Sauvegarde impossible.") : "Sauvegarde faite.", resultat?.ok === false ? "error" : "success");
+    // Garde-fous (25/09) : rien d'ecrit depuis la derniere, le serveur n'en
+    // refait pas une copie identique -- il le dit.
+    const faite = resultat?.dejaAJour ? "Déjà à jour : la dernière sauvegarde contient tout." : "Sauvegarde faite.";
+    notify(resultat?.ok === false ? (resultat.error || "Sauvegarde impossible.") : faite, resultat?.ok === false ? "error" : "success");
   } catch (error) {
     notify(`Sauvegarde impossible : ${error.message || "erreur"}`, "error");
   } finally {
@@ -7731,6 +8281,7 @@ function renderSettings() {
       </div>
     </article>
   `).join("");
+  majDroitsAdministration();
 }
 
 async function saveDeliverySector(form) {
@@ -7774,6 +8325,12 @@ async function loadMoi() {
     // laisse `moi` a null, et renderComptes n'affiche simplement rien.
     moi = null;
   }
+  // Le brouillon de commande attendait de savoir qui est connecte
+  // (reprendreBrouillonCommande) ; sans reponse, il reste en attente.
+  if (moi && repriseBrouillonEnAttente) {
+    repriseBrouillonEnAttente = false;
+    if (ongletAffiche === "commande-client") reprendreBrouillonCommande();
+  }
   renderCompteBarreLaterale();
   // Le titre « Bonjour <identifiant> » depend de /api/me : s'il repond apres
   // le premier rendu, le titre doit suivre.
@@ -7781,7 +8338,41 @@ async function loadMoi() {
   // La liste des comptes n'est lue que Parametres affiches (24/09).
   rendreSiAffiche("parametres", renderComptes);
   majDroitsNumerotation();
+  majDroitsAdministration();
+  // Le stock ferme au livreur (relecture du 26/09) : l'ecran deja dessine
+  // avant la reponse se redessine, maintenant ou en y arrivant. Pour les
+  // autres comptes rien ne change : pas de second rendu.
+  if (stockReserve()) rendreOuDifferer("stock", renderStock);
   majCarteJournal();
+  if (moi?.motDePasseEnvironnementCourt) montrerBandeauMotDePasseCourt();
+}
+
+// Garde-fous (25/09) : le mot de passe d'environnement fait moins de 12
+// caracteres. Le serveur demarre quand meme (un refus verrouillerait Thomas
+// dehors) ; /api/me le dit a l'administration seulement, et ce bandeau le
+// redit a chaque ouverture : il ne se corrige que sur le serveur. Meme forme
+// que le bandeau de restauration ; construit sans innerHTML.
+function montrerBandeauMotDePasseCourt() {
+  if (document.getElementById("bandeauMotDePasseCourt")) return;
+  const bandeau = document.createElement("div");
+  bandeau.id = "bandeauMotDePasseCourt";
+  bandeau.className = "storage-recovery-banner";
+  bandeau.setAttribute("role", "alert");
+  const contenu = document.createElement("div");
+  contenu.className = "storage-recovery-content";
+  const titre = document.createElement("strong");
+  titre.textContent = "Mot de passe d’administration trop court";
+  const texte = document.createElement("p");
+  texte.textContent = "Le mot de passe du compte d’environnement (SEREO_AUTH_PASSWORD) fait moins de 12 caractères. Change-le sur le serveur : 20 caractères aléatoires ou plus. Cela ferme aussi toutes les sessions ouvertes.";
+  contenu.append(titre, texte);
+  const fermer = document.createElement("button");
+  fermer.type = "button";
+  fermer.className = "storage-recovery-dismiss";
+  fermer.setAttribute("aria-label", "Fermer l’avertissement");
+  fermer.textContent = "×";
+  fermer.addEventListener("click", () => bandeau.remove());
+  bandeau.append(contenu, fermer);
+  document.body.prepend(bandeau);
 }
 
 // La numerotation des bons est reservee a l'administration (decision du
@@ -7802,6 +8393,72 @@ function majDroitsNumerotation() {
     form.append(note);
   }
   if (note) note.hidden = !ferme;
+}
+
+// Decision 6 (garde-fous du 25/09) : import, purge, reglages et sauvegardes sont
+// reserves a l'administration (le serveur refuse : requireAdministration). Un
+// autre compte LIT les blocs marques [data-reserve-admin] ; leurs commandes
+// sont fermees et le bloc dit pourquoi -- comme la numerotation des bons, au
+// lieu d'un refus 403 au clic. Les reglages de CET appareil restent libres
+// ([data-appareil] : « Y aller » ; le mode clair / sombre n'est pas marque).
+// Les liens de telechargement des archives sont retires (le serveur les
+// refuse). Tant que /api/me n'a pas repondu, rien ne change. Appelee apres
+// chaque rendu qui refait un bloc marque (reglages, archives, leur feuille).
+function importReserve() {
+  return Boolean(moi && !moi.administration);
+}
+
+// Relecture adverse du 26/09 : le serveur refuse au livreur l'ajustement du
+// stock (refuserAuLivreur, PATCH /api/stock/:id), mais l'ecran lui laissait
+// − / +, la quantite et le seuil ouverts. Il l'apprenait au clic (403), ou
+// plus tard, quand la file hors ligne retirait le geste refuse. Comme les blocs
+// reserves a l'administration : fermes, et l'ecran dit pourquoi (la phrase du
+// serveur). Tant que /api/me n'a pas repondu, rien ne change.
+const NOTE_STOCK_RESERVE = "Réservé au bureau et à la préparation.";
+
+function stockReserve() {
+  return Boolean(moi && String(moi.role) === "livreur");
+}
+
+// La note de l'ecran Stock ([data-note-stock]).
+function majNoteStock() {
+  document.querySelectorAll("[data-note-stock]").forEach(note => {
+    note.textContent = NOTE_STOCK_RESERVE;
+    note.hidden = !stockReserve();
+  });
+}
+
+function majDroitsAdministration() {
+  if (!moi) return;
+  const ferme = !moi.administration;
+  document.querySelectorAll("[data-reserve-admin]").forEach(bloc => {
+    for (const champ of bloc.querySelectorAll("input, select, textarea, button")) {
+      if (champ.closest("[data-appareil]")) continue;
+      if (ferme) {
+        if (!champ.disabled) {
+          champ.disabled = true;
+          champ.dataset.fermeParDroits = "1";
+        }
+      } else if (champ.dataset.fermeParDroits) {
+        champ.disabled = false;
+        delete champ.dataset.fermeParDroits;
+      }
+    }
+    if (ferme) bloc.querySelectorAll("a[download]").forEach(lien => lien.remove());
+    let note = bloc.querySelector(":scope > .par-reserve-note");
+    if (ferme && !note) {
+      note = document.createElement("p");
+      note.className = "par-aide par-reserve-note";
+      note.textContent = NOTE_RESERVE_ADMIN;
+      const titre = bloc.querySelector(":scope > h3, :scope > .par-carte-tete, :scope > .panel-heading");
+      if (titre) titre.after(note);
+      else bloc.prepend(note);
+    } else if (!ferme && note) {
+      note.remove();
+    }
+  });
+  // Les boutons d'import de l'en-tete et de l'accueil : fermes comme hors ligne.
+  majBandeauHorsLigne();
 }
 
 /**
@@ -7980,6 +8637,7 @@ async function renderImportsArchives() {
 
     if (!archives.length) {
       container.innerHTML = `<p class="muted">Aucun import archivé pour l'instant. Tes prochains imports apparaitront ici.</p>`;
+      majDroitsAdministration();
       return;
     }
 
@@ -8017,6 +8675,7 @@ async function renderImportsArchives() {
         </table>
       </div>
     `;
+    majDroitsAdministration();
   } catch (error) {
     container.innerHTML = `<p class="muted">Impossible de charger l'historique : ${escapeHtml(error.message || "erreur réseau")}</p>`;
   }
@@ -8089,6 +8748,7 @@ function ouvrirFeuilleImports(type) {
       `).join("")}
     </ul>
   `;
+  majDroitsAdministration();
   dialogue.showModal();
 }
 
@@ -8140,6 +8800,7 @@ async function purgeOrdersHandler(btn) {
     "",
     "Le stock et l'historique sont préservés.",
     "Les archives Excel restent téléchargeables.",
+    "Une sauvegarde est faite juste avant, et gardée à part : si elle échoue, rien n'est supprimé.",
     "",
     "Continuer ?"
   ].join("\n");
@@ -8152,7 +8813,7 @@ async function purgeOrdersHandler(btn) {
   await runAction(btn, "Purge en cours...", async () => {
     const result = await apiFetch("/api/orders/purge", { method: "POST" });
     notify(
-      `Purge faite : ${accorder(result.purged.commandes, "bon")}, ${accorder(result.purged.clients, "client")}, ${accorder(result.purged.ventes, "vente")}, ${accorder(result.purged.routes, "tournée")} supprimés. Va dans Imports et archives ci-dessus pour ré-importer tes Excel.`,
+      `Purge faite : ${accorder(result.purged.commandes, "bon")}, ${accorder(result.purged.clients, "client")}, ${accorder(result.purged.ventes, "vente")}, ${accorder(result.purged.routes, "tournée")} supprimés. Sauvegarde d’avant la purge : ${result.sauvegarde || "—"}. Va dans Imports et archives ci-dessus pour ré-importer tes Excel.`,
       "success"
     );
     await loadData();
@@ -9937,7 +10598,13 @@ async function apiFetch(url, options = {}) {
     noterEcriture();
     // La cle d'idempotence : gardee dans la file avec l'ecriture, elle fait
     // qu'un renvoi n'est applique qu'une fois (gesteIdempotent, server.js).
-    if (!isUpload) options = { ...options, headers: { ...entetesEnObjet(options.headers), "X-Sereo-Geste": nouvelleCleDeGeste() } };
+    // L'appelant peut porter la sienne (25/09) : la commande client garde UNE
+    // cle tant que sa saisie ne change pas (cleDEnvoiDeLaSaisie), pour qu'un
+    // second appui apres une issue inconnue soit le MEME geste.
+    if (!isUpload) {
+      const entetes = entetesEnObjet(options.headers);
+      options = { ...options, headers: { ...entetes, "X-Sereo-Geste": entetes["X-Sereo-Geste"] || nouvelleCleDeGeste() } };
+    }
   }
   const timeoutMs = options.timeoutMs || (isUpload ? APIFETCH_UPLOAD_TIMEOUT_MS : APIFETCH_DEFAULT_TIMEOUT_MS);
   const ac = new AbortController();
@@ -9964,18 +10631,22 @@ async function apiFetch(url, options = {}) {
     // Si c'est l'appelant qui a abort (pas le timeout), on re-throw l'erreur
     // originale pour preserver la semantique : il ne voulait plus rien envoyer.
     if (options.signal && options.signal.aborted) throw err;
-    // L'ecriture est-elle recuperable ? Voir tenterMiseEnFile().
-    if (await tenterMiseEnFile(url, options)) throw erreurMiseEnFile();
+    // L'ecriture est-elle recuperable ? Voir tenterMiseEnFile(). `sansFile` :
+    // une ecriture dont la suite depend de la reponse (la fiche d'un nouveau
+    // client, puis son abonnement) ne se met pas en file morceau par morceau.
+    if (!options.sansFile && await tenterMiseEnFile(url, options)) throw erreurMiseEnFile();
+    // `injoignable` : le serveur n'a rien repondu (l'appelant peut dire
+    // pourquoi rien n'est parti, plutot qu'un message de reseau generique).
     if (err && (err.name === "AbortError" || err.code === "ABORT_ERR")) {
-      throw new Error(`Réseau trop lent (plus de ${Math.round(timeoutMs / 1000)} s). Vérifie ta connexion.`);
+      throw Object.assign(new Error(`Réseau trop lent (plus de ${Math.round(timeoutMs / 1000)} s). Vérifie ta connexion.`), { injoignable: true });
     }
     // Jamais le message brut du navigateur (« Failed to fetch », « Load
     // failed », « NetworkError... ») : il est anglais et ne dit rien d'utile.
-    throw new Error("Impossible de joindre le serveur. Vérifie ta connexion.");
+    throw Object.assign(new Error("Impossible de joindre le serveur. Vérifie ta connexion."), { injoignable: true });
   }
   clearTimeout(timer);
 
-  if (ecriture && STATUTS_PASSERELLE.has(res.status) && await tenterMiseEnFile(url, options)) {
+  if (ecriture && STATUTS_PASSERELLE.has(res.status) && !options.sansFile && await tenterMiseEnFile(url, options)) {
     throw erreurMiseEnFile();
   }
   // Le serveur vient de repondre : c'est le moment de vider la file, meme si
@@ -9997,15 +10668,22 @@ async function apiFetch(url, options = {}) {
     const next = window.location.pathname + window.location.search + window.location.hash;
     // Le geste qui a rencontre la session expiree n'est pas perdu : il attend
     // dans la file, qui repartira apres la reconnexion (H2, lot 1 de l'audit).
-    if (ecriture) await tenterMiseEnFile(url, options);
+    const gardeeEnFile = Boolean(ecriture && !options.sansFile && await tenterMiseEnFile(url, options));
     // La session est finie : ses donnees ne doivent pas s'afficher a la
     // prochaine ouverture, avant que le serveur ait reconnu quelqu'un.
     // (Un 429 n'est pas une fin de session : on ne vide que sur 401.)
     // La FILE, elle, n'est pas un cache : elle reste.
     if (res.status === 401) await viderCacheDeDonnees();
-    window.location.href = `/login?next=${encodeURIComponent(next)}`;
-    // On throw quand meme pour interrompre proprement le code appelant.
-    throw new Error("Session expiree, redirection vers /login");
+    // « Se deconnecter » est deja en route vers /login : pas de seconde
+    // navigation, elle interromprait la sienne (garde-fous du 25/09).
+    if (!deconnexionEnCours) window.location.href = `/login?next=${encodeURIComponent(next)}`;
+    // On throw quand meme pour interrompre proprement le code appelant. Il
+    // sait si son ecriture attend dans la file (relecture adverse du 26/09) :
+    // la commande client oublie alors son brouillon, qui revenait apres la
+    // reconnexion comme une saisie a terminer -- la retoucher creait une
+    // seconde commande. Pas `enFile` : chaque appelant en tire son chemin
+    // « hors ligne », qui n'a pas ete relu pour une fin de session.
+    throw Object.assign(new Error("Session expiree, redirection vers /login"), { gardeeEnFile });
   }
 
   // Le CORPS a son propre delai (relecture adverse du lot 1). Premier jet :
@@ -10039,12 +10717,52 @@ async function apiFetch(url, options = {}) {
       ? body.error
       : `Erreur HTTP ${res.status}`;
     const erreur = new Error(message);
+    // Le serveur a REPONDU (25/09) : l'issue est connue, un nouvel envoi est
+    // un nouveau geste (voir cleDEnvoiDeLaSaisie).
+    erreur.statut = res.status;
     // Un refus peut porter sa liste (ex. les adresses a verifier d'une tournee).
     if (body && typeof body === "object" && body.details) erreur.details = body.details;
     throw erreur;
   }
 
   return body;
+}
+
+/**
+ * Un formulaire, UN envoi a la fois (chasse aux defauts, 25/09). La commande
+ * client a deux boutons « Valider la commande » HORS du formulaire, relies par
+ * `form=` : sous le total, et dans la barre du panier au telephone. runAction
+ * ne grisait que le declencheur : Entree (qui envoie par le premier) puis un
+ * toucher sur la barre, pendant un envoi lent, creaient DEUX commandes (chaque
+ * envoi tirait sa cle de geste). Le verrou est pose sur le FORMULAIRE : tous
+ * ses boutons d'envoi se grisent (`form.elements` compte ceux qui le visent
+ * par `form=`), et un envoi qui arrive pendant le premier est ignore.
+ */
+/**
+ * Envoie un formulaire comme un clic sur son bouton : ses ecouteurs « submit »
+ * s'executent. `requestSubmit()` n'existe que depuis Safari 16 : sous iOS 15.4
+ * a 15.x, l'import lance depuis l'en-tete levait une TypeError et le fichier
+ * choisi ne partait pas (chasse aux defauts, 25/09). Sans elle, l'evenement
+ * « submit » est emis a la main ; `form.submit()` contournerait les ecouteurs
+ * et naviguerait.
+ */
+function demanderEnvoi(form) {
+  if (!form) return;
+  if (typeof form.requestSubmit === "function") form.requestSubmit();
+  else form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+}
+
+async function envoyerUneFois(form, declencheur, busyText, action) {
+  if (form.dataset.envoiEnCours === "1") return;
+  form.dataset.envoiEnCours = "1";
+  const autres = [...form.elements].filter(el => el.type === "submit" && el !== declencheur && !el.disabled);
+  for (const bouton of autres) bouton.disabled = true;
+  try {
+    await runAction(declencheur, busyText, action);
+  } finally {
+    for (const bouton of autres) bouton.disabled = false;
+    delete form.dataset.envoiEnCours;
+  }
 }
 
 async function runAction(control, busyText, action) {
@@ -10125,7 +10843,11 @@ async function tenterMiseEnFile(url, options) {
   // refuser tout de suite.
   if (options.body instanceof FormData) return false;
   try {
-    await mettreEnAttente(url, { ...options, method: methode });
+    // `corpsEnFile` (facultatif) : ce que l'ecriture doit dire si elle attend
+    // -- rejouee plus tard, elle ne pourra plus poser de question (commande
+    // pour un nouveau client : envoyerCommandeClient).
+    const corps = typeof options.corpsEnFile === "string" ? options.corpsEnFile : options.body;
+    await mettreEnAttente(url, { ...options, method: methode, body: corps });
     await rafraichirEtatFile();
     return true;
   } catch {
@@ -10433,10 +11155,15 @@ function majBandeauHorsLigne() {
   // Un import de fichier ne se met pas en file (tenterMiseEnFile) : hors
   // ligne, ses boutons le disent au lieu d'echouer. AVANT le retour anticipe
   // du bandeau masque : sinon, le reseau revenu, ils restaient desactives.
+  // Garde-fous (25/09, decision 6) : l'import est reserve a l'administration ;
+  // pour un autre compte, ces boutons restent fermes, et disent pourquoi.
+  const reserve = importReserve();
   document.querySelectorAll('[data-action="importer-ventes"], [data-action="importer-stock"], #importVentesButton, #importStockButton')
     .forEach(bouton => {
-      bouton.disabled = horsLigne;
-      if (horsLigne) bouton.title = "Import impossible hors ligne"; else bouton.removeAttribute("title");
+      bouton.disabled = horsLigne || reserve;
+      if (reserve) bouton.title = NOTE_RESERVE_ADMIN;
+      else if (horsLigne) bouton.title = "Import impossible hors ligne";
+      else bouton.removeAttribute("title");
     });
   bandeau.hidden = !horsLigne && ecrituresEnAttente === 0;
   if (bandeau.hidden) return;
@@ -10658,15 +11385,26 @@ function formatJourDeTournee(value) {
 function renderStockLines(order) {
   const lines = order.stockLines || [];
   if (!lines.length) return `<div class="stock-lines muted">Aucun produit identifié.</div>`;
+  // Relecture adverse (25/09) : une commande au stock deja sorti du rayon
+  // (stockStatus « reserve » : saisie chez le client, planifiee confirmee, en
+  // preparation) ne se compare plus au rayon qu'elle a elle-meme reduit. Au
+  // bureau, sa ligne disait « Besoin 6 · Dispo 4 » en rouge, comme un manque,
+  // alors que ses 6 articles sont mis de cote ; le telephone ne l'alertait
+  // deja plus (ligneDeProduitPreparation). Un produit introuvable au stock n'a
+  // rien pu reserver : sa ligne reste dite telle quelle.
+  const reservee = order.stockStatus === "reserve";
 
   return `
     <div class="stock-lines">
-      ${lines.map(line => `
-        <div class="stock-line ${line.status === "ok" ? "line-ok" : "line-danger"}">
+      ${lines.map(line => {
+        const miseDeCote = reservee && line.status !== "unknown";
+        return `
+        <div class="stock-line ${line.status === "ok" || miseDeCote ? "line-ok" : "line-danger"}">
           <span>${escapeHtml(line.nom || line.code || "Produit")}</span>
-          <span>Besoin ${escapeHtml(line.required)} · Dispo ${line.available === null ? "?" : escapeHtml(line.available)}</span>
+          <span>Besoin ${escapeHtml(line.required)} · ${miseDeCote ? "Réservé" : `Dispo ${line.available === null ? "?" : escapeHtml(line.available)}`}</span>
         </div>
-      `).join("")}
+      `;
+      }).join("")}
     </div>
   `;
 }
@@ -11272,6 +12010,9 @@ function initTourneePratique() {
   // « Retour au depot » memorise : la case de la planification ecrit le
   // reglage (discretement ; hors ligne, il attend dans la file).
   retourPlanification?.addEventListener("change", () => {
+    // Garde-fous (25/09) : le reglage partage est reserve a l'administration ;
+    // pour un autre compte, la case ne vaut que pour la tournee preparee.
+    if (importReserve()) return;
     enregistrerReglagesTournee({ retourAuDepot: retourPlanification.checked })
       .catch(erreur => { if (!erreur?.enFile) notifyEchec(erreur); });
   });

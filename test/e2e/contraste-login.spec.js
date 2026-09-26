@@ -28,7 +28,9 @@ const { test, expect } = require("./tuiles");
 // Le serveur AUTHENTIFIE, declare dans playwright.config.js. `baseURL` pointe
 // sur l'autre, donc les URL sont absolues ici -- deliberement visible, pour
 // qu'on ne croie pas mesurer la meme chose que les autres bancs.
-const BASE = "http://127.0.0.1:3101";
+// L adresse du serveur authentifie : 3101 par defaut ; un worktree qui lance ses
+// bancs en parallele d autres passe la sienne (SEREO_E2E_AUTH_BASE_URL).
+const BASE = process.env.SEREO_E2E_AUTH_BASE_URL || "http://127.0.0.1:3101";
 
 const DIFF_MIN = 40;
 const PART_MIN = 0.02;

@@ -4,7 +4,10 @@
 
 const { test, expect } = require("./tuiles");
 
-const BASE = "http://127.0.0.1:3101";
+// L adresse du serveur authentifie : 3101 par defaut ; un worktree qui lance ses
+// bancs en parallele d autres passe la sienne (SEREO_E2E_AUTH_BASE_URL, comme
+// connexion et contraste-login ; SEREO_E2E_AUTH_URL, l'ancien nom de ce banc, vaut aussi).
+const BASE = process.env.SEREO_E2E_AUTH_BASE_URL || process.env.SEREO_E2E_AUTH_URL || "http://127.0.0.1:3101";
 // Un identifiant par passage : la base de ce serveur survit entre deux lancements
 // locaux (reuseExistingServer), et un identifiant deja pris serait refuse.
 const LIVREUR = { identifiant: `livreur-numero-${Date.now()}`, motDePasse: "livreur-e2e-sans-valeur-2026" };

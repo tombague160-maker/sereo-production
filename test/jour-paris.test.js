@@ -55,6 +55,11 @@ afterEach(() => mock.timers.reset());
 
 after(async () => {
   await new Promise(resolve => server.close(resolve));
+  // La sauvegarde automatique qu'un geste a lancee court peut-etre encore :
+  // depuis le 25/09 (garde-fous) elle se fait dans un thread, par une seconde
+  // connexion a la base. Sous Windows, effacer le dossier pendant qu'elle le
+  // tient ouvert levait EPERM (4 fois sur 6 seul ; 0 sur 6 sur main).
+  await require("../server")._flushPendingBackup();
   closeStorage();
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });

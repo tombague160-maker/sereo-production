@@ -7,9 +7,19 @@ const { spawn } = require("node:child_process");
 const net = require("node:net");
 const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
 
-const AUJOURDHUI = new Intl.DateTimeFormat("en-CA", {
-  timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit"
-}).format(new Date());
+/**
+ * Le jour a Paris A L'INSTANT (AAAA-MM-JJ). Lu a chaque seme, jamais au
+ * chargement du module (25/09) : la CI lance UN ouvrier Playwright pour tous
+ * les fichiers ; charge a 23 h 34 (Paris), il semait a 0 h 03 une tournee de
+ * la VEILLE, que l'ecran Tournee signalait « pas soldee » au-dessus de l'arret
+ * (158 px : le « flaky » de telephone-utilisable.spec.js du 24/09).
+ * test/seme-jour-de-paris.test.js.
+ */
+function jourDeParis() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit"
+  }).format(new Date());
+}
 
 /** Six clients autour de Besançon, tous géolocalisés. */
 const CLIENTS = [
@@ -35,11 +45,11 @@ const PRODUITS = [
   { code: "ALE", nom: "Alèses", prixUnitaire: 5 }
 ];
 
-function commande(id, client, status, extra = {}) {
+function commande(jour, id, client, status, extra = {}) {
   return {
     id, clientId: client.id, clientName: client.nom, status,
     address: client.rue, city: client.ville, postalCode: client.codePostal,
-    lat: client.lat, lng: client.lng, deliveryDate: AUJOURDHUI, dateCommande: AUJOURDHUI,
+    lat: client.lat, lng: client.lng, deliveryDate: jour, dateCommande: jour,
     products: PRODUITS.map(p => ({ ...p, quantite: 3 })),
     ...extra
   };
@@ -47,21 +57,23 @@ function commande(id, client, status, extra = {}) {
 
 /** Une tournée EN COURS : deux arrêts livrés, un en cours, un en problème, deux à venir. */
 function jeuDeDonnees() {
+  // Le jour du SEME (voir jourDeParis).
+  const jour = jourDeParis();
   const [tilleuls, pharma, bellevue, ssiad, veto, dupont] = CLIENTS;
   const commandes = [
-    commande("o-1", bellevue, "livre", { deliveredAt: `${AUJOURDHUI}T09:10:00Z` }),
-    commande("o-2", ssiad, "livre", { deliveredAt: `${AUJOURDHUI}T09:40:00Z` }),
-    commande("o-3", tilleuls, "en_livraison"),
-    commande("o-4", veto, "en_livraison"),
-    commande("o-5", pharma, "en_livraison"),
-    commande("o-6", dupont, "en_livraison"),
+    commande(jour, "o-1", bellevue, "livre", { deliveredAt: `${jour}T09:10:00Z` }),
+    commande(jour, "o-2", ssiad, "livre", { deliveredAt: `${jour}T09:40:00Z` }),
+    commande(jour, "o-3", tilleuls, "en_livraison"),
+    commande(jour, "o-4", veto, "en_livraison"),
+    commande(jour, "o-5", pharma, "en_livraison"),
+    commande(jour, "o-6", dupont, "en_livraison"),
     // Pour la vue de préparation : les quatre états d'une commande à préparer.
-    commande("o-7", pharma, "en_preparation"),
-    commande("o-8", bellevue, "pret_livraison"),
+    commande(jour, "o-7", pharma, "en_preparation"),
+    commande(jour, "o-8", bellevue, "pret_livraison"),
     // Bloquee : un produit dont le stock est a zero. Le serveur recalcule
     // canPrepare depuis le stock -- un drapeau seme serait ecrase.
-    commande("o-9", veto, "importe", { products: [...PRODUITS.map(p => ({ ...p, quantite: 3 })), { code: "GANTS", nom: "Gants nitrile", prixUnitaire: 8, quantite: 5 }] }),
-    commande("o-10", dupont, "importe")
+    commande(jour, "o-9", veto, "importe", { products: [...PRODUITS.map(p => ({ ...p, quantite: 3 })), { code: "GANTS", nom: "Gants nitrile", prixUnitaire: 8, quantite: 5 }] }),
+    commande(jour, "o-10", dupont, "importe")
   ];
   const arret = (o, status, extra = {}) => ({
     id: `s-${o.id}`, orderId: o.id, clientId: o.clientId, clientName: o.clientName,
@@ -74,7 +86,7 @@ function jeuDeDonnees() {
       { id: "st-GANTS", code: "GANTS", nom: "Gants nitrile", quantite: 0, tarif: 8 }],
     commandes,
     routes: [{
-      id: "r-1", status: "en_livraison", deliveryDate: AUJOURDHUI, name: "Tournée Besançon",
+      id: "r-1", status: "en_livraison", deliveryDate: jour, name: "Tournée Besançon",
       stops: [
         arret(commandes[0], "livre"),
         arret(commandes[1], "livre"),
@@ -86,11 +98,11 @@ function jeuDeDonnees() {
     }],
     // Trois abonnements, un par etat. La forme est celle que lib/operations-api.js ecrit.
     subscriptions: [
-      { id: "sub-1", clientId: tilleuls.id, status: "active", startDate: AUJOURDHUI, frequency: { unit: "days", interval: 14 }, reminderDays: 2, notes: "",
+      { id: "sub-1", clientId: tilleuls.id, status: "active", startDate: jour, frequency: { unit: "days", interval: 14 }, reminderDays: 2, notes: "",
         products: [{ stockId: "st-CH-L", code: "CH-L", nom: "Changes taille L", quantite: 4, prixUnitaire: 12, totalLigne: 48 }] },
-      { id: "sub-2", clientId: bellevue.id, status: "paused", startDate: AUJOURDHUI, frequency: { unit: "months", interval: 1 }, reminderDays: 3, notes: "",
+      { id: "sub-2", clientId: bellevue.id, status: "paused", startDate: jour, frequency: { unit: "months", interval: 1 }, reminderDays: 3, notes: "",
         products: [{ stockId: "st-ALE", code: "ALE", nom: "Alèses", quantite: 10, prixUnitaire: 5, totalLigne: 50 }] },
-      { id: "sub-3", clientId: pharma.id, status: "stopped", startDate: AUJOURDHUI, frequency: { unit: "days", interval: 7 }, reminderDays: 1, notes: "",
+      { id: "sub-3", clientId: pharma.id, status: "stopped", startDate: jour, frequency: { unit: "days", interval: 7 }, reminderDays: 1, notes: "",
         products: [{ stockId: "st-CH-L", code: "CH-L", nom: "Changes taille L", quantite: 2, prixUnitaire: 12, totalLigne: 24 }] }
     ]
   };
@@ -217,4 +229,9 @@ async function demarrer({ port, volume = "", seed = volume === "production" ? re
   };
 }
 
-module.exports = { demarrer, jeuDeDonnees, CLIENTS, AUJOURDHUI };
+module.exports = {
+  demarrer, jeuDeDonnees, CLIENTS, jourDeParis,
+  // Le jour a Paris, lu quand un banc le destructure -- a son chargement, juste
+  // avant son beforeAll --, et non plus fige au premier chargement de ce module.
+  get AUJOURDHUI() { return jourDeParis(); }
+};

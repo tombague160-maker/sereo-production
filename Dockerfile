@@ -63,20 +63,26 @@ ENV NODE_ENV=production \
     SEREO_UPLOAD_DIR=/app/uploads \
     SEREO_ENABLE_DB_EXPORT=0
 
-# Etape 1 : install des dependances (couche cachee tant que package*.json ne change pas)
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --no-audit --no-fund
-
-# Etape 2 : copie du code applicatif (couche relancee a chaque modif source)
-COPY . .
-
-# Etape 3 : creation des dossiers de runtime + permissions pour l'utilisateur "node"
-# (uid/gid 1000 dans l'image officielle node, compatible avec OMV / chown 1000:1000)
+# Etape 1 : les dossiers de runtime, a l'utilisateur "node" (uid/gid 1000 dans
+# l'image officielle node, compatible avec OMV / chown 1000:1000).
+# AVANT la copie des dependances et du code (25/09) : un `chown -R /app` place
+# APRES recopiait node_modules et le code dans une couche de plus (24,8 Mo,
+# 24 s a chaque construction, mesure de la chasse aux defauts). Ici, /app ne
+# contient que des dossiers vides ; tout ce qui suit est cree par node ou
+# copie avec --chown : memes proprietaires qu'avant, sans doublon.
 RUN mkdir -p /app/data /app/data/backups /app/uploads /app/imports /app/exports \
  && chown -R node:node /app
 
-# Securite : ne pas tourner en root
+# Securite : ne pas tourner en root (npm ci compris : node_modules est a node,
+# comme avant).
 USER node
+
+# Etape 2 : install des dependances (couche cachee tant que package*.json ne change pas)
+COPY --chown=node:node package.json package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund
+
+# Etape 3 : copie du code applicatif (couche relancee a chaque modif source)
+COPY --chown=node:node . .
 
 EXPOSE 3000
 

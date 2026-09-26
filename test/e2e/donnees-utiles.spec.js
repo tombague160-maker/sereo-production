@@ -41,8 +41,9 @@ test.beforeAll(async () => {
       dateCommande: jourDecale(jours), deliveryDate: jourDecale(jours), deliveredAt: `${jourDecale(jours)}T09:00:00Z`
     });
   }
-  // Un journal d'avant le lot : 60 actions et un mouvement, sans auteur.
-  seed.historique = Array.from({ length: 60 }, (_, i) => ({
+  // Un journal d'avant le lot : 230 actions (plus d'une page de 200, decision
+  // 10) et un mouvement, sans auteur.
+  seed.historique = Array.from({ length: 230 }, (_, i) => ({
     id: `h-ancien-${i}`, date: new Date(Date.now() - (i + 1) * 3600000).toISOString(), type: "Import", message: `ancienne action ${i}`
   }));
   seed.stockMovements = [{
@@ -244,10 +245,11 @@ test("journal — rien au chargement de l'app ; Paramètres lit une page, avec l
     await page.locator('.sidebar-compte').click();
     await expect(page.locator("#parJournal .par-journal-ligne").first()).toBeVisible();
   });
-  expect(aLOuverture.filter(u => u.startsWith("/api/journal"))).toEqual(["/api/journal?genre=actions&limite=50"]);
+  // Decision 10 (24/09) : les 200 dernieres lignes, puis « voir plus ».
+  expect(aLOuverture.filter(u => u.startsWith("/api/journal"))).toEqual(["/api/journal?genre=actions&limite=200"]);
 
   const lignes = page.locator("#parJournal .par-journal-ligne");
-  await expect(lignes).toHaveCount(50);
+  await expect(lignes).toHaveCount(200);
   await expect(lignes.first().locator(".par-journal-qui")).toHaveText(/dev/);
   // Integration du 24/09 : « 24 sept. · 16 h 00 » (utils/dates.js, lot parcours).
   await expect(lignes.first().locator(".par-journal-quand")).toHaveText(/^\d{1,2}(er)? [a-zéû]+\.? · \d{1,2} h \d{2}$/);
@@ -256,9 +258,10 @@ test("journal — rien au chargement de l'app ; Paramètres lit une page, avec l
 
   const suite = page.locator("#parJournalSuite");
   await expect(suite).toBeVisible();
+  await expect(suite).toHaveText("Afficher les 200 suivantes");
   await suite.click();
-  await expect(lignes).not.toHaveCount(50);
-  expect(await lignes.count()).toBeGreaterThan(60);
+  await expect(lignes).not.toHaveCount(200);
+  expect(await lignes.count()).toBeGreaterThan(230);
   await expect(suite).toBeHidden();
 
   await page.locator('[data-journal-genre="stock"]').click();

@@ -4,12 +4,14 @@ const express = require("express");
 const compression = require("compression");
 const multer = require("multer");
 const readXlsxFile = require("read-excel-file/node");
+const { classeurVerifie, ClasseurRefuse } = require("./lib/garde-excel");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
 const { zipSync, strToU8 } = require("fflate");
-const { createSqliteStore } = require("./storage/sqliteStore");
+const { createSqliteStore, lireTourneesDuFichier, ETAT_DE_LECTURE, AJOUT_EN_TETE } = require("./storage/sqliteStore");
+const sauvegardeBase = require("./lib/sauvegarde-base");
 const { empreinteDesSources, shellEmpreinte } = require("./lib/empreinte-shell");
 const { fondDeCarte } = require("./lib/fond-de-carte");
 const { GestionnaireOsrm } = require("./lib/osrm-local");
@@ -67,6 +69,9 @@ const GITHUB_REPO = "tombague160-maker/sereo-production";
 let releaseNotesCache = null;
 let releaseNotesCacheAt = 0;
 const RELEASE_NOTES_CACHE_TTL_MS = 60 * 60 * 1000;
+// Robustesse (25/09) : un GitHub qui ne repond pas laissait /api/version
+// pendant jusqu'aux delais d'undici (plusieurs minutes). 3 s, puis le repli.
+const RELEASE_NOTES_TIMEOUT_MS = 3000;
 
 async function fetchReleaseNotes(version) {
   const now = Date.now();
@@ -75,13 +80,30 @@ async function fetchReleaseNotes(version) {
     return releaseNotesCache;
   }
   const fallbackUrl = `https://github.com/${GITHUB_REPO}/releases/tag/v${version}`;
+  // Robustesse (25/09) : les bancs et les serveurs d'essai posent
+  // SEREO_SKIP_RELEASE_FETCH=1 depuis longtemps, mais rien ne la lisait :
+  // chaque serveur de banc interrogeait l'API GitHub (60 appels par heure et
+  // par adresse, sans compte). Posee a 1 : aucun appel sortant, notes vides.
+  if (process.env.SEREO_SKIP_RELEASE_FETCH === "1") {
+    return {
+      version,
+      releaseUrl: fallbackUrl,
+      releaseName: `v${version}`,
+      publishedAt: "",
+      pourToi: "",
+      fullNotes: "",
+      fetchedAt: new Date().toISOString(),
+      fetchError: "SEREO_SKIP_RELEASE_FETCH=1"
+    };
+  }
   try {
     const url = `https://api.github.com/repos/${GITHUB_REPO}/releases/tags/v${version}`;
     const response = await fetch(url, {
       headers: {
         "Accept": "application/vnd.github+json",
         "User-Agent": "sereo-app"
-      }
+      },
+      signal: AbortSignal.timeout(RELEASE_NOTES_TIMEOUT_MS)
     });
     if (!response.ok) {
       const cache = {
@@ -139,6 +161,19 @@ const STORAGE_ENGINE = (process.env.SEREO_STORAGE || "sqlite").toLowerCase();
 const SQLITE_PATH = path.resolve(process.env.SEREO_SQLITE_PATH || process.env.SQLITE_PATH || path.join(__dirname, "data", "sereo.sqlite"));
 const UPLOAD_DIR = path.resolve(process.env.SEREO_UPLOAD_DIR || path.join(__dirname, "imports"));
 const BACKUP_DIR = path.resolve(process.env.SEREO_BACKUP_DIR || path.join(path.dirname(STORAGE_ENGINE === "json" ? DB_PATH : SQLITE_PATH), "backups"));
+// Garde-fous (25/09, decision 3) : un SECOND dossier de sauvegarde, optionnel
+// (un autre disque, un partage monte). Chaque sauvegarde y est aussi copiee et
+// relue ; absent, rien ne change. Le meme dossier que le premier ne compte pas.
+const BACKUP_COPY_DIR = (() => {
+  const brut = cleanEnv(process.env.SEREO_BACKUP_COPY_DIR);
+  if (!brut) return null;
+  const dossier = path.resolve(brut);
+  if (dossier === BACKUP_DIR) {
+    console.warn("[storage] SEREO_BACKUP_COPY_DIR designe le dossier des sauvegardes lui-meme : ignore.");
+    return null;
+  }
+  return dossier;
+})();
 // v1.12.0 : dossier ou les Excel importes sont archives au format brut pour
 // retelechargement et audit. Sous-dossier du data dir, donc persistant sur
 // le volume Docker comme la SQLite.
@@ -174,6 +209,16 @@ const SHELL = (() => {
   }
 })();
 const SHELL_ANNONCE = SHELL ? SHELL.nom : "";
+// Chaque fichier du shell dit de quelle version il est (chasse aux defauts,
+// 25/09) : le service worker ne range dans le cache d'une version QUE les
+// fichiers de cette version (public/service-worker.js, duMemeShell). Sans
+// cela, une page plus recente que lui rangeait ses fichiers neufs dans le
+// cache de l'ancienne version, sous l'ancienne page gardee pour la tournee.
+// Un en-tete a part : X-Sereo-Shell reste celui de la PAGE (le shell qu'elle
+// attend), et rien d'autre ne le porte.
+function annoncerShell(res) {
+  if (SHELL_ANNONCE) res.setHeader("X-Sereo-Shell-Fichier", SHELL_ANNONCE);
+}
 const ENABLE_DB_EXPORT = process.env.SEREO_ENABLE_DB_EXPORT === "1";
 const AUTH_USER = cleanEnv(process.env.SEREO_AUTH_USER);
 const AUTH_PASSWORD = cleanEnv(process.env.SEREO_AUTH_PASSWORD);
@@ -416,20 +461,49 @@ app.disable("x-powered-by");
 // est indispensable pour que le rate limit s'applique par utilisateur et pas
 // sur l'IP unique du reverse proxy.
 app.set("trust proxy", 1);
+// Arret propre (robustesse, 25/09) : les requetes en cours sont comptees, pour
+// que l'arret (SIGTERM au redeploiement) les laisse finir ; une requete qui
+// arrive pendant l'arret recoit 503 (la file hors ligne garde le geste et le
+// renvoie, X-Sereo-Geste le rend idempotent) au lieu d'etre coupee.
+app.use((req, res, next) => {
+  if (arretEnCours) {
+    res.set("Connection", "close");
+    return res.status(503).json({ error: "Serveur en cours de redemarrage, reessaie dans un instant." });
+  }
+  requetesEnCours += 1;
+  let finie = false;
+  const finir = () => {
+    if (finie) return;
+    finie = true;
+    requetesEnCours -= 1;
+  };
+  res.once("finish", finir);
+  res.once("close", finir);
+  next();
+});
 app.use(securityHeaders);
 // Compression des reponses texte (HTML, CSS, JS, JSON de l'API). Mesure du
 // 23/09 : Node envoyait tout brut -- 750 Ko a chaque chargement (175 Ko une fois
 // compresses), et le JSON des commandes grossit avec la base. Les formats deja
 // compresses (polices, images, .xlsx) sont ecartes par le filtre par defaut.
 app.use(compression());
-app.use("/brand", express.static(path.join(__dirname, "public", "brand"), { immutable: true, maxAge: "1d" }));
+app.use("/brand", express.static(path.join(__dirname, "public", "brand"), { immutable: true, maxAge: "1d", setHeaders: annoncerShell }));
 // Les polices : la page de connexion les charge avant toute session. Rien de
 // sensible (des fichiers de police libres, OFL).
 // Pas d'« immutable » : les noms de fichiers n'ont pas d'empreinte.
-app.use("/fonts", express.static(path.join(__dirname, "public", "fonts"), { maxAge: "7d" }));
+app.use("/fonts", express.static(path.join(__dirname, "public", "fonts"), { maxAge: "7d", setHeaders: annoncerShell }));
 app.get("/favicon.svg", (req, res) => {
+  annoncerShell(res);
   res.sendFile(path.join(__dirname, "public", "favicon.svg"));
 });
+// /healthz : la relecture de chaque page (verifierPages, 5 ms sur une base de
+// la forme de la production, plus avec les traces) au plus toutes les 20 s.
+// Docker appelle toutes les 30 s : chacun de ses appels relit tout ; un appel
+// en boucle sur cette route publique, lui, ne fait pas relire la base a chaque
+// fois. Par magasin ouvert : une base rouverte (restauration) se relit.
+const SONDE_COMPLETE_MS = 20000;
+let sondeComplete = { store: null, a: 0, erreur: null };
+
 app.get("/healthz", (req, res) => {
   // Revue #4 : si la recovery storage a totalement echoue (disque plein, FS
   // read-only), le serveur ecoute mais sert 500 sur toutes les routes data.
@@ -437,6 +511,35 @@ app.get("/healthz", (req, res) => {
   // detectent le container comme non-sain (sinon il reste declare "healthy").
   if (storageRecoveryFatal) {
     return res.status(503).json({ ok: false, error: "storage indisponible (recovery echouee)" });
+  }
+  // Robustesse (25/09) : /healthz ne regardait jamais la base. Une base qui ne
+  // se lisait plus (toutes les pages en 500) restait « healthy » pour Docker.
+  // A chaque appel, la sonde rapide (sonderLecture : la premiere ligne de
+  // chaque table, et les lignes illisibles qu'on n'a pas pu mettre de cote) ;
+  // et, au plus toutes les SONDE_COMPLETE_MS, la relecture de chaque page
+  // (verifierPages), dont le verdict tient jusqu'a la suivante (relecture
+  // adverse du 26/09 : une page abimee au-dela de la premiere feuille ne se
+  // voyait pas). En echec, 503 sans detail (la route est publique), la cause
+  // dans les journaux du serveur.
+  if (useSqliteStorage()) {
+    try {
+      const store = getSqliteStore();
+      store.sonderLecture();
+      const maintenant = Date.now();
+      if (sondeComplete.store !== store || maintenant - sondeComplete.a >= SONDE_COMPLETE_MS) {
+        let erreur = null;
+        try {
+          store.verifierPages();
+        } catch (echec) {
+          erreur = echec;
+        }
+        sondeComplete = { store, a: maintenant, erreur };
+      }
+      if (sondeComplete.erreur) throw sondeComplete.erreur;
+    } catch (error) {
+      console.error(`[healthz] la base ne se lit pas : ${error.message || error}`);
+      return res.status(503).json({ ok: false, error: "base illisible" });
+    }
   }
   res.json({ ok: true });
 });
@@ -492,7 +595,7 @@ app.post("/login", (req, res) => {
 app.post("/logout", handleLogout);
 app.use(requireAccessAuth);
 app.use(express.json({ limit: "5mb" }));
-app.use("/vendor/leaflet", express.static(LEAFLET_DIST, { immutable: true, maxAge: "7d" }));
+app.use("/vendor/leaflet", express.static(LEAFLET_DIST, { immutable: true, maxAge: "7d", setHeaders: annoncerShell }));
 // Le service worker, servi avec le nom de shell a empreinte (voir SHELL plus
 // haut). « no-cache » : le navigateur revalide a chaque controle de mise a jour,
 // comme pour le fichier statique qu'il remplace.
@@ -507,6 +610,9 @@ app.use(express.static(path.join(__dirname, "public"), {
   // les fichiers statiques depuis son cache, et s'il est plus vieux que la page,
   // il doit le savoir AVANT qu'elle demande ses scripts (public/service-worker.js).
   setHeaders(res, chemin) {
+    // Tous les fichiers : leur version. La page, en plus, le shell qu'elle
+    // attend et sa fin de session.
+    annoncerShell(res);
     if (path.basename(chemin) !== "index.html") return;
     if (SHELL_ANNONCE) res.setHeader("X-Sereo-Shell", SHELL_ANNONCE);
     const fin = finDeSessionConnue(res.req);
@@ -607,7 +713,12 @@ function gesteIdempotent(req, res, next) {
     if (note) return;
     note = true;
     // Un 5xx n'est pas une reponse definitive : le renvoi doit pouvoir reessayer.
-    if (res.statusCode < 500) {
+    // Une QUESTION non plus (relecture adverse du 26/09) : le 409 « une fiche
+    // existe deja » n'applique rien, et la file renvoie la REPONSE (« nouvelle
+    // fiche ») sous la meme cle quand ce 409 s'est perdu en route. Lui rendre
+    // le 409 enregistre, sans lire son corps, la faisait abandonner : commande
+    // perdue. `res.locals.gesteSansEffet` : pose par handleRouteError.
+    if (res.statusCode < 500 && !res.locals.gesteSansEffet) {
       try {
         enregistrerGesteRecu({ cle, methode: req.method, chemin, statut: res.statusCode, recuLe: new Date().toISOString() });
       } catch (error) {
@@ -717,6 +828,116 @@ function clearAuthFailures(ip) {
   authRateLimitState.delete(ip);
 }
 
+// Garde-fous (25/09) : une limite PAR COMPTE, en plus de celle par adresse.
+// Celle par adresse (5 echecs, 15 s de blocage, compteur remis a zero ensuite)
+// laissait ~20 essais par minute et par adresse, sans aucune limite pour un
+// compte vise depuis de nombreuses adresses (chasse aux defauts, section 3).
+// Ici : AUTH_COMPTE_MAX_ATTEMPTS echecs sur un meme identifiant saisi, dans la
+// fenetre, bloquent CET identifiant AUTH_COMPTE_LOCKOUT_MS -- les autres
+// comptes ne sont pas touches. L'identifiant se compte sans casse ni espaces,
+// qu'il existe ou non (rien a enumerer). Le compteur n'est PAS remis a zero a
+// la fin du blocage : une attaque qui continue est rebloquee au premier echec
+// suivant ; une connexion reussie l'efface.
+// Relecture adverse du 26/09 : ce blocage refusait AUSSI le bon mot de passe,
+// sur tous les appareils. Un tiers qui connait l'identifiant de Thomas le
+// tenait dehors aussi longtemps qu'il le voulait (un echec toutes les 15 min) ;
+// un navigateur qui rejoue un vieux mot de passe Basic apres un changement de
+// SEREO_AUTH_PASSWORD faisait de meme, sans attaquant. D'ou l'« appareil
+// connu » (ci-dessous) : un appareil qui a deja ouvert CE compte n'est ni
+// bloque ni compte par sa limite -- il garde la seule limite par adresse,
+// celle d'avant le 25/09. La limite du compte ne vise plus que les appareils
+// inconnus, ceux d'une attaque repartie. Reste : un appareil NEUF de Thomas
+// attend la fin du blocage pendant une attaque (la page le dit).
+const AUTH_COMPTE_MAX_ATTEMPTS = Math.max(1, Number(process.env.SEREO_AUTH_MAX_ATTEMPTS_COMPTE) || 20);
+const AUTH_COMPTE_WINDOW_MS = Math.max(1000, Number(process.env.SEREO_AUTH_RATE_WINDOW_COMPTE_MS) || 60 * 60 * 1000);
+const AUTH_COMPTE_LOCKOUT_MS = Math.max(1000, Number(process.env.SEREO_AUTH_LOCKOUT_COMPTE_MS) || 15 * 60 * 1000);
+const authCompteState = new Map();
+
+function cleDeCompte(identifiant) {
+  return String(identifiant ?? "").trim().toLowerCase().slice(0, 120);
+}
+
+function statutDuCompte(identifiant, now = Date.now()) {
+  const entree = authCompteState.get(cleDeCompte(identifiant));
+  if (!entree) return { locked: false, remainingMs: 0 };
+  entree.failedTimestamps = entree.failedTimestamps.filter(t => t > now - AUTH_COMPTE_WINDOW_MS);
+  if (entree.lockedUntil && entree.lockedUntil > now) {
+    return { locked: true, remainingMs: entree.lockedUntil - now, lockedUntil: entree.lockedUntil };
+  }
+  return { locked: false, remainingMs: 0 };
+}
+
+function echecDuCompte(identifiant, now = Date.now()) {
+  const cle = cleDeCompte(identifiant);
+  let entree = authCompteState.get(cle);
+  if (!entree) {
+    entree = { failedTimestamps: [], lockedUntil: null };
+    authCompteState.set(cle, entree);
+  }
+  entree.failedTimestamps = entree.failedTimestamps.filter(t => t > now - AUTH_COMPTE_WINDOW_MS);
+  entree.failedTimestamps.push(now);
+  if (entree.failedTimestamps.length >= AUTH_COMPTE_MAX_ATTEMPTS) entree.lockedUntil = now + AUTH_COMPTE_LOCKOUT_MS;
+  return statutDuCompte(identifiant, now);
+}
+
+function effacerEchecsDuCompte(identifiant) {
+  authCompteState.delete(cleDeCompte(identifiant));
+}
+
+// L'« appareil connu » (relecture du 26/09 ; le « device cookie » de l'OWASP).
+// Une connexion reussie laisse au navigateur un cookie signe : « cet appareil a
+// su le mot de passe de ce compte ». Il porte l'empreinte des comptes ouverts
+// (au plus 8 : un poste partage), jamais leur nom, et sa date ; il vaut 180
+// jours apres la derniere connexion reussie. Signe avec la base du secret de
+// session SANS le mot de passe d'environnement : apres un changement de
+// SEREO_AUTH_PASSWORD, les appareils de Thomas restent connus -- c'est
+// justement quand un vieux mot de passe rejoue ferait bloquer le compte.
+// « Se deconnecter » ne l'efface pas : ce n'est pas une session, il n'ouvre
+// rien ; il n'exempte que de la limite par compte.
+const APPAREIL_COOKIE_NAME = "sereo_appareil";
+const APPAREIL_MAX_AGE_SECONDS = 180 * 24 * 60 * 60;
+const APPAREIL_COMPTES_MAX = 8;
+
+function signerAppareil(charge) {
+  return crypto.createHmac("sha256", `${AUTH_SESSION_SECRET_BASE}|appareil`).update(charge).digest("base64url");
+}
+
+function empreinteDeCompte(identifiant) {
+  return crypto.createHash("sha256").update(cleDeCompte(identifiant)).digest("base64url").slice(0, 16);
+}
+
+// Les empreintes des comptes que CET appareil a ouverts ; [] si le cookie
+// manque, est altere ou trop vieux.
+function comptesDeLAppareil(req, now = Date.now()) {
+  const valeur = String(parseCookies(req.get("cookie"))[APPAREIL_COOKIE_NAME] || "");
+  const point = valeur.lastIndexOf(".");
+  if (point <= 0) return [];
+  const charge = valeur.slice(0, point);
+  if (!constantTimeEqual(valeur.slice(point + 1), signerAppareil(charge))) return [];
+  try {
+    const { c, t } = JSON.parse(Buffer.from(charge, "base64url").toString("utf8"));
+    if (!Array.isArray(c) || !(Number(t) > now - APPAREIL_MAX_AGE_SECONDS * 1000)) return [];
+    return c.map(String);
+  } catch {
+    return [];
+  }
+}
+
+function appareilConnuDuCompte(req, identifiant) {
+  return Boolean(cleDeCompte(identifiant)) && comptesDeLAppareil(req).includes(empreinteDeCompte(identifiant));
+}
+
+// Le cookie a poser apres une connexion reussie : ce compte en tete, puis ceux
+// que l'appareil connaissait deja.
+function cookieAppareil(req, identifiant) {
+  const empreinte = empreinteDeCompte(identifiant);
+  const comptes = [empreinte, ...comptesDeLAppareil(req).filter(c => c !== empreinte)].slice(0, APPAREIL_COMPTES_MAX);
+  const charge = Buffer.from(JSON.stringify({ c: comptes, t: Date.now() })).toString("base64url");
+  const parts = [`${APPAREIL_COOKIE_NAME}=${charge}.${signerAppareil(charge)}`, "HttpOnly", "SameSite=Lax", "Path=/", `Max-Age=${APPAREIL_MAX_AGE_SECONDS}`];
+  if (req.secure || req.get("x-forwarded-proto") === "https") parts.push("Secure");
+  return parts.join("; ");
+}
+
 function getClientIp(req) {
   return req.ip || req.socket?.remoteAddress || "unknown";
 }
@@ -732,6 +953,11 @@ const authRateLimitCleanupInterval = setInterval(() => {
     if (!recentFailures && !stillLocked) {
       authRateLimitState.delete(ip);
     }
+  }
+  for (const [cle, entree] of authCompteState.entries()) {
+    const recents = entree.failedTimestamps.some(t => t > now - AUTH_COMPTE_WINDOW_MS);
+    const bloque = entree.lockedUntil && entree.lockedUntil > now;
+    if (!recents && !bloque) authCompteState.delete(cle);
   }
 }, 5 * 60 * 1000);
 authRateLimitCleanupInterval.unref();
@@ -791,6 +1017,28 @@ function securityHeaders(req, res, next) {
 
 function isEnvAuthConfigured() {
   return Boolean(AUTH_USER && AUTH_PASSWORD);
+}
+
+// Garde-fous (25/09) : le mot de passe d'environnement n'avait aucune longueur
+// minimale (celui de production faisait 5 lettres ; les comptes en base en
+// exigent MIN_PASSWORD_LENGTH = 10). En dessous de 12 caracteres : un
+// avertissement au journal du demarrage, et un bandeau pour l'administrateur
+// (/api/me). JAMAIS un refus de demarrer : il verrouillerait Thomas hors de son
+// application apres la mise a jour, sans moyen de corriger depuis l'ecran.
+const MOT_DE_PASSE_ENVIRONNEMENT_MIN = 12;
+
+function motDePasseEnvironnementCourt() {
+  return isEnvAuthConfigured() && AUTH_PASSWORD.length < MOT_DE_PASSE_ENVIRONNEMENT_MIN;
+}
+
+// Le mot de passe et sa longueur ne sont jamais ecrits.
+function avertirMotDePasseCourt() {
+  if (!motDePasseEnvironnementCourt()) return;
+  console.warn(
+    `[auth] SEREO_AUTH_PASSWORD fait moins de ${MOT_DE_PASSE_ENVIRONNEMENT_MIN} caracteres : `
+    + "le changer sur le serveur (20 caracteres aleatoires ou plus ; cela ferme aussi toutes les sessions). "
+    + "Le serveur demarre quand meme."
+  );
 }
 
 /**
@@ -978,6 +1226,9 @@ async function updateUserAccount(id, { role, actif, motDePasse } = {}) {
 
   assertLastAdminRemains(store, cible);
   store.saveUser(cible);
+  // Garde-fous (25/09) : un mot de passe change ferme les sessions ouvertes
+  // avec l'ancien (un telephone perdu, un cookie copie).
+  if (motDePasse !== undefined) fermerSessionsDuCompte(existant.id);
   return store.getUser(id);
 }
 
@@ -1678,13 +1929,17 @@ async function verifyPassword(password, salt, storedHash) {
 // la separation viendra si l'equipe grandit.
 //
 // Les portees par role restent declarees ci-dessous et restent TESTEES via
-// roleAllowsTabStrict, pour deux raisons : elles documentent l'intention, et
-// les activer se resume a poser SEREO_SEPARATION_ROLES=1. Sans cela, il
-// faudrait re-concevoir la repartition de zero le jour ou le besoin revient.
+// roleAllowsTabStrict : elles documentent l'intention, et SEREO_SEPARATION_ROLES=1
+// masque les onglets hors portee.
 //
-// A noter : `onglets` ne pilote que la NAVIGATION. Le masquage d'un onglet
-// n'est qu'un confort visuel — toute restriction reelle doit etre appliquee
-// cote serveur, sur les endpoints.
+// A noter : `onglets` ne pilote que la NAVIGATION -- poser la variable ne
+// ferme AUCUNE route (la chasse aux defauts du 24/09 : meme banc, meme
+// resultat, variable posee ou non). Les restrictions reelles sont cote
+// serveur, sur les routes, independamment de la variable (garde-fous du
+// 25/09) : requireAdministration (import, purge, reglages, sauvegardes,
+// comptes, numerotation) et refuserAuLivreur (modification du stock). La
+// liste complete : test/garde-fous-routes.test.js. `peutEcrire` n'est lu
+// nulle part.
 const SEPARATION_DES_ROLES = process.env.SEREO_SEPARATION_ROLES === "1";
 
 const ROLES = {
@@ -1816,9 +2071,82 @@ function createAccessSessionValue(now = Date.now(), identity = null) {
   return `${payload}.${signAuthPayload(payload)}`;
 }
 
+// --- Sessions fermees (garde-fous du 25/09) ------------------------------------
+//
+// Avant : « Se deconnecter » ne faisait qu'effacer le cookie du navigateur, et
+// un changement de mot de passe ne touchait pas aux sessions ouvertes ; une
+// copie du cookie restait valable jusqu'a 12 h (chasse aux defauts, section 3).
+// Maintenant :
+// - se deconnecter FERME la session : son empreinte (sha256 du cookie) est
+//   gardee jusqu'a l'expiration qu'elle aurait eue ; les autres sessions du
+//   meme compte (un autre appareil) restent ouvertes ;
+// - changer le mot de passe d'un compte en base ferme TOUTES ses sessions
+//   ouvertes avant le changement (« sessions depuis ») ; le compte
+//   d'environnement, lui, change deja de secret de signature avec son mot de
+//   passe.
+// Gardees dans app_meta (hors de readDb/writeDb, comme les comptes), relues
+// au premier besoin apres un demarrage ; en memoire ensuite. Verifiees dans
+// readAccessSession : tous les chemins (acces, identite) les voient.
+const CLE_SESSIONS_FERMEES = "sessions_fermees";
+const CLE_SESSIONS_DEPUIS = "sessions_depuis";
+let etatDesSessions = null;
+
+function sessionsFermees() {
+  if (etatDesSessions) return etatDesSessions;
+  const etat = { fermees: new Map(), depuis: new Map() };
+  if (useSqliteStorage()) {
+    try {
+      const store = getSqliteStore();
+      const maintenant = Date.now();
+      for (const [cle, fin] of Object.entries(store.lireMeta(CLE_SESSIONS_FERMEES) || {})) {
+        if (Number(fin) > maintenant) etat.fermees.set(cle, Number(fin));
+      }
+      for (const [uid, depuis] of Object.entries(store.lireMeta(CLE_SESSIONS_DEPUIS) || {})) {
+        if (Number.isFinite(Number(depuis))) etat.depuis.set(String(uid), Number(depuis));
+      }
+    } catch (error) {
+      // Base indisponible (restauration en cours) : rien de garde en memoire,
+      // on relira au prochain appel.
+      console.warn(`[auth] sessions fermees illisibles : ${error.message || error}`);
+      return etat;
+    }
+  }
+  etatDesSessions = etat;
+  return etat;
+}
+
+function cleDeSession(valeur) {
+  return crypto.createHash("sha256").update(String(valeur || "")).digest("hex").slice(0, 32);
+}
+
+function enregistrerSessions(cle, valeur) {
+  if (!useSqliteStorage()) return;
+  try {
+    getSqliteStore().ecrireMeta(cle, valeur);
+  } catch (error) {
+    console.warn(`[auth] sessions fermees non enregistrees (gardees en memoire) : ${error.message || error}`);
+  }
+}
+
+function fermerSession(valeur, session) {
+  const etat = sessionsFermees();
+  const maintenant = Date.now();
+  etat.fermees.set(cleDeSession(valeur), session.issuedAt + AUTH_COOKIE_MAX_AGE_SECONDS * 1000);
+  for (const [cle, fin] of etat.fermees) if (fin <= maintenant) etat.fermees.delete(cle);
+  enregistrerSessions(CLE_SESSIONS_FERMEES, Object.fromEntries(etat.fermees));
+}
+
+function fermerSessionsDuCompte(uid, depuis = Date.now()) {
+  const etat = sessionsFermees();
+  etat.depuis.set(String(uid), depuis);
+  enregistrerSessions(CLE_SESSIONS_DEPUIS, Object.fromEntries(etat.depuis));
+}
+
 /**
  * Verifie la signature et la fraicheur, puis retourne la charge utile.
  * Ne dit RIEN de la validite du compte : c'est le role de l'appelant.
+ * Garde-fous (25/09) : une session fermee (deconnexion, mot de passe change)
+ * n'est plus lue.
  */
 function readAccessSession(value, now = Date.now()) {
   const [payload, signature] = String(value || "").split(".");
@@ -1833,9 +2161,14 @@ function readAccessSession(value, now = Date.now()) {
     if (!Number.isFinite(issuedAt)) return null;
     if (now - issuedAt > AUTH_COOKIE_MAX_AGE_SECONDS * 1000) return null;
 
+    const uid = session.uid ? String(session.uid) : null;
+    const fermees = sessionsFermees();
+    if (fermees.fermees.has(cleDeSession(value))) return null;
+    if (uid && fermees.depuis.has(uid) && issuedAt < fermees.depuis.get(uid)) return null;
+
     return {
       user: typeof session.user === "string" ? session.user : "",
-      uid: session.uid ? String(session.uid) : null,
+      uid,
       issuedAt
     };
   } catch {
@@ -1977,19 +2310,30 @@ function requireAccessAuth(req, res, next) {
       denyAccessAttempt(req, res, 429, "Trop de tentatives de connexion. Reessayez plus tard.", status.remainingMs);
       return;
     }
+    // Garde-fous (25/09) : la limite par compte, comme au formulaire -- sauf
+    // pour un appareil qui a deja ouvert ce compte (relecture du 26/09).
+    const connu = appareilConnuDuCompte(req, basicCredentials.username);
+    const compte = connu ? { locked: false } : statutDuCompte(basicCredentials.username);
+    if (compte.locked) {
+      denyAccessAttempt(req, res, 429, "Trop de tentatives de connexion sur ce compte. Reessayez plus tard.", compte.remainingMs);
+      return;
+    }
 
     const valid = constantTimeEqual(basicCredentials.username, AUTH_USER)
       && constantTimeEqual(basicCredentials.password, AUTH_PASSWORD);
 
     if (valid) {
       clearAuthFailures(ip);
+      effacerEchecsDuCompte(basicCredentials.username);
+      if (!connu) res.append("Set-Cookie", cookieAppareil(req, basicCredentials.username));
       next();
       return;
     }
 
     const updated = recordAuthFailure(ip);
-    if (updated.locked) {
-      denyAccessAttempt(req, res, 429, "Trop de tentatives de connexion. Reessayez plus tard.", updated.remainingMs);
+    const compteApres = connu ? { locked: false, remainingMs: 0 } : echecDuCompte(basicCredentials.username);
+    if (updated.locked || compteApres.locked) {
+      denyAccessAttempt(req, res, 429, "Trop de tentatives de connexion. Reessayez plus tard.", Math.max(updated.remainingMs, compteApres.remainingMs));
       return;
     }
     denyAccessAttempt(req, res, 401, "Connexion requise");
@@ -2056,16 +2400,33 @@ function renderLoginPage(req, res) {
   // Source de verite serveur (la query ?locked=1 peut etre obsolete si le
   // lockout a expire entre le POST et le GET).
   const status = getAuthRateLimitStatus(getClientIp(req));
-  const isLocked = status.locked;
-  const lockedSeconds = isLocked ? Math.ceil(status.remainingMs / 1000) : 0;
-  const lockedUntilMs = isLocked ? status.lockedUntil : 0;
+  let isLocked = status.locked;
+  let lockedUntilMs = isLocked ? status.lockedUntil : 0;
+  // Garde-fous (25/09) : le blocage d'un COMPTE ne se lit pas depuis l'adresse
+  // (la page ne sait pas quel identifiant sera saisi) ; la redirection du POST
+  // porte son echeance. Affichage seulement : le refus est decide au POST,
+  // cote serveur. Une echeance passee ou invraisemblable n'affiche rien.
+  let parCompte = false;
+  if (!isLocked && req.query.compte === "1") {
+    const jusqua = Number(req.query.until);
+    const reste = jusqua - Date.now();
+    if (Number.isFinite(jusqua) && reste > 0 && reste <= AUTH_COMPTE_LOCKOUT_MS) {
+      isLocked = true;
+      parCompte = true;
+      lockedUntilMs = jusqua;
+    }
+  }
+  const lockedSeconds = isLocked ? Math.ceil((parCompte ? lockedUntilMs - Date.now() : status.remainingMs) / 1000) : 0;
 
   let errorMarkup = "";
   if (isLocked) {
     const plural = lockedSeconds > 1 ? "s" : "";
     // Le mot "seconde(s)" est dans un span separe pour que login.js puisse
     // basculer entre singulier et pluriel quand le compteur descend a 1.
-    errorMarkup = `<p class="login-error" role="alert" aria-live="polite">Trop de tentatives. R&eacute;essaie dans <span id="lockout-countdown">${lockedSeconds}</span> <span id="lockout-unit">seconde${plural}</span>.</p>`;
+    // Le blocage d'un compte ne vise que les appareils qui ne l'ont jamais
+    // ouvert (relecture du 26/09) : la page le dit, c'est la voie de secours.
+    const secours = parCompte ? " Un appareil d&eacute;j&agrave; connect&eacute; &agrave; ce compte peut toujours se connecter." : "";
+    errorMarkup = `<p class="login-error" role="alert" aria-live="polite">Trop de tentatives${parCompte ? " sur ce compte" : ""}. R&eacute;essaie dans <span id="lockout-countdown">${lockedSeconds}</span> <span id="lockout-unit">seconde${plural}</span>.${secours}</p>`;
   } else if (hasError) {
     // UNE phrase (planche 9c) : « Identifiant ou mot de passe incorrect. Il te
     // reste 2 tentatives avant un blocage de 15 secondes. » Les essais restants
@@ -2258,14 +2619,30 @@ async function handleLogin(req, res) {
     res.redirect(303, `/login?locked=1&until=${status.lockedUntil}&next=${encodeURIComponent(next)}`);
     return;
   }
+  // Garde-fous (25/09) : le compte vise, lui aussi, avant toute comparaison --
+  // sauf depuis un appareil qui l'a deja ouvert (relecture du 26/09) : ses
+  // echecs ne comptent pas non plus pour le compte.
+  const connu = appareilConnuDuCompte(req, username);
+  const compte = connu ? { locked: false } : statutDuCompte(username);
+  if (compte.locked) {
+    res.setHeader("Retry-After", String(Math.ceil(compte.remainingMs / 1000)));
+    res.redirect(303, `/login?locked=1&compte=1&until=${compte.lockedUntil}&next=${encodeURIComponent(next)}`);
+    return;
+  }
 
   const identity = await authenticateCredentials(username, password);
 
   if (!identity) {
     const updated = recordAuthFailure(ip);
+    const compteApres = connu ? { locked: false } : echecDuCompte(username);
     if (updated.locked) {
       res.setHeader("Retry-After", String(Math.ceil(updated.remainingMs / 1000)));
       res.redirect(303, `/login?locked=1&until=${updated.lockedUntil}&next=${encodeURIComponent(next)}`);
+      return;
+    }
+    if (compteApres.locked) {
+      res.setHeader("Retry-After", String(Math.ceil(compteApres.remainingMs / 1000)));
+      res.redirect(303, `/login?locked=1&compte=1&until=${compteApres.lockedUntil}&next=${encodeURIComponent(next)}`);
       return;
     }
     res.redirect(303, `/login?error=1&remaining=${updated.remaining}&next=${encodeURIComponent(next)}`);
@@ -2273,6 +2650,7 @@ async function handleLogin(req, res) {
   }
 
   clearAuthFailures(ip);
+  effacerEchecsDuCompte(username);
 
   if (identity.id) {
     try {
@@ -2282,10 +2660,11 @@ async function handleLogin(req, res) {
     }
   }
 
-  res.setHeader(
-    "Set-Cookie",
-    buildAuthCookie(createAccessSessionValue(Date.now(), identity), AUTH_COOKIE_MAX_AGE_SECONDS, req)
-  );
+  res.setHeader("Set-Cookie", [
+    buildAuthCookie(createAccessSessionValue(Date.now(), identity), AUTH_COOKIE_MAX_AGE_SECONDS, req),
+    // L'appareil est desormais connu de ce compte (relecture du 26/09).
+    cookieAppareil(req, username)
+  ]);
   res.redirect(303, next);
 }
 
@@ -2357,6 +2736,11 @@ async function authenticateCredentials(username, password) {
 }
 
 function handleLogout(req, res) {
+  // Garde-fous (25/09) : la session est FERMEE cote serveur, pas seulement
+  // effacee du navigateur (une copie du cookie ne sert plus a rien).
+  const valeur = getAccessSessionCookie(req);
+  const session = readAccessSession(valeur);
+  if (session) fermerSession(valeur, session);
   res.setHeader("Set-Cookie", buildAuthCookie("", 0, req));
   res.redirect(303, "/login");
 }
@@ -2479,6 +2863,9 @@ function openSqliteStore(options = {}) {
     defaultDb,
     normalizeDb,
     normaliserTable,
+    // Leur normalisation pose des defauts a la lecture (date, id, secteurs par
+    // defaut) : toujours ecrites, comme avant, meme sans avoir ete lues.
+    tablesToujoursEcrites: ["relances", "deliverySectors", "settings"],
     ensureDir
   });
 }
@@ -2768,7 +3155,16 @@ function normaliserTable(cle, valeur, db) {
 }
 
 function normalizeDb(db) {
-  for (const cle of TABLES_DE_LA_BASE) db[cle] = normaliserTable(cle, db[cle], db);
+  // Lecture paresseuse (25/09) : une table qu'une ecriture n'a pas lue n'a pas
+  // change ; la normaliser la lirait pour rien, et l'ecriture la saute
+  // (storage/sqliteStore.js, persistDatabase). `lue` est relu a chaque tour :
+  // une table lue en normalisant une autre (les reglages, pour les numeros de
+  // commande) est normalisee a son tour, comme avant.
+  const etat = db[ETAT_DE_LECTURE];
+  for (const cle of TABLES_DE_LA_BASE) {
+    if (etat && !etat.lue(cle)) continue;
+    db[cle] = normaliserTable(cle, db[cle], db);
+  }
 
   // P1 v1.14.0 : syncWorkflow N'EST PLUS appele ici (avant : a chaque readDb,
   // ce qui ajoutait 50-100ms a chaque requete GET). Il est maintenant appele
@@ -2785,7 +3181,14 @@ function normalizeDb(db) {
 function healDatabaseAtBoot() {
   try {
     const db = readDb();
-    syncWorkflow(db);
+    // Migration unique et idempotente (25/09) : le montant TTC des commandes
+    // dont le CA venait des ventes est fige sur elles (figerMontantsImportes).
+    figerMontantsImportes(db, "demarrage");
+    // La mise en coherence (syncWorkflow) est faite par writeDb, plus bas : la
+    // refaire ici doublait le demarrage (25/09 : 35 s -> 19 s a cinquante fois
+    // la base). Rien entre les deux ne lit ce qu'elle calcule : le journal de
+    // recuperation ne fait qu'ajouter une ligne, et le rognage des traces
+    // arrondit lui-meme la position (positionGpsArrondie).
     // B3 v1.16.0 : si une recovery de corruption a eu lieu pendant le readDb
     // ci-dessus, on la journalise dans l'historique pour que l'operateur la voie
     // (sinon une base vierge ressemble a une install neuve).
@@ -2833,7 +3236,7 @@ function ensureOrderNumbers(db) {
   // incremente localement a chaque allocation. O(N+M).
   const settings = normalizeSettings(db.settings || {});
   const { prefix, resetAnnually } = settings.orderNumbering;
-  const existingNumeros = db.commandes.map(o => o.numero).filter(Boolean);
+  const existingNumeros = numerosDejaAttribues(db);
 
   let continuousCounter = 0;
   const counterByYear = new Map();
@@ -2869,11 +3272,11 @@ function ensureOrderNumbers(db) {
     }
     if (resetAnnually) {
       const year = String(extractYear(order.dateCommande));
-      const next = (counterByYear.get(year) || 0) + 1;
+      const next = Math.max(counterByYear.get(year) || 0, plancherDeNumero(db, `${prefix}-${year}`)) + 1;
       counterByYear.set(year, next);
       order.numero = `${prefix}-${year}-${String(next).padStart(3, "0")}`;
     } else {
-      continuousCounter += 1;
+      continuousCounter = Math.max(continuousCounter, plancherDeNumero(db, prefix)) + 1;
       order.numero = `${prefix}-${String(continuousCounter).padStart(5, "0")}`;
     }
   });
@@ -3035,7 +3438,10 @@ function writeDb(db, options = {}) {
   // l'application echoue sur l'ecriture des donnees (visible) plutot que sur
   // un backup invisible. Cf revue R1 chantier 1 P1 #2.
   if (useSqliteStorage()) {
-    getSqliteStore().writeDb(db);
+    const store = getSqliteStore();
+    const misesDeCote = journaliserLignesMisesDeCote(db, store);
+    store.writeDb(db);
+    if (misesDeCote.length) store.marquerJournalisees(misesDeCote);
   } else {
     ensureDir(path.dirname(DB_PATH));
     const tempPath = `${DB_PATH}.${process.pid}.${Date.now()}.tmp`;
@@ -3065,6 +3471,52 @@ function writeDb(db, options = {}) {
         console.error(`[storage] Backup async echec (mutation deja persistee): ${backupError.message || backupError}`);
       })
       .finally(() => { pendingBackup = null; });
+  }
+}
+
+// Robustesse (25/09) : une ligne illisible (un caractere abime sur le disque)
+// est mise de cote a la lecture au lieu de faire tomber toutes les pages
+// (storage/sqliteStore.js, mettreDeCote). Elle va au journal dans l'ecriture
+// qui suit. Ce que cette ecriture va normaliser de toute facon est lu d'abord :
+// elle le decouvre ici, pas apres. Depuis la lecture paresseuse du 25/09
+// (integration du 26/09), une ecriture ne normalise plus que les tables deja
+// lues -- plus, la premiere apres l'ouverture, toutes : le magasin lit
+// exactement celles-la (lireCeQueLEcritureLira), pas toutes a chaque
+// ecriture. Une ligne d'une table qu'aucune ecriture ne lit est decouverte a
+// sa lecture, et journalisee a l'ecriture qui suit. Rend les numeros a
+// marquer « journalisees » une fois l'ecriture faite (un echec d'ecriture les
+// laisse pour la suivante).
+function journaliserLignesMisesDeCote(db, store) {
+  store.lireCeQueLEcritureLira(db);
+  const lignes = store.misesDeCoteAJournaliser();
+  if (!lignes.length) return [];
+  const noms = lignes.slice(0, 5).map(ligne => `${ligne.table} ${ligne.ligne}`).join(", ");
+  addHistory(db, "Stockage",
+    `${lignes.length} ligne(s) illisible(s) mise(s) de côté (${noms}${lignes.length > 5 ? ", …" : ""}) : `
+    + "leur texte est gardé tel quel dans la base (table lignes_en_quarantaine), le reste des données se lit normalement.",
+    { lignes: lignes.map(({ numero, ...ligne }) => ligne) });
+  return lignes.map(ligne => ligne.numero);
+}
+
+// Les clients dont une commande est en quarantaine (colonne client_id de la
+// ligne mise de cote). Vide hors SQLite, ou si l'etat ne se lit pas.
+function clientsDesCommandesMisesDeCote() {
+  if (!useSqliteStorage() || !sqliteStore) return new Set();
+  try {
+    return sqliteStore.clientsDesCommandesMisesDeCote();
+  } catch {
+    return new Set();
+  }
+}
+
+// Les commandes en quarantaine : id -> { clientId, numero }. Vide hors
+// SQLite, ou si l'etat ne se lit pas.
+function commandesMisesDeCote() {
+  if (!useSqliteStorage() || !sqliteStore) return new Map();
+  try {
+    return sqliteStore.commandesMisesDeCote();
+  } catch {
+    return new Map();
   }
 }
 
@@ -3163,14 +3615,28 @@ const BACKUP_RETENTION = 30;
 // Decision de Thomas du 24/09 : EN PLUS des 30 dernieres, une sauvegarde par
 // jour (de Paris) pendant 30 jours. Voir sauvegardesAGarder().
 const BACKUP_JOURS_JOURNALIERES = 30;
+// Garde-fous (25/09, decision 4) : et une par semaine (de Paris, du lundi au
+// dimanche) pendant 8 semaines.
+const BACKUP_SEMAINES_HEBDOMADAIRES = 8;
+// Decision 5 : la sauvegarde faite avant « Purger les bons de commande » est
+// HORS rotation -- ni les horaires ni les manuelles ne l'evincent. Le nom de
+// genre est reserve (« Sauvegarder maintenant » ne peut pas le prendre).
+const GENRE_AVANT_PURGE_COMMANDES = "avant-purge-commandes";
+const MOTIF_HORS_ROTATION = /-avant-purge-commandes\.(sqlite|json)\.gz$/;
 const BACKUP_FILENAME_PATTERN = /^db-.*\.(sqlite|json)(\.gz)?$/;
 
-function listBackupEntries() {
-  if (!fs.existsSync(BACKUP_DIR)) return [];
-  return fs.readdirSync(BACKUP_DIR)
-    .filter(name => BACKUP_FILENAME_PATTERN.test(name))
+// Relecture adverse du 26/09 : les fichiers de travail d'une sauvegarde en
+// cours (`…sqlite.gz.travail-copie.sqlite`, `…travail-verif.sqlite`) passaient
+// le motif. Plus recents que tout, ils devenaient « la derniere » le temps de
+// la copie : servis au telechargement (une base brute en cours d'ecriture),
+// affiches sur la carte, comptes par la rotation. Ils ne sont jamais une
+// sauvegarde (MOTIF_TRAVAIL, le meme que le nettoyage du demarrage).
+function listBackupEntries(dossier = BACKUP_DIR) {
+  if (!fs.existsSync(dossier)) return [];
+  return fs.readdirSync(dossier)
+    .filter(name => BACKUP_FILENAME_PATTERN.test(name) && !sauvegardeBase.MOTIF_TRAVAIL.test(name))
     .map(name => {
-      const fullPath = path.join(BACKUP_DIR, name);
+      const fullPath = path.join(dossier, name);
       try {
         const stat = fs.statSync(fullPath);
         return { name, fullPath, mtimeMs: stat.mtimeMs, size: stat.size };
@@ -3202,22 +3668,47 @@ function listBackupEntries() {
 // la rotation ne supprime jamais plus qu'avant, meme apres un mois sans
 // activite (les 30 plus recentes, toutes vieilles, restent).
 //
+// Garde-fous (25/09, decisions 4 et 5), EN PLUS :
+// - la derniere de chaque semaine de Paris (lundi-dimanche) sur 8 semaines,
+//   celle d'aujourd'hui comprise ; « avant-purge » (des tournees) comprises,
+//   comme toute sauvegarde : elles sont candidates au meme titre ;
+// - les sauvegardes d'avant la purge des bons, toutes : hors rotation. Elles
+//   ne prennent pas non plus de place parmi les 30 : les 30 dernieres se
+//   comptent sans elles (on en garde donc autant ou plus qu'avant).
+// La decision 4 dit « une par jour pendant 14 jours » : les 30 jours posees
+// le 24/09 les contiennent, et les ramener a 14 supprimerait plus qu'avant.
+// L'ensemble garde contient toujours celui de la regle d'avant (banc
+// « jamais plus agressive » de test/garde-fous-sauvegardes.test.js).
+//
 // `entries` : triees de la plus recente a la plus ancienne (listBackupEntries).
 function sauvegardesAGarder(entries, maintenant = new Date()) {
-  const garder = new Set(entries.slice(0, BACKUP_RETENTION).map(entry => entry.name));
-  const premierJour = ajouterJours(jourParis(maintenant), -(BACKUP_JOURS_JOURNALIERES - 1));
+  const horsRotation = entries.filter(entry => MOTIF_HORS_ROTATION.test(entry.name));
+  const rotation = entries.filter(entry => !MOTIF_HORS_ROTATION.test(entry.name));
+  const garder = new Set(horsRotation.map(entry => entry.name));
+  for (const entry of rotation.slice(0, BACKUP_RETENTION)) garder.add(entry.name);
+  const aujourdhui = jourParis(maintenant);
+  const premierJour = ajouterJours(aujourdhui, -(BACKUP_JOURS_JOURNALIERES - 1));
+  const premiereSemaine = ajouterJours(debutSemaine(aujourdhui), -7 * (BACKUP_SEMAINES_HEBDOMADAIRES - 1));
   const joursVus = new Set();
-  for (const entry of entries) {
+  const semainesVues = new Set();
+  for (const entry of rotation) {
     const jour = jourParis(entry.mtimeMs);
-    if (!jour || jour < premierJour || joursVus.has(jour)) continue;
-    joursVus.add(jour);
-    garder.add(entry.name);
+    if (!jour) continue;
+    if (jour >= premierJour && !joursVus.has(jour)) {
+      joursVus.add(jour);
+      garder.add(entry.name);
+    }
+    const semaine = debutSemaine(jour);
+    if (semaine >= premiereSemaine && !semainesVues.has(semaine)) {
+      semainesVues.add(semaine);
+      garder.add(entry.name);
+    }
   }
   return garder;
 }
 
-function pruneOldBackups() {
-  const entries = listBackupEntries();
+function pruneOldBackups(dossier = BACKUP_DIR) {
+  const entries = listBackupEntries(dossier);
   const garder = sauvegardesAGarder(entries);
   entries.filter(entry => !garder.has(entry.name)).forEach(entry => {
     try { fs.unlinkSync(entry.fullPath); } catch { /* best-effort */ }
@@ -3234,47 +3725,15 @@ function pruneOldBackups() {
 // - endpoint manuel /api/backup/now pour forcer un backup hors throttle
 let postRestoreBackupDone = false;
 
-function backupDbIfNeeded(options = {}) {
-  const { force = false, tag = "" } = options;
-  const sourcePath = useSqliteStorage() ? SQLITE_PATH : DB_PATH;
-  if (!fs.existsSync(sourcePath)) return null;
-
-  // Cas fresh_empty : pas de backup automatique tant que la base reste vide.
-  // Reste possible via /api/backup/now. Lot 3 : gate sur le flag re-armable
-  // (leve par writeDb a la re-saisie de donnees), plus sur lastStorageRecovery
-  // .mode qui n'etait JAMAIS re-arme (suspension a vie -> perte totale a la 2e
-  // corruption).
-  if (!force && backupsSuspendedFreshEmpty) {
-    return null;
-  }
-
-  // Cas restored_backup : faire UN snapshot post-restore une seule fois, puis
-  // continuer normalement (audit Sereo 2026-06-04 + SQLite docs). Le snapshot
-  // est tagge "post-restore" pour traçabilite forensique.
-  //
-  // Revue R1 P1 #5 : flag postRestoreBackupDone = true APRES succes, pas
-  // avant. Si writeBackupNow throw (disque plein), on doit retenter au
-  // prochain writeDb.
-  if (!force && lastStorageRecovery && lastStorageRecovery.mode === "restored_backup" && !postRestoreBackupDone) {
-    const path = writeBackupNow("post-restore");
-    if (path) postRestoreBackupDone = true;
-    return path;
-  }
-
-  // Throttle normal : skip si un backup recent existe (< 1h).
-  if (!force) {
-    const entries = listBackupEntries();
-    const mostRecent = entries[0];
-    if (mostRecent && Date.now() - mostRecent.mtimeMs < BACKUP_THROTTLE_MS) {
-      return null;
-    }
-  }
-
-  return writeBackupNow(tag);
-}
-
-// Chantier 2 : variante async pour le hot-path `writeDb`. Meme logique de
-// gating mode-aware que la version sync, mais utilise writeBackupNowAsync.
+// La sauvegarde du hot-path `writeDb` (Chantier 2). Garde-fous (25/09) : la
+// variante synchrone, backupDbIfNeeded, n'avait plus d'appelant ; elle est
+// retiree avec writeBackupNow (lecture du fichier de la base, voir plus bas).
+//
+// - fresh_empty : pas de sauvegarde automatique tant que la base reste vide
+//   (Lot 3 : drapeau re-armable, leve par writeDb a la re-saisie) ;
+// - restored_backup : UN instantane « post-restore », une seule fois (Revue R1
+//   P1 #5 : le drapeau n'est pose qu'apres succes) ;
+// - sinon, au plus une sauvegarde par BACKUP_THROTTLE_MS.
 async function backupDbIfNeededAsync(options = {}) {
   const { force = false, tag = "" } = options;
   const sourcePath = useSqliteStorage() ? SQLITE_PATH : DB_PATH;
@@ -3301,70 +3760,214 @@ async function backupDbIfNeededAsync(options = {}) {
   return writeBackupNowAsync(tag);
 }
 
-function writeBackupNow(tag = "") {
+// La derniere sauvegarde ecrite par CE processus, et l'ecriture qu'elle couvre
+// (la valeur de derniereModificationA quand la copie a commence). Sert a
+// « Sauvegarder maintenant » : si rien n'a ete ecrit depuis, la derniere est
+// deja a jour (garde-fous, 25/09).
+let derniereSauvegardeEcrite = null;
+
+// Garde-fous (25/09) : une sauvegarde COHERENTE et RELUE.
+//
+// Avant : writeBackupNowAsync lisait le FICHIER de la base en flux, hors verrou,
+// apres un checkpoint ; un checkpoint (automatique a 1 000 pages, pendant un
+// import) reecrivait le fichier au milieu de la lecture, et la copie melangeait
+// des pages d'avant et d'apres -- nommee comme une sauvegarde valide, jamais
+// relue (la chasse aux defauts : 2 fois sur 2). writeBackupNow (synchrone)
+// lisait d'un bloc, sans ce defaut, mais gelait le serveur le temps de
+// compresser la base, sous le verrou d'ecriture.
+//
+// Maintenant (lib/sauvegarde-base.js, dans un thread de travail) : VACUUM INTO
+// depuis une seconde connexion en lecture seule (un instantane coherent, meme
+// pendant des ecritures), gzip, puis relecture du .gz tel qu'une restauration
+// le lirait (integrity_check « ok », et le releve des `tables` demandees) ;
+// le fichier ne prend son nom qu'apres. Rend { chemin, nom, octets, sha256,
+// comptes, empreintes }, ou null si la base n'existe pas encore ; leve si la
+// copie ou sa relecture echoue (aucun fichier final n'est alors laisse).
+//
+// Le mode JSON (legacy, migration) garde la copie en flux : le fichier JSON est
+// remplace par renommage, jamais reecrit en place. Il est relu (JSON.parse).
+//
+// `copie: false` : la copie vers le second dossier est laissee a l'appelant
+// (la purge des bons, qui la fait apres avoir rendu le verrou d'ecriture).
+async function ecrireSauvegardeVerifiee(tag = "", { tables = [], copie = true } = {}) {
   const sourcePath = useSqliteStorage() ? SQLITE_PATH : DB_PATH;
   if (!fs.existsSync(sourcePath)) return null;
 
   ensureDir(BACKUP_DIR);
-  if (useSqliteStorage()) {
-    getSqliteStore().checkpoint();
-  }
-
   const baseExtension = useSqliteStorage() ? ".sqlite" : ".json";
   const tagPart = tag ? `-${tag.replace(/[^a-zA-Z0-9_-]/g, "")}` : "";
   const backupPath = path.join(BACKUP_DIR, `db-${safeTimestamp()}${tagPart}${baseExtension}.gz`);
+  // Pris AVANT la copie : une ecriture faite entre-temps est dans la copie, et
+  // la sauvegarde se dit couvrir un peu moins qu'elle ne couvre, jamais plus.
+  const couvre = derniereModificationA;
 
-  const sourceData = fs.readFileSync(sourcePath);
-  const compressed = zlib.gzipSync(sourceData);
-  fs.writeFileSync(backupPath, compressed);
+  let resultat;
+  if (useSqliteStorage()) {
+    // Ouvre la base (et la restaure si elle est corrompue) avant de la copier.
+    getSqliteStore();
+    resultat = await sauvegardeBase.copierEtVerifier({
+      source: SQLITE_PATH,
+      destination: backupPath,
+      tables,
+      maxOctets: MAX_BACKUP_DECOMPRESSED_BYTES
+    });
+  } else {
+    resultat = await sauvegarderFichierJson(sourcePath, backupPath);
+  }
 
   pruneOldBackups();
   lastBackupAt = new Date().toISOString();
   lastBackupError = null;
-  return backupPath;
+  derniereSauvegardeEcrite = { nom: path.basename(backupPath), couvre };
+  if (copie) await copierVersSecondDossier(backupPath, resultat.sha256);
+  return { chemin: backupPath, nom: path.basename(backupPath), ...resultat };
 }
 
-// Chantier 2 (audit 2026-06-04) : variante async via stream pipeline.
-// `zlib.createGzip()` delegue la compression au threadpool libuv (Node docs
-// confirme), donc le main thread reste libre pour les requetes HTTP pendant
-// le backup. Sur 50-100 MB c'etait 300-800 ms de freeze, maintenant ~5 ms
-// d'overhead non-bloquant.
-//
-// Pattern recommande (Dennis O'Keeffe 2024) : ecriture vers tmp, rename
-// atomique, cleanup best-effort si le pipeline echoue.
-//
-// Sync writeBackupNow garde sa raison d'etre : boot post-recovery (avant que
-// le serveur n'accepte des requetes, le freeze n'a pas d'impact) + tests.
-async function writeBackupNowAsync(tag = "") {
-  const sourcePath = useSqliteStorage() ? SQLITE_PATH : DB_PATH;
-  if (!fs.existsSync(sourcePath)) return null;
+// Le second dossier (SEREO_BACKUP_COPY_DIR, decision 3) : la derniere copie
+// reussie et la derniere erreur (null apres une copie reussie). En memoire.
+let derniereCopie = null;
+let derniereErreurCopie = null;
 
-  ensureDir(BACKUP_DIR);
-  if (useSqliteStorage()) {
-    getSqliteStore().checkpoint();
+function empreinteDuFichier(chemin) {
+  return new Promise((resolve, reject) => {
+    const hachage = crypto.createHash("sha256");
+    fs.createReadStream(chemin)
+      .on("data", morceau => hachage.update(morceau))
+      .on("error", reject)
+      .on("end", () => resolve(hachage.digest("hex")));
+  });
+}
+
+// Relecture adverse du 26/09 : un disque demonte ne se voyait pas. Docker lie
+// alors un dossier VIDE du disque systeme a la place du montage (ou le cree),
+// et cette fonction recreait le dossier au besoin : les copies y atterrissaient
+// sans bruit, « dans le second dossier » a l'ecran. Comparer les disques ne
+// suffit pas : la base est souvent sur un disque de donnees, le repli sur le
+// disque systeme -- deux numeros differents, rien a signaler. Le second
+// dossier porte donc un fichier TEMOIN, pose une fois par Thomas sur l'autre
+// disque (DEPLOYMENT.md) : disque demonte, temoin absent, rien n'est copie et
+// la carte le dit. Le dossier n'est plus jamais cree ici.
+const TEMOIN_SECOND_DOSSIER = "sereo-second-dossier";
+
+// Asynchrone expres : un partage reseau bloque ne gele pas le serveur.
+async function verifierTemoinSecondDossier() {
+  try {
+    await fs.promises.access(path.join(BACKUP_COPY_DIR, TEMOIN_SECOND_DOSSIER));
+  } catch {
+    throw new Error(`le fichier témoin « ${TEMOIN_SECOND_DOSSIER} » manque dans le second dossier (disque démonté ?) : rien n'y est copié. Si c'est bien l'autre disque, crée ce fichier vide (DEPLOYMENT.md, « Sauvegardes »)`);
   }
+}
 
-  const baseExtension = useSqliteStorage() ? ".sqlite" : ".json";
-  const tagPart = tag ? `-${tag.replace(/[^a-zA-Z0-9_-]/g, "")}` : "";
-  const backupPath = path.join(BACKUP_DIR, `db-${safeTimestamp()}${tagPart}${baseExtension}.gz`);
+// Copie une sauvegarde deja relue dans le second dossier : temoin present,
+// fichier provisoire, relecture (meme empreinte sha256 que l'originale), meme
+// date, renommage ; puis la meme retention que le premier dossier. N'echoue
+// jamais : la sauvegarde est faite, seule la copie manque -- et l'alerte
+// « copie » le dit.
+async function copierVersSecondDossier(chemin, sha256) {
+  if (!BACKUP_COPY_DIR) return null;
+  const nom = path.basename(chemin);
+  const cible = path.join(BACKUP_COPY_DIR, nom);
+  const provisoire = `${cible}.tmp`;
+  try {
+    await verifierTemoinSecondDossier();
+    await fs.promises.copyFile(chemin, provisoire);
+    const relue = await empreinteDuFichier(provisoire);
+    if (relue !== sha256) {
+      throw new Error(`la copie ne correspond pas a la sauvegarde (empreinte ${relue.slice(0, 12)} au lieu de ${String(sha256).slice(0, 12)})`);
+    }
+    const { mtime } = await fs.promises.stat(chemin);
+    await fs.promises.utimes(provisoire, mtime, mtime);
+    await fs.promises.rename(provisoire, cible);
+    pruneOldBackups(BACKUP_COPY_DIR);
+    derniereCopie = { nom, at: new Date().toISOString() };
+    derniereErreurCopie = null;
+    return cible;
+  } catch (error) {
+    try { await fs.promises.unlink(provisoire); } catch { /* absent : ok */ }
+    derniereErreurCopie = { at: new Date().toISOString(), message: String(error.message || error) };
+    console.error(`[storage] copie de ${nom} vers le second dossier impossible : ${derniereErreurCopie.message}`);
+    return null;
+  }
+}
+
+async function sauvegarderFichierJson(sourcePath, backupPath) {
   const tmpPath = backupPath + ".tmp";
-
   try {
     const { pipeline } = require("node:stream/promises");
     await pipeline(
       fs.createReadStream(sourcePath),
-      zlib.createGzip({ level: 6 }), // 6 = defaut, bon ratio/CPU
+      zlib.createGzip({ level: 6 }),
       fs.createWriteStream(tmpPath)
     );
-    fs.renameSync(tmpPath, backupPath); // atomique
-    pruneOldBackups();
-    lastBackupAt = new Date().toISOString();
-    lastBackupError = null;
-    return backupPath;
+    const compresse = fs.readFileSync(tmpPath);
+    const texte = zlib.gunzipSync(compresse, { maxOutputLength: MAX_BACKUP_DECOMPRESSED_BYTES }).toString("utf8");
+    if (texte.trim()) JSON.parse(texte);
+    fs.renameSync(tmpPath, backupPath);
+    return {
+      octets: compresse.length,
+      sha256: crypto.createHash("sha256").update(compresse).digest("hex"),
+      comptes: {},
+      empreintes: {}
+    };
   } catch (err) {
     try { fs.unlinkSync(tmpPath); } catch { /* best-effort */ }
     throw err;
   }
+}
+
+// Le chemin de la sauvegarde, ou null (contrat historique : la purge des
+// tournees l'injecte, writeDb l'appelle).
+async function writeBackupNowAsync(tag = "") {
+  const sauvegarde = await ecrireSauvegardeVerifiee(tag);
+  return sauvegarde ? sauvegarde.chemin : null;
+}
+
+// Une sauvegarde a la fois (revue #84 : deux sauvegardes concurrentes donnaient
+// un signal de sante incoherent). Attend celle qui court, puis tient sa place :
+// writeDb n'en lance pas d'autre tant que celle-ci n'est pas finie. Aucun
+// `await` entre la fin de l'attente et la prise de la place.
+async function sauvegardeSeule(ecrire) {
+  await flushPendingBackup();
+  const enVol = Promise.resolve().then(ecrire);
+  const place = enVol.then(() => {}, () => {});
+  pendingBackup = place;
+  place.then(() => { if (pendingBackup === place) pendingBackup = null; });
+  return enVol;
+}
+
+// Une sauvegarde interrompue (arret du processus pendant la copie, la
+// compression ou la relecture) laisse ses fichiers de travail : ni la rotation
+// ni la restauration ne les voient (BACKUP_FILENAME_PATTERN), rien d'autre ne
+// les supprime. Au demarrage, avant toute sauvegarde de CE processus, dans le
+// dossier des sauvegardes et dans le second dossier.
+//
+// Integration du 26/09 : un seul nettoyage pour les deux lots qui en avaient
+// ecrit un -- garde-fous (MOTIF_TRAVAIL : le .gz.tmp et les copies de travail
+// de la sauvegarde relue, second dossier compris) et robustesse (tout db-*.tmp,
+// chaque suppression journalisee). Une vraie sauvegarde (.gz fini) ne
+// correspond a aucun des deux motifs.
+const MOTIF_TEMPORAIRE_DE_SAUVEGARDE = /^db-.*\.tmp$/;
+
+function nettoyerSauvegardesInterrompues(dossier = BACKUP_DIR) {
+  const supprimes = [];
+  try {
+    if (!fs.existsSync(dossier)) return supprimes;
+    for (const nom of fs.readdirSync(dossier)) {
+      if (!sauvegardeBase.MOTIF_TRAVAIL.test(nom) && !MOTIF_TEMPORAIRE_DE_SAUVEGARDE.test(nom)) continue;
+      try {
+        fs.unlinkSync(path.join(dossier, nom));
+        supprimes.push(nom);
+      } catch (error) {
+        console.error(`[sauvegarde] fichier de travail ${nom} non supprime : ${error.message || error}`);
+      }
+    }
+  } catch (error) {
+    console.warn(`[storage] nettoyage des sauvegardes interrompues : ${error.message || error}`);
+  }
+  if (supprimes.length) {
+    console.log(`[sauvegarde] ${supprimes.length} fichier(s) de travail d'une sauvegarde interrompue supprime(s) (${dossier}) : ${supprimes.join(", ")}`);
+  }
+  return supprimes;
 }
 
 function safeTimestamp(date = new Date()) {
@@ -3390,7 +3993,7 @@ function auteurCourant() {
 }
 
 function addHistory(db, type, message, details = {}) {
-  db.historique.unshift({
+  ajouterEnTete(db, "historique", {
     id: crypto.randomUUID(),
     date: new Date().toISOString(),
     type,
@@ -3398,6 +4001,16 @@ function addHistory(db, type, message, details = {}) {
     details,
     auteur: auteurCourant()
   });
+}
+
+// Une ligne en tete de l'historique ou des mouvements de stock, SANS lire la
+// table quand la base sait l'ecrire seule (25/09) : chaque geste ajoute une
+// ligne a l'historique, et le lire en entier pour l'ecrire en entier coutait
+// plus que le geste. La table lue plus tard dans la meme requete a la ligne
+// en tete, comme avant (storage/sqliteStore.js, AJOUT_EN_TETE).
+function ajouterEnTete(db, cle, ligne) {
+  if (typeof db[AJOUT_EN_TETE] === "function") db[AJOUT_EN_TETE](cle, ligne);
+  else db[cle].unshift(ligne);
 }
 
 function clean(value) {
@@ -3554,7 +4167,10 @@ function normalizeDateInput(value) {
   if (isoMatch) {
     y = Number(isoMatch[1]); m = Number(isoMatch[2]); d = Number(isoMatch[3]);
   } else {
-    const fr = text.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/);
+    // Une heure apres la date FR (« 18/05/2026 10:30 », « 18/05/2026 10h30 »)
+    // est acceptee et ignoree (25/09) : l'import datait sinon le bon du jour
+    // de l'import (chasse aux defauts du 24/09).
+    const fr = text.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})(?:[ T]+\d{1,2}[:hH]\d{2}(?::\d{2})?)?$/);
     if (!fr) return "";
     d = Number(fr[1]); m = Number(fr[2]);
     // M1 (revue) : pivot 2 chiffres. "01/01/99" doit etre 1999 (legacy
@@ -3585,7 +4201,20 @@ function validateAndFormatYMD(y, m, d) {
 
 async function readExcelRows(filePath) {
   try {
-    const parsed = await readXlsxFile(filePath);
+    // Robustesse (25/09) : taille reelle, cellules, lignes et colonnes
+    // comptees AVANT la lecture (lib/garde-excel.js) ; au-dela, un refus clair
+    // au lieu de 600 Mo de memoire pour un fichier de 0,5 Mo.
+    // Relecture adverse (26/09) : la lecture se fait sur le classeur que la
+    // garde rend (ses seules parties comptees), jamais sur le fichier envoye :
+    // une partie cachee hors du repertoire du zip n'est plus decompressee.
+    let classeur;
+    try {
+      classeur = classeurVerifie(await fs.promises.readFile(filePath));
+    } catch (error) {
+      if (error instanceof ClasseurRefuse) throw badRequest(error.message);
+      throw error;
+    }
+    const parsed = await readXlsxFile(classeur);
     const rows = Array.isArray(parsed[0]) ? parsed : (parsed[0]?.data || []);
 
     if (!rows.length) {
@@ -3702,83 +4331,108 @@ function clientSecondaryKey(value) {
   return `${nom}|${cp}`;
 }
 
-function getRouteClientIds(db) {
-  const ids = new Set();
+// FUSION DES CLIENTS A L'IMPORT DES VENTES (25/09). Regle permanente de Thomas
+// (18/05) : tout import est une FUSION par cle metier, jamais un
+// « wipe-and-replace ». L'import des ventes reconstruisait pourtant la table
+// des clients depuis le fichier (chasse aux defauts du 24/09, constat
+// critique) : une fiche absente du fichier disparaissait (sauf si sa DERNIERE
+// commande etait en cours), et une fiche presente perdait tout ce que le
+// fichier ne porte pas -- email, prenom, preferences, source, archivage. Un
+// abonnement dont le client avait disparu ne se suspendait plus.
+//
+// Maintenant :
+//   - chaque ligne du fichier retrouve SA fiche : par la cle complete (nom,
+//     rue, code postal, ville), sinon par la cle secondaire (nom + code postal
+//     normalises) parmi les fiches que la cle complete ne vise pas ; une fiche
+//     n'est prise que par un seul client du fichier ;
+//   - la fiche trouvee garde son identifiant et tous ses champs ; une cellule
+//     PLEINE du fichier remplace la valeur, une cellule VIDE la laisse ;
+//   - une fiche absente du fichier reste telle quelle, a sa place.
 
-  db.routes.forEach(route => {
-    (route.stops || []).forEach(stop => {
-      if (stop.clientId !== undefined && stop.clientId !== null) {
-        ids.add(String(stop.clientId));
-      }
-    });
+/** Les fiches existantes, indexees pour l'import. `clesDuFichier` : les cles completes du fichier. */
+function indexerClientsExistants(clients, clesDuFichier) {
+  const parCle = new Map();
+  const parSecondaire = new Map();
+  // Deux fiches de meme cle : la derniere repond, comme avant (l'autre reste).
+  clients.forEach(client => parCle.set(clientKey(client), client));
+  clients.forEach(client => {
+    if (clesDuFichier.has(clientKey(client))) return;
+    const secondaire = clientSecondaryKey(client);
+    if (secondaire) parSecondaire.set(secondaire, client);
   });
-
-  return ids;
+  return { parCle, parSecondaire, prises: new Set() };
 }
 
-function shouldPreserveClientAfterImport(client, order, routeClientIds) {
-  const clientId = String(client?.id ?? "");
-  if (!clientId) return false;
-  if (routeClientIds.has(clientId)) return true;
-  if (!order) return false;
-  if (order.routeId) return true;
-
-  return [
-    "en_preparation",
-    "preparation_terminee",
-    "pret_livraison",
-    "en_livraison",
-    "livre",
-    "probleme_livraison",
-    "a_reprogrammer"
-  ].includes(order.status);
+/** La fiche existante d'un client du fichier, ou null ; `parSecondaire` dit comment. */
+function trouverFicheExistante(index, cle, secondaire) {
+  const directe = index.parCle.get(cle);
+  if (directe && !index.prises.has(directe)) {
+    index.prises.add(directe);
+    return { fiche: directe, parSecondaire: false };
+  }
+  const voisine = secondaire ? index.parSecondaire.get(secondaire) : null;
+  if (voisine && !index.prises.has(voisine)) {
+    index.prises.add(voisine);
+    return { fiche: voisine, parSecondaire: true };
+  }
+  return { fiche: null, parSecondaire: false };
 }
 
+/** Une cellule du fichier : pleine, elle remplace ; vide, la valeur en base reste. */
+function valeurFusionnee(duFichier, enBase) {
+  return clean(duFichier) !== "" ? duFichier : (enBase ?? "");
+}
+
+/**
+ * La liste des clients apres l'import : chaque fiche existante a sa place
+ * (remplacee par sa version fusionnee si le fichier la cite), puis les
+ * nouvelles. Rien n'est retire. Les comptes suivent la regle de Thomas :
+ * created / updated / preserved.
+ */
 function mergeImportedClients(db, importedClients) {
-  const importedKeys = new Set(importedClients.map(client => clientKey(client)));
-  // Map secondaire : cle nom+CP normalises -> client importe correspondant.
-  // Permet de rattraper les doublons quand l'adresse rue diverge legerement
-  // (virgule, espace, casse) entre la BDD et le fichier Excel.
-  const importedSecondaryKeys = new Map();
+  const fusionnees = new Map();
+  const nouvelles = [];
+  let mergedBySecondary = 0;
   importedClients.forEach(client => {
-    const secondary = clientSecondaryKey(client);
-    if (secondary && !importedSecondaryKeys.has(secondary)) {
-      importedSecondaryKeys.set(secondary, client);
+    const { _ficheExistante: existante, _parSecondaire: parSecondaire, ...fiche } = client;
+    if (existante) {
+      fusionnees.set(existante, fiche);
+      if (parSecondaire) mergedBySecondary += 1;
+    } else {
+      nouvelles.push(fiche);
     }
   });
-
-  const routeClientIds = getRouteClientIds(db);
-  const existingOrders = new Map(db.commandes.map(order => [String(order.clientId), order]));
-
-  // Phase 1 : pour chaque client existant en DB qui ne match PAS en strict
-  // mais match en secondaire, propager son id vers le client importe pour
-  // preserver les references dans commandes/routes/stops.
-  let mergedBySecondary = 0;
-  db.clients.forEach(existing => {
-    if (importedKeys.has(clientKey(existing))) return;
-    const secondary = clientSecondaryKey(existing);
-    if (!secondary) return;
-    const importedTwin = importedSecondaryKeys.get(secondary);
-    if (!importedTwin) return;
-    importedTwin.id = existing.id;
-    importedKeys.add(clientKey(importedTwin));
-    mergedBySecondary += 1;
-  });
-
-  // Phase 2 : preservation des clients en workflow actif qui ne sont
-  // dans AUCUN des deux match (strict ou secondaire).
-  const preservedClients = db.clients.filter(client => {
-    if (importedKeys.has(clientKey(client))) return false;
-    const secondary = clientSecondaryKey(client);
-    if (secondary && importedSecondaryKeys.has(secondary)) return false;
-    return shouldPreserveClientAfterImport(client, existingOrders.get(String(client.id)), routeClientIds);
-  });
-
+  const clients = [...db.clients.map(client => fusionnees.get(client) || client), ...nouvelles];
   return {
-    clients: [...importedClients, ...preservedClients],
-    preservedCount: preservedClients.length,
+    clients,
+    created: nouvelles.length,
+    updated: fusionnees.size,
+    preserved: db.clients.length - fusionnees.size,
     mergedBySecondary
   };
+}
+
+/** Le bon d'une ligne de vente : client (cle complete) + date de commande. */
+function cleDuBonDeLaVente(vente) {
+  return `${clientKey({ nom: vente.client, rue: vente.rue, codePostal: vente.codePostal, ville: vente.ville })}|${vente.dateCommandeIso || ""}`;
+}
+
+/**
+ * Les ventes apres un import : celles des bons absents du fichier restent,
+ * celles d'un bon du fichier sont remplacees par ses lignes (un bon corrige
+ * dans Ximi ne garde pas ses anciennes lignes, un fichier reimporte ne double
+ * rien). Un fichier cumulatif (le cas de la production) rend donc la meme
+ * table qu'avant ; un fichier partiel ou vide n'efface plus rien.
+ * `figes` (26/09) : les bons laisses tels quels -- leurs anciennes lignes
+ * restent, les lignes du fichier ne s'y ajoutent pas (bon incomplet, voir
+ * l'import des ventes). `cleAncienne` (26/09) : le bon d'une ancienne vente,
+ * reconnu par sa fiche quand son adresse a change (voir l'import des ventes).
+ */
+function fusionnerVentes(anciennes, nouvelles, figes = new Set(), cleAncienne = cleDuBonDeLaVente) {
+  const retenues = nouvelles.filter(vente => !figes.has(cleDuBonDeLaVente(vente)));
+  const bonsDuFichier = new Set(retenues.map(cleDuBonDeLaVente));
+  const gardees = (Array.isArray(anciennes) ? anciennes : []).filter(vente => !bonsDuFichier.has(cleAncienne(vente)));
+  return { ventes: [...gardees, ...retenues], gardees: gardees.length };
 }
 
 function badRequest(message) {
@@ -3793,6 +4447,9 @@ function handleRouteError(error, res, fallbackMessage) {
   if (status >= 500) {
     console.error(error);
   }
+  // Un refus qui est une question (doublonDeFiche) : sa cle d'idempotence
+  // reste libre pour la reponse (gesteIdempotent).
+  if (error.question) res.locals.gesteSansEffet = true;
 
   res.status(status).json({
     error: status >= 500 ? fallbackMessage : error.message,
@@ -3974,24 +4631,63 @@ function getQuantityForProductInOrder(product, order) {
   }, 0);
 }
 
-// Chantier 1 (2026-06-04) : ajout "probleme_livraison" et "a_reprogrammer"
-// dans la liste des statuts qui MAINTIENNENT la reservation. Avant ce fix,
-// `reserveStockForOrder` deduisait physiquement le stock mais
-// `calculateReservedStock` excluait ces statuts de la metrique reserved —
-// asymetrie comptable invisible (stock dispo affiche > stock physique reel).
+// Chantier 1 (2026-06-04) : "probleme_livraison" et "a_reprogrammer"
+// MAINTIENNENT la reservation. Avant ce fix, `reserveStockForOrder` deduisait
+// physiquement le stock mais `calculateReservedStock` excluait ces statuts de
+// la metrique reserved — asymetrie comptable invisible (stock dispo affiche >
+// stock physique reel).
 //
 // Pattern ERP standard (Odoo unrelease, ERPNext stock reservation) : un
 // echec de livraison ne libere PAS la reservation (livraison client absent
 // = relivraison sous 24-72h sur meme stock). Pour annuler une reservation,
 // utiliser l'endpoint explicite POST /api/orders/:id/release-stock.
-const RESERVED_ORDER_STATUSES = [
-  "en_preparation",
-  "preparation_terminee",
-  "pret_livraison",
-  "en_livraison",
-  "probleme_livraison",
-  "a_reprogrammer"
-];
+//
+// Chasse aux defauts du 24/09 (lot « stock ») : la reservation se lit sur la
+// COMMANDE, plus sur une liste de statuts. Une commande saisie chez le client,
+// ou une planifiee confirmee, sort son stock du rayon des sa creation et reste
+// « stock_a_verifier » (a preparer) : absente de l'ancienne liste
+// (RESERVED_ORDER_STATUSES : en preparation jusqu'a a reprogrammer), elle
+// etait reevaluee contre le rayon qu'elle venait de reduire (6 pris sur 10, 4
+// restants, « 6 demandes pour 4 » : « Bloquee stock », bouton grise, Reserve 0
+// au Stock). Est reservee toute commande qui porte stockReservedAt, sauf une
+// livree (la livraison consomme la reservation ; des livrees anciennes gardent
+// stockReservedAt, voir la purge) ou une annulee.
+const STATUTS_SANS_RESERVATION = new Set(["livre", "annulee"]);
+
+function stockReserveActif(order) {
+  return Boolean(order && order.stockReservedAt) && !STATUTS_SANS_RESERVATION.has(order.status);
+}
+
+// Une commande qui n'a pas encore ete preparee (importee, a verifier, validee
+// chez le client) et qu'une transition fait entrer dans la preparation ou
+// au-dela : son stock doit sortir du rayon, comme par « Passer en
+// preparation ».
+//
+// Relecture adverse (25/09) : une commande dont le stock a ete libere a la
+// main (release-stock, sur « a reprogrammer » ou en probleme de livraison) et
+// qu'une transition remet en PREPARATION (en preparation, terminee, prete) en
+// est aussi. « Passer en preparation » sortait son stock ; PATCH non :
+// preparee, en carton, pendant que le rayon comptait encore ses articles (une
+// autre commande pouvait les prendre, et sa livraison mettait le rayon en
+// negatif). Vers « en livraison » ou « livre », rien ne change : la
+// livraison reprend le stock (reprendreStockLibere), meme sur un rayon
+// insuffisant (decision de Thomas du 23/09), comme la tournee qui la relivre.
+const STATUTS_AVANT_PREPARATION = new Set(["brouillon", "importe", "stock_a_verifier", "commande_client_validee"]);
+const STATUTS_STOCK_SORTI = new Set(["en_preparation", "preparation_terminee", "pret_livraison", "en_livraison", "livre"]);
+const STATUTS_DE_PREPARATION = new Set(["en_preparation", "preparation_terminee", "pret_livraison"]);
+
+function stockLibereALaMain(order) {
+  return Boolean(order.stockReleaseReason) && order.stockReleaseReason !== "consumed_by_delivery";
+}
+
+function commandeQuiPartEnPreparation(order, statut) {
+  const avantPreparation = STATUTS_AVANT_PREPARATION.has(order.status) && STATUTS_STOCK_SORTI.has(statut);
+  const repreparee = stockLibereALaMain(order) && STATUTS_DE_PREPARATION.has(statut);
+  return statut !== order.status
+    && (avantPreparation || repreparee)
+    && isValidOrderStatusTransition(order.status, statut)
+    && !order.stockReservedAt;
+}
 
 // Chantier 2 (audit 2026-06-04) : pre-compute des metriques stock en
 // single-pass O(N+M) au lieu de N*M reduce imbriques par produit.
@@ -4063,7 +4759,7 @@ function buildStockMetricsIndex(commandes) {
   };
 
   for (const order of commandes || []) {
-    const isReserved = Boolean(order.stockReservedAt && RESERVED_ORDER_STATUSES.includes(order.status));
+    const isReserved = stockReserveActif(order);
     const isNeeded = NEEDED_ORDER_STATUSES.has(order.status);
     if (!isReserved && !isNeeded) continue;
     // null : rien de deduit, toute la ligne reste a prendre.
@@ -4199,7 +4895,7 @@ function lookupUpcomingDemand(index, product) {
 function calculateReservedStock(db, product, index) {
   if (index && index.totals) return lookupStockMetric(index, product, "reserved");
   return db.commandes.reduce((total, order) => {
-    const isReserved = Boolean(order.stockReservedAt && RESERVED_ORDER_STATUSES.includes(order.status));
+    const isReserved = stockReserveActif(order);
     return isReserved ? total + getQuantityForProductInOrder(product, order) : total;
   }, 0);
 }
@@ -4297,7 +4993,12 @@ function getRecommendations(db) {
     .filter(product => ["stock_faible", "rupture", "a_renseigner"].includes(product.stockStatus))
     .map(product => {
       const available = Number(product.quantityAvailable) || 0;
-      const needed = Number(product.quantityNeeded) || 0;
+      // Le besoin que le rayon n'a pas encore servi (lot « stock », 24/09) :
+      // une commande en preparation a deja sorti ses quantites du rayon.
+      // Avec quantityNeeded, 7 sortis sur 10 (rayon 3, seuil 5) donnaient
+      // 4 a racheter au lieu de 2. C'est le besoin de l'ecran « A recommander »
+      // depuis la relecture adverse du 24/09 (quantityNeededNotDeducted).
+      const needed = Number(product.quantityNeededNotDeducted) || 0;
       // Seuil 0 legitime preserve : on ne le remplace par 5 que si la valeur est invalide
       // (null, undefined, NaN, "" -> non finite). Cf. fix v1.1.0 sur normalizeProducts.
       const thresholdRaw = Number(product.alertThreshold);
@@ -4312,19 +5013,27 @@ function getRecommendations(db) {
     });
 }
 
-function recordStockMovement(db, product, oldQuantity, newQuantity, reason = "Ajustement manuel") {
+// `commande` (lot « stock », 24/09) : la commande dont le mouvement vient
+// (reservation, liberation, livraison acceptee) -- son id et son numero sont
+// gardes sur le mouvement (orderId : la colonne reference_commande de la
+// table). Une quantite inconnue (« a renseigner », null) compte pour 0 dans
+// le sens et l'ampleur du mouvement, et reste null dans oldQuantity.
+function recordStockMovement(db, product, oldQuantity, newQuantity, reason = "Ajustement manuel", { commande = null } = {}) {
   if (oldQuantity === newQuantity) return;
+  const ancienne = Number(oldQuantity) || 0;
+  const nouvelle = Number(newQuantity) || 0;
 
-  db.stockMovements.unshift({
+  ajouterEnTete(db, "stockMovements", {
     id: `stock-${crypto.randomUUID()}`,
     productId: product.id,
     productName: getProductName(product),
     sku: getProductCode(product),
-    type: newQuantity >= oldQuantity ? "entree" : "sortie",
-    quantity: Math.round(Math.abs(newQuantity - oldQuantity) * 100) / 100,
+    type: nouvelle >= ancienne ? "entree" : "sortie",
+    quantity: Math.round(Math.abs(nouvelle - ancienne) * 100) / 100,
     oldQuantity,
     newQuantity,
     reason: clean(reason) || "Ajustement manuel",
+    ...(commande ? { orderId: String(commande.id), numero: clean(commande.numero) } : {}),
     createdAt: new Date().toISOString(),
     // Avant le 24/09 : « local », toujours. L'auteur est celui de la requete.
     createdBy: auteurCourant()
@@ -4442,12 +5151,20 @@ function extractYear(dateString) {
 //
 // Format reset annuel    : CMD-2026-001, CMD-2026-002, ..., CMD-2027-001
 // Format continu (jamais) : CMD-00001, CMD-00002, ..., CMD-12847
+// Les numeros deja attribues : ceux des commandes, et ceux des commandes mises
+// de cote (relecture adverse du 26/09). Sans ces derniers, le numero de la
+// derniere commande, illisible, etait redonne a la suivante -- et avec lui
+// son identifiant cmd-<numero>, que ses arrets de tournee nomment encore.
+function numerosDejaAttribues(db) {
+  const numeros = (db.commandes || []).map(order => order.numero).filter(Boolean);
+  for (const { numero } of commandesMisesDeCote().values()) if (numero) numeros.push(numero);
+  return numeros;
+}
+
 function generateOrderNumber(db, dateCommande) {
   const settings = normalizeSettings(db.settings || {});
   const { prefix, resetAnnually } = settings.orderNumbering;
-  const existingNumeros = (db.commandes || [])
-    .map(order => order.numero)
-    .filter(Boolean);
+  const existingNumeros = numerosDejaAttribues(db);
 
   if (!resetAnnually) {
     // Compteur continu : extraire le plus grand suffixe numerique tout prefixe confondu
@@ -4457,7 +5174,7 @@ function generateOrderNumber(db, dateCommande) {
       if (!match) return max;
       const seq = Number(match[1]);
       return Number.isFinite(seq) && seq > max ? seq : max;
-    }, 0);
+    }, plancherDeNumero(db, prefix));
     return `${prefix}-${String(maxSeq + 1).padStart(5, "0")}`;
   }
 
@@ -4469,8 +5186,44 @@ function generateOrderNumber(db, dateCommande) {
     if (!match) return max;
     const seq = Number(match[1]);
     return Number.isFinite(seq) && seq > max ? seq : max;
-  }, 0);
+  }, plancherDeNumero(db, `${prefix}-${year}`));
   return `${prefix}-${year}-${String(maxSeq + 1).padStart(3, "0")}`;
+}
+
+// Chasse aux defauts du 24/09 (lot « stock ») : un numero attribue ne l'est
+// plus jamais deux fois. La purge des bons retient, avant de vider les
+// commandes, le plus grand numero de chaque serie (settings.numerosAttribues,
+// retenirNumerosAttribues) ; le compteur part du plus grand des deux. Avant,
+// la premiere commande d'apres une purge reprenait CMD-2026-001 et
+// l'identifiant cmd-cmd-2026-001 : un rappel survivant visait alors la
+// commande d'un autre client.
+//
+// Le plus grand numero deja attribue d'une serie (« CMD-2026 » : reset
+// annuel ; « CMD » : compteur continu), retenu par une purge. 0 sinon.
+function plancherDeNumero(db, serie) {
+  const retenus = db.settings && typeof db.settings === "object" ? db.settings.numerosAttribues : null;
+  const valeur = retenus && typeof retenus === "object" ? Number(retenus[serie]) : 0;
+  return Number.isInteger(valeur) && valeur > 0 ? valeur : 0;
+}
+
+// A appeler AVANT de supprimer des commandes (la purge) : retient, par serie,
+// le plus grand numero attribue, sans jamais faire redescendre un plancher.
+function retenirNumerosAttribues(db) {
+  const retenus = { ...((db.settings && db.settings.numerosAttribues) || {}) };
+  const retenir = (serie, seq) => {
+    if (Number.isInteger(seq) && seq > (Number(retenus[serie]) || 0)) retenus[serie] = seq;
+  };
+  for (const order of db.commandes || []) {
+    const numero = String(order.numero || "");
+    const annuel = numero.match(/^([A-Z0-9]{2,8})-(\d{4})-(\d+)$/);
+    if (annuel) {
+      retenir(`${annuel[1]}-${annuel[2]}`, Number(annuel[3]));
+      continue;
+    }
+    const continu = numero.match(/^([A-Z0-9]{2,8})-(\d+)$/);
+    if (continu) retenir(continu[1], Number(continu[2]));
+  }
+  db.settings = { ...(db.settings || {}), numerosAttribues: retenus };
 }
 
 // Hash deterministe d'une commande pour detecter les doublons au re-import.
@@ -4556,13 +5309,29 @@ function normalizeProducts(products) {
     .filter(product => product.code || product.nom);
 }
 
-function analyzeOrderStock(order, stock) {
-  const lookup = stockLookup(stock);
+// Lot « stock » (chasse aux defauts du 24/09) : deux lignes d'une commande qui
+// designent le MEME produit du stock (le meme productId deux fois, ou la meme
+// reference avec et sans code dans un fichier) etaient controlees chacune
+// seule : 3 + 3 sur un rayon de 5 passait, la reservation ramenait le rayon a
+// 0 (une unite perdue sans trace, setStockQuantity), et la liberation en
+// rendait 6. Les lignes d'un meme produit se partagent desormais le rayon :
+// chacune y prend a son tour, et `available` est ce qu'il en reste pour ELLE
+// (une ligne seule : le rayon, comme avant). Le manque de la commande est la
+// somme des manques, et `quantitesParProduit` donne a la reservation et a la
+// liberation la quantite de chaque produit, lignes additionnees.
+//
+// `lookup` : la table de recherche du catalogue, deja construite par
+// l'appelant (syncWorkflow la construit UNE fois pour toutes les commandes).
+// Un appel isole (un geste sur une commande) la construit lui-meme.
+function analyzeOrderStock(order, stock, lookup = stockLookup(stock)) {
+  const restantParProduit = new Map(); // produit du stock -> ce que le rayon laisse aux lignes suivantes
   const lines = normalizeProducts(order.products).map(product => {
     const stockItem = lookup.get(productKeyFromLine(product)) || lookup.get(`name:${normalizeTextKey(product.nom)}`);
-    const available = stockItem ? getStockQuantity(stockItem) : null;
+    const enRayon = stockItem ? getStockQuantity(stockItem) : null;
+    const available = enRayon === null ? null : (restantParProduit.has(stockItem) ? restantParProduit.get(stockItem) : enRayon);
     const required = Math.max(0, number(product.quantite, 0));
     const missing = available === null ? required : Math.max(0, required - available);
+    if (available !== null) restantParProduit.set(stockItem, Math.max(0, available - required));
     let status = "ok";
 
     if (!stockItem || available === null) status = "unknown";
@@ -4590,6 +5359,20 @@ function analyzeOrderStock(order, stock) {
   };
 }
 
+// Les lignes d'une analyse (analyzeOrderStock), regroupees par produit du
+// stock : [{ stockId, quantite }], lignes du meme produit additionnees. Les
+// lignes sans produit connu, ou que `garder` ecarte, ne comptent pas.
+function quantitesParProduit(lines, garder = () => true) {
+  const parProduit = new Map();
+  for (const line of lines) {
+    if (line.stockId === null || line.stockId === undefined) continue;
+    if (!line.required || line.required <= 0 || !garder(line)) continue;
+    const cle = String(line.stockId);
+    parProduit.set(cle, (parProduit.get(cle) || 0) + line.required);
+  }
+  return [...parProduit].map(([stockId, quantite]) => ({ stockId, quantite: Math.round(quantite * 100) / 100 }));
+}
+
 // ERP v1.9.0 : syncWorkflow ne regenere PLUS 1 commande par client. Il
 // enrichit les commandes existantes (analyse stock) et synchronise les statuts
 // des clients en se basant sur leur commande LA PLUS RECENTE. Cela permet le
@@ -4598,7 +5381,12 @@ function analyzeOrderStock(order, stock) {
 // Compatibilite legacy : si un client existe SANS aucune commande (seed test,
 // import historique), on en cree une "fallback" pour preserver le comportement
 // des anciennes UIs qui supposent qu'un client a toujours une commande.
+// Compte des synchronisations, pour les bancs (test/rapidite-serveur.test.js) :
+// une ecriture = une synchronisation.
+let synchronisations = 0;
+
 function syncWorkflow(db) {
+  synchronisations += 1;
   db.clients = db.clients.map(client => normalizeClient(client));
 
   // Bucket des commandes par clientId (1->N relation)
@@ -4612,9 +5400,15 @@ function syncWorkflow(db) {
   // Legacy compat : un client sans aucune commande recoit une commande
   // fallback (deduite de ses produits) pour ne pas casser les anciennes UIs
   // qui supposent 1 client = 1 commande.
+  // Robustesse (25/09) : pas pour un client dont la commande vient d'etre mise
+  // de cote parce qu'illisible -- sinon elle « revenait » en commande neuve,
+  // datee du jour, a preparer ou comptee dans le chiffre d'affaires du jour
+  // (mesure sur une base de la forme de la production, CMD-2025-039 -> CMD-2026-164).
+  const clientsSansFallback = clientsDesCommandesMisesDeCote();
   db.clients.forEach(client => {
     const orders = ordersByClientId.get(String(client.id)) || [];
     if (orders.length > 0) return;
+    if (clientsSansFallback.has(String(client.id))) return;
     if (!Array.isArray(client.produits) || client.produits.length === 0) return;
 
     const today = jourParis();
@@ -4644,10 +5438,16 @@ function syncWorkflow(db) {
     ordersByClientId.set(String(client.id), [fallback]);
   });
 
-  // Re-normalisation + enrichissement (analyse stock) de TOUTES les commandes
+  // Re-normalisation + enrichissement (analyse stock) de TOUTES les commandes.
+  // La table de recherche du catalogue se construit UNE fois (25/09) : chaque
+  // commande la reconstruisait -- deux normalisations de texte par produit et
+  // par commande, la moitie d'une ecriture en production, 1,3 s a dix fois la
+  // base. Rien ne touche au stock pendant l'enrichissement : la table vaut
+  // pour toutes les commandes.
+  const catalogue = stockLookup(db.stock);
   db.commandes = db.commandes
     .map(order => normalizeOrder(order))
-    .map(order => enrichOrder(order, db.stock));
+    .map(order => enrichOrder(order, db.stock, catalogue));
 
   // Statut du client = statut de sa commande la plus recente (par dateCommande)
   const latestOrderByClient = new Map();
@@ -4816,6 +5616,8 @@ function normalizeOrder(order) {
     remisA: clean(order.remisA),
     subscriptionId: order.subscriptionId || "",
     subscriptionDate: order.subscriptionDate || "",
+    // Decision 8 (24/09) : annulee par la pause ou l'arret de son abonnement.
+    ...(order.annuleeAvecAbonnement ? { annuleeAvecAbonnement: clean(order.annuleeAvecAbonnement) } : {}),
     source: clean(order.source || order.orderSource || order.sourceExcel),
     orderType: clean(order.orderType || order.typeCommande || order.type || (order.source === "commande_planifiee" ? "planifiee" : "immediate")),
     parentOrderId: clean(order.parentOrderId || order.commandeOrigineId || order.sourceOrderId),
@@ -4823,14 +5625,19 @@ function normalizeOrder(order) {
     plannedReminderId: clean(order.plannedReminderId || order.reminderId),
     reminderLeadDays: Math.max(0, Math.round(number(order.reminderLeadDays, 7))),
     total: Math.max(0, number(order.total, 0)),
+    // Le montant TTC fige d'une commande importee (25/09, voir montantTtcFige) :
+    // absent ailleurs. Sans cette ligne, syncWorkflow l'effacerait a l'ecriture.
+    ...(montantTtcFige(order) !== null ? { montantTtc: montantTtcFige(order) } : {}),
     sentToPreparationAt: order.sentToPreparationAt || ""
   };
 }
 
-function enrichOrder(order, stock) {
-  const stockCheck = analyzeOrderStock(order, stock);
-  // Chantier 1 : aligne sur RESERVED_ORDER_STATUSES (inclut probleme/a_reprogrammer)
-  const stockReserved = Boolean(order.stockReservedAt && RESERVED_ORDER_STATUSES.includes(order.status));
+function enrichOrder(order, stock, lookup = stockLookup(stock)) {
+  const stockCheck = analyzeOrderStock(order, stock, lookup);
+  // Chantier 1 : probleme/a_reprogrammer gardent leur reservation. Lot
+  // « stock » (24/09) : une commande a verifier au stock deja sorti aussi --
+  // jamais comparee au rayon qu'elle a elle-meme reduit (stockReserveActif).
+  const stockReserved = stockReserveActif(order);
 
   return {
     ...order,
@@ -4908,7 +5715,13 @@ function setOrderStatus(order, status, quand = null) {
   }
 }
 
-function reserveStockForOrder(db, order) {
+// Lot « stock » (24/09) : la quantite de chaque PRODUIT (lignes du meme
+// produit additionnees, quantitesParProduit) sort du rayon, et chaque sortie
+// est ecrite au journal des mouvements (recordStockMovement : l'auteur est
+// celui de la requete). Avant, rien n'y etait ecrit : un rayon qui avait
+// change trois fois laissait /api/stock-movements vide. `motif` : ce que dit
+// le mouvement (par defaut, la sortie pour la commande).
+function reserveStockForOrder(db, order, motif = `Sortie pour la commande ${nomDeCommande(order)}`) {
   if (order.stockReservedAt) return;
 
   const stockCheck = analyzeOrderStock(order, db.stock);
@@ -4916,18 +5729,33 @@ function reserveStockForOrder(db, order) {
     throw badRequest("Stock insuffisant ou non renseigne pour cette commande");
   }
 
-  stockCheck.lines.forEach(line => {
-    const product = db.stock.find(item => String(item.id) === String(line.stockId));
+  quantitesParProduit(stockCheck.lines).forEach(({ stockId, quantite }) => {
+    const product = db.stock.find(item => String(item.id) === stockId);
     if (!product) return;
 
-    const available = getStockQuantity(product) ?? 0;
-    setStockQuantity(product, available - line.required);
+    const avant = getStockQuantity(product) ?? 0;
+    // canPrepare garantit que le rayon couvre la somme : aucune remise a zero.
+    const apres = Math.round((avant - quantite) * 100) / 100;
+    product.quantite = apres;
+    recordStockMovement(db, product, avant, apres, motif, { commande: order });
   });
 
   order.stockReservedAt = new Date().toISOString();
   // Toutes les lignes viennent d'etre deduites.
   delete order.stockNonDeduit;
 }
+
+// Ce que dit le mouvement d'une liberation, selon sa raison (les codes des
+// appelants ; release-stock passe le texte saisi).
+const MOTIFS_DE_LIBERATION = {
+  order_cancelled: "commande annulée",
+  planned_order_cancelled: "commande planifiée annulée",
+  purge: "purge des bons de commande",
+  manual_release: "libération manuelle",
+  release: "libération",
+  subscription_paused: "abonnement mis en pause",
+  subscription_cancelled: "abonnement arrêté"
+};
 
 // Chantier 1 : symetrique de reserveStockForOrder. Restitue les quantites
 // physiquement deduites quand une commande quitte le workflow sans etre livree
@@ -4947,15 +5775,24 @@ function releaseOrderStockReservation(db, order, reason) {
   // Une ligne qu'aucune deduction n'a sortie du rayon (livraison acceptee sur
   // un stock non suivi) n'y rentre pas : l'ajouter inventerait une quantite.
   const nonDeduites = new Set(order.stockNonDeduit || []);
-  let restoredCount = 0;
-  stockCheck.lines.forEach(line => {
-    if (!line.required || line.required <= 0) return;
-    if (nonDeduites.has(productKeyFromLine(line))) return;
-    const product = db.stock.find(item => String(item.id) === String(line.stockId));
+  const rendue = line => !nonDeduites.has(productKeyFromLine(line));
+  // Le compte de l'historique reste celui des LIGNES rendues (« 2 ligne(s)
+  // restituee(s) ») ; le rayon, lui, recoit la somme par produit (lot
+  // « stock », 24/09 : deux lignes du meme produit rendent ce qu'elles ont pris,
+  // ni plus ni moins), ecrite sans remise a zero -- un rayon negatif (livraison
+  // acceptee sur stock insuffisant) remonte de la quantite rendue, il ne saute
+  // pas a zero.
+  const restoredCount = stockCheck.lines
+    .filter(line => line.required > 0 && rendue(line) && db.stock.some(item => String(item.id) === String(line.stockId)))
+    .length;
+  const motif = `Rendue au rayon : commande ${nomDeCommande(order)} (${MOTIFS_DE_LIBERATION[reason] || clean(reason) || "libération"})`;
+  quantitesParProduit(stockCheck.lines, rendue).forEach(({ stockId, quantite }) => {
+    const product = db.stock.find(item => String(item.id) === stockId);
     if (!product) return;
-    const available = getStockQuantity(product) ?? 0;
-    setStockQuantity(product, available + line.required);
-    restoredCount += 1;
+    const avant = getStockQuantity(product) ?? 0;
+    const apres = Math.round((avant + quantite) * 100) / 100;
+    product.quantite = apres;
+    recordStockMovement(db, product, avant, apres, motif, { commande: order });
   });
 
   order.stockReservedAt = null;
@@ -4977,6 +5814,22 @@ function findOrder(db, orderId) {
   const order = db.commandes.find(item => String(item.id) === String(orderId));
   if (!order) throw notFound("Commande introuvable");
   return order;
+}
+
+/**
+ * La commande d'un arret de tournee ; null si elle est MISE DE COTE (texte
+ * illisible, lignes_en_quarantaine). Relecture adverse du 26/09 : l'arret la
+ * nommait encore, et findOrder levait « Commande introuvable » -- toute la
+ * tournee ne demarrait plus, l'arret ne se marquait plus. L'arret porte de
+ * quoi etre fait (client, adresse, produits) : il vit sans sa commande, qui
+ * attend d'etre reparee a la main (ni son statut ni le stock ne suivent).
+ * Une commande absente pour une autre raison reste une erreur, comme avant.
+ */
+function commandeDeLArret(db, stop) {
+  const order = db.commandes.find(item => String(item.id) === String(stop.orderId));
+  if (order) return order;
+  if (commandesMisesDeCote().has(String(stop.orderId))) return null;
+  throw notFound("Commande introuvable");
 }
 
 function findClient(db, clientId) {
@@ -5060,13 +5913,40 @@ function inferCrmStatus(client, orders) {
   return "prospect";
 }
 
+// Les commandes, les rappels et les abonnes actifs, par client, construits
+// UNE fois pour la liste des clients (25/09). crmClientView parcourait toutes
+// les commandes et tous les rappels pour chaque client : O(clients x
+// commandes), 170 ms a dix fois la base, plusieurs secondes a cinquante. Memes
+// listes, dans le meme ordre (meme tri, stable, sur les commandes prises dans
+// l'ordre de la table).
+function indexCrmParClient(db) {
+  const parClient = (liste, champ) => {
+    const index = new Map();
+    for (const item of liste) {
+      const cle = String(item.clientId);
+      if (!index.has(cle)) index.set(cle, []);
+      index.get(cle).push(item);
+    }
+    for (const items of index.values()) items.sort((a, b) => String(b[champ] || "").localeCompare(String(a[champ] || "")));
+    return index;
+  };
+  return {
+    commandes: parClient(db.commandes, "dateCommande"),
+    relances: parClient(db.relances, "datePrevue"),
+    abonnes: new Set((db.subscriptions || []).filter(sub => sub.status === "active").map(sub => String(sub.clientId)))
+  };
+}
+
 // `ventesImportees` : l'index des ventes importees (buildImportedSalesIndex),
 // construit UNE fois par la liste des clients plutot qu'une fois par client.
-function crmClientView(db, client, ventesImportees = null) {
-  const orders = getClientOrderHistory(db, client.id);
-  const reminders = db.relances
-    .filter(reminder => String(reminder.clientId) === String(client.id))
-    .sort((a, b) => String(b.datePrevue || "").localeCompare(String(a.datePrevue || "")));
+// `parClient` : indexCrmParClient, de meme (la fiche seule s'en passe).
+function crmClientView(db, client, ventesImportees = null, parClient = null) {
+  const orders = parClient ? parClient.commandes.get(String(client.id)) || [] : getClientOrderHistory(db, client.id);
+  const reminders = parClient
+    ? parClient.relances.get(String(client.id)) || []
+    : db.relances
+      .filter(reminder => String(reminder.clientId) === String(client.id))
+      .sort((a, b) => String(b.datePrevue || "").localeCompare(String(a.datePrevue || "")));
   const latestOrder = orders[0];
   const firstOrder = orders[orders.length - 1];
   // Le chiffre d'affaires de la fiche (parcours simplifies, 24/09) : les
@@ -5094,7 +5974,9 @@ function crmClientView(db, client, ventesImportees = null) {
     // le signal ne s'y fie donc pas.
     relanceSuggeree: relanceSuggeree({
       commandes: orders,
-      abonne: (db.subscriptions || []).some(sub => String(sub.clientId) === String(client.id) && sub.status === "active"),
+      abonne: parClient
+        ? parClient.abonnes.has(String(client.id))
+        : (db.subscriptions || []).some(sub => String(sub.clientId) === String(client.id) && sub.status === "active"),
       statutCrm: crmStatus,
       archive: Boolean(client.crmArchived),
       aujourdhui: jourParis()
@@ -5114,10 +5996,19 @@ function crmClientView(db, client, ventesImportees = null) {
 function getReminderViews(db, query = {}) {
   const today = jourParis();
   const range = clean(query.range || "");
+  // Le client et la commande de chaque rappel, par index (25/09) : un find sur
+  // toute la table pour chaque rappel. Le premier trouve, comme find.
+  const premierParId = liste => {
+    const index = new Map();
+    for (const item of liste) if (!index.has(String(item.id))) index.set(String(item.id), item);
+    return index;
+  };
+  const clients = db.relances.length ? premierParId(db.clients) : new Map();
+  const commandes = db.relances.length ? premierParId(db.commandes) : new Map();
   let list = db.relances.map(reminder => ({
     ...reminder,
-    client: db.clients.find(client => String(client.id) === String(reminder.clientId)) || null,
-    order: db.commandes.find(order => String(order.id) === String(reminder.commandeId)) || null
+    client: clients.get(String(reminder.clientId)) || null,
+    order: commandes.get(String(reminder.commandeId)) || null
   }));
 
   if (query.clientId) {
@@ -5195,18 +6086,54 @@ function findDuplicateClient(db, payload, ignoreId = "") {
   });
 }
 
-function findOrCreateCustomerClient(db, payload = {}) {
+// Une commande pour un NOUVEAU client dont le telephone (ou le nom et le code
+// postal) est deja celui d'une fiche (chasse aux defauts du 24/09, 25/09).
+// Avant : la fiche trouvee prenait tout le formulaire -- « EHPAD Les
+// Tilleuls » devenait « Roux », et sa rue, son email, ses notes partaient
+// (le formulaire envoie ses champs vides). Le serveur ne devine plus : sans
+// choix, il refuse (409) et rend la fiche ; l'ecran propose « rattacher a
+// cette fiche » (clientId : prise telle quelle) ou « creer une nouvelle
+// fiche » (`nouvelleFiche`). Les numeros se comparent normalises
+// (cleTelephone : espaces, points, +33).
+function doublonDeFiche(fiche) {
+  const nom = [fiche.prenom, fiche.nom].filter(Boolean).join(" ") || fiche.nom || "sans nom";
+  const erreur = badRequest(`Une fiche existe déjà avec ce téléphone ou ce nom : ${nom}. Rattache la commande à cette fiche, ou crée une nouvelle fiche.`);
+  erreur.statusCode = 409;
+  // Une question, rien n'est applique : la cle X-Sereo-Geste ne la garde pas.
+  erreur.question = true;
+  erreur.details = {
+    doublon: {
+      id: fiche.id, nom: fiche.nom || "", prenom: fiche.prenom || "", telephone: fiche.telephone || "",
+      rue: fiche.rue || "", codePostal: fiche.codePostal || "", ville: fiche.ville || ""
+    }
+  };
+  return erreur;
+}
+
+//
+// Le 409 ne va qu'a une page qui sait poser la question : elle le demande
+// (`demander`, champ `demanderSiDoublon` de la commande). Sans demande ni
+// choix -- une page d'avant la mise a jour, ou une commande rejouee par la
+// file d'attente --, un refus retirerait la commande de la file (4xx :
+// abandonnee) : elle part sur une NOUVELLE fiche, l'existante ne bouge pas.
+// Une fiche en double se fusionne ; une commande perdue ne se retrouve pas.
+//
+// `rattacher` : un appel du SERVEUR lui-meme, qui n'a personne a qui poser la
+// question -- « Planifier la suite » d'une commande dont la fiche a disparu
+// (relecture adverse du 26/09 ; la production en a une, du 03/06, dont le
+// client existe sous un autre identifiant). La commande part sur la fiche
+// trouvee, prise TELLE QUELLE (avant le 25/09 : reecrite ; depuis, sans ce
+// drapeau : une fiche en double creee en silence).
+function findOrCreateCustomerClient(db, payload = {}, { nouvelleFiche = false, demander = false, rattacher = false } = {}) {
   if (payload.clientId) {
     const existing = findClient(db, payload.clientId);
     if (existing) return existing;
   }
 
-  const duplicate = findDuplicateClient(db, payload);
-  if (duplicate) {
-    const avant = adresseDuClient(duplicate);
-    Object.assign(duplicate, validateCrmClientPayload(payload, duplicate));
-    demenagerClient(db, duplicate, avant);
-    return duplicate;
+  if (!nouvelleFiche && (demander || rattacher)) {
+    const duplicate = findDuplicateClient(db, payload);
+    if (duplicate && rattacher) return duplicate;
+    if (duplicate) throw doublonDeFiche(duplicate);
   }
 
   const client = validateCrmClientPayload({
@@ -5257,7 +6184,24 @@ function buildCustomerOrderLines(db, products, options = {}) {
   });
 }
 
+// LE MONTANT TTC FIGE d'une commande importee (25/09). Chasse aux defauts du
+// 24/09 : 197 commandes sur 224 n'avaient de montant ni sur elles ni sur leurs
+// lignes ; leur chiffre d'affaires se relisait dans `db.ventes`, que chaque
+// import remplacait -- un fichier du seul mois courant mettait les mois passes
+// a 0. L'import fige desormais le montant de chaque bon sur la commande, et
+// une migration unique (figerMontantsImportes) l'a fait pour les commandes
+// d'avant. Decision 7 de Thomas (24/09) : c'est un montant TTC, avoirs
+// soustraits (il peut etre negatif) ; une ligne sans TTC n'y compte pas.
+// null : pas de montant fige (commande saisie dans Sereo, ou ancienne).
+function montantTtcFige(order) {
+  if (!order || order.montantTtc === undefined || order.montantTtc === null || order.montantTtc === "") return null;
+  const montant = Number(order.montantTtc);
+  return Number.isFinite(montant) ? Math.round(montant * 100) / 100 : null;
+}
+
 function getOrderTotal(order) {
+  const fige = montantTtcFige(order);
+  if (fige !== null) return fige;
   const explicit = firstPositiveNumber(order.total, order.totalTtc, order.ttc, order.montantTotal, order.montant);
   if (explicit > 0) return Math.round(explicit * 100) / 100;
   return normalizeProducts(order.products).reduce((total, line) => {
@@ -5267,16 +6211,36 @@ function getOrderTotal(order) {
   }, 0);
 }
 
+// « Prospects convertis ce mois » (chasse aux defauts du 24/09) : un client
+// devient « converti » a sa premiere commande ferme, s'il etait PROSPECT --
+// aucune commande livree ni en cours avant celle-ci (une planifiee pas encore
+// confirmee, une annulee ou un brouillon ne font pas un client). Avant,
+// crmConvertedAt se posait des qu'il etait vide : une pharmacie cliente
+// depuis 2024 qui commandait chez elle comptait comme une conversion (et les
+// 97 fiches importees de la production, qui n'en ont pas, l'auraient toutes
+// ete a leur premiere commande terrain). `commande` : celle qui convertit,
+// ecartee du compte.
+const STATUTS_QUI_NE_FONT_PAS_UN_CLIENT = new Set(["planifiee", "a_confirmer", "annulee", "brouillon"]);
+
+function etaitProspect(db, clientId, commande = null) {
+  return !(db.commandes || []).some(order => String(order.clientId) === String(clientId)
+    && order !== commande
+    && !(commande && String(order.id) === String(commande.id))
+    && !STATUTS_QUI_NE_FONT_PAS_UN_CLIENT.has(order.status));
+}
+
 function createCustomerOrder(db, payload = {}) {
   const requestedType = clean(payload.orderType || payload.typeCommande || payload.type).toLowerCase();
   if (requestedType === "planifiee" || requestedType === "planifie" || requestedType === "planned") {
     return createPlannedOrder(db, payload).order;
   }
 
+  // L'identifiant choisi (« rattacher a cette fiche ») l'emporte sur celui,
+  // vide, que le formulaire d'un nouveau client porte dans `client`.
   const client = findOrCreateCustomerClient(db, {
-    clientId: payload.clientId,
-    ...(payload.client || {})
-  });
+    ...(payload.client || {}),
+    clientId: payload.clientId || payload.client?.clientId
+  }, { nouvelleFiche: payload.nouvelleFiche === true, demander: payload.demanderSiDoublon === true });
   const dateCommande = normalizeDateInput(payload.dateCommande) || jourParis();
   // Decision 11 de Thomas (24/09) : un produit en rupture (ou au stock non
   // renseigne) ne fait plus REFUSER la commande prise chez le client. Elle est
@@ -5311,7 +6275,7 @@ function createCustomerOrder(db, payload = {}) {
   });
 
   client.crmStatus = "client_actif";
-  client.crmConvertedAt = client.crmConvertedAt || new Date().toISOString();
+  if (!client.crmConvertedAt && etaitProspect(db, client.id)) client.crmConvertedAt = new Date().toISOString();
   client.lastVisitDate = dateCommande;
   client.nextReminderDate = client.nextReminderDate || "";
   heriterPositionDuClient(order, client);
@@ -5490,6 +6454,69 @@ function refreshClientReminderDate(db, clientId) {
   client.nextReminderDate = next?.datePrevue || "";
 }
 
+// Chasse aux defauts du 24/09 (lot « stock et abonnements ») : une commande
+// annulee n'a plus rien a confirmer. Ses rappels encore a faire (« Confirmer
+// la livraison planifiee ») passent « annule », avec le resultat dit ; avant,
+// ils restaient a faire, remontaient dans les relances et le compteur du
+// tableau de bord, et le client aurait ete appele pour une livraison annulee.
+// Les autres rappels du client ne bougent pas ; son prochain rappel est
+// recalcule. Rend le nombre de rappels annules.
+function annulerRappelsDeLaCommande(db, order, resultat = "Commande annulée") {
+  const maintenant = new Date().toISOString();
+  const rappels = (db.relances || [])
+    .filter(reminder => String(reminder.commandeId) === String(order.id) && reminder.status === "a_faire");
+  rappels.forEach(reminder => {
+    reminder.status = "annule";
+    reminder.resultat = reminder.resultat || resultat;
+    reminder.updatedAt = maintenant;
+  });
+  if (rappels.length) refreshClientReminderDate(db, order.clientId);
+  return rappels.length;
+}
+
+// Decision 8 de Thomas (24/09) : arreter ou mettre en pause un abonnement
+// ANNULE ses commandes deja generees et pas encore livrees, avec leurs
+// rappels ; le stock qu'elles avaient reserve (planifiee confirmee) revient
+// au rayon, et le journal des mouvements le dit. Avant, la commande de
+// l'echeance restait « planifiee » avec son rappel « a faire », et quittait la
+// page Abonnements : une livraison qu'on ne voyait plus. Une commande deja en
+// preparation, prete ou en tournee suit son cours (la machine d'etat ne
+// l'annule pas) : elle est rendue dans `gardees`, pour que l'ecran la nomme.
+// Chaque commande annulee porte `annuleeAvecAbonnement` : l'abonnement repris,
+// son echeance a venir se genere de nouveau (lib/subscriptions.js).
+function suspendreCommandesDeLAbonnement(db, sub) {
+  const statut = sub.status === "cancelled" ? "cancelled" : "paused";
+  const raison = statut === "cancelled" ? "subscription_cancelled" : "subscription_paused";
+  const resultat = statut === "cancelled" ? "Abonnement arrêté" : "Abonnement mis en pause";
+  const annulees = [];
+  const gardees = [];
+  const resume = order => ({ id: order.id, numero: order.numero, date: order.deliveryDate || order.subscriptionDate, status: order.status });
+  for (const order of db.commandes) {
+    if (order.subscriptionId !== sub.id || STATUTS_SANS_RESERVATION.has(order.status)) continue;
+    if (!isValidOrderStatusTransition(order.status, "annulee")) {
+      gardees.push(resume(order));
+      continue;
+    }
+    if (order.stockReservedAt) releaseOrderStockReservation(db, order, raison);
+    setOrderStatus(order, "annulee");
+    order.annuleeAvecAbonnement = statut;
+    annulerRappelsDeLaCommande(db, order, `Commande annulée : ${resultat.toLowerCase()}`);
+    annulees.push(resume(order));
+  }
+  if (annulees.length || gardees.length) {
+    const numeros = liste => liste.map(o => o.numero || o.id).join(", ");
+    addHistory(db, "Abonnement", [
+      `${resultat} : ${annulees.length} commande(s) déjà créée(s) annulée(s)${annulees.length ? ` (${numeros(annulees)})` : ""}`,
+      gardees.length ? `${gardees.length} déjà en préparation ou en livraison, gardée(s) (${numeros(gardees)})` : ""
+    ].filter(Boolean).join(" ; "), {
+      subscriptionId: sub.id,
+      annulees: annulees.map(o => o.id),
+      gardees: gardees.map(o => o.id)
+    });
+  }
+  return { annulees, gardees };
+}
+
 function createAutomaticOrderReminder(db, order, options = {}) {
   if (!order?.clientId || !order.deliveryDate) return null;
   const type = clean(options.type || "confirmation_livraison");
@@ -5525,11 +6552,15 @@ function createAutomaticOrderReminder(db, order, options = {}) {
   return reminder;
 }
 
-function createPlannedOrder(db, payload = {}) {
+// `rattacherSiDoublon` : option des appels du serveur (replanOrder), jamais lue
+// dans le corps d'une requete.
+function createPlannedOrder(db, payload = {}, { rattacherSiDoublon = false } = {}) {
+  // L'identifiant choisi (« rattacher a cette fiche ») l'emporte sur celui,
+  // vide, que le formulaire d'un nouveau client porte dans `client`.
   const client = findOrCreateCustomerClient(db, {
-    clientId: payload.clientId,
-    ...(payload.client || {})
-  });
+    ...(payload.client || {}),
+    clientId: payload.clientId || payload.client?.clientId
+  }, { nouvelleFiche: payload.nouvelleFiche === true, demander: payload.demanderSiDoublon === true, rattacher: rattacherSiDoublon });
   const dateCommande = normalizeDateInput(payload.dateCommande) || jourParis();
   const deliveryDate = resolvePlannedDeliveryDate(db, client, payload);
   if (!deliveryDate) throw badRequest("Date de livraison obligatoire pour une commande planifiee");
@@ -5594,6 +6625,7 @@ function updatePlannedOrder(db, orderId, payload = {}) {
       releaseOrderStockReservation(db, order, "planned_order_cancelled");
     }
     setOrderStatus(order, nextStatus);
+    if (nextStatus === "annulee") annulerRappelsDeLaCommande(db, order);
   }
 
   if (payload.deliveryDate !== undefined || payload.dateLivraison !== undefined) {
@@ -5644,7 +6676,7 @@ function confirmPlannedOrder(db, orderId) {
   const client = findClient(db, order.clientId);
   if (client) {
     client.crmStatus = "client_actif";
-    client.crmConvertedAt = client.crmConvertedAt || order.confirmedAt;
+    if (!client.crmConvertedAt && etaitProspect(db, client.id, order)) client.crmConvertedAt = order.confirmedAt;
     client.lastVisitDate = jourParis(order.confirmedAt);
   }
 
@@ -5680,7 +6712,9 @@ function replanOrder(db, orderId, payload = {}) {
     notes: payload.notes || `Replanification depuis ${sourceOrder.numero || sourceOrder.id}`,
     parentOrderId: sourceOrder.id,
     reminderLeadDays: payload.reminderLeadDays
-  });
+    // La fiche de la commande a pu disparaitre (commande orpheline) : la suite
+    // part sur la fiche au meme telephone (ou nom + code postal), sans doublon.
+  }, { rattacherSiDoublon: true });
 
   addHistory(db, "Replanification", `Commande ${sourceOrder.numero || sourceOrder.id} replanifiee vers ${result.order.deliveryDate}`, {
     sourceOrderId: sourceOrder.id,
@@ -5751,18 +6785,27 @@ function importedSaleDate(vente) {
   return normalizeDateInput(vente.dateCommandeIso || vente.dateCommande || vente.date) || "";
 }
 
-function importedSaleLineTotal(vente) {
-  const quantity = Math.max(0, number(vente.quantite ?? vente.quantity, 0));
-  return firstPositiveNumber(
-    vente.totalLigne,
-    vente.total,
-    vente.ttc,
-    vente.TTC,
-    vente.ht,
-    vente.HT,
-    vente.montant,
-    number(vente.prixUnitaire, 0) * quantity
-  );
+// Le montant TTC d'une ligne de vente, ou null si elle n'en a pas (decision 7
+// de Thomas, 24/09 : CA en TTC, avoirs soustraits, HT et TTC plus jamais
+// additionnes). Avant : le premier montant positif, TTC sinon HT -- deux ventes
+// identiques comptaient 120 et 100, et un avoir (negatif) ne comptait pas.
+//   - une vente importee depuis le 25/09 porte son montant (`montantTtc`) ;
+//   - plus ancienne : son TTC, SIGNE (un avoir est negatif) ; un total sans
+//     base declaree ; un HT seul ne vaut pas un TTC (null : « sans montant ») ;
+//     sans aucun des deux, le prix unitaire par la quantite.
+function montantTtcDeLaVente(vente) {
+  if (Object.prototype.hasOwnProperty.call(vente, "montantTtc")) {
+    if (vente.montantTtc === null || vente.montantTtc === "") return null;
+    const montant = Number(vente.montantTtc);
+    return Number.isFinite(montant) ? montant : null;
+  }
+  const ttc = number(vente.ttc ?? vente.TTC ?? vente.totalTtc, 0);
+  if (ttc !== 0) return ttc;
+  const total = firstPositiveNumber(vente.totalLigne, vente.total, vente.montant);
+  if (total) return total;
+  if (number(vente.ht ?? vente.HT, 0) !== 0) return null;
+  const parPrix = number(vente.prixUnitaire, 0) * Math.max(0, number(vente.quantite ?? vente.quantity, 0));
+  return parPrix > 0 ? parPrix : null;
 }
 
 function importedOrderKey(clientName, date) {
@@ -5777,8 +6820,8 @@ function buildImportedSalesIndex(ventes = []) {
     const client = clean(vente.client || vente.clientName || vente.nomClient);
     if (!client) return;
     const date = importedSaleDate(vente);
-    const total = importedSaleLineTotal(vente);
-    if (!total) return;
+    const total = montantTtcDeLaVente(vente);
+    if (total === null) return;
 
     const orderKey = importedOrderKey(client, date);
     byOrder.set(orderKey, Math.round(((byOrder.get(orderKey) || 0) + total) * 100) / 100);
@@ -5796,12 +6839,44 @@ function buildImportedSalesIndex(ventes = []) {
   return { byOrder, byOrderProduct };
 }
 
-function getImportedOrderTotal(importedIndex, order, date) {
-  if (!importedIndex || !order) return 0;
+// Le montant des ventes d'une commande, ou null si aucune vente (avec un
+// montant TTC) ne la couvre -- la migration ne fige que ce qui existe.
+function montantDesVentesDeLaCommande(importedIndex, order, date) {
+  if (!importedIndex || !order) return null;
   const clientName = clean(order.clientName || order.nom || order.client);
-  const exact = importedIndex.byOrder.get(importedOrderKey(clientName, date));
-  if (exact) return exact;
-  return importedIndex.byOrder.get(importedOrderKey(clientName, "")) || 0;
+  for (const cle of [importedOrderKey(clientName, date), importedOrderKey(clientName, "")]) {
+    if (importedIndex.byOrder.has(cle)) return importedIndex.byOrder.get(cle);
+  }
+  return null;
+}
+
+function getImportedOrderTotal(importedIndex, order, date) {
+  return montantDesVentesDeLaCommande(importedIndex, order, date) || 0;
+}
+
+/**
+ * MIGRATION UNIQUE (25/09) : fige le montant TTC de chaque commande dont le
+ * chiffre d'affaires venait des ventes -- aucun montant sur elle ni sur ses
+ * lignes, et des ventes qui la couvrent (197 commandes sur 224 en
+ * production). Le CA de chaque mois ne change pas ; il ne depend plus des
+ * ventes. IDEMPOTENTE : une commande figee (ou qui porte son montant) n'est
+ * plus visee, une commande sans vente reste sans montant. Rend le compte.
+ */
+function figerMontantsImportes(db, origine = "demarrage") {
+  let index = null;
+  let figees = 0;
+  (db.commandes || []).forEach(order => {
+    if (montantTtcFige(order) !== null || getOrderTotal(order) !== 0) return;
+    index = index || buildImportedSalesIndex(db.ventes);
+    const montant = montantDesVentesDeLaCommande(index, order, orderDate(order));
+    if (montant === null) return;
+    order.montantTtc = Math.round(montant * 100) / 100;
+    figees += 1;
+  });
+  if (figees > 0) {
+    addHistory(db, "Migration", `${figees} commande(s) : montant TTC fige depuis les ventes importees (${origine}) ; leur chiffre d'affaires ne depend plus du dernier fichier importe.`, { commandes: figees });
+  }
+  return figees;
 }
 
 function getImportedProductTotal(importedIndex, order, date, line) {
@@ -6629,10 +7704,10 @@ function startRoute(db, routeId) {
   route.stops.forEach(stop => {
     if (["livre", "absent", "probleme", "a_reprogrammer"].includes(stop.status)) return;
     stop.status = "en_livraison";
-    const order = findOrder(db, stop.orderId);
-    setOrderStatus(order, "en_livraison");
+    const order = commandeDeLArret(db, stop);
+    if (order) setOrderStatus(order, "en_livraison");
 
-    const client = findClient(db, order.clientId);
+    const client = findClient(db, order ? order.clientId : stop.clientId);
     if (client) client.statut = "en_cours";
   });
 
@@ -6722,7 +7797,7 @@ function updateRouteStop(db, routeId, stopId, status, notes = "", motif = null, 
     if (STATUTS_ARRET_SOLDE.has(stop.status)) {
       // Le meme geste deux fois (un renvoi sans cle d'idempotence) : rien a
       // faire, et ce n'est pas une erreur.
-      if (stop.status === status) return { route, stop, order: findOrder(db, stop.orderId), inchange: true };
+      if (stop.status === status) return { route, stop, order: commandeDeLArret(db, stop), inchange: true };
       throw conflit(`${stop.clientName || "Cet arrêt"} est déjà « ${libelleStatutArret(stop.status)} » : utilise « Corriger le statut ».`);
     }
   }
@@ -6734,7 +7809,9 @@ function updateRouteStop(db, routeId, stopId, status, notes = "", motif = null, 
   // stock a ete libere (release-stock) reste « a reprogrammer », donc
   // livrable : elle repart dans une nouvelle tournee, qui ne reserve rien.
   // Son « Livre » la faisait sortir sans deduire le rayon, en silence.
-  if (status === "livre") reprendreStockLibere(db, findOrder(db, stop.orderId), retard ? "geste arrivé après la clôture" : "livrée en tournée");
+  // null : commande mise de cote (commandeDeLArret) -- l'arret seul change.
+  const order = commandeDeLArret(db, stop);
+  if (status === "livre" && order) reprendreStockLibere(db, order, retard ? "geste arrivé après la clôture" : "livrée en tournée");
   if (retard) {
     // Le livreur l'a fait AVANT la cloture : c'est la verite du terrain, la
     // cloture avait devine « a reprogrammer ». L'arret n'est plus une
@@ -6750,8 +7827,7 @@ function updateRouteStop(db, routeId, stopId, status, notes = "", motif = null, 
   // copie plus ancienne (refreshActiveRoute, H4).
   route.updatedAt = new Date().toISOString();
 
-  const order = findOrder(db, stop.orderId);
-  const client = findClient(db, order.clientId);
+  const client = findClient(db, order ? order.clientId : stop.clientId);
 
   // C1 (lot 1 de l'audit geo) : un absent ou un probleme n'est plus une
   // impasse. La commande passait en `probleme_livraison`, qu'aucune liste ne
@@ -6759,33 +7835,40 @@ function updateRouteStop(db, routeId, stopId, status, notes = "", motif = null, 
   // toujours. Elle passe desormais a `a_reprogrammer` : elle REVIENT d'elle-meme
   // dans « Commandes pretes a livrer », marquee « A reprogrammer ». La cause
   // reste lisible dans deliveryStatus (absent / probleme) et dans l'arret.
-  // Le stock, lui, reste reserve pour la relivraison (RESERVED_ORDER_STATUSES
+  // Le stock, lui, reste reserve pour la relivraison (stockReserveActif
   // compte a_reprogrammer) : ni libere, ni reserve une seconde fois -- la
   // tournee suivante ne reserve rien, et la livraison consomme la reservation.
+  // Sans commande (mise de cote) : seuls l'arret et le client changent.
   if (status === "livre") {
     // Un « Livre » arrive apres la cloture : la commande est « a reprogrammer »,
     // qui n'a pas de sortie directe vers « livre ».
-    if (retard && STATUTS_A_RELIVRER.includes(order.status)) setOrderStatus(order, "en_livraison");
-    setOrderStatus(order, "livre", now);
+    if (order) {
+      if (retard && STATUTS_A_RELIVRER.includes(order.status)) setOrderStatus(order, "en_livraison");
+      setOrderStatus(order, "livre", now);
+    }
     if (client) client.statut = "livree";
     // Decision 10 de Thomas (23/09) : « remis a… », facultatif. Sur l'arret ET
     // la commande : le detail de la commande le montre, l'historique aussi.
     const remis = clean(remisA).slice(0, REMIS_A_MAX);
     stop.remisA = remis;
-    order.remisA = remis;
+    if (order) order.remisA = remis;
   } else if (status === "absent") {
-    setOrderStatus(order, "a_reprogrammer");
-    order.deliveryStatus = "absent";
+    if (order) {
+      setOrderStatus(order, "a_reprogrammer");
+      order.deliveryStatus = "absent";
+    }
     if (client) client.statut = "absent";
   } else if (status === "probleme") {
-    setOrderStatus(order, "a_reprogrammer");
-    order.deliveryStatus = "probleme";
+    if (order) {
+      setOrderStatus(order, "a_reprogrammer");
+      order.deliveryStatus = "probleme";
+    }
     if (client) client.statut = "probleme";
   } else if (status === "a_reprogrammer") {
-    setOrderStatus(order, "a_reprogrammer");
+    if (order) setOrderStatus(order, "a_reprogrammer");
     if (client) client.statut = "non_livre";
   } else if (status === "en_livraison") {
-    setOrderStatus(order, "en_livraison");
+    if (order) setOrderStatus(order, "en_livraison");
     if (client) client.statut = "en_cours";
   }
 
@@ -6942,32 +8025,37 @@ function corrigerArret(db, routeId, stopId, { status, cause } = {}, par = "") {
     throw conflit(`${nomDeTournee(route)} est clôturée : un arrêt n'y redevient pas « à faire ». La commande est dans les commandes prêtes.`);
   }
 
-  const order = findOrder(db, stop.orderId);
-  const nom = nomDeCommande(order);
-  // Sans `routeId` (donnee d'avant createRoute, ou semee a la main), seule la
-  // presence dans une autre tournee active compte.
-  if ((order.routeId && String(order.routeId) !== String(route.id)) || tourneeActiveDeLaCommande(db, order.id, route.id)) {
-    throw conflit(`La commande ${nom} est repartie dans une autre tournée : corrige-la là-bas.`);
+  // null : commande mise de cote (commandeDeLArret) -- l'arret seul se corrige.
+  const order = commandeDeLArret(db, stop);
+  if (order) {
+    const nom = nomDeCommande(order);
+    // Sans `routeId` (donnee d'avant createRoute, ou semee a la main), seule la
+    // presence dans une autre tournee active compte.
+    if ((order.routeId && String(order.routeId) !== String(route.id)) || tourneeActiveDeLaCommande(db, order.id, route.id)) {
+      throw conflit(`La commande ${nom} est repartie dans une autre tournée : corrige-la là-bas.`);
+    }
+    // Un arret en echec dont la commande est restee « en livraison » (donnee
+    // d'avant le lot 1, ou semee ainsi) se corrige aussi : rien n'est reparti.
+    const attendus = stop.status === "livre" ? ["livre"] : [...STATUTS_A_RELIVRER, "en_livraison"];
+    if (!attendus.includes(order.status)) {
+      throw conflit(`La commande ${nom} a changé depuis ce geste : corrige-la depuis l'écran Commandes.`);
+    }
+    // Une reservation liberee a la main (release-stock) a rendu le stock au
+    // rayon : dire la commande livree la ferait sortir du stock sans la deduire.
+    // Avant, la correction etait refusee ; depuis la decision de Thomas (23/09),
+    // la reservation est reprise, meme sur un rayon insuffisant, comme pour le
+    // geste arrive apres la cloture (reprendreStockLibere, qui le journalise).
+    if (status === "livre") reprendreStockLibere(db, order, "correction du statut");
   }
-  // Un arret en echec dont la commande est restee « en livraison » (donnee
-  // d'avant le lot 1, ou semee ainsi) se corrige aussi : rien n'est reparti.
-  const attendus = stop.status === "livre" ? ["livre"] : [...STATUTS_A_RELIVRER, "en_livraison"];
-  if (!attendus.includes(order.status)) {
-    throw conflit(`La commande ${nom} a changé depuis ce geste : corrige-la depuis l'écran Commandes.`);
-  }
-  // Une reservation liberee a la main (release-stock) a rendu le stock au
-  // rayon : dire la commande livree la ferait sortir du stock sans la deduire.
-  // Avant, la correction etait refusee ; depuis la decision de Thomas (23/09),
-  // la reservation est reprise, meme sur un rayon insuffisant, comme pour le
-  // geste arrive apres la cloture (reprendreStockLibere, qui le journalise).
-  if (status === "livre") reprendreStockLibere(db, order, "correction du statut");
 
   const avant = stop.status;
   const now = new Date().toISOString();
-  const client = findClient(db, order.clientId);
+  const client = findClient(db, order ? order.clientId : stop.clientId);
 
   // 1. La commande quitte son etat, vers « en livraison ».
-  if (order.status === "livre") {
+  if (!order) {
+    // Mise de cote : rien a faire suivre.
+  } else if (order.status === "livre") {
     // Hors de la machine d'etat, deliberement : `livre` n'a aucune sortie pour
     // les gestes ordinaires (ni le livreur ni un import ne defont une
     // livraison). Seule cette correction, journalisee, le fait.
@@ -6990,14 +8078,16 @@ function corrigerArret(db, routeId, stopId, { status, cause } = {}, par = "") {
   if (status === "livre") {
     // L'heure du geste d'origine : c'est la que le livreur etait sur place.
     const quand = Number.isFinite(Date.parse(stop.deliveredAt || "")) ? stop.deliveredAt : now;
-    setOrderStatus(order, "livre", quand);
+    if (order) setOrderStatus(order, "livre", quand);
     stop.deliveredAt = quand;
     stop.problemReason = "";
     stop.problemReasonKey = "";
     if (client) client.statut = "livree";
   } else if (status === "absent" || status === "probleme") {
-    setOrderStatus(order, "a_reprogrammer");
-    order.deliveryStatus = status;
+    if (order) {
+      setOrderStatus(order, "a_reprogrammer");
+      order.deliveryStatus = status;
+    }
     stop.deliveredAt = stop.deliveredAt || now;
     stop.problemReason = `${libelleStatutArret(status)} (correction : ${pourquoi})`;
     stop.problemReasonKey = "";
@@ -7107,7 +8197,7 @@ function reprendreStockLibere(db, order, origine) {
   if (order.stockReservedAt || !order.stockReleaseReason || order.stockReleaseReason === "consumed_by_delivery") return;
   const verification = analyzeOrderStock(order, db.stock);
   if (verification.canPrepare) {
-    reserveStockForOrder(db, order);
+    reserveStockForOrder(db, order, `Sortie pour la commande ${nomDeCommande(order)}, livrée après la libération de son stock (${origine})`);
     addHistory(db, "Stock deduit", `Commande ${order.numero || order.id} : livree apres la liberation de son stock (${origine})`, {
       orderId: order.id,
       numero: order.numero
@@ -7121,6 +8211,9 @@ function reprendreStockLibere(db, order, origine) {
   // au rayon une quantite qu'il n'avait jamais perdue (« a renseigner » + 3).
   const nonDeduites = [];
   let negatif = false;
+  // Lot « stock » (24/09) : chaque deduction est ecrite au journal des
+  // mouvements, negatif compris (« Livree sur stock insuffisant »).
+  const motif = `Livrée sur stock insuffisant : commande ${nomDeCommande(order)} (${origine})`;
   verification.lines.forEach(line => {
     if (!line.required || line.required <= 0) return;
     const nom = clean(line.nom || line.code) || "Produit";
@@ -7138,6 +8231,7 @@ function reprendreStockLibere(db, order, origine) {
     }
     const apres = Math.round((avant - line.required) * 100) / 100;
     product.quantite = apres;
+    recordStockMovement(db, product, avant, apres, motif, { commande: order });
     if (apres < 0) {
       negatif = true;
       manques.push(`${getProductName(product)} : ${avant} en rayon pour ${line.required} livrés, stock à ${apres}`);
@@ -7167,11 +8261,16 @@ function reprendreStockLibere(db, order, origine) {
  * A appeler APRES writeDb : syncWorkflow a remplace les objets par leur forme
  * normalisee.
  */
+// Le geste sur un arret dont la commande est mise de cote (commandeDeLArret),
+// dit dans l'historique : la commande n'a pas suivi.
+const SANS_COMMANDE_MISE_DE_COTE = " — commande mise de côté (texte illisible) : ni son statut ni le stock n'ont suivi";
+
 function etatApresGesteArret(db, geste) {
   const route = routeAvecTrace(db, geste.route.id) || geste.route;
   const stop = route.stops.find(item => String(item.id) === String(geste.stop.id)) || geste.stop;
-  const order = db.commandes.find(item => String(item.id) === String(geste.order.id)) || geste.order;
-  const trouve = db.clients.find(item => String(item.id) === String(order.clientId));
+  // null : commande mise de cote (commandeDeLArret).
+  const order = geste.order ? db.commandes.find(item => String(item.id) === String(geste.order.id)) || geste.order : null;
+  const trouve = db.clients.find(item => String(item.id) === String(order ? order.clientId : stop.clientId));
   // Le client tel que /api/clients le rend (sans releve d'import, 24/09).
   const client = trouve ? sansReleveDImport(trouve) : null;
   return { route, stop, order, client };
@@ -7291,7 +8390,11 @@ function distance(a, b) {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-app.get("/api/db", (req, res) => {
+// La base entiere (clients, adresses, telephones, comptes) : un telechargement
+// de sauvegarde sous un autre nom. Reservee a l'administration (decision 6 du
+// 24/09, garde-fous du 25/09) : SEREO_ENABLE_DB_EXPORT=1 l'ouvrait a TOUT
+// compte connecte, livreur compris.
+app.get("/api/db", requireAdministration, (req, res) => {
   if (!ENABLE_DB_EXPORT) {
     res.status(403).json({
       error: "Export complet de la base desactive. Utiliser SEREO_ENABLE_DB_EXPORT=1 pour diagnostic local."
@@ -7333,7 +8436,9 @@ app.get("/api/historique", requireAdministration, (req, res) => {
   res.json(readDb().historique);
 });
 
-const JOURNAL_PAGE_DEFAUT = 50;
+// Decision 10 de Thomas (24/09) : les 200 dernieres lignes, puis « voir plus »
+// (relecture adverse du 26/09 : la page etait restee a 50).
+const JOURNAL_PAGE_DEFAUT = 200;
 const JOURNAL_PAGE_MAX = 200;
 
 /** « Alèses : −2 · 10 → 8 · Inventaire » : un mouvement de stock en une ligne. */
@@ -7342,7 +8447,8 @@ function messageMouvementStock(mouvement) {
   const quantite = Number(mouvement.quantity ?? mouvement.quantite);
   return [
     `${mouvement.productName || mouvement.sku || "Produit"} : ${signe}${Number.isFinite(quantite) ? quantite : "?"}`,
-    mouvement.oldQuantity !== undefined && mouvement.newQuantity !== undefined ? `${mouvement.oldQuantity} → ${mouvement.newQuantity}` : "",
+    // Une quantite inconnue (produit cree par un import, « a renseigner ») : « — ».
+    mouvement.oldQuantity !== undefined && mouvement.newQuantity !== undefined ? `${mouvement.oldQuantity ?? "—"} → ${mouvement.newQuantity ?? "—"}` : "",
     clean(mouvement.reason || mouvement.raison)
   ].filter(Boolean).join(" · ");
 }
@@ -7429,6 +8535,15 @@ app.get("/api/dashboard", (req, res) => {
   res.json(getDashboardSummary(db, useSqliteStorage() ? { nombreDeVentes: getSqliteStore().compterVentes() } : {}));
 });
 
+function lignesMisesDeCotePourEtat() {
+  if (!useSqliteStorage()) return { nombre: 0, dernieres: [] };
+  try {
+    return getSqliteStore().lignesMisesDeCote();
+  } catch {
+    return null;
+  }
+}
+
 app.get("/api/storage/status", (req, res) => {
   res.json({
     engine: useSqliteStorage() ? "sqlite" : "json",
@@ -7449,6 +8564,9 @@ app.get("/api/storage/status", (req, res) => {
     backupsSuspended: backupsSuspendedFreshEmpty,
     lastBackupAt,
     lastBackupError,
+    // Robustesse (25/09) : les lignes illisibles mises de cote (sans leur
+    // contenu) ; null si l'etat ne se lit pas.
+    lignesMisesDeCote: lignesMisesDeCotePourEtat(),
     // Calcul routier (23/09) : carte locale ou serveur public, zone, date de
     // la carte, derniere erreur, espace utilise ; `resume` est la ligne de
     // l'ecran Parametres.
@@ -7467,10 +8585,10 @@ app.get("/api/storage/status", (req, res) => {
 // requireAdministration sur la route). Mais sans authentification (dev, ou un
 // deploiement sans SEREO_AUTH_* ni compte), TOUT visiteur est « administrateur »
 // (getRequestIdentity) : le role ne prouve plus rien. C'est le cas que
-// SEREO_ENABLE_DB_EXPORT garde deja pour /api/db (export JSON de la base, ouvert
-// a tout compte connecte, 0 par defaut) : sans authentification, c'est lui qui
-// decide. Avec authentification, la variable ne s'applique pas ici -- l'ouvrir
-// pour la sauvegarde ouvrirait aussi /api/db a tous les comptes.
+// SEREO_ENABLE_DB_EXPORT garde deja pour /api/db (export JSON de la base,
+// reserve lui aussi a l'administration depuis le 25/09, 0 par defaut) : sans
+// authentification, c'est lui qui decide. Avec authentification, la variable
+// ne s'applique pas ici : le role suffit.
 // Rend null si le telechargement est permis, sinon la raison du refus.
 function refusDeTelechargement(identite) {
   if (!identite || !getRole(identite.role).administration) return "Reserve aux administrateurs.";
@@ -7507,6 +8625,7 @@ function etatDesSauvegardes(identite, maintenant = Date.now()) {
   let alerte = null;
   if (erreurLecture) alerte = { type: "lecture", message: erreurLecture };
   else if (lastBackupError) alerte = { type: "echec", at: lastBackupError.at, message: lastBackupError.message };
+  else if (derniereErreurCopie) alerte = { type: "copie", at: derniereErreurCopie.at, message: derniereErreurCopie.message };
   else if (backupsSuspendedFreshEmpty) alerte = { type: "suspendues" };
   else if (!derniere) alerte = { type: "aucune" };
   else if (perimee) alerte = { type: "perimee", depuis: new Date(derniereModificationA).toISOString() };
@@ -7524,10 +8643,16 @@ function etatDesSauvegardes(identite, maintenant = Date.now()) {
       heures: BACKUP_THROTTLE_MS / 3600000,
       dernieres: BACKUP_RETENTION,
       joursJournalieres: BACKUP_JOURS_JOURNALIERES,
+      semainesHebdomadaires: BACKUP_SEMAINES_HEBDOMADAIRES,
       perimeeApresHeures: SAUVEGARDE_PERIMEE_MS / 3600000
     },
     administration: Boolean(identite && getRole(identite.role).administration),
-    telechargement: { permis: refus === null && Boolean(derniere), raison: refus }
+    telechargement: { permis: refus === null && Boolean(derniere), raison: refus },
+    // Le second dossier (decision 3) : pose ou non, et la derniere copie
+    // reussie par ce processus. Le chemin n'est pas donne.
+    copie: BACKUP_COPY_DIR
+      ? { active: true, derniere: derniereCopie ? { nom: derniereCopie.nom, date: derniereCopie.at } : null }
+      : { active: false }
   };
 }
 
@@ -7566,31 +8691,72 @@ app.get("/api/sauvegardes/derniere", requireAdministration, (req, res) => {
 // Decision de Thomas du 24/09 : un geste d'administration (la carte
 // « Sauvegardes » de Parametres le porte). Sans authentification (dev), tout le
 // monde est administrateur, comme pour la numerotation des bons.
+//
+// Garde-fous (25/09) : la copie est coherente et relue (ecrireSauvegardeVerifiee)
+// et se fait HORS du verrou d'ecriture -- un « Livre » ne l'attend plus ; elle
+// attend la sauvegarde automatique en vol puis tient sa place (sauvegardeSeule).
+//
+// Et elle ne peut plus evincer les autres (chasse aux defauts : une purge puis
+// 30 appels remplacaient toutes les sauvegardes par une base vide) :
+// - deja a jour : si la derniere sauvegarde sur le disque est celle que ce
+//   processus a ecrite et que rien n'a ete ecrit depuis, aucun fichier de plus
+//   (reponse `dejaAJour`) ;
+// - au plus SAUVEGARDES_MANUELLES_PAR_HEURE sauvegardes manuelles par heure
+//   glissante (au-dela : 503 et Retry-After -- pas 429, qu'apiFetch prend pour
+//   un verrou de connexion). Les sauvegardes automatiques ne sont pas comptees ;
+// - le genre « avant-purge-* » est reserve (hors rotation pour les bons).
+const SAUVEGARDES_MANUELLES_PAR_HEURE = 10;
+const sauvegardesManuelles = [];
+
 app.post("/api/backup/now", requireAdministration, async (req, res) => {
   try {
-    const tag = clean(req.body?.tag || "manual").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 32);
-    const result = await withWriteLock(async () => {
-      let backupPath;
-      try {
-        backupPath = writeBackupNow(tag);
-      } catch (error) {
-        // La carte le dira aussi apres un rechargement, pas seulement le toast.
-        lastBackupError = { at: new Date().toISOString(), message: String(error.message || error) };
-        throw error;
-      }
-      if (!backupPath) return { ok: false, error: "Backup impossible (source absente)" };
+    let tag = clean(req.body?.tag || "manual").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 32);
+    // Le genre « avant-purge » est reserve, ou qu'il soit dans l'etiquette :
+    // « x-avant-purge-commandes » sortait la sauvegarde de la rotation
+    // (MOTIF_HORS_ROTATION ne lit que la fin du nom ; relecture du 26/09).
+    if (/avant-purge/i.test(tag)) tag = "manuelle";
 
+    const derniere = listBackupEntries()[0];
+    if (derniere && derniereSauvegardeEcrite
+      && derniere.name === derniereSauvegardeEcrite.nom
+      && derniereModificationA === derniereSauvegardeEcrite.couvre) {
+      res.json({ ok: true, dejaAJour: true, backupPath: derniere.name, tag });
+      return;
+    }
+
+    const maintenant = Date.now();
+    while (sauvegardesManuelles.length && sauvegardesManuelles[0] <= maintenant - 3600000) sauvegardesManuelles.shift();
+    if (sauvegardesManuelles.length >= SAUVEGARDES_MANUELLES_PAR_HEURE) {
+      const attenteMs = sauvegardesManuelles[0] + 3600000 - maintenant;
+      res.setHeader("Retry-After", String(Math.max(1, Math.ceil(attenteMs / 1000))));
+      res.status(503).json({
+        ok: false,
+        error: `Trop de sauvegardes manuelles : ${SAUVEGARDES_MANUELLES_PAR_HEURE} dans l’heure. Réessaie dans ${Math.max(1, Math.ceil(attenteMs / 60000))} min ; les sauvegardes automatiques continuent.`
+      });
+      return;
+    }
+    // Comptee des la tentative : un disque en panne ne se martele pas non plus.
+    sauvegardesManuelles.push(maintenant);
+
+    let sauvegarde;
+    try {
+      sauvegarde = await sauvegardeSeule(() => ecrireSauvegardeVerifiee(tag));
+    } catch (error) {
+      // La carte le dira aussi apres un rechargement, pas seulement le toast.
+      lastBackupError = { at: new Date().toISOString(), message: String(error.message || error) };
+      throw error;
+    }
+    if (!sauvegarde) {
+      return res.status(503).json({ ok: false, error: "Backup impossible (source absente)" });
+    }
+    await withWriteLock(async () => {
       const db = readDb();
-      addHistory(db, "Backup manuel", `Backup forcé créé : ${path.basename(backupPath)}`, { tag, backupPath });
+      addHistory(db, "Backup manuel", `Backup forcé créé : ${sauvegarde.nom}`, { tag, backupPath: sauvegarde.chemin });
       // Pas de double-backup recursif ; et cette ligne d'historique ne rend pas
       // la sauvegarde qu'elle annonce « perimee ».
       writeDb(db, { backup: false, modification: false });
-      return { ok: true, backupPath: path.basename(backupPath), tag };
     });
-    if (!result.ok) {
-      return res.status(503).json(result);
-    }
-    res.json(result);
+    res.json({ ok: true, backupPath: sauvegarde.nom, tag });
   } catch (error) {
     handleRouteError(error, res, "Erreur backup manuel");
   }
@@ -7715,7 +8881,7 @@ app.get(IMAGE_DE_MARQUE_CHEMIN, (req, res) => {
   res.send(Buffer.from(morceaux[2], "base64"));
 });
 
-app.patch("/api/settings/appearance", async (req, res) => {
+app.patch("/api/settings/appearance", requireAdministration, async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
       const db = readDb();
@@ -7769,7 +8935,7 @@ app.get("/api/settings/stock", (req, res) => {
   res.json(normalizeSettings(db.settings || {}).stock);
 });
 
-app.patch("/api/settings/stock", async (req, res) => {
+app.patch("/api/settings/stock", requireAdministration, async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
       const db = readDb();
@@ -7841,7 +9007,7 @@ app.patch("/api/settings/order-numbering", requireAdministration, async (req, re
 //   un middleware inline. Reduire la limite globale casserait brandImage.
 //   La protection reste : typeof + bornes serveur. Backlog : rate-limit
 //   global /api/settings/*.
-app.patch("/api/settings/tournee", async (req, res) => {
+app.patch("/api/settings/tournee", requireAdministration, async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
       const db = readDb();
@@ -7936,6 +9102,7 @@ app.get("/api/crm/clients", (req, res) => {
   const today = jourParis();
 
   const ventesImportees = buildImportedSalesIndex(db.ventes);
+  const parClient = indexCrmParClient(db);
   // La LISTE ne porte plus l'historique des commandes de chaque client (24/09) :
   // `orderHistory` recopiait /api/orders, client par client (66 % des 552 ko
   // mesures en production), et la page ne le lit pas -- elle a deja toutes les
@@ -7944,7 +9111,7 @@ app.get("/api/crm/clients", (req, res) => {
   let list = db.clients
     .filter(client => !client.crmArchived)
     .map(client => {
-      const { orderHistory, ...vue } = crmClientView(db, client, ventesImportees);
+      const { orderHistory, ...vue } = crmClientView(db, client, ventesImportees, parClient);
       return sansReleveDImport(vue);
     });
 
@@ -8242,7 +9409,7 @@ app.get("/api/delivery-sectors", (req, res) => {
   res.json((db.deliverySectors || []).map(decorerSecteurPourAffichage));
 });
 
-app.post("/api/delivery-sectors", async (req, res) => {
+app.post("/api/delivery-sectors", requireAdministration, async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
       const db = readDb();
@@ -8258,7 +9425,7 @@ app.post("/api/delivery-sectors", async (req, res) => {
   }
 });
 
-app.patch("/api/delivery-sectors/:id", async (req, res) => {
+app.patch("/api/delivery-sectors/:id", requireAdministration, async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
       const db = readDb();
@@ -8275,7 +9442,7 @@ app.patch("/api/delivery-sectors/:id", async (req, res) => {
   }
 });
 
-app.delete("/api/delivery-sectors/:id", async (req, res) => {
+app.delete("/api/delivery-sectors/:id", requireAdministration, async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
       const db = readDb();
@@ -8347,7 +9514,7 @@ app.get("/api/routes/:id", (req, res) => {
   res.json(route);
 });
 
-app.post("/api/import/stock", uploadExcel, async (req, res) => {
+app.post("/api/import/stock", requireAdministration, uploadExcel, async (req, res) => {
   const uploadedPath = req.file?.path;
 
   try {
@@ -8500,10 +9667,25 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
     const importedProducts = Array.from(seenProductKeys.values());
     const updatedCount = importedProducts.filter(p => existingByKey.has(productKey(p))).length;
     const createdCount = importedProducts.length - updatedCount;
+    // Lot « stock » (24/09) : la colonne Quantite qui CHANGE le rayon est
+    // ecrite au journal des mouvements, comme une saisie a la main ; un
+    // produit cree avec une quantite aussi. Un rayon inchange n'ecrit rien.
+    const motifImport = `Import du stock (${clean(req.file.originalname) || "fichier"})`;
+    importedProducts.forEach(product => {
+      const existing = existingByKey.get(productKey(product));
+      const apres = getStockQuantity(product);
+      if (existing) {
+        const avant = getStockQuantity(existing);
+        if (avant !== apres) recordStockMovement(db, product, avant, apres, motifImport);
+      } else if (apres !== null) {
+        recordStockMovement(db, product, null, apres, `${motifImport} : produit créé`);
+      }
+    });
 
     db.stock = [...importedProducts, ...preservedProducts];
 
-    syncWorkflow(db);
+    // Pas de syncWorkflow ici (25/09) : writeDb le fait, et rien d'ici la ne
+    // lit ce qu'il calcule (les comptes du message sont deja faits).
     const dedupNote = duplicatesSkipped > 0
       ? `, ${duplicatesSkipped} doublon(s) ignore(s)`
       : "";
@@ -8565,18 +9747,29 @@ app.post("/api/import/stock", uploadExcel, async (req, res) => {
 // derive (annulee, une commande terrain rendait 8 Changes et jamais ses 3
 // Aleses). Meme regle que la modification a la main : « Impossible de
 // modifier les produits apres reservation du stock ».
+//
+// Chasse aux defauts du 24/09 (lot « donnees clients », 25/09) : seul un bon
+// IMPORTE, encore a preparer, suit le fichier. Restaient reecrites : la
+// preparation lancee SANS reservation (PATCH de statut -- l'ecart nomme du lot
+// pieges), la commande annulee, et surtout les commandes SAISIES dans Sereo --
+// la commande terrain acceptee « bloquee » sans reservation (decision 11 du
+// 24/09) devenait un autre produit en gardant son ancien total ; une
+// planifiee (ou celle d'un abonnement) changeait avant sa confirmation. Le
+// fichier Ximi n'en est pas la source : elles gardent ce qui a ete saisi.
 function raisonImportIgnore(db, order) {
   if (order.status === "livre") return "livree";
   if (order.status === "en_livraison" || tourneeActiveDeLaCommande(db, order.id)) return "en_tournee";
   if (order.status === "pret_livraison") return "prete";
   if (STATUTS_A_RELIVRER.includes(order.status)) return "partie_en_tournee";
-  if (order.stockReservedAt) {
-    return ["en_preparation", "preparation_terminee"].includes(order.status) ? "en_preparation" : "stock_reserve";
-  }
+  if (["en_preparation", "preparation_terminee"].includes(order.status)) return "en_preparation";
+  if (order.stockReservedAt) return "stock_reserve";
+  if (order.status === "annulee") return "annulee";
+  if (order.source === "commande_terrain") return "saisie_terrain";
+  if (order.source === "commande_planifiee" || order.subscriptionId) return "planifiee";
   return null;
 }
 
-app.post("/api/import/ventes", uploadExcel, async (req, res) => {
+app.post("/api/import/ventes", requireAdministration, uploadExcel, async (req, res) => {
   const uploadedPath = req.file?.path;
 
   // M2 (revue) : compteur des quantites Excel negatives silencieusement
@@ -8609,41 +9802,110 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     // d'autres imports/PATCH concurrents.
     const response = await withWriteLock(async () => {
     const db = readDb();
-    const existingClients = new Map(db.clients.map(client => [clientKey(client), client]));
+    // Les lignes dont la colonne Secteur est remplie (fusion des fiches, 25/09).
+    const ventesAvecSecteur = new Set();
+
+    // Les colonnes de date du bon (25/09) : « Date », et les noms qu'un export
+    // ou un tableur lui donne. Une date ECRITE mais illisible met la ligne en
+    // erreur (elle datait le bon du jour de l'import) ; une cellule VIDE, ou
+    // pas de colonne, garde le repli documente : le jour de l'import.
+    const NOMS_DE_LA_DATE = ["Date", "Date facture", "Date de facture", "Date commande", "Date de commande", "Date de vente", "Date vente"];
+    // Les lignes ECARTEES, par cause (chasse aux defauts du 24/09, 25/09) :
+    // une quantite vide valait 1, une ligne sans client creait une commande
+    // « Client sans nom », une date illisible datait le bon du jour de
+    // l'import. Une ligne entierement vide (la fin d'une feuille) n'en est pas une.
+    const lignesEnErreur = { sansClientNiProduit: 0, sansClient: 0, sansProduit: 0, sansQuantite: 0, dateIllisible: 0 };
+    const adresseDeLaLigne = row => ({
+      rue: clean(getCellByNames(row, headers, ["Rue", "Adresse", "Adresse client"])),
+      codePostal: geocodage.normaliserCodePostal(getCellByNames(row, headers, ["Code Postal", "Code postal", "CP", "PostalCode"])),
+      ville: normalizeCity(getCellByNames(row, headers, ["Ville", "Commune"]))
+    });
+    // Les bons INCOMPLETS du fichier (relecture adverse du 26/09) : une de
+    // leurs lignes est en erreur -- quantite vide, produit absent -- alors que
+    // son client et sa date se lisent. Jusqu'au 25/09 ces lignes etaient
+    // importees (une quantite vide valait 1) : un bon deja importe avec elles,
+    // remplace par ses seules lignes lisibles, perdait un produit, et sa
+    // commande a preparer son montant. Un bon incomplet deja connu ne
+    // remplace ni sa commande ni ses lignes de vente ; le resume dit pourquoi.
+    // Un bon NOUVEAU est cree avec ses lignes lisibles (rien a proteger).
+    // Une date illisible ne dit pas le bon : jusqu'au 25/09, la ligne allait
+    // dans un bon date du jour de l'import, jamais dans celui-ci.
+    const bonsIncomplets = new Set();
+    const noterBonIncomplet = (row, client) => {
+      const dateCell = getCellByNames(row, headers, NOMS_DE_LA_DATE);
+      const dateCommandeIso = excelDateToIso(dateCell);
+      if (clean(dateCell) !== "" && !dateCommandeIso) return;
+      bonsIncomplets.add(cleDuBonDeLaVente({ client, ...adresseDeLaLigne(row), dateCommandeIso }));
+    };
 
     const ventes = dataRows
       .map((row, index) => {
+        if (!Array.isArray(row) || !row.some(cell => clean(cell) !== "")) return null;
         const codeProduit = clean(getCellByNames(row, headers, ["Code", "Reference", "Référence", "SKU"]));
         const nomProduit = clean(getCellByNames(row, headers, ["Nom", "Produit", "Article"]));
+        const produitComplet = clean(getCell(row, headers, "Produit", 1));
         const client = clean(getCellByNames(row, headers, ["Client", "Nom client", "Client final"]));
+        const aUnProduit = Boolean(codeProduit || nomProduit || produitComplet);
+        if (!client) {
+          lignesEnErreur[aUnProduit ? "sansClient" : "sansClientNiProduit"] += 1;
+          return null;
+        }
+        if (!aUnProduit) {
+          lignesEnErreur.sansProduit += 1;
+          noterBonIncomplet(row, client);
+          return null;
+        }
+        const celluleQuantite = getCellByNames(row, headers, ["Quantite", "Quantité", "Qte", "Qté"]);
+        if (clean(celluleQuantite) === "" || !Number.isFinite(number(celluleQuantite, NaN))) {
+          lignesEnErreur.sansQuantite += 1;
+          noterBonIncomplet(row, client);
+          return null;
+        }
         const statutFacture = clean(getCell(row, headers, "Statut", 1));
         // ERP v1.9.0 : la date Excel devient le discriminant entre 2 bons de
         // commande du meme client. Format ISO pour permettre le tri et le
         // matching deterministe. excelDate (FR) reste pour le legacy affichage.
-        const dateCell = getCell(row, headers, "Date", 1);
-        const date = excelDate(dateCell);
+        const dateCell = getCellByNames(row, headers, NOMS_DE_LA_DATE);
         const dateCommandeIso = excelDateToIso(dateCell);
+        if (clean(dateCell) !== "" && !dateCommandeIso) {
+          lignesEnErreur.dateIllisible += 1;
+          return null;
+        }
+        const date = excelDate(dateCell);
         const deliveryDate = normalizeDateInput(getCellByNames(row, headers, ["Date livraison", "Livraison", "Date de livraison"]));
-        const rawQty = number(getCellByNames(row, headers, ["Quantite", "Quantité", "Qte", "Qté"]), 1);
+        const rawQty = number(celluleQuantite, 0);
         const quantite = Math.max(0, rawQty);
         if (rawQty < 0) clampedNegativeQtyCount += 1;
-        const prixUnitaire = number(getCell(row, headers, "Prix unitaire", 1), 0);
-        const ht = number(getCell(row, headers, "HT", 1), 0);
-        const ttc = number(getCell(row, headers, "TTC", 1), 0);
-        const produitComplet = clean(getCell(row, headers, "Produit", 1));
+        const cellulePrix = getCell(row, headers, "Prix unitaire", 1);
+        const celluleHt = getCell(row, headers, "HT", 1);
+        const celluleTtc = getCell(row, headers, "TTC", 1);
+        const prixUnitaire = number(cellulePrix, 0);
+        const ht = number(celluleHt, 0);
+        const ttc = number(celluleTtc, 0);
+        // Decision 7 (24/09) : le montant TTC de la ligne, SIGNE -- un avoir
+        // (quantite et TTC negatifs) se soustrait. Un HT seul n'est pas un
+        // TTC (null : la ligne ne compte pas). Sans HT ni TTC, le prix unitaire
+        // par la quantite, comme avant.
+        const lisible = cellule => clean(cellule) !== "" && Number.isFinite(number(cellule, NaN));
+        const montantTtc = lisible(celluleTtc) ? number(celluleTtc, 0)
+          : clean(celluleHt) !== "" ? null
+            : lisible(cellulePrix) ? Math.round(number(cellulePrix, 0) * rawQty * 100) / 100
+              : null;
         const telephone = clean(getCellByNames(row, headers, ["Telephone favori", "Téléphone favori", "Telephone", "Téléphone", "Mobile", "Phone"]));
         const reference = clean(getCell(row, headers, "Reference", 1));
-        const codePostal = geocodage.normaliserCodePostal(getCellByNames(row, headers, ["Code Postal", "Code postal", "CP", "PostalCode"]));
-        const rue = clean(getCellByNames(row, headers, ["Rue", "Adresse", "Adresse client"]));
-        const ville = normalizeCity(getCellByNames(row, headers, ["Ville", "Commune"]));
-        const secteur = deriveSector(ville, getCellByNames(row, headers, ["Secteur", "Sector"]));
+        // La meme lecture que noterBonIncomplet : la meme cle de bon.
+        const { rue, codePostal, ville } = adresseDeLaLigne(row);
+        const secteurDuFichier = getCellByNames(row, headers, ["Secteur", "Sector"]);
+        const secteur = deriveSector(ville, secteurDuFichier);
         const notes = clean(getCellByNames(row, headers, ["Notes", "Remarque", "Remarques"]));
         const priority = clean(getCellByNames(row, headers, ["Priorite", "Priorite livraison", "Priority"]));
         const lat = getCoordinateValue(getCellByNames(row, headers, ["Latitude", "Lat"]), -90, 90);
         const lng = getCoordinateValue(getCellByNames(row, headers, ["Longitude", "Lng"]), -180, 180);
+        const id = crypto.randomUUID();
+        if (clean(secteurDuFichier)) ventesAvecSecteur.add(id);
 
         return {
-          id: crypto.randomUUID(),
+          id,
           codeProduit,
           produit: nomProduit || produitComplet,
           produitComplet,
@@ -8655,6 +9917,7 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
           prixUnitaire,
           ht,
           ttc,
+          montantTtc,
           telephone,
           reference,
           codePostal,
@@ -8668,14 +9931,25 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
           lng
         };
       })
-      .filter(vente => vente.client || vente.produit);
-    // Les lignes ILLISIBLES : quelque chose d'ecrit, mais ni client ni
-    // produit. Elles etaient ecartees sans un mot ; le resume les compte en
-    // erreurs. Une ligne entierement vide (la fin d'une feuille) n'en est pas une.
-    const lignesIllisibles = dataRows.filter(row => Array.isArray(row) && row.some(cell => clean(cell) !== "")).length
-      - ventes.length;
+      .filter(Boolean);
+    // Les lignes EN ERREUR : ecartees, comptees (le resume de l'ecran dit
+    // chaque cause). Le compte garde son nom : l'ecran le lit.
+    const lignesIllisibles = Object.values(lignesEnErreur).reduce((total, n) => total + n, 0);
 
-    db.ventes = ventes;
+    // Les ventes FUSIONNENT elles aussi (25/09) : `db.ventes = ventes` effacait
+    // celles de tout bon absent du fichier -- et le chiffre d'affaires qui en
+    // venait. Un bon du fichier (client + date) remplace ses lignes ; les
+    // autres restent. La fusion se fait APRES les commandes (26/09) : un bon
+    // incomplet dont la commande est laissee telle quelle garde aussi ses lignes.
+    // D'abord, figer le montant des commandes dont le CA vient encore des
+    // ventes (migration du 25/09, idempotente) : la table va changer.
+    figerMontantsImportes(db, "import des ventes");
+    // Les cles de vente (cleDuBonDeLaVente) de chaque bon, hors du releve garde sur la fiche.
+    const clesDesBons = new WeakMap();
+    // Le montant TTC de chaque bon du fichier : { montant, lignes } (lignes : celles qui ont un TTC).
+    const montantsDesBons = new WeakMap();
+    const arrondi = n => Math.round(n * 100) / 100;
+    let montantsRepris = 0;
 
     // ERP v1.9.0 : bucket par (client, dateCommande) au lieu de juste par client.
     // Chaque (client, date) = 1 bon de commande distinct. Multiples imports
@@ -8683,15 +9957,43 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     // de doublon (anti-doublon via excelRowHash).
     const todayIso = jourParis();
     const clientsMap = {};
+    // Fusion (25/09) : chaque client du fichier retrouve sa fiche existante --
+    // cle complete, sinon nom + code postal -- et la complete sans rien effacer.
+    const cleClientDeLaVente = vente => clientKey({ nom: vente.client, rue: vente.rue, codePostal: vente.codePostal, ville: vente.ville });
+    const indexFiches = indexerClientsExistants(db.clients, new Set(ventes.map(cleClientDeLaVente)));
+    // Les fiches d'AVANT l'import, pour reconnaitre le bon d'une ancienne vente
+    // (fusion des ventes, plus bas) : par cle complete quand une seule fiche la
+    // porte ; et combien de fiches partagent un nom + code postal.
+    const ficheAvantParCle = new Map();
+    const fichesParSecondaire = new Map();
+    db.clients.forEach(fiche => {
+      const cle = clientKey(fiche);
+      ficheAvantParCle.set(cle, ficheAvantParCle.has(cle) ? null : fiche.id);
+      const secondaire = clientSecondaryKey(fiche);
+      if (secondaire) fichesParSecondaire.set(secondaire, (fichesParSecondaire.get(secondaire) || 0) + 1);
+    });
+    // Les commandes ORPHELINES : leur fiche a disparu (un ancien import la
+    // retirait ; la production en a une, du 03/06). Une fiche recreee par le
+    // fichier reprend leur identifiant -- sinon la commande serait refaite en
+    // double. Par nom normalise, une fiche au plus par identifiant.
+    const idsDesFiches = new Set(db.clients.map(client => String(client.id)));
+    const orphelines = new Map();
+    db.commandes.forEach(order => {
+      const nom = normalizeTextKey(order.clientName);
+      if (order.clientId && !idsDesFiches.has(String(order.clientId)) && nom && !orphelines.has(nom)) orphelines.set(nom, order.clientId);
+    });
+    const idOrphelin = nom => {
+      const id = orphelines.get(normalizeTextKey(nom));
+      if (id !== undefined) orphelines.delete(normalizeTextKey(nom));
+      return id;
+    };
 
     ventes.forEach(vente => {
-      const key = clientKey({
-        nom: vente.client,
-        rue: vente.rue,
-        codePostal: vente.codePostal,
-        ville: vente.ville
-      });
-      const existingClient = existingClients.get(key) || {};
+      const key = cleClientDeLaVente(vente);
+      const trouvee = clientsMap[key]
+        ? { fiche: clientsMap[key]._ficheExistante, parSecondaire: clientsMap[key]._parSecondaire }
+        : trouverFicheExistante(indexFiches, key, clientSecondaryKey({ nom: vente.client, codePostal: vente.codePostal }));
+      const existingClient = trouvee.fiche || {};
       // Fallback : si la ligne Excel n'a pas de Date, on bucket avec la date du
       // jour (l'utilisateur peut quand meme avoir importe quelque chose hors
       // contexte de bon de commande date). C'est rare en pratique.
@@ -8708,12 +10010,18 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
         if (fichierRefuse) positionsImportRefusees += 1;
         const prendFichier = positionFichier && !manuelle && !fichierRefuse;
         clientsMap[key] = {
-          id: existingClient.id || crypto.randomUUID(),
-          nom: vente.client || "Client sans nom",
-          rue: vente.rue,
-          ville: vente.ville,
-          codePostal: vente.codePostal,
-          telephone: vente.telephone,
+          // Fusion (25/09) : la fiche existante d'abord -- identifiant, email,
+          // prenom, preferences, source, statut CRM, archivage... --, puis ce
+          // que le fichier dit. Une cellule vide ne remplace rien.
+          ...existingClient,
+          _ficheExistante: trouvee.fiche,
+          _parSecondaire: trouvee.parSecondaire,
+          id: existingClient.id || idOrphelin(vente.client) || crypto.randomUUID(),
+          nom: vente.client || existingClient.nom || "Client sans nom",
+          rue: valeurFusionnee(vente.rue, existingClient.rue),
+          ville: valeurFusionnee(vente.ville, existingClient.ville),
+          codePostal: valeurFusionnee(vente.codePostal, existingClient.codePostal),
+          telephone: valeurFusionnee(vente.telephone, existingClient.telephone),
           statut: existingClient.statut || "restant",
           // Liste flat (legacy compat pour syncWorkflow et anciennes UIs)
           produits: [],
@@ -8731,8 +10039,10 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
               geoLibelle: existingClient.geoLibelle || "",
               geoAVerifier: existingClient.geoAVerifier || ""
             }),
-          secteur: vente.secteur,
-          deliveryDate: vente.deliveryDate,
+          // Le secteur se deduit de la ville (ou de la colonne Secteur) du
+          // fichier ; sans l'une ni l'autre, celui de la fiche reste.
+          secteur: vente.ville || ventesAvecSecteur.has(vente.id) ? vente.secteur : (existingClient.secteur || vente.secteur),
+          deliveryDate: valeurFusionnee(vente.deliveryDate, existingClient.deliveryDate),
           notes: vente.notes || existingClient.notes || "",
           priority: vente.priority || existingClient.priority || "",
           // Multi-commandes : 1 entree par dateCommande pour ce client
@@ -8754,6 +10064,16 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
         order.factureLivree = order.factureLivree && venteFactureLivree;
         if (!order.deliveryDate && vente.deliveryDate) order.deliveryDate = vente.deliveryDate;
       }
+      const clesDuBon = clesDesBons.get(clientsMap[key].ordersByDate[dateCommande]) || new Set();
+      clesDuBon.add(cleDuBonDeLaVente(vente));
+      clesDesBons.set(clientsMap[key].ordersByDate[dateCommande], clesDuBon);
+      // Le montant TTC du bon (decision 7), hors du releve garde sur la fiche.
+      const montantDuBon = montantsDesBons.get(clientsMap[key].ordersByDate[dateCommande]) || { montant: 0, lignes: 0 };
+      if (vente.montantTtc !== null) {
+        montantDuBon.montant += vente.montantTtc;
+        montantDuBon.lignes += 1;
+      }
+      montantsDesBons.set(clientsMap[key].ordersByDate[dateCommande], montantDuBon);
 
       // Agregation/dedup produit dans la commande (meme produit 2 lignes Excel = somme)
       const lineTotal = firstPositiveNumber(vente.ttc, vente.ht, vente.prixUnitaire * vente.quantite);
@@ -8813,6 +10133,8 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     let importedAsLivreCount = 0;
     // Decision 1 (24/09) : les commandes laissees telles quelles, et pourquoi.
     const ignorees = [];
+    // Les bons dont les lignes de vente restent telles quelles (bons incomplets deja connus).
+    const bonsFiges = new Set();
 
     importedClients.forEach(client => {
       Object.values(client.ordersByDate || {}).forEach(orderData => {
@@ -8824,9 +10146,18 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
 
         // Chemin 1 : hash strict = meme contenu, re-import identique idempotent
         const sameHashOrder = db.commandes.find(o => o.excelRowHash && o.excelRowHash === hash);
+        const bon = montantsDesBons.get(orderData) || { montant: 0, lignes: 0 };
         if (sameHashOrder) {
           sameHashOrder.updatedAt = new Date().toISOString();
           skippedIdenticalCount += 1;
+          // Memes produits, memes quantites (l'empreinte ignore les montants) :
+          // le montant TTC du fichier fait foi -- un avoir ajoute au bon dans
+          // Ximi se soustrait. Le resume compte les montants qui changent.
+          if (bon.lignes > 0) {
+            const avant = getOrderTotal(sameHashOrder);
+            sameHashOrder.montantTtc = arrondi(bon.montant);
+            if (avant !== 0 && avant !== sameHashOrder.montantTtc) montantsRepris += 1;
+          }
           return;
         }
 
@@ -8838,7 +10169,13 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
         if (sameKeyOrder) {
           // Deja prete, en tournee ou livree : on n'y touche pas (decision 1).
           // Surtout pas le chemin 3 : ce serait une commande en double.
-          const raison = raisonImportIgnore(db, sameKeyOrder);
+          // Un bon INCOMPLET dans le fichier (une ligne en erreur) non plus :
+          // ses seules lignes lisibles feraient sortir un produit de la
+          // commande (relecture adverse du 26/09). Ses ventes restent aussi.
+          const clesDuBon = [...(clesDesBons.get(orderData) || [])];
+          const incomplet = clesDuBon.some(cle => bonsIncomplets.has(cle));
+          if (incomplet) clesDuBon.forEach(cle => bonsFiges.add(cle));
+          const raison = raisonImportIgnore(db, sameKeyOrder) || (incomplet ? "ligne_en_erreur" : null);
           if (raison) {
             ignorees.push({
               id: sameKeyOrder.id,
@@ -8851,6 +10188,8 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
           }
           sameKeyOrder.products = normalizeProducts(orderData.produits);
           sameKeyOrder.excelRowHash = hash;
+          // Le montant TTC du bon, fige (0 : aucune ligne n'a de TTC).
+          sameKeyOrder.montantTtc = arrondi(bon.montant);
           sameKeyOrder.updatedAt = new Date().toISOString();
           // Sync coordonnees client (peuvent avoir change). lat/lng client manuel
           // (PATCH /api/clients/:id/coordinates) deja merge dans client.lat/lng.
@@ -8891,6 +10230,8 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
           deliveryDate: orderData.deliveryDate || "",
           dateImport: new Date().toISOString(),
           excelRowHash: hash,
+          // Le montant TTC du bon, fige (0 : aucune ligne n'a de TTC).
+          montantTtc: arrondi(bon.montant),
           numero: generateOrderNumber(db, orderData.dateCommande),
           status: orderData.factureLivree ? "livre" : "stock_a_verifier",
           deliveryStatus: orderData.factureLivree ? "livre" : "restant",
@@ -8906,9 +10247,52 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       });
     });
 
-    syncWorkflow(db);
-    const preservedMessage = mergedImport.preservedCount > 0
-      ? `, ${mergedImport.preservedCount} client(s) deja en workflow conserve(s)`
+    // Les ventes, maintenant que les commandes sont decidees.
+    //
+    // Le bon d'une ANCIENNE vente suit la meme identite que sa commande : la
+    // fiche et la date (relecture adverse du 26/09). Sa cle (adresse complete +
+    // date) ne suffit plus quand l'adresse change dans Ximi (« 3 rue X »
+    // devient « 3 bis rue X », la ville s'ecrit autrement) : la fiche et la
+    // commande se retrouvaient (nom + code postal), mais les anciennes lignes
+    // de chaque bon restaient et les nouvelles s'y ajoutaient, pour toujours.
+    // Une ancienne vente prend la cle du bon du fichier quand sa fiche est SURE
+    // des deux cotes : une seule fiche porte son adresse complete, et le
+    // fichier rattache son bon de meme date a cette fiche par la cle complete
+    // ou par un nom + code postal qu'aucune autre fiche ne partage. Sinon (un
+    // homonyme au meme code postal), sa cle reste la sienne, comme avant.
+    const ficheSureDuFichier = vente => {
+      const entree = clientsMap[cleClientDeLaVente(vente)];
+      const fiche = entree?._ficheExistante;
+      if (!fiche) return null;
+      if (!entree._parSecondaire) return fiche.id;
+      return fichesParSecondaire.get(clientSecondaryKey(fiche)) === 1 ? fiche.id : null;
+    };
+    const bonDuFichierParFiche = new Map();
+    ventes.forEach(vente => {
+      const id = ficheSureDuFichier(vente);
+      if (id) bonDuFichierParFiche.set(`${id}|${vente.dateCommandeIso || ""}`, cleDuBonDeLaVente(vente));
+    });
+    const cleDeLAncienne = vente => {
+      const id = ficheAvantParCle.get(cleClientDeLaVente(vente));
+      return (id && bonDuFichierParFiche.get(`${id}|${vente.dateCommandeIso || ""}`)) || cleDuBonDeLaVente(vente);
+    };
+    // Un bon incomplet qui a deja des lignes les garde (meme sans commande :
+    // purgee, par exemple).
+    const bonsDesVentes = new Set((Array.isArray(db.ventes) ? db.ventes : []).map(cleDeLAncienne));
+    bonsIncomplets.forEach(cle => { if (bonsDesVentes.has(cle)) bonsFiges.add(cle); });
+    const fusionVentes = fusionnerVentes(db.ventes, ventes, bonsFiges, cleDeLAncienne);
+    db.ventes = fusionVentes.ventes;
+
+    // Pas de syncWorkflow ici (25/09) : writeDb le fait, et rien d'ici la ne
+    // lit ce qu'il calcule (les comptes du message sont deja faits).
+    // Les comptes de la fusion des fiches (regle de Thomas : created / updated / preserved).
+    const clientsImport = { created: mergedImport.created, updated: mergedImport.updated, preserved: mergedImport.preserved };
+    const fichesMessage = `, fiches clients : ${clientsImport.created} creee(s), ${clientsImport.updated} mise(s) a jour, ${clientsImport.preserved} absente(s) du fichier conservee(s)`;
+    const ventesGardeesMessage = fusionVentes.gardees > 0
+      ? `, ${fusionVentes.gardees} vente(s) d'autres bons conservee(s)`
+      : "";
+    const montantsMessage = montantsRepris > 0
+      ? `, ${montantsRepris} montant(s) TTC repris du fichier (bon identique, avoir ou correction)`
       : "";
     const mergedMessage = mergedImport.mergedBySecondary > 0
       ? `, ${mergedImport.mergedBySecondary} doublon(s) client(s) fusionne(s) par cle secondaire`
@@ -8926,13 +10310,20 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     const ignoreesMessage = ignorees.length > 0
       ? `, ${ignorees.length} commande(s) laissee(s) telle(s) quelle(s) (${ignorees.map(i => `${i.numero || i.id} : ${i.raison}`).join(", ")})`
       : "";
+    const causesDesErreurs = [
+      [lignesEnErreur.sansClientNiProduit, "sans client ni produit"],
+      [lignesEnErreur.sansClient, "sans client"],
+      [lignesEnErreur.sansProduit, "sans produit"],
+      [lignesEnErreur.sansQuantite, "sans quantite lisible"],
+      [lignesEnErreur.dateIllisible, "sans date lisible"]
+    ].filter(([n]) => n > 0).map(([n, cause]) => `${n} ${cause}`).join(", ");
     const illisiblesMessage = lignesIllisibles > 0
-      ? `, ${lignesIllisibles} ligne(s) sans client ni produit ecartee(s)`
+      ? `, ${lignesIllisibles} ligne(s) en erreur ecartee(s) (${causesDesErreurs})`
       : "";
     addHistory(
       db,
       "Import ventes",
-      `${db.ventes.length} vente(s) importee(s), ${importedClients.length} client(s) detecte(s), ${commandeStats}${ignoreesMessage}${illisiblesMessage}${preservedMessage}${mergedMessage}${livreMessage}${clampedMessage}${positionsMessage}`,
+      `${ventes.length} vente(s) importee(s), ${importedClients.length} client(s) detecte(s), ${commandeStats}${ignoreesMessage}${illisiblesMessage}${fichesMessage}${ventesGardeesMessage}${montantsMessage}${mergedMessage}${livreMessage}${clampedMessage}${positionsMessage}`,
       {
         fichier: req.file.originalname
       }
@@ -8940,15 +10331,19 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
 
     // v1.12.0 : archivage du fichier Excel brut pour retelechargement futur
     const archive = archiveImportFile(req, db, "ventes", {
-      rowsCount: db.ventes.length,
+      // Les lignes DU FICHIER (la table des ventes, fusionnee, en garde d'autres).
+      rowsCount: ventes.length,
       clientsCount: importedClients.length,
       created: createdCount,
       updated: updatedCount,
       skippedIdentical: skippedIdenticalCount,
       ignored: ignorees.length,
       lignesIllisibles,
+      lignesEnErreur,
       importedAsLivre: importedAsLivreCount,
-      mergedBySecondary: mergedImport.mergedBySecondary
+      mergedBySecondary: mergedImport.mergedBySecondary,
+      clientsImport,
+      montantsRepris
     });
 
     writeDb(db);
@@ -8960,6 +10355,11 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       commandes: db.commandes,
       secteurs: getSectors(db),
       mergedBySecondary: mergedImport.mergedBySecondary,
+      // Fusion des fiches (25/09) : aucune n'est retiree ; `preserved` compte
+      // celles que le fichier ne cite pas, laissees telles quelles.
+      clientsImport,
+      // Decision 7 : bons identiques dont le montant TTC du fichier a change (un avoir).
+      montantsRepris,
       importedAsLivre: importedAsLivreCount,
       created: createdCount,
       updated: updatedCount,
@@ -8969,6 +10369,8 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
       ignored: ignorees.length,
       ignorees,
       lignesIllisibles,
+      // Chaque cause (25/09) : l'ecran les dit une par une.
+      lignesEnErreur,
       clampedNegativeQuantities: clampedNegativeQtyCount,
       positionsRefusees: positionsImportRefusees,
       archive
@@ -9064,7 +10466,7 @@ app.get("/api/imports/archives", (req, res) => {
 // v1.12.0 : telechargement d'un fichier Excel archive. Verifie que l'id est
 // connu en DB et que le fichier existe encore sur disque (peut etre purge
 // manuellement par le sysadmin).
-app.get("/api/imports/archives/:id/download", (req, res) => {
+app.get("/api/imports/archives/:id/download", requireAdministration, (req, res) => {
   try {
     const db = readDb();
     const archive = (db.importsArchives || []).find(a => String(a.id) === String(req.params.id));
@@ -9094,11 +10496,50 @@ app.get("/api/imports/archives/:id/download", (req, res) => {
 //
 // La purge laisse l'utilisateur pouvoir reimporter ses Excel originaux
 // depuis Parametres -> Historique imports -> Telecharger.
-app.post("/api/orders/purge", async (req, res) => {
+//
+// Garde-fous (25/09, decisions 5 et 6) :
+// - reservee a l'administration (requireAdministration) ;
+// - precedee, SOUS le verrou d'ecriture (rien ne change entre la copie et
+//   l'effacement), d'une sauvegarde « avant-purge-commandes » HORS rotation,
+//   coherente et relue (ecrireSauvegardeVerifiee) ;
+// - la sauvegarde relue doit contenir EXACTEMENT les lignes que la purge
+//   efface (commandes, clients, ventes, tournees : memes comptes, memes
+//   identifiants) ; sinon, ou si elle echoue, la purge est refusee (503) et
+//   rien n'est efface.
+// La base est lue APRES l'attente de la sauvegarde : une ligne d'historique
+// ecrite pendant la copie (addHistoryEntry, hors verrou) n'est pas perdue.
+const TABLES_PURGEES = ["commandes", "clients", "ventes", "routes"];
+
+function refusDePurge(message) {
+  const error = new Error(`Purge refusée : ${message} Rien n'a été effacé.`);
+  error.refusDePurge = true;
+  return error;
+}
+
+app.post("/api/orders/purge", requireAdministration, async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
+      if (readDb().subscriptions.length) throw badRequest("La purge est désactivée en présence d’abonnements pour préserver les fiches clients et leurs échéances.");
+
+      let sauvegarde;
+      try {
+        // Sans la copie vers le second dossier : elle se fait apres le verrou
+        // (plus bas). Relecture du 26/09 : un partage reseau lent ou bloque
+        // suspendait, sous ce verrou, toutes les ecritures des autres comptes.
+        sauvegarde = await sauvegardeSeule(() => ecrireSauvegardeVerifiee(GENRE_AVANT_PURGE_COMMANDES, { tables: TABLES_PURGEES, copie: false }));
+      } catch (error) {
+        lastBackupError = { at: new Date().toISOString(), message: String(error.message || error) };
+        throw refusDePurge(`la sauvegarde d'avant purge a échoué (${error.message || error}).`);
+      }
+      if (!sauvegarde) throw refusDePurge("aucune sauvegarde n'a pu être écrite.");
+      if (useSqliteStorage()) {
+        const actuel = getSqliteStore().releverTables(TABLES_PURGEES);
+        const ecarts = TABLES_PURGEES.filter(table => sauvegarde.comptes[table] !== actuel.comptes[table]
+          || sauvegarde.empreintes[table] !== actuel.empreintes[table]);
+        if (ecarts.length) throw refusDePurge(`la sauvegarde ${sauvegarde.nom} ne contient pas exactement ce qui serait effacé (${ecarts.join(", ")}).`);
+      }
+
       const db = readDb();
-      if (db.subscriptions.length) throw badRequest("La purge est désactivée en présence d’abonnements pour préserver les fiches clients et leurs échéances.");
       const purgedCounts = {
         commandes: db.commandes.length,
         clients: db.clients.length,
@@ -9125,6 +10566,8 @@ app.post("/api/orders/purge", async (req, res) => {
         if (releaseOrderStockReservation(db, order, "purge")) stockReservationsReleased += 1;
       });
 
+      // Un numero attribue ne revient jamais (lot « stock », 24/09).
+      retenirNumerosAttribues(db);
       db.commandes = [];
       db.clients = [];
       db.ventes = [];
@@ -9133,24 +10576,35 @@ app.post("/api/orders/purge", async (req, res) => {
       addHistory(
         db,
         "Purge",
-        `Reset bons de commande : ${purgedCounts.commandes} commande(s), ${purgedCounts.clients} client(s), ${purgedCounts.ventes} vente(s), ${purgedCounts.routes} tournee(s) supprimees. ${stockReservationsReleased} reservation(s) de stock restituee(s). Catalogue stock et historique preserves.`,
-        { ...purgedCounts, stockReservationsReleased }
+        `Reset bons de commande : ${purgedCounts.commandes} commande(s), ${purgedCounts.clients} client(s), ${purgedCounts.ventes} vente(s), ${purgedCounts.routes} tournee(s) supprimees. ${stockReservationsReleased} reservation(s) de stock restituee(s). Catalogue stock et historique preserves. Sauvegarde d'avant purge (hors rotation) : ${sauvegarde.nom}`,
+        { ...purgedCounts, stockReservationsReleased, sauvegarde: sauvegarde.nom }
       );
 
       writeDb(db);
-      return purgedCounts;
+      return { purgedCounts, sauvegarde: sauvegarde.nom, chemin: sauvegarde.chemin, sha256: sauvegarde.sha256 };
     });
+    // La copie vers le second dossier, verrou rendu : la decision de purger ne
+    // l'attend pas (une copie qui echoue ne fait jamais echouer une
+    // sauvegarde), et les ecritures des autres non plus. Une sauvegarde a la
+    // fois (sauvegardeSeule) ; la reponse ne l'attend pas.
+    sauvegardeSeule(() => copierVersSecondDossier(result.chemin, result.sha256)).catch(() => {});
     res.json({
       success: true,
-      purged: result,
+      purged: result.purgedCounts,
+      sauvegarde: result.sauvegarde,
       message: "Bons de commande purges. Re-importez vos Excel depuis Parametres > Historique imports."
     });
   } catch (error) {
+    if (error && error.refusDePurge) {
+      console.error(`[purge] ${error.message}`);
+      res.status(503).json({ error: error.message });
+      return;
+    }
     handleRouteError(error, res, "Erreur purge bons");
   }
 });
 
-app.patch("/api/stock/:id", async (req, res) => {
+app.patch("/api/stock/:id", refuserAuLivreur, async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
       const db = readDb();
@@ -9196,7 +10650,8 @@ app.patch("/api/stock/:id", async (req, res) => {
         thresholdChanged = nextThreshold !== oldThreshold;
       }
 
-      syncWorkflow(db);
+      // Pas de syncWorkflow ici (25/09) : writeDb le fait. Le refaire doublait
+      // l'ajustement de stock (2,3 s -> 0,5 s a dix fois la base).
       if (quantityChanged) {
         addHistory(db, "Stock", `${product.nom} : stock ${oldQuantity} -> ${product.quantite}`, {
           produitId: product.id,
@@ -9489,6 +10944,14 @@ app.patch("/api/orders/:id", async (req, res) => {
         if (clean(req.body.status) === "annulee" && order.stockReservedAt) {
           releaseOrderStockReservation(db, order, "order_cancelled");
         }
+        // Lot « stock » (24/09) : la meme transition que « Passer en
+        // preparation » (POST /start-preparation) sort le stock du rayon.
+        // Avant, « en_preparation » puis « livre » par cette route livraient
+        // la commande sans rien sortir (rayon 10 au lieu de 6). Un rayon qui
+        // ne couvre pas la commande refuse (400), comme le geste de l'ecran.
+        if (commandeQuiPartEnPreparation(order, clean(req.body.status))) {
+          reserveStockForOrder(db, order);
+        }
         // Un « livre » d'ici sur une commande dont le stock a ete libere :
         // la reservation est reprise, comme sur l'arret (reprendreStockLibere).
         // Apres la transition verifiee : un refus ne touche pas au rayon.
@@ -9496,6 +10959,7 @@ app.patch("/api/orders/:id", async (req, res) => {
           reprendreStockLibere(db, order, "écran Commandes");
         }
         setOrderStatus(order, req.body.status);
+        if (order.status === "annulee") annulerRappelsDeLaCommande(db, order);
       }
 
       order.updatedAt = new Date().toISOString();
@@ -9690,10 +11154,10 @@ app.post("/api/routes/:routeId/stops/:stopId/correction", async (req, res) => {
       const db = readDb();
       const par = getRequestIdentity(req)?.identifiant || "";
       const r = corrigerArret(db, req.params.routeId, req.params.stopId, req.body || {}, par);
-      addHistory(db, "Correction", `${r.stop.clientName} : ${libelleStatutArret(r.avant)} → ${libelleStatutArret(r.stop.status)} — ${r.cause}`, {
+      addHistory(db, "Correction", `${r.stop.clientName} : ${libelleStatutArret(r.avant)} → ${libelleStatutArret(r.stop.status)} — ${r.cause}${r.order ? "" : SANS_COMMANDE_MISE_DE_COTE}`, {
         routeId: r.route.id,
         stopId: r.stop.id,
-        orderId: r.order.id,
+        orderId: r.order ? r.order.id : r.stop.orderId,
         de: r.avant,
         vers: r.stop.status,
         par
@@ -9735,10 +11199,11 @@ app.patch("/api/routes/:routeId/stops/:stopId", async (req, res) => {
       // Decision 10 : « remis a… » s'y lit aussi.
       const remis = r.stop.status === "livre" && r.stop.remisA ? ` — remis à ${r.stop.remisA}` : "";
       const tard = r.retard ? " (geste fait avant la clôture de la tournée)" : "";
-      addHistory(db, "Livraison", `${r.stop.clientName} : ${r.stop.status}${cause}${remis}${tard}`, {
+      const sansCommande = r.order ? "" : SANS_COMMANDE_MISE_DE_COTE;
+      addHistory(db, "Livraison", `${r.stop.clientName} : ${r.stop.status}${sansCommande}${cause}${remis}${tard}`, {
         routeId: r.route.id,
         stopId: r.stop.id,
-        orderId: r.order.id,
+        orderId: r.order ? r.order.id : r.stop.orderId,
         ...(r.stop.status === "livre" && r.stop.remisA ? { remisA: r.stop.remisA } : {})
       });
 
@@ -9845,41 +11310,12 @@ app.post("/api/livraison", async (req, res) => {
   }
 });
 
-app.post("/api/reset-tournee", async (req, res) => {
-  try {
-    await withWriteLock(async () => {
-      const db = readDb();
-
-      db.clients = db.clients.map(client => ({
-        ...client,
-        statut: "restant"
-      }));
-
-      db.commandes = db.commandes.map(order => {
-        if (["en_livraison", "livre", "probleme_livraison", "a_reprogrammer"].includes(order.status)) {
-          setOrderStatus(order, order.preparationStatus === "terminee" ? "pret_livraison" : "stock_a_verifier");
-        }
-
-        return order;
-      });
-
-      db.routes = db.routes.map(route => ({
-        ...route,
-        status: route.status === "en_livraison" ? "prete" : route.status,
-        stops: route.stops.map(stop => ({
-          ...stop,
-          status: stop.status === "en_livraison" ? "pret_livraison" : stop.status
-        }))
-      }));
-
-      addHistory(db, "Tournee", "Tournee reinitialisee");
-      writeDb(db);
-    });
-    res.json({ success: true });
-  } catch (error) {
-    handleRouteError(error, res, "Erreur reset tournee");
-  }
-});
+// Garde-fous (25/09) : l'ancienne route POST /api/reset-tournee est retiree.
+// Aucun ecran ni banc ne l'appelait (grep du 24/09), elle etait ouverte a toute
+// session, remettait tous les clients a « restant » et tentait de repasser des
+// commandes LIVREES en « pretes » -- sur une base sans commande livree, elle
+// defaisait une tournee en cours (200 mesure). Une route d'ecriture qu'aucun
+// ecran n'appelle ne sert qu'a un attaquant.
 
 // Lot 2 de l'audit geo, decision 7 de Thomas (23/09) : l'ancienne route
 // POST /api/optimize-route est retiree. Elle ordonnait les CLIENTS (et non les
@@ -9893,7 +11329,9 @@ require("./lib/operations-api").registerOperations(app, {
   buildImportedSalesIndex, getImportedOrderTotal, normalizeDateInput,
   geocoderAdresse, positionPourTournee, memoriserPositionDuCalcul,
   // Lot 5 : la limite de debit du relais de recherche d'adresse, par compte et par IP.
-  cleDeDebit: req => `${getRequestIdentity(req)?.identifiant || "anonyme"}|${getClientIp(req)}`
+  cleDeDebit: req => `${getRequestIdentity(req)?.identifiant || "anonyme"}|${getClientIp(req)}`,
+  // Decision 8 (24/09) : pause ou arret d'un abonnement.
+  suspendreCommandesDeLAbonnement
 });
 
 // Lot 6 de l'audit geo (pratique au quotidien) : reoptimiser, « Faire
@@ -9933,7 +11371,12 @@ app.get("/api/me", (req, res) => {
     separationDesRoles: SEPARATION_DES_ROLES,
     // `source` distingue un compte en base d'un acces par variables
     // d'environnement : le second ne peut pas etre modifie depuis l'interface.
-    source: identite.source
+    source: identite.source,
+    // Garde-fous (25/09) : a l'administration seulement (un autre compte n'a
+    // pas a apprendre que le mot de passe d'administration est court).
+    ...(getRole(identite.role).administration && motDePasseEnvironnementCourt()
+      ? { motDePasseEnvironnementCourt: true }
+      : {})
   });
 });
 
@@ -9956,6 +11399,27 @@ function requireAdministration(req, res, next) {
     return;
   }
 
+  req.identite = identite;
+  next();
+}
+
+/**
+ * Refuse une route au role « livreur » (garde-fous du 25/09) : la
+ * modification directe du stock. Comme requireAdministration, independant de
+ * la separation des onglets -- masquer un onglet ne garde rien.
+ * La liste de toutes les routes d'ecriture et de leur garde :
+ * test/garde-fous-routes.test.js (et DESIGN.md, garde-fous du 25/09).
+ */
+function refuserAuLivreur(req, res, next) {
+  const identite = getRequestIdentity(req);
+  if (!identite) {
+    res.status(401).json({ error: "Connexion requise" });
+    return;
+  }
+  if (String(identite.role) === "livreur") {
+    res.status(403).json({ error: "Réservé au bureau et à la préparation." });
+    return;
+  }
   req.identite = identite;
   next();
 }
@@ -10042,6 +11506,11 @@ app.patch("/api/comptes/:id", requireAdministration, async (req, res) => {
     }
 
     const compte = await updateUserAccount(req.params.id, patch);
+    // Son PROPRE mot de passe : ses sessions viennent d'etre fermees, celle-ci
+    // comprise ; la reponse en ouvre une neuve (sinon le geste deconnecte).
+    if (patch.motDePasse !== undefined && req.identite?.uid && String(req.identite.uid) === String(compte.id)) {
+      res.setHeader("Set-Cookie", buildAuthCookie(createAccessSessionValue(Date.now(), compte), AUTH_COOKIE_MAX_AGE_SECONDS, req));
+    }
 
     const details = [
       patch.role !== undefined ? `role=${patch.role}` : null,
@@ -10133,8 +11602,36 @@ function tourneesAPurger(db, maintenant = new Date(), mois = PURGE_TOURNEES_MOIS
 }
 
 /**
+ * Les tournees que contient une sauvegarde (.sqlite.gz), par identifiant, sous
+ * la forme JSON que readDb leur donne. Decompression hors du fil principal,
+ * copie de travail a cote de la sauvegarde (supprimee ensuite), ouverture en
+ * lecture seule et integrity_check (lireTourneesDuFichier). Leve si le fichier
+ * est illisible.
+ */
+async function tourneesDeLaSauvegarde(chemin) {
+  const compresse = await fs.promises.readFile(chemin);
+  const brut = await new Promise((resolve, reject) => {
+    zlib.gunzip(compresse, { maxOutputLength: MAX_BACKUP_DECOMPRESSED_BYTES }, (error, sortie) => (error ? reject(error) : resolve(sortie)));
+  });
+  // Nommee comme celles du thread de sauvegarde : jamais prise pour une
+  // sauvegarde (listBackupEntries), effacee au demarrage si elle reste.
+  const copie = sauvegardeBase.fichiersDeTravail(chemin).verification;
+  await fs.promises.writeFile(copie, brut);
+  try {
+    const routes = lireTourneesDuFichier(copie);
+    return new Map(routes.filter(route => route && route.id !== undefined && route.id !== null)
+      .map(route => [String(route.id), JSON.stringify(route)]));
+  } finally {
+    for (const suffixe of ["", "-wal", "-shm", "-journal"]) {
+      try { fs.unlinkSync(copie + suffixe); } catch { /* absent : ok */ }
+    }
+  }
+}
+
+/**
  * @param sauvegarder  la sauvegarde a faire avant (injectable pour les tests) ;
- *                     doit rendre le chemin du fichier, ou lever.
+ *                     doit rendre le chemin du fichier, ou lever. Le fichier
+ *                     est RELU (tourneesDeLaSauvegarde) : un chemin ne suffit pas.
  * @returns {{ purgees: number, sauvegarde?: string, raison?: string }}
  */
 async function purgerTourneesAnciennes({ maintenant = new Date(), mois = PURGE_TOURNEES_MOIS, sauvegarder = writeBackupNowAsync } = {}) {
@@ -10144,20 +11641,13 @@ async function purgerTourneesAnciennes({ maintenant = new Date(), mois = PURGE_T
   // de Mo), chaque jour a l'heure du demarrage plus une minute.
   const candidates = tourneesAPurger(readDb(), maintenant, mois);
   if (!candidates.length) return { purgees: 0 };
-  // Chaque tournee telle que la sauvegarde va la contenir.
-  const sauvees = new Map(candidates.map(route => [String(route.id), JSON.stringify(route)]));
 
   // Une sauvegarde automatique deja en vol lirait la base en meme temps : on
   // la laisse finir, puis la notre tient sa place (writeDb n'en lance pas
   // d'autre tant qu'elle court). Revue #84 : deux sauvegardes concurrentes.
-  await flushPendingBackup();
   let sauvegarde = null;
   try {
-    const enVol = Promise.resolve().then(() => sauvegarder("avant-purge"));
-    const place = enVol.then(() => {}, () => {});
-    pendingBackup = place;
-    place.then(() => { if (pendingBackup === place) pendingBackup = null; });
-    sauvegarde = await enVol;
+    sauvegarde = await sauvegardeSeule(() => sauvegarder("avant-purge"));
   } catch (error) {
     console.error(`[purge] sauvegarde impossible, purge annulee : ${error.message || error}`);
     return { purgees: 0, raison: "sauvegarde impossible" };
@@ -10165,6 +11655,19 @@ async function purgerTourneesAnciennes({ maintenant = new Date(), mois = PURGE_T
   if (!sauvegarde) {
     console.error("[purge] aucune sauvegarde ecrite, purge annulee");
     return { purgees: 0, raison: "sauvegarde impossible" };
+  }
+
+  // Garde-fous (25/09) : la sauvegarde est RELUE -- decompressee, ouverte,
+  // integrity_check -- et chaque tournee comparee a ce qu'ELLE contient. Avant,
+  // un chemin rendu suffisait : la comparaison se faisait a une photo prise en
+  // memoire avant la copie, sur la foi d'une copie jamais relue (et qui pouvait
+  // sortir dechiree). Une sauvegarde illisible : aucune purge.
+  let sauvees;
+  try {
+    sauvees = await tourneesDeLaSauvegarde(String(sauvegarde));
+  } catch (error) {
+    console.error(`[purge] sauvegarde ${path.basename(String(sauvegarde))} illisible, purge annulee : ${error.message || error}`);
+    return { purgees: 0, raison: "sauvegarde illisible" };
   }
 
   return withWriteLock(async () => {
@@ -10205,10 +11708,109 @@ function planifierPurgeDesTournees() {
   if (suivants.unref) suivants.unref();
 }
 
+// ============================================================================
+// ARRET PROPRE (robustesse, 25/09, chasse aux defauts section 4)
+// ============================================================================
+//
+// Avant : aucun gestionnaire de SIGTERM. A chaque redeploiement (sereo-updater,
+// `docker stop` : SIGTERM, puis SIGKILL 10 s plus tard), Node mourait sur le
+// coup : la requete en cours etait coupee (mesure du rapport : un PATCH en
+// attente du verrou recoit une reponse vide), la base n'etait ni validee au
+// fichier principal ni fermee, et une sauvegarde en cours laissait son
+// fichier temporaire (db-...gz.tmp) pour toujours.
+//
+// Maintenant, au premier SIGTERM ou SIGINT : plus de nouvelle connexion (et
+// 503 pour une requete qui arriverait sur une connexion deja ouverte : la
+// file hors ligne la renvoie), les requetes en cours finissent, puis la file
+// des ecritures et la sauvegarde en vol, la carte OSRM locale s'arrete, la
+// base est validee (checkpoint) et fermee, et le processus sort avec 0. Le
+// tout plafonne a ARRET_DELAI_MS, sous les 10 s de `docker stop`. Un second
+// signal garde son effet par defaut (arret immediat).
+
+const ARRET_DELAI_MS = 8000;
+let requetesEnCours = 0;
+let arretEnCours = null;
+let quitterLeProcessus = code => process.exit(code);
+
+function attendre(ms) {
+  return new Promise(resolve => {
+    const minuterie = setTimeout(resolve, ms);
+    if (minuterie.unref) minuterie.unref();
+  });
+}
+
+// La promesse, ou rien de plus que `ms` millisecondes.
+function auPlus(promesse, ms) {
+  return Promise.race([Promise.resolve(promesse).catch(() => {}), attendre(Math.max(0, ms))]);
+}
+
+async function arreterProprement(serveur, { signal = "SIGTERM", delaiMs = ARRET_DELAI_MS } = {}) {
+  if (arretEnCours) return arretEnCours;
+  arretEnCours = (async () => {
+    const debut = Date.now();
+    const reste = () => delaiMs - (Date.now() - debut);
+    console.log(`[arret] ${signal} recu : plus de nouvelle requete ; ${requetesEnCours} en cours.`);
+    if (serveur) {
+      serveur.close();
+      if (serveur.closeIdleConnections) serveur.closeIdleConnections();
+    }
+    while (requetesEnCours > 0 && reste() > 0) await attendre(20);
+    // Les ecritures deja en file (y compris hors requete : geocodage, purge).
+    let file;
+    do {
+      file = writeQueue;
+      await auPlus(file, reste());
+    } while (file !== writeQueue && reste() > 0);
+    await auPlus(flushPendingBackup(), reste());
+    if (serveur && serveur.closeAllConnections) serveur.closeAllConnections();
+    await auPlus(osrmLocal.arreter(), Math.min(1000, Math.max(0, reste())));
+    const restantes = requetesEnCours;
+    try {
+      if (useSqliteStorage() && sqliteStore) sqliteStore.checkpoint();
+    } catch (error) {
+      console.error(`[arret] validation de la base impossible : ${error.message || error}`);
+    }
+    closeStorage();
+    console.log(`[arret] termine en ${Date.now() - debut} ms${restantes ? ` (${restantes} requete(s) coupee(s) au bout du delai)` : ""}.`);
+    quitterLeProcessus(0);
+  })();
+  return arretEnCours;
+}
+
+let signauxInstalles = false;
+let serveurCourant = null;
+
+function installerArretPropre(serveur) {
+  serveurCourant = serveur;
+  if (signauxInstalles) return;
+  signauxInstalles = true;
+  for (const signal of ["SIGTERM", "SIGINT"]) {
+    process.once(signal, function arretPropreDeSereo() {
+      arreterProprement(serveurCourant, { signal }).catch(error => {
+        console.error(`[arret] ${error.message || error}`);
+        quitterLeProcessus(1);
+      });
+    });
+  }
+}
+
 function startServer(port = PORT, host = HOST) {
+  // Les fichiers de travail d'une sauvegarde interrompue : avant toute
+  // sauvegarde de ce processus (nettoyerSauvegardesInterrompues).
+  nettoyerSauvegardesInterrompues();
+  if (BACKUP_COPY_DIR) nettoyerSauvegardesInterrompues(BACKUP_COPY_DIR);
   // P1 v1.14.0 : healing initial pour garantir la coherence apres restart
   // (notamment apres restauration d'un backup ou montee de version)
   healDatabaseAtBoot();
+  avertirMotDePasseCourt();
+  if (BACKUP_COPY_DIR) {
+    // Relecture du 26/09 : un disque qui n'est pas revenu apres un redemarrage
+    // se dit des l'ouverture de la carte, pas a la premiere sauvegarde.
+    verifierTemoinSecondDossier().catch(error => {
+      if (!derniereCopie) derniereErreurCopie = { at: new Date().toISOString(), message: String(error.message || error) };
+      console.warn(`[storage] second dossier : ${error.message || error}`);
+    });
+  }
   planifierPurgeDesTournees();
   const serveur = app.listen(port, host, () => {
     console.log(`Sereo lance sur http://${host}:${port}`);
@@ -10226,6 +11828,7 @@ function startServer(port = PORT, host = HOST) {
       console.warn(`[osrm-local] ${error?.message || error}`);
     }
   });
+  installerArretPropre(serveur);
   return serveur;
 }
 
@@ -10292,6 +11895,8 @@ module.exports = {
   // Lot 3 de l audit geo : des adresses justes
   listerAdressesAVerifier,
   getSqliteStoreForTests: () => getSqliteStore(),
+  // /healthz (26/09) : la prochaine sonde fait la relecture complete.
+  _oublierSondeCompletePourTest: () => { sondeComplete = { store: null, a: 0, erreur: null }; },
   // Comptes utilisateurs (V8 phase 1)
   hashPassword,
   verifyPassword,
@@ -10312,9 +11917,13 @@ module.exports = {
   getRequestIdentity,
   isEnvAuthConfigured,
   // Helpers de test : ne pas appeler depuis du code applicatif
-  _resetAuthRateLimitForTest: () => authRateLimitState.clear(),
+  _resetAuthRateLimitForTest: () => { authRateLimitState.clear(); authCompteState.clear(); },
+  // Garde-fous (25/09) : oublier les sessions fermees gardees en memoire, comme
+  // un redemarrage (elles sont relues dans la base).
+  _oublierRevocationsPourTest: () => { etatDesSessions = null; },
   _createAccessSessionValueForTest: createAccessSessionValue,
   _withWriteLockForTest: withWriteLock,
+  _synchronisationsPourTest: () => synchronisations,
   _normalizeOrder: normalizeOrder,
   _getLastStorageRecovery: () => lastStorageRecovery,
   // Chantier 2 : permet aux tests d'attendre que le backup async finisse
@@ -10323,6 +11932,14 @@ module.exports = {
   _resetStorageRecoveryForTest: () => { lastStorageRecovery = null; storageRecoveryFatal = null; backupsSuspendedFreshEmpty = false; lastBackupAt = null; lastBackupError = null; derniereModificationA = null; },
   // Carte « Sauvegardes » (24/09) : la regle de retention, pure.
   _sauvegardesAGarder: sauvegardesAGarder,
+  // Garde-fous (25/09) : une vraie sauvegarde (coherente, relue), pour les
+  // bancs qui injectent la sauvegarde d'avant purge.
+  _sauvegarderPourTest: tag => writeBackupNowAsync(tag),
+  _nettoyerSauvegardesInterrompues: nettoyerSauvegardesInterrompues,
+  _reinitialiserLimiteSauvegardesPourTest: () => { sauvegardesManuelles.length = 0; },
+  // Arret propre (25/09) : les bancs remplacent la sortie du processus.
+  _quitterPourTest: fn => { quitterLeProcessus = fn; },
+  _arreterProprement: arreterProprement,
   _isCorruptionError: isCorruptionError,
   _normalizeDateInput: normalizeDateInput,
   _excelDateToIso: excelDateToIso,

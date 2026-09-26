@@ -3619,9 +3619,15 @@ Quatre défauts relevés sur `73cc8de`, tous vérifiés vrais, tous corrigés :
   17 `readDb` (≈ 130 ms chacun, surtout les commandes). Il n'a plus lieu après
   chaque geste, mais à l'ouverture et au sondage. Levier suivant : un seul
   `readDb` par vague (point d'entrée agrégé, ou lecture mémorisée par
-  `data_version`).
+  `data_version`). *Fait le 25/09 : lecture mémorisée par génération et `data_version`, voir
+  « 25/09 — Rapidité du serveur, CI et image ».*
 - `syncWorkflow` renormalise **toutes** les commandes à chaque écriture
   (≈ 150-250 ms à 6 000 commandes) : c'est le gros du « Livré » restant.
+  *Corrigé le 25/09 : ce chiffre était trop bas d'un ordre de grandeur (probablement mesuré
+  sur un stock vide, selon la chasse aux défauts du 24/09). Le coût venait de la table de recherche du catalogue,
+  reconstruite pour CHAQUE commande : 717 ms à 2 627 commandes et 218 produits pour ce
+  seul calcul, la moitié d'une écriture en production. Réglé : voir « 25/09 — Rapidité
+  du serveur, CI et image ».*
 - L'**historique texte** n'est jamais purgé (§4, réserve †).
 - Hors lot : tracés OSRM compacts (`polyline6` / `overview=simplified`, avec le
   serveur OSRM hébergé) ; marqueurs recréés à chaque rendu de carte (lot 4).
@@ -7717,7 +7723,9 @@ c'est le travail du serveur (la rafale) et le JSON que la page relit.
   ventes par un `COUNT` (`compterVentes`), plus en décodant les 429 lignes (249 Ko en
   production). Mêmes clés, mêmes valeurs (`{ ...db }`, `JSON.stringify` lisent tout) ;
   `writeDb` normalise tout, donc lit ce qui ne l'a pas été — l'état de la base au moment de
-  l'écriture, sous le verrou. Sans `normaliserTable` (bancs qui ouvrent le magasin seul), tout,
+  l'écriture, sous le verrou (*plus vrai depuis le 25/09 : une table non lue n'est plus ni
+  relue ni récrite, elle n'a pas pu changer — voir « 25/09 — Rapidité du serveur, CI et
+  image »*). Sans `normaliserTable` (bancs qui ouvrent le magasin seul), tout,
   comme avant. **Ce qui changerait** : une table lue APRÈS un `await` le serait plus tard que
   les autres (état plus récent), ou sur une base fermée entre-temps par une restauration
   (erreur au lieu de l'état d'avant). Relevé du 24/09, refait après la relecture adverse
@@ -8194,3 +8202,1504 @@ liste ciblée — les bancs des deux lots, `chargement-instantane`, `hors-ligne`
 `stock*`, `tabs`, `smoke` — **312/312** ; suite complète, deux passages : **723/723** et
 **723/723**. Un passage complet préalable (avant `4d8f513` et le banc de la carte) : 721 verts,
 le rouge de `carte-telephone` réglé ci-dessus.
+
+## 25/09 — Garde-fous : droits, sauvegardes, purge
+
+Branche `fix/garde-fous`, partie de `5b52268` (v1.46.0 et la performance du 24/09). Décisions de
+Thomas du 24/09 : 1, 3, 4, 5 et 6 (la 2, protection de la branche, revient à l'intégrateur). Chasse
+aux défauts du 24/09 : section 3 (sécurité) et section 4 (exploitation), partie serveur.
+
+### Qui peut écrire quoi (décision 6)
+
+Avant, les rôles ne gardaient que les onglets. Un compte « livreur » atteignait 49 routes
+d'écriture sur 55 par appel direct, que `SEREO_SEPARATION_ROLES` soit posée ou non : `peutEcrire`
+n'est lu nulle part, et la variable ne pilote que la navigation. Les gardes sont désormais sur les
+routes, et ne dépendent pas de la variable :
+
+- `requireAdministration` : 401 sans session, 403 « Réservé aux administrateurs. » pour un compte
+  livreur, bureau ou préparateur ;
+- `refuserAuLivreur` : 403 pour le seul livreur.
+
+La table ci-dessous reprend `GARDES` de `test/garde-fous-routes.test.js`. Ce banc relève toutes
+les routes d'écriture de `server.js` et `lib/*.js`. Il rougit si l'une d'elles n'est pas déclarée,
+ou si une route déclarée a disparu. Il éprouve ensuite chaque garde par un vrai appel avec chaque
+rôle, l'administrateur servant de témoin. **Une route d'écriture ajoutée s'ajoute aux deux
+endroits.**
+
+| Garde | Routes d'écriture (52) |
+|---|---|
+| Hors session (2) | `POST /login`, `POST /logout` |
+| Administration (14) | `POST /api/backup/now` ; `PATCH /api/settings/appearance`, `/api/settings/stock`, `/api/settings/order-numbering`, `/api/settings/tournee` ; `POST /api/delivery-sectors`, `PATCH` et `DELETE /api/delivery-sectors/:id` ; `POST /api/import/stock` et `/api/import/ventes` (refusés AVANT la réception du fichier) ; `POST /api/orders/purge` ; `POST /api/comptes`, `PATCH` et `DELETE /api/comptes/:id` |
+| Tout compte sauf livreur (1) | `PATCH /api/stock/:id` (bureau et préparation gardent l'ajustement du stock) |
+| Tout compte connecté (35) | Clients et CRM : `POST /api/crm/clients`, `PATCH` et `DELETE /api/crm/clients/:id`, `POST /api/crm/relances`, `PATCH /api/crm/relances/:id`, `PATCH /api/clients/:id`, `PATCH /api/clients/:id/coordinates`. Commandes : `POST /api/customer-orders`, `POST /api/customer-orders/send-preparation`, `POST /api/planned-orders`, `PATCH /api/planned-orders/:id`, `POST /api/planned-orders/:id/confirm`, `POST /api/orders/:id/replan`, `…/start-preparation`, `…/finish-preparation`, `…/release-stock`, `PATCH /api/orders/:id`, `POST /api/exports/commandes.xlsx`. Tournées et livraison : `POST /api/routes/decoupage`, `POST /api/routes`, `POST /api/routes/:id/start`, `…/annuler`, `…/cloturer`, `…/recalculate`, `…/reoptimiser`, `…/ajouter`, `POST /api/routes/:id/stops/:stopId/maintenant`, `POST /api/routes/:routeId/stops/:stopId/correction`, `PATCH /api/routes/:routeId/stops/:stopId`, `PATCH /api/routes/:id/reorder`, `POST /api/livraison`. Et `POST /api/geocodage/lancer` ; abonnements : `POST /api/subscriptions`, `PATCH /api/subscriptions/:id`, `POST /api/subscriptions/:id/orders` |
+
+**Lectures réservées à l'administration**, par la même garde (elles ne figurent pas dans la table,
+qui ne recense que les écritures) :
+
+- `GET /api/db` : l'export complet de la base. Il est fermé par défaut, mais
+  `SEREO_ENABLE_DB_EXPORT=1` l'ouvrait à **tout** compte connecté. Il est réservé à
+  l'administration depuis le 25/09 ; son banc est dans le même fichier.
+- `GET /api/sauvegardes/derniere`, `GET /api/imports/archives/:id/download`.
+- `GET /api/historique`, `GET /api/journal`, `GET /api/comptes`.
+
+**Retirée : `POST /api/reset-tournee`.** Aucun écran ne l'appelait et elle était ouverte à tous.
+Elle répondait 200 et défaisait une tournée en cours sur une base sans commande livrée. Le banc
+exige désormais 404.
+
+**À l'écran.** Les blocs `[data-reserve-admin]` gardent leur lecture pour les autres comptes. Ces
+blocs sont : les imports Excel de l'accueil, le logo, les secteurs, les imports et archives (et
+leur feuille au téléphone), l'horizon d'« À recommander », les réglages de tournée et la zone
+dangereuse. Pour les autres comptes, les commandes de ces blocs sont fermées, et une note dit
+« Réservé aux administrateurs. », comme pour la numérotation des bons. Les réglages de CET appareil
+restent libres (`[data-appareil]`). Les boutons d'import de l'en-tête sont fermés comme hors ligne,
+avec la même raison en titre. La carte « Sauvegardes » l'était déjà (v1.46.0).
+
+### Sauvegardes
+
+- **Cohérentes, puis relues.** Avant, la sauvegarde automatique lisait le fichier de la base en
+  flux pendant que d'autres écritures vidaient le WAL. Mesure de la chasse : pendant un gros import,
+  2 fois sur 2, la copie sortait déchirée, et rien ne la relisait. Désormais, un thread de travail
+  (`lib/sauvegarde-base.js`, `lib/sauvegarde-travail.js`) fait un `VACUUM INTO` depuis une seconde
+  connexion en lecture seule : on obtient un instantané cohérent. La copie est compressée, puis
+  relue comme une restauration : `integrity_check`, et relevé des tables demandées. Le fichier ne
+  prend son nom final qu'après cette relecture. Un échec ne laisse ni fichier final ni fichier de
+  travail. Au démarrage, les fichiers de travail d'une sauvegarde interrompue (`.gz.tmp`,
+  `.travail-*`) sont effacés, jamais un `.gz` fini.
+- **Conservation (décision 4).** Sont gardées : les 30 plus récentes ; la dernière de chaque jour
+  de Paris sur 30 jours ; la dernière de chaque semaine (lundi-dimanche) sur 8 semaines. Les
+  sauvegardes « avant-purge » des tournées comptent comme les autres. La décision dit « 14 jours » :
+  les 30 jours posés le 24/09 les contiennent, et revenir à 14 supprimerait plus qu'avant. Le banc
+  aléatoire (200 mélanges) vérifie que l'ensemble gardé contient toujours celui de la règle
+  d'avant.
+- **Hors rotation (décision 5).** Les sauvegardes `avant-purge-commandes` ne sont jamais évincées,
+  et ne prennent aucune place parmi les 30.
+- **« Sauvegarder maintenant ».** Réservé à l'administration. Au plus 10 par heure glissante :
+  au-delà, 503 avec `Retry-After` (pas 429, que l'écran prend pour un verrou de connexion). Si
+  rien n'a été écrit depuis la dernière sauvegarde de ce processus, le serveur répond « Déjà à
+  jour » sans écrire de fichier. Le genre `avant-purge-*` est réservé. Avant, une purge suivie de
+  30 appels remplaçait toutes les sauvegardes par une base vide.
+- **Second dossier (décision 3).** `SEREO_BACKUP_COPY_DIR` désigne un second dossier, idéalement
+  sur un autre disque. Chaque sauvegarde y est aussi copiée : fichier provisoire, relecture (même
+  empreinte sha256), même date, puis même conservation. Sans la variable, rien ne change. Le
+  dossier doit porter le fichier témoin `sereo-second-dossier`, posé une fois par Thomas sur
+  l'autre disque ; sans lui (disque démonté), rien n'est copié et le dossier n'est jamais créé
+  (relecture du 26/09). Une copie qui échoue ne fait pas échouer la sauvegarde : la carte le dit,
+  en mots et dans la couleur d'alerte. La variable est documentée dans `.env.example` et `DEPLOYMENT.md` (« Sauvegardes » :
+  montage, conservation, restauration à la main).
+- **La purge des tournées relit sa sauvegarde.** Elle décompresse le fichier, l'ouvre en lecture
+  seule et lance `integrity_check`. Elle ne supprime qu'une tournée que ce fichier contient sous sa
+  forme actuelle. Si la sauvegarde est illisible, rien n'est purgé.
+
+### Purge des bons (décisions 5 et 6)
+
+`POST /api/orders/purge` est réservée à l'administration. Avant d'effacer, sous le verrou
+d'écriture, elle fait une sauvegarde `avant-purge-commandes` hors rotation, cohérente et relue.
+Cette sauvegarde doit porter, pour les commandes, les clients, les ventes et les tournées,
+exactement les mêmes comptes et les mêmes identifiants que ce qui va être effacé. Sinon (échec,
+écart), la réponse est 503 : « Purge refusée : … Rien n'a été effacé. » Le journal, la réponse et
+l'écran nomment la sauvegarde. Ce que la purge efface n'a pas changé.
+
+### Connexion et sessions
+
+- **Limite par compte.** 20 échecs sur un même identifiant saisi (casse et espaces ignorés, que
+  l'identifiant existe ou non) dans l'heure bloquent cet identifiant 15 minutes. La limite vaut au
+  formulaire comme en authentification Basic, et s'ajoute à celle par adresse. Le compteur n'est
+  pas remis à zéro à la fin du blocage ; une connexion réussie l'efface. Réglages :
+  `SEREO_AUTH_MAX_ATTEMPTS_COMPTE`, `SEREO_AUTH_RATE_WINDOW_COMPTE_MS`,
+  `SEREO_AUTH_LOCKOUT_COMPTE_MS`. Depuis la relecture du 26/09, ce blocage ne vise que les
+  **appareils inconnus** : un appareil qui a déjà ouvert le compte n'est ni bloqué ni compté (voir
+  « Relecture adverse du 26/09 » ci-dessous).
+- **Les sessions fermées le sont côté serveur.** « Se déconnecter » ferme la session : l'empreinte
+  sha256 du cookie est gardée jusqu'à l'expiration qu'il aurait eue, et les autres appareils du
+  compte restent connectés. Changer le mot de passe d'un compte en base ferme toutes ses sessions
+  ouvertes ; qui change le sien reçoit une session neuve. Ces sessions fermées sont gardées dans
+  `app_meta` (deux clés, sans table ni colonne nouvelle) et relues après un redémarrage.
+  Conséquence : une lecture de l'écran partie pendant la déconnexion reçoit 401. `apiFetch` lançait
+  alors sa propre navigation, qui interrompait celle du formulaire (`net::ERR_ABORTED`) : le banc
+  `connexion.spec.js` rougissait parfois. La fenêtre existait déjà avant, plus étroite. Pendant une
+  déconnexion en ligne, le 401 ne navigue plus.
+- **Mot de passe d'environnement court.** Sous 12 caractères, le serveur démarre quand même : un
+  refus verrouillerait Thomas hors de son application après la mise à jour. Le journal du démarrage
+  signale la longueur insuffisante, sans le mot de passe ni sa longueur. `/api/me` le signale à
+  l'administration seulement, et l'écran en fait un bandeau d'alerte, fermable.
+
+### Décision 1
+
+La ligne 38 de `docs/internal/AUDIT_2026_05_20.md` portait en clair le mot de passe de
+production : ses deux occurrences sont remplacées par « [retiré] ». Aucune autre occurrence dans
+l'arbre (vérifié par `git grep`). La valeur reste dans l'historique git et dans les forks : elle
+est compromise, et Thomas la change sur l'OMV.
+
+### Aucune donnée perdue : la preuve
+
+Le script de preuve est hors dépôt (`preuve-donnees.js`, dans le scratchpad du lot). Il a tourné
+sur deux bases :
+
+- **forme production** : `jeuProduction()`, soit 97 clients, 224 commandes, 429 ventes, 18
+  tournées, 1 036 lignes d'historique, 633 mouvements et 123 archives ;
+- **écrite par v1.45.1** (`ef78be1`, worktree jetable) : le même jeu, plus les gestes de v1.45.1.
+  Six fiches enrichies, une archivée, un prospect, un rappel, une commande terrain mise en
+  préparation (du stock réservé) et un compte livreur.
+
+Sur une copie de chaque base, avec le code du lot, les tables ont été relevées une à une (comptes,
+empreinte de toutes les lignes, identifiants) :
+
+1. **Au démarrage**, aucune ligne n'a disparu ; seul `app_meta` change. **Au second démarrage**,
+   rien ne change : le code est idempotent.
+2. **« Sauvegarder maintenant »** : décompressée, la sauvegarde est identique à la base en service,
+   table par table (toutes les tables).
+3. **Purge des bons.** La sauvegarde `avant-purge-commandes`, décompressée, est identique à la base
+   d'avant la purge, table par table. Après la purge, la base est celle que laisse le code de la
+   base (`5b52268`) sur une autre copie. Seuls diffèrent `app_meta` et les lignes d'historique
+   ajoutées pendant l'essai : mêmes comptes, identifiants générés différents. Aucune ligne d'avant
+   ne disparaît de l'historique.
+
+### Bancs
+
+- **Unitaires** : `garde-fous-routes`, `garde-fous-droits`, `garde-fous-sauvegardes`,
+  `garde-fous-copie`, `garde-fous-auth` et `garde-fous-mot-de-passe` (`.test.js`). Quatre bancs
+  voisins suivent la nouvelle règle : `sauvegardes` (l'oracle compte les hebdomadaires),
+  `chantier1-concurrence`, `lot5-rapidite` et `journal-auteur`. `npm test` : **810/811**. Le
+  rouge restant est `lot5-rapidite.test.js:345` (`ECONNRESET`), le banc intermittent que la
+  chasse a relevé et confié au lot « robustesse » ; il passe 5 fois sur 5 seul.
+- **Rouges sur le code de la base (`5b52268`).** Les six bancs unitaires du lot y sont rouges.
+  Pour la plupart, la cause est la bonne (assertion sur le défaut). Sept rouges sont en revanche
+  des plantages, faute de fonction ou de module nouveaux : pour eux, la preuve est un **mutant du
+  code du lot**, qui retire la chose gardée. Sept mutants sont tués, chacun pour sa cause : copie
+  jamais faite ; copie en échec et silencieuse ; écart de la sauvegarde d'avant purge ignoré ;
+  relecture sans `integrity_check` ; nettoyage vide ; nettoyage non appelé au démarrage ; purge
+  des tournées sans `integrity_check`. Deux d'entre eux survivaient aux bancs d'origine :
+  - la relecture sans `integrity_check` : le banc abîmait la SOURCE, et `VACUUM INTO` échouait
+    avant toute relecture ;
+  - le nettoyage non appelé : le banc appelait la fonction elle-même.
+
+  D'où deux cas ajoutés, et `relireSauvegarde` sortie du thread pour être éprouvée :
+  - une copie abîmée APRÈS son écriture, dont seules des pages de l'historique sont touchées ;
+  - des fichiers de travail posés avant le vrai `startServer`.
+- **e2e** : `garde-fous.spec.js`, sur les ports 3600 (sans connexion) et 3601 (avec). L'adresse du
+  serveur authentifié de `connexion`, `contraste-login` et `numerotation-admin` se règle
+  (`SEREO_E2E_AUTH_BASE_URL`, 3101 par défaut). La liste ciblée — les bancs du lot, Paramètres,
+  connexion, hors ligne, chargement instantané, poids du réseau, rendu à l'affichage, barre
+  latérale, tournée, stock, imports, tableau de bord — donne **242/242**. Après la sortie de
+  `relireSauvegarde`, `garde-fous`, `sauvegardes`, `parametres` et `connexion` ont été rejoués :
+  **46/46**.
+
+### Ce qui reste
+
+- **Hors code.** Changer le mot de passe de production, et vérifier que la clé de session de l'OMV
+  n'est pas celle de l'exemple du même fichier d'audit (Thomas). Protéger la branche
+  (intégrateur). Mettre en place la copie hors disque (Thomas : le code est prêt,
+  `SEREO_BACKUP_COPY_DIR`). L'en-tête `Referrer-Policy` que SWAG double (hors dépôt).
+- **Autres lots.** Le fichier Excel piégé et les variables d'environnement non documentées
+  relèvent du lot « robustesse ». Ce lot-là efface aussi les fichiers temporaires de sauvegarde au
+  démarrage : les deux nettoyages sont à accorder à l'intégration.
+- **Choix nommés.**
+  - Les sauvegardes « avant-purge » des tournées restent dans la rotation, comme avant : seule
+    celle des bons est hors rotation (décision 5).
+  - Deux connexions d'un même compte dans la même milliseconde auraient le même cookie : fermer
+    l'une fermerait l'autre. C'est négligeable, et laissé tel quel.
+  - Hors SQLite (stockage JSON), les sessions fermées ne survivent pas à un redémarrage.
+
+### Relecture adverse du 26/09 : six défauts, leur sort
+
+Relecture de `636b3c1`. Les six défauts sont vrais : chacun a été vérifié dans le code, et trois
+l'ont aussi été par une mesure (`node`, motifs de nom). Tous sont corrigés. Chaque correctif a
+son banc, rouge sur `636b3c1` ou tué par un mutant du correctif ; les mutants du 26/09 meurent
+tous (17 sur 17), chacun sur l'assertion qui nomme sa cause.
+
+1. **Important — la limite par compte refusait le bon mot de passe, à tous les appareils.** Un
+   tiers qui connaît l'identifiant de Thomas le tenait dehors aussi longtemps qu'il le voulait :
+   environ 23 requêtes par heure suffisaient. Un navigateur qui rejoue un vieux mot de passe
+   Basic, après un changement de `SEREO_AUTH_PASSWORD`, faisait de même sans attaquant. Seul un
+   redémarrage en sortait.
+   **Correctif : l'« appareil connu »** (le « device cookie » de l'OWASP). Une connexion réussie,
+   au formulaire ou en Basic, laisse le cookie signé `sereo_appareil`. Il est `HttpOnly`, vaut 180
+   jours après la dernière connexion réussie, et porte l'empreinte (sha256 tronqué) des comptes
+   ouverts, au plus 8, jamais leur nom. Il est signé avec la base du secret de session **sans**
+   le mot de passe d'environnement : après un changement de ce mot de passe, les appareils de
+   Thomas restent connus, et c'est justement là qu'un vieux mot de passe rejoué ferait bloquer le
+   compte. Un appareil connu du compte n'est ni bloqué ni compté par la limite de ce compte : il
+   garde la seule limite par adresse, celle d'avant le 25/09. « Se déconnecter » ne l'efface pas,
+   car il n'ouvre rien. La page du blocage le dit : « Un appareil déjà connecté à ce compte peut
+   toujours se connecter. »
+   **Ce qui reste :** pendant une attaque, un appareil **neuf** de Thomas attend la fin du blocage
+   (15 min après le dernier échec). Un cookie « appareil connu » volé ne donne que la limite par
+   adresse ; c'était la règle de tous avant le 25/09. Le rapport à Thomas doit le dire.
+   Banc : `garde-fous-auth.test.js`, 4 cas. Sur `636b3c1`, les 4 rougissent faute de cookie. Six
+   mutants du correctif sont tués, un par cause : l'appareil jamais reconnu (formulaire, puis
+   Basic) ; la signature non vérifiée ; les échecs d'un appareil connu comptés (formulaire, puis
+   Basic) ; la voie de secours retirée de la page. Le quatrième survivait d'abord : 5 échecs au
+   formulaire ne passaient pas le seuil de 20. Le cas en rejoue désormais 20.
+2. **Important — disque démonté, les copies atterrissaient sur le disque système.** Docker lie
+   alors un dossier vide à la place du montage ; `copierVersSecondDossier` le recréait au besoin.
+   La carte disait « dans le second dossier », alors que `DEPLOYMENT.md` promettait une alerte.
+   Comparer les périphériques (`stat().dev`) ne suffit pas : base sur un disque de données, repli
+   sur le disque système, deux numéros différents, rien à signaler.
+   **Correctif : un fichier témoin.** `sereo-second-dossier` est posé une fois par Thomas sur
+   l'autre disque (`DEPLOYMENT.md` donne la commande). Sans lui, rien n'est copié, le dossier n'est
+   jamais créé, et l'alerte « copie » donne la raison. Le démarrage le vérifie aussi : un disque
+   non revenu après un redémarrage se voit dès l'ouverture de la carte. La vérification est
+   asynchrone, pour qu'un partage bloqué ne gèle pas le serveur.
+   Banc : `garde-fous-copie.test.js`, 2 cas. Sur `636b3c1`, ils rougissent : une copie a atterri
+   dans le dossier vide, et le démarrage ne dit rien (`{"type":"aucune"}`). Trois mutants tués :
+   le témoin non vérifié ; le dossier recréé ; pas de vérification au démarrage.
+3. **Mineur — les fichiers de travail d'une sauvegarde en cours passaient pour « la dernière ».**
+   `…sqlite.gz.travail-copie.sqlite` et `…travail-verif.sqlite` passaient le motif des sauvegardes.
+   La copie de relecture de la purge des tournées (`tourneesDeLaSauvegarde`) avait la même forme,
+   hors du relevé du relecteur. **Correctif :** `listBackupEntries` écarte `MOTIF_TRAVAIL`, le
+   motif du nettoyage au démarrage ; la copie des tournées prend son nom de `fichiersDeTravail`.
+   Banc : `sauvegardes.test.js`. Sur `636b3c1`, la carte donnait `….travail-verif.sqlite` pour
+   la dernière sauvegarde.
+4. **Mineur — le genre réservé se prenait en suffixe.** `{"tag":"x-avant-purge-commandes"}`
+   donnait une sauvegarde hors rotation, jamais supprimée. **Correctif :** une étiquette qui
+   contient « avant-purge », où que ce soit, devient « manuelle ». Banc : `garde-fous-droits.test.js`,
+   4 étiquettes, plus un témoin (« avant-inventaire », gardée). Rouge sur `636b3c1`.
+5. **Mineur — la purge des bons attendait la copie vers le second dossier sous le verrou
+   d'écriture.** **Correctif :** la sauvegarde reste faite et relue sous le verrou. Sa copie part
+   une fois le verrou rendu, une sauvegarde à la fois, et la réponse ne l'attend pas.
+   Banc : `garde-fous-copie.test.js`. Le partage est simulé bloqué, et un ajustement du stock doit
+   répondre pendant la copie. Sur `636b3c1`, il attendait (`'bloquee' !== 200`). Deux mutants
+   tués : la copie remise sous le verrou ; la copie oubliée. Ce second mutant faisait d'abord
+   **pendre** le banc au lieu de le faire rougir : l'attente de la copie est désormais bornée.
+6. **Mineur — l'écran laissait au livreur les commandes du stock.** **Correctif :** dans
+   l'écran Stock, pour le livreur, la quantité, le seuil, − et + sont fermés. Une note dit
+   « Réservé au bureau et à la préparation. », la phrase du refus du serveur. `setStock` et
+   `setStockThreshold` ne partent pas : rien ne va non plus dans la file hors ligne. Si
+   `/api/me` répond après le premier rendu, l'écran se redessine ; pour les autres comptes,
+   aucun second rendu. L'écran « Produits » a les mêmes commandes, mais il est hors `mainTabs`,
+   donc inatteignable : il n'est pas touché.
+   Banc : `e2e/garde-fous.spec.js`, 5 cas : fermé ; `/api/me` tardif ; téléphone clair et
+   sombre, à 4,5:1 et sans débordement ; témoin bureau et administrateur. Sur `636b3c1`, rouge :
+   la note n'existe pas. Cinq mutants tués : les lignes jamais fermées ; `setStock` sans garde ;
+   pas de second rendu ; la note jamais montrée ; le stock fermé à tous (témoin inverse).
+
+Au passage, le banc e2e « seconde copie posée » pose désormais le fichier témoin : sans lui, il
+aurait rougi, et pour la bonne cause.
+
+**Bancs du 26/09.** `npm test` : **820/820**, soit les 811 d'avant et 9 cas neufs ; le banc
+intermittent `lot5-rapidite` est passé cette fois. e2e :
+- `garde-fous` : 22/22 ;
+- sur le serveur sans connexion, 165/165 : stock (4 fichiers), À recommander, sauvegardes,
+  paramètres (bureau et téléphone), hors ligne, `livreur-ne-perd-rien`, tournée hors ligne,
+  chargement instantané, poids du réseau, rendu à l'affichage, un seul dessin, garde-fous ;
+- sur le serveur avec connexion (3621), 13/13 : `connexion`, `contraste-login`,
+  `numerotation-admin`.
+
+**Ce qui reste, nommé.**
+- Le repli sur un appareil neuf pendant une attaque (point 1).
+- `pruneOldBackups` et le nettoyage du démarrage lisent le second dossier en synchrone. Sur un
+  partage bloqué pile à ce moment, le fil principal attendrait. La vérification du témoin, qui
+  vient avant, est asynchrone ; ce reste est hors du relevé du relecteur.
+
+## 25/09 — Données clients : l'import fusionne au lieu de remplacer
+
+Branche `fix/import-clients-fusion`, partie de `5b52268` (v1.46.0 et la performance). Source :
+la chasse aux défauts du 24/09 (constat **critique** « l'import des ventes remplace la table des
+clients », constats hauts « réimport d'un bon » et « téléphone déjà connu », moyen « CA de 197
+commandes sur 224 », bas « date avec heure, Date facture », « quantité vide, ligne sans client »,
+« avoirs, HT et TTC »). Règle permanente de Thomas (18/05) : **tout import est une fusion par clé
+métier**, jamais un « wipe-and-replace ». Décision 7 (24/09) : chiffre d'affaires en TTC, écrit à
+l'écran, avoirs soustraits.
+
+### Fait
+
+**1. Les fiches clients fusionnent** (`mergeImportedClients`, `trouverFicheExistante`). Avant :
+la table était reconstruite depuis le fichier. Une fiche absente disparaissait (sauf si sa
+DERNIÈRE commande était en cours), une fiche présente perdait email, prénom, préférences,
+source ; un client archivé revenait ; l'abonnement d'un client disparu ne se suspendait plus
+(« Sélectionne un client existant »), ce qui bloquait la purge. Maintenant chaque client du
+fichier retrouve sa fiche (clé complète, sinon nom + code postal parmi les fiches que la clé
+complète ne vise pas ; une fiche n'est prise qu'une fois) ; la fiche garde son identifiant et
+tous ses champs, une cellule **pleine** remplace la valeur, une cellule **vide** la laisse ; une
+fiche absente reste telle quelle, à sa place. Comptes `clientsImport` { created, updated,
+preserved } dans la réponse, l'historique, l'archive et le résumé de l'écran (« absentes du
+fichier, gardées telles quelles »). Une fiche recréée par le fichier reprend l'identifiant des
+commandes **orphelines** de même nom (la production en a une, du 03/06, retirée par un ancien
+import) : sinon le bon était refait en double.
+
+**2. Les ventes fusionnent aussi** (`fusionnerVentes`) : un bon du fichier (client + date)
+remplace ses lignes, les ventes des autres bons restent. `db.ventes = ventes` effaçait celles de
+tout bon absent du fichier, et le CA qui en venait.
+
+**3. Réimporter un bon** (`raisonImportIgnore`, complément du lot « pièges » du 24/09 : livrée,
+en tournée, prête, stock réservé). Seul un bon **importé, encore à préparer**, suit le fichier.
+Ne sont plus réécrites : la commande **en préparation** même sans réservation, l'**annulée**, la
+commande **saisie au terrain** (acceptée bloquée sans réservation, décision 11 : elle devenait un
+autre produit en gardant son total), la **planifiée** et celle d'un **abonnement** avant
+confirmation. Le résumé nomme la raison de chacune.
+
+**4. Un nouveau client dont le téléphone (ou le nom et le code postal) est déjà celui d'une
+fiche.** Avant : la fiche prenait tout le formulaire (« EHPAD Les Tilleuls » devenait « Roux »,
+rue, email et notes vidés). Maintenant l'écran demande **avant d'envoyer** (dialogue
+`#doublonFicheDialog`) : « Rattacher la commande à « <fiche> » » (`clientId`, fiche prise telle
+quelle) ou « Créer une nouvelle fiche » (`nouvelleFiche`) ; Annuler n'envoie rien, le formulaire
+reste rempli. Une fiche que la liste n'a pas (archivée, créée depuis) : le serveur répond 409
+avec la fiche, et la même question se pose. Les numéros se comparaient déjà normalisés depuis la
+v1.46.0 (`cleTelephone` : espaces, points, +33) ; le banc le garde.
+
+- *La file d'attente* (reprise du 26/09). Une écriture refusée (4xx) est retirée de la file : une
+  commande partie sans choix puis mise en file (réseau muet, session expirée) était **refusée au
+  rejeu et abandonnée** (mesuré : « 1 modification a été refusée par le serveur et
+  abandonnée »), de même pour les commandes en file d'une page d'avant la mise à jour. Le 409 ne
+  va donc qu'à une page qui le demande (`demanderSiDoublon`) ; sans demande ni choix, la commande
+  part sur une **nouvelle fiche** et l'existante ne bouge pas. La page met en file la version
+  « nouvelle fiche » de la commande (`corpsEnFile`, option facultative d'`apiFetch`) ; un choix
+  déjà fait (`clientId`) l'emporte. Une fiche en double se fusionne ; une commande perdue ne se
+  retrouve pas.
+
+**5. Le chiffre d'affaires ne dépend plus du dernier fichier** (`montantTtcFige`,
+`figerMontantsImportes`). 197 commandes sur 224 en production n'avaient de montant ni sur elles
+ni sur leurs lignes : leur CA se relisait dans `db.ventes`, et un fichier du seul mois courant
+mettait les mois passés à 0. **Migration unique et idempotente** (au démarrage, et avant chaque
+import) : le montant TTC des commandes dont le CA venait des ventes est figé sur elles
+(`montantTtc`), le CA de chaque mois ne change pas, l'historique le dit une fois. L'import fige le
+montant de chaque bon ; un bon identique reprend le montant du fichier (un avoir ajouté dans
+Ximi se soustrait ; le résumé le compte). **Décision 7** : montant TTC **signé** (un avoir se
+soustrait) ; une ligne HT seule n'est plus additionnée (« sans montant ») ; « TTC » écrit sur le
+tableau de bord, l'Analyse (CA du jour, de la semaine, du mois, panier moyen) et la fiche client.
+
+**6. Les lignes du fichier.** « 18/05/2026 10:30 » est le 18/05 (une heure après une date FR est
+acceptée) ; « Date facture », « Date commande », « Date de vente » sont des colonnes de date ; une
+date **écrite mais illisible** met la ligne en erreur (elle datait le bon du jour de l'import) ;
+sans date, le repli documenté reste. Une quantité vide ou illisible met la ligne en erreur (elle
+valait 1) ; 0 reste une quantité. Une ligne sans client ou sans produit est en erreur (plus de
+commande « Client sans nom »). Le résumé et l'historique disent chaque cause (`lignesEnErreur`).
+
+### Aucune donnée perdue : les preuves
+
+`test/e2e/import-fusion-production.spec.js`, par l'API, avant / après : fiches (et 18 champs CRM),
+commandes (statut, lignes, montant), ventes, abonnements, rappels, CA de chaque mois ; pour un
+import **complet**, **partiel** (le mois le plus vendu) et **vide** (l'en-tête seul) ; la
+migration au démarrage, puis un redémarrage qui ne change rien.
+
+- **Base de la forme de la production** (`jeu-production.js`, enrichi de fiches CRM, de deux
+  archivées, de trois prospects absents du fichier, d'un abonnement et d'un rappel) : 158
+  commandes figées sur 224, CA des 12 mois égal à l'ancien calcul (refait par le banc depuis les
+  données brutes) ; complet : 90 fiches complétées, 10 gardées, 1 recréée (l'orpheline, sans
+  commande en double) ; partiel : 21 / 79 ; vide : 100 gardées ; 429 ventes avant et après.
+- **Base écrite par v1.45.1** (`SEREO_BASE_SQLITE`, worktree jetable : v1.45.1 importe le fichier
+  complet, sert le CRM — 12 fiches enrichies, 2 archivées, 3 prospects, un abonnement, un rappel,
+  une commande terrain d'un nouveau client —, puis on relève le CA qu'elle affiche) : 102 fiches,
+  226 commandes, 429 ventes ; 2 commandes figées au démarrage (v1.45.1 avait réécrit les lignes
+  des bons au réimport, avec leurs montants) ; **CA des 12 mois égal à celui qu'affichait
+  v1.45.1** (`SEREO_BASE_CA`) ; complet : 91 / 11, 192 bons identiques dont le montant figé égale
+  l'ancien ; partiel : 21 / 81 ; vide : 102 gardées. La base source n'est pas modifiée (même
+  SHA-256 avant et après).
+
+Le banc compare le montant de chaque commande (figé, sinon l'ancien calcul) : un montant figé faux
+d'un euro sur les bons identiques le fait rougir (962 lignes).
+
+### Réserves
+
+- La liste `produits` et le relevé `ordersByDate` d'une fiche **citée** par le fichier sont
+  refaits depuis le fichier, comme avant : relevé interne, non envoyé à l'écran
+  (`/api/crm/clients` les retire) ; `produits` ne sert qu'à la commande de repli d'une fiche qui
+  n'a aucune commande.
+- Le compte « 197 sur 224 » vient de la chasse (production) ; il n'est pas remesuré ici. Le jeu de
+  la forme de la production en fige 158, la base v1.45.1 en fige 2.
+- Une commande rejouée par la file sur un doublon crée une fiche en double (voulu : à fusionner à
+  la main dans le CRM).
+
+### Bancs
+
+Unitaires : `import-fusion-clients`, `import-verrous`, `commande-doublon-fiche`, `ca-fige`,
+`import-lignes` (aide `aide-import-ventes.js`) ; `api.test.js` « virgule en trop » part d'une
+commande encore à préparer (il juge la clé secondaire, pas le verrou). e2e :
+`import-clients-fusion` (port 3602 : résumé des fiches, réimport d'une commande terrain,
+« rattacher », « nouvelle », Annuler et fiche archivée, **commande en file rejouée**, « TTC » et
+avoir, lignes en erreur) et `import-fusion-production` (port 3603). Chaque banc rougit sur
+`5b52268` pour sa cause (fiche supprimée, email vidé, désarchivé, pause refusée, lignes
+remplacées, 201 au lieu de 409, montant non figé, « Chiffre d'affaires livré » sans TTC, bon daté
+du jour de l'import…) ; celui de l'orpheline sur son parent ; celui de la file sur le code
+d'avant la reprise. Trois mutants de la reprise rougissent chacun pour sa cause : la page met en
+file le corps envoyé (commande abandonnée), la page ne demande plus la question (pas de
+dialogue), le serveur refuse sans demande (409).
+
+Code vérifié : `b35009d`. `npm run check` ; `npm test` **806/806** (deux passages d'avant : un
+banc de durée sous la charge des e2e, `C2.stock.a`, vert 3 fois sur 3 au calme ; un
+`ECONNRESET` de `lot5-rapidite`, intermittent aussi sur `5b52268`, 1 fois sur 10 : antérieur au
+lot). e2e : le banc « aucune donnée perdue » sur la base v1.45.1, **4/4** ; les bancs du lot et
+leurs voisins — `import-*`, `pieges-import-validation`, `pieges-tournee`, `commandes`,
+`clients*`, `donnees-utiles`, `operations`, `carte-ca-remplie`, `tableau-de-bord-relecture`,
+`a-recommander`, `parcours-simplifies`, `hors-ligne`, `livreur-ne-perd-rien`,
+`tournee-hors-ligne`, `chargement-instantane`, `rendu-a-l-affichage`, `poids-reseau`,
+`squelette`, `etats-limites`, `ecrans-sans-planche`, `navigation-mobile`,
+`integration-lots-1-5`, `barre-laterale-finitions` — **298/298** (`rendu-a-l-affichage` rejoué
+seul : son port 3562 était pris par un autre worktree). Non lancé : `numerotation-admin` (serveur
+authentifié, hors du lot).
+
+### Relecture adverse du 26/09 — le sort de chaque défaut
+
+Relecture de `a7554de`. Quatre défauts, tous vrais, tous corrigés, chacun avec son banc rouge sur
+`a7554de`.
+
+1. **Important — la commande pouvait encore se perdre au rejeu** (`48c7704`). Le chemin que la
+   reprise disait fermer : la page envoie avec `demanderSiDoublon` et la clé `X-Sereo-Geste` K,
+   le serveur trouve une fiche que la liste n'avait pas et répond 409 ; `gesteIdempotent`
+   enregistrait ce 409 comme **la** réponse de K. Si elle se perdait (4G, délai de 30 s), la file
+   gardait l'écriture avec la même clé K et le corps « nouvelle fiche » : le serveur rendait
+   `409 {rejoue}` sans lire le corps, la file retirait tout 4xx. Le 409 « doublon de fiche » est
+   une **question**, rien n'est appliqué : sa clé n'est plus enregistrée (`erreur.question` →
+   `res.locals.gesteSansEffet`). Le rejeu est traité ; la clé prend alors sa réponse (201), et un
+   renvoi suivant est rejoué, pas refait. Le banc e2e de la reprise coupait la requête **avant**
+   le serveur (aucune clé) ; le nouveau laisse le serveur traiter (`route.fetch()`) puis coupe la
+   réponse.
+2. **Important — une ligne en erreur réécrivait un bon déjà importé** (`a8247ea`). Jusqu'au 25/09
+   une quantité vide valait 1 et une ligne sans produit restait dans le bon. Au réimport du
+   fichier cumulatif, les seules lignes lisibles remplaçaient les lignes de vente du bon et la
+   commande encore à préparer : un produit en sortait, son montant baissait, le résumé ne disait
+   qu'« 1 ligne écartée ». Un bon **incomplet** du fichier (une ligne sans quantité ou sans
+   produit dont le client et la date se lisent) déjà connu est laissé tel quel : commande non
+   réécrite (raison `ligne_en_erreur`, « une ligne de ce bon est en erreur dans le fichier »),
+   lignes de vente gardées. Un bon nouveau est créé avec ses lignes lisibles, comme avant. La
+   fusion des ventes passe après la décision sur les commandes. Une date illisible ne dit pas le
+   bon (jusqu'au 25/09 la ligne allait dans un bon daté du jour de l'import) : non concernée.
+3. **Mineur — une adresse changée dans Ximi doublait les ventes** (`8b1313b`). Le bon d'une vente
+   se reconnaissait à l'adresse complète ; la fiche et la commande se retrouvaient (nom + code
+   postal), les anciennes lignes restaient et les nouvelles s'y ajoutaient, pour toujours. Une
+   ancienne vente prend la clé du bon du fichier quand sa fiche est **sûre des deux côtés** (une
+   seule fiche porte son adresse complète ; le fichier rattache son bon de même date à cette
+   fiche par la clé complète ou par un nom + code postal qu'aucune autre fiche ne partage) :
+   l'identité de la commande. Sinon, sa clé reste la sienne : on garde plutôt que d'effacer.
+4. **Mineur — « Planifier la suite » d'une commande orpheline créait une fiche en double**
+   (`14e2b28`). `replanOrder` n'a personne à qui poser la question : il rattache à la fiche au
+   même téléphone (ou nom + code postal), prise **telle quelle** (option interne
+   `rattacherSiDoublon`, jamais lue dans une requête). Appelants recensés : la route
+   `/api/planned-orders` et `createCustomerOrder` (la page demande), les abonnements
+   (`operations-api.js` : `clientId` seul, sans nom ni téléphone — inchangés).
+
+Réserves de la relecture :
+
+- Un **nom** ou un **code postal** changé dans Ximi ne retrouve pas la fiche (clé complète et nom +
+  code postal diffèrent) : une nouvelle fiche et une nouvelle commande par bon, et ses ventes en
+  plus des anciennes. C'était déjà le cas des fiches et des commandes avant le lot ; le correctif
+  3 n'y touche pas (le rattacher au téléphone risquerait d'effacer les ventes d'un autre client
+  au même standard).
+- Un homonyme au même code postal dont l'adresse change garde ses anciennes lignes (doublon) :
+  choix délibéré, aucune vente d'un autre client ne peut disparaître.
+
+Bancs ajoutés : `commande-doublon-fiche` (même clé : 409 puis « nouvelle fiche » → 201, puis
+renvoi rejoué ; commande orpheline replanifiée et son témoin), `import-lignes` (quantité vide,
+sans produit ; témoins : bon corrigé, bon nouveau), `import-fusion-clients` (rue, ville
+changées ; deux témoins homonymes — le second mord le mutant « nom + code postal toujours sûr »),
+e2e `import-clients-fusion` (409 traité puis réponse perdue ; le résumé nomme `ligne_en_erreur`).
+
+Code vérifié : `8b1313b`. `npm run check` ; `npm test` **817/817** (806 + 11 nouveaux). e2e :
+`import-clients-fusion`, `import-fusion-production`, `pieges-import-validation`, `hors-ligne`,
+`livreur-ne-perd-rien`, `tournee-hors-ligne`, `donnees-utiles`, `commandes`, `clients`,
+`clients-mobile`, `operations`, `carte-ca-remplie`, `tableau-de-bord-relecture`,
+`chargement-instantane`, `integration-lots-1-5` — **177/177** ; le banc « aucune donnée perdue »
+sur la base écrite par v1.45.1, **4/4**, mêmes comptes qu'avant la relecture, base source
+inchangée (même SHA-256).
+
+## 25/09 — Stock et abonnements (chasse aux défauts du 24/09, décision 8)
+
+Branche `fix/stock-et-abonnements`, partie de `5b52268` (v1.46.0 + la performance, PR #184).
+Constats de la chasse aux défauts du 24/09, angle « métier » (identifiants du journal de la
+chasse : `7.n`) ; décision 8 de Thomas (24/09, recommandation acceptée). Chaque constat a été
+**rejoué sur `5b52268` avant d'y toucher** (scripts de la chasse, `chasse/metier/b*.js`, pointés
+sur ce code) : tous encore présents, sauf 7.14, corrigé à moitié par v1.46.0 (l'écran « À
+recommander » compte déjà le besoin non déduit ; `/api/recommendations` non).
+
+### Fait
+
+- **7.1 — La commande terrain ne se bloque plus elle-même.** Saisie chez le client ou planifiée
+  confirmée, une commande sort son stock du rayon et reste « à vérifier » (à préparer). Absente
+  de `RESERVED_ORDER_STATUSES`, elle était réévaluée contre le rayon qu'elle venait de réduire :
+  6 pris sur 10, « 6 demandés pour 4 », rangée « Bloquées », « Passer en préparation » grisé,
+  « Réservé 0 » au Stock, « Commande bloquée » au tableau de bord. La réservation se lit
+  désormais **sur la commande** : `stockReserveActif(order)` = `stockReservedAt`, ni livrée ni
+  annulée (`enrichOrder`, `buildStockMetricsIndex`, `calculateReservedStock`) ; la liste de
+  statuts est retirée. Ferme aussi l'écart « Réservé ne compte pas une commande confirmée » du
+  24/09 (section « Le filet de sécurité », « Ce qui reste »).
+- **7.3 — Deux lignes du même produit se partagent le rayon.** `analyzeOrderStock` fait prendre
+  chaque ligne dans ce que les précédentes du même produit ont laissé (`available` d'une ligne =
+  ce qui reste pour elle ; une ligne seule : le rayon, comme avant) : 3 + 3 sur 5 est « Bloquée —
+  Il manque 1 article », la préparation est refusée. La réservation et la libération sortent et
+  rendent **la somme par produit** (`quantitesParProduit`), écrite sans remise à zéro : avant, le
+  rayon tombait à 0 (une unité perdue) et la libération en rendait 6 ; un rayon négatif
+  (livraison acceptée sur stock insuffisant) remonte de ce qui est rendu au lieu de sauter à 0.
+- **7.12 — `PATCH /api/orders/:id` sort le stock.** Une commande importée, à vérifier ou validée
+  qu'une transition fait entrer en préparation (ou au-delà) réserve comme « Passer en
+  préparation » ; 400 « Stock insuffisant » si le rayon ne couvre pas. Avant : en préparation puis
+  livrée, rayon inchangé. Une commande « à reprogrammer » libérée à la main l'est aussi quand elle
+  revient **en préparation** (relecture adverse, voir plus bas) ; vers « en livraison » ou
+  « livré », sa livraison reprend le stock (`reprendreStockLibere`).
+- **7.14 — `/api/recommendations`** compte le besoin non encore sorti du rayon
+  (`quantityNeededNotDeducted`, celui de l'écran depuis le 24/09) : 7 sortis, rayon 3, seuil 5 →
+  **2** (avant : 4). Sa règle « sous le seuil seulement » ne change pas (écart du 24/09).
+- **7.13 — Le journal des mouvements reçoit tout ce qui change le rayon.** Sortie d'une commande
+  (« Sortie pour la commande CMD-2026-012 (EHPAD …) »), retour au rayon (« Rendue au rayon :
+  commande … (commande annulée | commande planifiée annulée | purge des bons de commande |
+  libération manuelle | abonnement mis en pause | abonnement arrêté | le motif saisi) »), livraison
+  reprise après libération, livraison acceptée sur stock insuffisant (« Livrée sur stock
+  insuffisant : commande … (origine) », négatif compris), import du stock dont la colonne
+  Quantité **change** le rayon (« Import du stock (fichier.xlsx) », « … : produit créé ») ; un
+  import qui ne change rien n'écrit rien. Chaque mouvement porte `orderId` (colonne
+  `reference_commande`) et `numero` ; l'auteur est celui de la requête (`createdBy`, posé par le
+  lot « données utiles »). Le journal de Paramètres écrit « — » pour une quantité qui n'existait
+  pas. L'état vide des « Mouvements récents » dit « Les entrées et sorties du stock apparaîtront
+  ici. » (plus « Les ajustements manuels »).
+- **7.10 — Une commande annulée annule ses rappels.** Planifiée annulée (`PATCH
+  /api/planned-orders/:id`) ou annulée depuis l'écran Commandes (`PATCH /api/orders/:id`) : ses
+  rappels encore à faire passent « annulé » (« Commande annulée »), le prochain rappel du client
+  est recalculé ; ses autres rappels ne bougent pas (`annulerRappelsDeLaCommande`).
+- **7.11 — Un numéro attribué ne revient jamais.** La purge des bons retient, avant de vider,
+  le plus grand numéro de chaque série (`settings.numerosAttribues` : « CMD-2026 » en remise
+  annuelle, « CMD » en compteur continu) ; `generateOrderNumber` et la numérotation des anciennes
+  commandes sans numéro partent du plus grand des deux. Avant : CMD-2026-001 et l'identifiant
+  `cmd-cmd-2026-001` d'une commande purgée, qu'un rappel survivant visait alors.
+- **7.15 — « Prospects convertis ce mois »** ne compte qu'un client qui était **prospect** : aucune
+  commande livrée ni en cours avant celle-ci (une planifiée non confirmée, une annulée, un
+  brouillon ne font pas un client) — commande terrain et confirmation d'une planifiée.
+- **7.6 / décision 8 — Abonnements.**
+  - *Pause ou arrêt* (`PATCH /api/subscriptions/:id`, statut qui quitte « actif ») : les
+    commandes déjà générées et pas livrées sont **annulées** avec leurs rappels ; le stock
+    réservé par une échéance confirmée revient au rayon (journal). Une commande déjà en
+    préparation, prête ou en livraison suit son cours (la machine d'état ne l'annule pas). La
+    réponse porte `suspension: { annulees, gardees }` (jamais écrit sur l'abonnement) ;
+    l'historique le dit ; l'écran aussi : « Abonnement mis en pause : 1 commande déjà créée
+    annulée (CMD-2026-011). » (bouton du sheet et éditeur).
+  - *Changement de fréquence ou reprise* : l'abonnement reçoit une **date d'effet**
+    (`effectiveFrom`, le jour de Paris ; jamais lue dans la requête). `schedule()` ignore les
+    échéances d'avant qui n'ont pas de commande ; `POST /api/subscriptions/:id/orders` refuse de
+    les créer (400). Avant : 14 → 7 jours faisait ressortir 6 échéances « en retard » déjà
+    couvertes par l'ancienne cadence, proposées à la génération (double livraison) ; une reprise
+    après deux mois de pause, 2 (3 au 25/09, la troisième échue le 22).
+  - Une commande annulée **par la pause** porte `annuleeAvecAbonnement` (gardé par
+    `normalizeOrder`) : elle ne retient plus son échéance ; l'abonnement repris, l'échéance à venir
+    se génère de nouveau. Une commande annulée à la main retient toujours la sienne (échéance
+    sautée, comme avant).
+  - Une commande déjà générée que la nouvelle cadence ne porte plus **reste au calendrier**
+    (avant : invisible à côté des nouvelles échéances, une double livraison que rien ne montrait).
+    Elle n'est pas annulée : c'est au bureau de choisir.
+
+### Décisions prises dans le lot
+
+- **Ce que « non livrée » annule** : les commandes que la machine d'état laisse annuler
+  (brouillon, planifiée, à confirmer, validée, à vérifier). Annuler une commande en préparation ou
+  dans une tournée casserait la tournée et mentirait sur le carton préparé : elle est nommée.
+- **Une pause est réversible pour l'avenir** : sans le marqueur, pause puis reprise la veille
+  d'une échéance l'aurait perdue pour toujours (la commande annulée la retenait).
+- **La date d'effet n'est posée que par la fréquence ou la reprise** (la décision). Changer la
+  première date d'un abonnement, ou en créer un avec une date passée, garde l'ancien comportement
+  (échéances passées « en retard ») : ni l'un ni l'autre n'est dans la décision.
+- **Le plancher des numéros vit dans les réglages**, retenu par la purge, seul chemin qui retire
+  des commandes. Les identifiants restent dérivés du numéro (`cmd-<numéro>`) : un numéro qui ne
+  revient pas suffit.
+
+### Écarts nommés
+
+- Les rappels d'une commande **purgée** restent en base (la purge ne touche pas `relances`) ; ils
+  ne visent plus jamais une autre commande, mais le client est introuvable. Lot « purge » (la
+  décision 5 y est traitée par un autre lot).
+- Un `PATCH` d'abonnement mis **en file hors ligne** annule les commandes au moment où il
+  repart, pas au moment du geste.
+- `CACHE_NAME` non changé (consigne) : `app.js` et `operations.js` ont bougé, l'intégration le
+  monte.
+- Le jeu « forme de la production » a 4 commandes **livrées** avec deux lignes du même produit :
+  au premier démarrage, leurs lignes calculées (`stockLines`, table `lignes_commande`) prennent
+  la nouvelle répartition (affichage d'une commande livrée, sans effet).
+- Le journal des mouvements n'a pas de rétention (une réservation et sa libération font deux
+  lignes) : lot rapidité / conservation.
+- `test/e2e/numerotation-admin.spec.js` vise le serveur authentifié commun (3101) : non lancé
+  ici ; sa moitié serveur (`comptes-connexion.test.js`, 403) est verte dans `npm test`.
+
+### Preuves rouges (ancien code `5b52268`, fichiers posés puis restaurés par copie ; cause lue)
+
+| Banc | Rouge sur `5b52268` |
+|---|---|
+| `stock-reservation-juste` — terrain 6 sur 10 | `{ canPrepare: false, stockStatus: 'insuffisant' }` au lieu de `{ true, 'reserve' }` |
+| — planifiée confirmée 6 sur 10 | idem |
+| — 3 + 3 sur 5 (API) | « 6 demandes pour 5 en rayon » : `bloquee` `false` au lieu de `true` |
+| — 3 + 3 sur 5 (import, avec et sans code) | `canPrepare` `true` au lieu de `false` |
+| — PATCH jusqu'à « livré » | `[['en_preparation',10,0],…,['livre',10,0]]` au lieu de `[…6,4…,['livre',6,0]]` |
+| — PATCH « prête » directe / rayon insuffisant | rayon 10 au lieu de 6 ; 200 au lieu de 400 |
+| — `/api/recommendations` | 4 au lieu de 2 |
+| `stock-journal-mouvements` (5 cas) | `actual: []` : aucun mouvement |
+| `commandes-rappels-et-numeros` — rappels | `[['a_faire','']]` au lieu de `[['annule','Commande annulée']]` (×3) |
+| — numéros | `CMD-2026-001` au lieu de `CMD-2026-003` ; `CMD-00001` au lieu de `CMD-00002` |
+| — conversions | 1 au lieu de 0 (×2) |
+| `abonnements-suspendus` (7 cas) | `['planifiee','stock_a_verifier']` au lieu de `['annulee','annulee']` (×2) ; `suspension` indéfini ; l'échéance garde `orderId` ; 6 puis 3 échéances « en retard » ; la commande du 15 absente du calendrier |
+| `stock-invariant` | ruptures « journal » dès la première préparation, « écran : Réservé 0 != 30 », « pD physique : rayon 0 + réservé 6 != 5 » puis « rayon 6 != 5 », « CMD-2026-006 pret_livraison sans stock sorti » |
+| e2e `stock-et-abonnements` | état vide : l'ancien texte ; terrain : groupe « Bloquées 2 » au lieu de « À préparer » ; pause (front neuf, serveur ancien) : « Abonnement mis en pause. » sans la commande |
+
+Témoins verts avant et après : commande importée non réservée qui dépasse le rayon (bloquée),
+2 + 2 sur 5, commande importée comptée dans le besoin, saisie à la main journalisée, numérotation
+sans purge, prospect converti, commande livrée de l'abonnement intouchée, modification sans date
+d'effet (la date de la requête ignorée), abonnement créé avec une date passée.
+
+**Mutants** (code commité, un à la fois, restauré par copie, empreinte vérifiée) : **23 sur 23
+tués** — la règle de réservation par liste, le partage du rayon retiré, le PATCH sans
+réservation, la recommandation sur `quantityNeeded`, chacun des quatre journaux (réservation,
+libération, import, livraison sur stock insuffisant), chacun des deux rappels, la purge sans
+plancher, le plancher ignoré, chacune des deux conversions, la pause sans annulation, sans
+rappels, la date d'effet jamais posée, le calendrier sans elle, sans les commandes hors cadence,
+le marqueur ignoré, perdu par `normalizeOrder`, la date d'effet lue dans la requête, la
+génération d'une échéance passée acceptée.
+
+### Aucune donnée perdue
+
+Deux bases, instantané de toutes les tables SQLite à chaque étape (script hors dépôt,
+contre-témoin de l'instrument : une ligne retirée et une ligne modifiée sont vues) :
+**A.** le jeu « forme de la production » (`jeu-production.js`) chargé et écrit par v1.45.1 ;
+**B.** le semé ordinaire où v1.45.1 a écrit par son API deux échéances d'abonnement (l'une
+confirmée), une commande terrain de 6 sur 10 (bloquée par v1.45.1) et une planifiée avec rappel.
+
+- Premier démarrage du nouveau code : **aucune ligne disparue** ; seuls des champs calculés
+  changent (A : 4 commandes livrées, voir les écarts ; B : la commande terrain devient
+  `canPrepare: true`, « réservé »). Second démarrage : **identique** (horodatages d'`app_meta`
+  seuls) — idempotent.
+- Gestes du lot (pause, annulation d'une planifiée) : aucune ligne disparue ; ne changent que les
+  commandes de l'abonnement (annulées, marquées), leurs rappels (annulés), le produit dont la
+  réservation revient (A : sorti puis rendu, inchangé ; B : 96 → 100), le prochain rappel des
+  clients, et les lignes ajoutées au journal et à l'historique.
+
+### Bancs
+
+`test/stock-reservation-juste.test.js` (11), `test/stock-journal-mouvements.test.js` (6,
+authentification allumée : l'auteur), `test/commandes-rappels-et-numeros.test.js` (9),
+`test/abonnements-suspendus.test.js` (10), `test/stock-invariant.test.js` (1 parcours, 20 étapes,
+4 produits, 3 égalités, plus les commandes préparées), `test/e2e/stock-et-abonnements.spec.js`
+(port 3604, 3 cas).
+
+**Exécutions** (arbre final) : `npm run check` ; `npm test` 805/806 — le rouge est
+`donnees-utiles.test.js` « journal — 50 par page », qui dépend de l'heure : sa ligne « écrite
+entre deux pages » est datée de maintenant, ses lignes semées d'aujourd'hui 08:00 UTC ; entre
+minuit à Paris et 08:00 UTC, maintenant est plus ancien qu'elles (rouge identique sur `5b52268`
+à 22:02 UTC, hors lot). e2e : stock, stock-a-plat, stock-negatif, stock-categories,
+preparation-lignes, preparation-mobile, operations, abonnements, abonnements-lignes,
+abonnements-mobile, abonnement-creation, a-recommander, tableau-de-bord,
+tableau-de-bord-relecture, commandes, donnees-utiles : **182/182** (dans le même lancement,
+`numerotation-admin` : rouge d'environnement, `ERR_CONNECTION_REFUSED` sur 3101, voir les écarts) ;
+le nouveau banc : **3/3** ; tabs,
+livreur-ne-perd-rien, hors-ligne, chargement-instantane, poids-reseau, rendu-a-l-affichage,
+un-seul-dessin, tournee, tournees-debloquees, tournee-hors-ligne, barre-laterale-finitions,
+parcours-simplifies, integration-lots-1-5, pieges-tournee, etats-limites, smoke : **142/142**.
+
+### Relecture adverse (25/09) : le sort de chaque défaut
+
+Six défauts relevés sur `d54298a` (deux importants, quatre mineurs), chacun vérifié sur ce code.
+
+- **Important — au bureau, le détail d'une commande réservée disait un faux manque. Vrai,
+  corrigé.** La carte de préparation du bureau (`renderStockLines`) comparait chaque ligne au
+  rayon que la commande avait elle-même réduit : commande terrain de 60 sur 100, « Besoin 60 ·
+  Dispo 40 » en rouge. Une commande « réservé » dit désormais « Besoin 60 · Réservé » (`line-ok`),
+  comme le téléphone (`ligneDeProduitPreparation`) ; un produit introuvable au stock, qui n'a rien
+  pu réserver, garde « Dispo ? » en rouge. Banc : `stock-et-abonnements.spec.js` (rouge sur
+  `d54298a` : `line-danger`, « Besoin 60 · Dispo 40 ») et un témoin, la commande bloquée qui garde
+  « Besoin 50 · Dispo 40 » en rouge (il tue le mutant « toujours réservée »).
+- **Important — rien ne répare les données d'avant la mise à jour. Vrai dans le code, sans objet
+  dans les données mesurées : non codé.** Un abonnement déjà en pause garde sa commande générée et
+  son rappel ; une planifiée déjà annulée garde son rappel « à faire » ; une fréquence changée
+  avant n'a pas de date d'effet (prouvé hors dépôt : rien ne bouge au démarrage). Observation de
+  la production du 24/09 (v1.45.0, lecture seule, script de la chasse `prod-compte.js`) :
+  0 abonnement, 0 relance, 0 planifiée d'un abonnement en pause ou arrêté, 0 rappel à faire sur
+  une commande annulée ; 224 commandes, toutes livrées. Réparer les commandes serait
+  **irréversible** (`annulee` n'a aucune sortie) sur une intention ambiguë (sous l'ancien code, une
+  commande gardée après une pause a pu l'être exprès) ; réparer les rappels à chaque démarrage
+  réannulerait un rappel rouvert à la main ; la date d'un ancien changement de fréquence n'est
+  écrite nulle part. Chemin à la main, prouvé : réactiver puis remettre en pause annule la
+  commande générée et son rappel ; un rappel isolé se clôt depuis les relances. À refaire
+  compter avant le déploiement ; si le compte n'est plus nul, à faire trancher par Thomas.
+- **Mineur — `PATCH` vers la préparation d'une « à reprogrammer » au stock libéré ne sortait pas
+  le stock. Vrai, corrigé.** « Passer en préparation » le sortait ; `PATCH` non : préparée, en
+  carton, pendant que le rayon comptait encore ses articles. `commandeQuiPartEnPreparation` couvre
+  désormais une commande libérée à la main (`stockReleaseReason`) qui va **en préparation,
+  terminée ou prête** ; rayon insuffisant : 400, comme le geste. Pas vers « en livraison » ni
+  « livré » : la livraison reprend le stock, même sur un rayon insuffisant (décision du 23/09), et
+  la tournée relivre une commande libérée sans le reprendre au départ. Une première version
+  étendue à « en livraison » refusait ce que `stock-journal-mouvements.test.js` garde : ramenée.
+  Bancs : trois cas et deux témoins dans `stock-reservation-juste.test.js`, une étape de
+  l'invariant (rouge sur `d54298a` : « CMD-2026-006 en_preparation sans stock sorti du rayon »).
+- **Mineur — une commande générée hors de la nouvelle cadence n'est pas annulée. Vrai, gardé.**
+  La décision 8 porte sur les échéances **passées** ; cette commande est à venir, et le calendrier
+  la montre à sa date (avant le lot, elle en disparaissait). L'annuler d'office serait
+  irréversible et hors de la décision. Question pour Thomas : l'annuler automatiquement ?
+- **Mineur — pause ou arrêt n'annulent pas une commande déjà en préparation, prête, en livraison
+  ou à reprogrammer. Vrai, gardé** (décision prise dans le lot, plus haut). La machine d'état n'a
+  pas « annulée » depuis ces statuts ; en livraison, la commande est dans une tournée (gardes de
+  tournée) ; en préparation, le carton est fait. L'écran la nomme (« … suit son cours
+  (CMD-…) »). Question pour Thomas, si « non livrée » doit aller plus loin.
+- **Mineur — « Prospects convertis » compte une fiche créée « client actif » sans commande.
+  Vrai, non corrigé.** Lire le statut de la fiche déplace l'erreur : la fiche créée par le
+  formulaire d'abonnement (`operations.js`, `crmStatus: "client_actif"`) ne compterait plus, celle
+  créée par une commande terrain (« prospect » par défaut) si ; un prospect passé « client actif »
+  à la main avant sa première commande ne compterait jamais. Il faut d'abord une définition ;
+  défaut proposé : « converti = la fiche quitte prospect pour client, à la main ou par sa première
+  commande ; une fiche créée client n'est pas une conversion ».
+
+**Mutants** (code commité, un à la fois, restauré par copie) : l'affichage « toujours réservée »
+(tué par le témoin bloqué) ; la reprise jamais faite (3 cas et l'invariant) ; étendue à « en
+livraison » (`stock-journal-mouvements`) ; étendue à « livré » (le témoin « en livraison →
+livré »). Ce témoin est né d'un mutant qui survivait à la première version (la restriction au
+statut d'origine, que rien ne distinguait).
+La clause `consumed_by_delivery` n'est atteignable par aucun chemin (la correction de statut
+l'efface avant tout retour en livraison) : gardée par symétrie avec `reprendreStockLibere`.
+
+**Exécutions** (arbre final de la correction) : `npm run check` ; `npm test` 809/811, deux fois,
+avec des rouges différents d'un lancement à l'autre, tous verts seuls (fichier relancé seul) et
+sur des chemins que la correction ne touche pas : `C2.stock.a` (306,7 ms pour 250), puis
+`meilleur-trajet` (114,3 ms pour 100) et `lot5-rapidite` (`ECONNRESET`), sous la charge d'une
+machine partagée (86 processus Node). e2e, port 3624 : stock-et-abonnements (4),
+preparation-lignes, preparation-mobile, commandes, parcours-simplifies,
+parcours-simplifies-telephone, interface-finitions, tabs, smoke, un-seul-dessin,
+rendu-a-l-affichage, tournees-debloquees, stock, stock-negatif, operations : **195/195**
+(`parcours-simplifies` relancé seul : son port semé 3528 était pris par un autre processus au
+premier lancement, 23/23 ensuite).
+
+## 25/09 — Rapidité du serveur, CI et image
+
+**Le constat (chasse aux défauts du 24/09, section 2).** Une écriture coûtait ~90 ms en
+production, dont la moitié à reconstruire la table de recherche du catalogue (code et nom
+normalisés de chaque produit) **pour chaque commande** : sonde de la chasse, 46,7 ms sur 89 ; à
+dix fois la base, 717 ms sur 1 061. Quatre chemins recalculaient tout deux fois (`syncWorkflow`
+juste avant `writeDb`, qui le refait) : l'ajustement de stock, l'import de stock, l'import de
+ventes, le démarrage. Chaque écriture relisait, décodait, resérialisait et hachait **toutes** les
+tables — historique, mouvements, ventes, archives — pour n'en écrire que deux ou trois lignes.
+Les routes de l'ouverture relisaient chacune en base la table que la voisine venait de lire (huit
+les commandes, trois les ventes, quatre les clients). La CI e2e : 723 tests, un ouvrier, 37 min
+sur une machine, et 31 exécutions devenues inutiles en 7 jours. L'image : une couche de 24,8 Mo
+qui recopiait `node_modules` et le code (`chown -R /app` placé après la copie) et 7,8 Mo de
+`design/` envoyés en production.
+
+**Déjà fait avant ce lot** (vérifié sur `5b52268`, lots du 24/09) : la lecture paresseuse (une
+requête ne lit que ses tables), la liste CRM sans `orderHistory` ni `ordersByDate`, les 12
+mouvements de stock (`limite`), `test/` et `agents/` hors de l'image.
+
+### Ce qui est posé
+
+- **Le catalogue une fois par écriture** (`b0040af`). `syncWorkflow` construit
+  `stockLookup(db.stock)` une fois et la passe à `enrichOrder` puis `analyzeOrderStock(order,
+  stock, lookup)`. Un appel isolé (un geste sur une commande) la construit encore lui-même
+  (paramètre par défaut). Rien ne touche au stock pendant l'enrichissement : la table vaut pour
+  toutes les commandes (doublons : le dernier l'emporte, comme avant).
+- **Le recalcul une fois** (`b0040af`). Les quatre `syncWorkflow` d'avant `writeDb` sont retirés.
+  Entre les deux, rien ne lit ce qu'il calcule : les comptes des messages d'import sont faits
+  avant ; le journal de récupération du démarrage ajoute une ligne ; le rognage des traces
+  arrondit lui-même la position.
+- **Une écriture n'écrit que ce qu'elle a lu** (`7a1adaa`). L'objet de la lecture paresseuse
+  porte `ETAT_DE_LECTURE` (un symbole non énumérable : invisible pour `{ ...db }`,
+  `JSON.stringify`, `Object.keys` — une copie par étalement n'en a pas, elle s'écrit donc en
+  entier, comme avant). `normalizeDb` ne normalise que les tables lues ; `persistDatabase` saute
+  une table dont aucune source n'a été lue — on n'y accède que par ses accesseurs, elle n'a pas pu
+  changer — et garde son état connu, **sans aucune suppression**. `addHistory` et
+  `recordStockMovement` passent par `ajouterEnTete` (`AJOUT_EN_TETE`) : la ligne attend, seule
+  écrite, au rang que `planSortOrders` lui donnerait (juste avant la première) ; lue ensuite dans
+  la même requête, la table l'a en tête, comme par `unshift`. Une fois écrite, elle n'attend plus
+  (correction du 26/09, ci-dessous). Réservé à `historique` et
+  `stockMovements` (seules sources de leur table), à une ligne qui a un `id` ; sinon, ou si les
+  rangs en base ne sont pas distincts, la table est lue comme avant. **La première écriture après
+  l'ouverture lit et récrit tout** : une base écrite par une version d'avant, ou restaurée (la
+  restauration rouvre un magasin neuf), sort normalisée par le code d'aujourd'hui. `relances`,
+  `deliverySectors` et `settings` sont toujours écrites : leur normalisation pose des défauts à
+  la lecture.
+- **La liste des clients et celle des rappels indexent leurs tables une fois** (`6b85064`).
+  `indexCrmParClient` : commandes, rappels et abonnés actifs par client, construits une fois pour
+  `GET /api/crm/clients` (avant : O(clients × commandes), la route la plus lente de l'ouverture) ;
+  même tri, stable, dans l'ordre de la table. La fiche seule garde le calcul direct.
+  `getReminderViews` : client et commande de chaque rappel par index, le premier trouvé comme
+  `find`.
+- **La vague de l'ouverture lit chaque table une fois en base** (`5d5c114`). `readPayloads` garde
+  le **texte** des lignes, par table, tant que la base n'a pas changé : génération avancée à
+  chaque COMMIT (et ROLLBACK) de ce magasin (`persistDatabase`, `migrateTraces`), `PRAGMA
+  data_version` pour les autres connexions. Chaque lecture décode ce texte à neuf : chaque requête
+  a ses objets. La mémoire s'oublie 5 s après la dernière lecture en base.
+  **Invariant à tenir** : une écriture future, par la connexion du magasin, sur une table que
+  `readPayloads` lit, hors `persistDatabase` et `migrateTraces`, doit appeler
+  `oublierLectures(database)` — sinon les lectures suivantes rendent l'état d'avant jusqu'au
+  prochain COMMIT ou 5 s de calme. Aujourd'hui il n'y en a aucune : les écritures directes du
+  magasin portent sur `utilisateurs`, `geocodages` et `gestes_recus`, que `readPayloads` ne lit
+  pas (grep du 26/09).
+- **La CI en quatre lots** (`4b23e16`). Matrice `e2e-lots` : `npm run test:e2e --
+  --shard=<lot>/4`, un ouvrier par machine comme avant (même charge, même garantie contre
+  l'instabilité née de la charge), `fail-fast: false`, un rapport par lot. Le verdict `e2e` garde
+  le nom **« Tests e2e (Playwright) »** (une protection de branche qui l'exige exige les quatre
+  lots), `needs: e2e-lots`, `if: ${{ always() }}` (rouge, pas « sauté », quand un lot échoue **ou
+  que l'exécution est annulée** — `!cancelled()` jusqu'à la correction du 26/09, ci-dessous),
+  vert seulement si `needs.e2e-lots.result == success`. `concurrency` : un groupe par PR, annulé
+  par une nouvelle poussée ; hors PR un groupe **par exécution** (`run_id`) — `main` n'est jamais
+  mis en file ni annulé, chaque commit garde son verdict.
+- **L'image** (`87fb5c8`, `46ef07d`). Les dossiers de runtime sont créés et donnés à `node`
+  **avant** les copies ; `USER node` avant `npm ci` ; `COPY --chown=node:node`. Mêmes
+  propriétaires qu'avant, sans la couche qui recopiait tout. `.dockerignore` : `design/`, `docs/`,
+  la documentation de la racine, `playwright.config.js`, les fichiers de release-please,
+  `.claude/`, et ce que laissent les bancs e2e (`test-results/` — traces et captures de données
+  semées —, `playwright-report/`, `pw-*.config.js`). Le serveur ne lit du dépôt que `server.js`,
+  `lib/`, `storage/`, `public/`, `package.json` et un éventuel `VERSION` (grep) ; `scripts/`
+  reste (`npm run migrate:sqlite`).
+
+### Mesures avant / après
+
+Avant = `5b52268` ; après = `5d5c114` (code serveur identique au dernier commit du lot). Jeu de
+forme production (`jeu-production.js`) multiplié : même catalogue de 218 produits, N fois les
+clients, commandes, tournées, ventes, historique, mouvements et archives (×50 : 11 200
+commandes, 51 800 lignes d'historique, base de 124 Mo). Chaque mesure sur une copie de la base,
+après une écriture d'échauffement ; deux tours alternés avant / après, médiane de toutes les
+valeurs (7 écritures et 3 imports par tour, ×50 : 3 et 1). Millisecondes, même machine, 25/09
+00:18–00:29.
+
+| Mesure | ×1 avant → après | ×10 | ×50 |
+|---|---|---|---|
+| Écriture sans changement (`readDb` + `writeDb`) | 130 → **17** | 1 146 → **208** | 6 241 → **987** |
+| Ajustement de stock (`PATCH /api/stock/:id`) | 194 → **29** | 1 925 → **158** | 10 774 → **1 258** |
+| Note CRM (`PATCH /api/crm/clients/:id`) | 133 → **44** | 1 050 → **275** | 6 234 → **1 385** |
+| Import de ventes, 429 lignes | 477 → **253** | 2 248 → **661** | 11 274 → **2 464** |
+| Import de stock, 218 lignes | 348 → **110** | 2 212 → **548** | 14 012 → **3 941** |
+| Mise en cohérence du démarrage | 195 → **83** | 1 590 → **559** | 10 852 → **2 895** |
+| Démarrage, jusqu'au premier `/healthz` 200 | 852 → **652** | 1 805 → **1 066** | 11 805 → **3 631** |
+| Rafale des 18 routes de l'ouverture | 160 → **100** | 975 → **640** | 6 517 → **2 724** |
+| Boucle bloquée pendant la rafale (max) | 106 → **66** | 887 → **559** | 6 229 → **2 489** |
+| `GET /api/orders` en 304 | 7 → 6 | 57 → **42** | 277 → **131** |
+
+Remesuré le 26/09 à ×10 (même méthode, machine chargée par d'autres bancs : temps absolus ~1,4 ×
+plus hauts) : écriture 1 599 → 280, ajustement de stock 2 376 → 274, note CRM 1 557 → 351, import
+de ventes 3 176 → 908, import de stock 3 562 → 912, démarrage 3 646 → 1 491, rafale 1 175 → 822,
+304 68 → 42 — mêmes rapports. Des temps : un ordre de grandeur, pas une promesse au pour cent.
+
+### Résultat identique à l'octet près
+
+Banc A/B, hors dépôt (il lui faut deux arbres de code) : chaque arbre joue le **même scénario**
+sur une **copie de la même base**, horloge figée et identifiants tirés d'un compteur — lecture
+des 23 routes de l'ouverture et des écrans, puis commande terrain, préparation, tournée, départ,
+« Livré », ajustement de stock, seuil, note CRM, relance, import de ventes de 429 lignes, import
+de stock, chaque geste suivi de la relecture des 23 routes : **311 réponses d'API**, puis le
+contenu entier de la base (toutes les tables, toutes les colonnes). Arbre `5b52268` contre le
+lot, rejoué le 26/09 sur `4f28c94` :
+
+| Base de départ | Réponses | Lignes en base | Résultat |
+|---|---|---|---|
+| Forme production ×1 | 311 | 3 515 | **identiques** (empreinte `b9a5a7e77bfbc4ba`) |
+| ×10 | 311 | 29 030 | **identiques** (`340a6f5fdb521941`) |
+| ×50 (empreintes par corps et par ligne) | 311 | 142 430 | **identiques** (`545572666e662b6f`) |
+| Écrite par v1.45.1 (construite puis « vieillie » par le même scénario joué par v1.45.1) | 311 | 3 569 | **identiques** (`9ef8fd3d9eff056d`) |
+
+Aucune ligne ne disparaît dans un arbre sans disparaître dans l'autre, table par table. Les
+ventes remplacées par l'import de ventes le sont **dans les deux arbres** : c'est le comportement
+d'avant (l'import de ventes remplace sa table), hors de ce lot. **Contre-témoin** : le lot muté
+pour perdre les lignes ajoutées en tête sans lecture (mutant W6 ci-dessous) donne **26 écarts**
+au même banc (12 lignes d'historique et 1 mouvement manquants, les réponses de
+`/api/historique` qui diffèrent) : l'égalité n'est pas celle d'un instrument aveugle.
+
+### CI : la durée attendue
+
+Lue dans une exécution réelle non coupée (run `36062309134`, 24/09, 723 tests, 36,9 min de tests,
+40 s de mise en place) : le reporter `github` écrit un caractère par test terminé sur des lignes
+horodatées, et un lot `--shard=i/4` est une tranche contiguë de la liste (`fullyParallel`). Lots
+de 209, 158, 183 et 173 tests (l'union des quatre `--list --shard=i/4` est la liste entière,
+723/723, aucun doublon — remesuré le 26/09) : **lot 1 entre 9,7 et 12,9 min**, lot 2 entre 7,2 et
+12,5, lot 3 entre 5,3 et 8,1, lot 4 entre 8,1 et 9,4 (dont le réessai d'un test instable) — les
+frontières ne sont horodatées qu'à ±3 min. Le verdict arrive donc en **~11 à 14 min au lieu de
+37,5**. Chaque lot refait la mise en place (~40 s de plus par lot et par exécution) ; le dépôt
+est public, les minutes ne sont pas facturées.
+
+### L'image, mesurée
+
+Construite avec le builder legacy (`DOCKER_BUILDKIT=0`, Docker 29.7.2) : avant `5b52268`, après
+`4f28c94` (image `1b3489f61f5d`, identique à celle construite le 25/09 — tout en cache).
+
+| | Avant | Après |
+|---|---|---|
+| Couche `mkdir … && chown -R node:node /app` | 25,2 Mo | 28,7 ko |
+| Couche du code (`COPY . .`) | 11 Mo | 2,45 Mo |
+| `/app` dans l'image | 25 Mo (dont `design/`, `docs/`, CHANGELOG…) | 16 Mo |
+| Image | 466 Mo | **424 Mo** |
+| Contexte envoyé au démon | 10,8 Mo | 2,4 Mo |
+
+Conteneur lancé (26/09) : `/healthz` 200 en 2 s, la base créée par `node` dans `/app/data` ;
+`/app`, `server.js`, `node_modules` et `data/backups` à `node:node`.
+
+### Bancs et preuves rouges
+
+- `test/rapidite-serveur.test.js` (18) : synchronisations comptées par chemin ; normalisations de
+  texte pendant une écriture ; tables relues par une écriture et par un geste (SQL compté) ; ligne
+  en tête puis table lue ; première écriture après réouverture ; éléments parcourus par `filter`
+  (liste des clients) et appels à `find` (rappels) ; relectures en base pendant la vague ;
+  témoins (la liste égale la fiche, l'analyse écrite égale l'appel isolé, écriture d'une autre
+  connexion vue, objets propres à chaque lecture) ; **120 pas au hasard** comparés après chaque
+  pas à une base réécrite d'un coup depuis un modèle.
+- `test/ci-lots.test.js` (3), `test/dockerfile-couches.test.js` (2), `test/dockerignore.test.js`
+  (le design, la documentation et les restes des bancs e2e exclus ; témoin : ce que le serveur lit
+  reste).
+- **Preuves rouges, rejouées le 26/09** (28 mutations : le correctif retiré, l'instrument gardé ;
+  restauration par copie, empreinte vérifiée ; chaque rouge est une assertion du banc attendu,
+  aucun plantage) : catalogue par commande (99 993 normalisations pour 225 commandes et 218
+  produits) ; `syncWorkflow` rajouté dans chacun des quatre chemins (« 2 synchronisations ») ;
+  écriture complète (`persistDatabase` ou `normalizeDb` qui lisent tout : « a relu abonnements,
+  mouvements_stock, ventes, historique, imports_archives ») ; historique par `unshift` ; première
+  écriture qui ne récrit pas ; **quatre mutants qui perdent ou déplacent des lignes** (ajouts en
+  queue, ajouts ignorés, rang décalé, ajouts non écrits) pris par les 120 pas ; index CRM ignoré
+  (23 487 éléments parcourus) ou tri inversé ; `find` des rappels (44 appels pour 22 rappels) ;
+  mémoire jamais servie, jamais oubliée au COMMIT, sans `data_version`, objets partagés ;
+  `ci.yml` d'avant (3 rouges), `if: always()` (ce rouge-là défendait l'erreur : c'est la forme
+  sûre, voir la correction du 26/09), un lot retiré, groupe par branche ; Dockerfile
+  d'avant ; `.dockerignore` d'avant et celui de `87fb5c8` (sans les restes des bancs e2e).
+- e2e (26/09, `4f28c94`, configuration locale sur 3628/3629, deux ouvriers) : les bancs des
+  écrans voisins et des garanties — `chargement-instantane`, `clients`, `commandes`,
+  `donnees-utiles`, `historique-lent`, `hors-ligne`, `integration-lots-1-5`,
+  `livreur-ne-perd-rien`, `numerotation-admin` (serveur authentifié par
+  `SEREO_E2E_AUTH_URL`), `operations`, `parametres`, `parcours-simplifies`, `performance`,
+  `pieges-import-validation`, `poids-reseau`, `rapidite-tournee`, `rendu-a-l-affichage`,
+  `sauvegardes`, `smoke`, `stock` — **240/240** ; le **lot 4/4 seul, sur une base neuve**
+  (comme une machine de la CI) : **173/173** (124, puis les 49 de `telephone-utilisable`
+  rejoués : son serveur semé n'avait pas démarré, le port 3524 était pris par un autre
+  processus pendant que d'autres lots jouaient leurs bancs, et le garde de `serveur-seme.js`
+  a refusé — un refus, pas un rouge du code).
+  `npm test` **793/793**.
+
+### Ce qui reste
+
+- **Les lots 1 à 3 n'ont pas été joués seuls** en local (consigne : pas de suite complète). Le
+  lot 1 est le début de la suite, comme une exécution non coupée ; le lot 4, la fin, joué seul
+  sur base neuve, passe. Le premier passage de la CI sur la PR montrera les quatre.
+- **Protection de branche** (à poser par l'intégrateur) : exiger « Tests e2e (Playwright) », le
+  verdict ; les lots s'appellent « Tests e2e (lot i/4) » et changeraient de nom avec leur nombre.
+- Le **premier** enregistrement après chaque démarrage lit et récrit tout, comme avant : c'est
+  voulu (base d'une version d'avant, ou restaurée) ; il est compris dans « démarrage ».
+- L'**import de ventes remplace** la table des ventes, avant comme après (banc A/B) : le lot
+  « données clients » traite les imports ; rien n'y change ici.
+- L'invariant de la lecture mémorisée (ci-dessus) : toute écriture directe future sur une table
+  lue par `readPayloads` doit oublier la mémoire.
+- À cinquante fois la base, un import de stock prend encore ~4 s et le démarrage ~3,6 s. Non
+  profilé ici ; candidat : `syncWorkflow` lui-même, qui renormalise toutes les commandes à
+  chaque écriture (non touché par ce lot).
+
+### Corrections après la relecture adverse (26/09)
+
+- **Le verdict e2e sautait quand on annulait l'exécution** (important, `86996cb`). Avec
+  `if: ${{ !cancelled() }}`, annuler l'exécution à la main pendant les lots (par exemple pour
+  économiser des minutes) faisait **sauter** « Tests e2e (Playwright) ». Or un job que sa condition
+  fait sauter rapporte « Success » et ne bloque pas une PR, même exigé (doc GitHub, « Using
+  conditions to control job execution », relue le 26/09). La PR devenait fusionnable sans
+  qu'aucun e2e ait jugé son dernier commit ; de même si un lot était rouge **puis** l'exécution
+  annulée (cas trouvé par le banc, pas par la relecture). Avant les lots, le job unique annulé
+  rapportait « cancelled », qui bloque. Désormais `if: ${{ always() }}` : annulé, il tourne et
+  dit rouge (lots « cancelled ») — il faut relancer. Une exécution périmée (nouvelle poussée)
+  rend ce rouge sur un commit qui n'est plus la tête de la PR : sans effet. La mise en garde de
+  GitHub contre `always()` vise les étapes qui peuvent rester bloquées (checkout…) ; ce job n'a
+  qu'un `test`. Coût (non mesuré) : un job court par exécution annulée, qui peut retarder d'autant
+  le départ de l'exécution suivante de la même PR (même groupe `concurrency`).
+  Le banc (`test/ci-lots.test.js`) ne verrouille plus une forme : un petit modèle des règles de
+  GitHub (sauté = succès ; sans condition = `success()` ; `always()`, `success()`, `failure()`,
+  `cancelled()` pour un job qui attend) joue cinq issues (lots verts, rouges, annulés, rouges puis
+  annulés, verts puis annulés) et exige que la protection lise un succès **si et seulement si**
+  les lots sont verts. Une expression qu'il ne sait pas évaluer le fait échouer. Témoin : il
+  refuse `!cancelled()` (2 issues) et l'absence de condition (3 issues). **Non mesuré sur une
+  vraie exécution annulée** (pas de poussée depuis ce lot) : si GitHub marquait le verdict
+  « cancelled » plutôt que « sauté », `!cancelled()` aurait bloqué ; `always()` bloque dans les
+  deux cas.
+- **Une ligne ajoutée en tête restait en attente après son écriture** (mineur, `f1115e5`). Le
+  même objet, lu ensuite, la montrait deux fois ; écrit une seconde fois, il échouait
+  (« UNIQUE constraint failed ») après avoir déjà écrit. Aucune route ne le faisait (un seul
+  `writeDb` par `readDb`, handler par handler, grep du 26/09) : un piège pour le prochain geste.
+  Après le COMMIT, `persistDatabase` dit à l'objet quelles lignes en attente sont écrites
+  (`ETAT_DE_LECTURE.enTeteEcrites`), et seulement celles-là. Bancs : relire puis récrire le même
+  objet, pour l'historique et les mouvements, avec un témoin que l'écriture n'a pas lu la table ;
+  les 120 pas au hasard vérifient aussi, après chaque écriture, que le même objet relu est le
+  modèle et que le récrire ne change pas la base.
+- **Preuves rouges** (fichier de `87f1247` remis, banc neuf gardé ; restauration par copie,
+  empreinte vérifiée) : `ci.yml` d'avant → « lots cancelled, exécution annulée : la protection
+  lit « success (sauté) » » et « lots failure, exécution annulée » ; `if` retiré → 3 issues ;
+  `sqliteStore.js` d'avant → `historique-relue` deux fois, « UNIQUE constraint failed:
+  historique.id (historique-recrite) », et au pas 4 des 120 pas `m-71`, `m-70` en double.
+- **Bancs** (26/09, sur `f1115e5`) : `npm run check` ; `npm test` **796/796** (793 + le témoin du
+  modèle de la protection + les deux suites « relire / récrire ») ; e2e voisins du magasin
+  (configuration locale sur 3628/3629, deux ouvriers) — `smoke`, `stock`, `historique-lent`,
+  `hors-ligne`, `chargement-instantane`, `livreur-ne-perd-rien`, `sauvegardes` — **71/71**, sans
+  réessai.
+
+## 25/09 — Robustesse et exploitation
+
+Lot 6 de la chasse aux défauts du 24/09 (sections 3 et 4 du rapport, et les constats bas de
+l'angle « exploitation »). Branche `fix/robustesse`, partie de `5b52268` (v1.46.0 et la
+performance). Ce qui change, pour Thomas : une panne de disque rare ne met plus toute l'application
+à terre sans que personne le voie, un redéploiement ne coupe plus un geste en plein vol, un geste
+confirmé survit à une coupure de courant, et un petit fichier Excel piégé ne fait plus redémarrer
+le serveur.
+
+### Une ligne illisible est mise de côté
+
+Avant : un seul caractère abîmé dans le texte JSON d'une ligne (erreur disque) faisait lever
+`JSON.parse` à chaque lecture de sa table. Depuis la lecture paresseuse, toutes les écritures
+(qui normalisent toutes les tables) et les pages qui lisent cette table répondaient 500, sans
+restauration (`quick_check` ne lit pas le contenu : ce n'est pas une corruption SQLite) et sans
+trace — pendant que Docker voyait le conteneur en bonne santé.
+
+Maintenant : la ligne est copiée, octets inchangés (`INSERT … SELECT`), dans la table
+`lignes_en_quarantaine` avec ce qui en dépend (lignes et livraison d'une commande ; tracé d'une
+tournée et livraisons de ses arrêts), puis écartée de la lecture. « Déjà copiée » se demande à la
+table, jamais à une mémoire du processus : une copie défaite par l'échec de l'écriture qui la
+portait se refait à l'essai suivant. Elle est écrite dans les journaux du serveur, inscrite au
+Journal (type « Stockage ») à l'écriture suivante, et comptée dans `/api/storage/status`
+(`lignesMisesDeCote`). Même traitement pour un tracé et pour les réglages (qui étaient remplacés
+par `{}` en silence), et pour une ligne illisible retirée par une table remplacée sans être lue
+(import, purge). Si la copie échoue, l'erreur d'origine remonte comme avant : rien n'est écarté
+sans copie. La seule commande d'un client, mise de côté, ne revient pas en « commande de repli »
+neuve du jour (`syncWorkflow`). Son numéro (et l'identifiant `cmd-<numéro>` qui en dérive) n'est
+jamais redonné à une commande suivante. Les arrêts de tournée qui la nomment vivent sans elle
+(`commandeDeLArret`) : la tournée démarre, l'arrêt se marque et se corrige ; ni le statut de la
+commande ni le stock ne suivent, et l'historique le dit (« commande mise de côté (texte illisible) :
+ni son statut ni le stock n'ont suivi »). Une commande absente pour une autre raison reste une
+erreur 404.
+
+Aucune donnée perdue, mesuré le 26/09 sur une base **écrite par v1.45.1** (forme de la
+production : 224 commandes, 441 lignes, 429 ventes, 1 036 lignes d'historique), photo octet par
+octet de chaque table avant et après :
+
+- ouverte par cette branche : seule la table `lignes_en_quarantaine` (vide) apparaît ; l'autre
+  écart (`app_meta.settings` : `stock.horizonJours`) vient déjà de la base `5b52268` (témoin : la
+  même base ouverte par `5b52268` donne le même écart) ; rouverte : **aucun écart** (idempotent) ;
+- la même base, une commande abîmée (`cmd-002`, 3 lignes, 1 livraison) : quittent leurs tables
+  exactement `cmd-002`, ses 3 lignes et sa livraison (5 lignes en quarantaine, contenu identique à
+  l'octet), une ligne de Journal s'ajoute, rien d'autre ne bouge ; rouverte : aucun écart.
+
+### `/healthz` lit la base
+
+Il ne regardait qu'un drapeau posé au démarrage. Il répond maintenant **503 « base illisible »**
+(la cause dans les journaux du serveur) quand :
+
+- la connexion est perdue ou une table manque (`sonderLecture` : la première ligne de chaque
+  table et les réglages, à chaque appel, moins d'une milliseconde) ;
+- une page de la base ne se lit plus, où qu'elle soit (`verifierPages` : `PRAGMA quick_check`,
+  le contrôle de l'ouverture). La première ligne seule ne descend que dans la feuille la plus à
+  gauche : mesuré sur cinq atteintes de structure (en-tête de feuille, tableau de cellules,
+  en-tête d'enregistrement, pointeur de débordement, page intérieure), elle en rate trois ;
+  `quick_check` les voit toutes, comme la lecture. Coût : 5 ms sur une base de la forme de la
+  production, 44 ms avec 250 tracés (4 938 pages). La route est publique : cette relecture se
+  fait au plus toutes les 20 s, son verdict tient jusqu'à la suivante (Docker appelle toutes les
+  30 s : chacun de ses appels relit tout) ;
+- une ligne illisible n'a pas pu être mise de côté (disque plein, volume en lecture seule) : sa
+  table ne se lit plus, les gestes répondent 500 ; jusqu'à ce qu'une copie réussisse.
+
+Il n'écrit rien. Un disque plein ou un volume en lecture seule sur une base saine ne se voit pas
+ici (ce que `/api/storage/status` montre des sauvegardes).
+
+### Arrêt propre au redéploiement
+
+`docker stop` envoie SIGTERM, puis SIGKILL 10 s plus tard ; Node mourait sur le coup (code 143,
+requête en attente reçue vide), sans valider ni fermer la base, et une sauvegarde interrompue
+laissait son `db-….gz.tmp` pour toujours. Au premier SIGTERM ou SIGINT : plus de nouvelle
+connexion (les connexions inactives sont fermées), 503 pour une requête arrivée pendant l'arrêt
+sur une connexion déjà ouverte (la file hors ligne la renvoie, `X-Sereo-Geste` la rend
+idempotente), les requêtes en cours finissent, puis la file des écritures et la sauvegarde en vol ;
+la carte OSRM locale s'arrête ; la base est validée et fermée ; sortie 0. Le tout plafonné à 8 s.
+Au démarrage, les `db-*.tmp` d'une sauvegarde interrompue sont supprimés et journalisés.
+
+### Écriture disque : `synchronous = FULL`
+
+En WAL, `NORMAL` n'attend le disque qu'au checkpoint : une coupure de courant pouvait effacer des
+gestes déjà confirmés (200) au livreur, que la file hors ligne ne garde plus. `FULL` attend le
+disque à chaque validation. Coût mesuré : 3,1 ms par validation (0,03 ms en `NORMAL`), une par
+écriture, contre 80 à 100 ms pour l'écriture d'un geste sur une base de la forme de la production :
+accepté. Les bancs qui créent beaucoup de bases s'allongent (60 mutations : 3,3 s → 7 à 11 s).
+
+### Import Excel : un fichier piégé est refusé avant d'être lu
+
+`read-excel-file` décompresse tout le classeur puis en construit l'arbre complet (environ 4 Ko par
+cellule) dans un tableau dense lignes × colonnes : un fichier de 0,5 Mo (50 000 lignes) montait à
+600 Mo, au-dessus des 512 Mo du conteneur. `lib/garde-excel.js` ouvre le zip avant la lecture,
+décompresse chaque partie sous un plafond réel (pas la taille annoncée, qui peut mentir) et compte.
+La lecture ne voit que ce qui a été compté : la garde lit la liste des parties dans le répertoire
+central du zip, `read-excel-file` lit les en-têtes locaux en flux sans jamais le consulter, et une
+partie cachée hors du répertoire (150 Mo d'espaces dans un fichier de 151 Ko) passait la garde puis
+était décompressée (+ 461 Mo mesurés). `classeurVerifie` rend donc un classeur reconstruit des
+seules parties inspectées (non compressées), et c'est lui que le serveur fait lire (+ 1 Mo sur le
+même fichier). Au-delà des limites, 400 avec un message qui dit quoi faire (« exporte une période
+plus courte… ») :
+
+| Limite | Valeur |
+|---|---|
+| Cellules remplies | 45 000 |
+| Éléments XML (la vraie mesure de la mémoire) | 280 000 |
+| Dernière ligne (dimension comprise) | 10 000 |
+| Dernière colonne | 100 (CV) |
+| Données décompressées | 16 Mo |
+
+Mesuré sous le tas du conteneur (259 Mo), base de la forme de la production, garde retirée :
+format Ximi (22 colonnes), 3 000 lignes passent, 3 500 tuent le serveur ; format du banc de charge
+v1.14.0 (8 colonnes), 8 001 lignes passent, 9 501 le tuent — la mort vient vers 470 000 éléments.
+Une première version à 40 000 cellules et 250 000 éléments refusait le banc v1.14.0 (5 000 lignes :
+40 008 cellules, 250 094 éléments), qui passe pourtant avec 1,6 de marge : relevée. Marge : 1,4 sur
+le dernier passage mesuré, 1,7 sur la première mort. Le fichier Ximi actuel : 429 lignes.
+
+### `/api/version` hors réseau
+
+`SEREO_SKIP_RELEASE_FETCH=1` était posée par les bancs et les serveurs d'essai, mais rien ne la
+lisait : chaque serveur de banc appelait l'API GitHub (60 appels par heure et par adresse ; 403
+mesuré le 24/09). Elle est lue ; et l'appel à GitHub a un délai maximal de 3 s (un GitHub muet
+laissait `/api/version` pendant).
+
+### Calcul routier : le service public, dit (décision 9)
+
+La production tourne à 512 Mo et reste sur le service public. La ligne « Calcul routier » de
+Paramètres disait « Serveur public (mémoire (512 Mo) ou disque libre (321,1 Go) insuffisants pour
+une carte locale). ». Elle dit « Service public — la carte locale s'active quand le conteneur a au
+moins 3 Go de mémoire (il en a 512 Mo). » (ou le disque, si c'est lui qui manque). `DEPLOYMENT.md`
+le dit en tête de sa section, et ramène « les coordonnées ne sortent plus » à sa condition. Rien
+n'est retiré de l'image.
+
+### Variables d'environnement et heure du conteneur
+
+`SEREO_APP_VERSION`, `SEREO_CONTACT_URL`, `SEREO_IMPORTS_ARCHIVES_DIR`, `SEREO_SEPARATION_ROLES`,
+et les anciens noms `HOST` et `SQLITE_PATH`, étaient lus sans être documentés. `.env.example` les
+décrit ; `DEPLOYMENT.md` a un tableau complet (défaut, rôle). `TZ` : l'image ne la pose pas, le
+conteneur tourne en UTC, et c'est voulu — les jours du métier sont calculés à Paris
+(`lib/jour-paris.js`) ; restent en UTC les journaux et les noms des sauvegardes. Le banc
+`test/variables-environnement.test.js` rougit si le code lit une variable absente de
+`.env.example` ou du tableau (une variable ajoutée par un autre lot devra y entrer).
+
+### Le banc qui rougissait sans raison
+
+Le seul rouge unitaire de la semaine sur `main` (run 36009519501, « lot 5 : GET /api/routes
+n'envoie pas le tracé », `ECONNRESET`) : `fetch` réutilisait une connexion keep-alive ouverte avant
+des bancs synchrones de plus de 6 s ; la minuterie de repos du serveur, en retard, la fermait juste
+après que le `fetch` suivant l'avait reprise. Reproduit 5 fois sur 5 hors du banc. Le banc ouvre
+une connexion par requête. Et le banc de pagination du Journal datait sa ligne « neuve » avant le
+semé entre minuit et 10 h (heure de Paris) : datée après.
+
+### Historique et ventes (décision 10)
+
+Le Journal de Paramètres est paginé depuis v1.46.0, rien n'est supprimé côté serveur. La page
+était de 50 lignes ; la décision dit 200 : **200 lignes par page**, « Afficher les 200
+suivantes » (serveur et écran). Mesuré sur 4 000 lignes : pire tâche longue 64 ms à l'ouverture de
+la carte. Aucun écran ne montre plus les ventes : `#ventes` n'est pas dans `mainTabs`, l'adresse
+`/#ventes` retombe sur le tableau de bord et `/api/ventes` ne part pas (mesuré dans le
+navigateur). Rien à faire ; le vieil écran (`renderVentes`, `#ventesList`) reste dans le code,
+inatteignable.
+
+### Ce qui reste
+
+- Le cas « vrai SIGTERM à un processus à part » ne tourne que hors Windows (la CI Linux).
+- `/healthz` ne voit ni un disque plein ni un volume en lecture seule tant qu'aucune ligne
+  illisible n'a dû être mise de côté. Il dit une base malade ; rien ne la rouvre ni ne la restaure
+  pendant que le serveur tourne (la restauration automatique n'a lieu qu'à l'ouverture).
+- Un arrêt fait sans sa commande (mise de côté) ne sort pas le stock : réparer la commande à la
+  main (sa copie est dans `lignes_en_quarantaine`), l'historique nomme l'arrêt.
+- Le second dossier de sauvegarde du lot « garde-fous » ajoutera une variable : elle devra entrer
+  dans le tableau de `DEPLOYMENT.md` (le banc des variables le rappellera).
+- Un autre banc de temps rougit parfois sous charge : « C2.stock.a » (`/api/stock` en moins de
+  250 ms), 399 ms mesurés pendant un `npm test` complet sur un poste chargé, 65 à 105 ms seul (la
+  base `5b52268` : 74 à 101 ms). Il mesure le temps écoulé, pas le travail : non touché ici.
+
+### Relecture adverse du 26/09 : le sort de chaque défaut
+
+Tous vérifiés (rejoués ou lus dans le code), tous vrais, tous corrigés, chacun avec un banc rouge
+sur le code relu (`03477f8`) pour la cause qu'il nomme :
+
+1. *Une ligne retirée sans copie après une écriture échouée* (important) : la copie faite dans la
+   transaction d'une écriture disparaissait avec son ROLLBACK, le processus se souvenait de
+   l'avoir faite. « Déjà copiée » se demande à la table.
+2. *Une partie de zip cachée contourne la garde Excel* (important) : la lecture se fait sur le
+   classeur reconstruit par la garde.
+3. *Une commande mise de côté bloque sa tournée* (important) : « Démarrer » et les gestes de
+   l'arrêt passent, sans la commande.
+4. *`/healthz` ne lit que la première feuille* (important) : relecture de chaque page
+   (`quick_check`), espacée ; et une ligne non mise de côté rend la base malade.
+5. *Le numéro d'une commande mise de côté est redonné* (mineur) : les numéros en quarantaine
+   comptent. Le numéro portait aussi l'identifiant, que les arrêts nomment encore.
+6. *Une tournée mise de côté perd les livraisons de ses arrêts* (mineur) : copiées avec elle —
+   celles des arrêts seulement, pas celles tirées des commandes, qui restent.
+7. *Journal à 50 lignes au lieu des 200 décidées* (mineur) : 200.
+
+Aucune donnée perdue, remesuré sur la base écrite par v1.45.1 avec le code final : ouverte, seule
+la table de quarantaine apparaît (et `stock.horizonJours` reçoit son défaut, qui vient de
+`5b52268`) ; une tournée abîmée (`route-t05`) : quittent leurs tables exactement la tournée et les
+livraisons de ses deux arrêts, les trois copiées à l'octet, une ligne de Journal s'ajoute ; une
+commande abîmée (`cmd-002`) : elle, ses 3 lignes et sa livraison, les cinq copiées ; rouvertes :
+aucun écart.
+
+### Bancs
+
+`test/ligne-abimee.test.js`, `test/healthz-base.test.js`, `test/arret-propre.test.js`,
+`test/ecriture-disque.test.js`, `test/garde-excel.test.js`, `test/import-excel-limites.test.js`,
+`test/version-hors-reseau.test.js`, `test/variables-environnement.test.js`,
+`test/osrm-local.test.js`, `test/lot5-rapidite.test.js`, `test/donnees-utiles.test.js`, et en
+e2e `test/e2e/donnees-utiles.spec.js` et `test/e2e/historique-lent.spec.js` (Journal à 200) :
+chacun rouge sur le code d'avant pour la cause qu'il nomme, puis vert. Le banc de charge v1.14.0
+(`test/api.test.js`, 5 000 lignes, qui passe par le classeur reconstruit) reste vert.
+
+## 25/09 — Téléphone, hors ligne et saisie
+
+**Point de départ.** La chasse aux défauts du 24/09 (section 1, côté page ; chaque point
+revérifié sur `5b52268`, le code de la v1.46.1), plus deux mesures faites en production après
+la v1.46.1 : le Stock au téléphone, 485 ms de tâches longues à l'arrivée (pire 362 ms, CPU x4) ;
+et le « 1 flaky » de la CI du 24/09 au soir (`telephone-utilisable.spec.js`, 375 × 667).
+Bancs : `test/e2e/hors-ligne-et-saisie.spec.js` (serveur semé 3606),
+`test/e2e/shell-meme-version.spec.js` (3607), `test/shell-meme-version.test.js`,
+`test/seme-jour-de-paris.test.js`. Chacun a d'abord été lancé sur le code d'avant : le rouge
+reçu est dit à chaque point.
+
+### Hors ligne : la page gardée et ses fichiers sont de la même version
+
+Le cas de l'audit (v1.45.0 : adresses `?v=` absentes du cache, la Tournée rouverte hors ligne
+sans style ni script) était déjà tenu par la performance du 24/09 (rouge sur v1.45.0 :
+« requêtes échouées : /css/style.css, /brand/sereo-logo.svg, /js/app.js » ; vert sur `5b52268`).
+Restaient trois chemins par lesquels la copie de la Tournée et ses fichiers divergeaient :
+une page plus récente que le service worker rangeait ses fichiers neufs dans le cache de
+l'ancienne version ; la page neuve remplaçait la copie de l'ancienne AVANT l'installation de
+son service worker (coupé dans l'intervalle : « cet écran demande le réseau ») ; l'installation
+rangeait ce que le serveur rendait à cet instant, quelle qu'en soit la version (ou la page de
+connexion, session finie). Chaque fichier du shell annonce sa version (`X-Sereo-Shell-Fichier` ;
+`X-Sereo-Shell` reste l'annonce de la page) ; le service worker ne range que ceux de la sienne,
+installe tout ou rien, et garde à part la page de la version suivante, qu'il reprend à
+l'activation. Rouge avant : 6 cas unitaires sur 8, et la réouverture e2e « Hors ligne — cet
+écran demande le réseau ».
+
+### Une saisie ne part qu'une fois, et ne se perd plus
+
+- **Deux « Valider la commande »** (sous le total, barre du panier) : un seul se grisait ; Entrée
+  puis la barre créaient deux commandes (rouge : 2). Le verrou est posé sur le formulaire
+  (`envoyerUneFois`) : tous ses boutons d'envoi.
+- **Hors ligne, « enregistrée, sera envoyée »** : la commande est vidée (rouge : « 1 produit »
+  restait) ; une clé d'envoi par SAISIE, gardée tant que rien ne change et oubliée quand le
+  serveur a répondu, fait qu'une revalidation après une issue inconnue est le même geste
+  (`X-Sereo-Geste`), même en ligne (rouge : une autre clé).
+- **Abonnement + nouvelle fiche, hors ligne ou en 4G sans débit** : refus clair, rien en file
+  (`sansFile` : la suite dépend de la réponse) ; abonnement d'un client existant hors ligne : la
+  fenêtre se ferme et le dit.
+- **Fiche client modifiée hors ligne** : l'identité ET la fiche CRM (statut, rappel, notes)
+  attendent dans la file, dans cet ordre ; la fenêtre se ferme.
+- **Le « retour » du téléphone** : le panier, les champs et la clé d'envoi sont gardés dans
+  `sessionStorage` à chaque saisie, rendus à l'ouverture de la commande client, oubliés à la
+  validation et à la déconnexion (rouge : « 0 produit » au retour).
+- **Safari ancien** : `checkVisibility` gardé (`estVisible`, iOS < 17.4 : plus de fausse erreur
+  rouge après « Créer la commande » d'une échéance) ; `requestSubmit` gardé (iOS < 16).
+- **« Partiel (N indispo) »** suit les réponses tardives et repasse « À jour ».
+- **Après « Livré »**, le chiffre d'affaires et les comptes du tableau de bord se relisent à
+  l'arrivée sur l'écran — jamais sur le chemin du geste (mise à jour ciblée intacte).
+
+Onze mutants (chacun remet un morceau de l'ancien comportement) : tous tués, chacun par son banc.
+
+### Téléphone : Clients et Stock
+
+- **Clients** (766 ms à l'arrivée en production) : `replierPilules` cachait les pilules une à une
+  et remesurait après chacune — une mise en page forcée par pilule (27 au banc). Tout est écrit,
+  lu d'un coup, calculé, puis les classes écrites : **une** mise en page ; le résultat est comparé,
+  largeur par largeur (320 à 440 px, pas de 2 et 4 px), à l'algorithme d'avant rejoué dans la
+  page. Jeu « production », CPU x4 : pire tâche 800–1 158 ms → 279–367 ms (six passages chacun).
+- **Stock — les pilules des écrans cachés** : `showTab` repliait toutes les rangées déclarées, et
+  chacune, même cachée avec son écran, lisait sa boîte après avoir écrit — deux mises en page
+  forcées de tout le document à CHAQUE changement d'écran au téléphone (au Stock, les 218 lignes
+  neuves comprises : style 72 ms + mise en page 84 ms, pour ne rien replier). Chaque rangée
+  déclare son écran ; cachée, elle ne se mesure pas. Banc : zéro mise en page forcée en arrivant
+  sur le Stock (rouge : 2, `mesurerRangeeDePilules < replierPilules`) ; témoin : Commandes mesure
+  toujours la sienne.
+- **Stock — deux `<svg>` par ligne** (le « − » et le « + » : 436 au jeu « production ») : plus de
+  la moitié de l'analyse HTML de la liste (96 ms, 39 sans eux, au mieux de neuf). Le même tracé
+  sert de masque à un pseudo-élément de la couleur du bouton (bloc en fin de `style.css`, couleurs
+  forcées comprises). Banc : aucun `<svg>` dans les lignes (rouge : 6 pour 3 lignes) et la capture
+  de chaque bouton comparée, pixel à pixel, à celle du `<svg>` d'avant rejoué dans la page : 0
+  pixel d'écart, clair et sombre (témoin : le bouton vide diffère de 24 et 44 pixels ; un trait de
+  2 au lieu de 2,5, ou le « + » sans son masque, rougissent). À DPR 2 et 3, écart de canal ≤ 6/255.
+- **Stock — les tris** : « À recommander », la liste à plat et les catégories comparaient par
+  `localeCompare(b, "fr")`, qui construit un comparateur à chaque paire (31 ms). Un
+  `Intl.Collator` construit une fois : même ordre, par définition. Banc : aucun `localeCompare`
+  pendant l'arrivée (rouge : 3, sur trois produits à recommander).
+
+**Stock, avant → après** (jeu « production », 390 × 844, CPU x4, arrivée depuis le tableau de
+bord, neuf passages chacun en séries alternées ; la machine faisait tourner d'autres bancs en même
+temps : c'est un journal, les bancs sont structurels) :
+
+| | `5b52268` (v1.46.1) | ce lot |
+|---|---|---|
+| Pire tâche, médiane (étendue) | 254 ms (149–392) | 164 ms (134–228) |
+| Total des tâches longues, médiane (étendue) | 383 ms (225–518) | 174 ms (141–292) |
+
+Ce qui reste à l'arrivée : l'analyse des 218 lignes (une écriture, gardée) et la première mise en
+page de l'écran (les lignes hors de l'écran n'y entrent pas : `content-visibility`).
+
+### Le « flaky » de la CI du 24/09 : un banc semé la veille
+
+À 375 × 667, au premier test de `telephone-utilisable.spec.js`, le nom, l'adresse et les articles
+de l'arrêt étaient 158 px plus bas (« nom bas 431 » au lieu de 273) ; au second essai, justes.
+Filmé à chaque image sous charge (serveur froid, API à 2,5 s, CPU x6), semé du jour : l'arrêt
+n'est jamais plus de 20 px plus bas, à sa première image, et à 273 en moins de 160 ms — pas d'état
+transitoire. La cause est l'heure : la CI lance UN ouvrier Playwright pour tous les fichiers
+(`workers: 1`) ; il avait chargé `serveur-seme.js` à 23 h 34 (Paris), et `AUJOURDHUI` y était figé
+au 24/09. Le banc a semé sa tournée à 0 h 03 le 25/09, datée de la VEILLE : l'écran Tournée a
+signalé au-dessus de l'arrêt « Tournée du jeudi 24 septembre n'est pas soldée » (126 px, plus
+l'écart). Le second essai tournait dans un ouvrier neuf, module rechargé après minuit. Reproduit
+au pixel près, semé de la veille : « gestes 447-577, nom bas 431, adresse bas 480, articles
+535/563 », la ligne de la CI.
+
+Le jour se lit à chaque semis (`jeuDeDonnees`, `jeuProduction`) ; `AUJOURDHUI`, exporté, se lit
+quand un banc le destructure (à son chargement). Banc sans serveur, horloge simulée : module
+chargé à 23 h 59, semis à 0 h 03 — la tournée est du 25 (rouge : du 24) ; témoin : semée à 23 h 59,
+elle est du 24. **Reste** : un fichier dont les tests enjambent minuit (semé avant, mesuré après)
+— une fenêtre de la durée du fichier au lieu du reste de la suite.
+
+**Question pour Thomas (produit, pas le banc).** Après minuit, une tournée encore en cours est
+signalée « pas soldée » au-dessus de l'arrêt, même quand c'est elle qu'on regarde : à 375 × 667,
+les 126 px du bandeau poussent le nom, l'adresse et les articles sous la barre des gestes — ce que
+le lot « téléphone utilisable » avait réglé. Un livreur qui finit après minuit le verrait.
+Défaut proposé : un bandeau d'une ligne quand la tournée signalée est celle affichée.
+
+### Relecture adverse (26/09) : la saisie après une fin de session ou une issue inconnue
+
+Quatre défauts relevés sur `2b72612`, tous vrais, tous corrigés. Bancs 15 à 18 de
+`hors-ligne-et-saisie.spec.js`, chacun d'abord lancé sur `2b72612`.
+
+- **Session expirée pendant « Valider »** : `apiFetch` mettait la commande en file (H2) mais
+  l'erreur ne le disait pas ; le brouillon restait, revenait après la reconnexion (« La commande
+  en cours a été reprise. ») alors que la file venait de créer la commande, et la moindre
+  retouche (autre saisie, donc autre clé) en créait une seconde (rouge : « 1 produit » repris ;
+  retouchée et revalidée, 2 commandes pour une saisie). L'erreur de fin de session porte
+  désormais `gardeeEnFile` ; la commande client s'en sert comme d'une mise en file : l'écran
+  repart à vide. Pas `enFile` : chaque appelant en tire son chemin « hors ligne », qui n'a pas
+  été relu pour une fin de session.
+- **Abonnement + nouvelle fiche, issue inconnue** (délai dépassé, réponse coupée) : le serveur a pu
+  créer la fiche ; l'écran disait « Pas de réseau », et le nouvel essai, sous une clé neuve,
+  créait une seconde fiche (sans téléphone ni code postal, `findDuplicateClient` ne la reconnaît
+  pas). Une clé par saisie de la fiche, comme la commande client ; au « déjà fait » (le serveur
+  ne rend que le statut) ou au corps coupé (en-têtes 2xx), la fiche est retrouvée au serveur :
+  inconnue de l'écran au premier envoi, même nom, même adresse — une seule, sinon on demande de
+  la choisir. Message sans réponse : « Pas de réponse du serveur (réseau absent ou trop lent) :
+  la fiche a peut-être été créée… ». Le banc 4 (4G sans débit) attend ce message : la page ne
+  sait pas si la requête est arrivée. Revers de la clé stable, tenu : un refus 409 perdu revient
+  rejoué sans message ; il est nommé (« Une fiche existe déjà… »).
+- **Revalider après une issue inconnue** : le rejeu `{ rejoue: true }` ne porte ni la commande ni
+  son numéro ; l'écran annonçait « validée : elle est à préparer », même bloquée faute de stock.
+  Il dit maintenant « avait déjà été reçue au premier envoi : elle n'a pas été créée une seconde
+  fois », et ouvre Commandes. (Rendre au rejeu le corps de la première réponse demanderait une
+  colonne dans `gestes_recus` : une migration, hors de ce lot.)
+- **Le brouillon d'un compte revenait au compte suivant** (même onglet, fin de session) : il porte
+  le compte qui l'a saisi ; un autre compte ne le reprend pas, il part. Tant que `/api/me` n'a pas
+  répondu, la reprise attend (`loadMoi`). Témoin : le même compte retrouve sa saisie.
+
+## 26/09 — Intégration des corrections du 26/09
+
+Branche `integration/corrections`, partie de `main` (`3d361ec`, v1.46.1). Fusionnés `--no-ff`,
+dans cet ordre, les six lots de la chasse aux défauts du 24/09, tous partis de `5b52268` (`main`
+avant le commit de release, qui ne touche que la version et le CHANGELOG) : `fix/garde-fous`
+(`9e77349`), `fix/import-clients-fusion` (`f0b5818`), `fix/stock-et-abonnements` (`c586f0b`),
+`perf/serveur-et-ci` (`ef51a2f`), `fix/robustesse` (`1b97973`), `fix/hors-ligne-et-saisie`
+(`950d52e`). Chaque fusion est contrôlée : les lignes ajoutées et retirées contre son premier
+parent égalent celles du lot contre `5b52268`, hors les conflits nommés ci-dessous ; chaque module
+du front passe `node --input-type=module --check`, `server.js` `node --check`, et aucune fonction
+n'est déclarée deux fois (ce que `node --check` ne voit pas).
+
+### Conflits signalés par git
+
+- **`DESIGN.md`**, **`style.css`**, **`.env.example`** : ajouts en fin de fichier ou au même
+  endroit, reconstruits depuis les trois versions, jamais en ôtant les marqueurs.
+- **`numerotation-admin.spec.js`** : les lots garde-fous et serveur-et-ci rendaient l'adresse du
+  serveur authentifié réglable sous deux noms ; `SEREO_E2E_AUTH_BASE_URL` (celui des trois bancs
+  du lot garde-fous) d'abord, `SEREO_E2E_AUTH_URL` accepté aussi.
+- **`package.json`** : le script `check` vérifie les deux modules de sauvegarde et `garde-excel`.
+- **`sqliteStore.js`** : les méthodes des trois lots, toutes gardées ; `readPayloads` garde la
+  lecture mémorisée (serveur-et-ci) et, si un texte ne se décode pas, relit la table ligne à
+  ligne **en base** pour mettre la ligne illisible de côté (robustesse).
+- **`server.js`** : au démarrage, la migration des montants (données clients) reste et le
+  `syncWorkflow` redondant part (`writeDb` le refait) ; `analyzeOrderStock` et `enrichOrder`
+  prennent la table du catalogue en paramètre (serveur-et-ci) et gardent la répartition du rayon
+  par produit et `stockReserveActif` (stock) ; l'import des ventes réécrit par le lot données
+  clients perd son `syncWorkflow` redondant (rien entre lui et `writeDb` ne lit ce qu'il calcule).
+- **`app.js`, la commande client** (données clients × hors ligne et saisie) : la page demande
+  « rattacher ou créer » avant l'envoi, prend la clé de geste de la **saisie**, et
+  `envoyerCommandeClient` porte cette clé : le renvoi après le 409 « doublon » la garde (une
+  question, que le serveur n'enregistre pas sous la clé), la version mise en file (« nouvelle
+  fiche ») aussi. En file ou fin de session, l'écran repart à vide ; refus, la clé part ; annulé
+  au dialogue, rien ne part. Contre-témoin : sans la clé dans `envoyerCommandeClient`,
+  `hors-ligne-et-saisie.spec.js:149` rougit (« le second envoi de la MÊME saisie a tiré une autre
+  clé »).
+- **`app.js`, ailleurs** : « Se déconnecter » (le brouillon part quand la déconnexion part
+  vraiment) ; les boutons − et + du Stock sans `<svg>` et fermés au livreur ; le 401 d'`apiFetch`
+  sans seconde navigation pendant la déconnexion, avec `gardeeEnFile`. **`operations.js`** :
+  l'abonnement mis en file garde sa réponse et son message de suspension.
+
+### Conflits que git ne signale pas
+
+- **`persistDatabase` levait à chaque écriture** (robustesse × serveur-et-ci). La vérification des
+  lignes illisibles retirées lisait `plan.seen` sur les plans partiels (table non lue), qui n'en
+  ont pas : « Cannot read properties of undefined », 17 rouges, dont la mise en cohérence du
+  démarrage (qui échouait dans son `catch`, en silence). Une table non lue ne perd aucune ligne :
+  elle est sautée.
+- **Le journal des lignes mises de côté relisait toutes les tables à chaque écriture** : « ce que
+  cette écriture va normaliser de toute façon » était vrai avant la lecture paresseuse des
+  écritures, faux depuis (`rapidite-serveur`, 4 rouges). Le magasin lit désormais exactement ce
+  que l'écriture lira (`lireCeQueLEcritureLira` : tout à la première après l'ouverture, les tables
+  toujours écrites ensuite). Une ligne d'une table qu'aucune écriture ne lit est découverte à sa
+  lecture et journalisée à l'écriture qui suit.
+
+### Réconciliations (commits à part)
+
+- **Le tableau des variables** de `DEPLOYMENT.md` nomme `SEREO_BACKUP_COPY_DIR` et les trois
+  réglages de la limite par compte (le banc du lot robustesse rougissait, comme il l'annonçait).
+- **Un seul nettoyage des sauvegardes interrompues** au démarrage (le lot garde-fous demandait de
+  l'accorder) : l'union des deux motifs, dans les deux dossiers, avant toute écriture, chaque
+  suppression journalisée.
+- **`jour-paris.test.js` attend la sauvegarde en vol** avant d'effacer son dossier : depuis le lot
+  garde-fous elle se fait dans un thread, par une seconde connexion ; sous Windows, EPERM 4 fois
+  sur 6 sur `fix/garde-fous` seul (0 sur 6 sur `main`).
+
+**Vérifié, rien à changer.** Les routes que les lots 2 à 6 ont modifiées gardent leur garde
+(import et purge : administration ; ajustement du stock : tout compte sauf livreur ; commandes,
+arrêts, abonnements : tout compte connecté) ; aucune route d'écriture nouvelle
+(`garde-fous-routes` vert). La numérotation compte à la fois le plancher retenu par la purge
+(stock) et les numéros en quarantaine (robustesse). La purge enchaîne la sauvegarde relue hors
+rotation, la restitution des réservations et le plancher des numéros. Aucune écriture directe du
+magasin (sessions fermées dans `app_meta`, quarantaine) ne vise une table mémorisée. `CACHE_NAME` :
+rien à faire, le nom du shell porte l'empreinte du contenu. La CI : « Tests + syntax check »
+inchangé ; « Tests e2e (Playwright) » tourne toujours et n'est vert que si les quatre lots le sont ;
+l'union des quatre `--list --shard=i/4` est la liste entière (788/788 ; lots de 209, 185, 198, 196).
+
+### Vérifications
+
+- `npm run check` ; `npm test` : **992/993** deux fois (le 993ᵉ, un vrai SIGTERM à un processus à
+  part, est sauté sous Windows ; la CI Linux le joue).
+- e2e, les bancs des six lots et leurs voisins (`garde-fous`, `import-clients-fusion`,
+  `import-fusion-production`, `stock-et-abonnements`, `donnees-utiles`, `historique-lent`,
+  `hors-ligne-et-saisie`, `shell-meme-version`, `chargement-instantane`, `hors-ligne`,
+  `tournee-hors-ligne`, `livreur-ne-perd-rien`, `poids-reseau`, `rendu-a-l-affichage`, `pieges-*`,
+  `parcours-simplifies*`, `sauvegardes`, `telephone-utilisable`, `tabs`, `smoke`, `connexion`,
+  `contraste-login`, `numerotation-admin`) : **269/269**.
+- Suite complète, deux passages (4 ouvriers) : **788/788** et **788/788**, sans réessai.
+
+### Aucune donnée perdue
+
+Script hors dépôt (`preuve-integration.js`) : instantané de toutes les lignes de toutes les
+tables, avant, après un premier démarrage du code intégré, après un second ; contre-témoin de
+l'instrument (une ligne retirée, une donnée changée, une table perdue sont vues).
+
+| Table | A. écrite par v1.45.1 : avant → 1er → 2e | B. forme production, écrite par `main` |
+|---|---|---|
+| clients | 102 → 102 → 102 | 97 → 97 → 97 |
+| commandes | 226 → 226 → 226 | 224 → 224 → 224 |
+| lignes_commande | 478 → 478 → 478 | 441 → 441 → 441 |
+| livraisons | 264 → 264 → 264 | 263 → 263 → 263 |
+| ventes | 429 → 429 → 429 | 429 → 429 → 429 |
+| historique | 1 057 → 1 058 → 1 058 | 1 036 → 1 037 → 1 037 |
+| mouvements_stock | 633 → 633 → 633 | 633 → 633 → 633 |
+| produits | 218 → 218 → 218 | 218 → 218 → 218 |
+| routes | 18 → 18 → 18 | 18 → 18 → 18 |
+| imports_archives | 124 → 124 → 124 | 123 → 123 → 123 |
+| abonnements, relances_crm | 1, 1 (inchangés) | 0, 0 |
+| lignes_en_quarantaine | absente → 0 → 0 | absente → 0 → 0 |
+
+Aucune ligne disparue, aucune table perdue. Au premier démarrage changent : les montants TTC
+figés (2 commandes sur A, 158 sur B, et la livraison tirée de chacune), une ligne d'historique qui
+le dit, la répartition du rayon sur les commandes **livrées** qui ont deux lignes du même produit
+(1 ligne sur A, 4 sur B : affichage, sans effet), les réglages de A (`stock.horizonJours` reçoit
+son défaut, écart qui vient de `5b52268`), la table de quarantaine créée vide. Au second : rien
+que `last_write_at` (idempotent). Les lectures de l'ouverture répondent 200 sur les deux bases.
+En plus, le banc du lot données clients rejoué sur la base v1.45.1 (`SEREO_BASE_SQLITE`,
+`SEREO_BASE_CA`) : **4/4** — imports complet, partiel et vide, CA des 12 mois égal à celui
+qu'affichait v1.45.1 ; la base source n'a pas changé (même SHA-256).
+
+### Ce qui reste
+
+- **Hors code, à Thomas** : changer le mot de passe de production (décision 1, il reste dans
+  l'historique git) ; poser le second disque et son fichier témoin (`SEREO_BACKUP_COPY_DIR`) ;
+  protéger `main` en exigeant « Tests + syntax check » et « Tests e2e (Playwright) » (pas les
+  lots, dont le nom suit leur nombre).
+- **La CI n'a jamais joué ces lots** : aucune poussée. Le premier passage de la PR montrera les
+  quatre lots e2e sous Linux, et le cas SIGTERM réel.
+- **Les questions des lots**, inchangées : annuler d'office une commande générée hors de la
+  nouvelle cadence ; ce que « non livrée » doit annuler à la pause ; la définition d'un prospect
+  converti ; le bandeau « tournée non soldée » après minuit au téléphone ; le repli d'un appareil
+  neuf pendant une attaque sur l'identifiant.
+- **Nommé, non traité** : trente fichiers de bancs unitaires effacent leur dossier sans attendre
+  la sauvegarde en vol (relevé par motif ; tous ne déclenchent pas de sauvegarde) ; aucun n'a
+  rougi sur les passages de l'intégration, la même fragilité reste possible sous Windows. `/api/storage/status`, ouverte à tout compte connecté, liste désormais
+  les lignes mises de côté (table, identifiant, message d'erreur de décodage). Le motif `db-*.tmp`
+  du nettoyage n'a pas de banc qui le distingue du `.gz.tmp`.

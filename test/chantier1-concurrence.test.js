@@ -290,6 +290,12 @@ test("C1.storage.a - status expose postRestoreBackupDone (false sur boot normal)
 test("C1.R2.a - POST /api/backup/now persiste l'entree historique (P0 fix)", async () => {
   // Avant le fix : addHistory(readDb(), ...) sans writeDb perdait l'entree.
   const before = readDb().historique.length;
+  // Garde-fous (25/09) : sans ecriture depuis la derniere sauvegarde, « Sauvegarder
+  // maintenant » est deja a jour et n'ecrit rien (ni fichier ni ligne). Une
+  // saisie d'abord, pour qu'une sauvegarde parte vraiment.
+  const saisie = readDb();
+  saisie.stock = [...(saisie.stock || []), { id: "p-c1r2a", nom: "Saisie C1.R2.a", code: "C1R2A", quantite: 1 }];
+  writeDb(saisie, { backup: false });
 
   const r = await api("/api/backup/now", {
     method: "POST",
