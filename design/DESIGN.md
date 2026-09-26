@@ -9417,3 +9417,151 @@ aucun écart.
 e2e `test/e2e/donnees-utiles.spec.js` et `test/e2e/historique-lent.spec.js` (Journal à 200) :
 chacun rouge sur le code d'avant pour la cause qu'il nomme, puis vert. Le banc de charge v1.14.0
 (`test/api.test.js`, 5 000 lignes, qui passe par le classeur reconstruit) reste vert.
+
+## 25/09 — Téléphone, hors ligne et saisie
+
+**Point de départ.** La chasse aux défauts du 24/09 (section 1, côté page ; chaque point
+revérifié sur `5b52268`, le code de la v1.46.1), plus deux mesures faites en production après
+la v1.46.1 : le Stock au téléphone, 485 ms de tâches longues à l'arrivée (pire 362 ms, CPU x4) ;
+et le « 1 flaky » de la CI du 24/09 au soir (`telephone-utilisable.spec.js`, 375 × 667).
+Bancs : `test/e2e/hors-ligne-et-saisie.spec.js` (serveur semé 3606),
+`test/e2e/shell-meme-version.spec.js` (3607), `test/shell-meme-version.test.js`,
+`test/seme-jour-de-paris.test.js`. Chacun a d'abord été lancé sur le code d'avant : le rouge
+reçu est dit à chaque point.
+
+### Hors ligne : la page gardée et ses fichiers sont de la même version
+
+Le cas de l'audit (v1.45.0 : adresses `?v=` absentes du cache, la Tournée rouverte hors ligne
+sans style ni script) était déjà tenu par la performance du 24/09 (rouge sur v1.45.0 :
+« requêtes échouées : /css/style.css, /brand/sereo-logo.svg, /js/app.js » ; vert sur `5b52268`).
+Restaient trois chemins par lesquels la copie de la Tournée et ses fichiers divergeaient :
+une page plus récente que le service worker rangeait ses fichiers neufs dans le cache de
+l'ancienne version ; la page neuve remplaçait la copie de l'ancienne AVANT l'installation de
+son service worker (coupé dans l'intervalle : « cet écran demande le réseau ») ; l'installation
+rangeait ce que le serveur rendait à cet instant, quelle qu'en soit la version (ou la page de
+connexion, session finie). Chaque fichier du shell annonce sa version (`X-Sereo-Shell-Fichier` ;
+`X-Sereo-Shell` reste l'annonce de la page) ; le service worker ne range que ceux de la sienne,
+installe tout ou rien, et garde à part la page de la version suivante, qu'il reprend à
+l'activation. Rouge avant : 6 cas unitaires sur 8, et la réouverture e2e « Hors ligne — cet
+écran demande le réseau ».
+
+### Une saisie ne part qu'une fois, et ne se perd plus
+
+- **Deux « Valider la commande »** (sous le total, barre du panier) : un seul se grisait ; Entrée
+  puis la barre créaient deux commandes (rouge : 2). Le verrou est posé sur le formulaire
+  (`envoyerUneFois`) : tous ses boutons d'envoi.
+- **Hors ligne, « enregistrée, sera envoyée »** : la commande est vidée (rouge : « 1 produit »
+  restait) ; une clé d'envoi par SAISIE, gardée tant que rien ne change et oubliée quand le
+  serveur a répondu, fait qu'une revalidation après une issue inconnue est le même geste
+  (`X-Sereo-Geste`), même en ligne (rouge : une autre clé).
+- **Abonnement + nouvelle fiche, hors ligne ou en 4G sans débit** : refus clair, rien en file
+  (`sansFile` : la suite dépend de la réponse) ; abonnement d'un client existant hors ligne : la
+  fenêtre se ferme et le dit.
+- **Fiche client modifiée hors ligne** : l'identité ET la fiche CRM (statut, rappel, notes)
+  attendent dans la file, dans cet ordre ; la fenêtre se ferme.
+- **Le « retour » du téléphone** : le panier, les champs et la clé d'envoi sont gardés dans
+  `sessionStorage` à chaque saisie, rendus à l'ouverture de la commande client, oubliés à la
+  validation et à la déconnexion (rouge : « 0 produit » au retour).
+- **Safari ancien** : `checkVisibility` gardé (`estVisible`, iOS < 17.4 : plus de fausse erreur
+  rouge après « Créer la commande » d'une échéance) ; `requestSubmit` gardé (iOS < 16).
+- **« Partiel (N indispo) »** suit les réponses tardives et repasse « À jour ».
+- **Après « Livré »**, le chiffre d'affaires et les comptes du tableau de bord se relisent à
+  l'arrivée sur l'écran — jamais sur le chemin du geste (mise à jour ciblée intacte).
+
+Onze mutants (chacun remet un morceau de l'ancien comportement) : tous tués, chacun par son banc.
+
+### Téléphone : Clients et Stock
+
+- **Clients** (766 ms à l'arrivée en production) : `replierPilules` cachait les pilules une à une
+  et remesurait après chacune — une mise en page forcée par pilule (27 au banc). Tout est écrit,
+  lu d'un coup, calculé, puis les classes écrites : **une** mise en page ; le résultat est comparé,
+  largeur par largeur (320 à 440 px, pas de 2 et 4 px), à l'algorithme d'avant rejoué dans la
+  page. Jeu « production », CPU x4 : pire tâche 800–1 158 ms → 279–367 ms (six passages chacun).
+- **Stock — les pilules des écrans cachés** : `showTab` repliait toutes les rangées déclarées, et
+  chacune, même cachée avec son écran, lisait sa boîte après avoir écrit — deux mises en page
+  forcées de tout le document à CHAQUE changement d'écran au téléphone (au Stock, les 218 lignes
+  neuves comprises : style 72 ms + mise en page 84 ms, pour ne rien replier). Chaque rangée
+  déclare son écran ; cachée, elle ne se mesure pas. Banc : zéro mise en page forcée en arrivant
+  sur le Stock (rouge : 2, `mesurerRangeeDePilules < replierPilules`) ; témoin : Commandes mesure
+  toujours la sienne.
+- **Stock — deux `<svg>` par ligne** (le « − » et le « + » : 436 au jeu « production ») : plus de
+  la moitié de l'analyse HTML de la liste (96 ms, 39 sans eux, au mieux de neuf). Le même tracé
+  sert de masque à un pseudo-élément de la couleur du bouton (bloc en fin de `style.css`, couleurs
+  forcées comprises). Banc : aucun `<svg>` dans les lignes (rouge : 6 pour 3 lignes) et la capture
+  de chaque bouton comparée, pixel à pixel, à celle du `<svg>` d'avant rejoué dans la page : 0
+  pixel d'écart, clair et sombre (témoin : le bouton vide diffère de 24 et 44 pixels ; un trait de
+  2 au lieu de 2,5, ou le « + » sans son masque, rougissent). À DPR 2 et 3, écart de canal ≤ 6/255.
+- **Stock — les tris** : « À recommander », la liste à plat et les catégories comparaient par
+  `localeCompare(b, "fr")`, qui construit un comparateur à chaque paire (31 ms). Un
+  `Intl.Collator` construit une fois : même ordre, par définition. Banc : aucun `localeCompare`
+  pendant l'arrivée (rouge : 3, sur trois produits à recommander).
+
+**Stock, avant → après** (jeu « production », 390 × 844, CPU x4, arrivée depuis le tableau de
+bord, neuf passages chacun en séries alternées ; la machine faisait tourner d'autres bancs en même
+temps : c'est un journal, les bancs sont structurels) :
+
+| | `5b52268` (v1.46.1) | ce lot |
+|---|---|---|
+| Pire tâche, médiane (étendue) | 254 ms (149–392) | 164 ms (134–228) |
+| Total des tâches longues, médiane (étendue) | 383 ms (225–518) | 174 ms (141–292) |
+
+Ce qui reste à l'arrivée : l'analyse des 218 lignes (une écriture, gardée) et la première mise en
+page de l'écran (les lignes hors de l'écran n'y entrent pas : `content-visibility`).
+
+### Le « flaky » de la CI du 24/09 : un banc semé la veille
+
+À 375 × 667, au premier test de `telephone-utilisable.spec.js`, le nom, l'adresse et les articles
+de l'arrêt étaient 158 px plus bas (« nom bas 431 » au lieu de 273) ; au second essai, justes.
+Filmé à chaque image sous charge (serveur froid, API à 2,5 s, CPU x6), semé du jour : l'arrêt
+n'est jamais plus de 20 px plus bas, à sa première image, et à 273 en moins de 160 ms — pas d'état
+transitoire. La cause est l'heure : la CI lance UN ouvrier Playwright pour tous les fichiers
+(`workers: 1`) ; il avait chargé `serveur-seme.js` à 23 h 34 (Paris), et `AUJOURDHUI` y était figé
+au 24/09. Le banc a semé sa tournée à 0 h 03 le 25/09, datée de la VEILLE : l'écran Tournée a
+signalé au-dessus de l'arrêt « Tournée du jeudi 24 septembre n'est pas soldée » (126 px, plus
+l'écart). Le second essai tournait dans un ouvrier neuf, module rechargé après minuit. Reproduit
+au pixel près, semé de la veille : « gestes 447-577, nom bas 431, adresse bas 480, articles
+535/563 », la ligne de la CI.
+
+Le jour se lit à chaque semis (`jeuDeDonnees`, `jeuProduction`) ; `AUJOURDHUI`, exporté, se lit
+quand un banc le destructure (à son chargement). Banc sans serveur, horloge simulée : module
+chargé à 23 h 59, semis à 0 h 03 — la tournée est du 25 (rouge : du 24) ; témoin : semée à 23 h 59,
+elle est du 24. **Reste** : un fichier dont les tests enjambent minuit (semé avant, mesuré après)
+— une fenêtre de la durée du fichier au lieu du reste de la suite.
+
+**Question pour Thomas (produit, pas le banc).** Après minuit, une tournée encore en cours est
+signalée « pas soldée » au-dessus de l'arrêt, même quand c'est elle qu'on regarde : à 375 × 667,
+les 126 px du bandeau poussent le nom, l'adresse et les articles sous la barre des gestes — ce que
+le lot « téléphone utilisable » avait réglé. Un livreur qui finit après minuit le verrait.
+Défaut proposé : un bandeau d'une ligne quand la tournée signalée est celle affichée.
+
+### Relecture adverse (26/09) : la saisie après une fin de session ou une issue inconnue
+
+Quatre défauts relevés sur `2b72612`, tous vrais, tous corrigés. Bancs 15 à 18 de
+`hors-ligne-et-saisie.spec.js`, chacun d'abord lancé sur `2b72612`.
+
+- **Session expirée pendant « Valider »** : `apiFetch` mettait la commande en file (H2) mais
+  l'erreur ne le disait pas ; le brouillon restait, revenait après la reconnexion (« La commande
+  en cours a été reprise. ») alors que la file venait de créer la commande, et la moindre
+  retouche (autre saisie, donc autre clé) en créait une seconde (rouge : « 1 produit » repris ;
+  retouchée et revalidée, 2 commandes pour une saisie). L'erreur de fin de session porte
+  désormais `gardeeEnFile` ; la commande client s'en sert comme d'une mise en file : l'écran
+  repart à vide. Pas `enFile` : chaque appelant en tire son chemin « hors ligne », qui n'a pas
+  été relu pour une fin de session.
+- **Abonnement + nouvelle fiche, issue inconnue** (délai dépassé, réponse coupée) : le serveur a pu
+  créer la fiche ; l'écran disait « Pas de réseau », et le nouvel essai, sous une clé neuve,
+  créait une seconde fiche (sans téléphone ni code postal, `findDuplicateClient` ne la reconnaît
+  pas). Une clé par saisie de la fiche, comme la commande client ; au « déjà fait » (le serveur
+  ne rend que le statut) ou au corps coupé (en-têtes 2xx), la fiche est retrouvée au serveur :
+  inconnue de l'écran au premier envoi, même nom, même adresse — une seule, sinon on demande de
+  la choisir. Message sans réponse : « Pas de réponse du serveur (réseau absent ou trop lent) :
+  la fiche a peut-être été créée… ». Le banc 4 (4G sans débit) attend ce message : la page ne
+  sait pas si la requête est arrivée. Revers de la clé stable, tenu : un refus 409 perdu revient
+  rejoué sans message ; il est nommé (« Une fiche existe déjà… »).
+- **Revalider après une issue inconnue** : le rejeu `{ rejoue: true }` ne porte ni la commande ni
+  son numéro ; l'écran annonçait « validée : elle est à préparer », même bloquée faute de stock.
+  Il dit maintenant « avait déjà été reçue au premier envoi : elle n'a pas été créée une seconde
+  fois », et ouvre Commandes. (Rendre au rejeu le corps de la première réponse demanderait une
+  colonne dans `gestes_recus` : une migration, hors de ce lot.)
+- **Le brouillon d'un compte revenait au compte suivant** (même onglet, fin de session) : il porte
+  le compte qui l'a saisi ; un autre compte ne le reprend pas, il part. Tant que `/api/me` n'a pas
+  répondu, la reprise attend (`loadMoi`). Témoin : le même compte retrouve sa saisie.
