@@ -3805,11 +3805,15 @@ function cleDuBonDeLaVente(vente) {
  * dans Ximi ne garde pas ses anciennes lignes, un fichier reimporte ne double
  * rien). Un fichier cumulatif (le cas de la production) rend donc la meme
  * table qu'avant ; un fichier partiel ou vide n'efface plus rien.
+ * `figes` (26/09) : les bons laisses tels quels -- leurs anciennes lignes
+ * restent, les lignes du fichier ne s'y ajoutent pas (bon incomplet, voir
+ * l'import des ventes).
  */
-function fusionnerVentes(anciennes, nouvelles) {
-  const bonsDuFichier = new Set(nouvelles.map(cleDuBonDeLaVente));
+function fusionnerVentes(anciennes, nouvelles, figes = new Set()) {
+  const retenues = nouvelles.filter(vente => !figes.has(cleDuBonDeLaVente(vente)));
+  const bonsDuFichier = new Set(retenues.map(cleDuBonDeLaVente));
   const gardees = (Array.isArray(anciennes) ? anciennes : []).filter(vente => !bonsDuFichier.has(cleDuBonDeLaVente(vente)));
-  return { ventes: [...gardees, ...nouvelles], gardees: gardees.length };
+  return { ventes: [...gardees, ...retenues], gardees: gardees.length };
 }
 
 function badRequest(message) {
@@ -8772,6 +8776,28 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     // « Client sans nom », une date illisible datait le bon du jour de
     // l'import. Une ligne entierement vide (la fin d'une feuille) n'en est pas une.
     const lignesEnErreur = { sansClientNiProduit: 0, sansClient: 0, sansProduit: 0, sansQuantite: 0, dateIllisible: 0 };
+    const adresseDeLaLigne = row => ({
+      rue: clean(getCellByNames(row, headers, ["Rue", "Adresse", "Adresse client"])),
+      codePostal: geocodage.normaliserCodePostal(getCellByNames(row, headers, ["Code Postal", "Code postal", "CP", "PostalCode"])),
+      ville: normalizeCity(getCellByNames(row, headers, ["Ville", "Commune"]))
+    });
+    // Les bons INCOMPLETS du fichier (relecture adverse du 26/09) : une de
+    // leurs lignes est en erreur -- quantite vide, produit absent -- alors que
+    // son client et sa date se lisent. Jusqu'au 25/09 ces lignes etaient
+    // importees (une quantite vide valait 1) : un bon deja importe avec elles,
+    // remplace par ses seules lignes lisibles, perdait un produit, et sa
+    // commande a preparer son montant. Un bon incomplet deja connu ne
+    // remplace ni sa commande ni ses lignes de vente ; le resume dit pourquoi.
+    // Un bon NOUVEAU est cree avec ses lignes lisibles (rien a proteger).
+    // Une date illisible ne dit pas le bon : jusqu'au 25/09, la ligne allait
+    // dans un bon date du jour de l'import, jamais dans celui-ci.
+    const bonsIncomplets = new Set();
+    const noterBonIncomplet = (row, client) => {
+      const dateCell = getCellByNames(row, headers, NOMS_DE_LA_DATE);
+      const dateCommandeIso = excelDateToIso(dateCell);
+      if (clean(dateCell) !== "" && !dateCommandeIso) return;
+      bonsIncomplets.add(cleDuBonDeLaVente({ client, ...adresseDeLaLigne(row), dateCommandeIso }));
+    };
 
     const ventes = dataRows
       .map((row, index) => {
@@ -8787,11 +8813,13 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
         }
         if (!aUnProduit) {
           lignesEnErreur.sansProduit += 1;
+          noterBonIncomplet(row, client);
           return null;
         }
         const celluleQuantite = getCellByNames(row, headers, ["Quantite", "Quantité", "Qte", "Qté"]);
         if (clean(celluleQuantite) === "" || !Number.isFinite(number(celluleQuantite, NaN))) {
           lignesEnErreur.sansQuantite += 1;
+          noterBonIncomplet(row, client);
           return null;
         }
         const statutFacture = clean(getCell(row, headers, "Statut", 1));
@@ -8826,9 +8854,8 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
               : null;
         const telephone = clean(getCellByNames(row, headers, ["Telephone favori", "Téléphone favori", "Telephone", "Téléphone", "Mobile", "Phone"]));
         const reference = clean(getCell(row, headers, "Reference", 1));
-        const codePostal = geocodage.normaliserCodePostal(getCellByNames(row, headers, ["Code Postal", "Code postal", "CP", "PostalCode"]));
-        const rue = clean(getCellByNames(row, headers, ["Rue", "Adresse", "Adresse client"]));
-        const ville = normalizeCity(getCellByNames(row, headers, ["Ville", "Commune"]));
+        // La meme lecture que noterBonIncomplet : la meme cle de bon.
+        const { rue, codePostal, ville } = adresseDeLaLigne(row);
         const secteurDuFichier = getCellByNames(row, headers, ["Secteur", "Sector"]);
         const secteur = deriveSector(ville, secteurDuFichier);
         const notes = clean(getCellByNames(row, headers, ["Notes", "Remarque", "Remarques"]));
@@ -8873,12 +8900,13 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     // Les ventes FUSIONNENT elles aussi (25/09) : `db.ventes = ventes` effacait
     // celles de tout bon absent du fichier -- et le chiffre d'affaires qui en
     // venait. Un bon du fichier (client + date) remplace ses lignes ; les
-    // autres restent.
+    // autres restent. La fusion se fait APRES les commandes (26/09) : un bon
+    // incomplet dont la commande est laissee telle quelle garde aussi ses lignes.
     // D'abord, figer le montant des commandes dont le CA vient encore des
     // ventes (migration du 25/09, idempotente) : la table va changer.
     figerMontantsImportes(db, "import des ventes");
-    const fusionVentes = fusionnerVentes(db.ventes, ventes);
-    db.ventes = fusionVentes.ventes;
+    // Les cles de vente (cleDuBonDeLaVente) de chaque bon, hors du releve garde sur la fiche.
+    const clesDesBons = new WeakMap();
     // Le montant TTC de chaque bon du fichier : { montant, lignes } (lignes : celles qui ont un TTC).
     const montantsDesBons = new WeakMap();
     const arrondi = n => Math.round(n * 100) / 100;
@@ -8986,6 +9014,9 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
         order.factureLivree = order.factureLivree && venteFactureLivree;
         if (!order.deliveryDate && vente.deliveryDate) order.deliveryDate = vente.deliveryDate;
       }
+      const clesDuBon = clesDesBons.get(clientsMap[key].ordersByDate[dateCommande]) || new Set();
+      clesDuBon.add(cleDuBonDeLaVente(vente));
+      clesDesBons.set(clientsMap[key].ordersByDate[dateCommande], clesDuBon);
       // Le montant TTC du bon (decision 7), hors du releve garde sur la fiche.
       const montantDuBon = montantsDesBons.get(clientsMap[key].ordersByDate[dateCommande]) || { montant: 0, lignes: 0 };
       if (vente.montantTtc !== null) {
@@ -9052,6 +9083,8 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
     let importedAsLivreCount = 0;
     // Decision 1 (24/09) : les commandes laissees telles quelles, et pourquoi.
     const ignorees = [];
+    // Les bons dont les lignes de vente restent telles quelles (bons incomplets deja connus).
+    const bonsFiges = new Set();
 
     importedClients.forEach(client => {
       Object.values(client.ordersByDate || {}).forEach(orderData => {
@@ -9086,7 +9119,13 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
         if (sameKeyOrder) {
           // Deja prete, en tournee ou livree : on n'y touche pas (decision 1).
           // Surtout pas le chemin 3 : ce serait une commande en double.
-          const raison = raisonImportIgnore(db, sameKeyOrder);
+          // Un bon INCOMPLET dans le fichier (une ligne en erreur) non plus :
+          // ses seules lignes lisibles feraient sortir un produit de la
+          // commande (relecture adverse du 26/09). Ses ventes restent aussi.
+          const clesDuBon = [...(clesDesBons.get(orderData) || [])];
+          const incomplet = clesDuBon.some(cle => bonsIncomplets.has(cle));
+          if (incomplet) clesDuBon.forEach(cle => bonsFiges.add(cle));
+          const raison = raisonImportIgnore(db, sameKeyOrder) || (incomplet ? "ligne_en_erreur" : null);
           if (raison) {
             ignorees.push({
               id: sameKeyOrder.id,
@@ -9157,6 +9196,13 @@ app.post("/api/import/ventes", uploadExcel, async (req, res) => {
         if (orderData.factureLivree) importedAsLivreCount += 1;
       });
     });
+
+    // Les ventes, maintenant que les commandes sont decidees. Un bon incomplet
+    // qui a deja des lignes les garde (meme sans commande : purgee, par exemple).
+    const bonsDesVentes = new Set((Array.isArray(db.ventes) ? db.ventes : []).map(cleDuBonDeLaVente));
+    bonsIncomplets.forEach(cle => { if (bonsDesVentes.has(cle)) bonsFiges.add(cle); });
+    const fusionVentes = fusionnerVentes(db.ventes, ventes, bonsFiges);
+    db.ventes = fusionVentes.ventes;
 
     syncWorkflow(db);
     // Les comptes de la fusion des fiches (regle de Thomas : created / updated / preserved).

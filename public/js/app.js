@@ -3672,7 +3672,10 @@ const RAISONS_IMPORT_IGNORE = {
   // Donnees clients (25/09) : seul un bon IMPORTE a preparer suit le fichier.
   annulee: "commande annulée",
   saisie_terrain: "commande saisie au terrain",
-  planifiee: "commande planifiée"
+  planifiee: "commande planifiée",
+  // Relecture du 26/09 : un bon deja importe dont une ligne est en erreur
+  // (quantite vide, produit absent) ne perd plus ce produit.
+  ligne_en_erreur: "une ligne de ce bon est en erreur dans le fichier"
 };
 const IMPORT_IGNOREES_MONTREES = 5;
 

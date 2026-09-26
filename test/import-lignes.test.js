@@ -151,3 +151,76 @@ test("ligne SANS CLIENT (ou sans produit) : en erreur, plus de commande « Clien
   const entree = db.historique.find(h => h.type === "Import ventes");
   assert.match(entree.message, /3 ligne\(s\) en erreur ecartee\(s\)/);
 });
+
+// Relecture adverse du 26/09 : un bon DEJA importe dont une ligne est
+// maintenant en erreur. Jusqu'au 25/09, une quantite vide valait 1 (et une
+// ligne sans produit restait dans le bon) : le bon Carre du 18/05 a ete
+// importe avec ses 3 lignes. Reimporte (fichier cumulatif), la ligne sans
+// quantite est ecartee ; les 2 autres remplacaient alors les lignes de vente
+// du bon et reecrivaient la commande encore a preparer : un produit sortait de
+// la commande, son montant baissait, et le resume ne disait qu'« 1 ligne sans
+// quantite lisible ecartee ».
+const ENTETE_TTC = ["Date", "Client", "Code", "Produit", "Quantite", "Rue", "Code Postal", "Ville", "TTC"];
+const BON_CARRE = [
+  ENTETE_TTC,
+  ["18/05/2026", CLIENT[0], "CH-L", "Changes taille L", "2", ...CLIENT.slice(1), "24"],
+  ["18/05/2026", CLIENT[0], "ALE", "Aleses", "3", ...CLIENT.slice(1), "15"],
+  ["18/05/2026", CLIENT[0], "GAN", "Gants", "1", ...CLIENT.slice(1), "8"]
+];
+const produitsDe = commande => commande.products.map(p => [p.code, Number(p.quantite)]);
+const idsDesVentes = () => readDb().ventes.map(v => v.id).sort();
+
+for (const [cause, abimer, compte] of [
+  ["quantite vide", ligne => { ligne[4] = ""; }, "sansQuantite"],
+  ["sans produit", ligne => { ligne[2] = ""; ligne[3] = ""; }, "sansProduit"]
+]) {
+  test(`un bon DEJA importe dont une ligne est maintenant en erreur (${cause}) : la commande a preparer n'est pas reecrite, les ventes du bon restent ; le resume dit pourquoi`, async () => {
+    semer();
+    // L'etat qu'a laisse l'ancien import : le bon avec ses 3 lignes.
+    const premier = await importerVentes(baseUrl, BON_CARRE);
+    assert.equal(premier.status, 200, premier.body?.error);
+    const [avant] = commandesDe(CLIENT[0]);
+    assert.equal(avant.products.length, 3, "prealable : le bon importe a 3 lignes");
+    const ventesAvant = idsDesVentes();
+
+    const fichier = BON_CARRE.map(ligne => [...ligne]);
+    abimer(fichier[3]);
+    const r = await importerVentes(baseUrl, fichier);
+    assert.equal(r.status, 200, r.body?.error);
+    assert.equal(r.body.lignesEnErreur?.[compte], 1, "prealable : la ligne est en erreur");
+    const [apres] = commandesDe(CLIENT[0]);
+    assert.deepEqual(produitsDe(apres), produitsDe(avant), "un produit est sorti de la commande a preparer");
+    assert.equal(apres.montantTtc, avant.montantTtc, "le montant de la commande a change");
+    assert.deepEqual(idsDesVentes(), ventesAvant, "les lignes de vente du bon ont ete remplacees par ses seules lignes lisibles");
+    const ignoree = (r.body.ignorees || []).find(i => i.id === apres.id);
+    assert.equal(ignoree?.raison, "ligne_en_erreur", "le resume ne dit pas que la commande est laissee telle quelle");
+    assert.equal(r.body.updated, 0);
+  });
+}
+
+test("temoin : le meme bon CORRIGE dans Ximi (quantite remplie, une autre) -- la commande a preparer suit le fichier", async () => {
+  semer();
+  await importerVentes(baseUrl, BON_CARRE);
+  const fichier = BON_CARRE.map(ligne => [...ligne]);
+  fichier[3][4] = "4";
+  fichier[3][8] = "32";
+  const r = await importerVentes(baseUrl, fichier);
+  assert.equal(r.status, 200, r.body?.error);
+  assert.equal(r.body.updated, 1);
+  const [apres] = commandesDe(CLIENT[0]);
+  assert.deepEqual(produitsDe(apres), [["CH-L", 2], ["ALE", 3], ["GAN", 4]]);
+  assert.equal(apres.montantTtc, 71);
+  assert.equal(readDb().ventes.length, 3, "les lignes du bon sont en double");
+});
+
+test("temoin : un NOUVEAU bon avec une ligne en erreur est cree avec ses lignes lisibles (rien a proteger), la ligne est comptee", async () => {
+  semer();
+  const fichier = BON_CARRE.map(ligne => [...ligne]);
+  fichier[3][4] = "";
+  const r = await importerVentes(baseUrl, fichier);
+  assert.equal(r.status, 200, r.body?.error);
+  assert.equal(r.body.created, 1);
+  assert.deepEqual(produitsDe(commandesDe(CLIENT[0])[0]), [["CH-L", 2], ["ALE", 3]]);
+  assert.equal(r.body.lignesEnErreur.sansQuantite, 1);
+  assert.equal(readDb().ventes.length, 2);
+});

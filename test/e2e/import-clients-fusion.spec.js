@@ -78,6 +78,30 @@ test("import partiel : le resume dit les fiches gardees ; aucune fiche ne dispar
   await ctx.close();
 });
 
+// Relecture adverse du 26/09 : un bon deja importe dont une ligne est
+// maintenant en erreur (la quantite vide valait 1 jusqu'au 25/09). Reimporte,
+// il ne perd plus ce produit, et l'ecran dit POURQUOI la commande est laissee
+// telle quelle (sans le libelle, il dirait « commande deja en cours »).
+test("reimport : un bon deja importe dont une ligne est en erreur (quantite vide) garde ses produits, et le resume dit pourquoi", async ({ browser }) => {
+  test.setTimeout(120000);
+  await semer();
+  const neuf = { nom: "Cabinet du Doubs", rue: "7 rue du Doubs", codePostal: "25000", ville: "Besançon" };
+  const entete = ["Date", "Client", "Code", "Produit", "Quantite", "Rue", "Code Postal", "Ville", "TTC"];
+  const ligne = (code, produit, quantite, ttc) => ["18/05/2026", neuf.nom, code, produit, quantite, neuf.rue, neuf.codePostal, neuf.ville, ttc];
+  const { ctx, page, erreurs } = await ouvrir(browser, "journee");
+  await importerParLEcran(page, xlsx([entete, ligne("CH-L", "Changes taille L", "2", "24"), ligne("ALE", "Alèses", "1", "8")]));
+  const resultat = await importerParLEcran(page, xlsx([entete, ligne("CH-L", "Changes taille L", "2", "24"), ligne("ALE", "Alèses", "", "8")]));
+  expect(resultat.lignesEnErreur.sansQuantite).toBe(1);
+  const bilan = page.locator("#importSummary");
+  await expect(bilan).toContainText("Ignorée : une ligne de ce bon est en erreur dans le fichier");
+  await expect(bilan).toContainText(neuf.nom);
+  const commandes = await (await fetch(srv.base + "/api/orders")).json();
+  const o = (Array.isArray(commandes) ? commandes : commandes.orders || []).find(x => x.clientName === neuf.nom);
+  expect(o.products.map(p => [p.code, Number(p.quantite)]), "un produit est sorti de la commande").toEqual([["CH-L", 2], ["ALE", 1]]);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
 test("reimport : une commande saisie au terrain n'est pas reecrite, et le resume dit pourquoi", async ({ browser }) => {
   test.setTimeout(120000);
   const seed = jeuDeDonnees();
