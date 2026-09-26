@@ -36,7 +36,17 @@ let server;
 let baseUrl;
 const journal = [];
 
+// Le meme vrai demarrage efface les fichiers de travail d'une sauvegarde
+// interrompue (reprise du 26/09) : le banc de garde-fous-sauvegardes appelle
+// la fonction elle-meme, et restait vert si startServer ne l'appelait plus
+// (mutant). Poses AVANT le demarrage, a cote d'un fichier qui n'en est pas un.
+const DOSSIER_SAUVEGARDES = process.env.SEREO_BACKUP_DIR;
+const RESTES = ["db-2026-09-25T08-00-00-000Z.sqlite.gz.tmp", "db-2026-09-25T08-00-00-000Z.sqlite.gz.travail-copie.sqlite", "db-2026-09-25T08-00-00-000Z.sqlite.gz.travail-verif.sqlite-wal"];
+const TEMOIN = "notes.txt";
+
 before(async () => {
+  fs.mkdirSync(DOSSIER_SAUVEGARDES, { recursive: true });
+  for (const nom of [...RESTES, TEMOIN]) fs.writeFileSync(path.join(DOSSIER_SAUVEGARDES, nom), "x");
   // Le vrai demarrage (startServer), journal capture.
   const warn = mock.method(console, "warn", (...args) => { journal.push(args.join(" ")); });
   const log = mock.method(console, "log", () => {});
@@ -73,6 +83,12 @@ async function connexion(identifiant, motDePasse) {
 test("mot de passe court : le serveur démarre quand même, et la connexion marche", async () => {
   assert.equal((await fetch(`${baseUrl}/healthz`)).status, 200);
   assert.ok(await connexion("admin", COURT), "le compte d'environnement ne se connecte plus");
+});
+
+test("le vrai démarrage efface les fichiers de travail d'une sauvegarde interrompue, et rien d'autre", () => {
+  const presents = fs.readdirSync(DOSSIER_SAUVEGARDES);
+  assert.deepEqual(RESTES.filter(nom => presents.includes(nom)), [], "fichiers de travail restes apres le demarrage");
+  assert.ok(presents.includes(TEMOIN), "temoin : le demarrage a efface un fichier qui n'etait pas a lui");
 });
 
 test("mot de passe court : le journal du démarrage l'annonce, sans écrire le mot de passe", () => {

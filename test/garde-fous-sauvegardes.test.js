@@ -209,6 +209,56 @@ test("une copie qui ne se relit pas ne devient jamais une sauvegarde (aucun fich
   assert.deepEqual(restes, [], "des fichiers de travail sont restes");
 });
 
+// Le cas que le banc precedent n'atteint pas (reprise du 26/09) : la copie
+// s'abime APRES son ecriture (disque), alors que VACUUM INTO a reussi. Seules
+// des pages feuilles de `historique` sont abimees (dbstat) : la table demandee
+// se lit encore, son releve seul ne verrait rien -- seul l'integrity_check le
+// voit. Mutant qui le retire de relireSauvegarde : ce banc rougit.
+test("une copie abîmée APRÈS son écriture ne passe pas la relecture, même si la table demandée se lit", async () => {
+  const { relireSauvegarde } = require("../lib/sauvegarde-base");
+  const dossier = fs.mkdtempSync(path.join(tmpRoot, "relecture-"));
+  const source = path.join(dossier, "copie.sqlite");
+  const base = new DatabaseSync(source);
+  base.exec("CREATE TABLE commandes (id TEXT PRIMARY KEY, payload TEXT)");
+  base.exec("CREATE TABLE historique (id TEXT PRIMARY KEY, payload TEXT)");
+  const commande = base.prepare("INSERT INTO commandes VALUES (?, ?)");
+  const ligne = base.prepare("INSERT INTO historique VALUES (?, ?)");
+  base.exec("BEGIN");
+  for (let i = 0; i < 50; i++) commande.run(`c-${i}`, "x");
+  for (let i = 0; i < 3000; i++) ligne.run(`h-${i}`, "m".repeat(300));
+  base.exec("COMMIT");
+  const taillePage = base.prepare("PRAGMA page_size").get().page_size;
+  const pages = base.prepare("SELECT pageno FROM dbstat WHERE name = 'historique' AND pagetype = 'leaf' ORDER BY pageno").all().map(r => r.pageno);
+  base.close();
+  assert.ok(pages.length > 20, `prealable : trop peu de pages d'historique (${pages.length})`);
+
+  const octets = fs.readFileSync(source);
+  for (const page of pages.slice(5, 15)) octets.fill(0x5a, (page - 1) * taillePage, page * taillePage);
+  const compresse = path.join(dossier, "db-abimee.sqlite.gz");
+  fs.writeFileSync(compresse, zlib.gzipSync(octets));
+  const verification = path.join(dossier, "verif.sqlite");
+
+  // Prealable : la table demandee se lit encore dans la copie abimee.
+  fs.writeFileSync(verification, octets);
+  const lue = new DatabaseSync(verification, { readOnly: true });
+  try {
+    assert.equal(lue.prepare("SELECT count(*) AS n FROM commandes").get().n, 50, "prealable : la table demandee ne se lit plus");
+  } finally {
+    lue.close();
+  }
+  fs.rmSync(verification);
+
+  await assert.rejects(relireSauvegarde({ compresse, verification, tables: ["commandes"] }), /integrity_check|malformed/);
+  assert.equal(fs.existsSync(verification), false, "le fichier de verification est reste");
+
+  // Temoin : la meme base, saine, se relit, et son releve est juste.
+  const saine = path.join(dossier, "db-saine.sqlite.gz");
+  fs.writeFileSync(saine, zlib.gzipSync(fs.readFileSync(source)));
+  const releve = await relireSauvegarde({ compresse: saine, verification, tables: ["commandes"] });
+  assert.equal(releve.comptes.commandes, 50);
+  assert.equal(fs.existsSync(verification), false);
+});
+
 test("au démarrage, les fichiers de travail d'une sauvegarde interrompue sont effacés, et rien d'autre", () => {
   viderLeDossier();
   const restes = ["db-2026-09-25T08-00-00-000Z.sqlite.gz.tmp", "db-2026-09-25T08-00-00-000Z.sqlite.gz.travail-copie.sqlite", "db-2026-09-25T08-00-00-000Z.sqlite.gz.travail-verif.sqlite-wal"];
