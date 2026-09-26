@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.1](https://github.com/tombague160-maker/sereo-production/compare/v2.0.0...v2.0.1) (2026-09-26)
+
+
+### 💄 Style / UI
+
+* **ui:** plus de bandeau rouge « mot de passe d'administration trop court » ([fc2ee21](https://github.com/tombague160-maker/sereo-production/commit/fc2ee2180a984aaefa0e836091e0a274305333e8))
+* **ui:** plus de bandeau rouge « mot de passe d'administration trop court » ([#189](https://github.com/tombague160-maker/sereo-production/issues/189)) ([3cab5ed](https://github.com/tombague160-maker/sereo-production/commit/3cab5eda533db9ff4e1fdaf978ae1fbc0fe690e8))
+
 ## [2.0.0](https://github.com/tombague160-maker/sereo-production/compare/v1.46.1...v2.0.0) (2026-09-26)
 
 
