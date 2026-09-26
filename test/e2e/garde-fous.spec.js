@@ -281,3 +281,59 @@ test.describe("mot de passe d'environnement long (témoin)", () => {
     await expect(page.locator("#bandeauMotDePasseCourt")).toHaveCount(0);
   });
 });
+
+// --- 4. « Se deconnecter » pendant une lecture en vol
+//
+// Une lecture de l'ecran partie pendant la deconnexion recoit 401 (la session
+// est fermee cote serveur des le POST /logout depuis le 25/09 ; avant, des que
+// la reponse effacait le cookie). apiFetch envoyait alors la page vers
+// /login?next=... : une SECONDE navigation, qui interrompait celle du
+// formulaire (net::ERR_ABORTED : connexion.spec.js rougissait parfois).
+// Le montage : les lectures de Parametres sont retenues au navigateur, le
+// serveur traite la deconnexion, elles partent, puis la reponse de la
+// deconnexion est rendue a la page. Sans service worker : page.route ne voit
+// pas les requetes qu'il fait.
+
+test.describe("se déconnecter pendant une lecture", () => {
+  const MOT_DE_PASSE = "mot-de-passe-long-sans-valeur-e2e";
+  let srv;
+  test.beforeAll(async () => { srv = await lancerAvecConnexion(MOT_DE_PASSE); });
+  test.afterAll(async () => { if (srv) await srv.arreter(); });
+
+  test("une lecture en vol ne détourne pas la déconnexion : une seule navigation, vers /login", async ({ browser }) => {
+    const ctx = await browser.newContext({ serviceWorkers: "block" });
+    const page = await ctx.newPage();
+    await seConnecter(page, srv.base, "admin-e2e", MOT_DE_PASSE);
+    const versLogin = [];
+    page.on("framenavigated", f => {
+      if (f !== page.mainFrame()) return;
+      const u = new URL(f.url());
+      if (u.pathname.startsWith("/login")) versLogin.push(u.pathname + u.search);
+    });
+    const retenues = [];
+    const statuts = [];
+    page.on("response", r => { if (r.url().includes("/api/")) statuts.push(r.status()); });
+    await page.route("**/api/**", route => { retenues.push(route); });
+    await page.route("**/logout", async route => {
+      const reponse = await route.fetch({ maxRedirects: 0 });
+      await page.unroute("**/api/**");
+      for (const r of retenues) await r.continue().catch(() => {});
+      // Le temps que les 401 reviennent et que la page les traite.
+      await new Promise(r => setTimeout(r, 800));
+      await route.fulfill({ response: reponse }).catch(() => {});
+    });
+    await page.locator(".sidebar").getByRole("button", { name: "Paramètres et compte" }).click();
+    await expect.poll(() => retenues.length).toBeGreaterThan(0);
+    let erreur = null;
+    await Promise.all([
+      page.waitForURL(/\/login/).catch(e => { erreur = e.message.split("\n")[0]; }),
+      page.locator(".sidebar").getByRole("button", { name: "Se déconnecter" }).click()
+    ]);
+    await expect.poll(() => new URL(page.url()).pathname).toBe("/login");
+    // Temoin du montage : des lectures sont bien parties apres la fermeture de
+    // la session, et ont recu 401 (sinon rien n'aurait ete eprouve).
+    expect(statuts.filter(s => s === 401).length).toBeGreaterThan(0);
+    expect({ versLogin, erreur }).toEqual({ versLogin: ["/login"], erreur: null });
+    await ctx.close();
+  });
+});

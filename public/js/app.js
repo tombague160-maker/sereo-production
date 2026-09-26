@@ -296,11 +296,23 @@ window.addEventListener("load", () => {
 // boutons (barre, menu « Plus ») visent le meme formulaire par `form=`.
 // `navigator.onLine === false` est sur ; `true` ne prouve rien (reseau qui
 // ment) : ce cas-la reste celui d'avant, hors de portee de cette garde.
+//
+// EN LIGNE (garde-fous du 25/09) : la page part vers /login. Une lecture
+// partie pendant ce temps revient en 401 (la session est fermee cote serveur
+// des le POST /logout) ; apiFetch ne lance pas alors SA navigation
+// (/login?next=...), qui interromprait celle du formulaire (net::ERR_ABORTED).
+// Remis a faux si la page revient du cache arriere du navigateur.
+let deconnexionEnCours = false;
 document.addEventListener("submit", event => {
-  if (event.target?.id !== "formDeconnexion" || navigator.onLine !== false) return;
-  event.preventDefault();
-  notify("Hors ligne : la déconnexion attend le retour du réseau. Rien n'a été effacé.", "error", { cle: "deconnexion-hors-ligne" });
+  if (event.target?.id !== "formDeconnexion") return;
+  if (navigator.onLine === false) {
+    event.preventDefault();
+    notify("Hors ligne : la déconnexion attend le retour du réseau. Rien n'a été effacé.", "error", { cle: "deconnexion-hors-ligne" });
+    return;
+  }
+  if (!event.defaultPrevented) deconnexionEnCours = true;
 });
+window.addEventListener("pageshow", event => { if (event.persisted) deconnexionEnCours = false; });
 
 function setNavigationSearchValue(value, sourceInput = null) {
   // #globalNavigationSearch vivait dans la barre du haut, que les planches
@@ -10102,7 +10114,9 @@ async function apiFetch(url, options = {}) {
     // (Un 429 n'est pas une fin de session : on ne vide que sur 401.)
     // La FILE, elle, n'est pas un cache : elle reste.
     if (res.status === 401) await viderCacheDeDonnees();
-    window.location.href = `/login?next=${encodeURIComponent(next)}`;
+    // « Se deconnecter » est deja en route vers /login : pas de seconde
+    // navigation, elle interromprait la sienne (garde-fous du 25/09).
+    if (!deconnexionEnCours) window.location.href = `/login?next=${encodeURIComponent(next)}`;
     // On throw quand meme pour interrompre proprement le code appelant.
     throw new Error("Session expiree, redirection vers /login");
   }
