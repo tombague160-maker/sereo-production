@@ -857,6 +857,36 @@ test("abonnement + nouvelle fiche qui existe déjà, le refus (409) se perd : au
   await ctx.close();
 });
 
+// Un refus est une issue CONNUE : la cle part, le nouvel essai est un nouveau
+// geste (sinon le serveur rejouerait le refus, sans son message).
+// (Un refus que seul le serveur fait : le garde de la page arrete deja un
+// telephone invalide, rien ne part.)
+test("abonnement + nouvelle fiche refusée (doublon, 409) : revalider sans rien changer est un nouveau geste, et redit le refus", async ({ browser }) => {
+  const { ctx, page, erreurs } = await ouvrir(browser, "abonnements");
+  const cles = [];
+  const rejoues = [];
+  await page.route("**/api/crm/clients", async route => {
+    if (route.request().method() !== "POST") return route.continue();
+    cles.push(route.request().headers()["x-sereo-geste"]);
+    const reponse = await route.fetch();
+    rejoues.push(reponse.headers()["x-sereo-geste-rejoue"] || "");
+    await route.fulfill({ response: reponse });
+  });
+  await saisirNouvelleFiche(page, { nom: "Clinique Vétérinaire du Doubs", rue: "1 place du Marché", ville: "Besançon" });
+  await page.fill("#subPostal", "25000");
+  await page.locator("#subSave").click();
+  await expect.poll(() => cles.length, { timeout: 10000, message: "prealable : la fiche part au serveur" }).toBe(1);
+  await expect(page.locator("#subError")).toContainText("Une fiche existe déjà");
+  await page.evaluate(() => { document.getElementById("subError").textContent = ""; });
+  await page.locator("#subSave").click();
+  await expect.poll(() => rejoues.length, { timeout: 10000 }).toBe(2);
+  expect(cles[1], "apres un refus, le nouvel essai garde la cle : le serveur rejoue le refus").not.toBe(cles[0]);
+  expect(rejoues, "le refus est rejoue au lieu d'etre redit").toEqual(["", ""]);
+  await expect(page.locator("#subError")).toContainText("Une fiche existe déjà");
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
 // 18. Revalider apres une issue inconnue : le serveur rend « deja fait »
 // ({ rejoue: true }, sans la commande). L'ecran annoncait « validée : elle est
 // à préparer », sans numero -- meme pour une commande bloquee faute de stock.
