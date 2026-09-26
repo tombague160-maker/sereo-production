@@ -382,6 +382,10 @@ test("si la copie est impossible, rien n'est ecarte : l'erreur d'origine remonte
   const geste = await api("/api/stock/p1", { method: "PATCH", body: JSON.stringify({ quantite: 48 }) });
   assert.equal(geste.status, 500, "une ecriture est passee sans que la ligne soit mise de cote");
   assert.ok(brut(cnx => cnx.prepare("SELECT 1 FROM historique WHERE id = 'h-2'").get()), "la ligne a disparu de sa table");
+  // Relecture adverse du 26/09 : la base « se lit » page par page, mais une
+  // ligne qu'on n'a pas pu mettre de cote met les gestes en 500 : /healthz le dit.
+  const sante = await api("/healthz");
+  assert.equal(sante.status, 503, `/healthz : ${JSON.stringify(sante.body)}`);
   closeStorage();
 });
 

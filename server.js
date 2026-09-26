@@ -471,6 +471,14 @@ app.use("/fonts", express.static(path.join(__dirname, "public", "fonts"), { maxA
 app.get("/favicon.svg", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "favicon.svg"));
 });
+// /healthz : la relecture de chaque page (verifierPages, 5 ms sur une base de
+// la forme de la production, plus avec les traces) au plus toutes les 20 s.
+// Docker appelle toutes les 30 s : chacun de ses appels relit tout ; un appel
+// en boucle sur cette route publique, lui, ne fait pas relire la base a chaque
+// fois. Par magasin ouvert : une base rouverte (restauration) se relit.
+const SONDE_COMPLETE_MS = 20000;
+let sondeComplete = { store: null, a: 0, erreur: null };
+
 app.get("/healthz", (req, res) => {
   // Revue #4 : si la recovery storage a totalement echoue (disque plein, FS
   // read-only), le serveur ecoute mais sert 500 sur toutes les routes data.
@@ -481,12 +489,28 @@ app.get("/healthz", (req, res) => {
   }
   // Robustesse (25/09) : /healthz ne regardait jamais la base. Une base qui ne
   // se lisait plus (toutes les pages en 500) restait « healthy » pour Docker.
-  // Une vraie lecture de chaque table (sonderLecture, quelques dizaines de
-  // microsecondes) ; en echec, 503 sans detail (la route est publique), la
-  // cause dans les journaux du serveur.
+  // A chaque appel, la sonde rapide (sonderLecture : la premiere ligne de
+  // chaque table, et les lignes illisibles qu'on n'a pas pu mettre de cote) ;
+  // et, au plus toutes les SONDE_COMPLETE_MS, la relecture de chaque page
+  // (verifierPages), dont le verdict tient jusqu'a la suivante (relecture
+  // adverse du 26/09 : une page abimee au-dela de la premiere feuille ne se
+  // voyait pas). En echec, 503 sans detail (la route est publique), la cause
+  // dans les journaux du serveur.
   if (useSqliteStorage()) {
     try {
-      getSqliteStore().sonderLecture();
+      const store = getSqliteStore();
+      store.sonderLecture();
+      const maintenant = Date.now();
+      if (sondeComplete.store !== store || maintenant - sondeComplete.a >= SONDE_COMPLETE_MS) {
+        let erreur = null;
+        try {
+          store.verifierPages();
+        } catch (echec) {
+          erreur = echec;
+        }
+        sondeComplete = { store, a: maintenant, erreur };
+      }
+      if (sondeComplete.erreur) throw sondeComplete.erreur;
     } catch (error) {
       console.error(`[healthz] la base ne se lit pas : ${error.message || error}`);
       return res.status(503).json({ ok: false, error: "base illisible" });
@@ -10570,6 +10594,8 @@ module.exports = {
   // Lot 3 de l audit geo : des adresses justes
   listerAdressesAVerifier,
   getSqliteStoreForTests: () => getSqliteStore(),
+  // /healthz (26/09) : la prochaine sonde fait la relecture complete.
+  _oublierSondeCompletePourTest: () => { sondeComplete = { store: null, a: 0, erreur: null }; },
   // Comptes utilisateurs (V8 phase 1)
   hashPassword,
   verifyPassword,

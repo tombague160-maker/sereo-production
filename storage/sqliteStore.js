@@ -164,18 +164,36 @@ function createSqliteStore(options) {
     },
 
     /**
-     * /healthz (25/09) : la base se lit-elle ? Une vraie lecture, table par
-     * table (la premiere ligne de chacune, et les reglages) : quelques
-     * dizaines de microsecondes. Leve si la connexion est perdue, si une page
-     * ne se lit plus (erreur disque, fichier abime) ou si une table manque.
-     * Ne lit pas le contenu de toutes les lignes : une ligne illisible est
-     * mise de cote a la lecture (mettreDeCote), elle ne rend pas la base
-     * malade. N'ecrit rien : un disque plein ou un volume en lecture seule
-     * ne se voit pas ici (ce que /api/storage/status montre des sauvegardes).
+     * /healthz (25/09), la sonde RAPIDE : la premiere ligne de chaque table,
+     * et les reglages (moins d'une milliseconde). Leve si la connexion est
+     * perdue ou si une table manque. Ne voit pas une page abimee plus loin
+     * dans une table (relecture adverse du 26/09 : LIMIT 1 ne descend que dans
+     * la feuille la plus a gauche) : c'est verifierPages.
+     * Leve aussi quand une ligne illisible n'a pas pu etre mise de cote (disque
+     * plein, volume en lecture seule) : sa table ne se lit plus, les gestes
+     * repondent 500. Une ligne mise de cote, elle, ne rend pas la base malade.
      */
     sonderLecture() {
       database.prepare("SELECT value FROM app_meta WHERE key = 'settings'").get();
       for (const table of TABLES_SONDEES) database.prepare(`SELECT * FROM ${table} LIMIT 1`).get();
+      const echecs = echecsDeMiseDeCote(database);
+      if (echecs.size) {
+        throw new Error(`${echecs.size} ligne(s) illisible(s) NON mise(s) de cote : ${[...echecs.values()].slice(0, 3).join(" ; ")}`);
+      }
+    },
+
+    /**
+     * /healthz, la sonde COMPLETE (relecture adverse du 26/09) : chaque page
+     * de la base se lit-elle ? PRAGMA quick_check, le controle de l'ouverture :
+     * il parcourt toutes les pages de toutes les tables et de tous les index
+     * (debordements compris). Mesure sur une base de la forme de la
+     * production : 5 ms ; une page abimee n'importe ou (en-tete de feuille,
+     * cellules, enregistrement, debordement, page interieure) le fait echouer
+     * comme elle fait echouer la lecture. Le serveur l'espace (route publique).
+     */
+    verifierPages() {
+      const lignes = database.prepare("PRAGMA quick_check").all().map(ligne => Object.values(ligne)[0]);
+      if (!(lignes.length === 1 && lignes[0] === "ok")) throw new Error(`quick_check : ${lignes.join(" | ").slice(0, 300)}`);
     },
 
     close() {
@@ -1407,6 +1425,20 @@ const DEPENDANCES_MISES_DE_COTE = {
   routes: [["traces_tournees", "route_id", "trace"]]
 };
 
+// Par base ouverte : les lignes illisibles dont la mise de cote a ECHOUE, et
+// pas reussi depuis (cle -> message). Tant qu'il en reste, leur table ne se lit
+// plus : sonderLecture le dit (/healthz). Une copie reussie efface la cle.
+const echecsParBase = new WeakMap();
+
+function echecsDeMiseDeCote(database) {
+  let echecs = echecsParBase.get(database);
+  if (!echecs) {
+    echecs = new Map();
+    echecsParBase.set(database, echecs);
+  }
+  return echecs;
+}
+
 function lireCommandesMisesDeCote(database) {
   const commandes = new Map();
   const valeur = v => (v === undefined || v === null || v === "" ? null : String(v));
@@ -1463,6 +1495,8 @@ function mettreDeCote(database, { table, colonneId, id, idLigne = id, colonneCon
   // quarantaine absente), l'erreur d'origine remonte, comme une copie ratee.
   // Sans copie a faire, rien n'est ecrit (un volume en lecture seule relit une
   // ligne deja mise de cote sans erreur).
+  const echecs = echecsDeMiseDeCote(database);
+  const cle = `${table}/${nom}`;
   database.exec("SAVEPOINT mise_de_cote");
   let copiee = 0;
   let dependances = 0;
@@ -1484,9 +1518,11 @@ function mettreDeCote(database, { table, colonneId, id, idLigne = id, colonneCon
       database.exec("RELEASE mise_de_cote");
     } catch { /* savepoint deja defait avec la transaction */ }
     console.error(`[stockage] ligne illisible ${table}/${nom} NON mise de cote (${erreurCopie.message}) : l'erreur d'origine remonte.`);
+    echecs.set(cle, `${cle} (${String(erreurCopie.message).slice(0, 120)})`);
     throw erreurDOrigine;
   }
 
+  echecs.delete(cle);
   if (!copiee) return;
   console.error(
     `[stockage] ligne illisible mise de cote : ${table}/${nom} (${message})`
