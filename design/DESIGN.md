@@ -9565,3 +9565,141 @@ Quatre défauts relevés sur `2b72612`, tous vrais, tous corrigés. Bancs 15 à 
 - **Le brouillon d'un compte revenait au compte suivant** (même onglet, fin de session) : il porte
   le compte qui l'a saisi ; un autre compte ne le reprend pas, il part. Tant que `/api/me` n'a pas
   répondu, la reprise attend (`loadMoi`). Témoin : le même compte retrouve sa saisie.
+
+## 26/09 — Intégration des corrections du 26/09
+
+Branche `integration/corrections`, partie de `main` (`3d361ec`, v1.46.1). Fusionnés `--no-ff`,
+dans cet ordre, les six lots de la chasse aux défauts du 24/09, tous partis de `5b52268` (`main`
+avant le commit de release, qui ne touche que la version et le CHANGELOG) : `fix/garde-fous`
+(`9e77349`), `fix/import-clients-fusion` (`f0b5818`), `fix/stock-et-abonnements` (`c586f0b`),
+`perf/serveur-et-ci` (`ef51a2f`), `fix/robustesse` (`1b97973`), `fix/hors-ligne-et-saisie`
+(`950d52e`). Chaque fusion est contrôlée : les lignes ajoutées et retirées contre son premier
+parent égalent celles du lot contre `5b52268`, hors les conflits nommés ci-dessous ; chaque module
+du front passe `node --input-type=module --check`, `server.js` `node --check`, et aucune fonction
+n'est déclarée deux fois (ce que `node --check` ne voit pas).
+
+### Conflits signalés par git
+
+- **`DESIGN.md`**, **`style.css`**, **`.env.example`** : ajouts en fin de fichier ou au même
+  endroit, reconstruits depuis les trois versions, jamais en ôtant les marqueurs.
+- **`numerotation-admin.spec.js`** : les lots garde-fous et serveur-et-ci rendaient l'adresse du
+  serveur authentifié réglable sous deux noms ; `SEREO_E2E_AUTH_BASE_URL` (celui des trois bancs
+  du lot garde-fous) d'abord, `SEREO_E2E_AUTH_URL` accepté aussi.
+- **`package.json`** : le script `check` vérifie les deux modules de sauvegarde et `garde-excel`.
+- **`sqliteStore.js`** : les méthodes des trois lots, toutes gardées ; `readPayloads` garde la
+  lecture mémorisée (serveur-et-ci) et, si un texte ne se décode pas, relit la table ligne à
+  ligne **en base** pour mettre la ligne illisible de côté (robustesse).
+- **`server.js`** : au démarrage, la migration des montants (données clients) reste et le
+  `syncWorkflow` redondant part (`writeDb` le refait) ; `analyzeOrderStock` et `enrichOrder`
+  prennent la table du catalogue en paramètre (serveur-et-ci) et gardent la répartition du rayon
+  par produit et `stockReserveActif` (stock) ; l'import des ventes réécrit par le lot données
+  clients perd son `syncWorkflow` redondant (rien entre lui et `writeDb` ne lit ce qu'il calcule).
+- **`app.js`, la commande client** (données clients × hors ligne et saisie) : la page demande
+  « rattacher ou créer » avant l'envoi, prend la clé de geste de la **saisie**, et
+  `envoyerCommandeClient` porte cette clé : le renvoi après le 409 « doublon » la garde (une
+  question, que le serveur n'enregistre pas sous la clé), la version mise en file (« nouvelle
+  fiche ») aussi. En file ou fin de session, l'écran repart à vide ; refus, la clé part ; annulé
+  au dialogue, rien ne part. Contre-témoin : sans la clé dans `envoyerCommandeClient`,
+  `hors-ligne-et-saisie.spec.js:149` rougit (« le second envoi de la MÊME saisie a tiré une autre
+  clé »).
+- **`app.js`, ailleurs** : « Se déconnecter » (le brouillon part quand la déconnexion part
+  vraiment) ; les boutons − et + du Stock sans `<svg>` et fermés au livreur ; le 401 d'`apiFetch`
+  sans seconde navigation pendant la déconnexion, avec `gardeeEnFile`. **`operations.js`** :
+  l'abonnement mis en file garde sa réponse et son message de suspension.
+
+### Conflits que git ne signale pas
+
+- **`persistDatabase` levait à chaque écriture** (robustesse × serveur-et-ci). La vérification des
+  lignes illisibles retirées lisait `plan.seen` sur les plans partiels (table non lue), qui n'en
+  ont pas : « Cannot read properties of undefined », 17 rouges, dont la mise en cohérence du
+  démarrage (qui échouait dans son `catch`, en silence). Une table non lue ne perd aucune ligne :
+  elle est sautée.
+- **Le journal des lignes mises de côté relisait toutes les tables à chaque écriture** : « ce que
+  cette écriture va normaliser de toute façon » était vrai avant la lecture paresseuse des
+  écritures, faux depuis (`rapidite-serveur`, 4 rouges). Le magasin lit désormais exactement ce
+  que l'écriture lira (`lireCeQueLEcritureLira` : tout à la première après l'ouverture, les tables
+  toujours écrites ensuite). Une ligne d'une table qu'aucune écriture ne lit est découverte à sa
+  lecture et journalisée à l'écriture qui suit.
+
+### Réconciliations (commits à part)
+
+- **Le tableau des variables** de `DEPLOYMENT.md` nomme `SEREO_BACKUP_COPY_DIR` et les trois
+  réglages de la limite par compte (le banc du lot robustesse rougissait, comme il l'annonçait).
+- **Un seul nettoyage des sauvegardes interrompues** au démarrage (le lot garde-fous demandait de
+  l'accorder) : l'union des deux motifs, dans les deux dossiers, avant toute écriture, chaque
+  suppression journalisée.
+- **`jour-paris.test.js` attend la sauvegarde en vol** avant d'effacer son dossier : depuis le lot
+  garde-fous elle se fait dans un thread, par une seconde connexion ; sous Windows, EPERM 4 fois
+  sur 6 sur `fix/garde-fous` seul (0 sur 6 sur `main`).
+
+**Vérifié, rien à changer.** Les routes que les lots 2 à 6 ont modifiées gardent leur garde
+(import et purge : administration ; ajustement du stock : tout compte sauf livreur ; commandes,
+arrêts, abonnements : tout compte connecté) ; aucune route d'écriture nouvelle
+(`garde-fous-routes` vert). La numérotation compte à la fois le plancher retenu par la purge
+(stock) et les numéros en quarantaine (robustesse). La purge enchaîne la sauvegarde relue hors
+rotation, la restitution des réservations et le plancher des numéros. Aucune écriture directe du
+magasin (sessions fermées dans `app_meta`, quarantaine) ne vise une table mémorisée. `CACHE_NAME` :
+rien à faire, le nom du shell porte l'empreinte du contenu. La CI : « Tests + syntax check »
+inchangé ; « Tests e2e (Playwright) » tourne toujours et n'est vert que si les quatre lots le sont ;
+l'union des quatre `--list --shard=i/4` est la liste entière (788/788 ; lots de 209, 185, 198, 196).
+
+### Vérifications
+
+- `npm run check` ; `npm test` : **992/993** deux fois (le 993ᵉ, un vrai SIGTERM à un processus à
+  part, est sauté sous Windows ; la CI Linux le joue).
+- e2e, les bancs des six lots et leurs voisins (`garde-fous`, `import-clients-fusion`,
+  `import-fusion-production`, `stock-et-abonnements`, `donnees-utiles`, `historique-lent`,
+  `hors-ligne-et-saisie`, `shell-meme-version`, `chargement-instantane`, `hors-ligne`,
+  `tournee-hors-ligne`, `livreur-ne-perd-rien`, `poids-reseau`, `rendu-a-l-affichage`, `pieges-*`,
+  `parcours-simplifies*`, `sauvegardes`, `telephone-utilisable`, `tabs`, `smoke`, `connexion`,
+  `contraste-login`, `numerotation-admin`) : **269/269**.
+- Suite complète, deux passages (4 ouvriers) : **788/788** et **788/788**, sans réessai.
+
+### Aucune donnée perdue
+
+Script hors dépôt (`preuve-integration.js`) : instantané de toutes les lignes de toutes les
+tables, avant, après un premier démarrage du code intégré, après un second ; contre-témoin de
+l'instrument (une ligne retirée, une donnée changée, une table perdue sont vues).
+
+| Table | A. écrite par v1.45.1 : avant → 1er → 2e | B. forme production, écrite par `main` |
+|---|---|---|
+| clients | 102 → 102 → 102 | 97 → 97 → 97 |
+| commandes | 226 → 226 → 226 | 224 → 224 → 224 |
+| lignes_commande | 478 → 478 → 478 | 441 → 441 → 441 |
+| livraisons | 264 → 264 → 264 | 263 → 263 → 263 |
+| ventes | 429 → 429 → 429 | 429 → 429 → 429 |
+| historique | 1 057 → 1 058 → 1 058 | 1 036 → 1 037 → 1 037 |
+| mouvements_stock | 633 → 633 → 633 | 633 → 633 → 633 |
+| produits | 218 → 218 → 218 | 218 → 218 → 218 |
+| routes | 18 → 18 → 18 | 18 → 18 → 18 |
+| imports_archives | 124 → 124 → 124 | 123 → 123 → 123 |
+| abonnements, relances_crm | 1, 1 (inchangés) | 0, 0 |
+| lignes_en_quarantaine | absente → 0 → 0 | absente → 0 → 0 |
+
+Aucune ligne disparue, aucune table perdue. Au premier démarrage changent : les montants TTC
+figés (2 commandes sur A, 158 sur B, et la livraison tirée de chacune), une ligne d'historique qui
+le dit, la répartition du rayon sur les commandes **livrées** qui ont deux lignes du même produit
+(1 ligne sur A, 4 sur B : affichage, sans effet), les réglages de A (`stock.horizonJours` reçoit
+son défaut, écart qui vient de `5b52268`), la table de quarantaine créée vide. Au second : rien
+que `last_write_at` (idempotent). Les lectures de l'ouverture répondent 200 sur les deux bases.
+En plus, le banc du lot données clients rejoué sur la base v1.45.1 (`SEREO_BASE_SQLITE`,
+`SEREO_BASE_CA`) : **4/4** — imports complet, partiel et vide, CA des 12 mois égal à celui
+qu'affichait v1.45.1 ; la base source n'a pas changé (même SHA-256).
+
+### Ce qui reste
+
+- **Hors code, à Thomas** : changer le mot de passe de production (décision 1, il reste dans
+  l'historique git) ; poser le second disque et son fichier témoin (`SEREO_BACKUP_COPY_DIR`) ;
+  protéger `main` en exigeant « Tests + syntax check » et « Tests e2e (Playwright) » (pas les
+  lots, dont le nom suit leur nombre).
+- **La CI n'a jamais joué ces lots** : aucune poussée. Le premier passage de la PR montrera les
+  quatre lots e2e sous Linux, et le cas SIGTERM réel.
+- **Les questions des lots**, inchangées : annuler d'office une commande générée hors de la
+  nouvelle cadence ; ce que « non livrée » doit annuler à la pause ; la définition d'un prospect
+  converti ; le bandeau « tournée non soldée » après minuit au téléphone ; le repli d'un appareil
+  neuf pendant une attaque sur l'identifiant.
+- **Nommé, non traité** : trente fichiers de bancs unitaires effacent leur dossier sans attendre
+  la sauvegarde en vol (relevé par motif ; tous ne déclenchent pas de sauvegarde) ; aucun n'a
+  rougi sur les passages de l'intégration, la même fragilité reste possible sous Windows. `/api/storage/status`, ouverte à tout compte connecté, liste désormais
+  les lignes mises de côté (table, identifiant, message d'erreur de décodage). Le motif `db-*.tmp`
+  du nettoyage n'a pas de banc qui le distingue du `.gz.tmp`.
