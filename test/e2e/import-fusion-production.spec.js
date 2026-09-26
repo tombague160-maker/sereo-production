@@ -82,7 +82,8 @@ const nombre = v => {
 const premierPositif = (...vs) => { for (const v of vs) { const n = nombre(v); if (Number.isFinite(n) && n > 0) return n; } return 0; };
 const jourParis = instant => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(instant));
 
-function caAncienParMois({ commandes, ventes }) {
+/** Le montant d'une commande pour l'ANCIEN calcul : le sien, sinon ses lignes, sinon ses ventes. */
+function montantsAnciens(ventes) {
   const parBon = new Map();
   for (const v of ventes) {
     const q = Math.max(0, nombre(v.quantite ?? v.quantity) || 0);
@@ -91,15 +92,21 @@ function caAncienParMois({ commandes, ventes }) {
     const k = `${cle(v.client)}|${String(v.dateCommandeIso || "").slice(0, 10)}`;
     parBon.set(k, Math.round(((parBon.get(k) || 0) + total) * 100) / 100);
   }
-  const mois = {};
-  for (const o of commandes.filter(c => c.status === "livre")) {
+  return o => {
     const lignes = (o.products || []).reduce((s, l) => s + (premierPositif(l.totalLigne, l.total, l.ttc, l.ht)
       || Math.max(0, nombre(l.quantite) || 0) * Math.max(0, nombre(l.prixUnitaire) || 0)), 0);
     const explicite = premierPositif(o.total, o.totalTtc, o.ttc, o.montantTotal, o.montant) || lignes;
-    const montant = explicite || parBon.get(`${cle(o.clientName)}|${o.dateCommande}`) || parBon.get(`${cle(o.clientName)}|`) || 0;
+    return Math.round((explicite || parBon.get(`${cle(o.clientName)}|${o.dateCommande}`) || parBon.get(`${cle(o.clientName)}|`) || 0) * 100) / 100;
+  };
+}
+
+function caAncienParMois({ commandes, ventes }) {
+  const montant = montantsAnciens(ventes);
+  const mois = {};
+  for (const o of commandes.filter(c => c.status === "livre")) {
     const jour = (o.deliveredAt && jourParis(o.deliveredAt)) || o.deliveryDate || o.dateCommande;
     const m = String(jour).slice(0, 7);
-    mois[m] = Math.round(((mois[m] || 0) + montant) * 100) / 100;
+    mois[m] = Math.round(((mois[m] || 0) + montant(o)) * 100) / 100;
   }
   return mois;
 }
@@ -176,8 +183,17 @@ function verifierRienPerdu(avant, apres, { nom }) {
 
   const commandesApres = new Map(apres.commandes.map(o => [o.id, o]));
   expect(avant.commandes.filter(o => !commandesApres.has(o.id)).map(o => o.id), `${nom} : commandes disparues`).toEqual([]);
-  const forme = o => JSON.stringify([o.status, o.montantTtc ?? null, (o.products || []).map(p => [p.code, p.nom, Number(p.quantite)])]);
+  const forme = o => JSON.stringify([o.status, (o.products || []).map(p => [p.code, p.nom, Number(p.quantite)])]);
   expect(avant.commandes.filter(o => forme(o) !== forme(commandesApres.get(o.id))).map(o => o.id), `${nom} : commandes existantes changees`).toEqual([]);
+  // Le montant de chaque commande : le fige s'il existe, sinon l'ancien calcul.
+  // Un bon identique peut recevoir son montant fige : il doit valoir l'ancien.
+  const montantAvant = montantsAnciens(avant.ventes);
+  const montantApres = montantsAnciens(apres.ventes);
+  const montant = (o, ancien) => (o.montantTtc !== undefined ? o.montantTtc : ancien(o));
+  const montantsChanges = avant.commandes.filter(o => montant(o, montantAvant) !== montant(commandesApres.get(o.id), montantApres))
+    .map(o => [o.id, montant(o, montantAvant), montant(commandesApres.get(o.id), montantApres)]);
+  expect(montantsChanges, `${nom} : montant d'une commande existante change`).toEqual([]);
+  const figeesParLImport = avant.commandes.filter(o => o.montantTtc === undefined && commandesApres.get(o.id).montantTtc !== undefined).length;
 
   const ventesApres = new Set(apres.ventes.map(v => `${v.client}|${v.dateCommandeIso}|${v.codeProduit}|${v.quantite}|${v.ttc}`));
   const ventesPerdues = avant.ventes.filter(v => !ventesApres.has(`${v.client}|${v.dateCommandeIso}|${v.codeProduit}|${v.quantite}|${v.ttc}`));
@@ -196,7 +212,7 @@ function verifierRienPerdu(avant, apres, { nom }) {
     if (caSansNouvelles[m] === 0) delete caSansNouvelles[m];
   }
   expect(caSansNouvelles, `${nom} : CA d'un mois change`).toEqual(avant.ca);
-  return { nouvelles: nouvelles.length };
+  return { nouvelles: nouvelles.length, figeesParLImport };
 }
 
 test("demarrage : la migration fige les montants ; le CA de chaque mois est celui de l'ancien calcul ; la rejouer ne change rien", async () => {
@@ -210,6 +226,11 @@ test("demarrage : la migration fige les montants ; le CA de chaque mois est celu
   expect(figees.length, "aucune commande figee : la migration n'a pas tourne").toBeGreaterThan(0);
   const vides = obj => Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== 0));
   expect(premier.ca, "la migration a change le CA d'un mois").toEqual(vides(attendu));
+  // SEREO_BASE_CA (facultatif) : le CA par mois que l'autre version affichait
+  // sur cette base ({ "2026-08": 951.81, ... }), releve avant de l'arreter.
+  if (process.env.SEREO_BASE_CA) {
+    expect(premier.ca, "le CA differe de celui que l'autre version affichait").toEqual(vides(JSON.parse(fs.readFileSync(process.env.SEREO_BASE_CA, "utf8"))));
+  }
   expect(premier.clients.length).toBe(brut.clients.length);
 
   // Redemarrer sur la MEME base : la migration ne refait rien.
@@ -237,10 +258,10 @@ for (const [nom, choisir] of [
     const r = await importer(lignes);
     expect(r.status, r.body?.error).toBe(200);
     const apres = await instantane();
-    const { nouvelles } = verifierRienPerdu(avant, apres, { nom });
+    const { nouvelles, figeesParLImport } = verifierRienPerdu(avant, apres, { nom });
     console.log(`[${nom}] ${lignes.length} ligne(s) ; fiches ${JSON.stringify(r.body.clientsImport)} ; commandes : ${r.body.created} creee(s), `
       + `${r.body.updated} mise(s) a jour, ${r.body.ignored} ignoree(s), ${r.body.skippedIdentical} identique(s) ; ${nouvelles} nouvelle(s) ; `
-      + `ventes ${avant.ventes.length} -> ${apres.ventes.length} ; erreurs ${r.body.lignesIllisibles}`);
+      + `ventes ${avant.ventes.length} -> ${apres.ventes.length} ; erreurs ${r.body.lignesIllisibles} ; montants figes par l'import ${figeesParLImport}`);
     expect(r.body.clientsImport.preserved + r.body.clientsImport.updated, "des fiches ne sont pas comptees").toBe(avant.clients.length);
     // Les fiches archivees restent archivees ; l'abonnement du prospect se suspend.
     expect(apres.clients.filter(c => c.crmArchived).map(c => c.id).sort()).toEqual(avant.clients.filter(c => c.crmArchived).map(c => c.id).sort());
