@@ -4,6 +4,7 @@ const express = require("express");
 const compression = require("compression");
 const multer = require("multer");
 const readXlsxFile = require("read-excel-file/node");
+const { inspecterClasseur, ClasseurRefuse } = require("./lib/garde-excel");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
@@ -3651,6 +3652,15 @@ function validateAndFormatYMD(y, m, d) {
 
 async function readExcelRows(filePath) {
   try {
+    // Robustesse (25/09) : taille reelle, cellules, lignes et colonnes
+    // comptees AVANT la lecture (lib/garde-excel.js) ; au-dela, un refus clair
+    // au lieu de 600 Mo de memoire pour un fichier de 0,5 Mo.
+    try {
+      inspecterClasseur(await fs.promises.readFile(filePath));
+    } catch (error) {
+      if (error instanceof ClasseurRefuse) throw badRequest(error.message);
+      throw error;
+    }
     const parsed = await readXlsxFile(filePath);
     const rows = Array.isArray(parsed[0]) ? parsed : (parsed[0]?.data || []);
 
