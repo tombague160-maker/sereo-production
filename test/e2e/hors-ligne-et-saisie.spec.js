@@ -814,10 +814,11 @@ test("abonnement + nouvelle fiche, en-têtes reçus mais corps coupé (la fiche 
   await saisirNouvelleFiche(page, FICHE);
   await page.locator("#subSave").click();
   await expect.poll(async () => (await fichesEtAbonnements(FICHE.nom)).fiches, { timeout: 10000 }).toBe(1);
+  // La fiche est creee, et la page le sait (en-tetes 2xx) : UN appui suffit,
+  // sans message brut ni nouvel essai.
   await page.waitForTimeout(1500);
-  // Le geste naturel si la fenetre est encore ouverte : reessayer.
-  if (await page.locator("#subscriptionDialog").isVisible()) await page.locator("#subSave").click();
-  await expect(page.locator("#subscriptionDialog")).toBeHidden();
+  const message = await page.locator("#subError").textContent();
+  await expect(page.locator("#subscriptionDialog"), `la fenetre reste ouverte sur : ${message}`).toBeHidden();
   expect(await fichesEtAbonnements(FICHE.nom), "une seconde fiche, ou l'abonnement ailleurs").toEqual({ fiches: 1, abonnements: 1 });
   expect(erreurs).toEqual([]);
   await ctx.close();
