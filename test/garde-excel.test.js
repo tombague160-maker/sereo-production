@@ -24,23 +24,23 @@ function classeur(lignes, colonnes, { prefixe = "", options = { level: 6 } } = {
   }, options));
 }
 
-test("garde : 40 000 cellules passent, 40 001 sont refusees", () => {
-  assert.equal(LIMITES.cellules, 40000);
-  const juste = inspecterClasseur(classeur(2000, 20));
-  assert.equal(juste.cellules, 40000);
-  assert.equal(juste.lignes, 2000);
+test("garde : 45 000 cellules passent, 45 001 sont refusees", () => {
+  assert.equal(LIMITES.cellules, 45000);
+  const juste = inspecterClasseur(classeur(2250, 20));
+  assert.equal(juste.cellules, 45000);
+  assert.equal(juste.lignes, 2250);
   assert.equal(juste.colonnes, 20);
-  assert.throws(() => inspecterClasseur(classeur(2001, 20)), ClasseurRefuse); // 40 020 cellules
-  const refus = (() => { try { inspecterClasseur(classeur(40001, 1)); return null; } catch (error) { return error; } })();
+  assert.throws(() => inspecterClasseur(classeur(2251, 20)), ClasseurRefuse); // 45 020 cellules
+  const refus = (() => { try { inspecterClasseur(classeur(45001, 1)); return null; } catch (error) { return error; } })();
   assert.ok(refus instanceof ClasseurRefuse);
-  assert.match(refus.message, /plus de 40[\s  ]000 cellules/);
+  assert.match(refus.message, /plus de 45[\s  ]000 cellules/);
 });
 
 test("garde : les cellules a prefixe d'espace de noms (x:c) sont comptees aussi", () => {
   const compte = inspecterClasseur(classeur(10, 3, { prefixe: "x" }));
   assert.equal(compte.cellules, 30);
   assert.equal(compte.colonnes, 3);
-  assert.throws(() => inspecterClasseur(classeur(20001, 2, { prefixe: "x" })), ClasseurRefuse);
+  assert.throws(() => inspecterClasseur(classeur(22501, 2, { prefixe: "x" })), ClasseurRefuse); // 45 002 cellules
 });
 
 test("garde : une partie non compressee (methode 0) est lue et comptee", () => {

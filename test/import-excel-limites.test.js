@@ -82,7 +82,7 @@ test("le fichier piege du rapport (0,6 Mo, 50 000 lignes) est refuse avant la le
   const r = await importer("/api/import/stock", bombe, "bombe.xlsx");
   const pic = process.resourceUsage().maxRSS / 1024 - avant;
   assert.equal(r.status, 400, JSON.stringify(r.body).slice(0, 300));
-  assert.match(r.body.error, /trop gros pour l'import : plus de 40[\s  ]000 cellules/);
+  assert.match(r.body.error, /trop gros pour l'import : plus de 45[\s  ]000 cellules/);
   assert.ok(pic < 150, `la memoire de pointe a monte de ${pic.toFixed(0)} Mo pour un fichier refuse`);
   assert.ok(Date.now() - t0 < 5000, `refus en ${Date.now() - t0} ms`);
 });
@@ -144,8 +144,8 @@ test("temoin : un fichier de stock ordinaire et des ventes au format Ximi (500 l
   assert.equal(ventes.status, 200, JSON.stringify(ventes.body).slice(0, 300));
 });
 
-test("des styles pieges (260 000 elements) sont refuses avant la lecture", async () => {
-  const styles = `<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cellXfs>${"<xf/>".repeat(260000)}</cellXfs></styleSheet>`;
+test("des styles pieges (300 000 elements) sont refuses avant la lecture", async () => {
+  const styles = `<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cellXfs>${"<xf/>".repeat(300000)}</cellXfs></styleSheet>`;
   const r = await importer("/api/import/stock", classeur(ENTETE_STOCK, { styles }));
   assert.equal(r.status, 400, JSON.stringify(r.body).slice(0, 300));
   assert.match(r.body.error, /trop complexe pour l'import/);
