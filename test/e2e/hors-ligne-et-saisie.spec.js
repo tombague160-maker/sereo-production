@@ -26,6 +26,10 @@
 // 12. Stock au telephone (485 ms a l'arrivee en production, v1.46.1) : chaque
 //     changement d'ecran mesurait les rangees de pilules des ecrans CACHES --
 //     deux mises en page forcees de tout le document, pour rien.
+// 13. Stock : deux <svg> par ligne (436 en production), plus de la moitie de
+//     l'analyse HTML de la liste ; dessines par la feuille, au pixel pres.
+// 14. Stock : trier « A recommander » construisait un comparateur par paire
+//     (localeCompare avec une langue) ; un seul, construit une fois.
 const { test, expect } = require("./tuiles");
 const { demarrer, jeuDeDonnees } = require("./serveur-seme");
 
@@ -554,6 +558,95 @@ test("Stock au téléphone : l'arrivée ne force aucune mise en page (les pilule
   const ouCommandes = await page.evaluate(() => window.__misesEnPage.ou);
   expect(auxCommandes, "temoin : aucune mesure en arrivant sur Commandes").toBeGreaterThanOrEqual(1);
   expect(ouCommandes.join(" | "), "temoin : ce n'est pas le repli qui mesure").toContain("replierPilules");
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+// --- 13. Les « − » et « + » du Stock : dessines par la feuille --------------
+
+// Le balisage d'avant (25/09) : deux <svg> par ligne, 16 px (style.css).
+const ANCIEN = {
+  moins: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg>',
+  plus: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg>'
+};
+
+/** Pixels qui different (un canal de plus de 8 sur 255) entre deux captures PNG, lus dans la page. */
+const pixelsDifferents = (page, a, b) => page.evaluate(async ([a, b]) => {
+  const lire = async b64 => {
+    const i = new Image();
+    i.src = `data:image/png;base64,${b64}`;
+    await i.decode();
+    const c = document.createElement("canvas");
+    c.width = i.width; c.height = i.height;
+    const x = c.getContext("2d");
+    x.drawImage(i, 0, 0);
+    return x.getImageData(0, 0, i.width, i.height);
+  };
+  const [p, q] = [await lire(a), await lire(b)];
+  if (p.width !== q.width || p.height !== q.height) return -1;
+  let n = 0;
+  for (let k = 0; k < p.data.length; k += 4) if ([0, 1, 2, 3].some(j => Math.abs(p.data[k + j] - q.data[k + j]) > 8)) n++;
+  return n;
+}, [a.toString("base64"), b.toString("base64")]);
+
+for (const theme of ["light", "dark"]) {
+  test(`Stock : « − » et « + » sans <svg> dans les lignes, même rendu que le <svg> d'avant (${theme})`, async ({ browser }) => {
+    const { ctx, page, erreurs } = await ouvrir(browser, "stock", {
+      vue: TELEPHONE,
+      avant: `try { localStorage.setItem("sereo:colorScheme", ${JSON.stringify(theme)}); } catch { /* ignore */ }`
+    });
+    await expect(page.locator("#stockList .stk-ligne").first()).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.dataset.colorScheme), "prealable : le theme").toBe(theme);
+    await page.addStyleTag({ content: "*, *::before, *::after { transition: none !important; animation: none !important; }" });
+    const lignes = await page.locator("#stockList .stk-ligne").count();
+    expect(await page.locator("#stockList .stk-ligne svg").count(), `des <svg> dans les ${lignes} lignes du Stock`).toBe(0);
+    for (const [nom, selecteur] of [["moins", ".stk-pas:not(.stk-pas--plus)"], ["plus", ".stk-pas--plus"]]) {
+      const bouton = page.locator(`#stockList .stk-ligne ${selecteur}`).first();
+      const nouveau = await bouton.screenshot();
+      // L'ancien : le <svg> d'avant dans le bouton, le pseudo-element eteint.
+      await bouton.evaluate((b, svg) => { b.innerHTML = svg; }, ANCIEN[nom]);
+      const eteindre = await page.addStyleTag({ content: "#stock .stk-pas::before { display: none !important; } #stock .stk-pas svg { width: 16px; height: 16px; }" });
+      const ancien = await bouton.screenshot();
+      // Temoin : sans rien dedans, le bouton differe bien de l'ancien.
+      await bouton.evaluate(b => { b.innerHTML = ""; });
+      const vide = await bouton.screenshot();
+      await eteindre.evaluate(s => s.remove());
+      const ecart = await pixelsDifferents(page, nouveau, ancien);
+      const temoin = await pixelsDifferents(page, vide, ancien);
+      console.log(`[stock ${theme}] « ${nom} » : ${ecart} pixel(s) differents du <svg> d'avant (bouton vide : ${temoin})`);
+      expect(temoin, `temoin : le bouton vide ne differe pas de l'ancien (« ${nom} »)`).toBeGreaterThan(10);
+      expect(ecart, `« ${nom} » ne se dessine pas comme le <svg> d'avant`).toBeLessThanOrEqual(2);
+    }
+    expect(erreurs).toEqual([]);
+    await ctx.close();
+  });
+}
+
+// --- 14. Les tris de l'arrivee sur le Stock : un comparateur, pas un par paire
+
+test("Stock au téléphone : l'arrivée trie « À recommander » et la liste sans construire un comparateur par comparaison (aucun localeCompare)", async ({ browser }) => {
+  // Prealable : trois produits a recommander -- deux seuils au-dessus du stock,
+  // et les gants a zero -- pour que le tri compare vraiment.
+  for (const id of ["st-CH-L", "st-ALE"]) {
+    const r = await fetch(`${srv.base}/api/stock/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ alertThreshold: 500 }) });
+    expect(r.status, `seuil de ${id}`).toBe(200);
+  }
+  const { ctx, page, erreurs } = await ouvrir(browser, "journee", { vue: TELEPHONE });
+  await page.evaluate(() => {
+    const c = window.__comparaisons = { actif: false, n: 0 };
+    const f = String.prototype.localeCompare;
+    String.prototype.localeCompare = function (...a) { if (c.actif) c.n++; return f.apply(this, a); };
+  });
+  // Temoin : l'instrument compte.
+  expect(await page.evaluate(() => { const c = window.__comparaisons; c.actif = true; "a".localeCompare("b", "fr"); c.actif = false; const n = c.n; c.n = 0; return n; })).toBe(1);
+  await page.evaluate(() => new Promise(r => {
+    addEventListener("hashchange", () => { window.__comparaisons.actif = false; r(); }, { once: true });
+    window.__comparaisons.actif = true;
+    location.hash = "#stock";
+  }));
+  await expect(page.locator("#stkRecoListe .stk-reco-ligne"), "prealable : trois produits a recommander").toHaveCount(3);
+  expect(await page.locator("#stockList .stk-ligne").count(), "prealable : la liste").toBeGreaterThan(2);
+  expect(await page.evaluate(() => window.__comparaisons.n), "localeCompare pendant l'arrivee sur le Stock").toBe(0);
   expect(erreurs).toEqual([]);
   await ctx.close();
 });

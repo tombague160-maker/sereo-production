@@ -5296,6 +5296,15 @@ function stockAPlat() {
   return stock.length > 0 && new Set(stock.map(categorieDuProduit)).size <= 1;
 }
 
+// Les tris de l'arrivee sur le Stock comparent des centaines de noms : UN
+// comparateur, construit une fois (25/09). localeCompare(b, "fr") en
+// construisait un par comparaison -- 31 ms au telephone (CPU x 4, jeu
+// « production ») pour trier « A recommander ». Meme ordre : c'est la meme
+// comparaison (Intl.Collator, memes options).
+const comparerNoms = new Intl.Collator("fr").compare;
+// Sans langue, comme localeCompare(b) sans argument (des dates ISO).
+const comparerTextes = new Intl.Collator().compare;
+
 // A plat, « du plus bas au plus haut » (planche 10a) : ce qui est sous le seuil
 // d'abord, puis ce qui est a renseigner (une quantite inconnue appelle aussi
 // un geste), puis le reste ; dans chaque groupe, la plus petite quantite en tete.
@@ -5303,7 +5312,7 @@ function trierAPlat(produits) {
   const groupe = p => (sousLeSeuil(p) ? 0 : getStockLevel(p).status === "a_renseigner" ? 1 : 2);
   const quantite = p => Number(p.quantityAvailable ?? getProductQuantity(p) ?? 0) || 0;
   return [...produits].sort((a, b) => groupe(a) - groupe(b) || quantite(a) - quantite(b)
-    || String(getProductName(a)).localeCompare(getProductName(b), "fr"));
+    || comparerNoms(String(getProductName(a)), String(getProductName(b))));
 }
 
 // L'ordre a plat est FIGE tant qu'on reste sur l'ecran. Chaque −/+ et chaque
@@ -5356,9 +5365,9 @@ function renderStockRecommande() {
   if (!liste) return;
   const bas = aRecommander()
     .sort((a, b) => (a.level === "urgent" ? 0 : 1) - (b.level === "urgent" ? 0 : 1)
-      || String(a.manqueLe || "9999").localeCompare(String(b.manqueLe || "9999"))
+      || comparerTextes(String(a.manqueLe || "9999"), String(b.manqueLe || "9999"))
       || (a.available - a.threshold) - (b.available - b.threshold)
-      || String(getProductName(a.product)).localeCompare(getProductName(b.product), "fr"));
+      || comparerNoms(String(getProductName(a.product)), String(getProductName(b.product))));
   setText("stkRecoCompte", String(bas.length));
   const compte = document.getElementById("stkRecoCompte");
   if (compte) compte.setAttribute("aria-label", `${bas.length} produit${bas.length > 1 ? "s" : ""} à recommander`);
@@ -5389,7 +5398,7 @@ function renderStockCategories() {
     parCategorie.set(cle, c);
   });
   const categories = [...parCategorie.values()]
-    .sort((a, b) => (a.cle ? 0 : 1) - (b.cle ? 0 : 1) || a.cle.localeCompare(b.cle, "fr"));
+    .sort((a, b) => (a.cle ? 0 : 1) - (b.cle ? 0 : 1) || comparerNoms(a.cle, b.cle));
   if (stockFilter.category !== "all" && !parCategorie.has(stockFilter.category)) stockFilter.category = "all";
   bloc.classList.toggle("stk-categories--liste", categories.length > 12);
   // A PLAT (planche 10a) : sans categorie, ou avec une seule, une tuile ne
@@ -5439,6 +5448,9 @@ const ICONE_CATEGORIE = "M12 3 3 8v8l9 5 9-5V8z";
 // les seuls chemins de l'application pour les poser. Les identifiants sont
 // propres a l'ecran : l'ecran « produits » rend les memes produits.
 // Rend le HTML de la ligne : renderStock les ecrit toutes en une fois (24/09).
+// Les « − » et « + » sont dessines par la feuille (#stock .stk-pas::before,
+// 25/09) : deux <svg> par ligne, c'etait plus de la moitie de l'analyse HTML
+// de la liste a chaque arrivee sur le Stock et a chaque recherche.
 function creerLigneStock(product) {
   const level = getStockLevel(product);
   const quantite = product.quantityAvailable ?? getProductQuantity(product);
@@ -5458,8 +5470,8 @@ function creerLigneStock(product) {
     <span class="stk-droite"><label class="sr-only" for="stk-seuil-${id}">Seuil de ${escapeHtml(nom)}</label><input class="stk-saisie stk-saisie--seuil" id="stk-seuil-${id}" data-stock-threshold-input data-product-id="${id}" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttribute(seuil)}"></span>
     <span class="stk-droite"><label class="sr-only" for="stk-qte-${id}">Stock de ${escapeHtml(nom)}${negatif ? ", négatif, à recompter" : enAlerte ? ", sous le seuil" : ""}</label><input class="stk-saisie stk-saisie--stock" id="stk-qte-${id}" data-stock-input data-product-id="${id}" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttribute(quantite === null ? "" : quantite)}" placeholder="—"></span>
     <span class="stk-ajuster">
-      <button class="stk-pas" type="button" data-product-id="${id}" data-stock-delta="-1" aria-label="Retirer 1 unité de ${escapeAttribute(nom)}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button>
-      <button class="stk-pas stk-pas--plus" type="button" data-product-id="${id}" data-stock-delta="1" aria-label="Ajouter 1 unité à ${escapeAttribute(nom)}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button>
+      <button class="stk-pas" type="button" data-product-id="${id}" data-stock-delta="-1" aria-label="Retirer 1 unité de ${escapeAttribute(nom)}"></button>
+      <button class="stk-pas stk-pas--plus" type="button" data-product-id="${id}" data-stock-delta="1" aria-label="Ajouter 1 unité à ${escapeAttribute(nom)}"></button>
     </span></div>`;
 }
 
