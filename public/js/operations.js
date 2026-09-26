@@ -89,6 +89,22 @@ const etatAbonnement = (sub) =>
       : { cle: "arrete", mot: "Arrêté", pill: "pill-blue" };
 
 /** Le detail d'un abonnement, en sheet : les faits, le panier, les actions. */
+// Decision 8 (24/09) : la pause ou l'arret annule les commandes deja creees
+// de l'abonnement ; celles deja en preparation ou en livraison suivent leur
+// cours. Le serveur rend ce qu'il a fait (`suspension`) : l'ecran le dit, sans
+// quoi des commandes disparaissaient de Commandes sans un mot.
+function messageSuspension(reponse, statut) {
+  const mot = statut === "cancelled" ? "arrêté" : "mis en pause";
+  const s = reponse && reponse.suspension;
+  if (!s) return `Abonnement ${mot}.`;
+  const numeros = (liste) => liste.map((o) => o.numero || o.id).join(", ");
+  const n = s.annulees.length, g = s.gardees.length;
+  const parties = [];
+  if (n) parties.push(`${n} commande${n > 1 ? "s" : ""} déjà créée${n > 1 ? "s" : ""} annulée${n > 1 ? "s" : ""} (${numeros(s.annulees)})`);
+  if (g) parties.push(`${g} déjà en préparation ou en livraison suit son cours (${numeros(s.gardees)})`);
+  return parties.length ? `Abonnement ${mot} : ${parties.join(" ; ")}.` : `Abonnement ${mot}.`;
+}
+
 function openSubDetail(id) {
   const dialogue = document.getElementById("abonnementDetailDialog");
   const corps = document.getElementById("abonnementDetailCorps");
@@ -179,17 +195,17 @@ export function initOperations(api) {
         const sub = data.subscriptions.items.find(
           (s) => s.id === el.dataset.id,
         );
-        await context.apiFetch(
+        const suivant = sub.status === "active" ? "paused" : "active";
+        const reponse = await context.apiFetch(
           `/api/subscriptions/${encodeURIComponent(sub.id)}`,
           {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              status: sub.status === "active" ? "paused" : "active",
-            }),
+            body: JSON.stringify({ status: suivant }),
           },
         );
         await context.loadData();
+        if (suivant !== "active") context.notify(messageSuspension(reponse, suivant), "success");
       }
       if (action === "generate-sub") {
         await context.apiFetch(
@@ -1287,7 +1303,7 @@ async function saveSubscription(event) {
       notes: document.getElementById("subNotes").value,
       status: document.getElementById("subStatus").value,
     };
-    await context.apiFetch(
+    const reponse = await context.apiFetch(
       editingId
         ? `/api/subscriptions/${encodeURIComponent(editingId)}`
         : "/api/subscriptions",
@@ -1299,7 +1315,8 @@ async function saveSubscription(event) {
     );
     document.getElementById("subscriptionDialog").close();
     await context.loadData();
-    context.notify("Abonnement enregistré.", "success");
+    // Mis en pause ou arrete depuis l'editeur : dire ce que la decision 8 a annule.
+    context.notify(reponse && reponse.suspension ? messageSuspension(reponse, payload.status) : "Abonnement enregistré.", "success");
   } catch (e) {
     document.getElementById("subError").textContent = e.message;
     // L'erreur est en bas du formulaire : elle se voit, sans chercher.
