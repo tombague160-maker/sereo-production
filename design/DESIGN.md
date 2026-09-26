@@ -8194,3 +8194,119 @@ liste ciblée — les bancs des deux lots, `chargement-instantane`, `hors-ligne`
 `stock*`, `tabs`, `smoke` — **312/312** ; suite complète, deux passages : **723/723** et
 **723/723**. Un passage complet préalable (avant `4d8f513` et le banc de la carte) : 721 verts,
 le rouge de `carte-telephone` réglé ci-dessus.
+
+## 25/09 — Téléphone, hors ligne et saisie
+
+**Point de départ.** La chasse aux défauts du 24/09 (section 1, côté page ; chaque point
+revérifié sur `5b52268`, le code de la v1.46.1), plus deux mesures faites en production après
+la v1.46.1 : le Stock au téléphone, 485 ms de tâches longues à l'arrivée (pire 362 ms, CPU x4) ;
+et le « 1 flaky » de la CI du 24/09 au soir (`telephone-utilisable.spec.js`, 375 × 667).
+Bancs : `test/e2e/hors-ligne-et-saisie.spec.js` (serveur semé 3606),
+`test/e2e/shell-meme-version.spec.js` (3607), `test/shell-meme-version.test.js`,
+`test/seme-jour-de-paris.test.js`. Chacun a d'abord été lancé sur le code d'avant : le rouge
+reçu est dit à chaque point.
+
+### Hors ligne : la page gardée et ses fichiers sont de la même version
+
+Le cas de l'audit (v1.45.0 : adresses `?v=` absentes du cache, la Tournée rouverte hors ligne
+sans style ni script) était déjà tenu par la performance du 24/09 (rouge sur v1.45.0 :
+« requêtes échouées : /css/style.css, /brand/sereo-logo.svg, /js/app.js » ; vert sur `5b52268`).
+Restaient trois chemins par lesquels la copie de la Tournée et ses fichiers divergeaient :
+une page plus récente que le service worker rangeait ses fichiers neufs dans le cache de
+l'ancienne version ; la page neuve remplaçait la copie de l'ancienne AVANT l'installation de
+son service worker (coupé dans l'intervalle : « cet écran demande le réseau ») ; l'installation
+rangeait ce que le serveur rendait à cet instant, quelle qu'en soit la version (ou la page de
+connexion, session finie). Chaque fichier du shell annonce sa version (`X-Sereo-Shell-Fichier` ;
+`X-Sereo-Shell` reste l'annonce de la page) ; le service worker ne range que ceux de la sienne,
+installe tout ou rien, et garde à part la page de la version suivante, qu'il reprend à
+l'activation. Rouge avant : 6 cas unitaires sur 8, et la réouverture e2e « Hors ligne — cet
+écran demande le réseau ».
+
+### Une saisie ne part qu'une fois, et ne se perd plus
+
+- **Deux « Valider la commande »** (sous le total, barre du panier) : un seul se grisait ; Entrée
+  puis la barre créaient deux commandes (rouge : 2). Le verrou est posé sur le formulaire
+  (`envoyerUneFois`) : tous ses boutons d'envoi.
+- **Hors ligne, « enregistrée, sera envoyée »** : la commande est vidée (rouge : « 1 produit »
+  restait) ; une clé d'envoi par SAISIE, gardée tant que rien ne change et oubliée quand le
+  serveur a répondu, fait qu'une revalidation après une issue inconnue est le même geste
+  (`X-Sereo-Geste`), même en ligne (rouge : une autre clé).
+- **Abonnement + nouvelle fiche, hors ligne ou en 4G sans débit** : refus clair, rien en file
+  (`sansFile` : la suite dépend de la réponse) ; abonnement d'un client existant hors ligne : la
+  fenêtre se ferme et le dit.
+- **Fiche client modifiée hors ligne** : l'identité ET la fiche CRM (statut, rappel, notes)
+  attendent dans la file, dans cet ordre ; la fenêtre se ferme.
+- **Le « retour » du téléphone** : le panier, les champs et la clé d'envoi sont gardés dans
+  `sessionStorage` à chaque saisie, rendus à l'ouverture de la commande client, oubliés à la
+  validation et à la déconnexion (rouge : « 0 produit » au retour).
+- **Safari ancien** : `checkVisibility` gardé (`estVisible`, iOS < 17.4 : plus de fausse erreur
+  rouge après « Créer la commande » d'une échéance) ; `requestSubmit` gardé (iOS < 16).
+- **« Partiel (N indispo) »** suit les réponses tardives et repasse « À jour ».
+- **Après « Livré »**, le chiffre d'affaires et les comptes du tableau de bord se relisent à
+  l'arrivée sur l'écran — jamais sur le chemin du geste (mise à jour ciblée intacte).
+
+Onze mutants (chacun remet un morceau de l'ancien comportement) : tous tués, chacun par son banc.
+
+### Téléphone : Clients et Stock
+
+- **Clients** (766 ms à l'arrivée en production) : `replierPilules` cachait les pilules une à une
+  et remesurait après chacune — une mise en page forcée par pilule (27 au banc). Tout est écrit,
+  lu d'un coup, calculé, puis les classes écrites : **une** mise en page ; le résultat est comparé,
+  largeur par largeur (320 à 440 px, pas de 2 et 4 px), à l'algorithme d'avant rejoué dans la
+  page. Jeu « production », CPU x4 : pire tâche 800–1 158 ms → 279–367 ms (six passages chacun).
+- **Stock — les pilules des écrans cachés** : `showTab` repliait toutes les rangées déclarées, et
+  chacune, même cachée avec son écran, lisait sa boîte après avoir écrit — deux mises en page
+  forcées de tout le document à CHAQUE changement d'écran au téléphone (au Stock, les 218 lignes
+  neuves comprises : style 72 ms + mise en page 84 ms, pour ne rien replier). Chaque rangée
+  déclare son écran ; cachée, elle ne se mesure pas. Banc : zéro mise en page forcée en arrivant
+  sur le Stock (rouge : 2, `mesurerRangeeDePilules < replierPilules`) ; témoin : Commandes mesure
+  toujours la sienne.
+- **Stock — deux `<svg>` par ligne** (le « − » et le « + » : 436 au jeu « production ») : plus de
+  la moitié de l'analyse HTML de la liste (96 ms, 39 sans eux, au mieux de neuf). Le même tracé
+  sert de masque à un pseudo-élément de la couleur du bouton (bloc en fin de `style.css`, couleurs
+  forcées comprises). Banc : aucun `<svg>` dans les lignes (rouge : 6 pour 3 lignes) et la capture
+  de chaque bouton comparée, pixel à pixel, à celle du `<svg>` d'avant rejoué dans la page : 0
+  pixel d'écart, clair et sombre (témoin : le bouton vide diffère de 24 et 44 pixels ; un trait de
+  2 au lieu de 2,5, ou le « + » sans son masque, rougissent). À DPR 2 et 3, écart de canal ≤ 6/255.
+- **Stock — les tris** : « À recommander », la liste à plat et les catégories comparaient par
+  `localeCompare(b, "fr")`, qui construit un comparateur à chaque paire (31 ms). Un
+  `Intl.Collator` construit une fois : même ordre, par définition. Banc : aucun `localeCompare`
+  pendant l'arrivée (rouge : 3, sur trois produits à recommander).
+
+**Stock, avant → après** (jeu « production », 390 × 844, CPU x4, arrivée depuis le tableau de
+bord, neuf passages chacun en séries alternées ; la machine faisait tourner d'autres bancs en même
+temps : c'est un journal, les bancs sont structurels) :
+
+| | `5b52268` (v1.46.1) | ce lot |
+|---|---|---|
+| Pire tâche, médiane (étendue) | 254 ms (149–392) | 164 ms (134–228) |
+| Total des tâches longues, médiane (étendue) | 383 ms (225–518) | 174 ms (141–292) |
+
+Ce qui reste à l'arrivée : l'analyse des 218 lignes (une écriture, gardée) et la première mise en
+page de l'écran (les lignes hors de l'écran n'y entrent pas : `content-visibility`).
+
+### Le « flaky » de la CI du 24/09 : un banc semé la veille
+
+À 375 × 667, au premier test de `telephone-utilisable.spec.js`, le nom, l'adresse et les articles
+de l'arrêt étaient 158 px plus bas (« nom bas 431 » au lieu de 273) ; au second essai, justes.
+Filmé à chaque image sous charge (serveur froid, API à 2,5 s, CPU x6), semé du jour : l'arrêt
+n'est jamais plus de 20 px plus bas, à sa première image, et à 273 en moins de 160 ms — pas d'état
+transitoire. La cause est l'heure : la CI lance UN ouvrier Playwright pour tous les fichiers
+(`workers: 1`) ; il avait chargé `serveur-seme.js` à 23 h 34 (Paris), et `AUJOURDHUI` y était figé
+au 24/09. Le banc a semé sa tournée à 0 h 03 le 25/09, datée de la VEILLE : l'écran Tournée a
+signalé au-dessus de l'arrêt « Tournée du jeudi 24 septembre n'est pas soldée » (126 px, plus
+l'écart). Le second essai tournait dans un ouvrier neuf, module rechargé après minuit. Reproduit
+au pixel près, semé de la veille : « gestes 447-577, nom bas 431, adresse bas 480, articles
+535/563 », la ligne de la CI.
+
+Le jour se lit à chaque semis (`jeuDeDonnees`, `jeuProduction`) ; `AUJOURDHUI`, exporté, se lit
+quand un banc le destructure (à son chargement). Banc sans serveur, horloge simulée : module
+chargé à 23 h 59, semis à 0 h 03 — la tournée est du 25 (rouge : du 24) ; témoin : semée à 23 h 59,
+elle est du 24. **Reste** : un fichier dont les tests enjambent minuit (semé avant, mesuré après)
+— une fenêtre de la durée du fichier au lieu du reste de la suite.
+
+**Question pour Thomas (produit, pas le banc).** Après minuit, une tournée encore en cours est
+signalée « pas soldée » au-dessus de l'arrêt, même quand c'est elle qu'on regarde : à 375 × 667,
+les 126 px du bandeau poussent le nom, l'adresse et les articles sous la barre des gestes — ce que
+le lot « téléphone utilisable » avait réglé. Un livreur qui finit après minuit le verrait.
+Défaut proposé : un bandeau d'une ligne quand la tournée signalée est celle affichée.
