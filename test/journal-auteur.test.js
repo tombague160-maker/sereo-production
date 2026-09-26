@@ -58,7 +58,10 @@ before(async () => {
   server = app.listen(0);
   await once(server, "listening");
   baseUrl = `http://127.0.0.1:${server.address().port}`;
-  await createUserAccount({ identifiant: "julie", motDePasse: "tournee-du-matin-2026", role: "livreur" });
+  // Garde-fous (25/09) : un livreur ne modifie plus le stock (refuserAuLivreur).
+  // Ce banc prend un compte non administrateur quelconque pour juger l'AUTEUR :
+  // julie est preparatrice (avant : livreuse).
+  await createUserAccount({ identifiant: "julie", motDePasse: "tournee-du-matin-2026", role: "preparateur" });
   await createUserAccount({ identifiant: "marc", motDePasse: "bureau-du-matin-2026", role: "bureau" });
 });
 

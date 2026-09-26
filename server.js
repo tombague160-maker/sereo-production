@@ -9,7 +9,8 @@ const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
 const { zipSync, strToU8 } = require("fflate");
-const { createSqliteStore } = require("./storage/sqliteStore");
+const { createSqliteStore, lireTourneesDuFichier } = require("./storage/sqliteStore");
+const sauvegardeBase = require("./lib/sauvegarde-base");
 const { empreinteDesSources, shellEmpreinte } = require("./lib/empreinte-shell");
 const { fondDeCarte } = require("./lib/fond-de-carte");
 const { GestionnaireOsrm } = require("./lib/osrm-local");
@@ -139,6 +140,19 @@ const STORAGE_ENGINE = (process.env.SEREO_STORAGE || "sqlite").toLowerCase();
 const SQLITE_PATH = path.resolve(process.env.SEREO_SQLITE_PATH || process.env.SQLITE_PATH || path.join(__dirname, "data", "sereo.sqlite"));
 const UPLOAD_DIR = path.resolve(process.env.SEREO_UPLOAD_DIR || path.join(__dirname, "imports"));
 const BACKUP_DIR = path.resolve(process.env.SEREO_BACKUP_DIR || path.join(path.dirname(STORAGE_ENGINE === "json" ? DB_PATH : SQLITE_PATH), "backups"));
+// Garde-fous (25/09, decision 3) : un SECOND dossier de sauvegarde, optionnel
+// (un autre disque, un partage monte). Chaque sauvegarde y est aussi copiee et
+// relue ; absent, rien ne change. Le meme dossier que le premier ne compte pas.
+const BACKUP_COPY_DIR = (() => {
+  const brut = cleanEnv(process.env.SEREO_BACKUP_COPY_DIR);
+  if (!brut) return null;
+  const dossier = path.resolve(brut);
+  if (dossier === BACKUP_DIR) {
+    console.warn("[storage] SEREO_BACKUP_COPY_DIR designe le dossier des sauvegardes lui-meme : ignore.");
+    return null;
+  }
+  return dossier;
+})();
 // v1.12.0 : dossier ou les Excel importes sont archives au format brut pour
 // retelechargement et audit. Sous-dossier du data dir, donc persistant sur
 // le volume Docker comme la SQLite.
@@ -717,6 +731,116 @@ function clearAuthFailures(ip) {
   authRateLimitState.delete(ip);
 }
 
+// Garde-fous (25/09) : une limite PAR COMPTE, en plus de celle par adresse.
+// Celle par adresse (5 echecs, 15 s de blocage, compteur remis a zero ensuite)
+// laissait ~20 essais par minute et par adresse, sans aucune limite pour un
+// compte vise depuis de nombreuses adresses (chasse aux defauts, section 3).
+// Ici : AUTH_COMPTE_MAX_ATTEMPTS echecs sur un meme identifiant saisi, dans la
+// fenetre, bloquent CET identifiant AUTH_COMPTE_LOCKOUT_MS -- les autres
+// comptes ne sont pas touches. L'identifiant se compte sans casse ni espaces,
+// qu'il existe ou non (rien a enumerer). Le compteur n'est PAS remis a zero a
+// la fin du blocage : une attaque qui continue est rebloquee au premier echec
+// suivant ; une connexion reussie l'efface.
+// Relecture adverse du 26/09 : ce blocage refusait AUSSI le bon mot de passe,
+// sur tous les appareils. Un tiers qui connait l'identifiant de Thomas le
+// tenait dehors aussi longtemps qu'il le voulait (un echec toutes les 15 min) ;
+// un navigateur qui rejoue un vieux mot de passe Basic apres un changement de
+// SEREO_AUTH_PASSWORD faisait de meme, sans attaquant. D'ou l'« appareil
+// connu » (ci-dessous) : un appareil qui a deja ouvert CE compte n'est ni
+// bloque ni compte par sa limite -- il garde la seule limite par adresse,
+// celle d'avant le 25/09. La limite du compte ne vise plus que les appareils
+// inconnus, ceux d'une attaque repartie. Reste : un appareil NEUF de Thomas
+// attend la fin du blocage pendant une attaque (la page le dit).
+const AUTH_COMPTE_MAX_ATTEMPTS = Math.max(1, Number(process.env.SEREO_AUTH_MAX_ATTEMPTS_COMPTE) || 20);
+const AUTH_COMPTE_WINDOW_MS = Math.max(1000, Number(process.env.SEREO_AUTH_RATE_WINDOW_COMPTE_MS) || 60 * 60 * 1000);
+const AUTH_COMPTE_LOCKOUT_MS = Math.max(1000, Number(process.env.SEREO_AUTH_LOCKOUT_COMPTE_MS) || 15 * 60 * 1000);
+const authCompteState = new Map();
+
+function cleDeCompte(identifiant) {
+  return String(identifiant ?? "").trim().toLowerCase().slice(0, 120);
+}
+
+function statutDuCompte(identifiant, now = Date.now()) {
+  const entree = authCompteState.get(cleDeCompte(identifiant));
+  if (!entree) return { locked: false, remainingMs: 0 };
+  entree.failedTimestamps = entree.failedTimestamps.filter(t => t > now - AUTH_COMPTE_WINDOW_MS);
+  if (entree.lockedUntil && entree.lockedUntil > now) {
+    return { locked: true, remainingMs: entree.lockedUntil - now, lockedUntil: entree.lockedUntil };
+  }
+  return { locked: false, remainingMs: 0 };
+}
+
+function echecDuCompte(identifiant, now = Date.now()) {
+  const cle = cleDeCompte(identifiant);
+  let entree = authCompteState.get(cle);
+  if (!entree) {
+    entree = { failedTimestamps: [], lockedUntil: null };
+    authCompteState.set(cle, entree);
+  }
+  entree.failedTimestamps = entree.failedTimestamps.filter(t => t > now - AUTH_COMPTE_WINDOW_MS);
+  entree.failedTimestamps.push(now);
+  if (entree.failedTimestamps.length >= AUTH_COMPTE_MAX_ATTEMPTS) entree.lockedUntil = now + AUTH_COMPTE_LOCKOUT_MS;
+  return statutDuCompte(identifiant, now);
+}
+
+function effacerEchecsDuCompte(identifiant) {
+  authCompteState.delete(cleDeCompte(identifiant));
+}
+
+// L'« appareil connu » (relecture du 26/09 ; le « device cookie » de l'OWASP).
+// Une connexion reussie laisse au navigateur un cookie signe : « cet appareil a
+// su le mot de passe de ce compte ». Il porte l'empreinte des comptes ouverts
+// (au plus 8 : un poste partage), jamais leur nom, et sa date ; il vaut 180
+// jours apres la derniere connexion reussie. Signe avec la base du secret de
+// session SANS le mot de passe d'environnement : apres un changement de
+// SEREO_AUTH_PASSWORD, les appareils de Thomas restent connus -- c'est
+// justement quand un vieux mot de passe rejoue ferait bloquer le compte.
+// « Se deconnecter » ne l'efface pas : ce n'est pas une session, il n'ouvre
+// rien ; il n'exempte que de la limite par compte.
+const APPAREIL_COOKIE_NAME = "sereo_appareil";
+const APPAREIL_MAX_AGE_SECONDS = 180 * 24 * 60 * 60;
+const APPAREIL_COMPTES_MAX = 8;
+
+function signerAppareil(charge) {
+  return crypto.createHmac("sha256", `${AUTH_SESSION_SECRET_BASE}|appareil`).update(charge).digest("base64url");
+}
+
+function empreinteDeCompte(identifiant) {
+  return crypto.createHash("sha256").update(cleDeCompte(identifiant)).digest("base64url").slice(0, 16);
+}
+
+// Les empreintes des comptes que CET appareil a ouverts ; [] si le cookie
+// manque, est altere ou trop vieux.
+function comptesDeLAppareil(req, now = Date.now()) {
+  const valeur = String(parseCookies(req.get("cookie"))[APPAREIL_COOKIE_NAME] || "");
+  const point = valeur.lastIndexOf(".");
+  if (point <= 0) return [];
+  const charge = valeur.slice(0, point);
+  if (!constantTimeEqual(valeur.slice(point + 1), signerAppareil(charge))) return [];
+  try {
+    const { c, t } = JSON.parse(Buffer.from(charge, "base64url").toString("utf8"));
+    if (!Array.isArray(c) || !(Number(t) > now - APPAREIL_MAX_AGE_SECONDS * 1000)) return [];
+    return c.map(String);
+  } catch {
+    return [];
+  }
+}
+
+function appareilConnuDuCompte(req, identifiant) {
+  return Boolean(cleDeCompte(identifiant)) && comptesDeLAppareil(req).includes(empreinteDeCompte(identifiant));
+}
+
+// Le cookie a poser apres une connexion reussie : ce compte en tete, puis ceux
+// que l'appareil connaissait deja.
+function cookieAppareil(req, identifiant) {
+  const empreinte = empreinteDeCompte(identifiant);
+  const comptes = [empreinte, ...comptesDeLAppareil(req).filter(c => c !== empreinte)].slice(0, APPAREIL_COMPTES_MAX);
+  const charge = Buffer.from(JSON.stringify({ c: comptes, t: Date.now() })).toString("base64url");
+  const parts = [`${APPAREIL_COOKIE_NAME}=${charge}.${signerAppareil(charge)}`, "HttpOnly", "SameSite=Lax", "Path=/", `Max-Age=${APPAREIL_MAX_AGE_SECONDS}`];
+  if (req.secure || req.get("x-forwarded-proto") === "https") parts.push("Secure");
+  return parts.join("; ");
+}
+
 function getClientIp(req) {
   return req.ip || req.socket?.remoteAddress || "unknown";
 }
@@ -732,6 +856,11 @@ const authRateLimitCleanupInterval = setInterval(() => {
     if (!recentFailures && !stillLocked) {
       authRateLimitState.delete(ip);
     }
+  }
+  for (const [cle, entree] of authCompteState.entries()) {
+    const recents = entree.failedTimestamps.some(t => t > now - AUTH_COMPTE_WINDOW_MS);
+    const bloque = entree.lockedUntil && entree.lockedUntil > now;
+    if (!recents && !bloque) authCompteState.delete(cle);
   }
 }, 5 * 60 * 1000);
 authRateLimitCleanupInterval.unref();
@@ -791,6 +920,28 @@ function securityHeaders(req, res, next) {
 
 function isEnvAuthConfigured() {
   return Boolean(AUTH_USER && AUTH_PASSWORD);
+}
+
+// Garde-fous (25/09) : le mot de passe d'environnement n'avait aucune longueur
+// minimale (celui de production faisait 5 lettres ; les comptes en base en
+// exigent MIN_PASSWORD_LENGTH = 10). En dessous de 12 caracteres : un
+// avertissement au journal du demarrage, et un bandeau pour l'administrateur
+// (/api/me). JAMAIS un refus de demarrer : il verrouillerait Thomas hors de son
+// application apres la mise a jour, sans moyen de corriger depuis l'ecran.
+const MOT_DE_PASSE_ENVIRONNEMENT_MIN = 12;
+
+function motDePasseEnvironnementCourt() {
+  return isEnvAuthConfigured() && AUTH_PASSWORD.length < MOT_DE_PASSE_ENVIRONNEMENT_MIN;
+}
+
+// Le mot de passe et sa longueur ne sont jamais ecrits.
+function avertirMotDePasseCourt() {
+  if (!motDePasseEnvironnementCourt()) return;
+  console.warn(
+    `[auth] SEREO_AUTH_PASSWORD fait moins de ${MOT_DE_PASSE_ENVIRONNEMENT_MIN} caracteres : `
+    + "le changer sur le serveur (20 caracteres aleatoires ou plus ; cela ferme aussi toutes les sessions). "
+    + "Le serveur demarre quand meme."
+  );
 }
 
 /**
@@ -978,6 +1129,9 @@ async function updateUserAccount(id, { role, actif, motDePasse } = {}) {
 
   assertLastAdminRemains(store, cible);
   store.saveUser(cible);
+  // Garde-fous (25/09) : un mot de passe change ferme les sessions ouvertes
+  // avec l'ancien (un telephone perdu, un cookie copie).
+  if (motDePasse !== undefined) fermerSessionsDuCompte(existant.id);
   return store.getUser(id);
 }
 
@@ -1678,13 +1832,17 @@ async function verifyPassword(password, salt, storedHash) {
 // la separation viendra si l'equipe grandit.
 //
 // Les portees par role restent declarees ci-dessous et restent TESTEES via
-// roleAllowsTabStrict, pour deux raisons : elles documentent l'intention, et
-// les activer se resume a poser SEREO_SEPARATION_ROLES=1. Sans cela, il
-// faudrait re-concevoir la repartition de zero le jour ou le besoin revient.
+// roleAllowsTabStrict : elles documentent l'intention, et SEREO_SEPARATION_ROLES=1
+// masque les onglets hors portee.
 //
-// A noter : `onglets` ne pilote que la NAVIGATION. Le masquage d'un onglet
-// n'est qu'un confort visuel — toute restriction reelle doit etre appliquee
-// cote serveur, sur les endpoints.
+// A noter : `onglets` ne pilote que la NAVIGATION -- poser la variable ne
+// ferme AUCUNE route (la chasse aux defauts du 24/09 : meme banc, meme
+// resultat, variable posee ou non). Les restrictions reelles sont cote
+// serveur, sur les routes, independamment de la variable (garde-fous du
+// 25/09) : requireAdministration (import, purge, reglages, sauvegardes,
+// comptes, numerotation) et refuserAuLivreur (modification du stock). La
+// liste complete : test/garde-fous-routes.test.js. `peutEcrire` n'est lu
+// nulle part.
 const SEPARATION_DES_ROLES = process.env.SEREO_SEPARATION_ROLES === "1";
 
 const ROLES = {
@@ -1816,9 +1974,82 @@ function createAccessSessionValue(now = Date.now(), identity = null) {
   return `${payload}.${signAuthPayload(payload)}`;
 }
 
+// --- Sessions fermees (garde-fous du 25/09) ------------------------------------
+//
+// Avant : « Se deconnecter » ne faisait qu'effacer le cookie du navigateur, et
+// un changement de mot de passe ne touchait pas aux sessions ouvertes ; une
+// copie du cookie restait valable jusqu'a 12 h (chasse aux defauts, section 3).
+// Maintenant :
+// - se deconnecter FERME la session : son empreinte (sha256 du cookie) est
+//   gardee jusqu'a l'expiration qu'elle aurait eue ; les autres sessions du
+//   meme compte (un autre appareil) restent ouvertes ;
+// - changer le mot de passe d'un compte en base ferme TOUTES ses sessions
+//   ouvertes avant le changement (« sessions depuis ») ; le compte
+//   d'environnement, lui, change deja de secret de signature avec son mot de
+//   passe.
+// Gardees dans app_meta (hors de readDb/writeDb, comme les comptes), relues
+// au premier besoin apres un demarrage ; en memoire ensuite. Verifiees dans
+// readAccessSession : tous les chemins (acces, identite) les voient.
+const CLE_SESSIONS_FERMEES = "sessions_fermees";
+const CLE_SESSIONS_DEPUIS = "sessions_depuis";
+let etatDesSessions = null;
+
+function sessionsFermees() {
+  if (etatDesSessions) return etatDesSessions;
+  const etat = { fermees: new Map(), depuis: new Map() };
+  if (useSqliteStorage()) {
+    try {
+      const store = getSqliteStore();
+      const maintenant = Date.now();
+      for (const [cle, fin] of Object.entries(store.lireMeta(CLE_SESSIONS_FERMEES) || {})) {
+        if (Number(fin) > maintenant) etat.fermees.set(cle, Number(fin));
+      }
+      for (const [uid, depuis] of Object.entries(store.lireMeta(CLE_SESSIONS_DEPUIS) || {})) {
+        if (Number.isFinite(Number(depuis))) etat.depuis.set(String(uid), Number(depuis));
+      }
+    } catch (error) {
+      // Base indisponible (restauration en cours) : rien de garde en memoire,
+      // on relira au prochain appel.
+      console.warn(`[auth] sessions fermees illisibles : ${error.message || error}`);
+      return etat;
+    }
+  }
+  etatDesSessions = etat;
+  return etat;
+}
+
+function cleDeSession(valeur) {
+  return crypto.createHash("sha256").update(String(valeur || "")).digest("hex").slice(0, 32);
+}
+
+function enregistrerSessions(cle, valeur) {
+  if (!useSqliteStorage()) return;
+  try {
+    getSqliteStore().ecrireMeta(cle, valeur);
+  } catch (error) {
+    console.warn(`[auth] sessions fermees non enregistrees (gardees en memoire) : ${error.message || error}`);
+  }
+}
+
+function fermerSession(valeur, session) {
+  const etat = sessionsFermees();
+  const maintenant = Date.now();
+  etat.fermees.set(cleDeSession(valeur), session.issuedAt + AUTH_COOKIE_MAX_AGE_SECONDS * 1000);
+  for (const [cle, fin] of etat.fermees) if (fin <= maintenant) etat.fermees.delete(cle);
+  enregistrerSessions(CLE_SESSIONS_FERMEES, Object.fromEntries(etat.fermees));
+}
+
+function fermerSessionsDuCompte(uid, depuis = Date.now()) {
+  const etat = sessionsFermees();
+  etat.depuis.set(String(uid), depuis);
+  enregistrerSessions(CLE_SESSIONS_DEPUIS, Object.fromEntries(etat.depuis));
+}
+
 /**
  * Verifie la signature et la fraicheur, puis retourne la charge utile.
  * Ne dit RIEN de la validite du compte : c'est le role de l'appelant.
+ * Garde-fous (25/09) : une session fermee (deconnexion, mot de passe change)
+ * n'est plus lue.
  */
 function readAccessSession(value, now = Date.now()) {
   const [payload, signature] = String(value || "").split(".");
@@ -1833,9 +2064,14 @@ function readAccessSession(value, now = Date.now()) {
     if (!Number.isFinite(issuedAt)) return null;
     if (now - issuedAt > AUTH_COOKIE_MAX_AGE_SECONDS * 1000) return null;
 
+    const uid = session.uid ? String(session.uid) : null;
+    const fermees = sessionsFermees();
+    if (fermees.fermees.has(cleDeSession(value))) return null;
+    if (uid && fermees.depuis.has(uid) && issuedAt < fermees.depuis.get(uid)) return null;
+
     return {
       user: typeof session.user === "string" ? session.user : "",
-      uid: session.uid ? String(session.uid) : null,
+      uid,
       issuedAt
     };
   } catch {
@@ -1977,19 +2213,30 @@ function requireAccessAuth(req, res, next) {
       denyAccessAttempt(req, res, 429, "Trop de tentatives de connexion. Reessayez plus tard.", status.remainingMs);
       return;
     }
+    // Garde-fous (25/09) : la limite par compte, comme au formulaire -- sauf
+    // pour un appareil qui a deja ouvert ce compte (relecture du 26/09).
+    const connu = appareilConnuDuCompte(req, basicCredentials.username);
+    const compte = connu ? { locked: false } : statutDuCompte(basicCredentials.username);
+    if (compte.locked) {
+      denyAccessAttempt(req, res, 429, "Trop de tentatives de connexion sur ce compte. Reessayez plus tard.", compte.remainingMs);
+      return;
+    }
 
     const valid = constantTimeEqual(basicCredentials.username, AUTH_USER)
       && constantTimeEqual(basicCredentials.password, AUTH_PASSWORD);
 
     if (valid) {
       clearAuthFailures(ip);
+      effacerEchecsDuCompte(basicCredentials.username);
+      if (!connu) res.append("Set-Cookie", cookieAppareil(req, basicCredentials.username));
       next();
       return;
     }
 
     const updated = recordAuthFailure(ip);
-    if (updated.locked) {
-      denyAccessAttempt(req, res, 429, "Trop de tentatives de connexion. Reessayez plus tard.", updated.remainingMs);
+    const compteApres = connu ? { locked: false, remainingMs: 0 } : echecDuCompte(basicCredentials.username);
+    if (updated.locked || compteApres.locked) {
+      denyAccessAttempt(req, res, 429, "Trop de tentatives de connexion. Reessayez plus tard.", Math.max(updated.remainingMs, compteApres.remainingMs));
       return;
     }
     denyAccessAttempt(req, res, 401, "Connexion requise");
@@ -2056,16 +2303,33 @@ function renderLoginPage(req, res) {
   // Source de verite serveur (la query ?locked=1 peut etre obsolete si le
   // lockout a expire entre le POST et le GET).
   const status = getAuthRateLimitStatus(getClientIp(req));
-  const isLocked = status.locked;
-  const lockedSeconds = isLocked ? Math.ceil(status.remainingMs / 1000) : 0;
-  const lockedUntilMs = isLocked ? status.lockedUntil : 0;
+  let isLocked = status.locked;
+  let lockedUntilMs = isLocked ? status.lockedUntil : 0;
+  // Garde-fous (25/09) : le blocage d'un COMPTE ne se lit pas depuis l'adresse
+  // (la page ne sait pas quel identifiant sera saisi) ; la redirection du POST
+  // porte son echeance. Affichage seulement : le refus est decide au POST,
+  // cote serveur. Une echeance passee ou invraisemblable n'affiche rien.
+  let parCompte = false;
+  if (!isLocked && req.query.compte === "1") {
+    const jusqua = Number(req.query.until);
+    const reste = jusqua - Date.now();
+    if (Number.isFinite(jusqua) && reste > 0 && reste <= AUTH_COMPTE_LOCKOUT_MS) {
+      isLocked = true;
+      parCompte = true;
+      lockedUntilMs = jusqua;
+    }
+  }
+  const lockedSeconds = isLocked ? Math.ceil((parCompte ? lockedUntilMs - Date.now() : status.remainingMs) / 1000) : 0;
 
   let errorMarkup = "";
   if (isLocked) {
     const plural = lockedSeconds > 1 ? "s" : "";
     // Le mot "seconde(s)" est dans un span separe pour que login.js puisse
     // basculer entre singulier et pluriel quand le compteur descend a 1.
-    errorMarkup = `<p class="login-error" role="alert" aria-live="polite">Trop de tentatives. R&eacute;essaie dans <span id="lockout-countdown">${lockedSeconds}</span> <span id="lockout-unit">seconde${plural}</span>.</p>`;
+    // Le blocage d'un compte ne vise que les appareils qui ne l'ont jamais
+    // ouvert (relecture du 26/09) : la page le dit, c'est la voie de secours.
+    const secours = parCompte ? " Un appareil d&eacute;j&agrave; connect&eacute; &agrave; ce compte peut toujours se connecter." : "";
+    errorMarkup = `<p class="login-error" role="alert" aria-live="polite">Trop de tentatives${parCompte ? " sur ce compte" : ""}. R&eacute;essaie dans <span id="lockout-countdown">${lockedSeconds}</span> <span id="lockout-unit">seconde${plural}</span>.${secours}</p>`;
   } else if (hasError) {
     // UNE phrase (planche 9c) : « Identifiant ou mot de passe incorrect. Il te
     // reste 2 tentatives avant un blocage de 15 secondes. » Les essais restants
@@ -2258,14 +2522,30 @@ async function handleLogin(req, res) {
     res.redirect(303, `/login?locked=1&until=${status.lockedUntil}&next=${encodeURIComponent(next)}`);
     return;
   }
+  // Garde-fous (25/09) : le compte vise, lui aussi, avant toute comparaison --
+  // sauf depuis un appareil qui l'a deja ouvert (relecture du 26/09) : ses
+  // echecs ne comptent pas non plus pour le compte.
+  const connu = appareilConnuDuCompte(req, username);
+  const compte = connu ? { locked: false } : statutDuCompte(username);
+  if (compte.locked) {
+    res.setHeader("Retry-After", String(Math.ceil(compte.remainingMs / 1000)));
+    res.redirect(303, `/login?locked=1&compte=1&until=${compte.lockedUntil}&next=${encodeURIComponent(next)}`);
+    return;
+  }
 
   const identity = await authenticateCredentials(username, password);
 
   if (!identity) {
     const updated = recordAuthFailure(ip);
+    const compteApres = connu ? { locked: false } : echecDuCompte(username);
     if (updated.locked) {
       res.setHeader("Retry-After", String(Math.ceil(updated.remainingMs / 1000)));
       res.redirect(303, `/login?locked=1&until=${updated.lockedUntil}&next=${encodeURIComponent(next)}`);
+      return;
+    }
+    if (compteApres.locked) {
+      res.setHeader("Retry-After", String(Math.ceil(compteApres.remainingMs / 1000)));
+      res.redirect(303, `/login?locked=1&compte=1&until=${compteApres.lockedUntil}&next=${encodeURIComponent(next)}`);
       return;
     }
     res.redirect(303, `/login?error=1&remaining=${updated.remaining}&next=${encodeURIComponent(next)}`);
@@ -2273,6 +2553,7 @@ async function handleLogin(req, res) {
   }
 
   clearAuthFailures(ip);
+  effacerEchecsDuCompte(username);
 
   if (identity.id) {
     try {
@@ -2282,10 +2563,11 @@ async function handleLogin(req, res) {
     }
   }
 
-  res.setHeader(
-    "Set-Cookie",
-    buildAuthCookie(createAccessSessionValue(Date.now(), identity), AUTH_COOKIE_MAX_AGE_SECONDS, req)
-  );
+  res.setHeader("Set-Cookie", [
+    buildAuthCookie(createAccessSessionValue(Date.now(), identity), AUTH_COOKIE_MAX_AGE_SECONDS, req),
+    // L'appareil est desormais connu de ce compte (relecture du 26/09).
+    cookieAppareil(req, username)
+  ]);
   res.redirect(303, next);
 }
 
@@ -2357,6 +2639,11 @@ async function authenticateCredentials(username, password) {
 }
 
 function handleLogout(req, res) {
+  // Garde-fous (25/09) : la session est FERMEE cote serveur, pas seulement
+  // effacee du navigateur (une copie du cookie ne sert plus a rien).
+  const valeur = getAccessSessionCookie(req);
+  const session = readAccessSession(valeur);
+  if (session) fermerSession(valeur, session);
   res.setHeader("Set-Cookie", buildAuthCookie("", 0, req));
   res.redirect(303, "/login");
 }
@@ -3163,14 +3450,28 @@ const BACKUP_RETENTION = 30;
 // Decision de Thomas du 24/09 : EN PLUS des 30 dernieres, une sauvegarde par
 // jour (de Paris) pendant 30 jours. Voir sauvegardesAGarder().
 const BACKUP_JOURS_JOURNALIERES = 30;
+// Garde-fous (25/09, decision 4) : et une par semaine (de Paris, du lundi au
+// dimanche) pendant 8 semaines.
+const BACKUP_SEMAINES_HEBDOMADAIRES = 8;
+// Decision 5 : la sauvegarde faite avant « Purger les bons de commande » est
+// HORS rotation -- ni les horaires ni les manuelles ne l'evincent. Le nom de
+// genre est reserve (« Sauvegarder maintenant » ne peut pas le prendre).
+const GENRE_AVANT_PURGE_COMMANDES = "avant-purge-commandes";
+const MOTIF_HORS_ROTATION = /-avant-purge-commandes\.(sqlite|json)\.gz$/;
 const BACKUP_FILENAME_PATTERN = /^db-.*\.(sqlite|json)(\.gz)?$/;
 
-function listBackupEntries() {
-  if (!fs.existsSync(BACKUP_DIR)) return [];
-  return fs.readdirSync(BACKUP_DIR)
-    .filter(name => BACKUP_FILENAME_PATTERN.test(name))
+// Relecture adverse du 26/09 : les fichiers de travail d'une sauvegarde en
+// cours (`…sqlite.gz.travail-copie.sqlite`, `…travail-verif.sqlite`) passaient
+// le motif. Plus recents que tout, ils devenaient « la derniere » le temps de
+// la copie : servis au telechargement (une base brute en cours d'ecriture),
+// affiches sur la carte, comptes par la rotation. Ils ne sont jamais une
+// sauvegarde (MOTIF_TRAVAIL, le meme que le nettoyage du demarrage).
+function listBackupEntries(dossier = BACKUP_DIR) {
+  if (!fs.existsSync(dossier)) return [];
+  return fs.readdirSync(dossier)
+    .filter(name => BACKUP_FILENAME_PATTERN.test(name) && !sauvegardeBase.MOTIF_TRAVAIL.test(name))
     .map(name => {
-      const fullPath = path.join(BACKUP_DIR, name);
+      const fullPath = path.join(dossier, name);
       try {
         const stat = fs.statSync(fullPath);
         return { name, fullPath, mtimeMs: stat.mtimeMs, size: stat.size };
@@ -3202,22 +3503,47 @@ function listBackupEntries() {
 // la rotation ne supprime jamais plus qu'avant, meme apres un mois sans
 // activite (les 30 plus recentes, toutes vieilles, restent).
 //
+// Garde-fous (25/09, decisions 4 et 5), EN PLUS :
+// - la derniere de chaque semaine de Paris (lundi-dimanche) sur 8 semaines,
+//   celle d'aujourd'hui comprise ; « avant-purge » (des tournees) comprises,
+//   comme toute sauvegarde : elles sont candidates au meme titre ;
+// - les sauvegardes d'avant la purge des bons, toutes : hors rotation. Elles
+//   ne prennent pas non plus de place parmi les 30 : les 30 dernieres se
+//   comptent sans elles (on en garde donc autant ou plus qu'avant).
+// La decision 4 dit « une par jour pendant 14 jours » : les 30 jours posees
+// le 24/09 les contiennent, et les ramener a 14 supprimerait plus qu'avant.
+// L'ensemble garde contient toujours celui de la regle d'avant (banc
+// « jamais plus agressive » de test/garde-fous-sauvegardes.test.js).
+//
 // `entries` : triees de la plus recente a la plus ancienne (listBackupEntries).
 function sauvegardesAGarder(entries, maintenant = new Date()) {
-  const garder = new Set(entries.slice(0, BACKUP_RETENTION).map(entry => entry.name));
-  const premierJour = ajouterJours(jourParis(maintenant), -(BACKUP_JOURS_JOURNALIERES - 1));
+  const horsRotation = entries.filter(entry => MOTIF_HORS_ROTATION.test(entry.name));
+  const rotation = entries.filter(entry => !MOTIF_HORS_ROTATION.test(entry.name));
+  const garder = new Set(horsRotation.map(entry => entry.name));
+  for (const entry of rotation.slice(0, BACKUP_RETENTION)) garder.add(entry.name);
+  const aujourdhui = jourParis(maintenant);
+  const premierJour = ajouterJours(aujourdhui, -(BACKUP_JOURS_JOURNALIERES - 1));
+  const premiereSemaine = ajouterJours(debutSemaine(aujourdhui), -7 * (BACKUP_SEMAINES_HEBDOMADAIRES - 1));
   const joursVus = new Set();
-  for (const entry of entries) {
+  const semainesVues = new Set();
+  for (const entry of rotation) {
     const jour = jourParis(entry.mtimeMs);
-    if (!jour || jour < premierJour || joursVus.has(jour)) continue;
-    joursVus.add(jour);
-    garder.add(entry.name);
+    if (!jour) continue;
+    if (jour >= premierJour && !joursVus.has(jour)) {
+      joursVus.add(jour);
+      garder.add(entry.name);
+    }
+    const semaine = debutSemaine(jour);
+    if (semaine >= premiereSemaine && !semainesVues.has(semaine)) {
+      semainesVues.add(semaine);
+      garder.add(entry.name);
+    }
   }
   return garder;
 }
 
-function pruneOldBackups() {
-  const entries = listBackupEntries();
+function pruneOldBackups(dossier = BACKUP_DIR) {
+  const entries = listBackupEntries(dossier);
   const garder = sauvegardesAGarder(entries);
   entries.filter(entry => !garder.has(entry.name)).forEach(entry => {
     try { fs.unlinkSync(entry.fullPath); } catch { /* best-effort */ }
@@ -3234,47 +3560,15 @@ function pruneOldBackups() {
 // - endpoint manuel /api/backup/now pour forcer un backup hors throttle
 let postRestoreBackupDone = false;
 
-function backupDbIfNeeded(options = {}) {
-  const { force = false, tag = "" } = options;
-  const sourcePath = useSqliteStorage() ? SQLITE_PATH : DB_PATH;
-  if (!fs.existsSync(sourcePath)) return null;
-
-  // Cas fresh_empty : pas de backup automatique tant que la base reste vide.
-  // Reste possible via /api/backup/now. Lot 3 : gate sur le flag re-armable
-  // (leve par writeDb a la re-saisie de donnees), plus sur lastStorageRecovery
-  // .mode qui n'etait JAMAIS re-arme (suspension a vie -> perte totale a la 2e
-  // corruption).
-  if (!force && backupsSuspendedFreshEmpty) {
-    return null;
-  }
-
-  // Cas restored_backup : faire UN snapshot post-restore une seule fois, puis
-  // continuer normalement (audit Sereo 2026-06-04 + SQLite docs). Le snapshot
-  // est tagge "post-restore" pour traçabilite forensique.
-  //
-  // Revue R1 P1 #5 : flag postRestoreBackupDone = true APRES succes, pas
-  // avant. Si writeBackupNow throw (disque plein), on doit retenter au
-  // prochain writeDb.
-  if (!force && lastStorageRecovery && lastStorageRecovery.mode === "restored_backup" && !postRestoreBackupDone) {
-    const path = writeBackupNow("post-restore");
-    if (path) postRestoreBackupDone = true;
-    return path;
-  }
-
-  // Throttle normal : skip si un backup recent existe (< 1h).
-  if (!force) {
-    const entries = listBackupEntries();
-    const mostRecent = entries[0];
-    if (mostRecent && Date.now() - mostRecent.mtimeMs < BACKUP_THROTTLE_MS) {
-      return null;
-    }
-  }
-
-  return writeBackupNow(tag);
-}
-
-// Chantier 2 : variante async pour le hot-path `writeDb`. Meme logique de
-// gating mode-aware que la version sync, mais utilise writeBackupNowAsync.
+// La sauvegarde du hot-path `writeDb` (Chantier 2). Garde-fous (25/09) : la
+// variante synchrone, backupDbIfNeeded, n'avait plus d'appelant ; elle est
+// retiree avec writeBackupNow (lecture du fichier de la base, voir plus bas).
+//
+// - fresh_empty : pas de sauvegarde automatique tant que la base reste vide
+//   (Lot 3 : drapeau re-armable, leve par writeDb a la re-saisie) ;
+// - restored_backup : UN instantane « post-restore », une seule fois (Revue R1
+//   P1 #5 : le drapeau n'est pose qu'apres succes) ;
+// - sinon, au plus une sauvegarde par BACKUP_THROTTLE_MS.
 async function backupDbIfNeededAsync(options = {}) {
   const { force = false, tag = "" } = options;
   const sourcePath = useSqliteStorage() ? SQLITE_PATH : DB_PATH;
@@ -3301,69 +3595,192 @@ async function backupDbIfNeededAsync(options = {}) {
   return writeBackupNowAsync(tag);
 }
 
-function writeBackupNow(tag = "") {
+// La derniere sauvegarde ecrite par CE processus, et l'ecriture qu'elle couvre
+// (la valeur de derniereModificationA quand la copie a commence). Sert a
+// « Sauvegarder maintenant » : si rien n'a ete ecrit depuis, la derniere est
+// deja a jour (garde-fous, 25/09).
+let derniereSauvegardeEcrite = null;
+
+// Garde-fous (25/09) : une sauvegarde COHERENTE et RELUE.
+//
+// Avant : writeBackupNowAsync lisait le FICHIER de la base en flux, hors verrou,
+// apres un checkpoint ; un checkpoint (automatique a 1 000 pages, pendant un
+// import) reecrivait le fichier au milieu de la lecture, et la copie melangeait
+// des pages d'avant et d'apres -- nommee comme une sauvegarde valide, jamais
+// relue (la chasse aux defauts : 2 fois sur 2). writeBackupNow (synchrone)
+// lisait d'un bloc, sans ce defaut, mais gelait le serveur le temps de
+// compresser la base, sous le verrou d'ecriture.
+//
+// Maintenant (lib/sauvegarde-base.js, dans un thread de travail) : VACUUM INTO
+// depuis une seconde connexion en lecture seule (un instantane coherent, meme
+// pendant des ecritures), gzip, puis relecture du .gz tel qu'une restauration
+// le lirait (integrity_check « ok », et le releve des `tables` demandees) ;
+// le fichier ne prend son nom qu'apres. Rend { chemin, nom, octets, sha256,
+// comptes, empreintes }, ou null si la base n'existe pas encore ; leve si la
+// copie ou sa relecture echoue (aucun fichier final n'est alors laisse).
+//
+// Le mode JSON (legacy, migration) garde la copie en flux : le fichier JSON est
+// remplace par renommage, jamais reecrit en place. Il est relu (JSON.parse).
+//
+// `copie: false` : la copie vers le second dossier est laissee a l'appelant
+// (la purge des bons, qui la fait apres avoir rendu le verrou d'ecriture).
+async function ecrireSauvegardeVerifiee(tag = "", { tables = [], copie = true } = {}) {
   const sourcePath = useSqliteStorage() ? SQLITE_PATH : DB_PATH;
   if (!fs.existsSync(sourcePath)) return null;
 
   ensureDir(BACKUP_DIR);
-  if (useSqliteStorage()) {
-    getSqliteStore().checkpoint();
-  }
-
   const baseExtension = useSqliteStorage() ? ".sqlite" : ".json";
   const tagPart = tag ? `-${tag.replace(/[^a-zA-Z0-9_-]/g, "")}` : "";
   const backupPath = path.join(BACKUP_DIR, `db-${safeTimestamp()}${tagPart}${baseExtension}.gz`);
+  // Pris AVANT la copie : une ecriture faite entre-temps est dans la copie, et
+  // la sauvegarde se dit couvrir un peu moins qu'elle ne couvre, jamais plus.
+  const couvre = derniereModificationA;
 
-  const sourceData = fs.readFileSync(sourcePath);
-  const compressed = zlib.gzipSync(sourceData);
-  fs.writeFileSync(backupPath, compressed);
+  let resultat;
+  if (useSqliteStorage()) {
+    // Ouvre la base (et la restaure si elle est corrompue) avant de la copier.
+    getSqliteStore();
+    resultat = await sauvegardeBase.copierEtVerifier({
+      source: SQLITE_PATH,
+      destination: backupPath,
+      tables,
+      maxOctets: MAX_BACKUP_DECOMPRESSED_BYTES
+    });
+  } else {
+    resultat = await sauvegarderFichierJson(sourcePath, backupPath);
+  }
 
   pruneOldBackups();
   lastBackupAt = new Date().toISOString();
   lastBackupError = null;
-  return backupPath;
+  derniereSauvegardeEcrite = { nom: path.basename(backupPath), couvre };
+  if (copie) await copierVersSecondDossier(backupPath, resultat.sha256);
+  return { chemin: backupPath, nom: path.basename(backupPath), ...resultat };
 }
 
-// Chantier 2 (audit 2026-06-04) : variante async via stream pipeline.
-// `zlib.createGzip()` delegue la compression au threadpool libuv (Node docs
-// confirme), donc le main thread reste libre pour les requetes HTTP pendant
-// le backup. Sur 50-100 MB c'etait 300-800 ms de freeze, maintenant ~5 ms
-// d'overhead non-bloquant.
-//
-// Pattern recommande (Dennis O'Keeffe 2024) : ecriture vers tmp, rename
-// atomique, cleanup best-effort si le pipeline echoue.
-//
-// Sync writeBackupNow garde sa raison d'etre : boot post-recovery (avant que
-// le serveur n'accepte des requetes, le freeze n'a pas d'impact) + tests.
-async function writeBackupNowAsync(tag = "") {
-  const sourcePath = useSqliteStorage() ? SQLITE_PATH : DB_PATH;
-  if (!fs.existsSync(sourcePath)) return null;
+// Le second dossier (SEREO_BACKUP_COPY_DIR, decision 3) : la derniere copie
+// reussie et la derniere erreur (null apres une copie reussie). En memoire.
+let derniereCopie = null;
+let derniereErreurCopie = null;
 
-  ensureDir(BACKUP_DIR);
-  if (useSqliteStorage()) {
-    getSqliteStore().checkpoint();
+function empreinteDuFichier(chemin) {
+  return new Promise((resolve, reject) => {
+    const hachage = crypto.createHash("sha256");
+    fs.createReadStream(chemin)
+      .on("data", morceau => hachage.update(morceau))
+      .on("error", reject)
+      .on("end", () => resolve(hachage.digest("hex")));
+  });
+}
+
+// Relecture adverse du 26/09 : un disque demonte ne se voyait pas. Docker lie
+// alors un dossier VIDE du disque systeme a la place du montage (ou le cree),
+// et cette fonction recreait le dossier au besoin : les copies y atterrissaient
+// sans bruit, « dans le second dossier » a l'ecran. Comparer les disques ne
+// suffit pas : la base est souvent sur un disque de donnees, le repli sur le
+// disque systeme -- deux numeros differents, rien a signaler. Le second
+// dossier porte donc un fichier TEMOIN, pose une fois par Thomas sur l'autre
+// disque (DEPLOYMENT.md) : disque demonte, temoin absent, rien n'est copie et
+// la carte le dit. Le dossier n'est plus jamais cree ici.
+const TEMOIN_SECOND_DOSSIER = "sereo-second-dossier";
+
+// Asynchrone expres : un partage reseau bloque ne gele pas le serveur.
+async function verifierTemoinSecondDossier() {
+  try {
+    await fs.promises.access(path.join(BACKUP_COPY_DIR, TEMOIN_SECOND_DOSSIER));
+  } catch {
+    throw new Error(`le fichier témoin « ${TEMOIN_SECOND_DOSSIER} » manque dans le second dossier (disque démonté ?) : rien n'y est copié. Si c'est bien l'autre disque, crée ce fichier vide (DEPLOYMENT.md, « Sauvegardes »)`);
   }
+}
 
-  const baseExtension = useSqliteStorage() ? ".sqlite" : ".json";
-  const tagPart = tag ? `-${tag.replace(/[^a-zA-Z0-9_-]/g, "")}` : "";
-  const backupPath = path.join(BACKUP_DIR, `db-${safeTimestamp()}${tagPart}${baseExtension}.gz`);
+// Copie une sauvegarde deja relue dans le second dossier : temoin present,
+// fichier provisoire, relecture (meme empreinte sha256 que l'originale), meme
+// date, renommage ; puis la meme retention que le premier dossier. N'echoue
+// jamais : la sauvegarde est faite, seule la copie manque -- et l'alerte
+// « copie » le dit.
+async function copierVersSecondDossier(chemin, sha256) {
+  if (!BACKUP_COPY_DIR) return null;
+  const nom = path.basename(chemin);
+  const cible = path.join(BACKUP_COPY_DIR, nom);
+  const provisoire = `${cible}.tmp`;
+  try {
+    await verifierTemoinSecondDossier();
+    await fs.promises.copyFile(chemin, provisoire);
+    const relue = await empreinteDuFichier(provisoire);
+    if (relue !== sha256) {
+      throw new Error(`la copie ne correspond pas a la sauvegarde (empreinte ${relue.slice(0, 12)} au lieu de ${String(sha256).slice(0, 12)})`);
+    }
+    const { mtime } = await fs.promises.stat(chemin);
+    await fs.promises.utimes(provisoire, mtime, mtime);
+    await fs.promises.rename(provisoire, cible);
+    pruneOldBackups(BACKUP_COPY_DIR);
+    derniereCopie = { nom, at: new Date().toISOString() };
+    derniereErreurCopie = null;
+    return cible;
+  } catch (error) {
+    try { await fs.promises.unlink(provisoire); } catch { /* absent : ok */ }
+    derniereErreurCopie = { at: new Date().toISOString(), message: String(error.message || error) };
+    console.error(`[storage] copie de ${nom} vers le second dossier impossible : ${derniereErreurCopie.message}`);
+    return null;
+  }
+}
+
+async function sauvegarderFichierJson(sourcePath, backupPath) {
   const tmpPath = backupPath + ".tmp";
-
   try {
     const { pipeline } = require("node:stream/promises");
     await pipeline(
       fs.createReadStream(sourcePath),
-      zlib.createGzip({ level: 6 }), // 6 = defaut, bon ratio/CPU
+      zlib.createGzip({ level: 6 }),
       fs.createWriteStream(tmpPath)
     );
-    fs.renameSync(tmpPath, backupPath); // atomique
-    pruneOldBackups();
-    lastBackupAt = new Date().toISOString();
-    lastBackupError = null;
-    return backupPath;
+    const compresse = fs.readFileSync(tmpPath);
+    const texte = zlib.gunzipSync(compresse, { maxOutputLength: MAX_BACKUP_DECOMPRESSED_BYTES }).toString("utf8");
+    if (texte.trim()) JSON.parse(texte);
+    fs.renameSync(tmpPath, backupPath);
+    return {
+      octets: compresse.length,
+      sha256: crypto.createHash("sha256").update(compresse).digest("hex"),
+      comptes: {},
+      empreintes: {}
+    };
   } catch (err) {
     try { fs.unlinkSync(tmpPath); } catch { /* best-effort */ }
     throw err;
+  }
+}
+
+// Le chemin de la sauvegarde, ou null (contrat historique : la purge des
+// tournees l'injecte, writeDb l'appelle).
+async function writeBackupNowAsync(tag = "") {
+  const sauvegarde = await ecrireSauvegardeVerifiee(tag);
+  return sauvegarde ? sauvegarde.chemin : null;
+}
+
+// Une sauvegarde a la fois (revue #84 : deux sauvegardes concurrentes donnaient
+// un signal de sante incoherent). Attend celle qui court, puis tient sa place :
+// writeDb n'en lance pas d'autre tant que celle-ci n'est pas finie. Aucun
+// `await` entre la fin de l'attente et la prise de la place.
+async function sauvegardeSeule(ecrire) {
+  await flushPendingBackup();
+  const enVol = Promise.resolve().then(ecrire);
+  const place = enVol.then(() => {}, () => {});
+  pendingBackup = place;
+  place.then(() => { if (pendingBackup === place) pendingBackup = null; });
+  return enVol;
+}
+
+// Une sauvegarde interrompue (arret du processus pendant la copie) laisse ses
+// fichiers de travail : rien d'autre ne les supprime. Au demarrage.
+function nettoyerSauvegardesInterrompues(dossier = BACKUP_DIR) {
+  try {
+    if (!fs.existsSync(dossier)) return;
+    for (const nom of fs.readdirSync(dossier)) {
+      if (!sauvegardeBase.MOTIF_TRAVAIL.test(nom)) continue;
+      try { fs.unlinkSync(path.join(dossier, nom)); } catch { /* best-effort */ }
+    }
+  } catch (error) {
+    console.warn(`[storage] nettoyage des sauvegardes interrompues : ${error.message || error}`);
   }
 }
 
@@ -7291,7 +7708,11 @@ function distance(a, b) {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-app.get("/api/db", (req, res) => {
+// La base entiere (clients, adresses, telephones, comptes) : un telechargement
+// de sauvegarde sous un autre nom. Reservee a l'administration (decision 6 du
+// 24/09, garde-fous du 25/09) : SEREO_ENABLE_DB_EXPORT=1 l'ouvrait a TOUT
+// compte connecte, livreur compris.
+app.get("/api/db", requireAdministration, (req, res) => {
   if (!ENABLE_DB_EXPORT) {
     res.status(403).json({
       error: "Export complet de la base desactive. Utiliser SEREO_ENABLE_DB_EXPORT=1 pour diagnostic local."
@@ -7467,10 +7888,10 @@ app.get("/api/storage/status", (req, res) => {
 // requireAdministration sur la route). Mais sans authentification (dev, ou un
 // deploiement sans SEREO_AUTH_* ni compte), TOUT visiteur est « administrateur »
 // (getRequestIdentity) : le role ne prouve plus rien. C'est le cas que
-// SEREO_ENABLE_DB_EXPORT garde deja pour /api/db (export JSON de la base, ouvert
-// a tout compte connecte, 0 par defaut) : sans authentification, c'est lui qui
-// decide. Avec authentification, la variable ne s'applique pas ici -- l'ouvrir
-// pour la sauvegarde ouvrirait aussi /api/db a tous les comptes.
+// SEREO_ENABLE_DB_EXPORT garde deja pour /api/db (export JSON de la base,
+// reserve lui aussi a l'administration depuis le 25/09, 0 par defaut) : sans
+// authentification, c'est lui qui decide. Avec authentification, la variable
+// ne s'applique pas ici : le role suffit.
 // Rend null si le telechargement est permis, sinon la raison du refus.
 function refusDeTelechargement(identite) {
   if (!identite || !getRole(identite.role).administration) return "Reserve aux administrateurs.";
@@ -7507,6 +7928,7 @@ function etatDesSauvegardes(identite, maintenant = Date.now()) {
   let alerte = null;
   if (erreurLecture) alerte = { type: "lecture", message: erreurLecture };
   else if (lastBackupError) alerte = { type: "echec", at: lastBackupError.at, message: lastBackupError.message };
+  else if (derniereErreurCopie) alerte = { type: "copie", at: derniereErreurCopie.at, message: derniereErreurCopie.message };
   else if (backupsSuspendedFreshEmpty) alerte = { type: "suspendues" };
   else if (!derniere) alerte = { type: "aucune" };
   else if (perimee) alerte = { type: "perimee", depuis: new Date(derniereModificationA).toISOString() };
@@ -7524,10 +7946,16 @@ function etatDesSauvegardes(identite, maintenant = Date.now()) {
       heures: BACKUP_THROTTLE_MS / 3600000,
       dernieres: BACKUP_RETENTION,
       joursJournalieres: BACKUP_JOURS_JOURNALIERES,
+      semainesHebdomadaires: BACKUP_SEMAINES_HEBDOMADAIRES,
       perimeeApresHeures: SAUVEGARDE_PERIMEE_MS / 3600000
     },
     administration: Boolean(identite && getRole(identite.role).administration),
-    telechargement: { permis: refus === null && Boolean(derniere), raison: refus }
+    telechargement: { permis: refus === null && Boolean(derniere), raison: refus },
+    // Le second dossier (decision 3) : pose ou non, et la derniere copie
+    // reussie par ce processus. Le chemin n'est pas donne.
+    copie: BACKUP_COPY_DIR
+      ? { active: true, derniere: derniereCopie ? { nom: derniereCopie.nom, date: derniereCopie.at } : null }
+      : { active: false }
   };
 }
 
@@ -7566,31 +7994,72 @@ app.get("/api/sauvegardes/derniere", requireAdministration, (req, res) => {
 // Decision de Thomas du 24/09 : un geste d'administration (la carte
 // « Sauvegardes » de Parametres le porte). Sans authentification (dev), tout le
 // monde est administrateur, comme pour la numerotation des bons.
+//
+// Garde-fous (25/09) : la copie est coherente et relue (ecrireSauvegardeVerifiee)
+// et se fait HORS du verrou d'ecriture -- un « Livre » ne l'attend plus ; elle
+// attend la sauvegarde automatique en vol puis tient sa place (sauvegardeSeule).
+//
+// Et elle ne peut plus evincer les autres (chasse aux defauts : une purge puis
+// 30 appels remplacaient toutes les sauvegardes par une base vide) :
+// - deja a jour : si la derniere sauvegarde sur le disque est celle que ce
+//   processus a ecrite et que rien n'a ete ecrit depuis, aucun fichier de plus
+//   (reponse `dejaAJour`) ;
+// - au plus SAUVEGARDES_MANUELLES_PAR_HEURE sauvegardes manuelles par heure
+//   glissante (au-dela : 503 et Retry-After -- pas 429, qu'apiFetch prend pour
+//   un verrou de connexion). Les sauvegardes automatiques ne sont pas comptees ;
+// - le genre « avant-purge-* » est reserve (hors rotation pour les bons).
+const SAUVEGARDES_MANUELLES_PAR_HEURE = 10;
+const sauvegardesManuelles = [];
+
 app.post("/api/backup/now", requireAdministration, async (req, res) => {
   try {
-    const tag = clean(req.body?.tag || "manual").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 32);
-    const result = await withWriteLock(async () => {
-      let backupPath;
-      try {
-        backupPath = writeBackupNow(tag);
-      } catch (error) {
-        // La carte le dira aussi apres un rechargement, pas seulement le toast.
-        lastBackupError = { at: new Date().toISOString(), message: String(error.message || error) };
-        throw error;
-      }
-      if (!backupPath) return { ok: false, error: "Backup impossible (source absente)" };
+    let tag = clean(req.body?.tag || "manual").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 32);
+    // Le genre « avant-purge » est reserve, ou qu'il soit dans l'etiquette :
+    // « x-avant-purge-commandes » sortait la sauvegarde de la rotation
+    // (MOTIF_HORS_ROTATION ne lit que la fin du nom ; relecture du 26/09).
+    if (/avant-purge/i.test(tag)) tag = "manuelle";
 
+    const derniere = listBackupEntries()[0];
+    if (derniere && derniereSauvegardeEcrite
+      && derniere.name === derniereSauvegardeEcrite.nom
+      && derniereModificationA === derniereSauvegardeEcrite.couvre) {
+      res.json({ ok: true, dejaAJour: true, backupPath: derniere.name, tag });
+      return;
+    }
+
+    const maintenant = Date.now();
+    while (sauvegardesManuelles.length && sauvegardesManuelles[0] <= maintenant - 3600000) sauvegardesManuelles.shift();
+    if (sauvegardesManuelles.length >= SAUVEGARDES_MANUELLES_PAR_HEURE) {
+      const attenteMs = sauvegardesManuelles[0] + 3600000 - maintenant;
+      res.setHeader("Retry-After", String(Math.max(1, Math.ceil(attenteMs / 1000))));
+      res.status(503).json({
+        ok: false,
+        error: `Trop de sauvegardes manuelles : ${SAUVEGARDES_MANUELLES_PAR_HEURE} dans l’heure. Réessaie dans ${Math.max(1, Math.ceil(attenteMs / 60000))} min ; les sauvegardes automatiques continuent.`
+      });
+      return;
+    }
+    // Comptee des la tentative : un disque en panne ne se martele pas non plus.
+    sauvegardesManuelles.push(maintenant);
+
+    let sauvegarde;
+    try {
+      sauvegarde = await sauvegardeSeule(() => ecrireSauvegardeVerifiee(tag));
+    } catch (error) {
+      // La carte le dira aussi apres un rechargement, pas seulement le toast.
+      lastBackupError = { at: new Date().toISOString(), message: String(error.message || error) };
+      throw error;
+    }
+    if (!sauvegarde) {
+      return res.status(503).json({ ok: false, error: "Backup impossible (source absente)" });
+    }
+    await withWriteLock(async () => {
       const db = readDb();
-      addHistory(db, "Backup manuel", `Backup forcé créé : ${path.basename(backupPath)}`, { tag, backupPath });
+      addHistory(db, "Backup manuel", `Backup forcé créé : ${sauvegarde.nom}`, { tag, backupPath: sauvegarde.chemin });
       // Pas de double-backup recursif ; et cette ligne d'historique ne rend pas
       // la sauvegarde qu'elle annonce « perimee ».
       writeDb(db, { backup: false, modification: false });
-      return { ok: true, backupPath: path.basename(backupPath), tag };
     });
-    if (!result.ok) {
-      return res.status(503).json(result);
-    }
-    res.json(result);
+    res.json({ ok: true, backupPath: sauvegarde.nom, tag });
   } catch (error) {
     handleRouteError(error, res, "Erreur backup manuel");
   }
@@ -7715,7 +8184,7 @@ app.get(IMAGE_DE_MARQUE_CHEMIN, (req, res) => {
   res.send(Buffer.from(morceaux[2], "base64"));
 });
 
-app.patch("/api/settings/appearance", async (req, res) => {
+app.patch("/api/settings/appearance", requireAdministration, async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
       const db = readDb();
@@ -7769,7 +8238,7 @@ app.get("/api/settings/stock", (req, res) => {
   res.json(normalizeSettings(db.settings || {}).stock);
 });
 
-app.patch("/api/settings/stock", async (req, res) => {
+app.patch("/api/settings/stock", requireAdministration, async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
       const db = readDb();
@@ -7841,7 +8310,7 @@ app.patch("/api/settings/order-numbering", requireAdministration, async (req, re
 //   un middleware inline. Reduire la limite globale casserait brandImage.
 //   La protection reste : typeof + bornes serveur. Backlog : rate-limit
 //   global /api/settings/*.
-app.patch("/api/settings/tournee", async (req, res) => {
+app.patch("/api/settings/tournee", requireAdministration, async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
       const db = readDb();
@@ -8242,7 +8711,7 @@ app.get("/api/delivery-sectors", (req, res) => {
   res.json((db.deliverySectors || []).map(decorerSecteurPourAffichage));
 });
 
-app.post("/api/delivery-sectors", async (req, res) => {
+app.post("/api/delivery-sectors", requireAdministration, async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
       const db = readDb();
@@ -8258,7 +8727,7 @@ app.post("/api/delivery-sectors", async (req, res) => {
   }
 });
 
-app.patch("/api/delivery-sectors/:id", async (req, res) => {
+app.patch("/api/delivery-sectors/:id", requireAdministration, async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
       const db = readDb();
@@ -8275,7 +8744,7 @@ app.patch("/api/delivery-sectors/:id", async (req, res) => {
   }
 });
 
-app.delete("/api/delivery-sectors/:id", async (req, res) => {
+app.delete("/api/delivery-sectors/:id", requireAdministration, async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
       const db = readDb();
@@ -8347,7 +8816,7 @@ app.get("/api/routes/:id", (req, res) => {
   res.json(route);
 });
 
-app.post("/api/import/stock", uploadExcel, async (req, res) => {
+app.post("/api/import/stock", requireAdministration, uploadExcel, async (req, res) => {
   const uploadedPath = req.file?.path;
 
   try {
@@ -8576,7 +9045,7 @@ function raisonImportIgnore(db, order) {
   return null;
 }
 
-app.post("/api/import/ventes", uploadExcel, async (req, res) => {
+app.post("/api/import/ventes", requireAdministration, uploadExcel, async (req, res) => {
   const uploadedPath = req.file?.path;
 
   // M2 (revue) : compteur des quantites Excel negatives silencieusement
@@ -9064,7 +9533,7 @@ app.get("/api/imports/archives", (req, res) => {
 // v1.12.0 : telechargement d'un fichier Excel archive. Verifie que l'id est
 // connu en DB et que le fichier existe encore sur disque (peut etre purge
 // manuellement par le sysadmin).
-app.get("/api/imports/archives/:id/download", (req, res) => {
+app.get("/api/imports/archives/:id/download", requireAdministration, (req, res) => {
   try {
     const db = readDb();
     const archive = (db.importsArchives || []).find(a => String(a.id) === String(req.params.id));
@@ -9094,11 +9563,50 @@ app.get("/api/imports/archives/:id/download", (req, res) => {
 //
 // La purge laisse l'utilisateur pouvoir reimporter ses Excel originaux
 // depuis Parametres -> Historique imports -> Telecharger.
-app.post("/api/orders/purge", async (req, res) => {
+//
+// Garde-fous (25/09, decisions 5 et 6) :
+// - reservee a l'administration (requireAdministration) ;
+// - precedee, SOUS le verrou d'ecriture (rien ne change entre la copie et
+//   l'effacement), d'une sauvegarde « avant-purge-commandes » HORS rotation,
+//   coherente et relue (ecrireSauvegardeVerifiee) ;
+// - la sauvegarde relue doit contenir EXACTEMENT les lignes que la purge
+//   efface (commandes, clients, ventes, tournees : memes comptes, memes
+//   identifiants) ; sinon, ou si elle echoue, la purge est refusee (503) et
+//   rien n'est efface.
+// La base est lue APRES l'attente de la sauvegarde : une ligne d'historique
+// ecrite pendant la copie (addHistoryEntry, hors verrou) n'est pas perdue.
+const TABLES_PURGEES = ["commandes", "clients", "ventes", "routes"];
+
+function refusDePurge(message) {
+  const error = new Error(`Purge refusée : ${message} Rien n'a été effacé.`);
+  error.refusDePurge = true;
+  return error;
+}
+
+app.post("/api/orders/purge", requireAdministration, async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
+      if (readDb().subscriptions.length) throw badRequest("La purge est désactivée en présence d’abonnements pour préserver les fiches clients et leurs échéances.");
+
+      let sauvegarde;
+      try {
+        // Sans la copie vers le second dossier : elle se fait apres le verrou
+        // (plus bas). Relecture du 26/09 : un partage reseau lent ou bloque
+        // suspendait, sous ce verrou, toutes les ecritures des autres comptes.
+        sauvegarde = await sauvegardeSeule(() => ecrireSauvegardeVerifiee(GENRE_AVANT_PURGE_COMMANDES, { tables: TABLES_PURGEES, copie: false }));
+      } catch (error) {
+        lastBackupError = { at: new Date().toISOString(), message: String(error.message || error) };
+        throw refusDePurge(`la sauvegarde d'avant purge a échoué (${error.message || error}).`);
+      }
+      if (!sauvegarde) throw refusDePurge("aucune sauvegarde n'a pu être écrite.");
+      if (useSqliteStorage()) {
+        const actuel = getSqliteStore().releverTables(TABLES_PURGEES);
+        const ecarts = TABLES_PURGEES.filter(table => sauvegarde.comptes[table] !== actuel.comptes[table]
+          || sauvegarde.empreintes[table] !== actuel.empreintes[table]);
+        if (ecarts.length) throw refusDePurge(`la sauvegarde ${sauvegarde.nom} ne contient pas exactement ce qui serait effacé (${ecarts.join(", ")}).`);
+      }
+
       const db = readDb();
-      if (db.subscriptions.length) throw badRequest("La purge est désactivée en présence d’abonnements pour préserver les fiches clients et leurs échéances.");
       const purgedCounts = {
         commandes: db.commandes.length,
         clients: db.clients.length,
@@ -9133,24 +9641,35 @@ app.post("/api/orders/purge", async (req, res) => {
       addHistory(
         db,
         "Purge",
-        `Reset bons de commande : ${purgedCounts.commandes} commande(s), ${purgedCounts.clients} client(s), ${purgedCounts.ventes} vente(s), ${purgedCounts.routes} tournee(s) supprimees. ${stockReservationsReleased} reservation(s) de stock restituee(s). Catalogue stock et historique preserves.`,
-        { ...purgedCounts, stockReservationsReleased }
+        `Reset bons de commande : ${purgedCounts.commandes} commande(s), ${purgedCounts.clients} client(s), ${purgedCounts.ventes} vente(s), ${purgedCounts.routes} tournee(s) supprimees. ${stockReservationsReleased} reservation(s) de stock restituee(s). Catalogue stock et historique preserves. Sauvegarde d'avant purge (hors rotation) : ${sauvegarde.nom}`,
+        { ...purgedCounts, stockReservationsReleased, sauvegarde: sauvegarde.nom }
       );
 
       writeDb(db);
-      return purgedCounts;
+      return { purgedCounts, sauvegarde: sauvegarde.nom, chemin: sauvegarde.chemin, sha256: sauvegarde.sha256 };
     });
+    // La copie vers le second dossier, verrou rendu : la decision de purger ne
+    // l'attend pas (une copie qui echoue ne fait jamais echouer une
+    // sauvegarde), et les ecritures des autres non plus. Une sauvegarde a la
+    // fois (sauvegardeSeule) ; la reponse ne l'attend pas.
+    sauvegardeSeule(() => copierVersSecondDossier(result.chemin, result.sha256)).catch(() => {});
     res.json({
       success: true,
-      purged: result,
+      purged: result.purgedCounts,
+      sauvegarde: result.sauvegarde,
       message: "Bons de commande purges. Re-importez vos Excel depuis Parametres > Historique imports."
     });
   } catch (error) {
+    if (error && error.refusDePurge) {
+      console.error(`[purge] ${error.message}`);
+      res.status(503).json({ error: error.message });
+      return;
+    }
     handleRouteError(error, res, "Erreur purge bons");
   }
 });
 
-app.patch("/api/stock/:id", async (req, res) => {
+app.patch("/api/stock/:id", refuserAuLivreur, async (req, res) => {
   try {
     const result = await withWriteLock(async () => {
       const db = readDb();
@@ -9845,41 +10364,12 @@ app.post("/api/livraison", async (req, res) => {
   }
 });
 
-app.post("/api/reset-tournee", async (req, res) => {
-  try {
-    await withWriteLock(async () => {
-      const db = readDb();
-
-      db.clients = db.clients.map(client => ({
-        ...client,
-        statut: "restant"
-      }));
-
-      db.commandes = db.commandes.map(order => {
-        if (["en_livraison", "livre", "probleme_livraison", "a_reprogrammer"].includes(order.status)) {
-          setOrderStatus(order, order.preparationStatus === "terminee" ? "pret_livraison" : "stock_a_verifier");
-        }
-
-        return order;
-      });
-
-      db.routes = db.routes.map(route => ({
-        ...route,
-        status: route.status === "en_livraison" ? "prete" : route.status,
-        stops: route.stops.map(stop => ({
-          ...stop,
-          status: stop.status === "en_livraison" ? "pret_livraison" : stop.status
-        }))
-      }));
-
-      addHistory(db, "Tournee", "Tournee reinitialisee");
-      writeDb(db);
-    });
-    res.json({ success: true });
-  } catch (error) {
-    handleRouteError(error, res, "Erreur reset tournee");
-  }
-});
+// Garde-fous (25/09) : l'ancienne route POST /api/reset-tournee est retiree.
+// Aucun ecran ni banc ne l'appelait (grep du 24/09), elle etait ouverte a toute
+// session, remettait tous les clients a « restant » et tentait de repasser des
+// commandes LIVREES en « pretes » -- sur une base sans commande livree, elle
+// defaisait une tournee en cours (200 mesure). Une route d'ecriture qu'aucun
+// ecran n'appelle ne sert qu'a un attaquant.
 
 // Lot 2 de l'audit geo, decision 7 de Thomas (23/09) : l'ancienne route
 // POST /api/optimize-route est retiree. Elle ordonnait les CLIENTS (et non les
@@ -9933,7 +10423,12 @@ app.get("/api/me", (req, res) => {
     separationDesRoles: SEPARATION_DES_ROLES,
     // `source` distingue un compte en base d'un acces par variables
     // d'environnement : le second ne peut pas etre modifie depuis l'interface.
-    source: identite.source
+    source: identite.source,
+    // Garde-fous (25/09) : a l'administration seulement (un autre compte n'a
+    // pas a apprendre que le mot de passe d'administration est court).
+    ...(getRole(identite.role).administration && motDePasseEnvironnementCourt()
+      ? { motDePasseEnvironnementCourt: true }
+      : {})
   });
 });
 
@@ -9956,6 +10451,27 @@ function requireAdministration(req, res, next) {
     return;
   }
 
+  req.identite = identite;
+  next();
+}
+
+/**
+ * Refuse une route au role « livreur » (garde-fous du 25/09) : la
+ * modification directe du stock. Comme requireAdministration, independant de
+ * la separation des onglets -- masquer un onglet ne garde rien.
+ * La liste de toutes les routes d'ecriture et de leur garde :
+ * test/garde-fous-routes.test.js (et DESIGN.md, garde-fous du 25/09).
+ */
+function refuserAuLivreur(req, res, next) {
+  const identite = getRequestIdentity(req);
+  if (!identite) {
+    res.status(401).json({ error: "Connexion requise" });
+    return;
+  }
+  if (String(identite.role) === "livreur") {
+    res.status(403).json({ error: "Réservé au bureau et à la préparation." });
+    return;
+  }
   req.identite = identite;
   next();
 }
@@ -10042,6 +10558,11 @@ app.patch("/api/comptes/:id", requireAdministration, async (req, res) => {
     }
 
     const compte = await updateUserAccount(req.params.id, patch);
+    // Son PROPRE mot de passe : ses sessions viennent d'etre fermees, celle-ci
+    // comprise ; la reponse en ouvre une neuve (sinon le geste deconnecte).
+    if (patch.motDePasse !== undefined && req.identite?.uid && String(req.identite.uid) === String(compte.id)) {
+      res.setHeader("Set-Cookie", buildAuthCookie(createAccessSessionValue(Date.now(), compte), AUTH_COOKIE_MAX_AGE_SECONDS, req));
+    }
 
     const details = [
       patch.role !== undefined ? `role=${patch.role}` : null,
@@ -10133,8 +10654,36 @@ function tourneesAPurger(db, maintenant = new Date(), mois = PURGE_TOURNEES_MOIS
 }
 
 /**
+ * Les tournees que contient une sauvegarde (.sqlite.gz), par identifiant, sous
+ * la forme JSON que readDb leur donne. Decompression hors du fil principal,
+ * copie de travail a cote de la sauvegarde (supprimee ensuite), ouverture en
+ * lecture seule et integrity_check (lireTourneesDuFichier). Leve si le fichier
+ * est illisible.
+ */
+async function tourneesDeLaSauvegarde(chemin) {
+  const compresse = await fs.promises.readFile(chemin);
+  const brut = await new Promise((resolve, reject) => {
+    zlib.gunzip(compresse, { maxOutputLength: MAX_BACKUP_DECOMPRESSED_BYTES }, (error, sortie) => (error ? reject(error) : resolve(sortie)));
+  });
+  // Nommee comme celles du thread de sauvegarde : jamais prise pour une
+  // sauvegarde (listBackupEntries), effacee au demarrage si elle reste.
+  const copie = sauvegardeBase.fichiersDeTravail(chemin).verification;
+  await fs.promises.writeFile(copie, brut);
+  try {
+    const routes = lireTourneesDuFichier(copie);
+    return new Map(routes.filter(route => route && route.id !== undefined && route.id !== null)
+      .map(route => [String(route.id), JSON.stringify(route)]));
+  } finally {
+    for (const suffixe of ["", "-wal", "-shm", "-journal"]) {
+      try { fs.unlinkSync(copie + suffixe); } catch { /* absent : ok */ }
+    }
+  }
+}
+
+/**
  * @param sauvegarder  la sauvegarde a faire avant (injectable pour les tests) ;
- *                     doit rendre le chemin du fichier, ou lever.
+ *                     doit rendre le chemin du fichier, ou lever. Le fichier
+ *                     est RELU (tourneesDeLaSauvegarde) : un chemin ne suffit pas.
  * @returns {{ purgees: number, sauvegarde?: string, raison?: string }}
  */
 async function purgerTourneesAnciennes({ maintenant = new Date(), mois = PURGE_TOURNEES_MOIS, sauvegarder = writeBackupNowAsync } = {}) {
@@ -10144,20 +10693,13 @@ async function purgerTourneesAnciennes({ maintenant = new Date(), mois = PURGE_T
   // de Mo), chaque jour a l'heure du demarrage plus une minute.
   const candidates = tourneesAPurger(readDb(), maintenant, mois);
   if (!candidates.length) return { purgees: 0 };
-  // Chaque tournee telle que la sauvegarde va la contenir.
-  const sauvees = new Map(candidates.map(route => [String(route.id), JSON.stringify(route)]));
 
   // Une sauvegarde automatique deja en vol lirait la base en meme temps : on
   // la laisse finir, puis la notre tient sa place (writeDb n'en lance pas
   // d'autre tant qu'elle court). Revue #84 : deux sauvegardes concurrentes.
-  await flushPendingBackup();
   let sauvegarde = null;
   try {
-    const enVol = Promise.resolve().then(() => sauvegarder("avant-purge"));
-    const place = enVol.then(() => {}, () => {});
-    pendingBackup = place;
-    place.then(() => { if (pendingBackup === place) pendingBackup = null; });
-    sauvegarde = await enVol;
+    sauvegarde = await sauvegardeSeule(() => sauvegarder("avant-purge"));
   } catch (error) {
     console.error(`[purge] sauvegarde impossible, purge annulee : ${error.message || error}`);
     return { purgees: 0, raison: "sauvegarde impossible" };
@@ -10165,6 +10707,19 @@ async function purgerTourneesAnciennes({ maintenant = new Date(), mois = PURGE_T
   if (!sauvegarde) {
     console.error("[purge] aucune sauvegarde ecrite, purge annulee");
     return { purgees: 0, raison: "sauvegarde impossible" };
+  }
+
+  // Garde-fous (25/09) : la sauvegarde est RELUE -- decompressee, ouverte,
+  // integrity_check -- et chaque tournee comparee a ce qu'ELLE contient. Avant,
+  // un chemin rendu suffisait : la comparaison se faisait a une photo prise en
+  // memoire avant la copie, sur la foi d'une copie jamais relue (et qui pouvait
+  // sortir dechiree). Une sauvegarde illisible : aucune purge.
+  let sauvees;
+  try {
+    sauvees = await tourneesDeLaSauvegarde(String(sauvegarde));
+  } catch (error) {
+    console.error(`[purge] sauvegarde ${path.basename(String(sauvegarde))} illisible, purge annulee : ${error.message || error}`);
+    return { purgees: 0, raison: "sauvegarde illisible" };
   }
 
   return withWriteLock(async () => {
@@ -10209,6 +10764,17 @@ function startServer(port = PORT, host = HOST) {
   // P1 v1.14.0 : healing initial pour garantir la coherence apres restart
   // (notamment apres restauration d'un backup ou montee de version)
   healDatabaseAtBoot();
+  avertirMotDePasseCourt();
+  nettoyerSauvegardesInterrompues();
+  if (BACKUP_COPY_DIR) {
+    nettoyerSauvegardesInterrompues(BACKUP_COPY_DIR);
+    // Relecture du 26/09 : un disque qui n'est pas revenu apres un redemarrage
+    // se dit des l'ouverture de la carte, pas a la premiere sauvegarde.
+    verifierTemoinSecondDossier().catch(error => {
+      if (!derniereCopie) derniereErreurCopie = { at: new Date().toISOString(), message: String(error.message || error) };
+      console.warn(`[storage] second dossier : ${error.message || error}`);
+    });
+  }
   planifierPurgeDesTournees();
   const serveur = app.listen(port, host, () => {
     console.log(`Sereo lance sur http://${host}:${port}`);
@@ -10312,7 +10878,10 @@ module.exports = {
   getRequestIdentity,
   isEnvAuthConfigured,
   // Helpers de test : ne pas appeler depuis du code applicatif
-  _resetAuthRateLimitForTest: () => authRateLimitState.clear(),
+  _resetAuthRateLimitForTest: () => { authRateLimitState.clear(); authCompteState.clear(); },
+  // Garde-fous (25/09) : oublier les sessions fermees gardees en memoire, comme
+  // un redemarrage (elles sont relues dans la base).
+  _oublierRevocationsPourTest: () => { etatDesSessions = null; },
   _createAccessSessionValueForTest: createAccessSessionValue,
   _withWriteLockForTest: withWriteLock,
   _normalizeOrder: normalizeOrder,
@@ -10323,6 +10892,11 @@ module.exports = {
   _resetStorageRecoveryForTest: () => { lastStorageRecovery = null; storageRecoveryFatal = null; backupsSuspendedFreshEmpty = false; lastBackupAt = null; lastBackupError = null; derniereModificationA = null; },
   // Carte « Sauvegardes » (24/09) : la regle de retention, pure.
   _sauvegardesAGarder: sauvegardesAGarder,
+  // Garde-fous (25/09) : une vraie sauvegarde (coherente, relue), pour les
+  // bancs qui injectent la sauvegarde d'avant purge.
+  _sauvegarderPourTest: tag => writeBackupNowAsync(tag),
+  _nettoyerSauvegardesInterrompues: nettoyerSauvegardesInterrompues,
+  _reinitialiserLimiteSauvegardesPourTest: () => { sauvegardesManuelles.length = 0; },
   _isCorruptionError: isCorruptionError,
   _normalizeDateInput: normalizeDateInput,
   _excelDateToIso: excelDateToIso,

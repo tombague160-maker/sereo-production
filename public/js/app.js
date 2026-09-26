@@ -179,6 +179,9 @@ let activeColorScheme = "auto";
 // est volontairement vide.
 let moi = null;
 let comptes = [];
+// La note des blocs reserves a l'administration (garde-fous du 25/09, voir
+// majDroitsAdministration) ; en tete : majBandeauHorsLigne la lit des le debut.
+const NOTE_RESERVE_ADMIN = "Réservé aux administrateurs.";
 
 
 if ("scrollRestoration" in history) {
@@ -293,11 +296,23 @@ window.addEventListener("load", () => {
 // boutons (barre, menu « Plus ») visent le meme formulaire par `form=`.
 // `navigator.onLine === false` est sur ; `true` ne prouve rien (reseau qui
 // ment) : ce cas-la reste celui d'avant, hors de portee de cette garde.
+//
+// EN LIGNE (garde-fous du 25/09) : la page part vers /login. Une lecture
+// partie pendant ce temps revient en 401 (la session est fermee cote serveur
+// des le POST /logout) ; apiFetch ne lance pas alors SA navigation
+// (/login?next=...), qui interromprait celle du formulaire (net::ERR_ABORTED).
+// Remis a faux si la page revient du cache arriere du navigateur.
+let deconnexionEnCours = false;
 document.addEventListener("submit", event => {
-  if (event.target?.id !== "formDeconnexion" || navigator.onLine !== false) return;
-  event.preventDefault();
-  notify("Hors ligne : la déconnexion attend le retour du réseau. Rien n'a été effacé.", "error", { cle: "deconnexion-hors-ligne" });
+  if (event.target?.id !== "formDeconnexion") return;
+  if (navigator.onLine === false) {
+    event.preventDefault();
+    notify("Hors ligne : la déconnexion attend le retour du réseau. Rien n'a été effacé.", "error", { cle: "deconnexion-hors-ligne" });
+    return;
+  }
+  if (!event.defaultPrevented) deconnexionEnCours = true;
 });
+window.addEventListener("pageshow", event => { if (event.persisted) deconnexionEnCours = false; });
 
 function setNavigationSearchValue(value, sourceInput = null) {
   // #globalNavigationSearch vivait dans la barre du haut, que les planches
@@ -4950,6 +4965,7 @@ function renderStock() {
   if (!container) return;
 
   container.innerHTML = "";
+  majNoteStock();
   renderStockRecommande();
   renderStockCategories();
   majSousTitreStock();
@@ -5144,15 +5160,17 @@ function creerLigneStock(product) {
   // n'en a plus assez ; le rayon passe alors en negatif. Ce negatif se DIT ici
   // (et dans « A regler ») : il appelle un recomptage, pas une rupture de plus.
   const negatif = quantite !== null && Number(quantite) < 0;
+  // Ferme au livreur (relecture du 26/09) : la note de l'ecran dit pourquoi.
+  const ferme = stockReserve() ? " disabled" : "";
   return `<div class="stk-ligne${enAlerte ? " stk-ligne--alerte" : ""}">
     <span class="stk-nom">${escapeHtml(nom)}${level.status === "a_renseigner" ? ` <span class="stk-a-renseigner">À renseigner</span>` : ""}${negatif ? ` <span class="stk-negatif">Stock négatif · à recompter</span>` : ""}</span>
     <span class="stk-code">${escapeHtml(product.code || product.sku || "-")}</span>
     <span class="stk-reserve">${escapeHtml(reserve)} sur commandes</span>
-    <span class="stk-droite"><label class="sr-only" for="stk-seuil-${id}">Seuil de ${escapeHtml(nom)}</label><input class="stk-saisie stk-saisie--seuil" id="stk-seuil-${id}" data-stock-threshold-input data-product-id="${id}" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttribute(seuil)}"></span>
-    <span class="stk-droite"><label class="sr-only" for="stk-qte-${id}">Stock de ${escapeHtml(nom)}${negatif ? ", négatif, à recompter" : enAlerte ? ", sous le seuil" : ""}</label><input class="stk-saisie stk-saisie--stock" id="stk-qte-${id}" data-stock-input data-product-id="${id}" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttribute(quantite === null ? "" : quantite)}" placeholder="—"></span>
+    <span class="stk-droite"><label class="sr-only" for="stk-seuil-${id}">Seuil de ${escapeHtml(nom)}</label><input class="stk-saisie stk-saisie--seuil" id="stk-seuil-${id}" data-stock-threshold-input data-product-id="${id}" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttribute(seuil)}"${ferme}></span>
+    <span class="stk-droite"><label class="sr-only" for="stk-qte-${id}">Stock de ${escapeHtml(nom)}${negatif ? ", négatif, à recompter" : enAlerte ? ", sous le seuil" : ""}</label><input class="stk-saisie stk-saisie--stock" id="stk-qte-${id}" data-stock-input data-product-id="${id}" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttribute(quantite === null ? "" : quantite)}" placeholder="—"${ferme}></span>
     <span class="stk-ajuster">
-      <button class="stk-pas" type="button" data-product-id="${id}" data-stock-delta="-1" aria-label="Retirer 1 unité de ${escapeAttribute(nom)}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button>
-      <button class="stk-pas stk-pas--plus" type="button" data-product-id="${id}" data-stock-delta="1" aria-label="Ajouter 1 unité à ${escapeAttribute(nom)}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button>
+      <button class="stk-pas" type="button" data-product-id="${id}" data-stock-delta="-1" aria-label="Retirer 1 unité de ${escapeAttribute(nom)}"${ferme}><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button>
+      <button class="stk-pas stk-pas--plus" type="button" data-product-id="${id}" data-stock-delta="1" aria-label="Ajouter 1 unité à ${escapeAttribute(nom)}"${ferme}><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button>
     </span></div>`;
 }
 
@@ -5275,6 +5293,12 @@ async function changeStock(productId, delta) {
 }
 
 async function setStock(productId, value) {
+  // Le livreur ne modifie pas le stock (le serveur le refuse) : rien ne part,
+  // ni vers la file hors ligne (relecture du 26/09).
+  if (stockReserve()) {
+    notify(NOTE_STOCK_RESERVE, "warning");
+    return;
+  }
   // Un champ VIDE n'est pas un zero : le vider mettait le produit en rupture.
   if (String(value ?? "").trim() === "") {
     notify("Quantité vide : rien n'a été changé.", "warning");
@@ -5307,6 +5331,12 @@ async function setStock(productId, value) {
 }
 
 async function setStockThreshold(productId, value) {
+  // Le livreur ne modifie pas le stock (le serveur le refuse) : rien ne part,
+  // ni vers la file hors ligne (relecture du 26/09).
+  if (stockReserve()) {
+    notify(NOTE_STOCK_RESERVE, "warning");
+    return;
+  }
   const raw = String(value ?? "").trim();
   const threshold = Number(raw);
 
@@ -7559,6 +7589,8 @@ function phraseAlerteSauvegardes(alerte) {
       return `La dernière sauvegarde a échoué${alerte.at ? ` (${formatDateLongue(alerte.at)})` : ""} : ${alerte.message || "erreur inconnue"}. Les données sont enregistrées, mais pas sauvegardées.`;
     case "lecture":
       return `Le dossier des sauvegardes est illisible : ${alerte.message || "erreur inconnue"}.`;
+    case "copie":
+      return `La copie dans le second dossier a échoué${alerte.at ? ` (${formatDateLongue(alerte.at)})` : ""} : ${alerte.message || "erreur inconnue"}. La sauvegarde est faite, mais seulement sur ce disque.`;
     case "suspendues":
       return "Sauvegardes suspendues : la base a été réinitialisée à vide. Elles reprennent à la première saisie.";
     case "aucune":
@@ -7593,6 +7625,16 @@ function renderSauvegardes(etat, erreur = "") {
   setText("parSauvegardesGardees", etat && etat.nombre
     ? `${etat.nombre} sauvegarde${etat.nombre > 1 ? "s" : ""} sur ${etat.jours} jour${etat.jours > 1 ? "s" : ""}, depuis le ${formatJourLong(etat.plusAncienne)}`
     : "—");
+  // Le second dossier (SEREO_BACKUP_COPY_DIR, garde-fous du 25/09) : la
+  // derniere copie reussie depuis le demarrage, ou pourquoi il n'y en a pas.
+  const copie = etat?.copie;
+  setText("parSauvegardesCopie", !etat || !copie
+    ? "—"
+    : !copie.active
+      ? "Non configurée : les sauvegardes ne sont que sur ce disque."
+      : copie.derniere
+        ? `${formatDateLongue(copie.derniere.date)} · dans le second dossier`
+        : "Aucune depuis le démarrage (à la prochaine sauvegarde).");
 
   // Les gestes : a l'administration seulement (le serveur les refuse aux
   // autres, requireAdministration). Un autre compte lit la carte et sait
@@ -7621,7 +7663,10 @@ async function sauvegarderMaintenant() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tag: "manuelle" })
     });
-    notify(resultat?.ok === false ? (resultat.error || "Sauvegarde impossible.") : "Sauvegarde faite.", resultat?.ok === false ? "error" : "success");
+    // Garde-fous (25/09) : rien d'ecrit depuis la derniere, le serveur n'en
+    // refait pas une copie identique -- il le dit.
+    const faite = resultat?.dejaAJour ? "Déjà à jour : la dernière sauvegarde contient tout." : "Sauvegarde faite.";
+    notify(resultat?.ok === false ? (resultat.error || "Sauvegarde impossible.") : faite, resultat?.ok === false ? "error" : "success");
   } catch (error) {
     notify(`Sauvegarde impossible : ${error.message || "erreur"}`, "error");
   } finally {
@@ -7731,6 +7776,7 @@ function renderSettings() {
       </div>
     </article>
   `).join("");
+  majDroitsAdministration();
 }
 
 async function saveDeliverySector(form) {
@@ -7781,7 +7827,41 @@ async function loadMoi() {
   // La liste des comptes n'est lue que Parametres affiches (24/09).
   rendreSiAffiche("parametres", renderComptes);
   majDroitsNumerotation();
+  majDroitsAdministration();
+  // Le stock ferme au livreur (relecture du 26/09) : l'ecran deja dessine
+  // avant la reponse se redessine, maintenant ou en y arrivant. Pour les
+  // autres comptes rien ne change : pas de second rendu.
+  if (stockReserve()) rendreOuDifferer("stock", renderStock);
   majCarteJournal();
+  if (moi?.motDePasseEnvironnementCourt) montrerBandeauMotDePasseCourt();
+}
+
+// Garde-fous (25/09) : le mot de passe d'environnement fait moins de 12
+// caracteres. Le serveur demarre quand meme (un refus verrouillerait Thomas
+// dehors) ; /api/me le dit a l'administration seulement, et ce bandeau le
+// redit a chaque ouverture : il ne se corrige que sur le serveur. Meme forme
+// que le bandeau de restauration ; construit sans innerHTML.
+function montrerBandeauMotDePasseCourt() {
+  if (document.getElementById("bandeauMotDePasseCourt")) return;
+  const bandeau = document.createElement("div");
+  bandeau.id = "bandeauMotDePasseCourt";
+  bandeau.className = "storage-recovery-banner";
+  bandeau.setAttribute("role", "alert");
+  const contenu = document.createElement("div");
+  contenu.className = "storage-recovery-content";
+  const titre = document.createElement("strong");
+  titre.textContent = "Mot de passe d’administration trop court";
+  const texte = document.createElement("p");
+  texte.textContent = "Le mot de passe du compte d’environnement (SEREO_AUTH_PASSWORD) fait moins de 12 caractères. Change-le sur le serveur : 20 caractères aléatoires ou plus. Cela ferme aussi toutes les sessions ouvertes.";
+  contenu.append(titre, texte);
+  const fermer = document.createElement("button");
+  fermer.type = "button";
+  fermer.className = "storage-recovery-dismiss";
+  fermer.setAttribute("aria-label", "Fermer l’avertissement");
+  fermer.textContent = "×";
+  fermer.addEventListener("click", () => bandeau.remove());
+  bandeau.append(contenu, fermer);
+  document.body.prepend(bandeau);
 }
 
 // La numerotation des bons est reservee a l'administration (decision du
@@ -7802,6 +7882,72 @@ function majDroitsNumerotation() {
     form.append(note);
   }
   if (note) note.hidden = !ferme;
+}
+
+// Decision 6 (garde-fous du 25/09) : import, purge, reglages et sauvegardes sont
+// reserves a l'administration (le serveur refuse : requireAdministration). Un
+// autre compte LIT les blocs marques [data-reserve-admin] ; leurs commandes
+// sont fermees et le bloc dit pourquoi -- comme la numerotation des bons, au
+// lieu d'un refus 403 au clic. Les reglages de CET appareil restent libres
+// ([data-appareil] : « Y aller » ; le mode clair / sombre n'est pas marque).
+// Les liens de telechargement des archives sont retires (le serveur les
+// refuse). Tant que /api/me n'a pas repondu, rien ne change. Appelee apres
+// chaque rendu qui refait un bloc marque (reglages, archives, leur feuille).
+function importReserve() {
+  return Boolean(moi && !moi.administration);
+}
+
+// Relecture adverse du 26/09 : le serveur refuse au livreur l'ajustement du
+// stock (refuserAuLivreur, PATCH /api/stock/:id), mais l'ecran lui laissait
+// − / +, la quantite et le seuil ouverts. Il l'apprenait au clic (403), ou
+// plus tard, quand la file hors ligne retirait le geste refuse. Comme les blocs
+// reserves a l'administration : fermes, et l'ecran dit pourquoi (la phrase du
+// serveur). Tant que /api/me n'a pas repondu, rien ne change.
+const NOTE_STOCK_RESERVE = "Réservé au bureau et à la préparation.";
+
+function stockReserve() {
+  return Boolean(moi && String(moi.role) === "livreur");
+}
+
+// La note de l'ecran Stock ([data-note-stock]).
+function majNoteStock() {
+  document.querySelectorAll("[data-note-stock]").forEach(note => {
+    note.textContent = NOTE_STOCK_RESERVE;
+    note.hidden = !stockReserve();
+  });
+}
+
+function majDroitsAdministration() {
+  if (!moi) return;
+  const ferme = !moi.administration;
+  document.querySelectorAll("[data-reserve-admin]").forEach(bloc => {
+    for (const champ of bloc.querySelectorAll("input, select, textarea, button")) {
+      if (champ.closest("[data-appareil]")) continue;
+      if (ferme) {
+        if (!champ.disabled) {
+          champ.disabled = true;
+          champ.dataset.fermeParDroits = "1";
+        }
+      } else if (champ.dataset.fermeParDroits) {
+        champ.disabled = false;
+        delete champ.dataset.fermeParDroits;
+      }
+    }
+    if (ferme) bloc.querySelectorAll("a[download]").forEach(lien => lien.remove());
+    let note = bloc.querySelector(":scope > .par-reserve-note");
+    if (ferme && !note) {
+      note = document.createElement("p");
+      note.className = "par-aide par-reserve-note";
+      note.textContent = NOTE_RESERVE_ADMIN;
+      const titre = bloc.querySelector(":scope > h3, :scope > .par-carte-tete, :scope > .panel-heading");
+      if (titre) titre.after(note);
+      else bloc.prepend(note);
+    } else if (!ferme && note) {
+      note.remove();
+    }
+  });
+  // Les boutons d'import de l'en-tete et de l'accueil : fermes comme hors ligne.
+  majBandeauHorsLigne();
 }
 
 /**
@@ -7980,6 +8126,7 @@ async function renderImportsArchives() {
 
     if (!archives.length) {
       container.innerHTML = `<p class="muted">Aucun import archivé pour l'instant. Tes prochains imports apparaitront ici.</p>`;
+      majDroitsAdministration();
       return;
     }
 
@@ -8017,6 +8164,7 @@ async function renderImportsArchives() {
         </table>
       </div>
     `;
+    majDroitsAdministration();
   } catch (error) {
     container.innerHTML = `<p class="muted">Impossible de charger l'historique : ${escapeHtml(error.message || "erreur réseau")}</p>`;
   }
@@ -8089,6 +8237,7 @@ function ouvrirFeuilleImports(type) {
       `).join("")}
     </ul>
   `;
+  majDroitsAdministration();
   dialogue.showModal();
 }
 
@@ -8140,6 +8289,7 @@ async function purgeOrdersHandler(btn) {
     "",
     "Le stock et l'historique sont préservés.",
     "Les archives Excel restent téléchargeables.",
+    "Une sauvegarde est faite juste avant, et gardée à part : si elle échoue, rien n'est supprimé.",
     "",
     "Continuer ?"
   ].join("\n");
@@ -8152,7 +8302,7 @@ async function purgeOrdersHandler(btn) {
   await runAction(btn, "Purge en cours...", async () => {
     const result = await apiFetch("/api/orders/purge", { method: "POST" });
     notify(
-      `Purge faite : ${accorder(result.purged.commandes, "bon")}, ${accorder(result.purged.clients, "client")}, ${accorder(result.purged.ventes, "vente")}, ${accorder(result.purged.routes, "tournée")} supprimés. Va dans Imports et archives ci-dessus pour ré-importer tes Excel.`,
+      `Purge faite : ${accorder(result.purged.commandes, "bon")}, ${accorder(result.purged.clients, "client")}, ${accorder(result.purged.ventes, "vente")}, ${accorder(result.purged.routes, "tournée")} supprimés. Sauvegarde d’avant la purge : ${result.sauvegarde || "—"}. Va dans Imports et archives ci-dessus pour ré-importer tes Excel.`,
       "success"
     );
     await loadData();
@@ -10003,7 +10153,9 @@ async function apiFetch(url, options = {}) {
     // (Un 429 n'est pas une fin de session : on ne vide que sur 401.)
     // La FILE, elle, n'est pas un cache : elle reste.
     if (res.status === 401) await viderCacheDeDonnees();
-    window.location.href = `/login?next=${encodeURIComponent(next)}`;
+    // « Se deconnecter » est deja en route vers /login : pas de seconde
+    // navigation, elle interromprait la sienne (garde-fous du 25/09).
+    if (!deconnexionEnCours) window.location.href = `/login?next=${encodeURIComponent(next)}`;
     // On throw quand meme pour interrompre proprement le code appelant.
     throw new Error("Session expiree, redirection vers /login");
   }
@@ -10433,10 +10585,15 @@ function majBandeauHorsLigne() {
   // Un import de fichier ne se met pas en file (tenterMiseEnFile) : hors
   // ligne, ses boutons le disent au lieu d'echouer. AVANT le retour anticipe
   // du bandeau masque : sinon, le reseau revenu, ils restaient desactives.
+  // Garde-fous (25/09, decision 6) : l'import est reserve a l'administration ;
+  // pour un autre compte, ces boutons restent fermes, et disent pourquoi.
+  const reserve = importReserve();
   document.querySelectorAll('[data-action="importer-ventes"], [data-action="importer-stock"], #importVentesButton, #importStockButton')
     .forEach(bouton => {
-      bouton.disabled = horsLigne;
-      if (horsLigne) bouton.title = "Import impossible hors ligne"; else bouton.removeAttribute("title");
+      bouton.disabled = horsLigne || reserve;
+      if (reserve) bouton.title = NOTE_RESERVE_ADMIN;
+      else if (horsLigne) bouton.title = "Import impossible hors ligne";
+      else bouton.removeAttribute("title");
     });
   bandeau.hidden = !horsLigne && ecrituresEnAttente === 0;
   if (bandeau.hidden) return;
@@ -11272,6 +11429,9 @@ function initTourneePratique() {
   // « Retour au depot » memorise : la case de la planification ecrit le
   // reglage (discretement ; hors ligne, il attend dans la file).
   retourPlanification?.addEventListener("change", () => {
+    // Garde-fous (25/09) : le reglage partage est reserve a l'administration ;
+    // pour un autre compte, la case ne vaut que pour la tournee preparee.
+    if (importReserve()) return;
     enregistrerReglagesTournee({ retourAuDepot: retourPlanification.checked })
       .catch(erreur => { if (!erreur?.enFile) notifyEchec(erreur); });
   });

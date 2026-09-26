@@ -2,6 +2,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { DatabaseSync } = require("node:sqlite");
+const { releverTable } = require("../lib/sauvegarde-base");
 
 function createSqliteStore(options) {
   const {
@@ -114,6 +115,23 @@ function createSqliteStore(options) {
       database.exec("PRAGMA wal_checkpoint(FULL)");
     },
 
+    /**
+     * Compte et empreinte des identifiants de chaque table demandee, dans la
+     * base en service (garde-fous, 25/09) : la meme requete que la
+     * verification d'une sauvegarde (lib/sauvegarde-base.js). Deux releves
+     * egaux = les memes lignes, par identifiant.
+     */
+    releverTables(tables) {
+      const comptes = {};
+      const empreintes = {};
+      for (const table of tables) {
+        const releve = releverTable(database, table);
+        comptes[table] = releve.compte;
+        empreintes[table] = releve.empreinte;
+      }
+      return { comptes, empreintes };
+    },
+
     close() {
       database.close();
     },
@@ -200,6 +218,31 @@ function createSqliteStore(options) {
     deleteUser(id) {
       const result = database.prepare("DELETE FROM utilisateurs WHERE id = ?").run(String(id));
       return result.changes > 0;
+    },
+
+    /**
+     * Une valeur JSON de app_meta, par cle (garde-fous du 25/09 : les sessions
+     * fermees). persistDatabase n'ecrit que ses propres cles (initialized,
+     * last_write_at, settings) : une autre cle n'est jamais effacee par
+     * writeDb. null si la cle est absente ou illisible.
+     */
+    lireMeta(cle) {
+      const row = database.prepare("SELECT value FROM app_meta WHERE key = ?").get(String(cle));
+      if (!row) return null;
+      try {
+        return JSON.parse(row.value);
+      } catch {
+        return null;
+      }
+    },
+
+    ecrireMeta(cle, valeur) {
+      database
+        .prepare(
+          `INSERT INTO app_meta (key, value, updated_at) VALUES (?, ?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+        )
+        .run(String(cle), JSON.stringify(valeur ?? null), new Date().toISOString());
     },
 
     touchUserLogin(id, isoDate) {
@@ -1254,8 +1297,29 @@ function stringify(value) {
   return JSON.stringify(value ?? {});
 }
 
+/**
+ * Les tournees d'un fichier SQLite (une sauvegarde decompressee), lues comme
+ * readDb les lit (readRoutes : meme trace, memes champs). Ouverture en lecture
+ * seule, fermee avant de rendre. Sert a la purge des tournees (garde-fous,
+ * 25/09) : elle ne supprime qu'une tournee que la sauvegarde RELUE contient
+ * sous sa forme actuelle.
+ */
+function lireTourneesDuFichier(chemin) {
+  const database = new DatabaseSync(chemin, { readOnly: true });
+  try {
+    const integrite = database.prepare("PRAGMA integrity_check").all().map(row => Object.values(row)[0]);
+    if (integrite.length !== 1 || integrite[0] !== "ok") {
+      throw new Error(`integrity_check : ${integrite.join(" | ").slice(0, 300)}`);
+    }
+    return readRoutes(database);
+  } finally {
+    database.close();
+  }
+}
+
 module.exports = {
-  createSqliteStore
+  createSqliteStore,
+  lireTourneesDuFichier
 };
 
 /**

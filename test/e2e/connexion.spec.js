@@ -5,7 +5,9 @@
 
 const { test, expect } = require("./tuiles");
 
-const BASE = "http://127.0.0.1:3101";
+// L adresse du serveur authentifie : 3101 par defaut ; un worktree qui lance ses
+// bancs en parallele d autres passe la sienne (SEREO_E2E_AUTH_BASE_URL).
+const BASE = process.env.SEREO_E2E_AUTH_BASE_URL || "http://127.0.0.1:3101";
 
 test("la page de la planche : la marque, les deux champs, le bouton, le pied", async ({ page }) => {
   await page.goto(BASE + "/login", { waitUntil: "networkidle" });

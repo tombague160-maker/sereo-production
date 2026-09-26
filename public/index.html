@@ -655,7 +655,7 @@
           </div>
         </details>
 
-        <div class="panel visual-panel">
+        <div class="panel visual-panel" data-reserve-admin>
           <div class="panel-heading">
             <div>
               <h3>Imports Excel</h3>
@@ -1043,6 +1043,9 @@
           </article>
 
           <div class="stk-carte stk-tableau">
+            <!-- Au livreur, les commandes du stock sont fermees (relecture du
+                 26/09) : la note dit pourquoi (texte pose par app.js). -->
+            <p id="stkReserveNote" class="par-aide stk-reserve-note" data-note-stock hidden></p>
             <div class="stk-filtres">
               <label class="cmd-tri">
                 <span class="sr-only">Statut</span>
@@ -1570,7 +1573,7 @@
             <!-- Le logo : hors planche, garde. -->
             <details class="par-details">
               <summary>Logo de l'application</summary>
-              <div class="par-logo">
+              <div class="par-logo" data-reserve-admin>
                 <img id="brandPreviewImage" src="/brand/sereo-logo.svg?v=20260701" alt="Logo SEREO" loading="lazy" data-brand-preview />
                 <label class="file-control" for="brandImageInput">
                   Importer une image
@@ -1582,7 +1585,7 @@
             </details>
           </article>
 
-          <article class="par-carte par-span-4" aria-labelledby="parSecteursTitre">
+          <article class="par-carte par-span-4" aria-labelledby="parSecteursTitre" data-reserve-admin>
             <div class="par-carte-tete">
               <h3 id="parSecteursTitre">Secteurs</h3>
               <!-- « Ajouter » de la planche 8d : au telephone seulement (le
@@ -1659,7 +1662,7 @@
             </form>
           </article>
 
-          <article class="par-carte par-span-6 par-imports" aria-labelledby="parImportsTitre">
+          <article class="par-carte par-span-6 par-imports" aria-labelledby="parImportsTitre" data-reserve-admin>
             <h3 id="parImportsTitre">Imports et archives</h3>
             <p class="par-aide par-bureau">Chaque fichier .xlsx importé est archivé et reste téléchargeable.</p>
             <div id="importsArchivesList" class="imports-archives-list" aria-live="polite">
@@ -1677,18 +1680,19 @@
             <dl class="par-sauvegardes-faits">
               <div><dt>Dernière</dt><dd id="parSauvegardeDerniere">Chargement…</dd></div>
               <div><dt>Conservées</dt><dd id="parSauvegardesGardees">—</dd></div>
+              <div><dt>Seconde copie</dt><dd id="parSauvegardesCopie">—</dd></div>
             </dl>
             <div class="par-sauvegardes-gestes" id="parSauvegardesGestes" hidden>
               <button class="button primary" type="button" data-action="sauvegarder-maintenant">Sauvegarder maintenant</button>
               <a class="button secondary" id="parSauvegardeTelecharger" href="/api/sauvegardes/derniere" download hidden>Télécharger la dernière</a>
             </div>
             <p id="parSauvegardesNote" class="par-aide" hidden></p>
-            <p class="par-aide" id="parSauvegardesAide">Une sauvegarde par heure d’activité. Les 30 dernières sont gardées, plus une par jour pendant 30 jours. Elles sont sur le même disque que la base&nbsp;: télécharges-en une de temps en temps.</p>
+            <p class="par-aide" id="parSauvegardesAide">Une sauvegarde par heure d’activité. Les 30 dernières sont gardées, plus une par jour pendant 30 jours et une par semaine pendant 8 semaines&nbsp;; celle faite avant une purge des bons est toujours gardée. Elles sont sur le même disque que la base&nbsp;: télécharges-en une de temps en temps.</p>
           </article>
 
           <!-- « A recommander » qui voit venir (decision de Thomas du 24/09) :
                l'horizon des commandes planifiees et des abonnements comptes. -->
-          <article class="par-carte par-span-6" aria-labelledby="parHorizonTitre">
+          <article class="par-carte par-span-6" aria-labelledby="parHorizonTitre" data-reserve-admin>
             <h3 id="parHorizonTitre">À recommander</h3>
             <p class="par-aide" id="parHorizonAide">Les abonnements actifs et les commandes planifiées de ces jours comptent dans « À recommander », en plus des commandes en cours. Règle-le sur ton délai de réassort fournisseur.</p>
             <div class="settings-slider-row">
@@ -1699,7 +1703,7 @@
             <p id="parHorizonStatut" class="par-aide" aria-live="polite"></p>
           </article>
 
-          <article class="par-carte par-span-6" aria-labelledby="parTourneeTitre">
+          <article class="par-carte par-span-6" aria-labelledby="parTourneeTitre" data-reserve-admin>
             <h3 id="parTourneeTitre">Réglages tournée</h3>
             <div class="settings-list">
               <article class="item">
@@ -1746,7 +1750,7 @@
                 <p class="muted" id="parMessageAide">Le SMS que le téléphone prépare pour le client. {heure} devient l’heure d’arrivée estimée.</p>
                 <textarea id="parMessagePrevenir" rows="2" maxlength="300" aria-labelledby="parMessageTitre" aria-describedby="parMessageAide"></textarea>
               </article>
-              <article class="item">
+              <article class="item" data-appareil>
                 <h4 id="parNavigationTitre">« Y aller » ouvre</h4>
                 <p class="muted">Réglage de cet appareil.</p>
                 <div id="parNavigation" class="par-segments" role="group" aria-labelledby="parNavigationTitre"></div>
@@ -1795,7 +1799,7 @@
 
           <!-- Zone dangereuse : la planche la reduit a une incise ; une purge
                definitive garde son bloc, son contour d'alerte et sa liste. -->
-          <article class="par-carte par-span-12 par-danger settings-block-danger" aria-labelledby="parDangerTitre">
+          <article class="par-carte par-span-12 par-danger settings-block-danger" aria-labelledby="parDangerTitre" data-reserve-admin>
             <h3 id="parDangerTitre">Zone dangereuse — Réinitialiser les bons de commande</h3>
             <div class="danger-zone">
               <p>Cette action <strong>supprime définitivement</strong> :</p>
@@ -1977,7 +1981,7 @@
       <h3 id="parImportsFeuilleTitre">Archives</h3>
       <button class="button secondary compact sheet-fermer" type="button" data-action="par-fermer-feuille" aria-label="Fermer">✕</button>
     </div>
-    <div id="parImportsFeuilleCorps" class="sheet-corps par-feuille-corps"></div>
+    <div id="parImportsFeuilleCorps" class="sheet-corps par-feuille-corps" data-reserve-admin></div>
   </dialog>
 
   <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
