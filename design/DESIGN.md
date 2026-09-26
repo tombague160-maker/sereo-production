@@ -8321,7 +8321,10 @@ l'écran nomment la sauvegarde. Ce que la purge efface n'a pas changé.
 - **Mot de passe d'environnement court.** Sous 12 caractères, le serveur démarre quand même : un
   refus verrouillerait Thomas hors de son application après la mise à jour. Le journal du démarrage
   signale la longueur insuffisante, sans le mot de passe ni sa longueur. `/api/me` le signale à
-  l'administration seulement, et l'écran en fait un bandeau d'alerte, fermable.
+  l'administration seulement, et l'écran en fait un bandeau d'alerte, fermable. **Retiré le
+  26/09 à la demande de Thomas** (il changera le mot de passe plus tard) : l'écran ne dit plus
+  rien ; le journal et `/api/me` restent. Le banc e2e (`garde-fous.spec.js`, section 3) tient
+  l'absence, avec le témoin positif `/api/me` → `motDePasseEnvironnementCourt: true`.
 
 ### Décision 1
 
