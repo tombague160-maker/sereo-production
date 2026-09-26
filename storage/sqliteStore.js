@@ -1386,7 +1386,13 @@ function readSettings(database) {
 // Si la copie echoue (disque plein, volume en lecture seule), l'erreur
 // d'origine remonte comme avant : une ligne n'est JAMAIS ecartee sans avoir ete
 // mise de cote. Idempotent : la meme ligne n'est pas copiee deux fois (meme
-// table, meme id, meme contenu), et un seul message par processus.
+// table, meme id, meme contenu), et un message par copie faite.
+//
+// « Deja copiee » se demande a la TABLE, jamais a une memoire du processus
+// (relecture adverse du 26/09) : une copie faite dans la transaction d'une
+// ecriture (le pre-controle de persistDatabase) disparait avec son ROLLBACK si
+// cette ecriture echoue plus loin (disque plein). Le processus, lui, s'en
+// souvenait : a l'essai suivant, la ligne quittait sa table sans copie.
 
 // Les tables que /healthz lit (sonderLecture) : toutes celles des donnees.
 const TABLES_SONDEES = ["produits", "clients", "commandes", "lignes_commande", "livraisons", "routes", "traces_tournees",
@@ -1398,20 +1404,6 @@ const DEPENDANCES_MISES_DE_COTE = {
   routes: [["traces_tournees", "route_id", "trace"]]
 };
 
-// Par base ouverte : les lignes deja mises de cote par CE processus, pour ne
-// les copier (et ne l'ecrire dans les journaux du serveur) qu'une fois. Ce qui
-// reste a inscrire au journal, lui, est dans la table (colonne journalisee).
-const misesDeCoteParBase = new WeakMap();
-
-function lignesDejaVues(database) {
-  let vues = misesDeCoteParBase.get(database);
-  if (!vues) {
-    vues = new Set();
-    misesDeCoteParBase.set(database, vues);
-  }
-  return vues;
-}
-
 /**
  * Copie la ligne illisible (et ce qui en depend) dans lignes_en_quarantaine.
  * `colonneId`/`id` : de quoi retrouver la ligne (« rowid » pour les tables de
@@ -1420,39 +1412,56 @@ function lignesDejaVues(database) {
  * Leve `erreurDOrigine` si la copie n'a pas pu se faire.
  */
 function mettreDeCote(database, { table, colonneId, id, idLigne = id, colonneContenu }, erreurDOrigine) {
-  const vues = lignesDejaVues(database);
   const nom = idLigne === undefined || idLigne === null ? `rowid ${id}` : String(idLigne);
-  const cle = `${table}\u0000${nom}`;
-  if (vues.has(cle)) return;
   const message = String((erreurDOrigine && erreurDOrigine.message) || erreurDOrigine).slice(0, 300);
   const maintenant = new Date().toISOString();
 
-  // Rend le nombre de lignes trouvees. Une ligne deja en quarantaine (meme
-  // table, meme id, meme contenu : un processus precedent l'a copiee, rien
-  // n'a ete ecrit depuis) ne l'est pas deux fois.
-  const copier = (t, colonneLien, valeur, colonneTexte, principale) => {
-    const lignes = database.prepare(`SELECT rowid AS rang_physique, * FROM ${t} WHERE ${colonneLien} = ?`).all(valeur);
+  const lignesDe = (t, colonneLien, valeur) =>
+    database.prepare(`SELECT rowid AS rang_physique, * FROM ${t} WHERE ${colonneLien} = ?`).all(valeur);
+  const idDeCopie = ligne => String(ligne.id ?? ligne.route_id ?? ligne.key ?? `rowid ${ligne.rang_physique}`);
+  // Deja en quarantaine : meme table, meme id, meme contenu (octets). Validee,
+  // ou copiee plus tot dans la transaction en cours ; une copie defaite par un
+  // ROLLBACK n'y est plus, et se refait.
+  const dejaCopiee = (t, ligne, colonneTexte) => Boolean(database.prepare(`
+    SELECT 1 AS ok FROM lignes_en_quarantaine q, ${t} AS s
+    WHERE s.rowid = ? AND q.table_source = ? AND q.ligne_id = ? AND q.contenu IS s.${colonneTexte}
+  `).get(ligne.rang_physique, t, idDeCopie(ligne)));
+  // Rend le nombre de lignes copiees ; une ligne deja en quarantaine ne l'est
+  // pas deux fois.
+  const copier = (t, lignes, colonneTexte, principale) => {
+    let copiees = 0;
     for (const ligne of lignes) {
       const { rang_physique: rang, [colonneTexte]: _texte, ...autres } = ligne;
-      const idCopie = String(autres.id ?? autres.route_id ?? autres.key ?? `rowid ${rang}`);
-      database.prepare(`
+      const idCopie = idDeCopie(ligne);
+      copiees += Number(database.prepare(`
         INSERT INTO lignes_en_quarantaine (table_source, ligne_id, contenu, colonnes, erreur, detectee_le, principale)
         SELECT ?, ?, s.${colonneTexte}, ?, ?, ?, ? FROM ${t} AS s
         WHERE s.rowid = ? AND NOT EXISTS (
           SELECT 1 FROM lignes_en_quarantaine q
           WHERE q.table_source = ? AND q.ligne_id = ? AND q.contenu IS s.${colonneTexte}
         )
-      `).run(t, idCopie, JSON.stringify(autres), message, maintenant, principale ? 1 : 0, rang, t, idCopie);
+      `).run(t, idCopie, JSON.stringify(autres), message, maintenant, principale ? 1 : 0, rang, t, idCopie).changes);
     }
-    return lignes.length;
+    return copiees;
   };
 
+  // Le controle lui-meme est dans le savepoint : s'il echoue (table de
+  // quarantaine absente), l'erreur d'origine remonte, comme une copie ratee.
+  // Sans copie a faire, rien n'est ecrit (un volume en lecture seule relit une
+  // ligne deja mise de cote sans erreur).
   database.exec("SAVEPOINT mise_de_cote");
+  let copiee = 0;
   let dependances = 0;
   try {
-    if (!copier(table, colonneId, id, colonneContenu, true)) throw new Error(`ligne ${table}/${nom} introuvable`);
-    if (idLigne !== undefined && idLigne !== null) {
-      for (const [t, lien, texte] of DEPENDANCES_MISES_DE_COTE[table] || []) dependances += copier(t, lien, idLigne, texte, false);
+    const principales = lignesDe(table, colonneId, id);
+    if (!principales.length) throw new Error(`ligne ${table}/${nom} introuvable`);
+    if (!principales.every(ligne => dejaCopiee(table, ligne, colonneContenu))) {
+      copiee = copier(table, principales, colonneContenu, true);
+      if (idLigne !== undefined && idLigne !== null) {
+        for (const [t, lien, texte] of DEPENDANCES_MISES_DE_COTE[table] || []) {
+          dependances += copier(t, lignesDe(t, lien, idLigne), texte, false);
+        }
+      }
     }
     database.exec("RELEASE mise_de_cote");
   } catch (erreurCopie) {
@@ -1464,7 +1473,7 @@ function mettreDeCote(database, { table, colonneId, id, idLigne = id, colonneCon
     throw erreurDOrigine;
   }
 
-  vues.add(cle);
+  if (!copiee) return;
   console.error(
     `[stockage] ligne illisible mise de cote : ${table}/${nom} (${message})`
     + `${dependances ? `, avec ${dependances} ligne(s) qui en dependent` : ""}. Copie dans lignes_en_quarantaine ; le reste des donnees se lit normalement.`

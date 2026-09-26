@@ -290,6 +290,32 @@ test("une table remplacee sans etre lue (import, purge) ne retire pas une ligne 
   assert.equal(q.find(x => x.table_source === "clients").contenu, abime);
 });
 
+test("une ecriture qui echoue APRES la mise de cote (ROLLBACK) : la ligne est recopiee a l'essai suivant, jamais retiree sans copie", () => {
+  // Relecture adverse du 26/09 : la copie faite dans la transaction de
+  // l'ecriture disparaissait avec son ROLLBACK, mais le processus se
+  // souvenait l'avoir faite ; a l'essai suivant, la ligne partait sans copie.
+  semer();
+  const abime = abimer("clients", "payload", "id", "c2");
+  closeStorage();
+  // Un import : les clients remplaces sans etre lus, et un produit neuf dont
+  // l'ecriture echoue (disque plein) apres le pre-controle des lignes retirees.
+  brut(cnx => cnx.exec("CREATE TRIGGER panne BEFORE INSERT ON produits BEGIN SELECT RAISE(ABORT, 'disque plein simule'); END;"));
+  const importer = () => {
+    const db = readDb();
+    db.clients = [{ id: "c1", nom: "Client 1", rue: "1 rue du Test", codePostal: "39300", ville: "Champagnole" }];
+    db.stock = [...db.stock, { id: "p9", code: "P9", nom: "Neuf", quantite: 1 }];
+    writeDb(db, { backup: false });
+  };
+  assert.throws(importer, /disque plein simule/);
+  assert.ok(brut(cnx => cnx.prepare("SELECT 1 FROM clients WHERE id = 'c2'").get()), "prealable : l'ecriture echouee n'a rien retire");
+  brut(cnx => cnx.exec("DROP TRIGGER panne"));
+  importer();
+  const q = quarantaine().filter(x => x.table_source === "clients");
+  assert.equal(q.length, 1, `la ligne illisible a quitte sa table sans copie : ${JSON.stringify(quarantaine())}`);
+  assert.equal(q[0].contenu, abime);
+  assert.ok(!brut(cnx => cnx.prepare("SELECT 1 FROM clients WHERE id = 'c2'").get()), "temoin : la ligne devait quitter sa table");
+});
+
 test("des octets qui ne sont plus de l'UTF-8 sont copies tels quels (pas de U+FFFD)", () => {
   semer();
   // {"id":"h-3",<FF>"x":1} : un octet invalide HORS d'une chaine JSON.
