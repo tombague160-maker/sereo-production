@@ -4965,6 +4965,7 @@ function renderStock() {
   if (!container) return;
 
   container.innerHTML = "";
+  majNoteStock();
   renderStockRecommande();
   renderStockCategories();
   majSousTitreStock();
@@ -5159,15 +5160,17 @@ function creerLigneStock(product) {
   // n'en a plus assez ; le rayon passe alors en negatif. Ce negatif se DIT ici
   // (et dans « A regler ») : il appelle un recomptage, pas une rupture de plus.
   const negatif = quantite !== null && Number(quantite) < 0;
+  // Ferme au livreur (relecture du 26/09) : la note de l'ecran dit pourquoi.
+  const ferme = stockReserve() ? " disabled" : "";
   return `<div class="stk-ligne${enAlerte ? " stk-ligne--alerte" : ""}">
     <span class="stk-nom">${escapeHtml(nom)}${level.status === "a_renseigner" ? ` <span class="stk-a-renseigner">À renseigner</span>` : ""}${negatif ? ` <span class="stk-negatif">Stock négatif · à recompter</span>` : ""}</span>
     <span class="stk-code">${escapeHtml(product.code || product.sku || "-")}</span>
     <span class="stk-reserve">${escapeHtml(reserve)} sur commandes</span>
-    <span class="stk-droite"><label class="sr-only" for="stk-seuil-${id}">Seuil de ${escapeHtml(nom)}</label><input class="stk-saisie stk-saisie--seuil" id="stk-seuil-${id}" data-stock-threshold-input data-product-id="${id}" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttribute(seuil)}"></span>
-    <span class="stk-droite"><label class="sr-only" for="stk-qte-${id}">Stock de ${escapeHtml(nom)}${negatif ? ", négatif, à recompter" : enAlerte ? ", sous le seuil" : ""}</label><input class="stk-saisie stk-saisie--stock" id="stk-qte-${id}" data-stock-input data-product-id="${id}" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttribute(quantite === null ? "" : quantite)}" placeholder="—"></span>
+    <span class="stk-droite"><label class="sr-only" for="stk-seuil-${id}">Seuil de ${escapeHtml(nom)}</label><input class="stk-saisie stk-saisie--seuil" id="stk-seuil-${id}" data-stock-threshold-input data-product-id="${id}" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttribute(seuil)}"${ferme}></span>
+    <span class="stk-droite"><label class="sr-only" for="stk-qte-${id}">Stock de ${escapeHtml(nom)}${negatif ? ", négatif, à recompter" : enAlerte ? ", sous le seuil" : ""}</label><input class="stk-saisie stk-saisie--stock" id="stk-qte-${id}" data-stock-input data-product-id="${id}" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttribute(quantite === null ? "" : quantite)}" placeholder="—"${ferme}></span>
     <span class="stk-ajuster">
-      <button class="stk-pas" type="button" data-product-id="${id}" data-stock-delta="-1" aria-label="Retirer 1 unité de ${escapeAttribute(nom)}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button>
-      <button class="stk-pas stk-pas--plus" type="button" data-product-id="${id}" data-stock-delta="1" aria-label="Ajouter 1 unité à ${escapeAttribute(nom)}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button>
+      <button class="stk-pas" type="button" data-product-id="${id}" data-stock-delta="-1" aria-label="Retirer 1 unité de ${escapeAttribute(nom)}"${ferme}><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button>
+      <button class="stk-pas stk-pas--plus" type="button" data-product-id="${id}" data-stock-delta="1" aria-label="Ajouter 1 unité à ${escapeAttribute(nom)}"${ferme}><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg></button>
     </span></div>`;
 }
 
@@ -5290,6 +5293,12 @@ async function changeStock(productId, delta) {
 }
 
 async function setStock(productId, value) {
+  // Le livreur ne modifie pas le stock (le serveur le refuse) : rien ne part,
+  // ni vers la file hors ligne (relecture du 26/09).
+  if (stockReserve()) {
+    notify(NOTE_STOCK_RESERVE, "warning");
+    return;
+  }
   // Un champ VIDE n'est pas un zero : le vider mettait le produit en rupture.
   if (String(value ?? "").trim() === "") {
     notify("Quantité vide : rien n'a été changé.", "warning");
@@ -5322,6 +5331,12 @@ async function setStock(productId, value) {
 }
 
 async function setStockThreshold(productId, value) {
+  // Le livreur ne modifie pas le stock (le serveur le refuse) : rien ne part,
+  // ni vers la file hors ligne (relecture du 26/09).
+  if (stockReserve()) {
+    notify(NOTE_STOCK_RESERVE, "warning");
+    return;
+  }
   const raw = String(value ?? "").trim();
   const threshold = Number(raw);
 
@@ -7813,6 +7828,10 @@ async function loadMoi() {
   rendreSiAffiche("parametres", renderComptes);
   majDroitsNumerotation();
   majDroitsAdministration();
+  // Le stock ferme au livreur (relecture du 26/09) : l'ecran deja dessine
+  // avant la reponse se redessine, maintenant ou en y arrivant. Pour les
+  // autres comptes rien ne change : pas de second rendu.
+  if (stockReserve()) rendreOuDifferer("stock", renderStock);
   majCarteJournal();
   if (moi?.motDePasseEnvironnementCourt) montrerBandeauMotDePasseCourt();
 }
@@ -7876,6 +7895,26 @@ function majDroitsNumerotation() {
 // chaque rendu qui refait un bloc marque (reglages, archives, leur feuille).
 function importReserve() {
   return Boolean(moi && !moi.administration);
+}
+
+// Relecture adverse du 26/09 : le serveur refuse au livreur l'ajustement du
+// stock (refuserAuLivreur, PATCH /api/stock/:id), mais l'ecran lui laissait
+// − / +, la quantite et le seuil ouverts. Il l'apprenait au clic (403), ou
+// plus tard, quand la file hors ligne retirait le geste refuse. Comme les blocs
+// reserves a l'administration : fermes, et l'ecran dit pourquoi (la phrase du
+// serveur). Tant que /api/me n'a pas repondu, rien ne change.
+const NOTE_STOCK_RESERVE = "Réservé au bureau et à la préparation.";
+
+function stockReserve() {
+  return Boolean(moi && String(moi.role) === "livreur");
+}
+
+// La note de l'ecran Stock ([data-note-stock]).
+function majNoteStock() {
+  document.querySelectorAll("[data-note-stock]").forEach(note => {
+    note.textContent = NOTE_STOCK_RESERVE;
+    note.hidden = !stockReserve();
+  });
 }
 
 function majDroitsAdministration() {

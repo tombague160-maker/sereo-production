@@ -15746,3 +15746,9 @@ button.button.danger .button-icon { width: 18px; height: 18px; flex: none; }
    son focus au clavier. */
 #bandeauMotDePasseCourt .storage-recovery-dismiss { width: 44px; height: 44px; }
 #bandeauMotDePasseCourt .storage-recovery-dismiss:focus-visible { outline: 3px solid var(--v8-surface); outline-offset: 2px; }
+
+/* --- Garde-fous, relecture du 26/09 : le stock ferme au livreur
+   La note de l'ecran Stock (« Reserve au bureau et a la
+   preparation. ») : le texte d'aide de Parametres, avec la marge de la carte.
+   [hidden] gagne : la note n'existe que pour le livreur. */
+#stock .stk-reserve-note:not([hidden]) { padding: 8px 12px 0; }

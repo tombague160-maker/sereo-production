@@ -43,6 +43,9 @@ test.describe("seconde copie posée", () => {
   let dossier;
   test.beforeAll(async () => {
     dossier = fs.mkdtempSync(path.join(os.tmpdir(), "sereo-copie-e2e-"));
+    // L'autre disque, monte, avec son fichier temoin (relecture du 26/09).
+    fs.mkdirSync(path.join(dossier, "second"));
+    fs.writeFileSync(path.join(dossier, "second", "sereo-second-dossier"), "");
     srv = await lancer({ SEREO_BACKUP_COPY_DIR: path.join(dossier, "second") });
   });
   test.afterAll(async () => {
@@ -192,6 +195,92 @@ test.describe("compte non administrateur", () => {
     await expect(page.locator('[data-action="purge-orders"]')).toBeEnabled();
     await expect(page.locator("#parHorizonSlider")).toBeEnabled();
     await expect(page.locator("#tourneeSpeedSlider")).toBeEnabled();
+  });
+});
+
+// --- 2 bis. Le livreur lit le stock, il ne le modifie pas (relecture du 26/09)
+//
+// Le serveur refuse au livreur PATCH /api/stock/:id (refuserAuLivreur, tenu par
+// test/garde-fous-routes.test.js). L'ecran lui laissait − / +, la quantite et
+// le seuil ouverts : il l'apprenait au clic (403), ou quand la file hors ligne
+// retirait le geste. Ils sont fermes, et l'ecran dit pourquoi.
+
+const LIVREUR = { identifiant: "julie", role: "livreur", roleLibelle: "Livreur", administration: false, onglets: "*", separationDesRoles: false, source: "compte" };
+
+test.describe("compte livreur : le stock se lit, il ne se modifie pas", () => {
+  let srv;
+  test.beforeAll(async () => { srv = await lancer(); });
+  test.afterAll(async () => { if (srv) await srv.arreter(); });
+
+  const commandesOuvertes = (page, conteneur) => page.locator(`${conteneur} input, ${conteneur} button[data-stock-delta]`).evaluateAll(els => ({
+    total: els.length,
+    ouvertes: els.filter(e => !e.disabled).map(e => e.id || e.getAttribute("aria-label"))
+  }));
+
+  async function ouvrir(page, onglet, me, { largeur = 1440, schema = "light" } = {}) {
+    await page.addInitScript(s => { try { localStorage.setItem("sereo:colorScheme", s); } catch { /* sans stockage */ } }, schema);
+    if (me) await page.route("**/api/me", route => route.fulfill({ json: me }));
+    await page.setViewportSize({ width: largeur, height: largeur < 800 ? 844 : 900 });
+    await page.goto(`${srv.base}/#${onglet}`, { waitUntil: "networkidle" });
+  }
+
+  test("Stock : quantité, seuil, − et + fermés, et la note dit pourquoi ; aucun ajustement ne part", async ({ page }) => {
+    await ouvrir(page, "stock", LIVREUR);
+    await expect(page.locator("#stockList .stk-ligne").first()).toBeVisible();
+    await expect(page.locator("#stkReserveNote")).toBeVisible();
+    await expect(page.locator("#stkReserveNote")).toHaveText("Réservé au bureau et à la préparation.");
+    const { total, ouvertes } = await commandesOuvertes(page, "#stockList");
+    expect(total, "temoin : aucune commande de stock a l'ecran").toBeGreaterThan(0);
+    expect(ouvertes, "commandes de stock encore ouvertes au livreur").toEqual([]);
+    // Un bouton reste ouvert (un ancien rendu) : le geste ne part pas pour autant.
+    const patchs = [];
+    page.on("request", r => { if (r.method() === "PATCH" && r.url().includes("/api/stock/")) patchs.push(r.url()); });
+    const plus = page.locator("#stockList button[data-stock-delta='1']").first();
+    await plus.evaluate(b => b.removeAttribute("disabled"));
+    await plus.click();
+    await expect(page.locator(".toast").filter({ hasText: "Réservé au bureau et à la préparation." }).first()).toBeVisible();
+    expect(patchs).toEqual([]);
+  });
+
+  test("Stock : /api/me qui répond APRÈS le premier rendu ferme quand même les commandes", async ({ page }) => {
+    let repondre;
+    const retenue = new Promise(r => { repondre = r; });
+    await page.route("**/api/me", async route => { await retenue; await route.fulfill({ json: LIVREUR }); });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`${srv.base}/#stock`);
+    await expect(page.locator("#stockList .stk-ligne").first()).toBeVisible();
+    // Avant la reponse : rien ne change (ouvert, sans note).
+    expect((await commandesOuvertes(page, "#stockList")).ouvertes.length).toBeGreaterThan(0);
+    await expect(page.locator("#stkReserveNote")).toBeHidden();
+    repondre();
+    await expect.poll(async () => (await commandesOuvertes(page, "#stockList")).ouvertes).toEqual([]);
+    await expect(page.locator("#stkReserveNote")).toBeVisible();
+  });
+
+  for (const schema of ["light", "dark"]) {
+    test(`au téléphone en ${schema === "light" ? "clair" : "sombre"} : la note se lit (4,5:1) et rien ne déborde`, async ({ page }) => {
+      await ouvrir(page, "stock", LIVREUR, { largeur: 390, schema });
+      const note = page.locator("#stkReserveNote");
+      await note.scrollIntoViewIfNeeded();
+      await expect(note).toBeVisible();
+      expect(await contraste(page, "#stkReserveNote")).toBeGreaterThanOrEqual(4.5);
+      const deborde = await page.evaluate(() => [...document.querySelectorAll("#stock .stk-tableau, #stock .stk-tableau *")]
+        .filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.right > window.innerWidth + 0.5; })
+        .map(e => e.id || e.className || e.tagName));
+      expect(deborde).toEqual([]);
+    });
+  }
+
+  test("témoin : le bureau et l'administrateur gardent le stock ouvert, sans note", async ({ page }) => {
+    await ouvrir(page, "stock", BUREAU);
+    await expect(page.locator("#stockList .stk-ligne").first()).toBeVisible();
+    await expect(page.locator("#stkReserveNote")).toBeHidden();
+    expect((await commandesOuvertes(page, "#stockList")).ouvertes.length).toBeGreaterThan(0);
+    const admin = await page.context().newPage();
+    await admin.goto(`${srv.base}/#stock`, { waitUntil: "networkidle" });
+    await expect(admin.locator("#stockList .stk-ligne").first()).toBeVisible();
+    await expect(admin.locator("#stkReserveNote")).toBeHidden();
+    expect((await commandesOuvertes(admin, "#stockList")).ouvertes.length).toBeGreaterThan(0);
   });
 });
 
