@@ -8194,3 +8194,154 @@ liste ciblée — les bancs des deux lots, `chargement-instantane`, `hors-ligne`
 `stock*`, `tabs`, `smoke` — **312/312** ; suite complète, deux passages : **723/723** et
 **723/723**. Un passage complet préalable (avant `4d8f513` et le banc de la carte) : 721 verts,
 le rouge de `carte-telephone` réglé ci-dessus.
+
+## 25/09 — Robustesse et exploitation
+
+Lot 6 de la chasse aux défauts du 24/09 (sections 3 et 4 du rapport, et les constats bas de
+l'angle « exploitation »). Branche `fix/robustesse`, partie de `5b52268` (v1.46.0 et la
+performance). Ce qui change, pour Thomas : une panne de disque rare ne met plus toute l'application
+à terre sans que personne le voie, un redéploiement ne coupe plus un geste en plein vol, un geste
+confirmé survit à une coupure de courant, et un petit fichier Excel piégé ne fait plus redémarrer
+le serveur.
+
+### Une ligne illisible est mise de côté
+
+Avant : un seul caractère abîmé dans le texte JSON d'une ligne (erreur disque) faisait lever
+`JSON.parse` à chaque lecture de sa table. Depuis la lecture paresseuse, toutes les écritures
+(qui normalisent toutes les tables) et les pages qui lisent cette table répondaient 500, sans
+restauration (`quick_check` ne lit pas le contenu : ce n'est pas une corruption SQLite) et sans
+trace — pendant que Docker voyait le conteneur en bonne santé.
+
+Maintenant : la ligne est copiée, octets inchangés (`INSERT … SELECT`), dans la table
+`lignes_en_quarantaine` avec ce qui en dépend (lignes et livraison d'une commande, tracé d'une
+tournée), puis écartée de la lecture. Elle est écrite dans les journaux du serveur, inscrite au
+Journal (type « Stockage ») à l'écriture suivante, et comptée dans `/api/storage/status`
+(`lignesMisesDeCote`). Même traitement pour un tracé et pour les réglages (qui étaient remplacés
+par `{}` en silence), et pour une ligne illisible retirée par une table remplacée sans être lue
+(import, purge). Si la copie échoue, l'erreur d'origine remonte comme avant : rien n'est écarté
+sans copie. La seule commande d'un client, mise de côté, ne revient pas en « commande de repli »
+neuve du jour (`syncWorkflow`).
+
+Aucune donnée perdue, mesuré le 26/09 sur une base **écrite par v1.45.1** (forme de la
+production : 224 commandes, 441 lignes, 429 ventes, 1 036 lignes d'historique), photo octet par
+octet de chaque table avant et après :
+
+- ouverte par cette branche : seule la table `lignes_en_quarantaine` (vide) apparaît ; l'autre
+  écart (`app_meta.settings` : `stock.horizonJours`) vient déjà de la base `5b52268` (témoin : la
+  même base ouverte par `5b52268` donne le même écart) ; rouverte : **aucun écart** (idempotent) ;
+- la même base, une commande abîmée (`cmd-002`, 3 lignes, 1 livraison) : quittent leurs tables
+  exactement `cmd-002`, ses 3 lignes et sa livraison (5 lignes en quarantaine, contenu identique à
+  l'octet), une ligne de Journal s'ajoute, rien d'autre ne bouge ; rouverte : aucun écart.
+
+### `/healthz` lit la base
+
+Il ne regardait qu'un drapeau posé au démarrage. Il lit maintenant la première ligne de chaque
+table de données et les réglages (`sonderLecture`, 0,4 ms sur une base de la forme de la
+production) et répond **503 « base illisible »** en cas d'échec, la cause dans les journaux. Il
+n'écrit rien : un disque plein ou un volume en lecture seule ne se voit pas ici.
+
+### Arrêt propre au redéploiement
+
+`docker stop` envoie SIGTERM, puis SIGKILL 10 s plus tard ; Node mourait sur le coup (code 143,
+requête en attente reçue vide), sans valider ni fermer la base, et une sauvegarde interrompue
+laissait son `db-….gz.tmp` pour toujours. Au premier SIGTERM ou SIGINT : plus de nouvelle
+connexion (les connexions inactives sont fermées), 503 pour une requête arrivée pendant l'arrêt
+sur une connexion déjà ouverte (la file hors ligne la renvoie, `X-Sereo-Geste` la rend
+idempotente), les requêtes en cours finissent, puis la file des écritures et la sauvegarde en vol ;
+la carte OSRM locale s'arrête ; la base est validée et fermée ; sortie 0. Le tout plafonné à 8 s.
+Au démarrage, les `db-*.tmp` d'une sauvegarde interrompue sont supprimés et journalisés.
+
+### Écriture disque : `synchronous = FULL`
+
+En WAL, `NORMAL` n'attend le disque qu'au checkpoint : une coupure de courant pouvait effacer des
+gestes déjà confirmés (200) au livreur, que la file hors ligne ne garde plus. `FULL` attend le
+disque à chaque validation. Coût mesuré : 3,1 ms par validation (0,03 ms en `NORMAL`), une par
+écriture, contre 80 à 100 ms pour l'écriture d'un geste sur une base de la forme de la production :
+accepté. Les bancs qui créent beaucoup de bases s'allongent (60 mutations : 3,3 s → 7 à 11 s).
+
+### Import Excel : un fichier piégé est refusé avant d'être lu
+
+`read-excel-file` décompresse tout le classeur puis en construit l'arbre complet (environ 4 Ko par
+cellule) dans un tableau dense lignes × colonnes : un fichier de 0,5 Mo (50 000 lignes) montait à
+600 Mo, au-dessus des 512 Mo du conteneur. `lib/garde-excel.js` ouvre le zip avant la lecture,
+décompresse chaque partie sous un plafond réel (pas la taille annoncée, qui peut mentir) et compte.
+Au-delà, 400 avec un message qui dit quoi faire (« exporte une période plus courte… ») :
+
+| Limite | Valeur |
+|---|---|
+| Cellules remplies | 45 000 |
+| Éléments XML (la vraie mesure de la mémoire) | 280 000 |
+| Dernière ligne (dimension comprise) | 10 000 |
+| Dernière colonne | 100 (CV) |
+| Données décompressées | 16 Mo |
+
+Mesuré sous le tas du conteneur (259 Mo), base de la forme de la production, garde retirée :
+format Ximi (22 colonnes), 3 000 lignes passent, 3 500 tuent le serveur ; format du banc de charge
+v1.14.0 (8 colonnes), 8 001 lignes passent, 9 501 le tuent — la mort vient vers 470 000 éléments.
+Une première version à 40 000 cellules et 250 000 éléments refusait le banc v1.14.0 (5 000 lignes :
+40 008 cellules, 250 094 éléments), qui passe pourtant avec 1,6 de marge : relevée. Marge : 1,4 sur
+le dernier passage mesuré, 1,7 sur la première mort. Le fichier Ximi actuel : 429 lignes.
+
+### `/api/version` hors réseau
+
+`SEREO_SKIP_RELEASE_FETCH=1` était posée par les bancs et les serveurs d'essai, mais rien ne la
+lisait : chaque serveur de banc appelait l'API GitHub (60 appels par heure et par adresse ; 403
+mesuré le 24/09). Elle est lue ; et l'appel à GitHub a un délai maximal de 3 s (un GitHub muet
+laissait `/api/version` pendant).
+
+### Calcul routier : le service public, dit (décision 9)
+
+La production tourne à 512 Mo et reste sur le service public. La ligne « Calcul routier » de
+Paramètres disait « Serveur public (mémoire (512 Mo) ou disque libre (321,1 Go) insuffisants pour
+une carte locale). ». Elle dit « Service public — la carte locale s'active quand le conteneur a au
+moins 3 Go de mémoire (il en a 512 Mo). » (ou le disque, si c'est lui qui manque). `DEPLOYMENT.md`
+le dit en tête de sa section, et ramène « les coordonnées ne sortent plus » à sa condition. Rien
+n'est retiré de l'image.
+
+### Variables d'environnement et heure du conteneur
+
+`SEREO_APP_VERSION`, `SEREO_CONTACT_URL`, `SEREO_IMPORTS_ARCHIVES_DIR`, `SEREO_SEPARATION_ROLES`,
+et les anciens noms `HOST` et `SQLITE_PATH`, étaient lus sans être documentés. `.env.example` les
+décrit ; `DEPLOYMENT.md` a un tableau complet (défaut, rôle). `TZ` : l'image ne la pose pas, le
+conteneur tourne en UTC, et c'est voulu — les jours du métier sont calculés à Paris
+(`lib/jour-paris.js`) ; restent en UTC les journaux et les noms des sauvegardes. Le banc
+`test/variables-environnement.test.js` rougit si le code lit une variable absente de
+`.env.example` ou du tableau (une variable ajoutée par un autre lot devra y entrer).
+
+### Le banc qui rougissait sans raison
+
+Le seul rouge unitaire de la semaine sur `main` (run 36009519501, « lot 5 : GET /api/routes
+n'envoie pas le tracé », `ECONNRESET`) : `fetch` réutilisait une connexion keep-alive ouverte avant
+des bancs synchrones de plus de 6 s ; la minuterie de repos du serveur, en retard, la fermait juste
+après que le `fetch` suivant l'avait reprise. Reproduit 5 fois sur 5 hors du banc. Le banc ouvre
+une connexion par requête. Et le banc de pagination du Journal datait sa ligne « neuve » avant le
+semé entre minuit et 10 h (heure de Paris) : datée après.
+
+### Historique et ventes (décision 10) : vérifié
+
+Le Journal de Paramètres est paginé depuis v1.46.0 : 50 lignes par page, « Afficher les 50
+suivantes », rien n'est supprimé côté serveur. 50 et non les 200 de la décision : gardé (le but —
+un affichage borné, « voir plus », rien de supprimé — est tenu, et les bancs de v1.46.0 portent
+sur 50). Aucun écran ne montre plus les ventes : `#ventes` n'est pas dans `mainTabs`, l'adresse
+`/#ventes` retombe sur le tableau de bord et `/api/ventes` ne part pas (mesuré dans le
+navigateur). Rien à faire ; le vieil écran (`renderVentes`, `#ventesList`) reste dans le code,
+inatteignable.
+
+### Ce qui reste
+
+- Le cas « vrai SIGTERM à un processus à part » ne tourne que hors Windows (la CI Linux).
+- `/healthz` ne voit ni un disque plein ni un volume en lecture seule.
+- Le second dossier de sauvegarde du lot « garde-fous » ajoutera une variable : elle devra entrer
+  dans le tableau de `DEPLOYMENT.md` (le banc des variables le rappellera).
+- Un autre banc de temps rougit parfois sous charge : « C2.stock.a » (`/api/stock` en moins de
+  250 ms), 399 ms mesurés pendant un `npm test` complet sur un poste chargé, 65 à 105 ms seul (la
+  base `5b52268` : 74 à 101 ms). Il mesure le temps écoulé, pas le travail : non touché ici.
+
+### Bancs
+
+`test/ligne-abimee.test.js`, `test/healthz-base.test.js`, `test/arret-propre.test.js`,
+`test/ecriture-disque.test.js`, `test/garde-excel.test.js`, `test/import-excel-limites.test.js`,
+`test/version-hors-reseau.test.js`, `test/variables-environnement.test.js`,
+`test/osrm-local.test.js`, `test/lot5-rapidite.test.js`, `test/donnees-utiles.test.js` : chacun
+rouge sur le code d'avant pour la cause qu'il nomme, puis vert. Le banc de charge v1.14.0
+(`test/api.test.js`, 5 000 lignes) reste vert.
