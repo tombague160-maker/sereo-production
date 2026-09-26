@@ -8213,14 +8213,21 @@ restauration (`quick_check` ne lit pas le contenu : ce n'est pas une corruption 
 trace — pendant que Docker voyait le conteneur en bonne santé.
 
 Maintenant : la ligne est copiée, octets inchangés (`INSERT … SELECT`), dans la table
-`lignes_en_quarantaine` avec ce qui en dépend (lignes et livraison d'une commande, tracé d'une
-tournée), puis écartée de la lecture. Elle est écrite dans les journaux du serveur, inscrite au
+`lignes_en_quarantaine` avec ce qui en dépend (lignes et livraison d'une commande ; tracé d'une
+tournée et livraisons de ses arrêts), puis écartée de la lecture. « Déjà copiée » se demande à la
+table, jamais à une mémoire du processus : une copie défaite par l'échec de l'écriture qui la
+portait se refait à l'essai suivant. Elle est écrite dans les journaux du serveur, inscrite au
 Journal (type « Stockage ») à l'écriture suivante, et comptée dans `/api/storage/status`
 (`lignesMisesDeCote`). Même traitement pour un tracé et pour les réglages (qui étaient remplacés
 par `{}` en silence), et pour une ligne illisible retirée par une table remplacée sans être lue
 (import, purge). Si la copie échoue, l'erreur d'origine remonte comme avant : rien n'est écarté
 sans copie. La seule commande d'un client, mise de côté, ne revient pas en « commande de repli »
-neuve du jour (`syncWorkflow`).
+neuve du jour (`syncWorkflow`). Son numéro (et l'identifiant `cmd-<numéro>` qui en dérive) n'est
+jamais redonné à une commande suivante. Les arrêts de tournée qui la nomment vivent sans elle
+(`commandeDeLArret`) : la tournée démarre, l'arrêt se marque et se corrige ; ni le statut de la
+commande ni le stock ne suivent, et l'historique le dit (« commande mise de côté (texte illisible) :
+ni son statut ni le stock n'ont suivi »). Une commande absente pour une autre raison reste une
+erreur 404.
 
 Aucune donnée perdue, mesuré le 26/09 sur une base **écrite par v1.45.1** (forme de la
 production : 224 commandes, 441 lignes, 429 ventes, 1 036 lignes d'historique), photo octet par
@@ -8235,10 +8242,24 @@ octet de chaque table avant et après :
 
 ### `/healthz` lit la base
 
-Il ne regardait qu'un drapeau posé au démarrage. Il lit maintenant la première ligne de chaque
-table de données et les réglages (`sonderLecture`, 0,4 ms sur une base de la forme de la
-production) et répond **503 « base illisible »** en cas d'échec, la cause dans les journaux. Il
-n'écrit rien : un disque plein ou un volume en lecture seule ne se voit pas ici.
+Il ne regardait qu'un drapeau posé au démarrage. Il répond maintenant **503 « base illisible »**
+(la cause dans les journaux du serveur) quand :
+
+- la connexion est perdue ou une table manque (`sonderLecture` : la première ligne de chaque
+  table et les réglages, à chaque appel, moins d'une milliseconde) ;
+- une page de la base ne se lit plus, où qu'elle soit (`verifierPages` : `PRAGMA quick_check`,
+  le contrôle de l'ouverture). La première ligne seule ne descend que dans la feuille la plus à
+  gauche : mesuré sur cinq atteintes de structure (en-tête de feuille, tableau de cellules,
+  en-tête d'enregistrement, pointeur de débordement, page intérieure), elle en rate trois ;
+  `quick_check` les voit toutes, comme la lecture. Coût : 5 ms sur une base de la forme de la
+  production, 44 ms avec 250 tracés (4 938 pages). La route est publique : cette relecture se
+  fait au plus toutes les 20 s, son verdict tient jusqu'à la suivante (Docker appelle toutes les
+  30 s : chacun de ses appels relit tout) ;
+- une ligne illisible n'a pas pu être mise de côté (disque plein, volume en lecture seule) : sa
+  table ne se lit plus, les gestes répondent 500 ; jusqu'à ce qu'une copie réussisse.
+
+Il n'écrit rien. Un disque plein ou un volume en lecture seule sur une base saine ne se voit pas
+ici (ce que `/api/storage/status` montre des sauvegardes).
 
 ### Arrêt propre au redéploiement
 
@@ -8265,7 +8286,13 @@ accepté. Les bancs qui créent beaucoup de bases s'allongent (60 mutations : 3,
 cellule) dans un tableau dense lignes × colonnes : un fichier de 0,5 Mo (50 000 lignes) montait à
 600 Mo, au-dessus des 512 Mo du conteneur. `lib/garde-excel.js` ouvre le zip avant la lecture,
 décompresse chaque partie sous un plafond réel (pas la taille annoncée, qui peut mentir) et compte.
-Au-delà, 400 avec un message qui dit quoi faire (« exporte une période plus courte… ») :
+La lecture ne voit que ce qui a été compté : la garde lit la liste des parties dans le répertoire
+central du zip, `read-excel-file` lit les en-têtes locaux en flux sans jamais le consulter, et une
+partie cachée hors du répertoire (150 Mo d'espaces dans un fichier de 151 Ko) passait la garde puis
+était décompressée (+ 461 Mo mesurés). `classeurVerifie` rend donc un classeur reconstruit des
+seules parties inspectées (non compressées), et c'est lui que le serveur fait lire (+ 1 Mo sur le
+même fichier). Au-delà des limites, 400 avec un message qui dit quoi faire (« exporte une période
+plus courte… ») :
 
 | Limite | Valeur |
 |---|---|
@@ -8317,12 +8344,12 @@ après que le `fetch` suivant l'avait reprise. Reproduit 5 fois sur 5 hors du ba
 une connexion par requête. Et le banc de pagination du Journal datait sa ligne « neuve » avant le
 semé entre minuit et 10 h (heure de Paris) : datée après.
 
-### Historique et ventes (décision 10) : vérifié
+### Historique et ventes (décision 10)
 
-Le Journal de Paramètres est paginé depuis v1.46.0 : 50 lignes par page, « Afficher les 50
-suivantes », rien n'est supprimé côté serveur. 50 et non les 200 de la décision : gardé (le but —
-un affichage borné, « voir plus », rien de supprimé — est tenu, et les bancs de v1.46.0 portent
-sur 50). Aucun écran ne montre plus les ventes : `#ventes` n'est pas dans `mainTabs`, l'adresse
+Le Journal de Paramètres est paginé depuis v1.46.0, rien n'est supprimé côté serveur. La page
+était de 50 lignes ; la décision dit 200 : **200 lignes par page**, « Afficher les 200
+suivantes » (serveur et écran). Mesuré sur 4 000 lignes : pire tâche longue 64 ms à l'ouverture de
+la carte. Aucun écran ne montre plus les ventes : `#ventes` n'est pas dans `mainTabs`, l'adresse
 `/#ventes` retombe sur le tableau de bord et `/api/ventes` ne part pas (mesuré dans le
 navigateur). Rien à faire ; le vieil écran (`renderVentes`, `#ventesList`) reste dans le code,
 inatteignable.
@@ -8330,18 +8357,50 @@ inatteignable.
 ### Ce qui reste
 
 - Le cas « vrai SIGTERM à un processus à part » ne tourne que hors Windows (la CI Linux).
-- `/healthz` ne voit ni un disque plein ni un volume en lecture seule.
+- `/healthz` ne voit ni un disque plein ni un volume en lecture seule tant qu'aucune ligne
+  illisible n'a dû être mise de côté. Il dit une base malade ; rien ne la rouvre ni ne la restaure
+  pendant que le serveur tourne (la restauration automatique n'a lieu qu'à l'ouverture).
+- Un arrêt fait sans sa commande (mise de côté) ne sort pas le stock : réparer la commande à la
+  main (sa copie est dans `lignes_en_quarantaine`), l'historique nomme l'arrêt.
 - Le second dossier de sauvegarde du lot « garde-fous » ajoutera une variable : elle devra entrer
   dans le tableau de `DEPLOYMENT.md` (le banc des variables le rappellera).
 - Un autre banc de temps rougit parfois sous charge : « C2.stock.a » (`/api/stock` en moins de
   250 ms), 399 ms mesurés pendant un `npm test` complet sur un poste chargé, 65 à 105 ms seul (la
   base `5b52268` : 74 à 101 ms). Il mesure le temps écoulé, pas le travail : non touché ici.
 
+### Relecture adverse du 26/09 : le sort de chaque défaut
+
+Tous vérifiés (rejoués ou lus dans le code), tous vrais, tous corrigés, chacun avec un banc rouge
+sur le code relu (`03477f8`) pour la cause qu'il nomme :
+
+1. *Une ligne retirée sans copie après une écriture échouée* (important) : la copie faite dans la
+   transaction d'une écriture disparaissait avec son ROLLBACK, le processus se souvenait de
+   l'avoir faite. « Déjà copiée » se demande à la table.
+2. *Une partie de zip cachée contourne la garde Excel* (important) : la lecture se fait sur le
+   classeur reconstruit par la garde.
+3. *Une commande mise de côté bloque sa tournée* (important) : « Démarrer » et les gestes de
+   l'arrêt passent, sans la commande.
+4. *`/healthz` ne lit que la première feuille* (important) : relecture de chaque page
+   (`quick_check`), espacée ; et une ligne non mise de côté rend la base malade.
+5. *Le numéro d'une commande mise de côté est redonné* (mineur) : les numéros en quarantaine
+   comptent. Le numéro portait aussi l'identifiant, que les arrêts nomment encore.
+6. *Une tournée mise de côté perd les livraisons de ses arrêts* (mineur) : copiées avec elle —
+   celles des arrêts seulement, pas celles tirées des commandes, qui restent.
+7. *Journal à 50 lignes au lieu des 200 décidées* (mineur) : 200.
+
+Aucune donnée perdue, remesuré sur la base écrite par v1.45.1 avec le code final : ouverte, seule
+la table de quarantaine apparaît (et `stock.horizonJours` reçoit son défaut, qui vient de
+`5b52268`) ; une tournée abîmée (`route-t05`) : quittent leurs tables exactement la tournée et les
+livraisons de ses deux arrêts, les trois copiées à l'octet, une ligne de Journal s'ajoute ; une
+commande abîmée (`cmd-002`) : elle, ses 3 lignes et sa livraison, les cinq copiées ; rouvertes :
+aucun écart.
+
 ### Bancs
 
 `test/ligne-abimee.test.js`, `test/healthz-base.test.js`, `test/arret-propre.test.js`,
 `test/ecriture-disque.test.js`, `test/garde-excel.test.js`, `test/import-excel-limites.test.js`,
 `test/version-hors-reseau.test.js`, `test/variables-environnement.test.js`,
-`test/osrm-local.test.js`, `test/lot5-rapidite.test.js`, `test/donnees-utiles.test.js` : chacun
-rouge sur le code d'avant pour la cause qu'il nomme, puis vert. Le banc de charge v1.14.0
-(`test/api.test.js`, 5 000 lignes) reste vert.
+`test/osrm-local.test.js`, `test/lot5-rapidite.test.js`, `test/donnees-utiles.test.js`, et en
+e2e `test/e2e/donnees-utiles.spec.js` et `test/e2e/historique-lent.spec.js` (Journal à 200) :
+chacun rouge sur le code d'avant pour la cause qu'il nomme, puis vert. Le banc de charge v1.14.0
+(`test/api.test.js`, 5 000 lignes, qui passe par le classeur reconstruit) reste vert.
