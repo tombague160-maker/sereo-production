@@ -1,0 +1,383 @@
+// L'IMPORT DES VENTES FUSIONNE, dans un vrai navigateur (25/09), sur un serveur
+// seme (port 3602). Chasse aux defauts du 24/09, lot « donnees clients ».
+//
+// 1. Le resume de l'import dit ce qu'il a fait des FICHES : creees, completees,
+//    et gardees telles quelles quand le fichier ne les cite pas (avant : elles
+//    etaient supprimees sans un mot).
+const { test, expect } = require("./tuiles");
+const { demarrer, jeuDeDonnees, AUJOURDHUI } = require("./serveur-seme");
+const { classeur } = require("../aide-import-ventes");
+
+const BUREAU = { width: 1440, height: 900 };
+
+test.describe.configure({ mode: "serial" });
+
+let srv;
+// Le port n'est ecrit qu'ICI (test/ports-e2e.test.js) : chaque banc resème.
+async function semer(seed = jeuDeDonnees()) {
+  if (srv) await srv.arreter();
+  srv = await demarrer({ port: 3602, seed });
+}
+test.afterAll(async () => { if (srv) await srv.arreter(); });
+
+const JOUR_FR = AUJOURDHUI.split("-").reverse().join("/");
+const xlsx = lignes => ({
+  name: "ventes.xlsx",
+  mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  buffer: classeur(lignes)
+});
+
+async function ouvrir(browser, ancre, { viewport = BUREAU, theme = "light" } = {}) {
+  const ctx = await browser.newContext({ viewport, colorScheme: theme, timezoneId: "Europe/Paris", locale: "fr-FR" });
+  await ctx.addInitScript(t => { try { localStorage.setItem("sereo:colorScheme", t); } catch {} }, theme);
+  const page = await ctx.newPage();
+  const erreurs = [];
+  page.on("pageerror", e => erreurs.push(e.message));
+  await page.goto(srv.base + "/#" + ancre, { waitUntil: "networkidle" });
+  await page.waitForTimeout(600);
+  return { ctx, page, erreurs };
+}
+
+async function importerParLEcran(page, fichier) {
+  const [selecteur] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    page.locator('#enteteActions [data-action="importer-ventes"]').click()
+  ]);
+  const reponse = page.waitForResponse(r => r.url().includes("/api/import/ventes"));
+  await selecteur.setFiles(fichier);
+  const r = await reponse;
+  expect(r.status()).toBe(200);
+  return r.json();
+}
+
+test("import partiel : le resume dit les fiches gardees ; aucune fiche ne disparait, l'email reste", async ({ browser }) => {
+  test.setTimeout(120000);
+  const seed = jeuDeDonnees();
+  // Une fiche enrichie au CRM, que le fichier cite ; les autres ne le sont pas.
+  const pharma = seed.clients.find(c => c.id === "c-pharma");
+  Object.assign(pharma, { email: "contact@pharmacie.example", prenom: "Claire", source: "salon" });
+  await semer(seed);
+  const avant = await (await fetch(srv.base + "/api/clients")).json();
+
+  const { ctx, page, erreurs } = await ouvrir(browser, "journee");
+  const resultat = await importerParLEcran(page, xlsx([
+    ["Date", "Client", "Code", "Produit", "Quantite", "Rue", "Code Postal", "Ville", "Telephone"],
+    [JOUR_FR, pharma.nom, "ALE", "Alèses", "2", pharma.rue, pharma.codePostal, pharma.ville, ""]
+  ]));
+  expect(resultat.clientsImport).toEqual({ created: 0, updated: 1, preserved: avant.length - 1 });
+
+  const bilan = page.locator("#importSummary");
+  await expect(bilan).toBeVisible();
+  await expect(bilan).toContainText(`Fiches clients : 0 nouvelle · 1 complétée · ${avant.length - 1} absentes du fichier, gardées telles quelles.`);
+
+  const apres = await (await fetch(srv.base + "/api/clients")).json();
+  expect(apres.map(c => c.id).sort(), "une fiche absente du fichier a disparu").toEqual(avant.map(c => c.id).sort());
+  const fiche = apres.find(c => c.id === "c-pharma");
+  expect([fiche.email, fiche.prenom, fiche.source]).toEqual(["contact@pharmacie.example", "Claire", "salon"]);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+// Relecture adverse du 26/09 : un bon deja importe dont une ligne est
+// maintenant en erreur (la quantite vide valait 1 jusqu'au 25/09). Reimporte,
+// il ne perd plus ce produit, et l'ecran dit POURQUOI la commande est laissee
+// telle quelle (sans le libelle, il dirait « commande deja en cours »).
+test("reimport : un bon deja importe dont une ligne est en erreur (quantite vide) garde ses produits, et le resume dit pourquoi", async ({ browser }) => {
+  test.setTimeout(120000);
+  await semer();
+  const neuf = { nom: "Cabinet du Doubs", rue: "7 rue du Doubs", codePostal: "25000", ville: "Besançon" };
+  const entete = ["Date", "Client", "Code", "Produit", "Quantite", "Rue", "Code Postal", "Ville", "TTC"];
+  const ligne = (code, produit, quantite, ttc) => ["18/05/2026", neuf.nom, code, produit, quantite, neuf.rue, neuf.codePostal, neuf.ville, ttc];
+  const { ctx, page, erreurs } = await ouvrir(browser, "journee");
+  await importerParLEcran(page, xlsx([entete, ligne("CH-L", "Changes taille L", "2", "24"), ligne("ALE", "Alèses", "1", "8")]));
+  const resultat = await importerParLEcran(page, xlsx([entete, ligne("CH-L", "Changes taille L", "2", "24"), ligne("ALE", "Alèses", "", "8")]));
+  expect(resultat.lignesEnErreur.sansQuantite).toBe(1);
+  const bilan = page.locator("#importSummary");
+  await expect(bilan).toContainText("Ignorée : une ligne de ce bon est en erreur dans le fichier");
+  await expect(bilan).toContainText(neuf.nom);
+  const commandes = await (await fetch(srv.base + "/api/orders")).json();
+  const o = (Array.isArray(commandes) ? commandes : commandes.orders || []).find(x => x.clientName === neuf.nom);
+  expect(o.products.map(p => [p.code, Number(p.quantite)]), "un produit est sorti de la commande").toEqual([["CH-L", 2], ["ALE", 1]]);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+test("reimport : une commande saisie au terrain n'est pas reecrite, et le resume dit pourquoi", async ({ browser }) => {
+  test.setTimeout(120000);
+  const seed = jeuDeDonnees();
+  const parc = { id: "c-parc", nom: "Foyer du Parc", rue: "2 rue du Parc", ville: "Dole", codePostal: "39100", lat: 47.09, lng: 5.49 };
+  seed.clients.push(parc);
+  // Acceptee « bloquee » faute de stock (decision 11) : rien de reserve.
+  seed.commandes.push({
+    id: "o-parc", numero: "CMD-2026-090", clientId: parc.id, clientName: parc.nom, status: "stock_a_verifier",
+    source: "commande_terrain", total: 24, address: parc.rue, city: parc.ville, postalCode: parc.codePostal,
+    lat: parc.lat, lng: parc.lng, deliveryDate: AUJOURDHUI, dateCommande: AUJOURDHUI,
+    products: [{ code: "CH-L", nom: "Changes taille L", prixUnitaire: 12, quantite: 2, totalLigne: 24 }]
+  });
+  await semer(seed);
+  const { ctx, page, erreurs } = await ouvrir(browser, "journee");
+  await importerParLEcran(page, xlsx([
+    ["Date", "Client", "Code", "Produit", "Quantite", "Rue", "Code Postal", "Ville"],
+    [JOUR_FR, parc.nom, "ALE", "Alèses", "9", parc.rue, parc.codePostal, parc.ville]
+  ]));
+  const bilan = page.locator("#importSummary");
+  await expect(bilan).toContainText("Ignorée : commande saisie au terrain");
+  await expect(bilan).toContainText("CMD-2026-090");
+  const commandes = await (await fetch(srv.base + "/api/orders")).json();
+  const o = (Array.isArray(commandes) ? commandes : commandes.orders || []).find(x => x.id === "o-parc");
+  expect(o.products.map(p => [p.code, Number(p.quantite)])).toEqual([["CH-L", 2]]);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+// 3. Une commande terrain pour un NOUVEAU client dont le telephone existe deja :
+//    la fiche n'est plus renommee ni videe ; l'ecran propose « rattacher » ou
+//    « creer une nouvelle fiche ».
+const TELEPHONE_TILLEULS = "0381000000";
+function semeAvecTelephone({ archive = false } = {}) {
+  const seed = jeuDeDonnees();
+  const tilleuls = seed.clients.find(c => c.id === "c-tilleuls");
+  Object.assign(tilleuls, { telephone: TELEPHONE_TILLEULS, email: "accueil@tilleuls.example", notes: "Code porte 4512", crmArchived: archive });
+  return seed;
+}
+
+async function commandePourMmeRoux(page) {
+  const form = page.locator("#customerOrderForm");
+  await form.locator("[name=nom]").fill("Roux");
+  await form.locator("[name=prenom]").fill("Mme");
+  await form.locator("[name=telephone]").fill("03 81 00 00 00");
+  await form.locator("[name=codePostal]").fill("25000");
+  await page.locator('#customerCatalog [data-customer-product="st-CH-L"][data-customer-delta="1"]').click();
+  await page.locator("#customerValider").click();
+}
+
+const ficheTilleuls = async () => (await (await fetch(srv.base + "/api/clients")).json()).find(c => c.id === "c-tilleuls");
+const champsFiche = c => ({ nom: c.nom, prenom: c.prenom || "", telephone: c.telephone, email: c.email, notes: c.notes, rue: c.rue });
+
+for (const [choix, attendu] of [["rattacher", "la commande part sur la fiche"], ["nouvelle", "une nouvelle fiche est creee"]]) {
+  test(`commande terrain, telephone deja connu : « ${choix} » -- ${attendu}, la fiche existante ne bouge pas`, async ({ browser }) => {
+    test.setTimeout(120000);
+    await semer(semeAvecTelephone());
+    const avant = champsFiche(await ficheTilleuls());
+    const nbAvant = (await (await fetch(srv.base + "/api/clients")).json()).length;
+    const { ctx, page, erreurs } = await ouvrir(browser, "commande-client");
+    const envois = [];
+    page.on("request", req => { if (req.url().endsWith("/api/customer-orders") && req.method() === "POST") envois.push(req.postData()); });
+    await commandePourMmeRoux(page);
+
+    const dialogue = page.locator("#doublonFicheDialog");
+    await expect(dialogue, "aucune question : la fiche existante serait reprise").toBeVisible();
+    // La fiche est dans la liste chargee : la question vient AVANT tout envoi.
+    expect(envois.length, "la commande est partie avant la question").toBe(0);
+    await expect(dialogue).toContainText("« EHPAD Les Tilleuls du Val de Loue »");
+    await expect(dialogue).toContainText("03 81 00 00 00");
+    const reponse = page.waitForResponse(r => r.url().endsWith("/api/customer-orders") && r.request().method() === "POST");
+    await dialogue.locator(`input[value="${choix}"]`).check();
+    await dialogue.locator('[data-action="doublon-valider"]').click();
+    const r = await reponse;
+    expect(r.status()).toBe(201);
+    const creee = await r.json();
+
+    expect(champsFiche(await ficheTilleuls()), "la fiche existante a ete renommee ou videe").toEqual(avant);
+    const clients = await (await fetch(srv.base + "/api/clients")).json();
+    if (choix === "rattacher") {
+      expect(creee.clientId).toBe("c-tilleuls");
+      expect(clients.length).toBe(nbAvant);
+    } else {
+      expect(creee.clientId).not.toBe("c-tilleuls");
+      expect(clients.length).toBe(nbAvant + 1);
+      expect(clients.find(c => c.id === creee.clientId).nom).toBe("Roux");
+    }
+    await expect(page.locator("#commandes")).toHaveClass(/active/);
+    expect(erreurs).toEqual([]);
+    await ctx.close();
+  });
+}
+
+test("commande terrain : Annuler au dialogue n'envoie rien ; une fiche que la liste n'a pas (archivee) fait poser la question par le serveur", async ({ browser }) => {
+  test.setTimeout(120000);
+  await semer(semeAvecTelephone({ archive: true }));
+  const { ctx, page, erreurs } = await ouvrir(browser, "commande-client");
+  const envois = [];
+  page.on("request", req => { if (req.url().endsWith("/api/customer-orders") && req.method() === "POST") envois.push(JSON.parse(req.postData() || "{}")); });
+  await commandePourMmeRoux(page);
+  // La liste CRM ne porte pas les fiches archivees : la question vient du 409.
+  const dialogue = page.locator("#doublonFicheDialog");
+  await expect(dialogue).toBeVisible();
+  expect(envois.length, "le premier envoi (refuse 409) n'est pas parti").toBe(1);
+  await dialogue.locator('[data-action="doublon-annuler"]').click();
+  await expect(dialogue).toBeHidden();
+  await page.waitForTimeout(300);
+  expect(envois.length, "Annuler a quand meme envoye la commande").toBe(1);
+  // Le formulaire reste rempli : rien n'est perdu.
+  await expect(page.locator("#customerOrderForm [name=nom]")).toHaveValue("Roux");
+  const commandes = await (await fetch(srv.base + "/api/orders")).json();
+  expect((Array.isArray(commandes) ? commandes : commandes.orders || []).some(o => o.clientName.includes("Roux"))).toBe(false);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+// La file d'attente : une commande qui part SANS choix (la liste ne connait pas
+// de doublon, le telephone se croit en ligne), puis reste en file (reseau muet).
+// Au rejeu, le serveur trouve la fiche archivee : un 409 retirerait la commande
+// de la file -- perdue, sous « refusee et abandonnee ». La file porte donc la
+// version « nouvelle fiche » ; la fiche archivee ne bouge pas.
+const lireFile = page => page.evaluate(() => new Promise(resolve => {
+  const d = indexedDB.open("sereo-file-attente", 1);
+  d.onerror = () => resolve([]);
+  d.onsuccess = () => {
+    const db = d.result;
+    if (!db.objectStoreNames.contains("ecritures")) { db.close(); resolve([]); return; }
+    const r = db.transaction("ecritures", "readonly").objectStore("ecritures").getAll();
+    r.onsuccess = () => { const v = r.result; db.close(); resolve(v); };
+    r.onerror = () => { db.close(); resolve([]); };
+  };
+}));
+
+test("commande terrain mise en file (reseau muet), doublon que seul le serveur connait (archive) : au rejeu, elle n'est pas perdue", async ({ browser }) => {
+  test.setTimeout(120000);
+  await semer(semeAvecTelephone({ archive: true }));
+  const avant = champsFiche(await ficheTilleuls());
+  const { ctx, page, erreurs } = await ouvrir(browser, "commande-client");
+  await page.evaluate(() => {
+    window.__toasts = [];
+    new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => {
+      if (n.classList && n.classList.contains("toast")) window.__toasts.push(n.textContent);
+    }))).observe(document, { childList: true, subtree: true });
+  });
+  await page.route("**/api/customer-orders", route =>
+    route.request().method() === "POST" ? route.abort("connectionrefused") : route.continue());
+  expect(await page.evaluate(() => navigator.onLine), "prealable : le navigateur doit se croire EN LIGNE").toBe(true);
+  await commandePourMmeRoux(page);
+  await expect.poll(async () => (await lireFile(page)).length, { timeout: 15000, message: "la commande n'a pas ete mise en file" }).toBe(1);
+
+  await page.unroute("**/api/customer-orders");
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  const roux = async () => {
+    const liste = await (await fetch(srv.base + "/api/orders")).json();
+    return (Array.isArray(liste) ? liste : liste.orders || []).filter(o => o.clientName.includes("Roux"));
+  };
+  await expect.poll(async () => (await lireFile(page)).length, { timeout: 40000, message: "la file ne s'est pas videe" }).toBe(0);
+  const toasts = await page.evaluate(() => window.__toasts);
+  expect(toasts.join(" | "), "la commande a ete refusee au rejeu et abandonnee").not.toMatch(/refus/i);
+  const commandes = await roux();
+  expect(commandes.length, "la commande en file est perdue").toBe(1);
+  expect(commandes[0].clientId, "la commande est partie sur la fiche archivee").not.toBe("c-tilleuls");
+  const fiche = await ficheTilleuls();
+  expect(champsFiche(fiche), "la fiche archivee a ete renommee ou videe").toEqual(avant);
+  expect(fiche.crmArchived).toBe(true);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+// Relecture adverse du 26/09 : le banc precedent coupe la requete AVANT le
+// serveur (aucune cle enregistree). Le cas qui perdait la commande : le serveur
+// a TRAITE l'envoi -- doublon, 409 -- et c'est sa reponse qui se perd (4G).
+// La file garde la meme cle X-Sereo-Geste ; si le 409 etait la reponse de
+// cette cle, le rejeu recevait 409 {rejoue} et la commande etait abandonnee.
+test("commande terrain : le serveur a repondu 409 (doublon archive) mais la reponse s'est perdue -- au rejeu, meme cle, la commande n'est pas perdue", async ({ browser }) => {
+  test.setTimeout(120000);
+  await semer(semeAvecTelephone({ archive: true }));
+  const avant = champsFiche(await ficheTilleuls());
+  const { ctx, page, erreurs } = await ouvrir(browser, "commande-client");
+  await page.evaluate(() => {
+    window.__toasts = [];
+    new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => {
+      if (n.classList && n.classList.contains("toast")) window.__toasts.push(n.textContent);
+    }))).observe(document, { childList: true, subtree: true });
+  });
+  const premier = [];
+  await page.route("**/api/customer-orders", async route => {
+    if (route.request().method() !== "POST") return route.continue();
+    if (premier.length === 0) {
+      // Le serveur recoit l'envoi et repond ; la page ne recoit rien.
+      const reponse = await route.fetch();
+      premier.push({ statut: reponse.status(), cle: route.request().headers()["x-sereo-geste"] || "" });
+      return route.abort("connectionreset");
+    }
+    return route.abort("connectionrefused");
+  });
+  await commandePourMmeRoux(page);
+  await expect.poll(async () => (await lireFile(page)).length, { timeout: 15000, message: "la commande n'a pas ete mise en file" }).toBe(1);
+  expect(premier.map(p => p.statut), "prealable : le serveur doit avoir traite l'envoi et repondu 409").toEqual([409]);
+  const [entree] = await lireFile(page);
+  const cleEnFile = Object.entries(entree.entetes || {}).find(([nom]) => nom.toLowerCase() === "x-sereo-geste")?.[1];
+  expect(cleEnFile, "prealable : la file doit rejouer avec la cle deja vue par le serveur").toBe(premier[0].cle);
+
+  await page.unroute("**/api/customer-orders");
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect.poll(async () => (await lireFile(page)).length, { timeout: 40000, message: "la file ne s'est pas videe" }).toBe(0);
+  const toasts = await page.evaluate(() => window.__toasts);
+  expect(toasts.join(" | "), "la commande a ete refusee au rejeu et abandonnee").not.toMatch(/refus/i);
+  const liste = await (await fetch(srv.base + "/api/orders")).json();
+  const commandes = (Array.isArray(liste) ? liste : liste.orders || []).filter(o => o.clientName.includes("Roux"));
+  expect(commandes.length, "la commande en file est perdue").toBe(1);
+  expect(commandes[0].clientId, "la commande est partie sur la fiche archivee").not.toBe("c-tilleuls");
+  expect(champsFiche(await ficheTilleuls()), "la fiche archivee a ete renommee ou videe").toEqual(avant);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+// 4. Decision 7 de Thomas (24/09) : le chiffre d'affaires est TTC, et l'ecran
+//    le dit -- tableau de bord, Analyse, fiche client. Un avoir ajoute a un bon
+//    deja importe se soustrait ; le resume le dit.
+test("chiffre d'affaires : « TTC » ecrit sur le tableau de bord, l'Analyse et la fiche ; un avoir se soustrait", async ({ browser }) => {
+  test.setTimeout(120000);
+  await semer();
+  // Un client NOUVEAU : ceux du seme ont tous une commande du jour en cours (l'import la laisserait).
+  const pharma = { nom: "Maison de Santé Arbois", rue: "10 rue de Faramand", codePostal: "39600", ville: "Arbois" };
+  const entete = ["Date", "Statut", "Client", "Code", "Produit", "Quantite", "Rue", "Code Postal", "Ville", "HT", "TTC"];
+  const vente = [JOUR_FR, "Envoyée", pharma.nom, "CH-L", "Changes taille L", "4", pharma.rue, pharma.codePostal, pharma.ville, "40", "48"];
+  const avoir = [JOUR_FR, "Envoyée", pharma.nom, "CH-L", "Changes taille L", "-1", pharma.rue, pharma.codePostal, pharma.ville, "-10", "-12"];
+
+  const { ctx, page, erreurs } = await ouvrir(browser, "journee");
+  await expect(page.locator("#journee .tb-ca .tb-libelle").first()).toHaveText("Chiffre d’affaires livré TTC");
+  await importerParLEcran(page, xlsx([entete, vente]));
+  const second = await importerParLEcran(page, xlsx([entete, vente, avoir]));
+  expect(second.montantsRepris).toBe(1);
+  await expect(page.locator("#importSummary")).toContainText("1 commande déjà importée : montant TTC repris du fichier (avoir ou correction dans Ximi).");
+
+  await page.goto(srv.base + "/#statistiques", { waitUntil: "networkidle" });
+  await page.waitForTimeout(600);
+  const tuiles = page.locator("#statsKpis");
+  await expect(tuiles).toContainText("CA livré TTC du jour");
+  await expect(tuiles).toContainText("CA livré TTC du mois");
+
+  await page.goto(srv.base + "/#crm", { waitUntil: "networkidle" });
+  await page.waitForTimeout(600);
+  await page.locator("#crmList .cli-ligne", { hasText: "Arbois" }).click();
+  const ca = page.locator("#cliFiche .cli-ca");
+  await expect(ca).toContainText("Chiffre d'affaires livré TTC");
+  const vue = (await (await fetch(srv.base + "/api/crm/clients")).json()).find(c => c.nom === pharma.nom);
+  // 48 - 12 : l'avoir est soustrait.
+  expect(vue.totalRevenue).toBe(36);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});
+
+// 5. Les lignes ecartees, par cause : une quantite vide ne vaut plus 1, une
+//    ligne sans client ne cree plus « Client sans nom », une date illisible ne
+//    date plus le bon du jour. Le resume dit chaque cause.
+test("lignes en erreur : le resume dit chaque cause ; rien n'est cree pour elles", async ({ browser }) => {
+  test.setTimeout(120000);
+  await semer();
+  const avant = (await (await fetch(srv.base + "/api/orders")).json());
+  const nbAvant = (Array.isArray(avant) ? avant : avant.orders || []).length;
+  const { ctx, page, erreurs } = await ouvrir(browser, "journee");
+  const resultat = await importerParLEcran(page, xlsx([
+    ["Date", "Client", "Code", "Produit", "Quantite", "Rue", "Code Postal", "Ville"],
+    [JOUR_FR, "", "ALE", "Alèses", "4", "", "", ""],
+    [JOUR_FR, "Maison de Santé Arbois", "CH-L", "Changes taille L", "", "10 rue de Faramand", "39600", "Arbois"],
+    ["le 3 mars", "Maison de Santé Arbois", "ALE", "Alèses", "2", "10 rue de Faramand", "39600", "Arbois"]
+  ]));
+  expect(resultat.lignesEnErreur).toEqual({ sansClientNiProduit: 0, sansClient: 1, sansProduit: 0, sansQuantite: 1, dateIllisible: 1 });
+  const bilan = page.locator("#importSummary");
+  await expect(bilan.locator(".import-bilan-compte")).toHaveText(["0 nouvelle", "0 mise à jour", "0 ignorée", "3 lignes en erreur"]);
+  await expect(bilan).toContainText("1 ligne sans client : écartée, vérifie le fichier.");
+  await expect(bilan).toContainText("1 ligne sans quantité lisible : écartée, vérifie le fichier.");
+  await expect(bilan).toContainText("1 ligne sans date lisible : écartée, vérifie le fichier.");
+  const apres = (await (await fetch(srv.base + "/api/orders")).json());
+  expect((Array.isArray(apres) ? apres : apres.orders || []).length, "une ligne en erreur a cree une commande").toBe(nbAvant);
+  expect(erreurs).toEqual([]);
+  await ctx.close();
+});

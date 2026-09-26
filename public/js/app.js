@@ -3683,7 +3683,14 @@ const RAISONS_IMPORT_IGNORE = {
   // Relecture du 24/09 : le stock reserve verrouille aussi (server.js,
   // raisonImportIgnore) -- preparation lancee, commande terrain, planifiee confirmee.
   en_preparation: "commande déjà en préparation",
-  stock_reserve: "stock déjà réservé pour cette commande"
+  stock_reserve: "stock déjà réservé pour cette commande",
+  // Donnees clients (25/09) : seul un bon IMPORTE a preparer suit le fichier.
+  annulee: "commande annulée",
+  saisie_terrain: "commande saisie au terrain",
+  planifiee: "commande planifiée",
+  // Relecture du 26/09 : un bon deja importe dont une ligne est en erreur
+  // (quantite vide, produit absent) ne perd plus ce produit.
+  ligne_en_erreur: "une ligne de ce bon est en erreur dans le fichier"
 };
 const IMPORT_IGNOREES_MONTREES = 5;
 
@@ -3718,7 +3725,21 @@ function bilanImportVentes(result) {
     details.push({ attention: true, html: `Et ${escapeHtml(accorder(ignorees.length - IMPORT_IGNOREES_MONTREES, "autre commande ignorée", "autres commandes ignorées"))} (déjà en préparation, prêtes, en tournée ou livrées), laissées telles quelles.` });
   }
   if (identiques) details.push({ html: `${escapeHtml(accorder(identiques, "commande identique, déjà importée", "commandes identiques, déjà importées"))} : rien à changer.` });
-  if (erreurs) details.push({ attention: true, html: `<strong>${escapeHtml(accorder(erreurs, "ligne sans client ni produit", "lignes sans client ni produit"))}</strong> : écartée${erreurs > 1 ? "s" : ""}, vérifie le fichier.` });
+  // Chaque cause d'erreur (25/09) : une quantite vide ne vaut plus 1, une ligne
+  // sans client ne cree plus « Client sans nom », une date illisible ne date
+  // plus le bon du jour -- elles sont ecartees, et le resume dit pourquoi. Un
+  // serveur plus ancien ne rend que le total : c'etait « sans client ni produit ».
+  const causes = result.lignesEnErreur || { sansClientNiProduit: erreurs };
+  [
+    ["sansClientNiProduit", "ligne sans client ni produit", "lignes sans client ni produit"],
+    ["sansClient", "ligne sans client", "lignes sans client"],
+    ["sansProduit", "ligne sans produit", "lignes sans produit"],
+    ["sansQuantite", "ligne sans quantité lisible", "lignes sans quantité lisible"],
+    ["dateIllisible", "ligne sans date lisible", "lignes sans date lisible"]
+  ].forEach(([cle, un, plusieurs]) => {
+    const n = nombre(causes[cle]);
+    if (n) details.push({ attention: true, html: `<strong>${escapeHtml(accorder(n, un, plusieurs))}</strong> : écartée${n > 1 ? "s" : ""}, vérifie le fichier.` });
+  });
   // Les avertissements du serveur, qui ne vivaient que dans l'historique.
   const negatives = nombre(result.clampedNegativeQuantities);
   if (negatives) details.push({ attention: true, html: `<strong>${escapeHtml(accorder(negatives, "quantité négative ramenée", "quantités négatives ramenées"))} à 0</strong> : vérifie les retours ou avoirs dans Ximi.` });
@@ -3728,6 +3749,21 @@ function bilanImportVentes(result) {
   if (livrees) details.push({ html: `${escapeHtml(accorder(livrees, "commande importée comme déjà livrée", "commandes importées comme déjà livrées"))} (facture « Envoyée »).` });
   const fusionnes = nombre(result.mergedBySecondary);
   if (fusionnes) details.push({ html: `${escapeHtml(accorder(fusionnes, "client en double fusionné", "clients en double fusionnés"))} avec sa fiche existante.` });
+  // Les fiches clients (fusion du 25/09) : l'import ne supprime plus une fiche
+  // absente du fichier et n'efface plus ce que le fichier ne porte pas. Le
+  // resume le dit, fiches gardees comprises.
+  // Decision 7 : un bon deja importe dont le montant TTC change dans le fichier
+  // (un avoir, une correction) prend ce montant ; le resume le dit.
+  const repris = nombre(result.montantsRepris);
+  if (repris) details.push({ html: `${escapeHtml(accorder(repris, "commande déjà importée : montant TTC repris du fichier", "commandes déjà importées : montant TTC repris du fichier"))} (avoir ou correction dans Ximi).` });
+  const fiches = result.clientsImport;
+  if (fiches) {
+    details.push({ html: `Fiches clients : ${escapeHtml([
+      accorder(nombre(fiches.created), "nouvelle", "nouvelles"),
+      accorder(nombre(fiches.updated), "complétée", "complétées"),
+      accorder(nombre(fiches.preserved), "absente du fichier, gardée telle quelle", "absentes du fichier, gardées telles quelles")
+    ].join(" · "))}.` });
+  }
   return { comptes, details, aPreparer: nombre(result.created) + nombre(result.updated) > 0 };
 }
 
@@ -4117,7 +4153,7 @@ function renderFicheClient() {
   }).join("");
   const resteRappels = rappelsAFaire.length - 3;
   const blocCa = `<section class="cli-ca" aria-label="Chiffre d'affaires et rappels">
-      <div class="cli-ca-montant"><p class="cli-libelle">Chiffre d'affaires livré</p><p class="cli-valeur cli-ca-valeur">${escapeHtml(formatMoney(client.totalRevenue || 0))}</p>`
+      <div class="cli-ca-montant"><p class="cli-libelle">Chiffre d'affaires livré TTC</p><p class="cli-valeur cli-ca-valeur">${escapeHtml(formatMoney(client.totalRevenue || 0))}</p>`
     + `<p class="cli-note">${livrees ? `${livrees} commande${livrees > 1 ? "s" : ""} livrée${livrees > 1 ? "s" : ""}` : "Aucune commande livrée"}</p></div>
       <div class="cli-ca-rappels"><p class="cli-libelle">Rappels à faire</p>`
     + (lignesRappels
@@ -4760,6 +4796,111 @@ async function reporterCoordonneesSurLaFiche(form, data) {
   return true;
 }
 
+// --- Doublon de fiche (chasse aux defauts du 24/09, lot donnees clients, 25/09) ---
+//
+// Une commande pour un NOUVEAU client dont le telephone -- ou le nom et le code
+// postal -- est deja celui d'une fiche. Mesure du rapport : la fiche trouvee
+// prenait tout le formulaire (« EHPAD Les Tilleuls » devenait « Roux », sa
+// rue, son email et ses notes partaient). Le serveur refuse maintenant (409)
+// sans choix explicite ; l'ecran demande : « rattacher a cette fiche » (prise
+// telle quelle) ou « creer une nouvelle fiche ». Il demande AVANT d'envoyer --
+// la liste des clients est chargee, hors ligne aussi --, et encore si le
+// serveur trouve une fiche que la liste n'avait pas (archivee, ou creee depuis).
+
+/** La cle nom + code postal, comme clientSecondaryKey (server.js). */
+function cleNomCodePostal(nom, codePostal) {
+  const n = normalizeTextKey(nom);
+  const cp = normalizeTextKey(codePostal);
+  return n && cp ? `${n}|${cp}` : "";
+}
+
+/** La fiche chargee qui a le telephone (normalise) ou le nom et le code postal saisis ; null sinon. */
+function ficheEnDoublon(data) {
+  const cleTel = valeur => normaliserTelephone(valeur) || normalizeTextKey(valeur);
+  const telephone = cleTel(data.telephone);
+  const nomCp = cleNomCodePostal([data.prenom, data.nom].filter(Boolean).join(" ") || data.nom, data.codePostal);
+  return crmClients.find(client => {
+    const sien = cleTel(client.telephone);
+    if (telephone && sien && telephone === sien) return true;
+    return Boolean(nomCp) && cleNomCodePostal(client.nom, client.codePostal) === nomCp;
+  }) || null;
+}
+
+/**
+ * `{}` sans doublon connu ; sinon le choix : `{ clientId }` ou
+ * `{ nouvelleFiche: true }` -- ou null si l'on annule. Hors ligne, sans
+ * doublon dans la liste, la commande part en « nouvelle fiche » : rejouee
+ * plus tard, un refus 409 la retirerait de la file (une fiche en double se
+ * fusionne ; une commande perdue ne se retrouve pas).
+ */
+async function choisirFicheSiDoublon(doublon, data) {
+  if (!doublon) return navigator.onLine === false ? { nouvelleFiche: true } : {};
+  return demanderChoixDeFiche(doublon, data);
+}
+
+/**
+ * Envoie la commande ; sur un doublon que la liste n'avait pas (409), demande,
+ * puis renvoie. `demanderSiDoublon` : cette page sait poser la question (sans
+ * lui, le serveur cree une nouvelle fiche). Si l'envoi part en FILE (reseau
+ * muet, session expiree), la commande attend en « nouvelle fiche » : rejouee
+ * plus tard, un 409 la ferait retirer de la file -- perdue (a moins d'un
+ * choix deja fait : `clientId` l'emporte au serveur).
+ */
+async function envoyerCommandeClient(endpoint, corps, data) {
+  const envoyer = contenu => apiFetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...contenu, demanderSiDoublon: true }),
+    corpsEnFile: JSON.stringify({ ...contenu, nouvelleFiche: true })
+  });
+  try {
+    return await envoyer(corps);
+  } catch (erreur) {
+    const doublon = erreur?.details?.doublon;
+    if (!doublon) throw erreur;
+    const choix = await demanderChoixDeFiche(doublon, data);
+    return choix ? envoyer({ ...corps, ...choix }) : null;
+  }
+}
+
+/** Le dialogue « rattacher ou creer ». Rend `{ clientId }`, `{ nouvelleFiche: true }` ou null. */
+function demanderChoixDeFiche(doublon, data) {
+  const dialogue = document.getElementById("doublonFicheDialog");
+  const texte = document.getElementById("doublonFicheTexte");
+  const liste = document.getElementById("doublonFicheChoix");
+  if (!dialogue || !texte || !liste || typeof dialogue.showModal !== "function") return Promise.resolve(null);
+  const nomFiche = [doublon.prenom, doublon.nom].filter(Boolean).join(" ") || doublon.nom || "sans nom";
+  const reperes = [formaterTelephone(doublon.telephone), villeAffichee(doublon.ville)].filter(Boolean).join(", ");
+  const nomSaisi = [data.prenom, data.nom].filter(Boolean).join(" ").trim() || "ce client";
+  texte.textContent = `Une fiche existe déjà avec ce téléphone ou ce nom : « ${nomFiche} »${reperes ? ` (${reperes})` : ""}.`;
+  liste.innerHTML = `
+    <label class="reopt-choix"><input type="radio" name="doublonFiche" value="rattacher" checked><span>Rattacher la commande à « ${escapeHtml(nomFiche)} » : la fiche reste telle quelle, la commande part à son adresse.</span></label>
+    <label class="reopt-choix"><input type="radio" name="doublonFiche" value="nouvelle"><span>Créer une nouvelle fiche « ${escapeHtml(nomSaisi)} ».</span></label>`;
+
+  return new Promise(resolve => {
+    const surClic = evenement => {
+      const action = evenement.target.closest("[data-action]")?.dataset.action;
+      if (action === "doublon-annuler") terminer(null);
+      if (action === "doublon-valider") {
+        const choix = liste.querySelector('input[name="doublonFiche"]:checked')?.value;
+        terminer(choix === "nouvelle" ? { nouvelleFiche: true } : { clientId: doublon.id });
+      }
+    };
+    // Echap ferme le <dialog> : c'est une annulation (comme le motif d'un arret).
+    const surFermeture = () => terminer(null);
+    function terminer(valeur) {
+      dialogue.removeEventListener("click", surClic);
+      dialogue.removeEventListener("close", surFermeture);
+      if (dialogue.open) dialogue.close();
+      resolve(valeur);
+    }
+    dialogue.addEventListener("click", surClic);
+    dialogue.addEventListener("close", surFermeture);
+    dialogue.showModal();
+    liste.querySelector("input:checked")?.focus();
+  });
+}
+
 async function submitCustomerOrder(form) {
   const lines = Array.from(customerCart.values());
   if (!lines.length) {
@@ -4772,20 +4913,22 @@ async function submitCustomerOrder(form) {
     return;
   }
   const endpoint = data.orderType === "planifiee" ? "/api/planned-orders" : "/api/customer-orders";
+  // Un nouveau client dont le telephone (ou le nom et le code postal) a deja
+  // une fiche : on choisit AVANT d'envoyer (25/09). Annuler : rien ne part.
+  const choixDeFiche = data.clientId ? {} : await choisirFicheSiDoublon(ficheEnDoublon(data), data);
+  if (!choixDeFiche) return;
   const ficheModifiee = await reporterCoordonneesSurLaFiche(form, data);
   const fiche = ficheModifiee ? " Coordonnées enregistrées sur la fiche du client." : "";
-  const reponse = await apiFetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      clientId: data.clientId,
-      client: data,
-      products: lines,
-      notes: data.notes,
-      orderType: data.orderType,
-      deliveryDate: data.deliveryDate
-    })
-  });
+  const reponse = await envoyerCommandeClient(endpoint, {
+    clientId: data.clientId,
+    client: data,
+    products: lines,
+    notes: data.notes,
+    orderType: data.orderType,
+    deliveryDate: data.deliveryDate,
+    ...choixDeFiche
+  }, data);
+  if (!reponse) return;
   customerCart.clear();
   form.reset();
   // reset() ne vide PAS le client choisi (relecture adverse) : sur un champ
@@ -4873,11 +5016,13 @@ async function cancelPlannedOrder(orderId) {
 function renderStatistics() {
   const kpis = document.getElementById("statsKpis");
   if (!kpis || !statistics) return;
+  // Decision 7 de Thomas (24/09) : le chiffre d'affaires est TTC, avoirs
+  // soustraits, et l'ecran le dit (le serveur n'additionne plus HT et TTC).
   const items = [
-    { label: "CA livré du jour", value: formatMoney(statistics.today?.revenue), hint: accorder(statistics.today?.orders, "commande"), tone: "success" },
-    { label: "CA livré de la semaine", value: formatMoney(statistics.week?.revenue), hint: formatEvolution(statistics.week?.evolution), tone: getEvolutionTone(statistics.week?.evolution) },
-    { label: "CA livré du mois", value: formatMoney(statistics.month?.revenue), hint: `${accorder(statistics.month?.orders, "commande")} · ${formatEvolution(statistics.month?.evolution)}`, tone: getEvolutionTone(statistics.month?.evolution) },
-    { label: "Panier moyen", value: formatMoney(statistics.averageBasket), hint: "Commandes livrées, toutes périodes", tone: "info" },
+    { label: "CA livré TTC du jour", value: formatMoney(statistics.today?.revenue), hint: accorder(statistics.today?.orders, "commande"), tone: "success" },
+    { label: "CA livré TTC de la semaine", value: formatMoney(statistics.week?.revenue), hint: formatEvolution(statistics.week?.evolution), tone: getEvolutionTone(statistics.week?.evolution) },
+    { label: "CA livré TTC du mois", value: formatMoney(statistics.month?.revenue), hint: `${accorder(statistics.month?.orders, "commande")} · ${formatEvolution(statistics.month?.evolution)}`, tone: getEvolutionTone(statistics.month?.evolution) },
+    { label: "Panier moyen", value: formatMoney(statistics.averageBasket), hint: "TTC, commandes livrées, toutes périodes", tone: "info" },
     { label: "Nouveaux clients", value: statistics.newClientsMonth || 0, hint: "Ce mois-ci", tone: "warning" },
     { label: "Prospects convertis", value: statistics.convertedProspectsMonth || 0, hint: "Ce mois-ci", tone: "success" }
   ];
@@ -10277,7 +10422,11 @@ async function tenterMiseEnFile(url, options) {
   // refuser tout de suite.
   if (options.body instanceof FormData) return false;
   try {
-    await mettreEnAttente(url, { ...options, method: methode });
+    // `corpsEnFile` (facultatif) : ce que l'ecriture doit dire si elle attend
+    // -- rejouee plus tard, elle ne pourra plus poser de question (commande
+    // pour un nouveau client : envoyerCommandeClient).
+    const corps = typeof options.corpsEnFile === "string" ? options.corpsEnFile : options.body;
+    await mettreEnAttente(url, { ...options, method: methode, body: corps });
     await rafraichirEtatFile();
     return true;
   } catch {

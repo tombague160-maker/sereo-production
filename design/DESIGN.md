@@ -8482,3 +8482,204 @@ intermittent `lot5-rapidite` est passé cette fois. e2e :
 - `pruneOldBackups` et le nettoyage du démarrage lisent le second dossier en synchrone. Sur un
   partage bloqué pile à ce moment, le fil principal attendrait. La vérification du témoin, qui
   vient avant, est asynchrone ; ce reste est hors du relevé du relecteur.
+
+## 25/09 — Données clients : l'import fusionne au lieu de remplacer
+
+Branche `fix/import-clients-fusion`, partie de `5b52268` (v1.46.0 et la performance). Source :
+la chasse aux défauts du 24/09 (constat **critique** « l'import des ventes remplace la table des
+clients », constats hauts « réimport d'un bon » et « téléphone déjà connu », moyen « CA de 197
+commandes sur 224 », bas « date avec heure, Date facture », « quantité vide, ligne sans client »,
+« avoirs, HT et TTC »). Règle permanente de Thomas (18/05) : **tout import est une fusion par clé
+métier**, jamais un « wipe-and-replace ». Décision 7 (24/09) : chiffre d'affaires en TTC, écrit à
+l'écran, avoirs soustraits.
+
+### Fait
+
+**1. Les fiches clients fusionnent** (`mergeImportedClients`, `trouverFicheExistante`). Avant :
+la table était reconstruite depuis le fichier. Une fiche absente disparaissait (sauf si sa
+DERNIÈRE commande était en cours), une fiche présente perdait email, prénom, préférences,
+source ; un client archivé revenait ; l'abonnement d'un client disparu ne se suspendait plus
+(« Sélectionne un client existant »), ce qui bloquait la purge. Maintenant chaque client du
+fichier retrouve sa fiche (clé complète, sinon nom + code postal parmi les fiches que la clé
+complète ne vise pas ; une fiche n'est prise qu'une fois) ; la fiche garde son identifiant et
+tous ses champs, une cellule **pleine** remplace la valeur, une cellule **vide** la laisse ; une
+fiche absente reste telle quelle, à sa place. Comptes `clientsImport` { created, updated,
+preserved } dans la réponse, l'historique, l'archive et le résumé de l'écran (« absentes du
+fichier, gardées telles quelles »). Une fiche recréée par le fichier reprend l'identifiant des
+commandes **orphelines** de même nom (la production en a une, du 03/06, retirée par un ancien
+import) : sinon le bon était refait en double.
+
+**2. Les ventes fusionnent aussi** (`fusionnerVentes`) : un bon du fichier (client + date)
+remplace ses lignes, les ventes des autres bons restent. `db.ventes = ventes` effaçait celles de
+tout bon absent du fichier, et le CA qui en venait.
+
+**3. Réimporter un bon** (`raisonImportIgnore`, complément du lot « pièges » du 24/09 : livrée,
+en tournée, prête, stock réservé). Seul un bon **importé, encore à préparer**, suit le fichier.
+Ne sont plus réécrites : la commande **en préparation** même sans réservation, l'**annulée**, la
+commande **saisie au terrain** (acceptée bloquée sans réservation, décision 11 : elle devenait un
+autre produit en gardant son total), la **planifiée** et celle d'un **abonnement** avant
+confirmation. Le résumé nomme la raison de chacune.
+
+**4. Un nouveau client dont le téléphone (ou le nom et le code postal) est déjà celui d'une
+fiche.** Avant : la fiche prenait tout le formulaire (« EHPAD Les Tilleuls » devenait « Roux »,
+rue, email et notes vidés). Maintenant l'écran demande **avant d'envoyer** (dialogue
+`#doublonFicheDialog`) : « Rattacher la commande à « <fiche> » » (`clientId`, fiche prise telle
+quelle) ou « Créer une nouvelle fiche » (`nouvelleFiche`) ; Annuler n'envoie rien, le formulaire
+reste rempli. Une fiche que la liste n'a pas (archivée, créée depuis) : le serveur répond 409
+avec la fiche, et la même question se pose. Les numéros se comparaient déjà normalisés depuis la
+v1.46.0 (`cleTelephone` : espaces, points, +33) ; le banc le garde.
+
+- *La file d'attente* (reprise du 26/09). Une écriture refusée (4xx) est retirée de la file : une
+  commande partie sans choix puis mise en file (réseau muet, session expirée) était **refusée au
+  rejeu et abandonnée** (mesuré : « 1 modification a été refusée par le serveur et
+  abandonnée »), de même pour les commandes en file d'une page d'avant la mise à jour. Le 409 ne
+  va donc qu'à une page qui le demande (`demanderSiDoublon`) ; sans demande ni choix, la commande
+  part sur une **nouvelle fiche** et l'existante ne bouge pas. La page met en file la version
+  « nouvelle fiche » de la commande (`corpsEnFile`, option facultative d'`apiFetch`) ; un choix
+  déjà fait (`clientId`) l'emporte. Une fiche en double se fusionne ; une commande perdue ne se
+  retrouve pas.
+
+**5. Le chiffre d'affaires ne dépend plus du dernier fichier** (`montantTtcFige`,
+`figerMontantsImportes`). 197 commandes sur 224 en production n'avaient de montant ni sur elles
+ni sur leurs lignes : leur CA se relisait dans `db.ventes`, et un fichier du seul mois courant
+mettait les mois passés à 0. **Migration unique et idempotente** (au démarrage, et avant chaque
+import) : le montant TTC des commandes dont le CA venait des ventes est figé sur elles
+(`montantTtc`), le CA de chaque mois ne change pas, l'historique le dit une fois. L'import fige le
+montant de chaque bon ; un bon identique reprend le montant du fichier (un avoir ajouté dans
+Ximi se soustrait ; le résumé le compte). **Décision 7** : montant TTC **signé** (un avoir se
+soustrait) ; une ligne HT seule n'est plus additionnée (« sans montant ») ; « TTC » écrit sur le
+tableau de bord, l'Analyse (CA du jour, de la semaine, du mois, panier moyen) et la fiche client.
+
+**6. Les lignes du fichier.** « 18/05/2026 10:30 » est le 18/05 (une heure après une date FR est
+acceptée) ; « Date facture », « Date commande », « Date de vente » sont des colonnes de date ; une
+date **écrite mais illisible** met la ligne en erreur (elle datait le bon du jour de l'import) ;
+sans date, le repli documenté reste. Une quantité vide ou illisible met la ligne en erreur (elle
+valait 1) ; 0 reste une quantité. Une ligne sans client ou sans produit est en erreur (plus de
+commande « Client sans nom »). Le résumé et l'historique disent chaque cause (`lignesEnErreur`).
+
+### Aucune donnée perdue : les preuves
+
+`test/e2e/import-fusion-production.spec.js`, par l'API, avant / après : fiches (et 18 champs CRM),
+commandes (statut, lignes, montant), ventes, abonnements, rappels, CA de chaque mois ; pour un
+import **complet**, **partiel** (le mois le plus vendu) et **vide** (l'en-tête seul) ; la
+migration au démarrage, puis un redémarrage qui ne change rien.
+
+- **Base de la forme de la production** (`jeu-production.js`, enrichi de fiches CRM, de deux
+  archivées, de trois prospects absents du fichier, d'un abonnement et d'un rappel) : 158
+  commandes figées sur 224, CA des 12 mois égal à l'ancien calcul (refait par le banc depuis les
+  données brutes) ; complet : 90 fiches complétées, 10 gardées, 1 recréée (l'orpheline, sans
+  commande en double) ; partiel : 21 / 79 ; vide : 100 gardées ; 429 ventes avant et après.
+- **Base écrite par v1.45.1** (`SEREO_BASE_SQLITE`, worktree jetable : v1.45.1 importe le fichier
+  complet, sert le CRM — 12 fiches enrichies, 2 archivées, 3 prospects, un abonnement, un rappel,
+  une commande terrain d'un nouveau client —, puis on relève le CA qu'elle affiche) : 102 fiches,
+  226 commandes, 429 ventes ; 2 commandes figées au démarrage (v1.45.1 avait réécrit les lignes
+  des bons au réimport, avec leurs montants) ; **CA des 12 mois égal à celui qu'affichait
+  v1.45.1** (`SEREO_BASE_CA`) ; complet : 91 / 11, 192 bons identiques dont le montant figé égale
+  l'ancien ; partiel : 21 / 81 ; vide : 102 gardées. La base source n'est pas modifiée (même
+  SHA-256 avant et après).
+
+Le banc compare le montant de chaque commande (figé, sinon l'ancien calcul) : un montant figé faux
+d'un euro sur les bons identiques le fait rougir (962 lignes).
+
+### Réserves
+
+- La liste `produits` et le relevé `ordersByDate` d'une fiche **citée** par le fichier sont
+  refaits depuis le fichier, comme avant : relevé interne, non envoyé à l'écran
+  (`/api/crm/clients` les retire) ; `produits` ne sert qu'à la commande de repli d'une fiche qui
+  n'a aucune commande.
+- Le compte « 197 sur 224 » vient de la chasse (production) ; il n'est pas remesuré ici. Le jeu de
+  la forme de la production en fige 158, la base v1.45.1 en fige 2.
+- Une commande rejouée par la file sur un doublon crée une fiche en double (voulu : à fusionner à
+  la main dans le CRM).
+
+### Bancs
+
+Unitaires : `import-fusion-clients`, `import-verrous`, `commande-doublon-fiche`, `ca-fige`,
+`import-lignes` (aide `aide-import-ventes.js`) ; `api.test.js` « virgule en trop » part d'une
+commande encore à préparer (il juge la clé secondaire, pas le verrou). e2e :
+`import-clients-fusion` (port 3602 : résumé des fiches, réimport d'une commande terrain,
+« rattacher », « nouvelle », Annuler et fiche archivée, **commande en file rejouée**, « TTC » et
+avoir, lignes en erreur) et `import-fusion-production` (port 3603). Chaque banc rougit sur
+`5b52268` pour sa cause (fiche supprimée, email vidé, désarchivé, pause refusée, lignes
+remplacées, 201 au lieu de 409, montant non figé, « Chiffre d'affaires livré » sans TTC, bon daté
+du jour de l'import…) ; celui de l'orpheline sur son parent ; celui de la file sur le code
+d'avant la reprise. Trois mutants de la reprise rougissent chacun pour sa cause : la page met en
+file le corps envoyé (commande abandonnée), la page ne demande plus la question (pas de
+dialogue), le serveur refuse sans demande (409).
+
+Code vérifié : `b35009d`. `npm run check` ; `npm test` **806/806** (deux passages d'avant : un
+banc de durée sous la charge des e2e, `C2.stock.a`, vert 3 fois sur 3 au calme ; un
+`ECONNRESET` de `lot5-rapidite`, intermittent aussi sur `5b52268`, 1 fois sur 10 : antérieur au
+lot). e2e : le banc « aucune donnée perdue » sur la base v1.45.1, **4/4** ; les bancs du lot et
+leurs voisins — `import-*`, `pieges-import-validation`, `pieges-tournee`, `commandes`,
+`clients*`, `donnees-utiles`, `operations`, `carte-ca-remplie`, `tableau-de-bord-relecture`,
+`a-recommander`, `parcours-simplifies`, `hors-ligne`, `livreur-ne-perd-rien`,
+`tournee-hors-ligne`, `chargement-instantane`, `rendu-a-l-affichage`, `poids-reseau`,
+`squelette`, `etats-limites`, `ecrans-sans-planche`, `navigation-mobile`,
+`integration-lots-1-5`, `barre-laterale-finitions` — **298/298** (`rendu-a-l-affichage` rejoué
+seul : son port 3562 était pris par un autre worktree). Non lancé : `numerotation-admin` (serveur
+authentifié, hors du lot).
+
+### Relecture adverse du 26/09 — le sort de chaque défaut
+
+Relecture de `a7554de`. Quatre défauts, tous vrais, tous corrigés, chacun avec son banc rouge sur
+`a7554de`.
+
+1. **Important — la commande pouvait encore se perdre au rejeu** (`48c7704`). Le chemin que la
+   reprise disait fermer : la page envoie avec `demanderSiDoublon` et la clé `X-Sereo-Geste` K,
+   le serveur trouve une fiche que la liste n'avait pas et répond 409 ; `gesteIdempotent`
+   enregistrait ce 409 comme **la** réponse de K. Si elle se perdait (4G, délai de 30 s), la file
+   gardait l'écriture avec la même clé K et le corps « nouvelle fiche » : le serveur rendait
+   `409 {rejoue}` sans lire le corps, la file retirait tout 4xx. Le 409 « doublon de fiche » est
+   une **question**, rien n'est appliqué : sa clé n'est plus enregistrée (`erreur.question` →
+   `res.locals.gesteSansEffet`). Le rejeu est traité ; la clé prend alors sa réponse (201), et un
+   renvoi suivant est rejoué, pas refait. Le banc e2e de la reprise coupait la requête **avant**
+   le serveur (aucune clé) ; le nouveau laisse le serveur traiter (`route.fetch()`) puis coupe la
+   réponse.
+2. **Important — une ligne en erreur réécrivait un bon déjà importé** (`a8247ea`). Jusqu'au 25/09
+   une quantité vide valait 1 et une ligne sans produit restait dans le bon. Au réimport du
+   fichier cumulatif, les seules lignes lisibles remplaçaient les lignes de vente du bon et la
+   commande encore à préparer : un produit en sortait, son montant baissait, le résumé ne disait
+   qu'« 1 ligne écartée ». Un bon **incomplet** du fichier (une ligne sans quantité ou sans
+   produit dont le client et la date se lisent) déjà connu est laissé tel quel : commande non
+   réécrite (raison `ligne_en_erreur`, « une ligne de ce bon est en erreur dans le fichier »),
+   lignes de vente gardées. Un bon nouveau est créé avec ses lignes lisibles, comme avant. La
+   fusion des ventes passe après la décision sur les commandes. Une date illisible ne dit pas le
+   bon (jusqu'au 25/09 la ligne allait dans un bon daté du jour de l'import) : non concernée.
+3. **Mineur — une adresse changée dans Ximi doublait les ventes** (`8b1313b`). Le bon d'une vente
+   se reconnaissait à l'adresse complète ; la fiche et la commande se retrouvaient (nom + code
+   postal), les anciennes lignes restaient et les nouvelles s'y ajoutaient, pour toujours. Une
+   ancienne vente prend la clé du bon du fichier quand sa fiche est **sûre des deux côtés** (une
+   seule fiche porte son adresse complète ; le fichier rattache son bon de même date à cette
+   fiche par la clé complète ou par un nom + code postal qu'aucune autre fiche ne partage) :
+   l'identité de la commande. Sinon, sa clé reste la sienne : on garde plutôt que d'effacer.
+4. **Mineur — « Planifier la suite » d'une commande orpheline créait une fiche en double**
+   (`14e2b28`). `replanOrder` n'a personne à qui poser la question : il rattache à la fiche au
+   même téléphone (ou nom + code postal), prise **telle quelle** (option interne
+   `rattacherSiDoublon`, jamais lue dans une requête). Appelants recensés : la route
+   `/api/planned-orders` et `createCustomerOrder` (la page demande), les abonnements
+   (`operations-api.js` : `clientId` seul, sans nom ni téléphone — inchangés).
+
+Réserves de la relecture :
+
+- Un **nom** ou un **code postal** changé dans Ximi ne retrouve pas la fiche (clé complète et nom +
+  code postal diffèrent) : une nouvelle fiche et une nouvelle commande par bon, et ses ventes en
+  plus des anciennes. C'était déjà le cas des fiches et des commandes avant le lot ; le correctif
+  3 n'y touche pas (le rattacher au téléphone risquerait d'effacer les ventes d'un autre client
+  au même standard).
+- Un homonyme au même code postal dont l'adresse change garde ses anciennes lignes (doublon) :
+  choix délibéré, aucune vente d'un autre client ne peut disparaître.
+
+Bancs ajoutés : `commande-doublon-fiche` (même clé : 409 puis « nouvelle fiche » → 201, puis
+renvoi rejoué ; commande orpheline replanifiée et son témoin), `import-lignes` (quantité vide,
+sans produit ; témoins : bon corrigé, bon nouveau), `import-fusion-clients` (rue, ville
+changées ; deux témoins homonymes — le second mord le mutant « nom + code postal toujours sûr »),
+e2e `import-clients-fusion` (409 traité puis réponse perdue ; le résumé nomme `ligne_en_erreur`).
+
+Code vérifié : `8b1313b`. `npm run check` ; `npm test` **817/817** (806 + 11 nouveaux). e2e :
+`import-clients-fusion`, `import-fusion-production`, `pieges-import-validation`, `hors-ligne`,
+`livreur-ne-perd-rien`, `tournee-hors-ligne`, `donnees-utiles`, `commandes`, `clients`,
+`clients-mobile`, `operations`, `carte-ca-remplie`, `tableau-de-bord-relecture`,
+`chargement-instantane`, `integration-lots-1-5` — **177/177** ; le banc « aucune donnée perdue »
+sur la base écrite par v1.45.1, **4/4**, mêmes comptes qu'avant la relecture, base source
+inchangée (même SHA-256).

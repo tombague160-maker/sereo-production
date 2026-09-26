@@ -474,7 +474,7 @@
           <section class="panel tb-ca">
             <div class="tb-ca-tetes">
               <div class="tb-ca-bloc">
-                <span class="tb-libelle">Chiffre d’affaires livré</span>
+                <span class="tb-libelle">Chiffre d’affaires livré TTC</span>
                 <strong id="opRevenue" class="tb-montant">—</strong>
                 <small id="opDelivered" class="tb-legende">Commandes livrées</small>
               </div>
@@ -483,7 +483,7 @@
                 <strong id="opBasket" class="tb-valeur">—</strong>
               </div>
             </div>
-            <div id="revenueChart" class="revenue-chart" aria-label="Chiffre d’affaires des derniers mois"></div>
+            <div id="revenueChart" class="revenue-chart" aria-label="Chiffre d’affaires TTC des derniers mois"></div>
           </section>
 
           <div class="tb-colonne">
@@ -1910,6 +1910,25 @@
       <div class="motif-actions">
         <button class="button secondary" type="button" data-action="correction-annuler">Annuler</button>
         <button class="button primary" type="button" data-action="correction-valider">Corriger</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Donnees clients (25/09) : une commande pour un NOUVEAU client dont le
+       telephone, ou le nom et le code postal, est deja celui d'une fiche. Le
+       serveur ne reecrit plus la fiche trouvee : on choisit ici. Memes pieces
+       que « Reoptimiser » (radios dans un fieldset, deux boutons). -->
+  <dialog id="doublonFicheDialog" class="motif-dialog" aria-labelledby="doublonFicheTitre">
+    <form method="dialog" id="doublonFicheForm">
+      <h3 id="doublonFicheTitre">Ce client a peut-être déjà une fiche</h3>
+      <p class="muted" id="doublonFicheTexte"></p>
+      <fieldset class="reopt-choix-liste">
+        <legend>Pour cette commande</legend>
+        <div id="doublonFicheChoix"></div>
+      </fieldset>
+      <div class="motif-actions">
+        <button class="button secondary" type="button" data-action="doublon-annuler">Annuler</button>
+        <button class="button primary" type="button" data-action="doublon-valider">Continuer</button>
       </div>
     </form>
   </dialog>

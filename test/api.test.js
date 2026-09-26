@@ -1689,8 +1689,11 @@ test("anti-doublon client : virgule en trop dans rue => fusion par cle secondair
       city: "Besancon",
       postalCode: "25000",
       products: [{ code: "A1", nom: "Produit A", quantite: 5 }],
-      status: "en_preparation",
-      preparationStatus: "en_cours"
+      // Encore a preparer (25/09) : une commande EN PREPARATION n'est plus
+      // reecrite par l'import, meme sans reservation (import-verrous.test.js).
+      // Ce banc juge la fusion par cle secondaire, pas le verrou.
+      status: "stock_a_verifier",
+      preparationStatus: "a_preparer"
     }]
   });
 
