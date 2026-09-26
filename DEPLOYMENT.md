@@ -48,6 +48,63 @@ Important : `/data` doit etre un volume persistant sur l'hebergeur. Si l'heberge
 efface le disque au redemarrage, utiliser un volume persistant ou migrer vers une base
 geree type Postgres.
 
+### Toutes les variables (25/09)
+
+Liste complete de ce que le serveur lit ; le detail de chacune est dans `.env.example`.
+Le banc `test/variables-environnement.test.js` rougit si le code lit une variable
+absente de ce tableau ou de `.env.example`. « Image » : valeur posee par le `Dockerfile`.
+
+| Variable | Defaut | Role |
+|---|---|---|
+| `NODE_ENV` | `production` (image) | Lue par Express, pas par Sereo : masque le detail des erreurs. |
+| `TZ` | vide : UTC | Heure du conteneur. **Ne pas la poser** : voir « Heure du conteneur » plus bas. |
+| `PORT` | `3000` | Port d'ecoute. |
+| `SEREO_HOST` | `127.0.0.1` ; `0.0.0.0` (image) | Adresse d'ecoute. |
+| `HOST` | — | Ancien nom de `SEREO_HOST`, lu si celle-ci est vide. |
+| `SEREO_APP_VERSION` | fichier `VERSION`, sinon `package.json` | Version affichee ; posee par `sereo-updater` depuis l'etiquette git. |
+| `SEREO_SKIP_RELEASE_FETCH` | vide | `1` : `/api/version` n'appelle pas l'API GitHub (tests, serveurs d'essai). |
+| `SEREO_STORAGE` | `sqlite` | `json` : ancien mode, migration seulement. |
+| `SEREO_SQLITE_PATH` | `data/sereo.sqlite` ; `/app/data/sereo.sqlite` (image) | La base. Sur un volume persistant. |
+| `SQLITE_PATH` | — | Ancien nom de `SEREO_SQLITE_PATH`, lu si celle-ci est vide. |
+| `SEREO_DB_PATH` | `data/db.json` | Ancien JSON, source de la migration initiale. |
+| `SEREO_UPLOAD_DIR` | `imports/` ; `/app/uploads` (image) | Fichiers Excel en cours d'import (temporaires). |
+| `SEREO_BACKUP_DIR` | `backups/` a cote de la base | Sauvegardes automatiques. |
+| `SEREO_IMPORTS_ARCHIVES_DIR` | `imports-archives/` a cote de la base | Copie brute de chaque Excel importe. |
+| `SEREO_OSRM_DIR` | `osrm/` a cote de la base | Cartes du calcul routier local. |
+| `SEREO_ENABLE_DB_EXPORT` | `0` | `1` : export complet de la base (administration locale). |
+| `SEREO_AUTH_USER` | vide | Identifiant ; avec le mot de passe, protege tout l'acces. |
+| `SEREO_AUTH_PASSWORD` | vide | Mot de passe du compte ci-dessus. |
+| `SEREO_AUTH_REALM` | `Sereo` | Nom du domaine d'authentification. |
+| `SEREO_AUTH_SESSION_SECRET` | fichier `session-secret` a cote de la base | Secret des cookies de session. |
+| `SEREO_AUTH_MAX_ATTEMPTS` | `5` | Essais de connexion rates avant blocage. |
+| `SEREO_AUTH_RATE_WINDOW_MS` | `900000` (15 min) | Fenetre de comptage des essais. |
+| `SEREO_AUTH_LOCKOUT_MS` | `15000` (15 s) | Duree du blocage. |
+| `SEREO_SEPARATION_ROLES` | vide (desactivee, decision du 26/08) | `1` : onglets selon le role. Navigation seulement ; les droits sont appliques par le serveur. |
+| `SEREO_PURGE_TOURNEES_MOIS` | `12` | Conservation des tournees terminees, en mois ; `0` coupe la purge. |
+| `SEREO_GEOCODAGE_AUTO` | `1` | `0` : geocodage sur demande seulement. |
+| `SEREO_GEOCODER_URL` | Base Adresse Nationale | Point d'acces du geocodeur. |
+| `SEREO_GEOCODER_INTERVALLE_MS` | `120` | Pause entre deux appels. |
+| `SEREO_GEOCODER_TIMEOUT_MS` | `8000` | Delai maximal d'un appel. |
+| `SEREO_GEOCODER_MAX_PAR_LOT` | `300` | Adresses par lancement. |
+| `SEREO_CONTACT_URL` | le depot public | Contact inscrit dans le User-Agent envoye au geocodeur. |
+| `SEREO_ROUTING_URL` | `https://router.project-osrm.org` | Service de calcul routier (service public). |
+| `SEREO_ROUTING_REPLI_URL` | le service public | Repli si le premier ne repond pas ; vide : pas de repli. |
+| `SEREO_OSRM_LOCAL` | `1` | `0` : coupe la carte locale (voir « Calcul routier » plus bas). |
+| `SEREO_OSRM_ZONE` | selon memoire et disque | Force la zone de la carte locale. |
+| `SEREO_OSRM_PORT` | `5000` | Port local d'`osrm-routed` dans le conteneur. |
+| `SEREO_TUILES_URL` | OpenStreetMap | Fond de carte (gabarit https). |
+| `SEREO_TUILES_ATTRIBUTION` | celle d'OpenStreetMap | Mention exigee par le fournisseur de tuiles. |
+| `SEREO_TUILES_ZOOM_MAX` | `19` | Zoom maximal servi. |
+
+### Heure du conteneur (TZ)
+
+L'image ne pose pas `TZ` : le processus tourne en **UTC**, et c'est le reglage que les
+tests verifient. Il ne faut pas la poser. Les jours et heures du metier sont calcules a
+**Paris** par le code, quelle que soit l'heure du conteneur (`lib/jour-paris.js` : jour de
+livraison, « aujourd'hui », preparation de nuit de la carte a 3 h). Seuls les horodatages
+techniques sont en UTC, 1 h de moins que Paris l'hiver et 2 h l'ete : les journaux
+(`docker logs sereo`) et les noms des sauvegardes (`db-2026-09-25T14-00-00-000Z...`).
+
 ## Protection d'acces
 
 L'application peut proteger toute l'interface et toutes les routes API avec un identifiant
@@ -126,10 +183,21 @@ Verifier la persistance :
 
 ## Calcul routier OSRM local (integre a l'image Docker, 23/09)
 
+> **En production aujourd'hui : service public.** La carte locale s'active quand le
+> conteneur a au moins 3 Go de memoire (et 6 Go libres sur le volume de donnees, en plus
+> des 2 Go gardes pour la base). Le conteneur de production est limite a **512 Mo**
+> (mesure du 24/09, `/api/storage/status`) :
+> les tournees se calculent donc sur le service public (`SEREO_ROUTING_URL`), comme
+> avant la v1.42, et les coordonnees des arrets partent chez ce tiers. Decision du
+> 24/09 : on reste ainsi, sans rien retirer de l'image ; la carte locale s'activera
+> d'elle-meme le jour ou la limite du conteneur passera a 3 Go. **Parametres → Reglages
+> tournee → Calcul routier** le dit : « Service public — la carte locale s'active quand
+> le conteneur a au moins 3 Go de mémoire (il en a 512 Mo). »
+
 Depuis la release qui suit la v1.42.0, l'image Docker de Sereo contient le moteur de
-calcul routier OSRM. **Il n'y a rien a faire sur le serveur** : ni compose a modifier,
-ni conteneur a ajouter, ni carte a telecharger a la main. Hors Docker (poste de
-developpement, CI), les binaires OSRM n'existent pas et rien ne se passe.
+calcul routier OSRM. Il n'y a rien a installer : ni compose a modifier, ni conteneur a
+ajouter, ni carte a telecharger a la main -- mais il faut la memoire dite ci-dessus. Hors
+Docker (poste de developpement, CI), les binaires OSRM n'existent pas et rien ne se passe.
 
 ### Ce qui se passe apres la release
 
@@ -141,7 +209,8 @@ developpement, CI), les binaires OSRM n'existent pas et rien ne se passe.
    calculent sur le serveur public, comme avant, le temps que la carte locale soit
    prete.
 3. **2 minutes apres le demarrage**, Sereo choisit une zone selon la memoire et le
-   disque du serveur, telecharge la carte depuis Geofabrik dans `/app/data/osrm/`
+   disque du serveur (en dessous de 3 Go de memoire, aucune : il reste sur le service
+   public et s'arrete la), telecharge la carte depuis Geofabrik dans `/app/data/osrm/`
    (le volume de donnees), verifie sa somme MD5 et la prepare **en priorite basse**
    (`nice`, `ionice`) : le reste du serveur garde la main.
 4. Des que la carte est prete, les tournees sont calculees **dans le conteneur**
@@ -159,7 +228,7 @@ developpement, CI), les binaires OSRM n'existent pas et rien ne se passe.
 | France entiere | memoire ≥ 24 Go ET disque ≥ 50 Go | 5,1 Go | 50 Go | 24 Go |
 | Bourgogne-Franche-Comte + Grand Est, Auvergne-Rhone-Alpes, Centre-Val de Loire, Ile-de-France, Suisse | memoire ≥ 12 Go ET disque ≥ 30 Go | 2,5 Go | 30 Go | 12 Go |
 | Bourgogne-Franche-Comte | memoire ≥ 3 Go ET disque ≥ 6 Go | 0,33 Go | 6 Go | 3 Go |
-| Aucune (serveur public) | en dessous | — | — | — |
+| Aucune (service public) — **la production, a 512 Mo** | en dessous | — | — | — |
 
 Ce sont des seuils prudents, **estimes** (seul Monaco a ete prepare pour de vrai : 2 s).
 Ordres de grandeur attendus, a confirmer par la premiere preparation :

@@ -758,3 +758,19 @@ test("resume : a 512 Mo, « Service public — la carte locale s'active quand le
   assert.equal((await resume({ memoire: 512 * 1024 ** 2, env: { SEREO_OSRM_ZONE: "aucune" } })).resume,
     "Serveur public (zone « aucune » demandée par SEREO_OSRM_ZONE).");
 });
+
+test("DEPLOYMENT.md dit la meme chose que l'ecran : service public a 512 Mo, carte locale des le seuil du code", () => {
+  const doc = fs.readFileSync(path.join(__dirname, "..", "DEPLOYMENT.md"), "utf8");
+  const encadre = doc.match(/^> \*\*En production aujourd'hui : service public\.\*\*[\s\S]*?(?=\n\n)/m);
+  assert.ok(encadre, "l'encadre « En production aujourd'hui : service public » manque");
+  const texte = encadre[0].replace(/^> ?/gm, "").replace(/\s+/g, " ");
+  const seuil = texte.match(/La carte locale s'active quand le conteneur a au moins (\d+) Go de memoire/);
+  assert.ok(seuil, `seuil absent : ${texte.slice(0, 200)}`);
+  assert.equal(Number(seuil[1]) * GO, ZONES.region.memoire, "le seuil ecrit n'est pas celui du code");
+  assert.match(texte, /limite a \*\*512 Mo\*\*/);
+  // La phrase citee est celle que l'ecran affiche vraiment.
+  const { resumer } = require("../lib/osrm-local");
+  const phrase = resumer({ actif: true, zone: null, zoneVoulue: null, ressources: true,
+    raison: choisirZone({ memoire: 512 * 1024 ** 2, disque: 300 * GO }).raison });
+  assert.ok(texte.includes(`« ${phrase} »`), `phrase de l'ecran non citee : ${phrase}`);
+});
