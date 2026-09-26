@@ -230,8 +230,10 @@ test("purge des bons : la copie vers un second dossier bloqué ne retient pas le
   const partage = new Promise(r => { liberer = r; });
   let signaler;
   const copieCommencee = new Promise(r => { signaler = r; });
+  // Seule la copie de la sauvegarde d'avant purge est retenue.
   fs.promises.copyFile = async (source, cible, ...reste) => {
-    if (path.resolve(String(cible)).startsWith(path.resolve(SECOND))) {
+    const vers = path.resolve(String(cible));
+    if (vers.startsWith(path.resolve(SECOND)) && /-avant-purge-commandes\./.test(path.basename(vers))) {
       signaler();
       await partage;
     }
@@ -245,7 +247,9 @@ test("purge des bons : la copie vers un second dossier bloqué ne retient pas le
   let statutPurge = null;
   try {
     purge = fetch(`${base}/api/orders/purge`, { method: "POST" });
-    await copieCommencee;
+    // Borne : une copie qui ne part jamais fait rougir le banc, pas l'attendre sans fin.
+    const partie = await Promise.race([copieCommencee.then(() => true), new Promise(r => setTimeout(() => r(false), 10000))]);
+    assert.ok(partie, "la copie de la sauvegarde d'avant purge vers le second dossier n'a jamais commence");
     // Un autre compte ajuste le stock pendant ce temps.
     ecriture = fetch(`${base}/api/stock/st-1`, {
       method: "PATCH",
