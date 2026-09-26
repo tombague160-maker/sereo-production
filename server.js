@@ -5263,14 +5263,22 @@ function doublonDeFiche(fiche) {
 // file d'attente --, un refus retirerait la commande de la file (4xx :
 // abandonnee) : elle part sur une NOUVELLE fiche, l'existante ne bouge pas.
 // Une fiche en double se fusionne ; une commande perdue ne se retrouve pas.
-function findOrCreateCustomerClient(db, payload = {}, { nouvelleFiche = false, demander = false } = {}) {
+//
+// `rattacher` : un appel du SERVEUR lui-meme, qui n'a personne a qui poser la
+// question -- « Planifier la suite » d'une commande dont la fiche a disparu
+// (relecture adverse du 26/09 ; la production en a une, du 03/06, dont le
+// client existe sous un autre identifiant). La commande part sur la fiche
+// trouvee, prise TELLE QUELLE (avant le 25/09 : reecrite ; depuis, sans ce
+// drapeau : une fiche en double creee en silence).
+function findOrCreateCustomerClient(db, payload = {}, { nouvelleFiche = false, demander = false, rattacher = false } = {}) {
   if (payload.clientId) {
     const existing = findClient(db, payload.clientId);
     if (existing) return existing;
   }
 
-  if (!nouvelleFiche && demander) {
+  if (!nouvelleFiche && (demander || rattacher)) {
     const duplicate = findDuplicateClient(db, payload);
+    if (duplicate && rattacher) return duplicate;
     if (duplicate) throw doublonDeFiche(duplicate);
   }
 
@@ -5609,13 +5617,15 @@ function createAutomaticOrderReminder(db, order, options = {}) {
   return reminder;
 }
 
-function createPlannedOrder(db, payload = {}) {
+// `rattacherSiDoublon` : option des appels du serveur (replanOrder), jamais lue
+// dans le corps d'une requete.
+function createPlannedOrder(db, payload = {}, { rattacherSiDoublon = false } = {}) {
   // L'identifiant choisi (« rattacher a cette fiche ») l'emporte sur celui,
   // vide, que le formulaire d'un nouveau client porte dans `client`.
   const client = findOrCreateCustomerClient(db, {
     ...(payload.client || {}),
     clientId: payload.clientId || payload.client?.clientId
-  }, { nouvelleFiche: payload.nouvelleFiche === true, demander: payload.demanderSiDoublon === true });
+  }, { nouvelleFiche: payload.nouvelleFiche === true, demander: payload.demanderSiDoublon === true, rattacher: rattacherSiDoublon });
   const dateCommande = normalizeDateInput(payload.dateCommande) || jourParis();
   const deliveryDate = resolvePlannedDeliveryDate(db, client, payload);
   if (!deliveryDate) throw badRequest("Date de livraison obligatoire pour une commande planifiee");
@@ -5766,7 +5776,9 @@ function replanOrder(db, orderId, payload = {}) {
     notes: payload.notes || `Replanification depuis ${sourceOrder.numero || sourceOrder.id}`,
     parentOrderId: sourceOrder.id,
     reminderLeadDays: payload.reminderLeadDays
-  });
+    // La fiche de la commande a pu disparaitre (commande orpheline) : la suite
+    // part sur la fiche au meme telephone (ou nom + code postal), sans doublon.
+  }, { rattacherSiDoublon: true });
 
   addHistory(db, "Replanification", `Commande ${sourceOrder.numero || sourceOrder.id} replanifiee vers ${result.order.deliveryDate}`, {
     sourceOrderId: sourceOrder.id,

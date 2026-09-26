@@ -205,3 +205,47 @@ test("cle d'idempotence : le 409 « doublon » (une question) n'est pas la repon
     assert.equal(db.commandes.length, 1, `${chemin} : commande en double au renvoi`);
   }
 });
+
+// Relecture adverse du 26/09 : « Planifier la suite » d'une commande dont la
+// fiche a disparu (la production en a une, du 03/06 : sa fiche existe sous un
+// autre identifiant, meme telephone). Le serveur n'appelle pas avec
+// `demanderSiDoublon` : depuis le 25/09, sans lui, une NOUVELLE fiche etait
+// creee, en silence -- un doublon du client. Le serveur, qui n'a personne a
+// qui poser la question, rattache a la fiche trouvee, prise TELLE QUELLE.
+function semerOrpheline({ telephone = "03 81 00 00 00" } = {}) {
+  const db = defaultDb();
+  db.clients = [{ ...EHPAD }];
+  db.stock = [{ id: "p1", code: "CH-L", nom: "Changes taille L", quantite: 20, tarif: 12 }];
+  db.commandes = [{
+    id: "o-orph", numero: "CMD-2026-001", clientId: "client-disparu", clientName: EHPAD.nom, phone: telephone,
+    address: EHPAD.rue, postalCode: EHPAD.codePostal, city: EHPAD.ville,
+    products: [{ stockId: "p1", code: "CH-L", nom: "Changes taille L", quantite: 2, prixUnitaire: 12, totalLigne: 24 }],
+    status: "livre", deliveryStatus: "livre", preparationStatus: "terminee",
+    dateCommande: "2026-06-03", deliveryDate: "2026-06-03", source: "import_excel"
+  }];
+  writeDb(db, { backup: false });
+}
+
+test("« Planifier la suite » d'une commande ORPHELINE : la commande planifiee part sur la fiche au meme telephone, prise telle quelle -- pas de fiche en double", async () => {
+  semerOrpheline();
+  const avant = extraire(ficheEhpad());
+  const r = await poster("/api/orders/o-orph/replan", { deliveryDate: "2026-12-01" });
+  assert.equal(r.status, 201, r.body?.error);
+  const db = readDb();
+  assert.equal(db.clients.length, 1, `une fiche en double a ete creee : ${db.clients.map(c => `${c.id} ${c.nom}`).join(", ")}`);
+  assert.equal(r.body.order.clientId, "c-ehpad", "la commande planifiee n'est pas sur la fiche existante");
+  assert.deepEqual(extraire(ficheEhpad()), avant, "la fiche existante a ete reecrite");
+});
+
+test("temoin : « Planifier la suite » d'une commande orpheline SANS fiche au meme telephone ni au meme nom -- une fiche est creee (rien a rattacher)", async () => {
+  semerOrpheline({ telephone: "0612345678" });
+  const db0 = readDb();
+  db0.commandes[0].clientName = "Cabinet Lemoine";
+  db0.commandes[0].postalCode = "39100";
+  writeDb(db0, { backup: false });
+  const r = await poster("/api/orders/o-orph/replan", { deliveryDate: "2026-12-01" });
+  assert.equal(r.status, 201, r.body?.error);
+  const db = readDb();
+  assert.equal(db.clients.length, 2);
+  assert.notEqual(r.body.order.clientId, "c-ehpad", "rattachee a une fiche sans rapport");
+});
