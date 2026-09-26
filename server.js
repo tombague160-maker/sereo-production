@@ -68,6 +68,9 @@ const GITHUB_REPO = "tombague160-maker/sereo-production";
 let releaseNotesCache = null;
 let releaseNotesCacheAt = 0;
 const RELEASE_NOTES_CACHE_TTL_MS = 60 * 60 * 1000;
+// Robustesse (25/09) : un GitHub qui ne repond pas laissait /api/version
+// pendant jusqu'aux delais d'undici (plusieurs minutes). 3 s, puis le repli.
+const RELEASE_NOTES_TIMEOUT_MS = 3000;
 
 async function fetchReleaseNotes(version) {
   const now = Date.now();
@@ -76,13 +79,30 @@ async function fetchReleaseNotes(version) {
     return releaseNotesCache;
   }
   const fallbackUrl = `https://github.com/${GITHUB_REPO}/releases/tag/v${version}`;
+  // Robustesse (25/09) : les bancs et les serveurs d'essai posent
+  // SEREO_SKIP_RELEASE_FETCH=1 depuis longtemps, mais rien ne la lisait :
+  // chaque serveur de banc interrogeait l'API GitHub (60 appels par heure et
+  // par adresse, sans compte). Posee a 1 : aucun appel sortant, notes vides.
+  if (process.env.SEREO_SKIP_RELEASE_FETCH === "1") {
+    return {
+      version,
+      releaseUrl: fallbackUrl,
+      releaseName: `v${version}`,
+      publishedAt: "",
+      pourToi: "",
+      fullNotes: "",
+      fetchedAt: new Date().toISOString(),
+      fetchError: "SEREO_SKIP_RELEASE_FETCH=1"
+    };
+  }
   try {
     const url = `https://api.github.com/repos/${GITHUB_REPO}/releases/tags/v${version}`;
     const response = await fetch(url, {
       headers: {
         "Accept": "application/vnd.github+json",
         "User-Agent": "sereo-app"
-      }
+      },
+      signal: AbortSignal.timeout(RELEASE_NOTES_TIMEOUT_MS)
     });
     if (!response.ok) {
       const cache = {
