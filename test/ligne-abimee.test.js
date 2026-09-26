@@ -335,6 +335,31 @@ test("un trace de tournee abime : la tournee se lit sans sa ligne, le trace est 
   assert.deepEqual([q[0].table_source, q[0].ligne_id, q[0].contenu], ["traces_tournees", "t1", abime]);
 });
 
+test("une tournee abimee part en quarantaine AVEC les livraisons de ses arrets (le seul exemplaire lisible de ce qui a ete fait)", () => {
+  // Relecture adverse du 26/09 : seul le trace suivait la tournee ; les lignes
+  // livraisons de ses arrets (statut, heure, motif, en clair) n'etaient plus
+  // produites, et l'ecriture suivante les retirait sans copie.
+  semer();
+  const db = readDb();
+  const arret = db.routes.find(t => t.id === "t1").stops[0];
+  Object.assign(arret, { status: "probleme", deliveredAt: "2026-09-25T09:10:00.000Z", problemReason: "Portail ferme" });
+  writeDb(db, { backup: false });
+  const livraison = brut(cnx => cnx.prepare("SELECT hex(payload) AS h FROM livraisons WHERE id = 's1'").get());
+  assert.ok(livraison, "prealable : l'arret n'a pas de ligne livraisons");
+  closeStorage();
+  abimer("routes", "payload", "id", "t1");
+  closeStorage();
+  writeDb(readDb(), { backup: false });
+  assert.ok(!brut(cnx => cnx.prepare("SELECT 1 FROM routes WHERE id = 't1'").get()), "prealable : la tournee n'a pas quitte sa table");
+  const q = quarantaine();
+  const copie = q.find(x => x.table_source === "livraisons" && x.ligne_id === "s1");
+  assert.ok(copie, `la livraison de l'arret n'est pas copiee : ${JSON.stringify(q.map(x => [x.table_source, x.ligne_id]))}`);
+  assert.equal(copie.contenu, livraison.h);
+  assert.ok(q.some(x => x.table_source === "traces_tournees" && x.ligne_id === "t1"), "le trace ne suit plus la tournee");
+  // Seules les livraisons de CETTE tournee : celle de la commande o2 (hors tournee) reste.
+  assert.ok(!q.some(x => x.table_source === "livraisons" && x.ligne_id !== "s1"), JSON.stringify(q.map(x => [x.table_source, x.ligne_id])));
+});
+
 test("des reglages abimes sont mis de cote AVANT que l'ecriture suivante ne les remplace", () => {
   semer();
   const abime = abimer("app_meta", "value", "key", "settings");
